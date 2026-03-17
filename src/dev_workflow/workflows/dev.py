@@ -92,6 +92,9 @@ def run_plan_design(task_id: str) -> None:
     # 状态转换
     transition(task_id, 'design_complete', note='方案设计完成')
     notify(task, f'📋 方案设计完成：《{task["title"]}》\n\n等待方案评审...', str(plan_path))
+    # Push：自动启动方案评审
+    from dev_workflow.runner import run_in_background
+    run_in_background(task_id, 'review')
 
 
 def run_plan_review(task_id: str) -> None:

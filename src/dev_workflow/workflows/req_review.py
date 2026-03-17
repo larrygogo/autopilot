@@ -45,6 +45,9 @@ def run_req_analysis(task_id: str) -> None:
 
     transition(task_id, 'analysis_complete', note='需求分析完成')
     notify(task, f'📄 需求分析完成：《{task["title"]}》\n\n等待需求评审...')
+    # Push：自动启动需求评审
+    from dev_workflow.runner import run_in_background
+    run_in_background(task_id, 'req_review')
 
 
 def run_req_review(task_id: str) -> None:
@@ -76,7 +79,11 @@ def run_req_review(task_id: str) -> None:
         notify(task, f'✅ 需求评审通过：《{task["title"]}》', str(review_path))
     else:
         transition(task_id, 'req_review_reject', note='需求评审驳回')
-        notify(task, f'❌ 需求评审驳回：《{task["title"]}》\n\n请检查评审报告', str(review_path))
+        transition(task_id, 'retry_req_analysis', note='自动重新分析需求')
+        notify(task, f'❌ 需求评审驳回：《{task["title"]}》\n\n自动重新分析...', str(review_path))
+        # Push：自动重试需求分析
+        from dev_workflow.runner import run_in_background
+        run_in_background(task_id, 'req_analysis')
 
 
 # ──────────────────────────────────────────────────────────
