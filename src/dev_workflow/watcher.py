@@ -11,32 +11,50 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from scripts.workflow.db import get_active_tasks, get_task, get_conn, now
-from scripts.workflow.runner import is_locked, execute_phase, notify
-from scripts.workflow.state_machine import VALID_TRANSITIONS
+from dev_workflow.db import get_active_tasks, get_task, get_conn, now
+from dev_workflow.infra import is_locked, notify
+from dev_workflow.runner import execute_phase
+from dev_workflow.logger import get_logger
+
+log = get_logger()
 
 STUCK_TIMEOUT_SECONDS = 600  # 10 分钟没有进展认为卡死
 
-# 运行中的状态 → 对应的 phase
-RUNNING_STATE_PHASE = {
-    'designing':     'design',
-    'reviewing':     'review',
-    'in_development': 'dev',
-    'code_reviewing': 'code_review',
-}
 
-# 等待中的状态 → 对应的 phase（正常情况下 push 模型会自动推进，这里是兜底）
-PENDING_STATE_PHASE = {
-    'pending_design': 'design',
-    'pending_review': 'review',
-    'developing':     'dev',
-}
+def _get_state_mappings(task: dict) -> tuple[dict, dict]:
+    """获取任务对应工作流的状态映射（动态查注册表，fallback 到默认值）"""
+    workflow_name = task.get('workflow', 'dev')
+
+    try:
+        from dev_workflow import registry
+        running_map = registry.get_running_state_phase(workflow_name)
+        pending_map = registry.get_pending_state_phase(workflow_name)
+        if running_map or pending_map:
+            return running_map, pending_map
+    except Exception:
+        pass
+
+    # fallback 默认值
+    running_map = {
+        'designing':     'design',
+        'reviewing':     'review',
+        'in_development': 'dev',
+        'code_reviewing': 'code_review',
+    }
+    pending_map = {
+        'pending_design': 'design',
+        'pending_review': 'review',
+        'developing':     'dev',
+    }
+    return running_map, pending_map
 
 
 def is_stuck(task):
     """判断任务是否卡死"""
     status = task['status']
-    if status not in RUNNING_STATE_PHASE and status not in PENDING_STATE_PHASE:
+    running_map, pending_map = _get_state_mappings(task)
+
+    if status not in running_map and status not in pending_map:
         return False
 
     # 如果有锁文件（进程还活着），不算卡死
@@ -59,33 +77,62 @@ def is_stuck(task):
         return False
 
 
-# running 状态 → 回退到哪个 pending 状态（用于卡死恢复）
-RUNNING_TO_PENDING = {
-    'designing':     'pending_design',
-    'reviewing':     'pending_review',
-    'in_development': 'developing',
-    'code_reviewing': None,  # code_reviewing 无对应 pending，回退到 developing 重新开发
-}
+def _get_fail_trigger(task: dict, status: str) -> str | None:
+    """获取 running 状态对应的 fail trigger"""
+    workflow_name = task.get('workflow', 'dev')
 
-# running 状态 → 回退时需要的 trigger（回退本身不走状态机，直接改 DB）
-RUNNING_FAIL_TRIGGER = {
-    'designing':     'design_fail',
-    'reviewing':     None,  # 无 fail trigger，直接改状态
-    'in_development': 'dev_fail',
-    'code_reviewing': None,
-}
+    try:
+        from dev_workflow import registry
+        wf = registry.get_workflow(workflow_name)
+        if wf:
+            for phase in wf['phases']:
+                if phase.get('running_state') == status:
+                    return phase.get('fail_trigger')
+    except Exception:
+        pass
+
+    # fallback
+    return {
+        'designing':     'design_fail',
+        'in_development': 'dev_fail',
+    }.get(status)
+
+
+def _get_pending_state(task: dict, status: str) -> str | None:
+    """获取 running 状态对应的回退 pending 状态"""
+    workflow_name = task.get('workflow', 'dev')
+
+    try:
+        from dev_workflow import registry
+        wf = registry.get_workflow(workflow_name)
+        if wf:
+            for phase in wf['phases']:
+                if phase.get('running_state') == status:
+                    return phase.get('pending_state')
+    except Exception:
+        pass
+
+    # fallback
+    return {
+        'designing':     'pending_design',
+        'reviewing':     'pending_review',
+        'in_development': 'developing',
+        'code_reviewing': None,
+    }.get(status)
+
 
 def recover_task(task):
     """尝试恢复卡死的任务"""
     status = task['status']
     task_id = task['id']
+    running_map, pending_map = _get_state_mappings(task)
 
-    phase = RUNNING_STATE_PHASE.get(status) or PENDING_STATE_PHASE.get(status)
+    phase = running_map.get(status) or pending_map.get(status)
     if not phase:
         return
 
     failure_count = task.get('failure_count', 0) + 1
-    print(f'[{task_id}] 检测到卡死（{status}），尝试恢复（第{failure_count}次）', file=sys.stderr)
+    log.warning('检测到卡死（%s），尝试恢复（第%d次）', status, failure_count)
 
     # 更新失败计数
     with get_conn() as conn:
@@ -93,28 +140,28 @@ def recover_task(task):
                      (failure_count, now(), task_id))
 
     if failure_count >= 3:
-        print(f'[{task_id}] 失败次数过多，通知用户', file=sys.stderr)
+        log.error('失败次数过多（%d次），通知用户', failure_count)
         notify(task, f'⚠️ 任务卡死：《{task["title"]}》\n\n状态：{status}，已失败 {failure_count} 次。请人工检查。')
         return
 
     # running 状态：先回退到 pending，再重新触发
-    if status in RUNNING_STATE_PHASE:
-        fail_trigger = RUNNING_FAIL_TRIGGER.get(status)
+    if status in running_map:
+        fail_trigger = _get_fail_trigger(task, status)
         if fail_trigger:
             try:
-                from scripts.workflow.state_machine import transition
+                from dev_workflow.state_machine import transition
                 transition(task_id, fail_trigger, note=f'卡死恢复（第{failure_count}次）')
-                print(f'[{task_id}] 触发 {fail_trigger}，状态回退', file=sys.stderr)
+                log.info('触发 %s，状态回退', fail_trigger)
             except Exception as e:
-                print(f'[{task_id}] 回退失败：{e}，直接强制改状态', file=sys.stderr)
-                pending = RUNNING_TO_PENDING.get(status, 'pending_design')
+                log.error('回退失败：%s，直接强制改状态', e)
+                pending = _get_pending_state(task, status) or 'pending_design'
                 with get_conn() as conn:
                     conn.execute('UPDATE tasks SET status = ?, updated_at = ?, started_at = ? WHERE id = ?',
                                  (pending, now(), now(), task_id))
         else:
             # 无 fail trigger 的 running 状态，直接强制改回 pending
-            pending = RUNNING_TO_PENDING.get(status) or 'developing'
-            print(f'[{task_id}] 强制回退 {status} → {pending}', file=sys.stderr)
+            pending = _get_pending_state(task, status) or 'developing'
+            log.warning('强制回退 %s → %s', status, pending)
             with get_conn() as conn:
                 conn.execute('UPDATE tasks SET status = ?, updated_at = ?, started_at = ? WHERE id = ?',
                              (pending, now(), now(), task_id))
@@ -125,7 +172,7 @@ def recover_task(task):
         return
 
     # pending 状态：直接重新触发
-    if status in PENDING_STATE_PHASE:
+    if status in pending_map:
         execute_phase(task_id, phase)
 
 
@@ -140,7 +187,8 @@ def main():
         else:
             # 任务正常，检查有没有 pending 状态但没有锁（可能 push 失败了）
             status = task['status']
-            if status in PENDING_STATE_PHASE and not is_locked(task['id']):
+            _, pending_map = _get_state_mappings(task)
+            if status in pending_map and not is_locked(task['id']):
                 from datetime import timezone as tz
                 started_at = task.get('started_at') or task.get('updated_at')
                 if started_at:
@@ -150,8 +198,8 @@ def main():
                     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
                     # 等待超过 3 分钟还没有推进（push 可能失败了）
                     if elapsed > 180:
-                        phase = PENDING_STATE_PHASE[status]
-                        print(f'[{task["id"]}] pending 状态超时，重新触发 {phase}', file=sys.stderr)
+                        phase = pending_map[status]
+                        log.info('pending 状态超时，重新触发 %s', phase)
                         execute_phase(task['id'], phase)
 
 

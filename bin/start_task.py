@@ -2,7 +2,7 @@
 """
 注册新开发任务并启动流程。
 用法：
-  python3 bin/start_task.py <req_id> [--project <project>] [--repo <repo_path>]
+  python3 bin/start_task.py <req_id> [--project <project>] [--repo <repo_path>] [--workflow <workflow>]
 """
 import sys, argparse
 from pathlib import Path
@@ -10,7 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from dev_workflow.db import init_db, get_task, CONFIG
-from dev_workflow.runner import execute_phase, DEFAULT_NOTIFY_CHANNEL, DEFAULT_NOTIFY_TARGET
+from dev_workflow.infra import DEFAULT_NOTIFY_CHANNEL, DEFAULT_NOTIFY_TARGET, fetch_req
+from dev_workflow.runner import execute_phase
 
 def main():
     parser = argparse.ArgumentParser(description='注册并启动开发任务')
@@ -18,9 +19,21 @@ def main():
     parser.add_argument('--project', help='项目名（对应 config.yaml 中的 projects 配置）')
     parser.add_argument('--repo', help='本地仓库路径（覆盖 config.yaml）')
     parser.add_argument('--title', help='需求标题（可选，会从 ReqGenie 自动拉取）')
+    parser.add_argument('--workflow', default='dev', help='工作流名称（默认：dev）')
     args = parser.parse_args()
 
     init_db()
+
+    # 确保工作流已注册
+    import dev_workflow.workflows  # noqa: F401
+
+    # 验证工作流存在
+    from dev_workflow.registry import get_workflow, list_workflows
+    wf = get_workflow(args.workflow)
+    if not wf:
+        available = [w['name'] for w in list_workflows()]
+        print(f'未知工作流：{args.workflow}，可用工作流：{available}')
+        sys.exit(1)
 
     # 检查是否已注册
     task_id = f'{args.req_id[:8]}'
@@ -49,7 +62,6 @@ def main():
     # 拉取需求标题（如未提供）
     title = args.title or f'需求 {args.req_id[:8]}'
     try:
-        from dev_workflow.runner import fetch_req
         req = fetch_req(args.req_id)
         if req:
             title = req.get('title', title)
@@ -67,12 +79,16 @@ def main():
         agents=agents,
         notify_target=DEFAULT_NOTIFY_TARGET,
         channel=DEFAULT_NOTIFY_CHANNEL,
+        workflow=args.workflow,
     )
     print(f'✓ 任务已注册：{task_id} — {title}')
-    print(f'  项目：{project_name}，仓库：{repo_path}')
-    print(f'  开始方案设计...')
+    print(f'  工作流：{args.workflow}，项目：{project_name}，仓库：{repo_path}')
 
-    execute_phase(task_id, 'design')
+    # 获取工作流的第一个阶段
+    first_phase = wf['phases'][0]['name']
+    print(f'  开始 {first_phase}...')
+
+    execute_phase(task_id, first_phase)
 
 if __name__ == '__main__':
     main()
