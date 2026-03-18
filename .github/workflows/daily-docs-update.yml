@@ -1,0 +1,110 @@
+name: 每日文档同步
+
+on:
+  schedule:
+    # 每天 UTC 00:00（北京时间 08:00）
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 支持手动触发
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check-and-update-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 检测过去 24 小时的代码变更
+        id: changes
+        run: |
+          # 检查 src/ bin/ prompts/ 目录下的代码文件变更
+          CHANGED_FILES=$(git log --since="24 hours ago" --name-only --pretty=format: -- src/ bin/ prompts/ | sort -u | grep -v '^$' || true)
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "没有检测到代码变更，跳过文档更新。"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "检测到以下文件变更："
+            echo "$CHANGED_FILES"
+            # 保存变更文件列表（用换行符分隔，转义为单行）
+            {
+              echo 'changed_files<<EOF'
+              echo "$CHANGED_FILES"
+              echo 'EOF'
+            } >> "$GITHUB_OUTPUT"
+
+            # 获取变更摘要（提交消息）
+            COMMIT_SUMMARY=$(git log --since="24 hours ago" --oneline -- src/ bin/ prompts/)
+            {
+              echo 'commit_summary<<EOF'
+              echo "$COMMIT_SUMMARY"
+              echo 'EOF'
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 检查是否已有待处理的文档更新 Issue
+        if: steps.changes.outputs.has_changes == 'true'
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OPEN_ISSUES=$(gh issue list --label "docs-sync" --state open --json number --jq length)
+          if [ "$OPEN_ISSUES" -gt 0 ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "已存在未处理的文档更新 Issue，跳过创建。"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 创建文档更新 Issue 并分配 Copilot
+        if: steps.changes.outputs.has_changes == 'true' && steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_URL=$(gh issue create \
+            --title "docs: 同步文档以反映最新代码变更 ($(date +%Y-%m-%d))" \
+            --label "docs-sync" \
+            --body "$(cat <<'ISSUE_BODY'
+          ## 任务
+
+          过去 24 小时内检测到代码变更，请更新以下文档使其与代码保持同步：
+
+          ### 需要更新的文件
+
+          1. **`knowledge/architecture.md`** — 如果模块职责、数据流或架构有变化，更新对应章节
+          2. **`knowledge/workflow-development.md`** — 如果工作流定义、阶段字段或 infra 工具有变化，更新对应章节
+          3. **`knowledge/state-machine.md`** — 如果状态转换、驳回机制有变化，更新状态图
+          4. **`CLAUDE.md`** — 如果目录结构或开发规范有变化，更新对应章节
+          5. **`README.md`** — 如果功能特性、CLI 命令、配置项或架构有变化，更新对应章节
+
+          ### 变更的文件
+
+          ${{ steps.changes.outputs.changed_files }}
+
+          ### 相关提交
+
+          ${{ steps.changes.outputs.commit_summary }}
+
+          ### 要求
+
+          - 只更新与代码变更相关的文档章节，不要做无关修改
+          - 保持现有文档风格和中文语言
+          - 确保代码示例、目录结构、配置项说明与实际代码一致
+          - 不要修改任何代码文件（src/ bin/ prompts/）
+          ISSUE_BODY
+          )")
+
+          echo "Issue 已创建: $ISSUE_URL"
+
+          # 提取 issue 编号并分配 Copilot
+          ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -o '[0-9]*$')
+          gh api "repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/assignees" \
+            -f "assignees[]=copilot-swe-agent" || echo "Copilot 分配失败，请手动分配"
+
+          echo "已分配 Copilot 处理文档更新"
