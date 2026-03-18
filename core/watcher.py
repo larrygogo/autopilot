@@ -9,44 +9,36 @@ import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dev_workflow.db import get_active_tasks, get_task, get_conn, now
-from dev_workflow.infra import is_locked, notify
-from dev_workflow.runner import execute_phase
-from dev_workflow.logger import get_logger
+from core.db import get_active_tasks, get_task, get_conn, now
+from core.infra import is_locked, notify
+from core.runner import execute_phase
+from core.logger import get_logger
 
 log = get_logger()
 
-STUCK_TIMEOUT_SECONDS = 600  # 10 分钟没有进展认为卡死
-
 
 def _get_state_mappings(task: dict) -> tuple[dict, dict]:
-    """获取任务对应工作流的状态映射（动态查注册表，fallback 到默认值）"""
-    workflow_name = task.get('workflow', 'dev')
+    """获取任务对应工作流的状态映射（动态查注册表，查不到返回空字典）"""
+    workflow_name = task.get('workflow', '')
 
     try:
-        from dev_workflow import registry
+        from core import registry
         running_map = registry.get_running_state_phase(workflow_name)
         pending_map = registry.get_pending_state_phase(workflow_name)
-        if running_map or pending_map:
-            return running_map, pending_map
-    except Exception:
-        pass
+        return running_map, pending_map
+    except Exception as e:
+        log.debug('获取工作流 %s 状态映射失败：%s', workflow_name, e)
 
-    # fallback 默认值
-    running_map = {
-        'designing':     'design',
-        'reviewing':     'review',
-        'in_development': 'dev',
-        'code_reviewing': 'code_review',
-    }
-    pending_map = {
-        'pending_design': 'design',
-        'pending_review': 'review',
-        'developing':     'dev',
-    }
-    return running_map, pending_map
+    return {}, {}
+
+
+def _calculate_delay(policy: dict, attempt: int) -> float:
+    """根据重试策略和尝试次数计算延迟"""
+    if policy.get('backoff') == 'exponential':
+        return min(policy['delay'] * (2 ** (attempt - 1)), policy['max_delay'])
+    return policy['delay']
 
 
 def is_stuck(task):
@@ -66,59 +58,59 @@ def is_stuck(task):
     if not started_at:
         return False
 
+    # 从策略获取超时值
+    workflow_name = task.get('workflow', '')
+    phase_name = running_map.get(status) or pending_map.get(status)
+    try:
+        from core.registry import get_retry_policy
+        policy = get_retry_policy(workflow_name, phase_name)
+        stuck_timeout = policy['stuck_timeout']
+    except Exception:
+        stuck_timeout = 600
+
     try:
         started = datetime.fromisoformat(started_at)
         if started.tzinfo is None:
             from datetime import timezone as tz
             started = started.replace(tzinfo=tz.utc)
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-        return elapsed > STUCK_TIMEOUT_SECONDS
+        return elapsed > stuck_timeout
     except Exception:
         return False
 
 
 def _get_fail_trigger(task: dict, status: str) -> str | None:
     """获取 running 状态对应的 fail trigger"""
-    workflow_name = task.get('workflow', 'dev')
+    workflow_name = task.get('workflow', '')
 
     try:
-        from dev_workflow import registry
+        from core import registry
         wf = registry.get_workflow(workflow_name)
         if wf:
             for phase in wf['phases']:
                 if phase.get('running_state') == status:
                     return phase.get('fail_trigger')
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug('获取 fail_trigger 失败：%s', e)
 
-    # fallback
-    return {
-        'designing':     'design_fail',
-        'in_development': 'dev_fail',
-    }.get(status)
+    return None
 
 
 def _get_pending_state(task: dict, status: str) -> str | None:
     """获取 running 状态对应的回退 pending 状态"""
-    workflow_name = task.get('workflow', 'dev')
+    workflow_name = task.get('workflow', '')
 
     try:
-        from dev_workflow import registry
+        from core import registry
         wf = registry.get_workflow(workflow_name)
         if wf:
             for phase in wf['phases']:
                 if phase.get('running_state') == status:
                     return phase.get('pending_state')
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug('获取 pending_state 失败：%s', e)
 
-    # fallback
-    return {
-        'designing':     'pending_design',
-        'reviewing':     'pending_review',
-        'in_development': 'developing',
-        'code_reviewing': None,
-    }.get(status)
+    return None
 
 
 def recover_task(task):
@@ -129,6 +121,7 @@ def recover_task(task):
 
     phase = running_map.get(status) or pending_map.get(status)
     if not phase:
+        log.error('无法确定状态 %s 对应的阶段，跳过恢复', status)
         return
 
     failure_count = task.get('failure_count', 0) + 1
@@ -139,7 +132,16 @@ def recover_task(task):
         conn.execute('UPDATE tasks SET failure_count = ?, updated_at = ? WHERE id = ?',
                      (failure_count, now(), task_id))
 
-    if failure_count >= 3:
+    # 从策略获取 max_retries
+    workflow_name = task.get('workflow', '')
+    try:
+        from core.registry import get_retry_policy
+        policy = get_retry_policy(workflow_name, phase)
+        max_retries = policy['max_retries']
+    except Exception:
+        max_retries = 3
+
+    if failure_count >= max_retries:
         log.error('失败次数过多（%d次），通知用户', failure_count)
         notify(task, f'⚠️ 任务卡死：《{task["title"]}》\n\n状态：{status}，已失败 {failure_count} 次。请人工检查。')
         return
@@ -149,18 +151,25 @@ def recover_task(task):
         fail_trigger = _get_fail_trigger(task, status)
         if fail_trigger:
             try:
-                from dev_workflow.state_machine import transition
+                from core.state_machine import transition
                 transition(task_id, fail_trigger, note=f'卡死恢复（第{failure_count}次）')
                 log.info('触发 %s，状态回退', fail_trigger)
             except Exception as e:
                 log.error('回退失败：%s，直接强制改状态', e)
-                pending = _get_pending_state(task, status) or 'pending_design'
+                pending = _get_pending_state(task, status)
+                if not pending:
+                    log.error('无法确定 %s 的回退状态，跳过恢复', status)
+                    return
+
                 with get_conn() as conn:
                     conn.execute('UPDATE tasks SET status = ?, updated_at = ?, started_at = ? WHERE id = ?',
                                  (pending, now(), now(), task_id))
         else:
             # 无 fail trigger 的 running 状态，直接强制改回 pending
-            pending = _get_pending_state(task, status) or 'developing'
+            pending = _get_pending_state(task, status)
+            if not pending:
+                log.error('无法确定 %s 的回退状态，跳过恢复', status)
+                return
             log.warning('强制回退 %s → %s', status, pending)
             with get_conn() as conn:
                 conn.execute('UPDATE tasks SET status = ?, updated_at = ?, started_at = ? WHERE id = ?',
@@ -196,11 +205,19 @@ def main():
                     if started.tzinfo is None:
                         started = started.replace(tzinfo=tz.utc)
                     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-                    # 等待超过 3 分钟还没有推进（push 可能失败了）
-                    if elapsed > 180:
-                        phase = pending_map[status]
-                        log.info('pending 状态超时，重新触发 %s', phase)
-                        execute_phase(task['id'], phase)
+                    # 从策略获取延迟值
+                    phase_name = pending_map[status]
+                    workflow_name = task.get('workflow', '')
+                    try:
+                        from core.registry import get_retry_policy
+                        policy = get_retry_policy(workflow_name, phase_name)
+                        failure_count = task.get('failure_count', 0)
+                        pending_delay = _calculate_delay(policy, max(failure_count, 1))
+                    except Exception:
+                        pending_delay = 180
+                    if elapsed > pending_delay:
+                        log.info('pending 状态超时，重新触发 %s', phase_name)
+                        execute_phase(task['id'], phase_name)
 
 
 if __name__ == '__main__':

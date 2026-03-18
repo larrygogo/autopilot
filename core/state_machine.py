@@ -1,57 +1,11 @@
 """
-状态机：定义合法的状态转换，执行转换时记录日志
-支持动态转换表（从工作流注册表查询）
+状态机：执行状态转换，记录日志
+转换表完全由工作流注册表提供，框架不内置任何业务状态
 """
 from __future__ import annotations
 
 import sqlite3
-from dev_workflow.db import get_conn, now
-
-# ──────────────────────────────────────────────────────────
-# 默认转换表（dev 工作流，作为 fallback）
-# ──────────────────────────────────────────────────────────
-
-STATES = [
-    'pending_design',    # 待设计
-    'designing',         # 设计中
-    'pending_review',    # 待评审
-    'reviewing',         # 评审中
-    'review_rejected',   # 方案评审拒绝
-    'developing',        # 待开发
-    'in_development',    # 开发中
-    'code_reviewing',    # 代码审查中
-    'code_rejected',     # 代码审查拒绝
-    'pr_submitted',      # PR 已提交（终态）
-    'cancelled',         # 已取消（终态）
-]
-
-TERMINAL_STATES = ['pr_submitted', 'cancelled']
-
-# 合法转换：{当前状态: [(trigger, 目标状态), ...]}
-VALID_TRANSITIONS = {
-    'pending_design':  [('start_design',    'designing'),
-                        ('cancel',          'cancelled')],
-    'designing':       [('design_complete', 'pending_review'),
-                        ('design_fail',     'pending_design'),
-                        ('cancel',          'cancelled')],
-    'pending_review':  [('start_review',    'reviewing'),
-                        ('cancel',          'cancelled')],
-    'reviewing':       [('review_pass',     'developing'),
-                        ('review_reject',   'review_rejected'),
-                        ('cancel',          'cancelled')],
-    'review_rejected': [('retry_design',    'pending_design'),
-                        ('cancel',          'cancelled')],
-    'developing':      [('start_dev',       'in_development'),
-                        ('cancel',          'cancelled')],
-    'in_development':  [('dev_complete',    'code_reviewing'),
-                        ('dev_fail',        'developing'),
-                        ('cancel',          'cancelled')],
-    'code_reviewing':  [('code_pass',       'pr_submitted'),
-                        ('code_reject',     'code_rejected'),
-                        ('cancel',          'cancelled')],
-    'code_rejected':   [('retry_dev',       'in_development'),
-                        ('cancel',          'cancelled')],
-}
+from core.db import get_conn, now
 
 
 class InvalidTransitionError(Exception):
@@ -61,24 +15,23 @@ class InvalidTransitionError(Exception):
 def _resolve_transitions(task_id: str, conn) -> dict[str, list[tuple[str, str]]]:
     """
     解析任务对应的转换表。
-    优先从工作流注册表查询，fallback 到 VALID_TRANSITIONS。
+    从工作流注册表查询，查不到返回空字典。
     """
     row = conn.execute('SELECT workflow FROM tasks WHERE id = ?', (task_id,)).fetchone()
     if not row:
-        return VALID_TRANSITIONS
+        return {}
 
-    workflow_name = row['workflow'] if row['workflow'] else 'dev'
+    workflow_name = row['workflow'] if row['workflow'] else ''
 
-    # 尝试从注册表获取
     try:
-        from dev_workflow import registry
+        from core import registry
         transitions = registry.build_transitions(workflow_name)
         if transitions:
             return transitions
     except Exception:
         pass
 
-    return VALID_TRANSITIONS
+    return {}
 
 
 def transition(task_id: str, trigger: str, note: str | None = None,
@@ -153,15 +106,14 @@ def transition(task_id: str, trigger: str, note: str | None = None,
 
 def can_transition(task_id: str, trigger: str) -> bool:
     """检查是否可以执行某个 trigger"""
-    from dev_workflow.db import get_task
+    from core.db import get_task
     task = get_task(task_id)
     if not task:
         return False
 
-    # 动态获取转换表
-    workflow_name = task.get('workflow', 'dev')
+    workflow_name = task.get('workflow', '')
     try:
-        from dev_workflow import registry
+        from core import registry
         transitions = registry.build_transitions(workflow_name)
         if transitions:
             allowed = transitions.get(task['status'], [])
@@ -169,25 +121,23 @@ def can_transition(task_id: str, trigger: str) -> bool:
     except Exception:
         pass
 
-    allowed = VALID_TRANSITIONS.get(task['status'], [])
-    return any(t == trigger for t, _ in allowed)
+    return False
 
 
 def get_available_triggers(task_id: str) -> list[str]:
     """获取当前状态下可用的 trigger 列表"""
-    from dev_workflow.db import get_task
+    from core.db import get_task
     task = get_task(task_id)
     if not task:
         return []
 
-    # 动态获取转换表
-    workflow_name = task.get('workflow', 'dev')
+    workflow_name = task.get('workflow', '')
     try:
-        from dev_workflow import registry
+        from core import registry
         transitions = registry.build_transitions(workflow_name)
         if transitions:
             return [t for t, _ in transitions.get(task['status'], [])]
     except Exception:
         pass
 
-    return [t for t, _ in VALID_TRANSITIONS.get(task['status'], [])]
+    return []

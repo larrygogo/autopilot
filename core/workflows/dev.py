@@ -1,23 +1,166 @@
 """
 完整开发工作流：方案设计 → 方案评审 → 开发 → 代码审查 → PR 提交
-从 runner.py 迁移的 5 个阶段函数
+自包含：业务常量、辅助函数、阶段函数均在本模块内
 """
 from __future__ import annotations
 
-import json, re, subprocess
+import json, os, re, subprocess, tempfile
 from pathlib import Path
 
-from dev_workflow.db import get_task, get_conn, now, get_default_branch
-from dev_workflow.state_machine import transition
-from dev_workflow.infra import (
-    _run_git, run_claude, notify, fetch_req, get_task_dir,
-    PROMPTS_DIR, PROJECTS_DIR, REQGENIE_REQ_URL,
-    TIMEOUT_DESIGN, TIMEOUT_REVIEW, TIMEOUT_DEV, TIMEOUT_CODE_REVIEW, TIMEOUT_PR_DESC,
-    REVIEW_RESULT_PASS, REVIEW_RESULT_REJECT,
-)
-from dev_workflow.logger import get_logger
+from core.db import get_task, get_conn, now, get_default_branch, CONFIG
+from core.state_machine import transition
+from core.infra import _run_git, run_claude, get_task_dir, PROJECTS_DIR
+from core.logger import get_logger
 
 log = get_logger()
+
+# ──────────────────────────────────────────────────────────
+# 自管理配置（从全局 CONFIG 读取，有默认值）
+# ──────────────────────────────────────────────────────────
+
+_rq_cfg = CONFIG.get('reqgenie', {})
+REQGENIE_BASE_URL = os.environ.get('REQGENIE_BASE_URL') or _rq_cfg.get('base_url', 'https://reqgenie.reverse-game.ltd')
+REQGENIE_MCP_URL = f'{REQGENIE_BASE_URL}/mcp'
+REQGENIE_REQ_URL = f'{REQGENIE_BASE_URL}/requirements'
+OP_VAULT = os.environ.get('OP_VAULT') or _rq_cfg.get('op_vault', 'openclaw')
+OP_REQGENIE_ITEM = os.environ.get('OP_REQGENIE_ITEM') or _rq_cfg.get('op_item', 'reqgenie 需求系统')
+
+_notify_cfg = CONFIG.get('notify', {})
+DEFAULT_NOTIFY_CHANNEL = _notify_cfg.get('channel', 'telegram')
+DEFAULT_NOTIFY_TARGET = _notify_cfg.get('target', '')
+
+_timeout_cfg = CONFIG.get('timeouts', {})
+TIMEOUT_DESIGN = _timeout_cfg.get('design', 900)
+TIMEOUT_REVIEW = _timeout_cfg.get('review', 900)
+TIMEOUT_DEV = _timeout_cfg.get('development', 1800)
+TIMEOUT_CODE_REVIEW = _timeout_cfg.get('code_review', 1200)
+TIMEOUT_PR_DESC = _timeout_cfg.get('pr_description', 300)
+
+REVIEW_RESULT_PASS = 'REVIEW_RESULT: PASS'
+REVIEW_RESULT_REJECT = 'REVIEW_RESULT: REJECT'
+
+PROMPTS_DIR = Path(__file__).parent.parent.parent / 'prompts'
+
+# ──────────────────────────────────────────────────────────
+# 自包含辅助函数
+# ──────────────────────────────────────────────────────────
+
+def fetch_req(req_id: str) -> dict | None:
+    """从 ReqGenie 拉取需求"""
+    try:
+        key_r = subprocess.run(
+            ['op', 'item', 'get', OP_REQGENIE_ITEM, '--vault', OP_VAULT, '--fields', 'label=api_key'],
+            capture_output=True, text=True)
+    except FileNotFoundError:
+        log.warning('op CLI 未安装，跳过 ReqGenie')
+        return None
+    if key_r.returncode != 0:
+        return None
+    key = key_r.stdout.strip()
+    cfg = {'mcpServers': {'reqgenie': {
+        'baseUrl': REQGENIE_MCP_URL,
+        'headers': {'Authorization': f'Bearer {key}'}
+    }}}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cfg_path = os.path.join(tmpdir, 'config.json')
+        out_path = os.path.join(tmpdir, 'result.json')
+        with open(cfg_path, 'w') as f:
+            json.dump(cfg, f)
+        r = subprocess.run(
+            f'mcporter --config {cfg_path} call reqgenie.get_requirement id={req_id} --output json > {out_path}',
+            shell=True, timeout=60)
+        if r.returncode == 0 and Path(out_path).exists():
+            data = json.loads(Path(out_path).read_text(encoding='utf-8'))
+            return data.get('data', data) if 'id' not in data else data
+    return None
+
+
+def notify_dev(task: dict, message: str, media_path: str | None = None) -> None:
+    """dev 工作流通知（通过 openclaw CLI）"""
+    target = task.get('notify_target', '')
+    channel = task.get('channel', 'telegram')
+    try:
+        subprocess.run(['openclaw', 'message', 'send',
+            '--channel', channel, '--target', target, '--message', message], check=False)
+        if media_path and Path(media_path).exists():
+            subprocess.run(['openclaw', 'message', 'send',
+                '--channel', channel, '--target', target,
+                '--media', media_path,
+                '--message', Path(media_path).name], check=False)
+    except FileNotFoundError:
+        log.warning('openclaw 未安装，通知跳过：%s', message[:80])
+
+
+def setup_dev_task(args) -> dict:
+    """dev 工作流的任务初始化钩子"""
+    projects_cfg = CONFIG.get('projects', {})
+    project_name = args.project or (list(projects_cfg.keys())[0] if projects_cfg else 'unknown')
+    project_cfg = projects_cfg.get(project_name, {})
+    repo_path = args.repo or project_cfg.get('repo_path', '')
+    if repo_path:
+        repo_path = str(Path(repo_path).expanduser())
+
+    agents_cfg = CONFIG.get('agents', {}).get('default', {})
+    agents = {
+        'planDesign':  agents_cfg.get('plan_design', 'claude'),
+        'planReview':  agents_cfg.get('plan_review', 'codex'),
+        'development': agents_cfg.get('development', 'claude'),
+        'codeReview':  agents_cfg.get('code_review', 'codex'),
+    }
+
+    title = args.title or f'需求 {args.req_id[:8]}'
+    try:
+        req = fetch_req(args.req_id)
+        if req:
+            title = req.get('title', title)
+    except Exception:
+        pass
+
+    return {
+        'req_id': args.req_id,
+        'title': title,
+        'project': project_name,
+        'repo_path': repo_path,
+        'branch': f'feat/{project_name}-{args.req_id[:8]}',
+        'agents': agents,
+        'notify_target': DEFAULT_NOTIFY_TARGET,
+        'channel': DEFAULT_NOTIFY_CHANNEL,
+    }
+
+
+# ──────────────────────────────────────────────────────────
+# 内部辅助
+# ──────────────────────────────────────────────────────────
+
+def _get_rejection_counts(task: dict) -> dict:
+    """从任务中获取驳回计数字典"""
+    raw = task.get('rejection_counts', '{}')
+    if not raw:
+        raw = '{}'
+    try:
+        counts = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        counts = {
+            'design': task.get('rejection_count', 0) or 0,
+            'code': task.get('code_rejection_count', 0) or 0,
+        }
+    return counts
+
+
+def _get_phase_config(task: dict, phase_name: str, key: str, default):
+    """从工作流定义中获取阶段配置值"""
+    from core.registry import get_phase
+    workflow = task.get('workflow', 'dev')
+    phase = get_phase(workflow, phase_name)
+    if phase:
+        return phase.get(key, default)
+    return default
+
+
+def _notify(task: dict, message: str, media_path: str | None = None) -> None:
+    """通知快捷方式：通过框架 notify 分发"""
+    from core.infra import notify
+    notify(task, message, media_path)
 
 
 # ──────────────────────────────────────────────────────────
@@ -30,12 +173,10 @@ def run_plan_design(task_id: str) -> None:
     task_dir = get_task_dir(task_id)
     repo_path = task['repo_path']
 
-    # 更新仓库
     default_branch = get_default_branch(task['project'])
     _run_git(['checkout', default_branch], cwd=repo_path)
     _run_git(['pull', '--ff-only'], cwd=repo_path)
 
-    # 读取需求（优先远程，fallback 到本地文件）
     req = fetch_req(task['req_id'])
     if not req:
         local_req_path = task_dir / 'requirement.md'
@@ -48,7 +189,6 @@ def run_plan_design(task_id: str) -> None:
                 f'可将需求内容写入该文件作为 fallback。'
             )
 
-    # 读取历史驳回的评审报告（如有）
     rejection_history = ''
     review_path = task_dir / 'plan_review.md'
     rejection_counts = _get_rejection_counts(task)
@@ -56,7 +196,6 @@ def run_plan_design(task_id: str) -> None:
     if review_path.exists() and design_rejections > 0:
         rejection_history = f'\n## 上一次评审的驳回意见（第{design_rejections}次驳回）\n{review_path.read_text(encoding="utf-8")}'
 
-    # 拼装提示词
     template = (PROMPTS_DIR / 'plan-design.md').read_text(encoding='utf-8')
     description = req.get('description', '')
     org = req.get('organized_content') or {}
@@ -85,15 +224,12 @@ def run_plan_design(task_id: str) -> None:
 
     result = run_claude(prompt, repo_path, timeout=TIMEOUT_DESIGN)
 
-    # 保存方案
     plan_path = task_dir / 'plan.md'
     plan_path.write_text(f'<!-- generated:{now()} -->\n{result}', encoding='utf-8')
 
-    # 状态转换
     transition(task_id, 'design_complete', note='方案设计完成')
-    notify(task, f'📋 方案设计完成：《{task["title"]}》\n\n等待方案评审...', str(plan_path))
-    # Push：自动启动方案评审
-    from dev_workflow.runner import run_in_background
+    _notify(task, f'📋 方案设计完成：《{task["title"]}》\n\n等待方案评审...', str(plan_path))
+    from core.runner import run_in_background
     run_in_background(task_id, 'review')
 
 
@@ -111,19 +247,16 @@ def run_plan_review(task_id: str) -> None:
 
     result = run_claude(prompt, repo_path, timeout=TIMEOUT_REVIEW)
 
-    # 保存评审报告
     review_path = task_dir / 'plan_review.md'
     review_path.write_text(f'<!-- generated:{now()} -->\n{result}', encoding='utf-8')
 
-    # 解析结论
     passed = REVIEW_RESULT_PASS in result
     rejected = REVIEW_RESULT_REJECT in result
 
     if passed:
         transition(task_id, 'review_pass', note='方案评审通过')
-        notify(task, f'✅ 方案评审通过：《{task["title"]}》\n\n开始开发...', str(review_path))
-        # Push：直接启动开发
-        from dev_workflow.runner import run_in_background
+        _notify(task, f'✅ 方案评审通过：《{task["title"]}》\n\n开始开发...', str(review_path))
+        from core.runner import run_in_background
         run_in_background(task_id, 'dev')
 
     elif rejected:
@@ -139,15 +272,14 @@ def run_plan_review(task_id: str) -> None:
             transition(task_id, 'cancel',
                 note=f'方案评审驳回 {new_count} 次，已取消',
                 extra_updates={'rejection_counts': json.dumps(rejection_counts), 'rejection_reason': reason})
-            notify(task, f'⚠️ 方案评审驳回 {new_count} 次：《{task["title"]}》\n\n已超过上限，任务取消。', str(review_path))
+            _notify(task, f'⚠️ 方案评审驳回 {new_count} 次：《{task["title"]}》\n\n已超过上限，任务取消。', str(review_path))
         else:
             transition(task_id, 'review_reject',
                 note=f'方案评审驳回（第{new_count}次）',
                 extra_updates={'rejection_counts': json.dumps(rejection_counts), 'rejection_reason': reason})
-            # 先回退到 pending_design，再启动重新设计
             transition(task_id, 'retry_design', note=f'自动重新设计（第{new_count}次驳回）')
-            notify(task, f'❌ 方案评审驳回（第{new_count}次）：《{task["title"]}》\n\n自动重新设计...', str(review_path))
-            from dev_workflow.runner import run_in_background
+            _notify(task, f'❌ 方案评审驳回（第{new_count}次）：《{task["title"]}》\n\n自动重新设计...', str(review_path))
+            from core.runner import run_in_background
             run_in_background(task_id, 'design')
     else:
         raise RuntimeError(f'无法解析评审结论，请检查报告')
@@ -160,7 +292,6 @@ def run_development(task_id: str) -> None:
     repo_path = task['repo_path']
     branch = task['branch']
 
-    # 切换分支
     default_branch = get_default_branch(task['project'])
     _run_git(['checkout', default_branch], cwd=repo_path)
     _run_git(['pull', '--ff-only'], cwd=repo_path)
@@ -187,7 +318,6 @@ def run_development(task_id: str) -> None:
     report_path = task_dir / 'dev_report.md'
     report_path.write_text(f'<!-- generated:{now()} -->\n{result}', encoding='utf-8')
 
-    # 提交 Claude 生成的代码（如有变更）
     status_r = _run_git(['status', '--porcelain'], cwd=repo_path)
     if status_r.stdout.strip():
         _run_git(['add', '-A'], cwd=repo_path)
@@ -197,10 +327,9 @@ def run_development(task_id: str) -> None:
         log.warning('Claude 未产生代码变更')
 
     transition(task_id, 'dev_complete', note='开发完成')
-    notify(task, f'🔨 开发完成：《{task["title"]}》\n\n启动代码审查...', str(report_path))
+    _notify(task, f'🔨 开发完成：《{task["title"]}》\n\n启动代码审查...', str(report_path))
 
-    # Push：直接启动代码审查
-    from dev_workflow.runner import run_in_background
+    from core.runner import run_in_background
     run_in_background(task_id, 'code_review')
 
 
@@ -210,7 +339,6 @@ def run_code_review(task_id: str) -> None:
     task_dir = get_task_dir(task_id)
     repo_path = task['repo_path']
 
-    # 获取 diff
     default_branch = get_default_branch(task['project'])
     r = _run_git(['diff', f'{default_branch}...HEAD', '--no-ext-diff'], cwd=repo_path)
     git_diff = r.stdout[:80000]
@@ -237,8 +365,8 @@ def run_code_review(task_id: str) -> None:
 
     if passed:
         transition(task_id, 'code_pass', note='代码审查通过')
-        notify(task, f'✅ 代码审查通过：《{task["title"]}》\n\n提交 PR...', str(review_path))
-        from dev_workflow.runner import run_in_background
+        _notify(task, f'✅ 代码审查通过：《{task["title"]}》\n\n提交 PR...', str(review_path))
+        from core.runner import run_in_background
         run_in_background(task_id, 'pr')
 
     elif rejected:
@@ -254,15 +382,14 @@ def run_code_review(task_id: str) -> None:
             transition(task_id, 'cancel',
                 note=f'代码审查驳回 {new_count} 次，已取消',
                 extra_updates={'rejection_counts': json.dumps(rejection_counts), 'rejection_reason': reason})
-            notify(task, f'⚠️ 代码审查驳回 {new_count} 次：《{task["title"]}》\n\n已超过上限，任务取消。', str(review_path))
+            _notify(task, f'⚠️ 代码审查驳回 {new_count} 次：《{task["title"]}》\n\n已超过上限，任务取消。', str(review_path))
         else:
             transition(task_id, 'code_reject',
                 note=f'代码审查驳回（第{new_count}次）',
                 extra_updates={'rejection_counts': json.dumps(rejection_counts), 'rejection_reason': reason})
-            # 先回退到 in_development，再启动返工
             transition(task_id, 'retry_dev', note=f'自动返工（第{new_count}次驳回）')
-            notify(task, f'❌ 代码审查驳回（第{new_count}次）：《{task["title"]}》\n\n自动返工...', str(review_path))
-            from dev_workflow.runner import run_in_background
+            _notify(task, f'❌ 代码审查驳回（第{new_count}次）：《{task["title"]}》\n\n自动返工...', str(review_path))
+            from core.runner import run_in_background
             run_in_background(task_id, 'dev')
     else:
         raise RuntimeError('无法解析审查结论，请检查报告')
@@ -275,10 +402,8 @@ def run_submit_pr(task_id: str) -> None:
     repo_path = task['repo_path']
     branch = task['branch']
 
-    # push 分支
     _run_git(['push', '-u', 'origin', branch], cwd=repo_path)
 
-    # 生成 PR 描述（调 claude）
     plan_content = (task_dir / 'plan.md').read_text(encoding='utf-8') if (task_dir / 'plan.md').exists() else ''
     dev_report = (task_dir / 'dev_report.md').read_text(encoding='utf-8') if (task_dir / 'dev_report.md').exists() else ''
     default_branch = get_default_branch(task['project'])
@@ -292,7 +417,6 @@ def run_submit_pr(task_id: str) -> None:
     prompt = prompt.replace('{{dev_report}}', dev_report[:2000])
     prompt = prompt.replace('{{git_diff}}', git_diff)
 
-    # 判断有无前端改动
     name_r = _run_git(['diff', f'{default_branch}...HEAD', '--name-only'], cwd=repo_path)
     has_frontend = any(f.endswith(('.tsx', '.ts', '.jsx', '.vue', '.css', '.scss', '.less', '.html', '.svelte'))
                        for f in name_r.stdout.split('\n'))
@@ -310,7 +434,6 @@ def run_submit_pr(task_id: str) -> None:
     )
     body = pr_body.stdout.strip() if pr_body.returncode == 0 else f'完成需求：{task["title"]}'
 
-    # 检查是否已有 PR
     existing = subprocess.run(['gh', 'pr', 'view', '--json', 'url'],
                               capture_output=True, text=True, cwd=repo_path,
                               encoding='utf-8', errors='replace')
@@ -333,37 +456,7 @@ def run_submit_pr(task_id: str) -> None:
         conn.execute('UPDATE tasks SET pr_url = ?, updated_at = ? WHERE id = ?',
                      (pr_url, now(), task_id))
 
-    notify(task, f'🎉 PR 已提交：《{task["title"]}》\n\n{pr_url}')
-
-
-# ──────────────────────────────────────────────────────────
-# 辅助函数
-# ──────────────────────────────────────────────────────────
-
-def _get_rejection_counts(task: dict) -> dict:
-    """从任务中获取驳回计数字典"""
-    raw = task.get('rejection_counts', '{}')
-    if not raw:
-        raw = '{}'
-    try:
-        counts = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        # 兼容旧格式
-        counts = {
-            'design': task.get('rejection_count', 0) or 0,
-            'code': task.get('code_rejection_count', 0) or 0,
-        }
-    return counts
-
-
-def _get_phase_config(task: dict, phase_name: str, key: str, default):
-    """从工作流定义中获取阶段配置值"""
-    from dev_workflow.registry import get_phase
-    workflow = task.get('workflow', 'dev')
-    phase = get_phase(workflow, phase_name)
-    if phase:
-        return phase.get(key, default)
-    return default
+    _notify(task, f'🎉 PR 已提交：《{task["title"]}》\n\n{pr_url}')
 
 
 # ──────────────────────────────────────────────────────────
@@ -373,6 +466,8 @@ def _get_phase_config(task: dict, phase_name: str, key: str, default):
 WORKFLOW = {
     'name': 'dev',
     'description': '完整开发流程',
+    'setup_func': setup_dev_task,
+    'notify_func': notify_dev,
     'phases': [
         {
             'name': 'design',
@@ -435,7 +530,6 @@ WORKFLOW = {
     ],
     'initial_state': 'pending_design',
     'terminal_states': ['pr_submitted', 'cancelled'],
-    # 使用硬编码转换表以保持完全向后兼容
     'transitions': {
         'pending_design':  [('start_design',    'designing'),
                             ('cancel',          'cancelled')],

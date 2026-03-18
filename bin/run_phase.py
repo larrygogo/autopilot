@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 
 # 把 src 加入路径
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dev_workflow.runner import execute_phase
+from core.runner import execute_phase
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:

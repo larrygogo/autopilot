@@ -1,30 +1,87 @@
 """
 需求评审工作流：需求分析 → 需求评审
-独立于开发流程的轻量级工作流示例
+自包含：业务常量、辅助函数、阶段函数均在本模块内
 """
 from __future__ import annotations
 
-import json
+import json, os, subprocess, tempfile
 from pathlib import Path
 
-from dev_workflow.db import get_task, now
-from dev_workflow.state_machine import transition
-from dev_workflow.infra import (
-    run_claude, notify, fetch_req, get_task_dir,
-    PROMPTS_DIR, REQGENIE_REQ_URL,
-    TIMEOUT_REVIEW, REVIEW_RESULT_PASS, REVIEW_RESULT_REJECT,
-)
-from dev_workflow.logger import get_logger
+from core.db import get_task, now, CONFIG
+from core.state_machine import transition
+from core.infra import run_claude, get_task_dir
+from core.logger import get_logger
 
 log = get_logger()
 
+# ──────────────────────────────────────────────────────────
+# 自管理配置
+# ──────────────────────────────────────────────────────────
+
+_rq_cfg = CONFIG.get('reqgenie', {})
+REQGENIE_BASE_URL = os.environ.get('REQGENIE_BASE_URL') or _rq_cfg.get('base_url', 'https://reqgenie.reverse-game.ltd')
+REQGENIE_MCP_URL = f'{REQGENIE_BASE_URL}/mcp'
+REQGENIE_REQ_URL = f'{REQGENIE_BASE_URL}/requirements'
+OP_VAULT = os.environ.get('OP_VAULT') or _rq_cfg.get('op_vault', 'openclaw')
+OP_REQGENIE_ITEM = os.environ.get('OP_REQGENIE_ITEM') or _rq_cfg.get('op_item', 'reqgenie 需求系统')
+
+_timeout_cfg = CONFIG.get('timeouts', {})
+TIMEOUT_REVIEW = _timeout_cfg.get('review', 900)
+
+REVIEW_RESULT_PASS = 'REVIEW_RESULT: PASS'
+REVIEW_RESULT_REJECT = 'REVIEW_RESULT: REJECT'
+
+PROMPTS_DIR = Path(__file__).parent.parent.parent / 'prompts'
+
+# ──────────────────────────────────────────────────────────
+# 自包含辅助函数
+# ──────────────────────────────────────────────────────────
+
+def fetch_req(req_id: str) -> dict | None:
+    """从 ReqGenie 拉取需求"""
+    try:
+        key_r = subprocess.run(
+            ['op', 'item', 'get', OP_REQGENIE_ITEM, '--vault', OP_VAULT, '--fields', 'label=api_key'],
+            capture_output=True, text=True)
+    except FileNotFoundError:
+        log.warning('op CLI 未安装，跳过 ReqGenie')
+        return None
+    if key_r.returncode != 0:
+        return None
+    key = key_r.stdout.strip()
+    cfg = {'mcpServers': {'reqgenie': {
+        'baseUrl': REQGENIE_MCP_URL,
+        'headers': {'Authorization': f'Bearer {key}'}
+    }}}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cfg_path = os.path.join(tmpdir, 'config.json')
+        out_path = os.path.join(tmpdir, 'result.json')
+        with open(cfg_path, 'w') as f:
+            json.dump(cfg, f)
+        r = subprocess.run(
+            f'mcporter --config {cfg_path} call reqgenie.get_requirement id={req_id} --output json > {out_path}',
+            shell=True, timeout=60)
+        if r.returncode == 0 and Path(out_path).exists():
+            data = json.loads(Path(out_path).read_text(encoding='utf-8'))
+            return data.get('data', data) if 'id' not in data else data
+    return None
+
+
+def _notify(task: dict, message: str, media_path: str | None = None) -> None:
+    """通知快捷方式：通过框架 notify 分发"""
+    from core.infra import notify
+    notify(task, message, media_path)
+
+
+# ──────────────────────────────────────────────────────────
+# 阶段函数
+# ──────────────────────────────────────────────────────────
 
 def run_req_analysis(task_id: str) -> None:
     """需求分析：拉取并整理需求内容"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
 
-    # 拉取需求
     req = fetch_req(task['req_id'])
     if not req:
         local_req_path = task_dir / 'requirement.md'
@@ -34,7 +91,6 @@ def run_req_analysis(task_id: str) -> None:
         else:
             raise RuntimeError(f'无法拉取需求详情，且本地文件 {local_req_path} 不存在。')
 
-    # 保存需求内容
     req_path = task_dir / 'requirement_analysis.md'
     description = req.get('description', '')
     org = req.get('organized_content') or {}
@@ -44,9 +100,8 @@ def run_req_analysis(task_id: str) -> None:
     req_path.write_text(f'<!-- generated:{now()} -->\n{content}', encoding='utf-8')
 
     transition(task_id, 'analysis_complete', note='需求分析完成')
-    notify(task, f'📄 需求分析完成：《{task["title"]}》\n\n等待需求评审...')
-    # Push：自动启动需求评审
-    from dev_workflow.runner import run_in_background
+    _notify(task, f'📄 需求分析完成：《{task["title"]}》\n\n等待需求评审...')
+    from core.runner import run_in_background
     run_in_background(task_id, 'req_review')
 
 
@@ -57,7 +112,6 @@ def run_req_review(task_id: str) -> None:
 
     req_content = (task_dir / 'requirement_analysis.md').read_text(encoding='utf-8')
 
-    # 使用需求评审提示词
     template_path = PROMPTS_DIR / 'requirement-review.md'
     if template_path.exists():
         template = template_path.read_text(encoding='utf-8')
@@ -76,13 +130,12 @@ def run_req_review(task_id: str) -> None:
 
     if passed:
         transition(task_id, 'req_review_pass', note='需求评审通过')
-        notify(task, f'✅ 需求评审通过：《{task["title"]}》', str(review_path))
+        _notify(task, f'✅ 需求评审通过：《{task["title"]}》', str(review_path))
     else:
         transition(task_id, 'req_review_reject', note='需求评审驳回')
         transition(task_id, 'retry_req_analysis', note='自动重新分析需求')
-        notify(task, f'❌ 需求评审驳回：《{task["title"]}》\n\n自动重新分析...', str(review_path))
-        # Push：自动重试需求分析
-        from dev_workflow.runner import run_in_background
+        _notify(task, f'❌ 需求评审驳回：《{task["title"]}》\n\n自动重新分析...', str(review_path))
+        from core.runner import run_in_background
         run_in_background(task_id, 'req_analysis')
 
 
@@ -121,7 +174,6 @@ WORKFLOW = {
     ],
     'initial_state': 'pending_analysis',
     'terminal_states': ['req_review_done', 'cancelled'],
-    # 手写转换表（更精确）
     'transitions': {
         'pending_analysis':    [('start_analysis',      'analyzing'),
                                 ('cancel',              'cancelled')],

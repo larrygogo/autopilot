@@ -1,5 +1,4 @@
-# openclaw-dev-workflow 配置模板
-# 复制为 config.yaml 并填写实际值
+# dev-pilot 框架配置（全部可选，有默认值）
 #
 # 配置文件查找优先级：
 #   1. 环境变量 DEV_WORKFLOW_CONFIG 指定的路径
@@ -7,67 +6,15 @@
 #   3. ~/.openclaw/dev-workflow/config.yaml
 #   4. 项目目录的 config.yaml
 
-# 运行时数据存放路径
-# 包含 SQLite 数据库（runtime/workflow.db）和任务产出物（runtime/dev-tasks/<task_id>/）
-# 默认 ~/.openclaw/workspace
+# 运行时数据存放路径（默认 ~/.openclaw/workspace）
 # workspace: ~/.openclaw/workspace
 
-# Git 主分支名
-# 方案设计/开发阶段会 checkout 到此分支拉取最新代码
-# 代码审查用此分支做 diff 基准，PR 创建时作为 base 分支
-# 默认 main
-default_branch: main
+# Git 主分支名（默认 main）
+# default_branch: main
 
-# 需求管理系统（ReqGenie）集成
-# 工作流启动时通过 MCP 协议从 ReqGenie 拉取需求详情
-# 如果连接失败，会 fallback 到本地 requirement.md 文件
-reqgenie:
-  # ReqGenie 实例地址
-  base_url: https://your-reqgenie-instance.com
-  # 1Password 条目名，存储 ReqGenie API Key
-  # 系统调用: op item get <op_item> --vault <op_vault> --fields label=api_key
-  op_item: reqgenie 需求系统
-  # 1Password 保管库名
-  op_vault: openclaw
-
-# 任务状态变更时的推送通知
-# 通过 openclaw message send 命令发送
-notify:
-  # 通知渠道类型: telegram | discord | slack 等
-  channel: telegram
-  # 接收方标识
-  # Telegram: chat_id | Discord: channel_id | Slack: channel name
-  target: "your_chat_id"
-
-# 各阶段调用 AI agent 的最大等待时间（秒）
-# 超时会触发 ERROR，failure_count +1，watcher 可自动恢复重试
-timeouts:
-  design: 900         # 方案设计（15 分钟）—— 阅读需求 + 生成完整技术方案
-  review: 900         # 方案评审（15 分钟）—— 对照需求逐条审查方案
-  development: 1800   # 开发执行（30 分钟）—— 最耗时，AI 在仓库中创建/修改多个文件
-  code_review: 1200   # 代码审查（20 分钟）—— 分析 git diff 并出具审查报告
-  pr_description: 300 # PR 描述生成（5 分钟）—— 基于方案和 diff 生成 PR body
-
-# 各阶段使用的 AI agent
-# 目前支持: claude（Claude Code CLI）| codex（OpenAI Codex CLI）
-agents:
-  default:
-    plan_design: claude   # 方案设计 —— 推荐 claude，需要深度分析和长文本输出
-    plan_review: codex    # 方案评审
-    development: claude   # 开发执行 —— 推荐 claude，需要读写仓库文件
-    code_review: codex    # 代码审查
-
-# 项目配置（支持多项目）
-# 启动任务时通过 --project <name> 选择
-projects:
-  my-project:
-    # 本地 Git 仓库路径，AI agent 在此目录下读写代码
-    repo_path: ~/repos/my-project
-    # 技术栈描述，会注入到方案设计提示词中，帮助 AI 生成符合技术栈的方案
-    tech_stack: "描述技术栈，会传给 agent"
-    # 项目级主分支名（可选，覆盖全局 default_branch）
-    # default_branch: main
-  another-project:
-    repo_path: ~/repos/another-project
-    tech_stack: "Go + React + PostgreSQL"
-    default_branch: master
+# 以下配置由具体工作流使用，详见 examples/ 下各工作流的 config.example.yaml：
+# - reqgenie: 需求管理系统集成
+# - notify: 通知渠道
+# - timeouts: 各阶段超时
+# - agents: AI agent 分配
+# - projects: 项目映射

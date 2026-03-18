@@ -10,15 +10,6 @@ from pathlib import Path
 _FMT = '%(asctime)s [%(levelname)s] [%(phase_tag)s] %(message)s'
 _DATEFMT = '%Y-%m-%d %H:%M:%S'
 
-# 阶段 → 标签映射
-PHASE_TAGS = {
-    'design':      'PLAN_DESIGN',
-    'review':      'PLAN_REVIEW',
-    'dev':         'DEVELOPMENT',
-    'code_review': 'CODE_REVIEW',
-    'pr':          'SUBMIT_PR',
-}
-
 
 class _PhaseFilter(logging.Filter):
     """注入 phase_tag 字段到日志记录"""
@@ -36,7 +27,7 @@ class _PhaseFilter(logging.Filter):
 _phase_filter = _PhaseFilter()
 
 
-def get_logger(name: str = 'dev_workflow') -> logging.Logger:
+def get_logger(name: str = 'core') -> logging.Logger:
     """获取模块 logger（单例，只初始化一次 handler）"""
     logger = logging.getLogger(name)
     if not logger.handlers:
@@ -50,14 +41,8 @@ def get_logger(name: str = 'dev_workflow') -> logging.Logger:
 
 
 def set_phase(phase: str, label: str | None = None) -> None:
-    """设置当前阶段标签
-
-    优先使用显式传入的 label，其次查静态 PHASE_TAGS，最后 fallback 到 phase.upper()
-    """
-    if label:
-        _phase_filter.phase_tag = label
-    else:
-        _phase_filter.phase_tag = PHASE_TAGS.get(phase, phase.upper())
+    """设置当前阶段标签"""
+    _phase_filter.phase_tag = label if label else phase.upper()
 
 
 def reset_phase() -> None:

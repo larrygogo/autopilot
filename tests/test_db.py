@@ -2,7 +2,7 @@
 数据库层单元测试：CRUD 操作、配置加载
 """
 import pytest
-from dev_workflow.db import (
+from core.db import (
     create_task, get_task, get_active_tasks, get_task_logs,
     get_default_branch, now,
 )
@@ -66,7 +66,7 @@ class TestActiveTasksQuery:
 
     def test_active_tasks_excludes_cancelled(self):
         _create_test_task('ACT02')
-        from dev_workflow.db import get_conn
+        from core.db import get_conn
         conn = get_conn()
         conn.execute("UPDATE tasks SET status = 'cancelled' WHERE id = 'ACT02'")
         conn.commit()
@@ -75,7 +75,7 @@ class TestActiveTasksQuery:
 
     def test_active_tasks_excludes_pr_submitted(self):
         _create_test_task('ACT03')
-        from dev_workflow.db import get_conn
+        from core.db import get_conn
         conn = get_conn()
         conn.execute("UPDATE tasks SET status = 'pr_submitted' WHERE id = 'ACT03'")
         conn.commit()
@@ -86,7 +86,7 @@ class TestActiveTasksQuery:
 class TestTaskLogs:
 
     def test_logs_recorded_on_transition(self):
-        from dev_workflow.state_machine import transition
+        from core.state_machine import transition
         tid = _create_test_task('LOG01')
         transition(tid, 'start_design')
         logs = get_task_logs(tid)
@@ -96,7 +96,7 @@ class TestTaskLogs:
         assert logs[0]['to_status'] == 'designing'
 
     def test_logs_limit(self):
-        from dev_workflow.state_machine import transition
+        from core.state_machine import transition
         tid = _create_test_task('LOG02')
         transition(tid, 'start_design')
         transition(tid, 'design_complete')

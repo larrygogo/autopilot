@@ -7,7 +7,7 @@ import importlib
 import pkgutil
 from typing import Any
 
-from dev_workflow.logger import get_logger
+from core.logger import get_logger
 
 log = get_logger()
 
@@ -15,16 +15,113 @@ log = get_logger()
 _registry: dict[str, Any] = {}
 
 
+class WorkflowValidationError(Exception):
+    """工作流定义校验失败"""
+    pass
+
+
+def validate_workflow(wf: dict) -> list[str]:
+    """校验 WORKFLOW 字典，返回警告列表，严重错误直接 raise WorkflowValidationError"""
+    warnings: list[str] = []
+
+    # ── 必须字段 ──
+    required_fields = {
+        'name': str,
+        'phases': list,
+        'initial_state': str,
+        'terminal_states': list,
+    }
+    for field, expected_type in required_fields.items():
+        if field not in wf:
+            raise WorkflowValidationError(f'缺少必须字段：{field}')
+        if not isinstance(wf[field], expected_type):
+            raise WorkflowValidationError(f'字段 {field} 类型错误：期望 {expected_type.__name__}，得到 {type(wf[field]).__name__}')
+
+    if not wf['phases']:
+        raise WorkflowValidationError('phases 不能为空')
+    if not wf['terminal_states']:
+        raise WorkflowValidationError('terminal_states 不能为空')
+
+    # ── phase 校验 ──
+    phase_names: set[str] = set()
+    all_phase_names = {p['name'] for p in wf['phases'] if isinstance(p, dict) and 'name' in p}
+    for i, phase in enumerate(wf['phases']):
+        if not isinstance(phase, dict):
+            raise WorkflowValidationError(f'phases[{i}] 必须是 dict')
+        for pf in ('name', 'pending_state', 'running_state'):
+            if pf not in phase:
+                raise WorkflowValidationError(f'phases[{i}] 缺少必须字段：{pf}')
+            if not isinstance(phase[pf], str):
+                raise WorkflowValidationError(f'phases[{i}].{pf} 必须是 str')
+        if 'func' not in phase:
+            raise WorkflowValidationError(f'phases[{i}] 缺少必须字段：func')
+        if not callable(phase['func']):
+            raise WorkflowValidationError(f'phases[{i}].func 必须是 callable')
+
+        # 阶段名唯一性
+        if phase['name'] in phase_names:
+            raise WorkflowValidationError(f'重复的阶段名：{phase["name"]}')
+        phase_names.add(phase['name'])
+
+        # reject_trigger 必须配套 retry_target
+        if phase.get('reject_trigger') and not phase.get('retry_target'):
+            warnings.append(f'阶段 {phase["name"]} 有 reject_trigger 但无 retry_target')
+
+        # retry_target 目标阶段必须存在
+        if phase.get('retry_target'):
+            target = phase['retry_target']
+            if target not in all_phase_names:
+                raise WorkflowValidationError(
+                    f'阶段 {phase["name"]} 的 retry_target "{target}" 不在 phases 中'
+                )
+
+    # ── 转换表完整性 ──
+    if 'transitions' in wf:
+        if wf['initial_state'] not in wf['transitions']:
+            warnings.append(f'initial_state "{wf["initial_state"]}" 不在 transitions 中')
+    else:
+        first_pending = wf['phases'][0]['pending_state']
+        if wf['initial_state'] != first_pending:
+            warnings.append(
+                f'initial_state "{wf["initial_state"]}" != phases[0].pending_state "{first_pending}"'
+            )
+
+    # ── 可选字段类型检查 ──
+    if 'max_rejections' in wf and not isinstance(wf['max_rejections'], int):
+        warnings.append('max_rejections 应为 int')
+    if 'hooks' in wf:
+        if not isinstance(wf['hooks'], dict):
+            warnings.append('hooks 应为 dict')
+        else:
+            valid_hook_names = {'before_phase', 'after_phase', 'on_phase_error'}
+            for key, val in wf['hooks'].items():
+                if key not in valid_hook_names:
+                    warnings.append(f'hooks 包含未知钩子：{key}（允许：{valid_hook_names}）')
+                if not callable(val):
+                    warnings.append(f'hooks["{key}"] 必须是 callable')
+    if 'retry_policy' in wf and not isinstance(wf['retry_policy'], dict):
+        warnings.append('retry_policy 应为 dict')
+
+    return warnings
+
+
 def discover() -> None:
     """扫描 workflows/ 目录，导入所有含 WORKFLOW 的模块并注册"""
-    import dev_workflow.workflows as pkg
+    import core.workflows as pkg
     for importer, mod_name, is_pkg in pkgutil.iter_modules(pkg.__path__):
         if is_pkg:
             continue
-        full_name = f'dev_workflow.workflows.{mod_name}'
+        full_name = f'core.workflows.{mod_name}'
         try:
             mod = importlib.import_module(full_name)
             if hasattr(mod, 'WORKFLOW'):
+                try:
+                    warns = validate_workflow(mod.WORKFLOW)
+                    for w in warns:
+                        log.warning('工作流 %s 校验警告：%s', full_name, w)
+                except WorkflowValidationError as e:
+                    log.warning('工作流 %s 校验失败，跳过注册：%s', full_name, e)
+                    continue
                 name = mod.WORKFLOW['name']
                 _registry[name] = mod
                 log.debug('注册工作流：%s（来自 %s）', name, full_name)
@@ -33,7 +130,8 @@ def discover() -> None:
 
 
 def register(module: Any) -> None:
-    """手动注册一个工作流模块"""
+    """手动注册一个工作流模块（校验失败直接 raise）"""
+    validate_workflow(module.WORKFLOW)
     name = module.WORKFLOW['name']
     _registry[name] = module
 
@@ -215,3 +313,41 @@ def get_terminal_states(workflow_name: str) -> list[str]:
     if not wf:
         return ['cancelled']
     return wf.get('terminal_states', ['cancelled'])
+
+
+# ──────────────────────────────────────────────────────────
+# 重试策略
+# ──────────────────────────────────────────────────────────
+
+DEFAULT_RETRY_POLICY: dict = {
+    'max_retries': 3,
+    'backoff': 'fixed',
+    'delay': 60,
+    'max_delay': 600,
+    'stuck_timeout': 600,
+}
+
+
+def get_retry_policy(workflow_name: str, phase_name: str | None = None) -> dict:
+    """获取重试策略：phase 级别 > workflow 级别 > DEFAULT_RETRY_POLICY"""
+    policy = dict(DEFAULT_RETRY_POLICY)
+
+    wf = get_workflow(workflow_name)
+    if not wf:
+        return policy
+
+    # workflow 级别覆盖
+    wf_policy = wf.get('retry_policy')
+    if isinstance(wf_policy, dict):
+        policy.update(wf_policy)
+
+    # phase 级别覆盖
+    if phase_name:
+        for phase in wf.get('phases', []):
+            if phase['name'] == phase_name:
+                phase_policy = phase.get('retry_policy')
+                if isinstance(phase_policy, dict):
+                    policy.update(phase_policy)
+                break
+
+    return policy

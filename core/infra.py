@@ -1,15 +1,15 @@
 """
-基础设施层：从 runner.py 提取的公共工具函数
-包含 git 操作、Claude CLI 调用、通知、锁机制、需求拉取等
+基础设施层：通用工具函数
+包含 git 操作、Claude CLI 调用、锁机制、通知分发
 """
 from __future__ import annotations
 
-import json, subprocess, sys, os, tempfile
+import subprocess, sys, os, tempfile
 from pathlib import Path
 from typing import IO
 
-from dev_workflow.db import WORKSPACE, CONFIG
-from dev_workflow.logger import get_logger
+from core.db import WORKSPACE, CONFIG
+from core.logger import get_logger
 
 log = get_logger()
 
@@ -17,43 +17,8 @@ log = get_logger()
 # 路径常量
 # ──────────────────────────────────────────────────────────
 
-PROMPTS_DIR = Path(__file__).parent.parent.parent / 'prompts'
 DEVTASKS_DIR = WORKSPACE / 'runtime/dev-tasks'
 PROJECTS_DIR = WORKSPACE / 'runtime/projects'
-
-# ──────────────────────────────────────────────────────────
-# ReqGenie 配置（config.yaml > 环境变量 > 默认值）
-# ──────────────────────────────────────────────────────────
-
-_rq_cfg = CONFIG.get('reqgenie', {})
-REQGENIE_BASE_URL = os.environ.get('REQGENIE_BASE_URL') or _rq_cfg.get('base_url', 'https://reqgenie.reverse-game.ltd')
-REQGENIE_MCP_URL = f'{REQGENIE_BASE_URL}/mcp'
-REQGENIE_REQ_URL = f'{REQGENIE_BASE_URL}/requirements'
-OP_VAULT = os.environ.get('OP_VAULT') or _rq_cfg.get('op_vault', 'openclaw')
-OP_REQGENIE_ITEM = os.environ.get('OP_REQGENIE_ITEM') or _rq_cfg.get('op_item', 'reqgenie 需求系统')
-
-# ──────────────────────────────────────────────────────────
-# 通知配置
-# ──────────────────────────────────────────────────────────
-
-_notify_cfg = CONFIG.get('notify', {})
-DEFAULT_NOTIFY_CHANNEL = _notify_cfg.get('channel', 'telegram')
-DEFAULT_NOTIFY_TARGET = _notify_cfg.get('target', '')
-
-# ──────────────────────────────────────────────────────────
-# 超时配置（config.yaml > 默认值）
-# ──────────────────────────────────────────────────────────
-
-_timeout_cfg = CONFIG.get('timeouts', {})
-TIMEOUT_DESIGN = _timeout_cfg.get('design', 900)
-TIMEOUT_REVIEW = _timeout_cfg.get('review', 900)
-TIMEOUT_DEV = _timeout_cfg.get('development', 1800)
-TIMEOUT_CODE_REVIEW = _timeout_cfg.get('code_review', 1200)
-TIMEOUT_PR_DESC = _timeout_cfg.get('pr_description', 300)
-
-# 评审结果常量
-REVIEW_RESULT_PASS = 'REVIEW_RESULT: PASS'
-REVIEW_RESULT_REJECT = 'REVIEW_RESULT: REJECT'
 
 # ──────────────────────────────────────────────────────────
 # Git 操作
@@ -138,22 +103,21 @@ def release_lock(task_id: str) -> None:
             pass
 
 # ──────────────────────────────────────────────────────────
-# 通知
+# 通知分发（通用：从工作流注册表获取 notify_func）
 # ──────────────────────────────────────────────────────────
 
 def notify(task: dict, message: str, media_path: str | None = None) -> None:
-    target = task.get('notify_target', '')
-    channel = task.get('channel', 'telegram')
+    """通用通知：从工作流注册表获取 notify_func，没有则仅打日志"""
+    workflow_name = task.get('workflow', '')
     try:
-        subprocess.run(['openclaw', 'message', 'send',
-            '--channel', channel, '--target', target, '--message', message], check=False)
-        if media_path and Path(media_path).exists():
-            subprocess.run(['openclaw', 'message', 'send',
-                '--channel', channel, '--target', target,
-                '--media', media_path,
-                '--message', Path(media_path).name], check=False)
-    except FileNotFoundError:
-        log.warning('openclaw 未安装，通知跳过：%s', message[:80])
+        from core import registry
+        wf = registry.get_workflow(workflow_name)
+        if wf and 'notify_func' in wf:
+            wf['notify_func'](task, message, media_path)
+            return
+    except Exception as e:
+        log.debug('通知分发失败：%s', e)
+    log.info('通知: %s', message[:120])
 
 # ──────────────────────────────────────────────────────────
 # Agent 执行
@@ -178,35 +142,3 @@ def get_task_dir(task_id: str) -> Path:
     d = DEVTASKS_DIR / task_id
     d.mkdir(parents=True, exist_ok=True)
     return d
-
-# ──────────────────────────────────────────────────────────
-# 工具：实时拉取需求
-# ──────────────────────────────────────────────────────────
-
-def fetch_req(req_id: str) -> dict | None:
-    try:
-        key_r = subprocess.run(
-            ['op', 'item', 'get', OP_REQGENIE_ITEM, '--vault', OP_VAULT, '--fields', 'label=api_key'],
-            capture_output=True, text=True)
-    except FileNotFoundError:
-        log.warning('op CLI 未安装，跳过 ReqGenie')
-        return None
-    if key_r.returncode != 0:
-        return None
-    key = key_r.stdout.strip()
-    cfg = {'mcpServers': {'reqgenie': {
-        'baseUrl': REQGENIE_MCP_URL,
-        'headers': {'Authorization': f'Bearer {key}'}
-    }}}
-    with tempfile.TemporaryDirectory() as tmpdir:
-        cfg_path = os.path.join(tmpdir, 'config.json')
-        out_path = os.path.join(tmpdir, 'result.json')
-        with open(cfg_path, 'w') as f:
-            json.dump(cfg, f)
-        r = subprocess.run(
-            f'mcporter --config {cfg_path} call reqgenie.get_requirement id={req_id} --output json > {out_path}',
-            shell=True, timeout=60)
-        if r.returncode == 0 and Path(out_path).exists():
-            data = json.loads(Path(out_path).read_text(encoding='utf-8'))
-            return data.get('data', data) if 'id' not in data else data
-    return None

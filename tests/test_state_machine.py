@@ -2,11 +2,12 @@
 状态机单元测试：合法/非法转换、驳回计数
 """
 import pytest
-from dev_workflow.db import create_task, get_task
-from dev_workflow.state_machine import (
+from core.db import create_task, get_task
+from core.state_machine import (
     transition, InvalidTransitionError, can_transition,
-    get_available_triggers, VALID_TRANSITIONS, TERMINAL_STATES,
+    get_available_triggers,
 )
+from core.registry import build_transitions, get_all_states, get_terminal_states
 
 
 def _create_test_task(task_id='TEST01', workflow='dev'):
@@ -174,14 +175,20 @@ class TestHelperFunctions:
         assert 'cancel' in triggers
 
     def test_all_states_have_transitions_or_are_terminal(self):
-        """验证 VALID_TRANSITIONS 的完整性"""
-        from dev_workflow.state_machine import STATES
-        for state in STATES:
-            if state in TERMINAL_STATES:
-                assert state not in VALID_TRANSITIONS or VALID_TRANSITIONS[state] == []
+        """验证 dev 工作流转换表的完整性（通过 registry）"""
+        terminals = set(get_terminal_states('dev'))
+        transitions = build_transitions('dev')
+        # 收集转换表中涉及的所有状态（源 + 目标）
+        all_states = set(transitions.keys())
+        for pairs in transitions.values():
+            for _, dest in pairs:
+                all_states.add(dest)
+        for state in all_states:
+            if state in terminals:
+                assert state not in transitions or transitions[state] == []
             else:
-                assert state in VALID_TRANSITIONS
-                assert len(VALID_TRANSITIONS[state]) > 0
+                assert state in transitions
+                assert len(transitions[state]) > 0
 
 
 class TestDynamicTransitions:

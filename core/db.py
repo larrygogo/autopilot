@@ -7,6 +7,10 @@ import sqlite3, os
 from pathlib import Path
 from datetime import datetime, timezone
 
+from core.logger import get_logger
+
+log = get_logger()
+
 
 def _load_config():
     """加载配置文件，按优先级查找"""
@@ -19,7 +23,7 @@ def _load_config():
         Path(env_cfg) if env_cfg else None,
         Path.cwd() / 'config.yaml',
         Path.home() / '.openclaw/dev-workflow/config.yaml',
-        Path(__file__).parent.parent.parent / 'config.yaml',
+        Path(__file__).parent.parent / 'config.yaml',
     ]
     for p in search_paths:
         if p and p.is_file():
@@ -122,15 +126,15 @@ def get_task(task_id: str) -> dict | None:
 def get_active_tasks() -> list[dict]:
     """获取所有活跃任务（未到终态）"""
     # 收集所有工作流的终态
-    terminal = {'pr_submitted', 'cancelled'}
+    terminal = {'cancelled'}
     try:
-        from dev_workflow import registry
+        from core import registry
         for wf_info in registry.list_workflows():
             wf = registry.get_workflow(wf_info['name'])
             if wf:
                 terminal.update(wf.get('terminal_states', []))
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug('获取工作流终态失败：%s', e)
     terminal = tuple(terminal)
     placeholders = ','.join('?' * len(terminal))
     with get_conn() as conn:
@@ -151,12 +155,11 @@ def create_task(task_id: str, req_id: str, title: str, project: str, repo_path: 
     import json
     # 确定初始状态
     if initial_status is None:
-        try:
-            from dev_workflow import registry
-            wf = registry.get_workflow(workflow)
-            initial_status = wf['initial_state'] if wf else 'pending_design'
-        except Exception:
-            initial_status = 'pending_design'
+        from core import registry
+        wf = registry.get_workflow(workflow)
+        if not wf:
+            raise ValueError(f'未知工作流：{workflow}，请先注册')
+        initial_status = wf['initial_state']
 
     with get_conn() as conn:
         conn.execute('''
@@ -177,13 +180,89 @@ def get_task_logs(task_id: str, limit: int = 20) -> list[dict]:
         ''', (task_id, limit)).fetchall()
         return [dict(r) for r in rows]
 
-def get_default_branch(project: str | None = None) -> str:
-    """获取主分支名称（项目级 > 全局 > 默认 main）"""
+def list_tasks(status: str | None = None, workflow: str | None = None,
+               project: str | None = None, limit: int = 50) -> list[dict]:
+    """带过滤条件的任务列表（参数化查询）"""
+    query = 'SELECT * FROM tasks WHERE 1=1'
+    params: list = []
+    if status:
+        query += ' AND status = ?'
+        params.append(status)
+    if workflow:
+        query += ' AND workflow = ?'
+        params.append(workflow)
     if project:
-        project_cfg = CONFIG.get('projects', {}).get(project, {})
-        branch = project_cfg.get('default_branch')
-        if branch:
-            return branch
+        query += ' AND project = ?'
+        params.append(project)
+    query += ' ORDER BY updated_at DESC LIMIT ?'
+    params.append(limit)
+    with get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_task_stats() -> dict:
+    """聚合统计：总数、按状态/工作流分组、成功率、平均耗时
+
+    SQL 做 GROUP BY 基础聚合，Python 层根据 registry 的终态归类计算成功率。
+    平均耗时仅统计已到达终态的任务。
+    """
+    with get_conn() as conn:
+        # 总数
+        total = conn.execute('SELECT COUNT(*) FROM tasks').fetchone()[0]
+
+        # 按状态分组
+        by_status: dict[str, int] = {}
+        for row in conn.execute('SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status'):
+            by_status[row['status']] = row['cnt']
+
+        # 按工作流分组
+        by_workflow: dict[str, int] = {}
+        for row in conn.execute('SELECT workflow, COUNT(*) as cnt FROM tasks GROUP BY workflow'):
+            by_workflow[row['workflow']] = row['cnt']
+
+    # 成功率：收集各工作流的成功终态（非 cancelled）
+    success_states: set[str] = set()
+    try:
+        from core import registry
+        for wf_info in registry.list_workflows():
+            wf = registry.get_workflow(wf_info['name'])
+            if wf:
+                for s in wf.get('terminal_states', []):
+                    if s != 'cancelled':
+                        success_states.add(s)
+    except Exception as e:
+        log.debug('获取工作流终态失败：%s', e)
+
+    success_count = sum(cnt for st, cnt in by_status.items() if st in success_states)
+    terminal_count = success_count + by_status.get('cancelled', 0)
+    success_rate = (success_count / terminal_count * 100) if terminal_count > 0 else 0.0
+
+    # 平均耗时（仅终态任务）
+    all_terminal = success_states | {'cancelled'}
+    if all_terminal:
+        placeholders = ','.join('?' * len(all_terminal))
+        with get_conn() as conn:
+            row = conn.execute(
+                f'SELECT AVG((julianday(updated_at) - julianday(created_at)) * 86400) as avg_dur '
+                f'FROM tasks WHERE status IN ({placeholders})',
+                tuple(all_terminal)
+            ).fetchone()
+            avg_duration = row['avg_dur'] if row['avg_dur'] is not None else 0.0
+    else:
+        avg_duration = 0.0
+
+    return {
+        'total': total,
+        'by_status': by_status,
+        'by_workflow': by_workflow,
+        'success_rate': round(success_rate, 2),
+        'avg_duration_seconds': round(avg_duration, 2),
+    }
+
+
+def get_default_branch(project: str | None = None) -> str:
+    """获取主分支名称"""
     return CONFIG.get('default_branch', 'main')
 
 

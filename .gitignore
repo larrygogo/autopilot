@@ -4,3 +4,5 @@ __pycache__/
 *.db
 *.log
 .env
+claude-progress.md
+feature-list.json

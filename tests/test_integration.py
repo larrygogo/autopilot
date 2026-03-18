@@ -4,11 +4,12 @@
 - 验证任务创建 → 状态流转 → 驳回重试 → 取消 → 日志完整性
 """
 import pytest
-from dev_workflow.db import create_task, get_task, get_active_tasks, get_task_logs, get_default_branch
-from dev_workflow.state_machine import (
+from core.db import create_task, get_task, get_active_tasks, get_task_logs, get_default_branch
+from core.state_machine import (
     transition, InvalidTransitionError, can_transition,
-    get_available_triggers, VALID_TRANSITIONS, STATES, TERMINAL_STATES,
+    get_available_triggers,
 )
+from core.registry import get_terminal_states
 
 
 def _register_task(task_id='INT-001', title='集成测试任务', workflow='dev'):
@@ -93,7 +94,7 @@ class TestHappyPath:
 
         # 验证终态
         task = get_task(tid)
-        assert task['status'] in TERMINAL_STATES
+        assert task['status'] in get_terminal_states('dev')
 
         # 验证不再出现在活跃列表中
         active = get_active_tasks()
@@ -223,7 +224,7 @@ class TestFailureTracking:
         transition(tid, 'start_design')
 
         # 模拟 watcher 检测到卡死，增加失败计数
-        from dev_workflow.db import get_conn, now
+        from core.db import get_conn, now
         with get_conn() as conn:
             conn.execute('UPDATE tasks SET failure_count = failure_count + 1, updated_at = ? WHERE id = ?',
                          (now(), tid))

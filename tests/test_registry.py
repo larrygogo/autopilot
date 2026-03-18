@@ -2,7 +2,7 @@
 工作流注册表单元测试
 """
 import pytest
-from dev_workflow.registry import (
+from core.registry import (
     get_workflow, get_workflow_module, list_workflows,
     get_phase, get_phase_func, get_next_phase,
     build_transitions, get_running_state_phase, get_pending_state_phase,
@@ -61,12 +61,11 @@ class TestPhaseQuery:
 class TestBuildTransitions:
     """转换表构建"""
 
-    def test_dev_transitions_backward_compatible(self):
-        """dev 工作流的转换表与原始 VALID_TRANSITIONS 一致"""
-        from dev_workflow.state_machine import VALID_TRANSITIONS
+    def test_dev_transitions_match_workflow_definition(self):
+        """dev 工作流的转换表与 WORKFLOW['transitions'] 一致"""
+        wf = get_workflow('dev')
         transitions = build_transitions('dev')
-        # dev 工作流使用硬编码转换表，应完全匹配
-        assert transitions == VALID_TRANSITIONS
+        assert transitions == wf['transitions']
 
     def test_req_review_transitions(self):
         transitions = build_transitions('req_review')

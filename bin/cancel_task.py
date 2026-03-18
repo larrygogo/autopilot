@@ -6,25 +6,33 @@
 import sys, argparse
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dev_workflow.db import get_task
-from dev_workflow.state_machine import transition, InvalidTransitionError
-from dev_workflow.infra import notify
+from core.db import get_task
+from core.state_machine import transition, InvalidTransitionError
+from core.infra import notify
 
 
 def main():
-    parser = argparse.ArgumentParser(description='取消开发任务')
+    parser = argparse.ArgumentParser(description='取消任务')
     parser.add_argument('task_id', help='任务 ID')
     parser.add_argument('--reason', default='用户手动取消', help='取消原因')
     args = parser.parse_args()
+
+    # 确保工作流已注册
+    import core.workflows  # noqa: F401
 
     task = get_task(args.task_id)
     if not task:
         print(f'任务不存在：{args.task_id}')
         sys.exit(1)
 
-    if task['status'] in ('pr_submitted', 'cancelled'):
+    # 从 registry 动态获取终态
+    from core.registry import get_terminal_states
+    terminal_states = set(get_terminal_states(task.get('workflow', '')))
+    terminal_states.add('cancelled')  # cancelled 始终是终态
+
+    if task['status'] in terminal_states:
         print(f'任务已处于终态：{task["status"]}')
         sys.exit(0)
 
