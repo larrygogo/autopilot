@@ -11,16 +11,15 @@ def _create_sample_task(
     """创建样本任务"""
     create_task(
         task_id=task_id,
-        req_id=f"REQ-{task_id}",
         title=f"Task {task_id}",
+        workflow=workflow,
+        channel="log",
+        notify_target="",
+        initial_status=status,
+        req_id=f"REQ-{task_id}",
         project=project,
         repo_path="/tmp/repo",
         branch=f"feat/{task_id}",
-        agents={},
-        notify_target="",
-        channel="log",
-        workflow=workflow,
-        initial_status=status,
     )
 
 
@@ -50,12 +49,6 @@ class TestListTasks:
         assert len(result) == 1
         assert result[0]["workflow"] == "req_review"
 
-    def test_filter_by_project(self):
-        _create_sample_task("t1", project="alpha")
-        _create_sample_task("t2", project="beta")
-        result = list_tasks(project="alpha")
-        assert len(result) == 1
-
     def test_limit(self):
         for i in range(5):
             _create_sample_task(f"t{i}")
@@ -66,9 +59,8 @@ class TestListTasks:
         _create_sample_task("t1", workflow="dev", project="alpha")
         _create_sample_task("t2", workflow="dev", project="beta")
         _create_sample_task("t3", workflow="req_review", project="alpha", status="pending_analysis")
-        result = list_tasks(workflow="dev", project="alpha")
-        assert len(result) == 1
-        assert result[0]["id"] == "t1"
+        result = list_tasks(workflow="dev")
+        assert len(result) == 2
 
 
 class TestGetTaskStats:

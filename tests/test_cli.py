@@ -22,15 +22,14 @@ def _create_test_task(task_id="CLI-001", workflow="dev"):
     """在测试数据库中创建任务"""
     create_task(
         task_id=task_id,
-        req_id="REQ-CLI-001",
         title="CLI 测试任务",
+        workflow=workflow,
+        channel="log",
+        notify_target="",
+        req_id="REQ-CLI-001",
         project="test-project",
         repo_path="/tmp/test-repo",
         branch="feat/test",
-        agents={},
-        notify_target="",
-        channel="log",
-        workflow=workflow,
     )
 
 

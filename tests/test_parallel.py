@@ -240,15 +240,14 @@ class TestSubTaskCRUD:
     def _create_parent(self, task_id="PAR-001"):
         create_task(
             task_id=task_id,
-            req_id="REQ-PAR",
             title="并行测试",
+            workflow="dev",
+            channel="log",
+            notify_target="",
+            req_id="REQ-PAR",
             project="test",
             repo_path="/tmp/test",
             branch="feat/test",
-            agents={},
-            notify_target="",
-            channel="log",
-            workflow="dev",
         )
         return task_id
 
@@ -330,6 +329,7 @@ class TestSubTaskCRUD:
         sub = get_task(f"{parent_id}__fe")
         parent = get_task(parent_id)
 
+        # extra fields inherited
         assert sub["project"] == parent["project"]
         assert sub["repo_path"] == parent["repo_path"]
         assert sub["branch"] == parent["branch"]
@@ -345,15 +345,14 @@ class TestActiveTasksFiltering:
         parent_id = "ACTIVE-001"
         create_task(
             task_id=parent_id,
-            req_id="REQ-ACT",
             title="活跃任务测试",
+            workflow="dev",
+            channel="log",
+            notify_target="",
+            req_id="REQ-ACT",
             project="test",
             repo_path="/tmp/test",
             branch="feat/test",
-            agents={},
-            notify_target="",
-            channel="log",
-            workflow="dev",
         )
         create_sub_task(parent_id, f"{parent_id}__sub", "step", "grp", 0)
 

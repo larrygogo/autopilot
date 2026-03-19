@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -22,25 +23,16 @@ DB_PATH = AUTOPILOT_HOME / "runtime/workflow.db"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
-    req_id TEXT NOT NULL,
     title TEXT NOT NULL,
-    project TEXT,
-    repo_path TEXT,
-    branch TEXT,
     workflow TEXT NOT NULL,
     status TEXT NOT NULL,
-    rejection_count INTEGER DEFAULT 0,
-    code_rejection_count INTEGER DEFAULT 0,
-    rejection_counts TEXT DEFAULT '{}',  -- JSON: {"design": 0, "code": 0, ...}
     failure_count INTEGER DEFAULT 0,
-    rejection_reason TEXT,
-    pr_url TEXT,
-    agents TEXT,              -- JSON: workflow-defined agent roles
     channel TEXT DEFAULT 'log',
     notify_target TEXT,
+    extra TEXT DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    started_at TEXT,          -- 当前阶段开始时间，用于卡死检测
+    started_at TEXT,
     parent_task_id TEXT DEFAULT NULL,
     parallel_index INTEGER DEFAULT NULL,
     parallel_group TEXT DEFAULT NULL
@@ -61,6 +53,26 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_task_id);
 """
+
+# 列名常量：用于区分列字段 vs extra 字段
+_TABLE_COLUMNS = frozenset(
+    {
+        "id",
+        "title",
+        "workflow",
+        "status",
+        "failure_count",
+        "channel",
+        "notify_target",
+        "extra",
+        "created_at",
+        "updated_at",
+        "started_at",
+        "parent_task_id",
+        "parallel_index",
+        "parallel_group",
+    }
+)
 
 _local = threading.local()
 
@@ -111,11 +123,32 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _split_fields(fields: dict) -> tuple[dict, dict]:
+    """将字段拆分为列字段和 extra 字段"""
+    col_fields = {}
+    extra_fields = {}
+    for k, v in fields.items():
+        if k in _TABLE_COLUMNS:
+            col_fields[k] = v
+        else:
+            extra_fields[k] = v
+    return col_fields, extra_fields
+
+
 def get_task(task_id: str) -> dict | None:
-    """获取任务"""
+    """获取任务，自动将 extra JSON 合并到返回 dict"""
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        result = dict(row)
+        extra_raw = result.pop("extra", "{}")
+        try:
+            extra = json.loads(extra_raw) if extra_raw else {}
+        except (json.JSONDecodeError, TypeError):
+            extra = {}
+        result.update(extra)
+        return result
 
 
 def get_active_tasks(include_sub_tasks: bool = True) -> list[dict]:
@@ -143,30 +176,44 @@ def get_active_tasks(include_sub_tasks: bool = True) -> list[dict]:
         query += " AND parent_task_id IS NULL"
     with get_conn() as conn:
         rows = conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+        return [_row_to_dict(r) for r in rows]
+
+
+def _row_to_dict(row) -> dict:
+    """将数据库行转为 dict，自动展开 extra JSON"""
+    result = dict(row)
+    extra_raw = result.pop("extra", "{}")
+    try:
+        extra = json.loads(extra_raw) if extra_raw else {}
+    except (json.JSONDecodeError, TypeError):
+        extra = {}
+    result.update(extra)
+    return result
 
 
 def create_task(
     task_id: str,
-    req_id: str,
     title: str,
-    project: str,
-    repo_path: str,
-    branch: str,
-    agents: dict,
-    notify_target: str,
     workflow: str,
+    *,
     channel: str = "log",
+    notify_target: str = "",
     initial_status: str | None = None,
+    **extra,
 ) -> None:
     """创建新任务
 
-    Args:
-        workflow: 工作流名称，默认 'dev'
-        initial_status: 初始状态，默认从工作流定义的 initial_state 获取
-    """
-    import json
+    核心字段通过显式参数传入，其余字段自动存入 extra JSON。
 
+    Args:
+        task_id: 任务 ID
+        title: 任务标题
+        workflow: 工作流名称
+        channel: 通知渠道，默认 'log'
+        notify_target: 通知目标
+        initial_status: 初始状态，默认从工作流定义的 initial_state 获取
+        **extra: 工作流自定义字段（如 req_id, project, repo_path 等），存入 extra JSON
+    """
     # 确定初始状态
     if initial_status is None:
         from core import registry
@@ -176,31 +223,60 @@ def create_task(
             raise ValueError(f"未知工作流：{workflow}，请先注册")
         initial_status = wf["initial_state"]
 
+    extra_json = json.dumps(extra, ensure_ascii=False) if extra else "{}"
+
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO tasks
-            (id, req_id, title, project, repo_path, branch, workflow,
-             agents, notify_target, channel, status, created_at, updated_at, started_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, title, workflow, channel, notify_target, extra,
+             status, created_at, updated_at, started_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 task_id,
-                req_id,
                 title,
-                project,
-                repo_path,
-                branch,
                 workflow,
-                json.dumps(agents),
-                notify_target,
                 channel,
+                notify_target,
+                extra_json,
                 initial_status,
                 now(),
                 now(),
                 now(),
             ),
         )
+
+
+def update_task(task_id: str, **fields) -> None:
+    """透明更新任务字段 — 列字段直接 SET，其余合并入 extra JSON
+
+    Args:
+        task_id: 任务 ID
+        **fields: 要更新的字段
+    """
+    if not fields:
+        return
+
+    col_fields, extra_fields = _split_fields(fields)
+
+    with get_conn() as conn:
+        if extra_fields:
+            # 读取当前 extra 并合并
+            row = conn.execute("SELECT extra FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if row:
+                try:
+                    current_extra = json.loads(row["extra"]) if row["extra"] else {}
+                except (json.JSONDecodeError, TypeError):
+                    current_extra = {}
+                current_extra.update(extra_fields)
+                col_fields["extra"] = json.dumps(current_extra, ensure_ascii=False)
+
+        if col_fields:
+            col_fields["updated_at"] = now()
+            set_clause = ", ".join(f"{k} = ?" for k in col_fields)
+            values = list(col_fields.values()) + [task_id]
+            conn.execute(f"UPDATE tasks SET {set_clause} WHERE id = ?", values)
 
 
 def get_task_logs(task_id: str, limit: int = 20) -> list[dict]:
@@ -216,9 +292,7 @@ def get_task_logs(task_id: str, limit: int = 20) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def list_tasks(
-    status: str | None = None, workflow: str | None = None, project: str | None = None, limit: int = 50
-) -> list[dict]:
+def list_tasks(status: str | None = None, workflow: str | None = None, limit: int = 50) -> list[dict]:
     """带过滤条件的任务列表（参数化查询）"""
     query = "SELECT * FROM tasks WHERE 1=1"
     params: list = []
@@ -228,14 +302,11 @@ def list_tasks(
     if workflow:
         query += " AND workflow = ?"
         params.append(workflow)
-    if project:
-        query += " AND project = ?"
-        params.append(project)
     query += " ORDER BY updated_at DESC LIMIT ?"
     params.append(limit)
     with get_conn() as conn:
         rows = conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+        return [_row_to_dict(r) for r in rows]
 
 
 def get_task_stats() -> dict:
@@ -312,31 +383,31 @@ def create_sub_task(
     parallel_index: int,
     initial_status: str = "pending",
 ) -> None:
-    """创建子任务（继承父任务的基本信息）"""
+    """创建子任务（继承父任务的基本信息和 extra 字段）"""
     parent = get_task(parent_task_id)
     if not parent:
         raise ValueError(f"父任务不存在：{parent_task_id}")
+
+    # 从父任务中提取 extra 字段（排除列字段）
+    parent_extra = {k: v for k, v in parent.items() if k not in _TABLE_COLUMNS}
+    extra_json = json.dumps(parent_extra, ensure_ascii=False) if parent_extra else "{}"
 
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO tasks
-            (id, req_id, title, project, repo_path, branch, workflow,
-             agents, notify_target, channel, status, created_at, updated_at, started_at,
+            (id, title, workflow, channel, notify_target, extra,
+             status, created_at, updated_at, started_at,
              parent_task_id, parallel_index, parallel_group)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 sub_task_id,
-                parent["req_id"],
                 f"{parent['title']} [{phase_name}]",
-                parent["project"],
-                parent["repo_path"],
-                parent["branch"],
                 parent["workflow"],
-                parent["agents"],
-                parent["notify_target"],
-                parent["channel"],
+                parent.get("channel", "log"),
+                parent.get("notify_target", ""),
+                extra_json,
                 initial_status,
                 now(),
                 now(),
@@ -355,7 +426,7 @@ def get_sub_tasks(parent_task_id: str) -> list[dict]:
             "SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY parallel_index",
             (parent_task_id,),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_row_to_dict(r) for r in rows]
 
 
 def all_sub_tasks_done(parent_task_id: str) -> bool:

@@ -30,11 +30,9 @@ def _ensure_workflows():
 
 @main.command()
 @click.argument("req_id")
-@click.option("--project", default=None, help="项目名（对应 config.yaml 中的 projects 配置）")
-@click.option("--repo", default=None, help="本地仓库路径（覆盖 config.yaml）")
 @click.option("--title", default=None, help="需求标题（可选）")
 @click.option("--workflow", default=None, help="工作流名称")
-def start(req_id, project, repo, title, workflow):
+def start(req_id, title, workflow):
     """注册并启动任务"""
     from core.db import create_task, get_task, init_db
 
@@ -74,22 +72,27 @@ def start(req_id, project, repo, title, workflow):
         # 构建类似 argparse 的命名空间
         from types import SimpleNamespace
 
-        args = SimpleNamespace(req_id=req_id, project=project, repo=repo, title=title, workflow=workflow)
+        args = SimpleNamespace(req_id=req_id, title=title, workflow=workflow)
         params = setup_func(args)
     else:
         params = {
-            "req_id": req_id,
             "title": title or f"Task {req_id[:8]}",
-            "project": project or "",
-            "repo_path": repo or "",
-            "branch": "",
-            "agents": {},
-            "notify_target": "",
-            "channel": "log",
         }
 
-    create_task(task_id=task_id, workflow=workflow, **params)
-    click.echo(f"✓ 任务已注册：{task_id} — {params.get('title', task_id)}")
+    # 从 params 中提取核心字段，其余作为 extra
+    task_title = params.pop("title", title or f"Task {req_id[:8]}")
+    task_channel = params.pop("channel", "log")
+    task_notify_target = params.pop("notify_target", "")
+
+    create_task(
+        task_id=task_id,
+        title=task_title,
+        workflow=workflow,
+        channel=task_channel,
+        notify_target=task_notify_target,
+        **params,
+    )
+    click.echo(f"✓ 任务已注册：{task_id} — {task_title}")
     click.echo(f"  工作流：{workflow}")
 
     first = wf["phases"][0]
@@ -169,17 +172,16 @@ def cancel(task_id, reason):
 @main.command("list")
 @click.option("--status", default=None, help="按状态过滤")
 @click.option("--workflow", default=None, help="按工作流过滤")
-@click.option("--project", default=None, help="按项目过滤")
 @click.option("--limit", default=50, type=int, help="最大返回条数（默认 50）")
 @click.option("--all", "show_all", is_flag=True, help="显示子任务")
-def list_cmd(status, workflow, project, limit, show_all):
+def list_cmd(status, workflow, limit, show_all):
     """查询任务列表"""
     from core.db import init_db, list_tasks
 
     init_db()
     _ensure_workflows()
 
-    tasks = list_tasks(status=status, workflow=workflow, project=project, limit=limit)
+    tasks = list_tasks(status=status, workflow=workflow, limit=limit)
 
     # 默认隐藏子任务
     if not show_all:
@@ -221,22 +223,26 @@ def show(task_id, log_count):
         click.echo(f"任务不存在：{task_id}")
         sys.exit(1)
 
+    from core.db import _TABLE_COLUMNS
+
     click.echo(f"任务 ID:    {task['id']}")
     click.echo(f"标题:       {task['title']}")
     click.echo(f"工作流:     {task['workflow']}")
-    click.echo(f"项目:       {task['project']}")
     click.echo(f"状态:       {task['status']}")
-    click.echo(f"分支:       {task['branch']}")
-    if task.get("pr_url"):
-        click.echo(f"PR:         {task['pr_url']}")
     click.echo(f"创建时间:   {task['created_at']}")
     click.echo(f"更新时间:   {task['updated_at']}")
 
     failure_count = task.get("failure_count", 0)
-    rejection_count = task.get("rejection_count", 0)
-    if failure_count or rejection_count:
+    if failure_count:
         click.echo(f"\n失败次数:   {failure_count}")
-        click.echo(f"驳回次数:   {rejection_count}")
+
+    # 显示 extra 字段（非核心列字段）
+    _skip = _TABLE_COLUMNS | {"id", "title", "workflow", "status", "created_at", "updated_at", "failure_count"}
+    extra_items = {k: v for k, v in task.items() if k not in _skip and v is not None and v != ""}
+    if extra_items:
+        click.echo("\n自定义字段:")
+        for k, v in extra_items.items():
+            click.echo(f"  {k}: {v}")
 
     # 父子任务关系
     parent_id = task.get("parent_task_id")

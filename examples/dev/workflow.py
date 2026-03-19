@@ -1,66 +1,33 @@
 """
 完整开发工作流：方案设计 → 方案评审 → 开发 → 代码审查 → PR 提交
-自包含：业务常量、辅助函数、阶段函数均在本模块内
+展示框架标准模式：读任务 → 执行 → 保存产出物 → transition → push 下一阶段
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
-import tempfile
 from pathlib import Path
 
-from core import AUTOPILOT_HOME
-from core.db import CONFIG, get_conn, get_task, now
+from core.db import CONFIG, get_task, now, update_task
 from core.infra import get_task_dir
 from core.logger import get_logger
 from core.state_machine import transition
 
 log = get_logger()
 
-# ──────────────────────────────────────────────────────────
-# 自管理配置（从全局 CONFIG 读取，有默认值）
-# ──────────────────────────────────────────────────────────
-
-_rq_cfg = CONFIG.get("reqgenie", {})
-REQGENIE_BASE_URL = os.environ.get("REQGENIE_BASE_URL") or _rq_cfg.get("base_url", "https://reqgenie.reverse-game.ltd")
-REQGENIE_MCP_URL = f"{REQGENIE_BASE_URL}/mcp"
-REQGENIE_REQ_URL = f"{REQGENIE_BASE_URL}/requirements"
-OP_VAULT = os.environ.get("OP_VAULT") or _rq_cfg.get("op_vault", "openclaw")
-OP_REQGENIE_ITEM = os.environ.get("OP_REQGENIE_ITEM") or _rq_cfg.get("op_item", "reqgenie 需求系统")
-
-_notify_cfg = CONFIG.get("notify", {})
-DEFAULT_NOTIFY_CHANNEL = _notify_cfg.get("channel", "telegram")
-DEFAULT_NOTIFY_TARGET = _notify_cfg.get("target", "")
-
-_timeout_cfg = CONFIG.get("timeouts", {})
-TIMEOUT_DESIGN = _timeout_cfg.get("design", 900)
-TIMEOUT_REVIEW = _timeout_cfg.get("review", 900)
-TIMEOUT_DEV = _timeout_cfg.get("development", 1800)
-TIMEOUT_CODE_REVIEW = _timeout_cfg.get("code_review", 1200)
-TIMEOUT_PR_DESC = _timeout_cfg.get("pr_description", 300)
-
 REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS"
 REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT"
 
-PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
 # ──────────────────────────────────────────────────────────
-# 自包含辅助函数
+# 辅助函数
 # ──────────────────────────────────────────────────────────
-
-PROJECTS_DIR = AUTOPILOT_HOME / "runtime/projects"
-
-
-def get_default_branch(project: str | None = None) -> str:
-    """获取主分支名称（从工作流配置读取）"""
-    return CONFIG.get("default_branch", "main")
 
 
 def _run_git(args: list[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:
-    """执行 git 命令，失败时抛出有意义的异常"""
+    """执行 git 命令"""
     cmd_str = " ".join(["git"] + args)
     log.debug("执行: %s (cwd=%s)", cmd_str, cwd)
     r = subprocess.run(["git"] + args, capture_output=True, text=True, cwd=cwd, encoding="utf-8", errors="replace")
@@ -70,7 +37,7 @@ def _run_git(args: list[str], cwd: str, check: bool = True) -> subprocess.Comple
 
 
 def run_claude(prompt: str, repo_path: str | None = None, timeout: int = 900) -> str:
-    """调用 Claude CLI 执行 AI 任务（工作流专属，非框架核心）"""
+    """调用 Claude CLI 执行 AI 任务"""
     log.info("调用 Claude CLI (timeout=%ds, cwd=%s)", timeout, repo_path or "None")
     try:
         r = subprocess.run(
@@ -89,108 +56,6 @@ def run_claude(prompt: str, repo_path: str | None = None, timeout: int = 900) ->
     return r.stdout.strip()
 
 
-def fetch_req(req_id: str) -> dict | None:
-    """从 ReqGenie 拉取需求"""
-    try:
-        key_r = subprocess.run(
-            ["op", "item", "get", OP_REQGENIE_ITEM, "--vault", OP_VAULT, "--fields", "label=api_key"],
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
-        log.warning("op CLI 未安装，跳过 ReqGenie")
-        return None
-    if key_r.returncode != 0:
-        return None
-    key = key_r.stdout.strip()
-    cfg = {"mcpServers": {"reqgenie": {"baseUrl": REQGENIE_MCP_URL, "headers": {"Authorization": f"Bearer {key}"}}}}
-    with tempfile.TemporaryDirectory() as tmpdir:
-        cfg_path = os.path.join(tmpdir, "config.json")
-        out_path = os.path.join(tmpdir, "result.json")
-        with open(cfg_path, "w") as f:
-            json.dump(cfg, f)
-        r = subprocess.run(
-            f"mcporter --config {cfg_path} call reqgenie.get_requirement id={req_id} --output json > {out_path}",
-            shell=True,
-            timeout=60,
-        )
-        if r.returncode == 0 and Path(out_path).exists():
-            data = json.loads(Path(out_path).read_text(encoding="utf-8"))
-            return data.get("data", data) if "id" not in data else data
-    return None
-
-
-def notify_dev(task: dict, message: str, media_path: str | None = None) -> None:
-    """dev 工作流通知（通过 openclaw CLI）"""
-    target = task.get("notify_target", "")
-    channel = task.get("channel", "telegram")
-    try:
-        subprocess.run(
-            ["openclaw", "message", "send", "--channel", channel, "--target", target, "--message", message], check=False
-        )
-        if media_path and Path(media_path).exists():
-            subprocess.run(
-                [
-                    "openclaw",
-                    "message",
-                    "send",
-                    "--channel",
-                    channel,
-                    "--target",
-                    target,
-                    "--media",
-                    media_path,
-                    "--message",
-                    Path(media_path).name,
-                ],
-                check=False,
-            )
-    except FileNotFoundError:
-        log.warning("openclaw 未安装，通知跳过：%s", message[:80])
-
-
-def setup_dev_task(args) -> dict:
-    """dev 工作流的任务初始化钩子"""
-    projects_cfg = CONFIG.get("projects", {})
-    project_name = args.project or (list(projects_cfg.keys())[0] if projects_cfg else "unknown")
-    project_cfg = projects_cfg.get(project_name, {})
-    repo_path = args.repo or project_cfg.get("repo_path", "")
-    if repo_path:
-        repo_path = str(Path(repo_path).expanduser())
-
-    agents_cfg = CONFIG.get("agents", {}).get("default", {})
-    agents = {
-        "planDesign": agents_cfg.get("plan_design", "claude"),
-        "planReview": agents_cfg.get("plan_review", "codex"),
-        "development": agents_cfg.get("development", "claude"),
-        "codeReview": agents_cfg.get("code_review", "codex"),
-    }
-
-    title = args.title or f"需求 {args.req_id[:8]}"
-    try:
-        req = fetch_req(args.req_id)
-        if req:
-            title = req.get("title", title)
-    except Exception:
-        pass
-
-    return {
-        "req_id": args.req_id,
-        "title": title,
-        "project": project_name,
-        "repo_path": repo_path,
-        "branch": f"feat/{project_name}-{args.req_id[:8]}",
-        "agents": agents,
-        "notify_target": DEFAULT_NOTIFY_TARGET,
-        "channel": DEFAULT_NOTIFY_CHANNEL,
-    }
-
-
-# ──────────────────────────────────────────────────────────
-# 内部辅助
-# ──────────────────────────────────────────────────────────
-
-
 def _get_rejection_counts(task: dict) -> dict:
     """从任务中获取驳回计数字典"""
     raw = task.get("rejection_counts", "{}")
@@ -199,10 +64,7 @@ def _get_rejection_counts(task: dict) -> dict:
     try:
         counts = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
-        counts = {
-            "design": task.get("rejection_count", 0) or 0,
-            "code": task.get("code_rejection_count", 0) or 0,
-        }
+        counts = {}
     return counts
 
 
@@ -217,11 +79,26 @@ def _get_phase_config(task: dict, phase_name: str, key: str, default):
     return default
 
 
-def _notify(task: dict, message: str, media_path: str | None = None, event: str = "info") -> None:
-    """通知快捷方式：通过框架 notify 分发"""
-    from core.infra import notify
+# ──────────────────────────────────────────────────────────
+# setup
+# ──────────────────────────────────────────────────────────
 
-    notify(task, message, media_path, event=event)
+
+def setup_dev_task(args) -> dict:
+    """dev 工作流的任务初始化钩子"""
+    repo_path = CONFIG.get("repo_path", "")
+    if repo_path:
+        repo_path = str(Path(repo_path).expanduser())
+
+    default_branch = CONFIG.get("default_branch", "main")
+    title = args.title or "untitled"
+
+    return {
+        "title": title,
+        "repo_path": repo_path,
+        "default_branch": default_branch,
+        "branch": f"feat/{title[:20].replace(' ', '-').lower()}",
+    }
 
 
 # ──────────────────────────────────────────────────────────
@@ -229,87 +106,74 @@ def _notify(task: dict, message: str, media_path: str | None = None, event: str 
 # ──────────────────────────────────────────────────────────
 
 
-def run_plan_design(task_id: str) -> None:
-    """方案设计"""
+def run_design(task_id: str) -> None:
+    """方案设计：读 requirement.md → 调用 AI → 保存 plan.md"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
     repo_path = task["repo_path"]
+    default_branch = task.get("default_branch", "main")
 
-    default_branch = get_default_branch(task["project"])
     _run_git(["checkout", default_branch], cwd=repo_path)
     _run_git(["pull", "--ff-only"], cwd=repo_path)
 
-    req = fetch_req(task["req_id"])
-    if not req:
-        local_req_path = task_dir / "requirement.md"
-        if local_req_path.exists():
-            log.info("ReqGenie 不可用，使用本地需求文件")
-            req = {"description": local_req_path.read_text(encoding="utf-8"), "organized_content": {}}
-        else:
-            raise RuntimeError(
-                f"无法拉取需求详情，且本地文件 {local_req_path} 不存在。可将需求内容写入该文件作为 fallback。"
-            )
+    req_path = task_dir / "requirement.md"
+    if not req_path.exists():
+        raise RuntimeError(f"需求文件不存在：{req_path}")
+    requirement = req_path.read_text(encoding="utf-8")
 
+    # 驳回历史
     rejection_history = ""
     review_path = task_dir / "plan_review.md"
     rejection_counts = _get_rejection_counts(task)
     design_rejections = rejection_counts.get("design", 0)
     if review_path.exists() and design_rejections > 0:
         prev_review = review_path.read_text(encoding="utf-8")
-        rejection_history = f"\n## 上一次评审的驳回意见（第{design_rejections}次驳回）\n{prev_review}"
+        rejection_history = f"\n\n## 上一次评审的驳回意见（第{design_rejections}次驳回）\n{prev_review}"
 
-    template = (PROMPTS_DIR / "plan-design.md").read_text(encoding="utf-8")
-    description = req.get("description", "")
-    org = req.get("organized_content") or {}
-    acceptance = "\n".join(org.get("acceptance_criteria", []))
-
-    knowledge = ""
-    knowledge_path = PROJECTS_DIR / task["project"] / "knowledge.md"
-    if knowledge_path.exists():
-        knowledge = knowledge_path.read_text(encoding="utf-8")
-
-    prompt = template
-    for k, v in {
-        "{{project}}": task["project"],
-        "{{tech_stack}}": "Rust (backend) + TypeScript/React (frontend) + PostgreSQL",
-        "{{repo_path}}": repo_path,
-        "{{title}}": task["title"],
-        "{{url}}": f"{REQGENIE_REQ_URL}/{task['req_id']}",
-        "{{description}}": description,
-        "{{acceptance_criteria}}": acceptance,
-    }.items():
-        prompt = prompt.replace(k, v)
-    prompt = prompt.replace(
-        "{{#knowledge}}\n项目知识库：\n{{knowledge}}\n{{/knowledge}}", f"项目知识库：\n{knowledge}" if knowledge else ""
+    prompt = (
+        f"你是一位资深架构师。请根据以下需求，生成一份完整的技术方案。\n\n"
+        f"## 需求\n{requirement}\n\n"
+        f"## 仓库路径\n{repo_path}\n\n"
+        f"请先阅读仓库代码了解项目结构，然后输出包含以下内容的技术方案：\n"
+        f"1. 需求分析\n2. 技术方案\n3. 实现步骤\n4. 影响范围\n5. 测试计划"
+        f"{rejection_history}"
     )
-    if rejection_history:
-        prompt += rejection_history
 
-    result = run_claude(prompt, repo_path, timeout=TIMEOUT_DESIGN)
+    result = run_claude(prompt, repo_path, timeout=900)
 
     plan_path = task_dir / "plan.md"
     plan_path.write_text(f"<!-- generated:{now()} -->\n{result}", encoding="utf-8")
 
     transition(task_id, "design_complete", note="方案设计完成")
-    _notify(task, f"📋 方案设计完成：《{task['title']}》\n\n等待方案评审...", str(plan_path))
     from core.runner import run_in_background
 
     run_in_background(task_id, "review")
 
 
-def run_plan_review(task_id: str) -> None:
-    """方案评审"""
+def run_review(task_id: str) -> None:
+    """方案评审：读 plan.md → 调用 AI → 判断 PASS/REJECT"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
     repo_path = task["repo_path"]
 
     plan_content = (task_dir / "plan.md").read_text(encoding="utf-8")
-    template = (PROMPTS_DIR / "plan-review.md").read_text(encoding="utf-8")
-    prompt = template.replace("{{title}}", task["title"])
-    prompt = prompt.replace("{{url}}", f"{REQGENIE_REQ_URL}/{task['req_id']}")
-    prompt = prompt.replace("{{plan_content}}", plan_content)
+    requirement = ""
+    req_path = task_dir / "requirement.md"
+    if req_path.exists():
+        requirement = req_path.read_text(encoding="utf-8")
 
-    result = run_claude(prompt, repo_path, timeout=TIMEOUT_REVIEW)
+    prompt = (
+        f"你是一位技术评审专家。请评审以下技术方案是否满足需求。\n\n"
+        f"## 需求\n{requirement}\n\n"
+        f"## 技术方案\n{plan_content}\n\n"
+        f"请从以下维度评审：完整性、可行性、风险点、测试覆盖。\n\n"
+        f"最后必须输出以下结论之一（独占一行）：\n"
+        f"- {REVIEW_RESULT_PASS}\n"
+        f"- {REVIEW_RESULT_REJECT}\n\n"
+        f"如果驳回，请在 ## 驳回理由 下说明具体问题。"
+    )
+
+    result = run_claude(prompt, repo_path, timeout=900)
 
     review_path = task_dir / "plan_review.md"
     review_path.write_text(f"<!-- generated:{now()} -->\n{result}", encoding="utf-8")
@@ -318,11 +182,10 @@ def run_plan_review(task_id: str) -> None:
     rejected = REVIEW_RESULT_REJECT in result
 
     if passed:
-        transition(task_id, "review_pass", note="方案评审通过")
-        _notify(task, f"✅ 方案评审通过：《{task['title']}》\n\n开始开发...", str(review_path))
+        transition(task_id, "review_complete", note="方案评审通过")
         from core.runner import run_in_background
 
-        run_in_background(task_id, "dev")
+        run_in_background(task_id, "develop")
 
     elif rejected:
         reason_match = re.search(r"## 驳回理由\n(.*?)(?=\n## |\Z)", result, re.DOTALL)
@@ -340,8 +203,6 @@ def run_plan_review(task_id: str) -> None:
                 note=f"方案评审驳回 {new_count} 次，已取消",
                 extra_updates={"rejection_counts": json.dumps(rejection_counts), "rejection_reason": reason},
             )
-            msg = f"⚠️ 方案评审驳回 {new_count} 次：《{task['title']}》\n\n已超过上限，任务取消。"
-            _notify(task, msg, str(review_path))
         else:
             transition(
                 task_id,
@@ -350,8 +211,6 @@ def run_plan_review(task_id: str) -> None:
                 extra_updates={"rejection_counts": json.dumps(rejection_counts), "rejection_reason": reason},
             )
             transition(task_id, "retry_design", note=f"自动重新设计（第{new_count}次驳回）")
-            msg = f"❌ 方案评审驳回（第{new_count}次）：《{task['title']}》\n\n自动重新设计..."
-            _notify(task, msg, str(review_path))
             from core.runner import run_in_background
 
             run_in_background(task_id, "design")
@@ -359,14 +218,14 @@ def run_plan_review(task_id: str) -> None:
         raise RuntimeError("无法解析评审结论，请检查报告")
 
 
-def run_development(task_id: str) -> None:
-    """开发执行"""
+def run_develop(task_id: str) -> None:
+    """开发执行：读 plan.md → 在 repo 中调用 AI → git commit"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
     repo_path = task["repo_path"]
     branch = task["branch"]
+    default_branch = task.get("default_branch", "main")
 
-    default_branch = get_default_branch(task["project"])
     _run_git(["checkout", default_branch], cwd=repo_path)
     _run_git(["pull", "--ff-only"], cwd=repo_path)
     r = _run_git(["checkout", "-b", branch], cwd=repo_path, check=False)
@@ -374,20 +233,14 @@ def run_development(task_id: str) -> None:
         _run_git(["checkout", branch], cwd=repo_path)
 
     plan_content = (task_dir / "plan.md").read_text(encoding="utf-8")
-    template = (PROMPTS_DIR / "development.md").read_text(encoding="utf-8")
-    prompt = template
-    for k, v in {
-        "{{project}}": task["project"],
-        "{{repo_path}}": repo_path,
-        "{{branch}}": branch,
-        "{{title}}": task["title"],
-        "{{url}}": f"{REQGENIE_REQ_URL}/{task['req_id']}",
-        "{{plan_content}}": plan_content,
-    }.items():
-        prompt = prompt.replace(k, v)
-    prompt = prompt.replace("{{#knowledge}}\n项目知识库：\n{{knowledge}}\n{{/knowledge}}", "")
 
-    result = run_claude(prompt, repo_path, timeout=TIMEOUT_DEV)
+    prompt = (
+        f"你是一位高级开发工程师。请根据以下技术方案进行开发。\n\n"
+        f"## 技术方案\n{plan_content}\n\n"
+        f"请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。"
+    )
+
+    result = run_claude(prompt, repo_path, timeout=1800)
 
     report_path = task_dir / "dev_report.md"
     report_path.write_text(f"<!-- generated:{now()} -->\n{result}", encoding="utf-8")
@@ -396,41 +249,37 @@ def run_development(task_id: str) -> None:
     if status_r.stdout.strip():
         _run_git(["add", "-A"], cwd=repo_path)
         _run_git(["commit", "-m", f"feat: {task['title']}"], cwd=repo_path)
-        log.info("已提交代码变更")
-    else:
-        log.warning("Claude 未产生代码变更")
 
-    transition(task_id, "dev_complete", note="开发完成")
-    _notify(task, f"🔨 开发完成：《{task['title']}》\n\n启动代码审查...", str(report_path))
-
+    transition(task_id, "develop_complete", note="开发完成")
     from core.runner import run_in_background
 
     run_in_background(task_id, "code_review")
 
 
 def run_code_review(task_id: str) -> None:
-    """代码审查"""
+    """代码审查：git diff → 调用 AI → 判断 PASS/REJECT"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
     repo_path = task["repo_path"]
+    default_branch = task.get("default_branch", "main")
 
-    default_branch = get_default_branch(task["project"])
     r = _run_git(["diff", f"{default_branch}...HEAD", "--no-ext-diff"], cwd=repo_path)
     git_diff = r.stdout[:80000]
 
     plan_content = (task_dir / "plan.md").read_text(encoding="utf-8")
-    template = (PROMPTS_DIR / "code-review.md").read_text(encoding="utf-8")
-    prompt = template
-    for k, v in {
-        "{{title}}": task["title"],
-        "{{url}}": f"{REQGENIE_REQ_URL}/{task['req_id']}",
-        "{{plan_content}}": plan_content,
-        "{{git_diff}}": git_diff,
-    }.items():
-        prompt = prompt.replace(k, v)
-    prompt = re.sub(r"{{#screenshots}}.*?{{/screenshots}}", "", prompt, flags=re.DOTALL)
 
-    result = run_claude(prompt, repo_path, timeout=TIMEOUT_CODE_REVIEW)
+    prompt = (
+        f"你是一位代码审查专家。请审查以下代码变更是否符合技术方案要求。\n\n"
+        f"## 技术方案\n{plan_content}\n\n"
+        f"## 代码变更\n```diff\n{git_diff}\n```\n\n"
+        f"请从以下维度审查：正确性、代码质量、安全性、测试覆盖。\n\n"
+        f"最后必须输出以下结论之一（独占一行）：\n"
+        f"- {REVIEW_RESULT_PASS}\n"
+        f"- {REVIEW_RESULT_REJECT}\n\n"
+        f"如果驳回，请在 ## 不通过理由 下说明具体问题。"
+    )
+
+    result = run_claude(prompt, repo_path, timeout=1200)
 
     review_path = task_dir / "code_review_report.md"
     review_path.write_text(f"<!-- generated:{now()} -->\n{result}", encoding="utf-8")
@@ -439,11 +288,10 @@ def run_code_review(task_id: str) -> None:
     rejected = REVIEW_RESULT_REJECT in result
 
     if passed:
-        transition(task_id, "code_pass", note="代码审查通过")
-        _notify(task, f"✅ 代码审查通过：《{task['title']}》\n\n提交 PR...", str(review_path))
+        transition(task_id, "code_review_complete", note="代码审查通过")
         from core.runner import run_in_background
 
-        run_in_background(task_id, "pr")
+        run_in_background(task_id, "submit_pr")
 
     elif rejected:
         reason_match = re.search(r"## 不通过理由\n(.*?)(?=\n## |\Z)", result, re.DOTALL)
@@ -461,72 +309,47 @@ def run_code_review(task_id: str) -> None:
                 note=f"代码审查驳回 {new_count} 次，已取消",
                 extra_updates={"rejection_counts": json.dumps(rejection_counts), "rejection_reason": reason},
             )
-            msg = f"⚠️ 代码审查驳回 {new_count} 次：《{task['title']}》\n\n已超过上限，任务取消。"
-            _notify(task, msg, str(review_path))
         else:
             transition(
                 task_id,
-                "code_reject",
+                "code_review_reject",
                 note=f"代码审查驳回（第{new_count}次）",
                 extra_updates={"rejection_counts": json.dumps(rejection_counts), "rejection_reason": reason},
             )
-            transition(task_id, "retry_dev", note=f"自动返工（第{new_count}次驳回）")
-            msg = f"❌ 代码审查驳回（第{new_count}次）：《{task['title']}》\n\n自动返工..."
-            _notify(task, msg, str(review_path))
+            transition(task_id, "retry_develop", note=f"自动返工（第{new_count}次驳回）")
             from core.runner import run_in_background
 
-            run_in_background(task_id, "dev")
+            run_in_background(task_id, "develop")
     else:
         raise RuntimeError("无法解析审查结论，请检查报告")
 
 
 def run_submit_pr(task_id: str) -> None:
-    """提交 PR"""
+    """提交 PR：git push → gh pr create"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
     repo_path = task["repo_path"]
     branch = task["branch"]
+    default_branch = task.get("default_branch", "main")
 
     _run_git(["push", "-u", "origin", branch], cwd=repo_path)
 
     plan_file = task_dir / "plan.md"
     plan_content = plan_file.read_text(encoding="utf-8") if plan_file.exists() else ""
-    report_file = task_dir / "dev_report.md"
-    dev_report = report_file.read_text(encoding="utf-8") if report_file.exists() else ""
-    default_branch = get_default_branch(task["project"])
     diff_r = _run_git(["diff", f"{default_branch}...HEAD", "--stat"], cwd=repo_path)
-    git_diff = diff_r.stdout[:3000]
+    git_diff_stat = diff_r.stdout[:3000]
 
-    template = (PROMPTS_DIR / "pr-description.md").read_text(encoding="utf-8")
-    prompt = template.replace("{{title}}", task["title"])
-    prompt = prompt.replace("{{url}}", f"{REQGENIE_REQ_URL}/{task['req_id']}")
-    prompt = prompt.replace("{{plan_content}}", plan_content[:4000])
-    prompt = prompt.replace("{{dev_report}}", dev_report[:2000])
-    prompt = prompt.replace("{{git_diff}}", git_diff)
-
-    name_r = _run_git(["diff", f"{default_branch}...HEAD", "--name-only"], cwd=repo_path)
-    has_frontend = any(
-        f.endswith((".tsx", ".ts", ".jsx", ".vue", ".css", ".scss", ".less", ".html", ".svelte"))
-        for f in name_r.stdout.split("\n")
+    prompt = (
+        f"请根据以下信息生成 PR 描述（Markdown 格式）：\n\n"
+        f"## 标题\n{task['title']}\n\n"
+        f"## 技术方案摘要\n{plan_content[:4000]}\n\n"
+        f"## 变更统计\n{git_diff_stat}\n\n"
+        f"请输出完整的 PR body，包含：概述、主要变更、测试说明。"
     )
-    if has_frontend:
-        prompt = prompt.replace("{{#has_frontend}}\n", "").replace("\n{{/has_frontend}}", "")
-        prompt = re.sub(r"{{.has_frontend}}.*?{{/has_frontend}}", "", prompt, flags=re.DOTALL)
-    else:
-        prompt = re.sub(r"{{#has_frontend}}.*?{{/has_frontend}}", "", prompt, flags=re.DOTALL)
-        prompt = prompt.replace("{{^has_frontend}}\n（无前端视觉改动）\n{{/has_frontend}}", "（无前端视觉改动）")
 
-    pr_body = subprocess.run(
-        ["claude", "--permission-mode", "bypassPermissions", "--print", prompt],
-        capture_output=True,
-        text=True,
-        timeout=TIMEOUT_PR_DESC,
-        cwd=repo_path,
-        encoding="utf-8",
-        errors="replace",
-    )
-    body = pr_body.stdout.strip() if pr_body.returncode == 0 else f"完成需求：{task['title']}"
+    pr_body = run_claude(prompt, repo_path, timeout=300)
 
+    # 检查是否已存在 PR
     existing = subprocess.run(
         ["gh", "pr", "view", "--json", "url"],
         capture_output=True,
@@ -537,7 +360,7 @@ def run_submit_pr(task_id: str) -> None:
     )
     if existing.returncode == 0:
         pr_url = json.loads(existing.stdout).get("url", "")
-        subprocess.run(["gh", "pr", "edit", "--body", body], capture_output=True, cwd=repo_path)
+        subprocess.run(["gh", "pr", "edit", "--body", pr_body], capture_output=True, cwd=repo_path)
     else:
         r = subprocess.run(
             [
@@ -547,7 +370,7 @@ def run_submit_pr(task_id: str) -> None:
                 "--title",
                 task["title"],
                 "--body",
-                body,
+                pr_body,
                 "--base",
                 default_branch,
                 "--head",
@@ -563,24 +386,4 @@ def run_submit_pr(task_id: str) -> None:
             raise RuntimeError(f"创建 PR 失败：{r.stderr}")
         pr_url = r.stdout.strip()
 
-    with get_conn() as conn:
-        conn.execute("UPDATE tasks SET pr_url = ?, updated_at = ? WHERE id = ?", (pr_url, now(), task_id))
-
-    _notify(task, f"🎉 PR 已提交：《{task['title']}》\n\n{pr_url}")
-
-
-# ──────────────────────────────────────────────────────────
-# 工作流定义（已迁移到 workflow.yaml）
-# 保留 WORKFLOW 引用以兼容单文件 Python 模块加载
-# ──────────────────────────────────────────────────────────
-
-
-def _load_workflow_from_yaml():
-    """从同目录 workflow.yaml 加载工作流定义"""
-    from core.registry import load_yaml_workflow
-
-    mod = load_yaml_workflow(Path(__file__).parent)
-    return mod.WORKFLOW if mod else {}
-
-
-WORKFLOW = _load_workflow_from_yaml()
+    update_task(task_id, pr_url=pr_url)

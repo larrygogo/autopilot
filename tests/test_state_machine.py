@@ -2,6 +2,8 @@
 状态机单元测试：合法/非法转换、驳回计数
 """
 
+import json
+
 import pytest
 
 from core.db import create_task, get_task
@@ -17,15 +19,15 @@ from core.state_machine import (
 def _create_test_task(task_id="TEST01", workflow="dev"):
     create_task(
         task_id=task_id,
-        req_id="REQ-TEST-001",
         title="测试任务",
+        workflow=workflow,
+        channel="telegram",
+        notify_target="123",
+        req_id="REQ-TEST-001",
         project="test-proj",
         repo_path="/tmp/test-repo",
         branch="feat/test-TEST01",
         agents={"planDesign": "claude", "planReview": "claude", "development": "claude", "codeReview": "claude"},
-        notify_target="123",
-        channel="telegram",
-        workflow=workflow,
     )
     return task_id
 
@@ -156,6 +158,7 @@ class TestExtraUpdates:
     """extra_updates 参数测试"""
 
     def test_rejection_count_update(self):
+        """extra_updates 中的非列字段存入 extra JSON"""
         tid = _create_test_task()
         for t in ["start_design", "design_complete", "start_review"]:
             transition(tid, t)
@@ -164,9 +167,7 @@ class TestExtraUpdates:
         assert task["rejection_count"] == 1
 
     def test_rejection_counts_json_update(self):
-        """新的 JSON 格式驳回计数"""
-        import json
-
+        """JSON 格式驳回计数"""
         tid = _create_test_task()
         for t in ["start_design", "design_complete", "start_review"]:
             transition(tid, t)

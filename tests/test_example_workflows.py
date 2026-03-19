@@ -39,15 +39,14 @@ def _register_task(task_id, workflow):
     """注册一个测试任务"""
     create_task(
         task_id=task_id,
-        req_id=f"REQ-{task_id}",
         title=f"测试任务 {task_id}",
+        workflow=workflow,
+        channel="log",
+        notify_target="",
+        req_id=f"REQ-{task_id}",
         project="test-project",
         repo_path="/tmp/test-repo",
         branch=f"feat/{task_id}",
-        agents={},
-        notify_target="",
-        channel="log",
-        workflow=workflow,
     )
 
 

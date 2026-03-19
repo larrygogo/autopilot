@@ -17,8 +17,11 @@ def _register_task(task_id="INT-001", title="集成测试任务", workflow="dev"
     """模拟 start_task.py 的任务注册流程"""
     create_task(
         task_id=task_id,
-        req_id="REQ-INTEGRATION-001",
         title=title,
+        workflow=workflow,
+        channel="telegram",
+        notify_target="test-chat-id",
+        req_id="REQ-INTEGRATION-001",
         project="test-project",
         repo_path="/tmp/test-repo",
         branch=f"feat/test-project-{task_id}",
@@ -28,9 +31,6 @@ def _register_task(task_id="INT-001", title="集成测试任务", workflow="dev"
             "development": "claude",
             "codeReview": "codex",
         },
-        notify_target="test-chat-id",
-        channel="telegram",
-        workflow=workflow,
     )
     return task_id
 
@@ -45,12 +45,11 @@ class TestTaskRegistration:
         assert task is not None
         assert task["status"] == "pending_design"
         assert task["workflow"] == "dev"
+        assert task["failure_count"] == 0
+        # extra fields accessible transparently
         assert task["project"] == "test-project"
         assert task["branch"] == "feat/test-project-INT-001"
-        assert task["rejection_count"] == 0
-        assert task["code_rejection_count"] == 0
-        assert task["failure_count"] == 0
-        assert task["pr_url"] is None
+        assert task["req_id"] == "REQ-INTEGRATION-001"
 
     def test_task_appears_in_active_list(self):
         _register_task()

@@ -35,10 +35,11 @@ cp -r examples/data_pipeline/ ~/.autopilot/workflows/data_pipeline/
 
 5 个阶段：方案设计 → 方案评审 → 开发 → 代码审查 → PR 提交
 
-- `workflow.yaml` — 工作流定义（YAML 格式，声明式）
-- `workflow.py` — 阶段函数实现
-- `config.example.yaml` — dev 专属配置模板
-- `prompts/` — 5 个 AI 提示词模板
+- `workflow.yaml` — 工作流定义（自动推导 + reject 语法糖）
+- `workflow.py` — 阶段函数实现（内联提示词）
+- `config.example.yaml` — 极简配置模板（repo_path + default_branch）
+
+**展示特性**：5 阶段完整流程、reject 驳回机制、Claude CLI 集成、标准阶段模式（读任务 → 执行 → 保存产出物 → transition → push 下一阶段）
 
 ### req_review — 需求评审流程
 

@@ -12,15 +12,14 @@ from core.watcher import is_stuck, recover_task
 def _create_test_task(task_id="WATCH-001", status="designing"):
     create_task(
         task_id=task_id,
-        req_id="REQ-WATCHER",
         title="watcher 测试任务",
+        workflow="dev",
+        channel="log",
+        notify_target="",
+        req_id="REQ-WATCHER",
         project="test",
         repo_path="/tmp/test",
         branch="feat/test",
-        agents={},
-        notify_target="",
-        channel="log",
-        workflow="dev",
     )
     if status != "pending_design":
         conn = get_conn()

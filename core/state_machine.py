@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from core.db import get_conn, now
+from core.db import _TABLE_COLUMNS, get_conn, now
 
 
 class InvalidTransitionError(Exception):
@@ -87,13 +87,31 @@ def transition(
                     f"非法转换：{from_status} --[{trigger}]--> ??? （允许的 trigger：{[t for t, _ in allowed]}）"
                 )
 
-            # 构建更新字段
-            updates = {"status": to_status, "updated_at": now(), "started_at": now()}
-            if extra_updates:
-                updates.update(extra_updates)
+            # 构建更新字段（透明区分列字段 vs extra JSON）
+            import json
 
-            set_clause = ", ".join(f"{k} = ?" for k in updates)
-            values = list(updates.values()) + [task_id]
+            col_updates = {"status": to_status, "updated_at": now(), "started_at": now()}
+            extra_fields = {}
+
+            if extra_updates:
+                for k, v in extra_updates.items():
+                    if k in _TABLE_COLUMNS:
+                        col_updates[k] = v
+                    else:
+                        extra_fields[k] = v
+
+            if extra_fields:
+                # 读取当前 extra 并合并
+                current_row = conn.execute("SELECT extra FROM tasks WHERE id = ?", (task_id,)).fetchone()
+                try:
+                    current_extra = json.loads(current_row["extra"]) if current_row and current_row["extra"] else {}
+                except (json.JSONDecodeError, TypeError):
+                    current_extra = {}
+                current_extra.update(extra_fields)
+                col_updates["extra"] = json.dumps(current_extra, ensure_ascii=False)
+
+            set_clause = ", ".join(f"{k} = ?" for k in col_updates)
+            values = list(col_updates.values()) + [task_id]
             conn.execute(f"UPDATE tasks SET {set_clause} WHERE id = ?", values)
 
             # 记录日志

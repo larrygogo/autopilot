@@ -96,7 +96,11 @@
 ### db.py — 数据库
 
 - SQLite 持久化，WAL 模式
-- `tasks` 表：任务状态、配置、元数据、子任务字段（`parent_task_id` / `parallel_index` / `parallel_group`）
+- `tasks` 表：精简 schema，只保留框架核心列（id, title, workflow, status, failure_count, channel, notify_target, extra, 时间戳, 并行字段）
+- `extra` TEXT 列：JSON 格式，存储工作流自定义字段（如 req_id, project, repo_path 等）
+- `get_task()` 自动将 extra JSON 合并到返回 dict，调用方直接 `task["repo_path"]` 无需关心存储位置
+- `create_task(task_id, title, workflow, **extra)` — 非核心字段自动存入 extra JSON
+- `update_task(task_id, **fields)` — 透明更新，框架自动区分列字段 vs extra
 - `task_logs` 表：状态转换审计日志
 - 子任务 CRUD：`create_sub_task()`、`get_sub_tasks()`、`all_sub_tasks_done()`
 

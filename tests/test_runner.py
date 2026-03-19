@@ -11,15 +11,14 @@ from core.runner import execute_phase
 def _create_test_task(task_id="RUN-001"):
     create_task(
         task_id=task_id,
-        req_id="REQ-RUNNER",
         title="runner 测试任务",
+        workflow="dev",
+        channel="log",
+        notify_target="",
+        req_id="REQ-RUNNER",
         project="test",
         repo_path="/tmp/test",
         branch="feat/test",
-        agents={},
-        notify_target="",
-        channel="log",
-        workflow="dev",
     )
     return task_id
 

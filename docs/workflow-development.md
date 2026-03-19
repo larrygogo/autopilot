@@ -188,12 +188,14 @@ phases:
    - `fail_strategy: cancel_all`（默认）→ 取消所有兄弟子任务，父任务回退
    - `fail_strategy: continue` → 等待其他子任务完成
 
-### 数据库变更
+### 数据库字段
 
-子任务在 tasks 表中新增字段：
+子任务使用 tasks 表的核心列：
 - `parent_task_id` — 父任务 ID
 - `parallel_index` — 并行组内的索引
 - `parallel_group` — 并行组名称
+
+子任务自动继承父任务的 `extra` JSON 字段。
 
 ### CLI 行为
 
@@ -266,25 +268,54 @@ transitions:
     - [trigger2, state_c]  # 条件分支
 ```
 
+## 任务数据存储
+
+框架 schema 只保留核心列，工作流自定义字段存入 `extra` JSON：
+
+```python
+# 创建任务：核心字段显式传入，其余自动存入 extra
+create_task(
+    task_id="T001",
+    title="My Task",
+    workflow="dev",
+    channel="telegram",
+    notify_target="chat-id",
+    # 以下全部存入 extra JSON
+    req_id="REQ-001",
+    project="my-project",
+    repo_path="/path/to/repo",
+    branch="feat/T001",
+    agents={"dev": "claude"},
+)
+
+# 读取：extra 字段自动展开，直接访问
+task = get_task("T001")
+task["repo_path"]  # 直接可用，无需关心存储位置
+task["project"]    # 同上
+
+# 更新：透明区分列字段 vs extra
+update_task("T001", pr_url="https://...", failure_count=1)
+```
+
 ## 阶段函数编写规范
 
 ### 编写模式
 
 ```python
 def run_my_phase(task_id: str) -> None:
-    # 1. 获取任务信息
+    # 1. 获取任务信息（extra 字段自动展开）
     task = get_task(task_id)
 
     # 2. 准备输入
     plan = (task_dir / "plan.md").read_text()
 
-    # 3. 执行核心逻辑
+    # 3. 执行核心逻辑（直接访问 extra 字段）
     result = my_execute(prompt, repo_path=task['repo_path'])
 
     # 4. 保存产出物
     (task_dir / "output.md").write_text(result)
 
-    # 5. 状态转换
+    # 5. 状态转换（extra_updates 同样透明区分）
     transition(task_id, 'my_phase_complete')
 
     # 6. Push 下一阶段
@@ -296,6 +327,7 @@ def run_my_phase(task_id: str) -> None:
 - **不要手动管理锁**：`execute_phase()` 自动获取锁
 - **不要吞异常**：让异常抛出，Runner 会捕获并记录
 - **转换必须在 Push 之前**：先 `transition()` 再 `run_in_background()`
+- **字段存储透明**：`get_task()` 自动展开 extra，开发者无需关心字段在列里还是 JSON 里
 
 ## 完整示例
 

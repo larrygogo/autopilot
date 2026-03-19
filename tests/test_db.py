@@ -10,21 +10,22 @@ from core.db import (
     get_task,
     get_task_logs,
     now,
+    update_task,
 )
 
 
 def _create_test_task(task_id="DB-TEST", workflow="dev"):
     create_task(
         task_id=task_id,
-        req_id="REQ-DB-001",
         title="DB 测试任务",
+        workflow=workflow,
+        channel="telegram",
+        notify_target="123",
+        req_id="REQ-DB-001",
         project="test-proj",
         repo_path="/tmp/test-repo",
         branch="feat/test-DB-TEST",
         agents={"planDesign": "claude"},
-        notify_target="123",
-        channel="telegram",
-        workflow=workflow,
     )
     return task_id
 
@@ -37,8 +38,12 @@ class TestCreateAndGetTask:
         assert task["title"] == "DB 测试任务"
         assert task["status"] == "pending_design"
         assert task["workflow"] == "dev"
-        assert task["rejection_count"] == 0
         assert task["failure_count"] == 0
+        # extra fields accessible transparently
+        assert task["req_id"] == "REQ-DB-001"
+        assert task["project"] == "test-proj"
+        assert task["repo_path"] == "/tmp/test-repo"
+        assert task["branch"] == "feat/test-DB-TEST"
 
     def test_get_nonexistent(self):
         assert get_task("NONEXIST") is None
@@ -55,14 +60,32 @@ class TestCreateAndGetTask:
         assert task["workflow"] == "req_review"
         assert task["status"] == "pending_analysis"
 
-    def test_rejection_counts_field(self):
-        """rejection_counts JSON 字段"""
-        import json
-
-        tid = _create_test_task("RC-TEST")
+    def test_extra_fields_stored_as_json(self):
+        """extra 字段存储为 JSON"""
+        tid = _create_test_task("EX-TEST")
         task = get_task(tid)
-        counts = json.loads(task["rejection_counts"])
-        assert counts == {}
+        assert task["agents"] == {"planDesign": "claude"}
+
+
+class TestUpdateTask:
+    def test_update_column_field(self):
+        tid = _create_test_task("UPD-COL")
+        update_task(tid, failure_count=3)
+        task = get_task(tid)
+        assert task["failure_count"] == 3
+
+    def test_update_extra_field(self):
+        tid = _create_test_task("UPD-EXT")
+        update_task(tid, pr_url="https://github.com/pr/1")
+        task = get_task(tid)
+        assert task["pr_url"] == "https://github.com/pr/1"
+
+    def test_update_mixed_fields(self):
+        tid = _create_test_task("UPD-MIX")
+        update_task(tid, failure_count=2, rejection_reason="bad design")
+        task = get_task(tid)
+        assert task["failure_count"] == 2
+        assert task["rejection_reason"] == "bad design"
 
 
 class TestActiveTasksQuery:

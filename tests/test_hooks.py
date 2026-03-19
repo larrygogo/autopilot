@@ -48,16 +48,15 @@ def _create_test_task(
 ) -> None:
     create_task(
         task_id=task_id,
-        req_id="REQ-HOOK",
         title="Hook Test",
+        workflow=workflow,
+        channel="log",
+        notify_target="",
+        initial_status=status,
+        req_id="REQ-HOOK",
         project="test",
         repo_path="/tmp/repo",
         branch="feat/hook",
-        agents={},
-        notify_target="",
-        channel="log",
-        workflow=workflow,
-        initial_status=status,
     )
 
 
