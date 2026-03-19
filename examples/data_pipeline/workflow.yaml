@@ -1,0 +1,60 @@
+name: data_pipeline
+description: 数据处理流水线
+
+retry_policy:
+  max_retries: 5
+  backoff: exponential
+  delay: 30
+
+terminal_states: [completed, completed_partial, cancelled]
+
+phases:
+  - name: extract
+    timeout: 600
+
+  - name: validate_data
+    timeout: 300
+
+  - name: transform
+    timeout: 900
+    reject: extract
+
+  - name: load
+    timeout: 600
+
+# 手写转换表：支持前向跳转（validate_skip → load）和多终态
+transitions:
+  pending_extract:
+    - [start_extract, running_extract]
+    - [cancel, cancelled]
+  running_extract:
+    - [extract_complete, pending_validate_data]
+    - [extract_fail, pending_extract]
+    - [cancel, cancelled]
+  pending_validate_data:
+    - [start_validate_data, running_validate_data]
+    - [cancel, cancelled]
+  running_validate_data:
+    - [validate_data_complete, pending_transform]
+    - [validate_skip, pending_load]
+    - [validate_data_fail, pending_validate_data]
+    - [cancel, cancelled]
+  pending_transform:
+    - [start_transform, running_transform]
+    - [cancel, cancelled]
+  running_transform:
+    - [transform_complete, pending_load]
+    - [transform_reject, transform_rejected]
+    - [transform_fail, pending_transform]
+    - [cancel, cancelled]
+  transform_rejected:
+    - [retry_extract, pending_extract]
+    - [cancel, cancelled]
+  pending_load:
+    - [start_load, running_load]
+    - [cancel, cancelled]
+  running_load:
+    - [load_complete, completed]
+    - [load_partial, completed_partial]
+    - [load_fail, pending_load]
+    - [cancel, cancelled]

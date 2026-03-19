@@ -1,0 +1,22 @@
+name: parallel_build
+description: 并行构建流程
+
+hooks:
+  before_phase: on_before_phase
+  after_phase: on_after_phase
+
+phases:
+  - name: prepare
+    timeout: 300
+
+  - parallel:
+      name: build
+      fail_strategy: cancel_all
+      phases:
+        - name: build_frontend
+          timeout: 1200
+        - name: build_backend
+          timeout: 1200
+
+  - name: integration_test
+    timeout: 900
