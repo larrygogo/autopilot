@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     failure_count INTEGER DEFAULT 0,
     rejection_reason TEXT,
     pr_url TEXT,
-    agents TEXT,              -- JSON: {planDesign, planReview, development, codeReview}
-    channel TEXT DEFAULT 'telegram',
+    agents TEXT,              -- JSON: workflow-defined agent roles
+    channel TEXT DEFAULT 'log',
     notify_target TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -156,7 +156,7 @@ def create_task(
     agents: dict,
     notify_target: str,
     workflow: str,
-    channel: str = "telegram",
+    channel: str = "log",
     initial_status: str | None = None,
 ) -> None:
     """创建新任务

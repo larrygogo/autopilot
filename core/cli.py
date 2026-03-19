@@ -79,10 +79,10 @@ def start(req_id, project, repo, title, workflow):
     else:
         params = {
             "req_id": req_id,
-            "title": title or f"需求 {req_id[:8]}",
-            "project": project or "unknown",
+            "title": title or f"Task {req_id[:8]}",
+            "project": project or "",
             "repo_path": repo or "",
-            "branch": f"feat/{req_id[:8]}",
+            "branch": "",
             "agents": {},
             "notify_target": "",
             "channel": "log",
