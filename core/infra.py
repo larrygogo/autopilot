@@ -20,7 +20,7 @@ log = get_logger()
 # 路径常量
 # ──────────────────────────────────────────────────────────
 
-DEVTASKS_DIR = AUTOPILOT_HOME / "runtime/dev-tasks"
+TASKS_DIR = AUTOPILOT_HOME / "runtime/tasks"
 
 
 # ──────────────────────────────────────────────────────────
@@ -140,6 +140,6 @@ def notify(task: dict, message: str, media_path: str | None = None, event: str =
 
 
 def get_task_dir(task_id: str) -> Path:
-    d = DEVTASKS_DIR / task_id
+    d = TASKS_DIR / task_id
     d.mkdir(parents=True, exist_ok=True)
     return d
