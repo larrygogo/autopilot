@@ -4,9 +4,6 @@ YAML 工作流加载 + 自动推导测试
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from core.registry import (
@@ -14,8 +11,6 @@ from core.registry import (
     _expand_phase_defaults,
     _normalize_transitions,
     build_transitions,
-    get_phase,
-    get_phase_func,
     load_yaml_workflow,
     validate_workflow,
 )

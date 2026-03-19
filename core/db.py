@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import sqlite3
-import sys
 import threading
 from datetime import datetime, timezone
 

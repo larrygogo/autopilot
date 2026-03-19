@@ -1,6 +1,6 @@
 """
 基础设施层：通用工具函数
-包含 git 操作、Claude CLI 调用、锁机制、通知分发
+包含 git 操作、外部 CLI 调用、锁机制、通知分发
 """
 
 from __future__ import annotations

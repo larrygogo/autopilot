@@ -1,6 +1,6 @@
 # autopilot
 
-AI 驱动的可扩展开发工作流自动化框架，基于状态机 + Push 模型 + 插件化工作流。
+轻量级多阶段任务编排引擎，基于状态机 + Push 模型 + 插件化工作流。
 
 ## 架构概要
 
@@ -48,7 +48,7 @@ autopilot/
 │   ├── state_machine.py           # 纯状态机，转换表由注册表提供
 │   ├── runner.py                  # 执行引擎 & Push 模型 & 并行 fork/join
 │   ├── registry.py                # 工作流插件注册 & 发现 & YAML 加载
-│   ├── infra.py                   # git / 锁 / 通知分发 / AI 调用
+│   ├── infra.py                   # git / 锁 / 通知分发
 │   ├── notify.py                  # 多后端通知系统（webhook / command）
 │   ├── logger.py                  # 阶段标签日志
 │   ├── watcher.py                 # 卡死任务检测 & 恢复（含并行子任务）

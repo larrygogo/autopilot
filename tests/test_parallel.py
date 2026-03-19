@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest import mock
 
 from core.db import (
     all_sub_tasks_done,
