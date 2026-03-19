@@ -368,8 +368,7 @@ def workflows():
                 label = f" [{phase['label']}]" if phase.get("label") else ""
                 trigger_info = f"trigger={phase.get('trigger')}" if phase.get("trigger") else "(auto)"
                 line = (
-                    f"    - {phase['name']}{label}: "
-                    f"{phase['pending_state']} → {phase['running_state']}  {trigger_info}"
+                    f"    - {phase['name']}{label}: {phase['pending_state']} → {phase['running_state']}  {trigger_info}"
                 )
                 click.echo(line)
         click.echo()

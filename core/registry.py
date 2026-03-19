@@ -339,13 +339,9 @@ def validate_workflow(wf: dict) -> list[str]:
             if phase.get("_jump_origin") != "reject":
                 continue
             target = phase["jump_target"]
-            target_idx = next(
-                (i for i, (_, n, _) in enumerate(ordered_names) if n == target), None
-            )
+            target_idx = next((i for i, (_, n, _) in enumerate(ordered_names) if n == target), None)
             if target_idx is not None and target_idx >= idx:
-                raise WorkflowValidationError(
-                    f'阶段 {phase["name"]} 的 reject 目标 "{target}" 必须在当前阶段之前'
-                )
+                raise WorkflowValidationError(f'阶段 {phase["name"]} 的 reject 目标 "{target}" 必须在当前阶段之前')
 
     # ── 转换表完整性 ──
     if "transitions" in wf:
@@ -358,9 +354,7 @@ def validate_workflow(wf: dict) -> list[str]:
         else:
             first_pending = first_phase["pending_state"]
             if wf["initial_state"] != first_pending:
-                warnings.append(
-                    f'initial_state "{wf["initial_state"]}" != phases[0].pending_state "{first_pending}"'
-                )
+                warnings.append(f'initial_state "{wf["initial_state"]}" != phases[0].pending_state "{first_pending}"')
 
     # ── 可选字段类型检查 ──
     if "max_rejections" in wf and not isinstance(wf["max_rejections"], int):
@@ -381,9 +375,7 @@ def validate_workflow(wf: dict) -> list[str]:
     return warnings
 
 
-def _validate_regular_phase(
-    phase: dict, idx: int, prefix: str, all_phase_names: set[str], warnings: list[str]
-) -> None:
+def _validate_regular_phase(phase: dict, idx: int, prefix: str, all_phase_names: set[str], warnings: list[str]) -> None:
     """校验普通阶段（非 parallel）"""
     for pf in ("name", "pending_state", "running_state"):
         if pf not in phase:
@@ -403,9 +395,7 @@ def _validate_regular_phase(
     if phase.get("jump_target"):
         target = phase["jump_target"]
         if target not in all_phase_names:
-            raise WorkflowValidationError(
-                f'阶段 {phase["name"]} 的 jump_target "{target}" 不在 phases 中'
-            )
+            raise WorkflowValidationError(f'阶段 {phase["name"]} 的 jump_target "{target}" 不在 phases 中')
 
 
 # ──────────────────────────────────────────────────────────
