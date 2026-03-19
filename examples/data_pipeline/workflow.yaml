@@ -1,0 +1,19 @@
+name: data_pipeline
+description: 数据处理流水线
+retry_policy:
+  max_retries: 5
+  backoff: exponential
+  delay: 30
+terminal_states: [completed, completed_partial, cancelled]
+phases:
+  - name: extract
+    timeout: 600
+  - name: validate_data
+    timeout: 300
+    jump_trigger: validate_skip
+    jump_target: load
+  - name: transform
+    timeout: 900
+    reject: extract
+  - name: load
+    timeout: 600

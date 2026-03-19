@@ -1,0 +1,9 @@
+name: doc_gen
+description: 文档生成与评审
+phases:
+  - name: generate
+    timeout: 600
+  - name: review_doc
+    timeout: 600
+    reject: generate
+    max_rejections: 5

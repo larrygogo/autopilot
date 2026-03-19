@@ -1,5 +1,5 @@
 """
-dev-pilot 统一 CLI 入口（click）
+autopilot 统一 CLI 入口（click）
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from core import __version__
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="dev-pilot")
+@click.version_option(version=__version__, prog_name="autopilot")
 def main():
-    """dev-pilot: AI 驱动的工作流自动化框架"""
+    """autopilot: AI 驱动的工作流自动化框架"""
     pass
 
 
@@ -47,7 +47,7 @@ def start(req_id, project, repo, title, workflow):
 
     if workflow is None:
         if not available:
-            click.echo("没有已注册的工作流，请先将工作流放入 DEV_PILOT_HOME/workflows/ 目录")
+            click.echo("没有已注册的工作流，请先将工作流放入 AUTOPILOT_HOME/workflows/ 目录")
             sys.exit(1)
         elif len(available) == 1:
             workflow = available[0]["name"]
@@ -234,6 +234,54 @@ def show(task_id, log_count):
 
 
 # ──────────────────────────────────────────────────────────
+# validate
+# ──────────────────────────────────────────────────────────
+
+
+@main.command()
+@click.argument("name", required=False)
+def validate(name):
+    """校验工作流定义"""
+    _ensure_workflows()
+
+    from core.registry import WorkflowValidationError, get_workflow, list_workflows, validate_workflow
+
+    if name:
+        wf = get_workflow(name)
+        if not wf:
+            click.echo(f"未知工作流：{name}")
+            sys.exit(1)
+        try:
+            warns = validate_workflow(wf)
+            click.echo(f"✓ {name} 校验通过")
+            for w in warns:
+                click.echo(f"  ⚠ {w}")
+        except WorkflowValidationError as e:
+            click.echo(f"✗ {name} 校验失败：{e}")
+            sys.exit(1)
+    else:
+        available = list_workflows()
+        if not available:
+            click.echo("暂无已注册工作流")
+            return
+        all_ok = True
+        for wf_info in available:
+            wf = get_workflow(wf_info["name"])
+            if not wf:
+                continue
+            try:
+                warns = validate_workflow(wf)
+                click.echo(f"✓ {wf_info['name']} 校验通过")
+                for w in warns:
+                    click.echo(f"  ⚠ {w}")
+            except WorkflowValidationError as e:
+                click.echo(f"✗ {wf_info['name']} 校验失败：{e}")
+                all_ok = False
+        if not all_ok:
+            sys.exit(1)
+
+
+# ──────────────────────────────────────────────────────────
 # workflows
 # ──────────────────────────────────────────────────────────
 
@@ -312,20 +360,20 @@ def stats():
 
 
 @main.command()
-@click.option("--path", default=None, help="自定义工作空间路径（默认 ~/.dev-pilot/）")
+@click.option("--path", default=None, help="自定义工作空间路径（默认 ~/.autopilot/）")
 def init(path):
     """初始化用户工作空间"""
     import shutil
     from pathlib import Path
 
-    from core import DEV_PILOT_HOME
+    from core import AUTOPILOT_HOME
 
     framework_root = Path(__file__).parent.parent
 
     if path:
         home = Path(path).expanduser()
     else:
-        home = DEV_PILOT_HOME
+        home = AUTOPILOT_HOME
 
     click.echo(f"初始化用户工作空间：{home}")
 
@@ -370,9 +418,9 @@ def init(path):
     click.echo("\n初始化完成！")
     click.echo("\n后续步骤：")
     click.echo(f"  1. 编辑 {config_dest} 配置框架参数")
-    click.echo("  2. 运行 dev-pilot upgrade 初始化数据库")
+    click.echo("  2. 运行 autopilot upgrade 初始化数据库")
     if path:
-        click.echo(f"  3. 设置环境变量：export DEV_PILOT_HOME={home}")
+        click.echo(f"  3. 设置环境变量：export AUTOPILOT_HOME={home}")
 
 
 # ──────────────────────────────────────────────────────────
@@ -385,7 +433,7 @@ def init(path):
 @click.option("--dry-run", is_flag=True, help="预览待执行迁移")
 def upgrade(show_status, dry_run):
     """数据库升级"""
-    from core import DEV_PILOT_HOME
+    from core import AUTOPILOT_HOME
     from core.db import get_conn, init_db
     from core.migrate import (
         ensure_schema_version_table,
@@ -394,8 +442,8 @@ def upgrade(show_status, dry_run):
         run_pending_migrations,
     )
 
-    click.echo(f"dev-pilot v{__version__}")
-    click.echo(f"DEV_PILOT_HOME: {DEV_PILOT_HOME}")
+    click.echo(f"autopilot v{__version__}")
+    click.echo(f"AUTOPILOT_HOME: {AUTOPILOT_HOME}")
     click.echo()
 
     init_db()
