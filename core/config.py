@@ -37,9 +37,7 @@ def load_config() -> dict:
 # Schema 定义
 # ──────────────────────────────────────────────────────────
 
-_SCHEMA: dict[str, dict] = {
-    "default_branch": {"type": str},
-}
+_SCHEMA: dict[str, dict] = {}
 
 
 def validate_config(config: dict) -> tuple[list[str], list[str]]:

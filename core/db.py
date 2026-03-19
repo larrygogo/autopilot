@@ -392,10 +392,5 @@ def any_sub_task_failed(parent_task_id: str) -> bool:
     return False
 
 
-def get_default_branch(project: str | None = None) -> str:
-    """获取主分支名称"""
-    return CONFIG.get("default_branch", "main")
-
-
 if __name__ == "__main__":
     init_db()

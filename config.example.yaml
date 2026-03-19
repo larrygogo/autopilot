@@ -6,8 +6,5 @@
 #   3. 当前工作目录的 config.yaml
 #   4. 项目目录的 config.yaml
 #
-# 框架仅使用 default_branch，其余字段由工作流自行读取。
+# 框架本身无内置配置项，所有字段由工作流自行读取。
 # 工作流专属配置详见 examples/ 下各工作流的 config.example.yaml。
-
-# Git 主分支名（默认 main）
-# default_branch: main

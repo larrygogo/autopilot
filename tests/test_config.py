@@ -15,11 +15,11 @@ class TestLoadConfig:
     def test_env_var_priority(self, tmp_path):
         """环境变量指定的配置文件优先"""
         cfg_file = tmp_path / "env_config.yaml"
-        cfg_file.write_text("default_branch: develop\n", encoding="utf-8")
+        cfg_file.write_text("my_key: my_value\n", encoding="utf-8")
 
         with mock.patch.dict(os.environ, {"DEV_WORKFLOW_CONFIG": str(cfg_file)}):
             config = load_config()
-        assert config.get("default_branch") == "develop"
+        assert config.get("my_key") == "my_value"
 
     def test_missing_file_returns_empty(self):
         """所有配置文件都不存在时返回空 dict"""
@@ -42,53 +42,29 @@ class TestLoadConfig:
     def test_valid_config_loads_values(self, tmp_path):
         """有效配置加载所有值"""
         cfg_file = tmp_path / "valid.yaml"
-        cfg_file.write_text("default_branch: main\ntimeouts:\n  design: 600\n", encoding="utf-8")
+        cfg_file.write_text("timeout: 600\nretries: 3\n", encoding="utf-8")
 
         with mock.patch.dict(os.environ, {"DEV_WORKFLOW_CONFIG": str(cfg_file)}):
             config = load_config()
-        assert config["default_branch"] == "main"
-        assert config["timeouts"]["design"] == 600
+        assert config["timeout"] == 600
+        assert config["retries"] == 3
 
 
 class TestValidateConfig:
     """配置校验"""
-
-    def test_valid_config_no_errors(self):
-        """有效配置无 errors 和 warnings"""
-        config = {"default_branch": "main"}
-        errors, warnings = validate_config(config)
-        assert errors == []
-        assert warnings == []
-
-    def test_unknown_key_warning(self):
-        """未知配置项产生 warning"""
-        config = {"default_branch": "main", "unknown_key": "value"}
-        errors, warnings = validate_config(config)
-        assert errors == []
-        assert len(warnings) == 1
-        assert "unknown_key" in warnings[0]
-
-    def test_wrong_type_error(self):
-        """类型错误产生 error"""
-        config = {"default_branch": 123}
-        errors, warnings = validate_config(config)
-        assert len(errors) == 1
-        assert "default_branch" in errors[0]
-        assert warnings == []
-
-    def test_workflow_config_treated_as_unknown(self):
-        """工作流专属配置项产生 warning（框架不校验）"""
-        config = {"default_branch": "main", "timeouts": {"design": 600}}
-        errors, warnings = validate_config(config)
-        assert errors == []
-        assert len(warnings) == 1
-        assert "timeouts" in warnings[0]
 
     def test_empty_config_passes(self):
         """空配置通过校验"""
         errors, warnings = validate_config({})
         assert errors == []
         assert warnings == []
+
+    def test_unknown_keys_produce_warnings(self):
+        """框架 schema 为空，所有 key 产生 warning"""
+        config = {"some_key": "value", "another": 123}
+        errors, warnings = validate_config(config)
+        assert errors == []
+        assert len(warnings) == 2
 
     def test_non_dict_config_error(self):
         """非 dict 配置产生 error"""

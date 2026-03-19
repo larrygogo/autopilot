@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 from core import AUTOPILOT_HOME
-from core.db import CONFIG, get_conn, get_default_branch, get_task, now
+from core.db import CONFIG, get_conn, get_task, now
 from core.infra import get_task_dir
 from core.logger import get_logger
 from core.state_machine import transition
@@ -52,6 +52,11 @@ PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 # ──────────────────────────────────────────────────────────
 
 PROJECTS_DIR = AUTOPILOT_HOME / "runtime/projects"
+
+
+def get_default_branch(project: str | None = None) -> str:
+    """获取主分支名称（从工作流配置读取）"""
+    return CONFIG.get("default_branch", "main")
 
 
 def _run_git(args: list[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:

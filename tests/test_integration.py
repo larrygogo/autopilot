@@ -6,7 +6,7 @@
 
 import pytest
 
-from core.db import create_task, get_active_tasks, get_default_branch, get_task, get_task_logs
+from core.db import create_task, get_active_tasks, get_task, get_task_logs
 from core.registry import get_terminal_states
 from core.state_machine import (
     transition,
@@ -323,15 +323,6 @@ class TestLogIntegrity:
             to_s = logs_asc[i]["to_status"]
             from_s = logs_asc[i + 1]["from_status"]
             assert to_s == from_s, f"日志链断裂：第{i}条 to={to_s} != 第{i + 1}条 from={from_s}"
-
-
-class TestDefaultBranchConfig:
-    """场景 9：主分支配置"""
-
-    def test_default_branch_returns_string(self):
-        branch = get_default_branch()
-        assert isinstance(branch, str)
-        assert branch in ("main", "master") or len(branch) > 0
 
 
 class TestReqReviewWorkflow:

@@ -7,7 +7,6 @@ import pytest
 from core.db import (
     create_task,
     get_active_tasks,
-    get_default_branch,
     get_task,
     get_task_logs,
     now,
@@ -122,8 +121,3 @@ class TestUtilities:
         ts = now()
         assert "T" in ts
         assert "+" in ts or "Z" in ts
-
-    def test_get_default_branch(self):
-        branch = get_default_branch()
-        assert isinstance(branch, str)
-        assert len(branch) > 0

@@ -77,7 +77,6 @@ autopilot/
 
 - Python 3.10+，使用 `from __future__ import annotations` 支持新式类型注解
 - 核心函数必须有类型提示
-- 主分支名从 `config.yaml` 的 `default_branch` 读取，默认 `main`
 - 框架核心（core/）不得引入任何工作流专属的常量、配置或逻辑
 - 工作流模块必须自包含：业务常量、辅助函数、通知实现均在模块内部
 - 所有模块通过 `from core import AUTOPILOT_HOME` 引用用户工作空间路径
@@ -144,8 +143,7 @@ python -m pytest tests/ -v
 
 ## 配置
 
-参考 `config.example.yaml`，框架级配置仅需：
-- `default_branch`：主分支名（可选）
+参考 `config.example.yaml`，框架本身无内置配置项，所有字段由工作流自行读取。
 
 工作流专属配置详见 `examples/` 下各工作流的 `config.example.yaml`。
 
