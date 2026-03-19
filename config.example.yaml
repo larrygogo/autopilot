@@ -2,12 +2,18 @@
 #
 # 配置文件查找优先级：
 #   1. 环境变量 DEV_WORKFLOW_CONFIG 指定的路径
-#   2. 当前工作目录的 config.yaml
-#   3. ~/.openclaw/dev-workflow/config.yaml
+#   2. DEV_PILOT_HOME/config.yaml（默认 ~/.dev-pilot/config.yaml）
+#   3. 当前工作目录的 config.yaml
 #   4. 项目目录的 config.yaml
-
-# 运行时数据存放路径（默认 ~/.openclaw/workspace）
-# workspace: ~/.openclaw/workspace
+#
+# 用户工作空间路径（通过环境变量 DEV_PILOT_HOME 设置，默认 ~/.dev-pilot/）
+# 目录结构：
+#   ~/.dev-pilot/
+#   ├── config.yaml        # 本配置文件
+#   ├── workflows/         # 用户自定义工作流
+#   ├── prompts/           # 用户提示词模板
+#   └── runtime/
+#       └── workflow.db    # SQLite 数据库
 
 # Git 主分支名（默认 main）
 # default_branch: main

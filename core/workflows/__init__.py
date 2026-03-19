@@ -1,6 +1,7 @@
 """
-工作流包：自动发现并注册所有工作流模块
+工作流包：触发用户工作流发现
 """
+
 from core.registry import discover
 
 discover()

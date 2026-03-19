@@ -1,14 +1,15 @@
 """
 统一日志模块：分级日志 + 任务级文件输出 + 阶段标签
 """
+
 from __future__ import annotations
 
 import logging
 import sys
 from pathlib import Path
 
-_FMT = '%(asctime)s [%(levelname)s] [%(phase_tag)s] %(message)s'
-_DATEFMT = '%Y-%m-%d %H:%M:%S'
+_FMT = "%(asctime)s [%(levelname)s] [%(phase_tag)s] %(message)s"
+_DATEFMT = "%Y-%m-%d %H:%M:%S"
 
 
 class _PhaseFilter(logging.Filter):
@@ -16,7 +17,7 @@ class _PhaseFilter(logging.Filter):
 
     def __init__(self):
         super().__init__()
-        self.phase_tag = 'SYSTEM'
+        self.phase_tag = "SYSTEM"
 
     def filter(self, record):
         record.phase_tag = self.phase_tag
@@ -27,7 +28,7 @@ class _PhaseFilter(logging.Filter):
 _phase_filter = _PhaseFilter()
 
 
-def get_logger(name: str = 'core') -> logging.Logger:
+def get_logger(name: str = "core") -> logging.Logger:
     """获取模块 logger（单例，只初始化一次 handler）"""
     logger = logging.getLogger(name)
     if not logger.handlers:
@@ -47,12 +48,12 @@ def set_phase(phase: str, label: str | None = None) -> None:
 
 def reset_phase() -> None:
     """重置阶段标签"""
-    _phase_filter.phase_tag = 'SYSTEM'
+    _phase_filter.phase_tag = "SYSTEM"
 
 
 def add_task_log_handler(logger: logging.Logger, task_dir: str | Path) -> None:
     """为 logger 添加任务级文件 handler（写入 workflow.log）"""
-    log_path = Path(task_dir) / 'workflow.log'
+    log_path = Path(task_dir) / "workflow.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 避免重复添加同一文件的 handler
@@ -60,7 +61,7 @@ def add_task_log_handler(logger: logging.Logger, task_dir: str | Path) -> None:
         if isinstance(h, logging.FileHandler) and h.baseFilename == str(log_path.resolve()):
             return
 
-    handler = logging.FileHandler(str(log_path), mode='a', encoding='utf-8')
+    handler = logging.FileHandler(str(log_path), mode="a", encoding="utf-8")
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter(_FMT, datefmt=_DATEFMT))
     logger.addHandler(handler)

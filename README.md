@@ -4,88 +4,54 @@ AI 驱动的可扩展开发工作流自动化框架。基于状态机 + Push 模
 
 ## 特性
 
-- **插件化工作流**：在 `workflows/` 目录下新增工作流模块即可自动注册，无需修改核心代码
+- **插件化工作流**：用户工作流自动发现，放入 `DEV_PILOT_HOME/workflows/` 即可注册
 - **状态机驱动**：SQLite 持久化，原子性状态转换，非法转换在运行时阻止
 - **Push 模型**：每个阶段完成后非阻塞启动下一阶段，无需轮询
 - **并发安全**：跨平台文件锁（Unix `fcntl.flock` / Windows `msvcrt.locking`）防止竞态条件
 - **Watcher 保底**：定期检测卡死任务，自动恢复执行
+- **统一 CLI**：`dev-pilot` 命令，10 个子命令覆盖所有操作
+- **用户空间分离**：`DEV_PILOT_HOME`（默认 `~/.dev-pilot/`）存放用户配置、工作流和运行时数据，`git pull` 升级安全无冲突
+- **数据库迁移引擎**：纯 stdlib 实现，支持顺序迁移、失败回滚、schema 版本检查
+- **配置校验**：`dev-pilot config check` 自动检测配置文件中的类型错误和未知字段
 - **可配置**：`config.yaml` 驱动，支持多项目、多 AI agent、自定义超时
 
 ## 快速开始
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/your-org/dev-pilot
+git clone https://github.com/larrygogo/dev-pilot
 cd dev-pilot
 
-# 2. 安装依赖
-pip install -r requirements.txt
+# 2. 安装（推荐）
+pip install -e ".[dev]"
 
-# 3. 配置
-cp config.example.yaml config.yaml
-# 编辑 config.yaml，填写项目路径、通知渠道等
+# 3. 初始化用户工作空间
+dev-pilot init
 
-# 4. 启动任务
-python3 bin/start_task.py <req_id> --project my-project
+# 4. 执行数据库迁移
+dev-pilot upgrade
+
+# 5. 编辑配置
+vim ~/.dev-pilot/config.yaml
+
+# 6. 校验配置
+dev-pilot config check
+
+# 7. 启动任务
+dev-pilot start <req_id> --project my-project
 ```
-
-## 内置工作流
-
-### dev — 完整开发流程
-
-从需求到 PR 的全自动 5 阶段流水线：
-
-```
-pending_design ──→ designing ──→ pending_review ──→ reviewing
-       ↑ (驳回重试)                                    ↓ 通过
-       └── review_rejected                        developing
-                                                       │
-                                                  in_development
-                                                       │
-                                              code_reviewing ──→ pr_submitted ✓
-                                                       ↑ (驳回重试)
-                                                  code_rejected
-```
-
-| 阶段 | 说明 | 默认超时 |
-|------|------|----------|
-| **design** | AI 生成技术方案（`plan.md`） | 900s |
-| **review** | AI 评审方案，通过/驳回 | 900s |
-| **dev** | AI 在仓库中实现代码并提交 | 1800s |
-| **code_review** | AI 审查代码变更，通过/驳回 | 1200s |
-| **pr** | 推送分支、生成 PR 描述、创建 PR | 300s |
-
-驳回时自动重试上游阶段，默认最多 10 次。
-
-### req_review — 需求评审
-
-轻量级需求分析与评审，2 阶段：
-
-```
-pending_analysis ──→ analyzing ──→ pending_req_review ──→ req_reviewing
-                                          ↑ (驳回重试)          ↓ 通过
-                                     req_review_rejected    req_review_done ✓
-```
-
-| 阶段 | 说明 | 默认超时 |
-|------|------|----------|
-| **req_analysis** | 获取并分析需求 | 900s |
-| **req_review** | AI 评审需求质量 | 900s |
 
 ## 自定义工作流
 
-创建新工作流只需 3 步：
-
-1. 在 `src/dev_workflow/workflows/` 下新建 Python 模块
-2. 定义阶段函数和 `WORKFLOW` 字典
-3. 框架自动发现并注册
+将工作流模块放入 `~/.dev-pilot/workflows/` 目录，框架自动发现并注册。
 
 ```python
-# src/dev_workflow/workflows/my_workflow.py
+# ~/.dev-pilot/workflows/my_workflow.py
 
 WORKFLOW = {
     'name': 'my_workflow',
     'description': '我的自定义工作流',
+    'initial_state': 'pending_step1',
     'terminal_states': ['done', 'cancelled'],
     'phases': [
         {
@@ -105,43 +71,87 @@ WORKFLOW = {
 
 > 详细开发指南见 [`knowledge/workflow-development.md`](knowledge/workflow-development.md)
 
+## DEV_PILOT_HOME
+
+用户数据与框架代码分离，统一存放在 `DEV_PILOT_HOME`（默认 `~/.dev-pilot/`，可通过环境变量覆盖）：
+
+```
+~/.dev-pilot/                    # DEV_PILOT_HOME
+├── config.yaml                  # 用户配置
+├── workflows/                   # 用户自定义工作流
+├── prompts/                     # 用户提示词模板
+└── runtime/
+    └── workflow.db              # SQLite 数据库
+```
+
 ## 架构概览
 
 ```
-bin/                        CLI 入口脚本
-  start_task.py               注册并启动任务
-  run_phase.py                后台阶段执行入口
-  cancel_task.py              取消运行中的任务
-  watcher.py                  cron 异常恢复入口
-src/dev_workflow/           核心库
-  db.py                       SQLite 数据库 & 配置加载
-  state_machine.py            状态机定义 & 原子转换
-  runner.py                   阶段执行引擎 & Push 模型
-  registry.py                 工作流插件注册 & 发现
-  infra.py                    基础设施（git / 锁 / 通知 / AI 调用）
-  logger.py                   阶段标签日志
-  watcher.py                  卡死任务检测 & 恢复
-  workflows/                  工作流插件目录
-    dev.py                      完整开发流程（5 阶段）
-    req_review.py               需求评审（2 阶段）
-prompts/                    AI 提示词模板（Mustache 风格）
-knowledge/                  架构文档 & 开发指南
-tests/                      单元测试
+dev-pilot/
+├── core/                          # 框架核心（通用引擎）
+│   ├── __init__.py                # __version__ + DEV_PILOT_HOME
+│   ├── cli.py                     # 统一 click CLI 入口
+│   ├── config.py                  # 配置加载 + schema 校验
+│   ├── db.py                      # SQLite 数据库 & 查询
+│   ├── state_machine.py           # 纯状态机，转换表由注册表提供
+│   ├── runner.py                  # 执行引擎 & Push 模型
+│   ├── registry.py                # 工作流插件注册 & 发现（用户工作流）
+│   ├── infra.py                   # git / 锁 / 通知分发 / AI 调用
+│   ├── logger.py                  # 阶段标签日志
+│   ├── watcher.py                 # 卡死任务检测 & 恢复
+│   ├── migrate.py                 # 数据库迁移引擎
+│   ├── migrations/                # 迁移脚本
+│   └── workflows/                 # 工作流包（触发用户工作流发现）
+├── bin/                           # 独立 CLI 脚本（兼容旧用法）
+├── examples/                      # 示例工作流（参考实现）
+├── prompts/                       # AI 提示词模板
+├── knowledge/                     # 架构文档
+├── tests/                         # 单元测试（176 个）
+├── pyproject.toml                 # 包配置 + ruff + pytest
+└── .github/workflows/ci.yml      # GitHub Actions CI
 ```
 
 核心模块职责：
 
 | 模块 | 职责 |
 |------|------|
-| `registry` | 自动扫描 `workflows/` 目录，注册工作流，提供阶段查询、转换表生成 |
+| `cli` | 统一命令行入口，10 个子命令覆盖全部操作 |
+| `config` | 配置文件加载（多路径搜索）和 schema 校验 |
+| `registry` | 自动扫描用户工作流目录，注册工作流，提供阶段查询、转换表生成 |
 | `state_machine` | 原子性状态转换（SQLite 事务），动态从 registry 加载转换表 |
 | `runner` | 获取锁 → 执行阶段函数 → 释放锁，提供 `run_in_background()` Push 推进 |
-| `infra` | 跨平台文件锁、git 操作、Claude CLI 调用、通知发送、需求获取 |
-| `db` | SQLite 持久化（tasks / task_logs 表），配置文件加载 |
-| `logger` | 阶段标签格式化日志，支持文件和控制台输出 |
+| `infra` | 跨平台文件锁、git 操作、Claude CLI 调用、通知发送 |
+| `db` | SQLite 持久化（tasks / task_logs 表） |
+| `migrate` | 数据库迁移引擎，顺序执行、失败回滚、版本管理 |
 | `watcher` | 定期扫描活跃任务，检测卡死（>600s 无锁），自动重试恢复 |
 
 > 详细架构文档见 [`knowledge/architecture.md`](knowledge/architecture.md)
+
+## CLI 命令
+
+安装后通过 `dev-pilot` 命令使用：
+
+```bash
+# 任务管理
+dev-pilot start <req_id> [--project <name>] [--workflow <name>]   # 注册并启动任务
+dev-pilot cancel <task_id> [--reason <reason>]                    # 取消任务
+dev-pilot list [--status <s>] [--workflow <w>] [--project <p>]    # 查询任务列表
+dev-pilot show <task_id> [--logs <n>]                             # 查看任务详情
+dev-pilot stats                                                   # 任务统计概览
+
+# 工作流
+dev-pilot workflows                                               # 列出已注册工作流
+
+# 系统管理
+dev-pilot init [--path <dir>]                                     # 初始化用户工作空间
+dev-pilot upgrade [--status] [--dry-run]                          # 数据库升级
+dev-pilot watch                                                   # 卡死检测与自动恢复
+
+# 配置
+dev-pilot config check [--file <path>]                            # 校验配置文件
+```
+
+> `bin/` 目录下的独立脚本仍可使用，但推荐使用 `dev-pilot` 统一命令。
 
 ## 配置
 
@@ -161,7 +171,7 @@ timeouts:
 
 # 需求系统
 reqgenie:
-  base_url: https://reqgenie.reverse-game.ltd
+  base_url: https://reqgenie.example.com
   op_item: 'reqgenie 需求系统'
 
 # 通知
@@ -184,68 +194,56 @@ projects:
     tech_stack: "Rust + TypeScript + PostgreSQL"
 ```
 
-## CLI 命令
-
-### 启动任务
-
-```bash
-python3 bin/start_task.py <req_id> [--project <name>] [--repo <path>] [--title <title>] [--workflow <name>]
-```
-
-- `req_id`：需求 ID（来自 ReqGenie）
-- `--project`：项目名（对应 config.yaml 中的 projects 配置）
-- `--workflow`：工作流名称（默认 `dev`，可选 `req_review`）
-
-### 取消任务
-
-```bash
-python3 bin/cancel_task.py <task_id> [--reason <reason>]
-```
-
-### 手动执行阶段
-
-```bash
-python3 bin/run_phase.py <task_id> <phase>
-```
-
-### Watcher（建议配合 cron）
-
-```bash
-# 手动运行
-python3 bin/watcher.py
-
-# 配置 OpenClaw cron（每 5 分钟）
-openclaw cron add --name dev-workflow-watcher --every 5m \
-  --system-event "python3 /path/to/dev-pilot/bin/watcher.py"
-```
+使用 `dev-pilot config check` 校验配置是否正确。
 
 ## 开发
+
+### 安装开发环境
+
+```bash
+pip install -e ".[dev]"    # 安装 dev-pilot + pytest + ruff
+```
 
 ### 运行测试
 
 ```bash
-pip install pytest
-python -m pytest tests/ -v
+pytest tests/ -v           # 176 个测试
+```
+
+### 代码质量
+
+```bash
+ruff check .               # lint 检查
+ruff format .              # 代码格式化
+```
+
+### 数据库升级
+
+新增迁移脚本放入 `core/migrations/`，命名格式 `NNN_description.py`，实现 `up(conn)` 函数。
+
+```bash
+dev-pilot upgrade --status    # 查看当前版本和待执行迁移
+dev-pilot upgrade --dry-run   # 预览将执行的迁移
+dev-pilot upgrade             # 执行迁移
 ```
 
 ### 开发规范
 
 - Python 3.10+，使用 `from __future__ import annotations`
+- ruff 格式化，行宽 120
 - 核心函数必须有类型提示
 - git 操作使用 `infra._run_git()` 辅助函数
 - 主分支名和超时值从 `config.yaml` 读取，不要硬编码
+- 框架核心（`core/`）不得引入任何工作流专属的常量、配置或逻辑
 
 ## 依赖
 
 - Python 3.10+
+- PyYAML >= 6.0
+- click >= 8.0
 - [Claude Code CLI](https://claude.ai/code) 或 [Codex CLI](https://github.com/openai/codex)
-- [1Password CLI (op)](https://1password.com/downloads/command-line/)
 - [GitHub CLI (gh)](https://cli.github.com/)
-- OpenClaw（用于通知和 cron 调度）
 
-## 未来规划
+## License
 
-- **持久化任务队列**：引入 Redis 或消息队列，替代 SQLite + subprocess 调度，支持分布式部署
-- **Web UI / Dashboard**：可视化面板查看任务状态、日志、产出物，支持手动干预
-- **Metrics 与可观测性**：接入 Prometheus / Grafana，采集各阶段耗时和成功率指标
-- **更多 AI 模型**：支持 GPT-4、Gemini、本地模型等，按阶段灵活选择
+MIT

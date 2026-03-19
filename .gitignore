@@ -4,5 +4,7 @@ __pycache__/
 *.db
 *.log
 .env
+.venv/
+*.egg-info/
 claude-progress.md
 feature-list.json
