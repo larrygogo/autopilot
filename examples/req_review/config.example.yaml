@@ -1,12 +1,2 @@
 # req_review 工作流配置
-# 合并到项目根目录的 config.yaml 中使用
-
-# 需求管理系统（ReqGenie）集成
-reqgenie:
-  base_url: https://your-reqgenie-instance.com
-  op_item: reqgenie 需求系统
-  op_vault: your-vault
-
-# 超时配置
-timeouts:
-  review: 900  # 需求评审（15 分钟）
+# 当前无必需配置项，需求内容从 task_dir/requirement.md 读取

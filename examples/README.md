@@ -45,10 +45,10 @@ cp -r examples/data_pipeline/ ~/.autopilot/workflows/data_pipeline/
 
 2 个阶段：需求分析 → 需求评审
 
-- `workflow.yaml` — 工作流定义
-- `workflow.py` — 阶段函数实现
-- `config.example.yaml` — req_review 专属配置模板
-- `prompts/` — 1 个 AI 提示词模板
+- `workflow.yaml` — 工作流定义（自动推导 + reject 语法糖）
+- `workflow.py` — 阶段函数实现（内联提示词）
+
+**展示特性**：极简 2 阶段流程、reject 驳回机制、需求来源为本地 requirement.md
 
 ### doc_gen — 文档生成与评审
 
