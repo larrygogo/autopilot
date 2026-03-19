@@ -167,7 +167,7 @@ def execute_phase(task_id: str, phase: str) -> None:
         try:
             task = get_task(task_id)
             if task:
-                notify(task, f"⚠️ 阶段 {phase} 执行失败：《{task['title']}》\n\n错误：{e}")
+                notify(task, f"⚠️ 阶段 {phase} 执行失败：《{task['title']}》\n\n错误：{e}", event="error")
         except Exception:
             pass
         # on_phase_error 钩子

@@ -179,11 +179,11 @@ def _get_phase_config(task: dict, phase_name: str, key: str, default):
     return default
 
 
-def _notify(task: dict, message: str, media_path: str | None = None) -> None:
+def _notify(task: dict, message: str, media_path: str | None = None, event: str = "info") -> None:
     """通知快捷方式：通过框架 notify 分发"""
     from core.infra import notify
 
-    notify(task, message, media_path)
+    notify(task, message, media_path, event=event)
 
 
 # ──────────────────────────────────────────────────────────
@@ -540,6 +540,22 @@ WORKFLOW = {
     "description": "完整开发流程",
     "setup_func": setup_dev_task,
     "notify_func": notify_dev,
+    # 通知后端配置（框架内置多后端分发，当 notify_func 未定义时生效）
+    # 事件类型：progress / success / error / info，"*" 表示全部
+    # 模板变量：{{message}} {{target}} {{channel}} {{task_id}} {{title}} {{workflow}} {{status}} {{event}}
+    # 条件块：{{#media_path}}...{{/media_path}}，环境变量：${BOT_TOKEN}
+    "notify_backends": [
+        {
+            "name": "local-cmd",
+            "type": "command",
+            "command": (
+                "openclaw message send --channel {{channel}} --target {{target}}"
+                ' --message "{{message}}"'
+                ' {{#media_path}}--media "{{media_path}}"{{/media_path}}'
+            ),
+            "events": ["*"],
+        },
+    ],
     "phases": [
         {
             "name": "design",

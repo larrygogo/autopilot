@@ -149,7 +149,8 @@ def recover_task(task):
 
     if failure_count >= max_retries:
         log.error("失败次数过多（%d次），通知用户", failure_count)
-        notify(task, f"⚠️ 任务卡死：《{task['title']}》\n\n状态：{status}，已失败 {failure_count} 次。请人工检查。")
+        msg = f"⚠️ 任务卡死：《{task['title']}》\n\n状态：{status}，已失败 {failure_count} 次。请人工检查。"
+        notify(task, msg, event="error")
         return
 
     # running 状态：先回退到 pending，再重新触发

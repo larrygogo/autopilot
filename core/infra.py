@@ -116,9 +116,16 @@ def release_lock(task_id: str) -> None:
 # ──────────────────────────────────────────────────────────
 
 
-def notify(task: dict, message: str, media_path: str | None = None) -> None:
-    """通用通知：从工作流注册表获取 notify_func，没有则仅打日志"""
+def notify(task: dict, message: str, media_path: str | None = None, event: str = "info") -> None:
+    """
+    通用通知分发：
+    1. 工作流 notify_func 存在则调用（覆盖语义）并 return
+    2. 框架多后端分发（core.notify.dispatch）
+    3. 两者都没有 → log.info 兜底
+    """
     workflow_name = task.get("workflow", "")
+
+    # 1. 工作流自定义 notify_func（覆盖语义）
     try:
         from core import registry
 
@@ -127,7 +134,18 @@ def notify(task: dict, message: str, media_path: str | None = None) -> None:
             wf["notify_func"](task, message, media_path)
             return
     except Exception as e:
-        log.debug("通知分发失败：%s", e)
+        log.debug("工作流 notify_func 调用失败：%s", e)
+
+    # 2. 框架多后端分发
+    try:
+        from core.notify import dispatch
+
+        if dispatch(task, message, event=event, media_path=media_path):
+            return
+    except Exception as e:
+        log.debug("框架通知分发失败：%s", e)
+
+    # 3. 兜底日志
     log.info("通知: %s", message[:120])
 
 

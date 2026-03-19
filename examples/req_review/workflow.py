@@ -73,11 +73,11 @@ def fetch_req(req_id: str) -> dict | None:
     return None
 
 
-def _notify(task: dict, message: str, media_path: str | None = None) -> None:
+def _notify(task: dict, message: str, media_path: str | None = None, event: str = "info") -> None:
     """通知快捷方式：通过框架 notify 分发"""
     from core.infra import notify
 
-    notify(task, message, media_path)
+    notify(task, message, media_path, event=event)
 
 
 # ──────────────────────────────────────────────────────────
@@ -156,6 +156,18 @@ def run_req_review(task_id: str) -> None:
 WORKFLOW = {
     "name": "req_review",
     "description": "需求评审流程",
+    # 通知后端：未配置 notify_func 时由框架分发
+    # "notify_backends": [
+    #     {
+    #         "name": "telegram",
+    #         "type": "webhook",
+    #         "url": "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage",
+    #         "method": "POST",
+    #         "headers": {"Content-Type": "application/json"},
+    #         "body": '{"chat_id": "{{target}}", "text": "[{{workflow}}] {{message}}"}',
+    #         "events": ["progress", "success", "error"],
+    #     },
+    # ],
     "phases": [
         {
             "name": "req_analysis",

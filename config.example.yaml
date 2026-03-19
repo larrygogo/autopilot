@@ -18,9 +18,12 @@
 # Git 主分支名（默认 main）
 # default_branch: main
 
+# 通知后端在各工作流的 WORKFLOW['notify_backends'] 中定义，详见 examples/ 下的示例。
+# config.yaml 中的 notify.channel / notify.target 仅作为模板变量数据来源。
+
 # 以下配置由具体工作流使用，详见 examples/ 下各工作流的 config.example.yaml：
 # - reqgenie: 需求管理系统集成
-# - notify: 通知渠道
+# - notify: 通知渠道（channel/target 作为模板变量数据来源）
 # - timeouts: 各阶段超时
 # - agents: AI agent 分配
 # - projects: 项目映射

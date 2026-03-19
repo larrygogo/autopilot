@@ -40,6 +40,7 @@ dev-pilot/
 │   ├── runner.py                  # 执行引擎 & Push 模型
 │   ├── registry.py                # 工作流插件注册 & 发现（用户工作流）
 │   ├── infra.py                   # git / 锁 / 通知分发 / AI 调用
+│   ├── notify.py                  # 多后端通知系统（webhook / command）
 │   ├── logger.py                  # 阶段标签日志
 │   ├── watcher.py                 # 卡死任务检测 & 恢复
 │   ├── migrate.py                 # 数据库迁移引擎

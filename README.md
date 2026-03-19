@@ -97,6 +97,7 @@ dev-pilot/
 │   ├── runner.py                  # 执行引擎 & Push 模型
 │   ├── registry.py                # 工作流插件注册 & 发现（用户工作流）
 │   ├── infra.py                   # git / 锁 / 通知分发 / AI 调用
+│   ├── notify.py                  # 多后端通知系统（webhook / command）
 │   ├── logger.py                  # 阶段标签日志
 │   ├── watcher.py                 # 卡死任务检测 & 恢复
 │   ├── migrate.py                 # 数据库迁移引擎
@@ -121,6 +122,7 @@ dev-pilot/
 | `state_machine` | 原子性状态转换（SQLite 事务），动态从 registry 加载转换表 |
 | `runner` | 获取锁 → 执行阶段函数 → 释放锁，提供 `run_in_background()` Push 推进 |
 | `infra` | 跨平台文件锁、git 操作、Claude CLI 调用、通知发送 |
+| `notify` | 多后端通知系统，支持 webhook 和 command 两种后端，事件路由、模板渲染（在工作流 WORKFLOW 中配置） |
 | `db` | SQLite 持久化（tasks / task_logs 表） |
 | `migrate` | 数据库迁移引擎，顺序执行、失败回滚、版本管理 |
 | `watcher` | 定期扫描活跃任务，检测卡死（>600s 无锁），自动重试恢复 |
@@ -174,7 +176,7 @@ reqgenie:
   base_url: https://reqgenie.example.com
   op_item: 'reqgenie 需求系统'
 
-# 通知
+# 通知（channel/target 作为模板变量数据来源）
 notify:
   channel: telegram
   target: "your_chat_id"

@@ -132,7 +132,7 @@ def cancel(task_id, reason):
     try:
         transition(task_id, "cancel", note=reason)
         click.echo(f"✓ 任务已取消：{task_id} — {task['title']}")
-        notify(task, f"🚫 任务已取消：《{task['title']}》\n\n原因：{reason}")
+        notify(task, f"🚫 任务已取消：《{task['title']}》\n\n原因：{reason}", event="info")
     except InvalidTransitionError as e:
         click.echo(f"取消失败：{e}")
         sys.exit(1)
