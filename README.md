@@ -117,7 +117,7 @@ WORKFLOW = {
 }
 ```
 
-> 完整开发指南见 [`knowledge/workflow-development.md`](knowledge/workflow-development.md)
+> 完整开发指南见 [`docs/workflow-development.md`](docs/workflow-development.md)
 
 ## 架构
 
@@ -134,11 +134,11 @@ autopilot/
 │   ├── migrate.py           # 数据库迁移引擎
 │   └── cli.py               # 统一 CLI 入口
 ├── examples/                # 示例工作流（dev 开发流程 / req_review 需求评审）
-├── knowledge/               # 架构文档
+├── docs/                    # 架构文档
 └── tests/                   # 单元测试
 ```
 
-> 详细架构文档见 [`knowledge/architecture.md`](knowledge/architecture.md)
+> 详细架构文档见 [`docs/architecture.md`](docs/architecture.md)
 
 ## CLI
 

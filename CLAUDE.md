@@ -71,8 +71,7 @@ autopilot/
 │       ├── workflow.py
 │       ├── config.example.yaml
 │       └── prompts/
-├── prompts/                       # AI 提示词模板
-├── knowledge/                     # 架构文档
+├── docs/                          # 架构文档
 ├── tests/                         # 单元测试
 └── config.example.yaml            # 极简框架配置
 ```
@@ -156,7 +155,7 @@ python -m pytest tests/ -v
 
 ## 知识库
 
-详细架构文档见 `knowledge/` 目录：
+详细架构文档见 `docs/` 目录：
 - `architecture.md`：整体架构、模块职责、数据流、设计决策
 - `workflow-development.md`：自定义工作流开发指南、YAML 工作流完整字段说明
 - `state-machine.md`：状态转换表、驳回机制、各工作流完整状态图

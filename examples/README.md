@@ -69,7 +69,7 @@ cp -r examples/req_review/ ~/.autopilot/workflows/req_review/
 
 ## 开发自定义工作流
 
-参考 `knowledge/workflow-development.md` 获取完整的工作流开发指南。
+参考 `docs/workflow-development.md` 获取完整的工作流开发指南。
 
 ### 推荐方式：YAML 工作流
 

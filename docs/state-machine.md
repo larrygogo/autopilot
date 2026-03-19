@@ -57,7 +57,27 @@ COMMIT;                                        -- 提交（全部成功或全部
 
 如果触发器不合法，抛出 `InvalidTransitionError`，事务回滚。
 
-## 驳回 / 重试机制
+## 跳转机制（Jump）
+
+底层使用 `jump_trigger` / `jump_target` 实现方向无关的阶段跳转。
+
+### reject 语法糖
+
+`reject` 是 jump 的语法糖，只允许往回跳（目标必须在当前阶段之前）：
+
+```yaml
+- name: review
+  reject: design     # 语法糖，展开为 jump_trigger + jump_target
+```
+
+展开后等价于：
+```yaml
+- name: review
+  jump_trigger: review_reject
+  jump_target: design
+```
+
+### 驳回转换过程
 
 驳回是一个两步转换过程：
 
@@ -69,10 +89,25 @@ reviewing ──[review_reject]──→ review_rejected ──[retry_design]─
    └─── 第二步：从驳回态回退到目标阶段的 pending 态 ─────────────────────────┘
 ```
 
-驳回计数机制：
+### 直接跳转
+
+直接使用 `jump_trigger` / `jump_target` 可以跳转到任意阶段（包括前后方向）：
+
+```yaml
+- name: step1
+  jump_trigger: step1_jump
+  jump_target: step3    # 可以跳到后方阶段
+```
+
+### 驳回计数
+
 - `rejection_counts` 是 JSON 字段：`{"design": 2, "code": 0}`
 - 每次驳回递增对应阶段计数
 - 超过 `max_rejections`（默认 10）自动取消任务
+
+### 兼容性
+
+旧字段 `reject_trigger` / `retry_target` 仍可使用，会自动映射为 `jump_trigger` / `jump_target`。
 
 ## 终态与活跃状态
 

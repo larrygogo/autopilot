@@ -77,9 +77,9 @@ jobs:
 
           ### 需要更新的文件
 
-          1. **`knowledge/architecture.md`** — 如果模块职责、数据流或架构有变化，更新对应章节
-          2. **`knowledge/workflow-development.md`** — 如果工作流定义、阶段字段或 infra 工具有变化，更新对应章节
-          3. **`knowledge/state-machine.md`** — 如果状态转换、驳回机制有变化，更新状态图
+          1. **`docs/architecture.md`** — 如果模块职责、数据流或架构有变化，更新对应章节
+          2. **`docs/workflow-development.md`** — 如果工作流定义、阶段字段或 infra 工具有变化，更新对应章节
+          3. **`docs/state-machine.md`** — 如果状态转换、驳回机制有变化，更新状态图
           4. **`CLAUDE.md`** — 如果目录结构或开发规范有变化，更新对应章节
           5. **`README.md`** — 如果功能特性、CLI 命令、配置项或架构有变化，更新对应章节
 

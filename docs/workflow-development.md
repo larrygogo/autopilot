@@ -64,8 +64,8 @@ phases:
     running_state: running_review_doc
     trigger: start_review_doc
     complete_trigger: review_doc_complete
-    reject_trigger: review_doc_reject
-    retry_target: generate
+    jump_trigger: review_doc_reject
+    jump_target: generate
     max_rejections: 5
     timeout: 600
     func: run_review_doc
@@ -89,7 +89,7 @@ Workflow 级别推导：
 - `initial_state`：不写则取第一个 phase 的 `pending_state`
 - `terminal_states`：不写则 `[done, cancelled]`
 
-### `reject` 语法糖
+### `reject` 语法糖（只能往回跳）
 
 ```yaml
 - name: review
@@ -100,10 +100,26 @@ Workflow 级别推导：
 自动展开为：
 ```yaml
 - name: review
-  reject_trigger: review_reject
-  retry_target: design
+  jump_trigger: review_reject
+  jump_target: design
   max_rejections: 10
 ```
+
+注意：`reject` 目标必须在当前阶段之前，否则校验报错。
+
+### `jump_trigger` / `jump_target`（任意方向跳转）
+
+直接使用底层字段可以跳转到任意阶段（前/后均可）：
+
+```yaml
+- name: step2
+  jump_trigger: step2_skip
+  jump_target: step4    # 可以向前跳
+```
+
+### 兼容旧字段
+
+旧字段 `reject_trigger` / `retry_target` 仍可使用，会自动映射为 `jump_trigger` / `jump_target`。
 
 ### 函数绑定
 
@@ -219,8 +235,8 @@ WORKFLOW = {
     'running_state': str,       # 运行状态名
     'complete_trigger': str,    # 完成触发器
     'fail_trigger': str | None, # 失败触发器（回到 pending 重试）
-    'reject_trigger': str | None,   # 驳回触发器
-    'retry_target': str | None,     # 驳回后重试的目标阶段名
+    'jump_trigger': str | None,     # 跳转触发器（reject 语法糖展开后生成）
+    'jump_target': str | None,      # 跳转目标阶段名
     'max_rejections': int,      # 最大驳回次数（默认 10）
     'func': callable,           # 阶段执行函数
 }
@@ -235,7 +251,7 @@ WORKFLOW = {
 - `pending_state` → `(trigger, running_state)`
 - `running_state` → `(complete_trigger, next_pending_state)`
 - 有 `fail_trigger` 时：`running_state` → `(fail_trigger, pending_state)`
-- 有 `reject_trigger` 时：生成驳回和重试转换
+- 有 `jump_trigger` 时：生成驳回和重试转换
 - 所有非终态都加入 `(cancel, cancelled)`
 - `parallel` 阶段自动生成 fork/join 转换
 
