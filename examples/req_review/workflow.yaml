@@ -1,5 +1,5 @@
 name: req_review
-description: 需求评审流程（需求分析 → 需求评审）
+description: "[AI] 需求评审流程（需求分析 → 需求评审）"
 
 phases:
   - name: req_analysis

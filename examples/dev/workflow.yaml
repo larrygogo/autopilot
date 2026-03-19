@@ -1,5 +1,5 @@
 name: dev
-description: 完整开发流程（设计 → 评审 → 开发 → 代码审查 → PR）
+description: "[AI] 完整开发流程（设计 → 评审 → 开发 → 代码审查 → PR）"
 setup_func: setup_dev_task
 
 phases:

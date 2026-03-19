@@ -31,22 +31,27 @@ cp -r examples/data_pipeline/ ~/.autopilot/workflows/data_pipeline/
 
 ## 可用示例
 
-### dev — 完整开发流程
+本目录内置 5 个示例工作流，分为两类：
+
+- **AI 示例工作流**：集成 Claude CLI，可直接运行 AI 驱动的完整流程
+- **框架特性示例**：展示框架能力（自动推导、并行、跳转等），阶段函数为占位实现
+
+### [AI] dev — 完整开发流程
 
 5 个阶段：方案设计 → 方案评审 → 开发 → 代码审查 → PR 提交
 
 - `workflow.yaml` — 工作流定义（自动推导 + reject 语法糖）
-- `workflow.py` — 阶段函数实现（内联提示词）
+- `workflow.py` — 阶段函数实现（内联提示词，调用 Claude CLI）
 - `config.example.yaml` — 极简配置模板（repo_path + default_branch）
 
 **展示特性**：5 阶段完整流程、reject 驳回机制、Claude CLI 集成、标准阶段模式（读任务 → 执行 → 保存产出物 → transition → push 下一阶段）
 
-### req_review — 需求评审流程
+### [AI] req_review — 需求评审流程
 
 2 个阶段：需求分析 → 需求评审
 
 - `workflow.yaml` — 工作流定义（自动推导 + reject 语法糖）
-- `workflow.py` — 阶段函数实现（内联提示词）
+- `workflow.py` — 阶段函数实现（内联提示词，调用 Claude CLI）
 
 **展示特性**：极简 2 阶段流程、reject 驳回机制、需求来源为本地 requirement.md
 
