@@ -111,10 +111,10 @@ def discover() -> None:
 
 
 def _discover_user() -> None:
-    """扫描 DEV_PILOT_HOME/workflows/ 用户工作流"""
-    from core import DEV_PILOT_HOME
+    """扫描 AUTOPILOT_HOME/workflows/ 用户工作流"""
+    from core import AUTOPILOT_HOME
 
-    user_wf_dir = DEV_PILOT_HOME / "workflows"
+    user_wf_dir = AUTOPILOT_HOME / "workflows"
     if not user_wf_dir.is_dir():
         return
     for py_file in sorted(user_wf_dir.glob("*.py")):

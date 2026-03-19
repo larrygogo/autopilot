@@ -1,24 +1,24 @@
-# dev-pilot
+# autopilot
 
 AI 驱动的可扩展开发工作流自动化框架，基于状态机 + Push 模型 + 插件化工作流。
 
 ## 架构概要
 
-- **插件化工作流**：`DEV_PILOT_HOME/workflows/`（用户）工作流自动发现
+- **插件化工作流**：`AUTOPILOT_HOME/workflows/`（用户）工作流自动发现
 - **工作流注册中心**：`core/registry.py` 自动发现、注册、查询工作流
 - **状态机驱动**：`core/state_machine.py` 动态加载转换表，原子性状态转换
 - **Push 模型**：每阶段完成后 `run_in_background()` 非阻塞启动下一阶段
 - **并发安全**：跨平台文件锁（`core/infra.py`）防止双重执行
 - **Watcher 保底**：定期检测卡死任务，自动恢复
 - **框架零业务知识**：核心模块不含任何工作流专属常量或逻辑
-- **用户空间分离**：`DEV_PILOT_HOME`（默认 `~/.dev-pilot/`）存放用户配置、工作流和运行时数据
+- **用户空间分离**：`AUTOPILOT_HOME`（默认 `~/.autopilot/`）存放用户配置、工作流和运行时数据
 
-## DEV_PILOT_HOME
+## AUTOPILOT_HOME
 
-用户数据与框架代码分离，统一存放在 `DEV_PILOT_HOME`（默认 `~/.dev-pilot/`，可通过环境变量覆盖）：
+用户数据与框架代码分离，统一存放在 `AUTOPILOT_HOME`（默认 `~/.autopilot/`，可通过环境变量覆盖）：
 
 ```
-~/.dev-pilot/                    # DEV_PILOT_HOME
+~/.autopilot/                    # AUTOPILOT_HOME
 ├── config.yaml                  # 用户配置
 ├── workflows/                   # 用户自定义工作流
 ├── prompts/                     # 用户提示词模板
@@ -32,9 +32,9 @@ AI 驱动的可扩展开发工作流自动化框架，基于状态机 + Push 模
 ## 目录结构
 
 ```
-dev-pilot/
+autopilot/
 ├── core/                          # 框架核心（通用引擎）
-│   ├── __init__.py                # __version__ + DEV_PILOT_HOME
+│   ├── __init__.py                # __version__ + AUTOPILOT_HOME
 │   ├── db.py                      # SQLite 数据库 & 配置加载
 │   ├── state_machine.py           # 纯状态机，转换表由注册表提供
 │   ├── runner.py                  # 执行引擎 & Push 模型
@@ -84,23 +84,23 @@ dev-pilot/
 - 主分支名从 `config.yaml` 的 `default_branch` 读取，默认 `main`
 - 框架核心（core/）不得引入任何工作流专属的常量、配置或逻辑
 - 工作流模块必须自包含：业务常量、辅助函数、通知实现均在模块内部
-- 所有模块通过 `from core import DEV_PILOT_HOME` 引用用户工作空间路径
+- 所有模块通过 `from core import AUTOPILOT_HOME` 引用用户工作空间路径
 
 ## 新增工作流
 
-将工作流模块放入 `DEV_PILOT_HOME/workflows/` 目录，框架自动发现并注册。
+将工作流模块放入 `AUTOPILOT_HOME/workflows/` 目录，框架自动发现并注册。
 
 工作流模块需导出 `WORKFLOW` 字典（必须包含 name/phases/transitions/initial_state/terminal_states）。
 可选字段：`setup_func`（任务初始化钩子）、`notify_func`（通知实现）
 
-`examples/` 目录包含参考实现，`dev-pilot init` 会将示例工作流复制到用户空间。
+`examples/` 目录包含参考实现，`autopilot init` 会将示例工作流复制到用户空间。
 
 ## 升级流程
 
 ```bash
 # 首次安装
-git clone ... && cd dev-pilot
-python bin/init_home.py          # 初始化 ~/.dev-pilot/
+git clone ... && cd autopilot
+python bin/init_home.py          # 初始化 ~/.autopilot/
 python bin/upgrade.py            # 执行基线迁移
 
 # 日常升级

@@ -9,7 +9,7 @@ import sys
 import threading
 from datetime import datetime, timezone
 
-from core import DEV_PILOT_HOME
+from core import AUTOPILOT_HOME
 from core.config import load_config
 from core.logger import get_logger
 
@@ -18,7 +18,7 @@ log = get_logger()
 
 CONFIG = load_config()
 
-DB_PATH = DEV_PILOT_HOME / "runtime/workflow.db"
+DB_PATH = AUTOPILOT_HOME / "runtime/workflow.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (

@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import IO
 
-from core import DEV_PILOT_HOME
+from core import AUTOPILOT_HOME
 from core.logger import get_logger
 
 log = get_logger()
@@ -21,8 +21,8 @@ log = get_logger()
 # 路径常量
 # ──────────────────────────────────────────────────────────
 
-DEVTASKS_DIR = DEV_PILOT_HOME / "runtime/dev-tasks"
-PROJECTS_DIR = DEV_PILOT_HOME / "runtime/projects"
+DEVTASKS_DIR = AUTOPILOT_HOME / "runtime/dev-tasks"
+PROJECTS_DIR = AUTOPILOT_HOME / "runtime/projects"
 
 # ──────────────────────────────────────────────────────────
 # Git 操作

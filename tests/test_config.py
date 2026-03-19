@@ -25,7 +25,7 @@ class TestLoadConfig:
         """所有配置文件都不存在时返回空 dict"""
         with (
             mock.patch.dict(os.environ, {"DEV_WORKFLOW_CONFIG": "/nonexistent/config.yaml"}),
-            mock.patch("core.config.DEV_PILOT_HOME", Path("/nonexistent/devpilot")),
+            mock.patch("core.config.AUTOPILOT_HOME", Path("/nonexistent/devpilot")),
         ):
             config = load_config()
         assert config == {}

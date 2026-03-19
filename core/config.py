@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from core import DEV_PILOT_HOME
+from core import AUTOPILOT_HOME
 from core.logger import get_logger
 
 log = get_logger()
@@ -22,7 +22,7 @@ def load_config() -> dict:
     env_cfg = os.environ.get("DEV_WORKFLOW_CONFIG", "")
     search_paths = [
         Path(env_cfg) if env_cfg else None,
-        DEV_PILOT_HOME / "config.yaml",
+        AUTOPILOT_HOME / "config.yaml",
         Path.cwd() / "config.yaml",
         Path(__file__).parent.parent / "config.yaml",
     ]

@@ -48,7 +48,7 @@ class TestUserWorkflowDiscovery:
         for k in to_remove:
             del sys.modules[k]
 
-        with mock.patch("core.DEV_PILOT_HOME", tmp_path):
+        with mock.patch("core.AUTOPILOT_HOME", tmp_path):
             old_registry = dict(_registry)
             try:
                 _discover_user()
@@ -67,7 +67,7 @@ class TestUserWorkflowDiscovery:
         for k in to_remove:
             del sys.modules[k]
 
-        with mock.patch("core.DEV_PILOT_HOME", tmp_path):
+        with mock.patch("core.AUTOPILOT_HOME", tmp_path):
             old_registry = dict(_registry)
             try:
                 _discover_user()
@@ -93,7 +93,7 @@ class TestUserWorkflowDiscovery:
         for k in to_remove:
             del sys.modules[k]
 
-        with mock.patch("core.DEV_PILOT_HOME", tmp_path):
+        with mock.patch("core.AUTOPILOT_HOME", tmp_path):
             old_registry = dict(_registry)
             try:
                 _discover_user()
@@ -115,7 +115,7 @@ class TestUserWorkflowDiscovery:
         for k in to_remove:
             del sys.modules[k]
 
-        with mock.patch("core.DEV_PILOT_HOME", tmp_path):
+        with mock.patch("core.AUTOPILOT_HOME", tmp_path):
             old_registry = dict(_registry)
             try:
                 _discover_user()
@@ -126,7 +126,7 @@ class TestUserWorkflowDiscovery:
 
     def test_no_workflows_dir(self, tmp_path):
         """没有 workflows 目录不报错"""
-        with mock.patch("core.DEV_PILOT_HOME", tmp_path):
+        with mock.patch("core.AUTOPILOT_HOME", tmp_path):
             old_registry = dict(_registry)
             try:
                 _discover_user()  # 不应抛异常

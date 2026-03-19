@@ -1,5 +1,5 @@
 """
-dev-pilot 框架核心包
+autopilot 框架核心包
 """
 
 from __future__ import annotations
@@ -9,4 +9,4 @@ from pathlib import Path
 
 __version__ = "0.2.0"
 
-DEV_PILOT_HOME = Path(os.environ.get("DEV_PILOT_HOME") or Path.home() / ".dev-pilot").expanduser()
+AUTOPILOT_HOME = Path(os.environ.get("AUTOPILOT_HOME") or Path.home() / ".autopilot").expanduser()

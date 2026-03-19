@@ -2,7 +2,7 @@
 """
 初始化用户工作空间。
 用法：
-  python3 bin/init_home.py                     # 初始化 ~/.dev-pilot/
+  python3 bin/init_home.py                     # 初始化 ~/.autopilot/
   python3 bin/init_home.py --path /custom/path  # 自定义路径
 """
 
@@ -19,21 +19,21 @@ FRAMEWORK_ROOT = Path(__file__).parent.parent
 
 
 def main():
-    parser = argparse.ArgumentParser(description="初始化 dev-pilot 用户工作空间")
+    parser = argparse.ArgumentParser(description="初始化 autopilot 用户工作空间")
     parser.add_argument(
         "--path",
         type=str,
         default=None,
-        help="自定义工作空间路径（默认 ~/.dev-pilot/）",
+        help="自定义工作空间路径（默认 ~/.autopilot/）",
     )
     args = parser.parse_args()
 
     if args.path:
         home = Path(args.path).expanduser()
     else:
-        from core import DEV_PILOT_HOME
+        from core import AUTOPILOT_HOME
 
-        home = DEV_PILOT_HOME
+        home = AUTOPILOT_HOME
 
     print(f"初始化用户工作空间：{home}")
 
@@ -90,7 +90,7 @@ def main():
     print(f"  1. 编辑 {config_dest} 配置框架参数")
     print("  2. 运行 python bin/upgrade.py 初始化数据库")
     if args.path:
-        print(f"  3. 设置环境变量：export DEV_PILOT_HOME={home}")
+        print(f"  3. 设置环境变量：export AUTOPILOT_HOME={home}")
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ def main():
 
     if args.workflow is None:
         if not available:
-            print("没有已注册的工作流，请先将工作流放入 DEV_PILOT_HOME/workflows/ 目录")
+            print("没有已注册的工作流，请先将工作流放入 AUTOPILOT_HOME/workflows/ 目录")
             sys.exit(1)
         elif len(available) == 1:
             args.workflow = available[0]["name"]

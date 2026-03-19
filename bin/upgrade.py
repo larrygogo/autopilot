@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core import DEV_PILOT_HOME, __version__
+from core import AUTOPILOT_HOME, __version__
 from core.db import get_conn, init_db
 from core.migrate import (
     ensure_schema_version_table,
@@ -26,13 +26,13 @@ from core.migrate import (
 
 
 def main():
-    parser = argparse.ArgumentParser(description="dev-pilot 数据库升级")
+    parser = argparse.ArgumentParser(description="autopilot 数据库升级")
     parser.add_argument("--status", action="store_true", help="查看当前版本")
     parser.add_argument("--dry-run", action="store_true", help="预览待执行迁移")
     args = parser.parse_args()
 
-    print(f"dev-pilot v{__version__}")
-    print(f"DEV_PILOT_HOME: {DEV_PILOT_HOME}")
+    print(f"autopilot v{__version__}")
+    print(f"AUTOPILOT_HOME: {AUTOPILOT_HOME}")
     print()
 
     # 确保数据库存在
