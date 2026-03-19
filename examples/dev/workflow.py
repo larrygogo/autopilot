@@ -12,8 +12,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from core import AUTOPILOT_HOME
 from core.db import CONFIG, get_conn, get_default_branch, get_task, now
-from core.infra import PROJECTS_DIR, _run_git, get_task_dir
+from core.infra import get_task_dir
 from core.logger import get_logger
 from core.state_machine import transition
 
@@ -49,6 +50,18 @@ PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 # ──────────────────────────────────────────────────────────
 # 自包含辅助函数
 # ──────────────────────────────────────────────────────────
+
+PROJECTS_DIR = AUTOPILOT_HOME / "runtime/projects"
+
+
+def _run_git(args: list[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:
+    """执行 git 命令，失败时抛出有意义的异常"""
+    cmd_str = " ".join(["git"] + args)
+    log.debug("执行: %s (cwd=%s)", cmd_str, cwd)
+    r = subprocess.run(["git"] + args, capture_output=True, text=True, cwd=cwd, encoding="utf-8", errors="replace")
+    if check and r.returncode != 0:
+        raise RuntimeError(f"git 命令失败：{cmd_str}\nstderr: {r.stderr.strip()}")
+    return r
 
 
 def run_claude(prompt: str, repo_path: str | None = None, timeout: int = 900) -> str:

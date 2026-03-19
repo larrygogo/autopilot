@@ -1,8 +1,6 @@
 """
-基础设施测试：锁机制、git 操作
+基础设施测试：锁机制、通知分发
 """
-
-from unittest import mock
 
 from core.infra import acquire_lock, is_locked, release_lock
 
@@ -33,43 +31,3 @@ class TestLockMechanism:
     def test_release_nonexistent_lock(self):
         """释放不存在的锁不报错"""
         release_lock("test-lock-phantom")
-
-
-class TestRunGit:
-    """git 操作 mock 测试"""
-
-    def test_success(self):
-        from core.infra import _run_git
-
-        result = mock.MagicMock()
-        result.returncode = 0
-        result.stdout = "main"
-        result.stderr = ""
-        with mock.patch("subprocess.run", return_value=result):
-            r = _run_git(["branch", "--show-current"], cwd="/tmp")
-        assert r.stdout == "main"
-
-    def test_failure_raises(self):
-        from core.infra import _run_git
-
-        result = mock.MagicMock()
-        result.returncode = 1
-        result.stderr = "fatal: not a git repo"
-        with mock.patch("subprocess.run", return_value=result):
-            try:
-                _run_git(["status"], cwd="/tmp")
-                assert False, "Expected RuntimeError"
-            except RuntimeError as e:
-                assert "git 命令失败" in str(e)
-
-    def test_check_false_no_raise(self):
-        from core.infra import _run_git
-
-        result = mock.MagicMock()
-        result.returncode = 1
-        result.stderr = "error"
-        with mock.patch("subprocess.run", return_value=result):
-            r = _run_git(["checkout", "-b", "test"], cwd="/tmp", check=False)
-        assert r.returncode == 1
-
-

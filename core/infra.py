@@ -1,12 +1,11 @@
 """
 基础设施层：通用工具函数
-包含 git 操作、外部 CLI 调用、锁机制、通知分发
+包含锁机制、通知分发、任务目录管理
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -22,21 +21,6 @@ log = get_logger()
 # ──────────────────────────────────────────────────────────
 
 DEVTASKS_DIR = AUTOPILOT_HOME / "runtime/dev-tasks"
-PROJECTS_DIR = AUTOPILOT_HOME / "runtime/projects"
-
-# ──────────────────────────────────────────────────────────
-# Git 操作
-# ──────────────────────────────────────────────────────────
-
-
-def _run_git(args: list[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:
-    """执行 git 命令，失败时抛出有意义的异常"""
-    cmd_str = " ".join(["git"] + args)
-    log.debug("执行: %s (cwd=%s)", cmd_str, cwd)
-    r = subprocess.run(["git"] + args, capture_output=True, text=True, cwd=cwd, encoding="utf-8", errors="replace")
-    if check and r.returncode != 0:
-        raise RuntimeError(f"git 命令失败：{cmd_str}\nstderr: {r.stderr.strip()}")
-    return r
 
 
 # ──────────────────────────────────────────────────────────
@@ -149,10 +133,10 @@ def notify(task: dict, message: str, media_path: str | None = None, event: str =
     log.info("通知: %s", message[:120])
 
 
-# ──────────────────────────────────────────────────────────
-# Agent 执行
-# ──────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────
+# 任务目录
+# ──────────────────────────────────────────────────────────
 
 
 def get_task_dir(task_id: str) -> Path:

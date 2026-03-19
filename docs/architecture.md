@@ -88,7 +88,6 @@
 
 | 功能 | 函数 | 说明 |
 |------|------|------|
-| Git | `_run_git(args, cwd)` | 执行 git 命令，自动检查返回码 |
 | 文件锁 | `acquire_lock(task_id)` | 跨平台非阻塞排他锁 |
 | | `release_lock(task_id)` | 释放锁 |
 | | `is_locked(task_id)` | 检查锁状态 |

@@ -77,7 +77,6 @@ autopilot/
 
 - Python 3.10+，使用 `from __future__ import annotations` 支持新式类型注解
 - 核心函数必须有类型提示
-- git 操作使用 `infra._run_git()` 辅助函数，自动检查返回码
 - 主分支名从 `config.yaml` 的 `default_branch` 读取，默认 `main`
 - 框架核心（core/）不得引入任何工作流专属的常量、配置或逻辑
 - 工作流模块必须自包含：业务常量、辅助函数、通知实现均在模块内部
