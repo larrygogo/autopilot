@@ -281,6 +281,54 @@ def show(task_id, log_count):
 
 
 # ──────────────────────────────────────────────────────────
+# validate
+# ──────────────────────────────────────────────────────────
+
+
+@main.command()
+@click.argument("name", required=False)
+def validate(name):
+    """校验工作流定义"""
+    _ensure_workflows()
+
+    from core.registry import WorkflowValidationError, get_workflow, list_workflows, validate_workflow
+
+    if name:
+        wf = get_workflow(name)
+        if not wf:
+            click.echo(f"未知工作流：{name}")
+            sys.exit(1)
+        try:
+            warns = validate_workflow(wf)
+            click.echo(f"✓ {name} 校验通过")
+            for w in warns:
+                click.echo(f"  ⚠ {w}")
+        except WorkflowValidationError as e:
+            click.echo(f"✗ {name} 校验失败：{e}")
+            sys.exit(1)
+    else:
+        available = list_workflows()
+        if not available:
+            click.echo("暂无已注册工作流")
+            return
+        all_ok = True
+        for wf_info in available:
+            wf = get_workflow(wf_info["name"])
+            if not wf:
+                continue
+            try:
+                warns = validate_workflow(wf)
+                click.echo(f"✓ {wf_info['name']} 校验通过")
+                for w in warns:
+                    click.echo(f"  ⚠ {w}")
+            except WorkflowValidationError as e:
+                click.echo(f"✗ {wf_info['name']} 校验失败：{e}")
+                all_ok = False
+        if not all_ok:
+            sys.exit(1)
+
+
+# ──────────────────────────────────────────────────────────
 # workflows
 # ──────────────────────────────────────────────────────────
 
