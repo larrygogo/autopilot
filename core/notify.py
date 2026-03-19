@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import ssl
 import subprocess
 import urllib.request
 from typing import Any
@@ -90,7 +91,14 @@ def _send_webhook(backend: dict, variables: dict[str, str]) -> None:
             headers=headers,
             method=method,
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        ctx = ssl.create_default_context()
+        try:
+            import certifi
+
+            ctx.load_verify_locations(certifi.where())
+        except ImportError:
+            pass
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
             log.debug("webhook %s 响应：%d", backend.get("name", ""), resp.status)
     except Exception as e:
         log.error("webhook %s 发送失败：%s", backend.get("name", ""), e)
