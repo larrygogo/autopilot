@@ -1,0 +1,112 @@
+"""
+基础设施测试：锁机制、git 操作、Claude CLI mock
+"""
+
+import subprocess
+from unittest import mock
+
+from core.infra import acquire_lock, is_locked, release_lock
+
+
+class TestLockMechanism:
+    """文件锁测试"""
+
+    def test_acquire_and_release(self):
+        """获取锁后释放"""
+        fd = acquire_lock("test-lock-001")
+        assert fd is not None
+        assert is_locked("test-lock-001")
+        release_lock("test-lock-001")
+        assert not is_locked("test-lock-001")
+
+    def test_double_acquire_returns_none(self):
+        """重复获取锁返回 None"""
+        fd1 = acquire_lock("test-lock-002")
+        assert fd1 is not None
+        fd2 = acquire_lock("test-lock-002")
+        assert fd2 is None
+        release_lock("test-lock-002")
+
+    def test_is_locked_false_when_no_lock(self):
+        """未加锁时 is_locked 返回 False"""
+        assert not is_locked("test-lock-never")
+
+    def test_release_nonexistent_lock(self):
+        """释放不存在的锁不报错"""
+        release_lock("test-lock-phantom")
+
+
+class TestRunGit:
+    """git 操作 mock 测试"""
+
+    def test_success(self):
+        from core.infra import _run_git
+
+        result = mock.MagicMock()
+        result.returncode = 0
+        result.stdout = "main"
+        result.stderr = ""
+        with mock.patch("subprocess.run", return_value=result):
+            r = _run_git(["branch", "--show-current"], cwd="/tmp")
+        assert r.stdout == "main"
+
+    def test_failure_raises(self):
+        from core.infra import _run_git
+
+        result = mock.MagicMock()
+        result.returncode = 1
+        result.stderr = "fatal: not a git repo"
+        with mock.patch("subprocess.run", return_value=result):
+            try:
+                _run_git(["status"], cwd="/tmp")
+                assert False, "Expected RuntimeError"
+            except RuntimeError as e:
+                assert "git 命令失败" in str(e)
+
+    def test_check_false_no_raise(self):
+        from core.infra import _run_git
+
+        result = mock.MagicMock()
+        result.returncode = 1
+        result.stderr = "error"
+        with mock.patch("subprocess.run", return_value=result):
+            r = _run_git(["checkout", "-b", "test"], cwd="/tmp", check=False)
+        assert r.returncode == 1
+
+
+class TestRunClaude:
+    """Claude CLI mock 测试"""
+
+    def test_success(self):
+        from core.infra import run_claude
+
+        result = mock.MagicMock()
+        result.returncode = 0
+        result.stdout = "AI response"
+        result.stderr = ""
+        with mock.patch("subprocess.run", return_value=result):
+            output = run_claude("test prompt")
+        assert output == "AI response"
+
+    def test_timeout(self):
+        from core.infra import run_claude
+
+        with mock.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 900)):
+            try:
+                run_claude("test prompt", timeout=900)
+                assert False, "Expected RuntimeError"
+            except RuntimeError as e:
+                assert "超时" in str(e)
+
+    def test_failure(self):
+        from core.infra import run_claude
+
+        result = mock.MagicMock()
+        result.returncode = 1
+        result.stderr = "Claude error"
+        with mock.patch("subprocess.run", return_value=result):
+            try:
+                run_claude("test prompt")
+                assert False, "Expected RuntimeError"
+            except RuntimeError as e:
+                assert "Claude CLI 失败" in str(e)

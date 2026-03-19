@@ -1,0 +1,47 @@
+name: req_review
+description: 需求评审流程
+
+phases:
+  - name: req_analysis
+    label: REQ_ANALYSIS
+    trigger: start_analysis
+    pending_state: pending_analysis
+    running_state: analyzing
+    complete_trigger: analysis_complete
+    fail_trigger: analysis_fail
+    timeout_key: review
+    func: run_req_analysis
+
+  - name: req_review
+    label: REQ_REVIEW
+    trigger: start_req_review
+    pending_state: pending_req_review
+    running_state: req_reviewing
+    complete_trigger: req_review_pass
+    reject_trigger: req_review_reject
+    retry_target: req_analysis
+    max_rejections: 5
+    timeout_key: review
+    func: run_req_review
+
+initial_state: pending_analysis
+terminal_states: [req_review_done, cancelled]
+
+transitions:
+  pending_analysis:
+    - [start_analysis, analyzing]
+    - [cancel, cancelled]
+  analyzing:
+    - [analysis_complete, pending_req_review]
+    - [analysis_fail, pending_analysis]
+    - [cancel, cancelled]
+  pending_req_review:
+    - [start_req_review, req_reviewing]
+    - [cancel, cancelled]
+  req_reviewing:
+    - [req_review_pass, req_review_done]
+    - [req_review_reject, req_review_rejected]
+    - [cancel, cancelled]
+  req_review_rejected:
+    - [retry_req_analysis, pending_analysis]
+    - [cancel, cancelled]

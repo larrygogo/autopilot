@@ -1,0 +1,103 @@
+name: dev
+description: 完整开发流程
+setup_func: setup_dev_task
+notify_func: notify_dev
+
+notify_backends:
+  - name: local-cmd
+    type: command
+    command: >-
+      openclaw message send --channel {{channel}} --target {{target}}
+      --message "{{message}}"
+      {{#media_path}}--media "{{media_path}}"{{/media_path}}
+    events: ["*"]
+
+phases:
+  - name: design
+    label: PLAN_DESIGN
+    trigger: start_design
+    pending_state: pending_design
+    running_state: designing
+    complete_trigger: design_complete
+    fail_trigger: design_fail
+    timeout_key: design
+    func: run_plan_design
+
+  - name: review
+    label: PLAN_REVIEW
+    trigger: start_review
+    pending_state: pending_review
+    running_state: reviewing
+    complete_trigger: review_pass
+    reject_trigger: review_reject
+    retry_target: design
+    max_rejections: 10
+    timeout_key: review
+    func: run_plan_review
+
+  - name: dev
+    label: DEVELOPMENT
+    trigger: start_dev
+    pending_state: developing
+    running_state: in_development
+    complete_trigger: dev_complete
+    fail_trigger: dev_fail
+    timeout_key: development
+    func: run_development
+
+  - name: code_review
+    label: CODE_REVIEW
+    trigger: null
+    pending_state: code_reviewing
+    running_state: code_reviewing
+    complete_trigger: code_pass
+    reject_trigger: code_reject
+    retry_target: dev
+    max_rejections: 10
+    timeout_key: code_review
+    func: run_code_review
+
+  - name: pr
+    label: SUBMIT_PR
+    trigger: null
+    pending_state: pr_submitting
+    running_state: pr_submitting
+    complete_trigger: null
+    timeout_key: pr_description
+    func: run_submit_pr
+
+initial_state: pending_design
+terminal_states: [pr_submitted, cancelled]
+
+transitions:
+  pending_design:
+    - [start_design, designing]
+    - [cancel, cancelled]
+  designing:
+    - [design_complete, pending_review]
+    - [design_fail, pending_design]
+    - [cancel, cancelled]
+  pending_review:
+    - [start_review, reviewing]
+    - [cancel, cancelled]
+  reviewing:
+    - [review_pass, developing]
+    - [review_reject, review_rejected]
+    - [cancel, cancelled]
+  review_rejected:
+    - [retry_design, pending_design]
+    - [cancel, cancelled]
+  developing:
+    - [start_dev, in_development]
+    - [cancel, cancelled]
+  in_development:
+    - [dev_complete, code_reviewing]
+    - [dev_fail, developing]
+    - [cancel, cancelled]
+  code_reviewing:
+    - [code_pass, pr_submitted]
+    - [code_reject, code_rejected]
+    - [cancel, cancelled]
+  code_rejected:
+    - [retry_dev, in_development]
+    - [cancel, cancelled]
