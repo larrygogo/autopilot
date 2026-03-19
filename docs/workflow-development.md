@@ -214,7 +214,7 @@ WORKFLOW = {
     # === 选填 ===
     'description': str,
     'initial_state': str,       # 默认：第一个阶段的 pending_state
-    'terminal_states': list,    # 默认：['cancelled']
+    'terminal_states': list,    # 默认：['done', 'cancelled']
     'transitions': dict,        # 不提供则自动生成
     'setup_func': callable,     # 任务初始化钩子
     'notify_func': callable,    # 通知实现

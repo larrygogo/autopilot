@@ -18,6 +18,15 @@ cp -r examples/dev/ ~/.autopilot/workflows/dev/
 
 # 安装 req_review 需求评审流程
 cp -r examples/req_review/ ~/.autopilot/workflows/req_review/
+
+# 安装 doc_gen 文档生成与评审
+cp -r examples/doc_gen/ ~/.autopilot/workflows/doc_gen/
+
+# 安装 parallel_build 并行构建流程
+cp -r examples/parallel_build/ ~/.autopilot/workflows/parallel_build/
+
+# 安装 data_pipeline 数据处理流水线
+cp -r examples/data_pipeline/ ~/.autopilot/workflows/data_pipeline/
 ```
 
 ## 可用示例

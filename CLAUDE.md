@@ -42,6 +42,8 @@ AI 驱动的可扩展开发工作流自动化框架，基于状态机 + Push 模
 autopilot/
 ├── core/                          # 框架核心（通用引擎）
 │   ├── __init__.py                # __version__ + AUTOPILOT_HOME
+│   ├── cli.py                     # 统一 CLI 入口（click）
+│   ├── config.py                  # 配置加载 & 校验
 │   ├── db.py                      # SQLite 数据库（含子任务支持）
 │   ├── state_machine.py           # 纯状态机，转换表由注册表提供
 │   ├── runner.py                  # 执行引擎 & Push 模型 & 并行 fork/join
@@ -61,16 +63,11 @@ autopilot/
 ├── bin/                           # 通用 CLI
 ├── examples/                      # 示例工作流（参考实现）
 │   ├── README.md                  # 安装说明
-│   ├── dev/                       # dev 完整开发流程
-│   │   ├── workflow.yaml          # 工作流定义（YAML）
-│   │   ├── workflow.py            # 阶段函数
-│   │   ├── config.example.yaml
-│   │   └── prompts/
-│   └── req_review/                # 需求评审流程
-│       ├── workflow.yaml
-│       ├── workflow.py
-│       ├── config.example.yaml
-│       └── prompts/
+│   ├── dev/                       # 完整开发流程（5 阶段）
+│   ├── req_review/                # 需求评审流程（2 阶段）
+│   ├── doc_gen/                   # 文档生成与评审（极简自动推导）
+│   ├── parallel_build/            # 并行构建流程（fork/join + hooks）
+│   └── data_pipeline/             # 数据处理流水线（前向跳转 + 多终态）
 ├── docs/                          # 架构文档
 ├── tests/                         # 单元测试
 └── config.example.yaml            # 极简框架配置
