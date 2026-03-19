@@ -18,8 +18,8 @@ phases:
     pending_state: pending_req_review
     running_state: req_reviewing
     complete_trigger: req_review_pass
-    reject_trigger: req_review_reject
-    retry_target: req_analysis
+    jump_trigger: req_review_reject
+    jump_target: req_analysis
     max_rejections: 5
     timeout_key: review
     func: run_req_review

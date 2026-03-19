@@ -54,8 +54,9 @@ class TestExpandPhaseDefaults:
         phase = {"name": "review", "timeout": 900, "reject": "design"}
         expanded = _expand_phase_defaults(phase, {"design", "review"})
 
-        assert expanded["reject_trigger"] == "review_reject"
-        assert expanded["retry_target"] == "design"
+        assert expanded["jump_trigger"] == "review_reject"
+        assert expanded["jump_target"] == "design"
+        assert expanded["_jump_origin"] == "reject"
         assert expanded["max_rejections"] == 10
         assert "reject" not in expanded  # 语法糖已消费
 
@@ -64,6 +65,20 @@ class TestExpandPhaseDefaults:
         expanded = _expand_phase_defaults(phase, {"design", "review"})
 
         assert expanded["max_rejections"] == 5  # 不被默认 10 覆盖
+
+    def test_legacy_reject_trigger_mapped(self):
+        """旧字段 reject_trigger/retry_target 自动映射为 jump_trigger/jump_target"""
+        phase = {
+            "name": "review",
+            "reject_trigger": "review_reject",
+            "retry_target": "design",
+        }
+        expanded = _expand_phase_defaults(phase, {"design", "review"})
+
+        assert expanded["jump_trigger"] == "review_reject"
+        assert expanded["jump_target"] == "design"
+        assert "reject_trigger" not in expanded
+        assert "retry_target" not in expanded
 
 
 class TestNormalizeTransitions:
@@ -305,8 +320,8 @@ def run_review(task_id):
         wf = mod.WORKFLOW
 
         review = wf["phases"][1]
-        assert review["reject_trigger"] == "review_reject"
-        assert review["retry_target"] == "design"
+        assert review["jump_trigger"] == "review_reject"
+        assert review["jump_target"] == "design"
         assert review["max_rejections"] == 5
 
 
@@ -369,3 +384,87 @@ def run_step2(task_id): pass
         finally:
             _registry.clear()
             _registry.update(old)
+
+
+class TestRejectDirectionValidation:
+    """reject 语法糖方向校验"""
+
+    def test_reject_forward_target_raises(self, tmp_path):
+        """reject 目标在当前阶段之后 → 校验失败"""
+        yaml_content = """
+name: bad_reject
+phases:
+  - name: step1
+    reject: step2
+  - name: step2
+"""
+        py_content = """
+def run_step1(task_id): pass
+def run_step2(task_id): pass
+"""
+        (tmp_path / "workflow.yaml").write_text(yaml_content)
+        (tmp_path / "workflow.py").write_text(py_content)
+
+        mod = load_yaml_workflow(tmp_path)
+        with pytest.raises(WorkflowValidationError, match="必须在当前阶段之前"):
+            validate_workflow(mod.WORKFLOW)
+
+    def test_reject_self_raises(self, tmp_path):
+        """reject 目标是自身 → 校验失败"""
+        yaml_content = """
+name: self_reject
+phases:
+  - name: step1
+    reject: step1
+"""
+        py_content = "def run_step1(task_id): pass"
+
+        (tmp_path / "workflow.yaml").write_text(yaml_content)
+        (tmp_path / "workflow.py").write_text(py_content)
+
+        mod = load_yaml_workflow(tmp_path)
+        with pytest.raises(WorkflowValidationError, match="必须在当前阶段之前"):
+            validate_workflow(mod.WORKFLOW)
+
+    def test_jump_target_forward_allowed(self, tmp_path):
+        """直接使用 jump_trigger/jump_target 可以向前跳（不受 reject 方向限制）"""
+        yaml_content = """
+name: forward_jump
+phases:
+  - name: step1
+    jump_trigger: step1_skip
+    jump_target: step3
+  - name: step2
+  - name: step3
+"""
+        py_content = """
+def run_step1(task_id): pass
+def run_step2(task_id): pass
+def run_step3(task_id): pass
+"""
+        (tmp_path / "workflow.yaml").write_text(yaml_content)
+        (tmp_path / "workflow.py").write_text(py_content)
+
+        mod = load_yaml_workflow(tmp_path)
+        warns = validate_workflow(mod.WORKFLOW)
+        assert isinstance(warns, list)  # 不抛异常
+
+    def test_reject_backward_allowed(self, tmp_path):
+        """reject 目标在当前阶段之前 → 正常通过"""
+        yaml_content = """
+name: good_reject
+phases:
+  - name: step1
+  - name: step2
+    reject: step1
+"""
+        py_content = """
+def run_step1(task_id): pass
+def run_step2(task_id): pass
+"""
+        (tmp_path / "workflow.yaml").write_text(yaml_content)
+        (tmp_path / "workflow.py").write_text(py_content)
+
+        mod = load_yaml_workflow(tmp_path)
+        warns = validate_workflow(mod.WORKFLOW)
+        assert isinstance(warns, list)  # 不抛异常

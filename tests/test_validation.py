@@ -131,16 +131,16 @@ class TestPhaseValidation:
         with pytest.raises(WorkflowValidationError, match="重复"):
             validate_workflow(wf)
 
-    def test_reject_trigger_without_retry_target(self):
+    def test_jump_trigger_without_jump_target(self):
         wf = _make_workflow()
-        wf["phases"][0]["reject_trigger"] = "reject_step1"
+        wf["phases"][0]["jump_trigger"] = "reject_step1"
         warns = validate_workflow(wf)
-        assert any("retry_target" in w for w in warns)
+        assert any("jump_target" in w for w in warns)
 
-    def test_retry_target_not_in_phases(self):
+    def test_jump_target_not_in_phases(self):
         wf = _make_workflow()
-        wf["phases"][0]["reject_trigger"] = "reject_step1"
-        wf["phases"][0]["retry_target"] = "nonexistent"
+        wf["phases"][0]["jump_trigger"] = "reject_step1"
+        wf["phases"][0]["jump_target"] = "nonexistent"
         with pytest.raises(WorkflowValidationError, match="nonexistent"):
             validate_workflow(wf)
 

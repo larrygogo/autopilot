@@ -102,7 +102,7 @@ phases:
     timeout: 900
   - name: step2
     timeout: 600
-    reject: step1      # 语法糖：自动生成 reject_trigger + retry_target
+    reject: step1      # 语法糖：自动生成 jump_trigger + jump_target（只能往回跳）
 ```
 
 并行阶段：

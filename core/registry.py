@@ -51,7 +51,7 @@ def _expand_phase_defaults(phase: dict, all_phase_names: set[str]) -> dict:
       func name: run_design
 
     reject 语法糖：
-      reject: design → reject_trigger: {name}_reject, retry_target: design
+      reject: design → jump_trigger: {name}_reject, jump_target: design
     """
     name = phase["name"]
     expanded = dict(phase)
@@ -63,14 +63,23 @@ def _expand_phase_defaults(phase: dict, all_phase_names: set[str]) -> dict:
     expanded.setdefault("fail_trigger", f"{name}_fail")
     expanded.setdefault("label", name.upper())
 
-    # reject 语法糖
+    # reject 语法糖 → jump_trigger/jump_target + 标记来源
     reject_target = expanded.pop("reject", None)
     if reject_target:
-        expanded.setdefault("reject_trigger", f"{name}_reject")
-        expanded.setdefault("retry_target", reject_target)
+        expanded.setdefault("jump_trigger", f"{name}_reject")
+        expanded.setdefault("jump_target", reject_target)
+        expanded["_jump_origin"] = "reject"
         if reject_target not in all_phase_names:
             log.warning("阶段 %s 的 reject 目标 '%s' 不在 phases 中", name, reject_target)
         expanded.setdefault("max_rejections", 10)
+
+    # 兼容旧字段: reject_trigger/retry_target → jump_trigger/jump_target
+    legacy_reject_trigger = expanded.pop("reject_trigger", None)
+    legacy_retry_target = expanded.pop("retry_target", None)
+    if legacy_reject_trigger:
+        expanded.setdefault("jump_trigger", legacy_reject_trigger)
+    if legacy_retry_target:
+        expanded.setdefault("jump_target", legacy_retry_target)
 
     return expanded
 
@@ -311,6 +320,33 @@ def validate_workflow(wf: dict) -> list[str]:
             raise WorkflowValidationError(f"重复的阶段名：{phase['name']}")
         phase_names.add(phase["name"])
 
+    # ── reject 语法糖方向校验：目标必须在当前阶段之前 ──
+    ordered_names = []
+    for p in wf["phases"]:
+        if "parallel" in p:
+            ordered_names.append(("parallel", p["parallel"]["name"], p["parallel"]))
+        else:
+            ordered_names.append(("phase", p["name"], p))
+
+    for idx, (kind, name, obj) in enumerate(ordered_names):
+        phases_to_check = []
+        if kind == "parallel":
+            phases_to_check = obj.get("phases", [])
+        else:
+            phases_to_check = [obj]
+
+        for phase in phases_to_check:
+            if phase.get("_jump_origin") != "reject":
+                continue
+            target = phase["jump_target"]
+            target_idx = next(
+                (i for i, (_, n, _) in enumerate(ordered_names) if n == target), None
+            )
+            if target_idx is not None and target_idx >= idx:
+                raise WorkflowValidationError(
+                    f'阶段 {phase["name"]} 的 reject 目标 "{target}" 必须在当前阶段之前'
+                )
+
     # ── 转换表完整性 ──
     if "transitions" in wf:
         if wf["initial_state"] not in wf["transitions"]:
@@ -359,16 +395,16 @@ def _validate_regular_phase(
     if not callable(phase["func"]):
         raise WorkflowValidationError(f"{prefix}phases[{idx}].func 必须是 callable")
 
-    # reject_trigger 必须配套 retry_target
-    if phase.get("reject_trigger") and not phase.get("retry_target"):
-        warnings.append(f"阶段 {phase['name']} 有 reject_trigger 但无 retry_target")
+    # jump_trigger 必须配套 jump_target
+    if phase.get("jump_trigger") and not phase.get("jump_target"):
+        warnings.append(f"阶段 {phase['name']} 有 jump_trigger 但无 jump_target")
 
-    # retry_target 目标阶段必须存在
-    if phase.get("retry_target"):
-        target = phase["retry_target"]
+    # jump_target 目标阶段必须存在
+    if phase.get("jump_target"):
+        target = phase["jump_target"]
         if target not in all_phase_names:
             raise WorkflowValidationError(
-                f'阶段 {phase["name"]} 的 retry_target "{target}" 不在 phases 中'
+                f'阶段 {phase["name"]} 的 jump_target "{target}" 不在 phases 中'
             )
 
 
@@ -565,7 +601,7 @@ def build_transitions(workflow_name: str) -> dict[str, list[tuple[str, str]]]:
     - 每个阶段的 pending_state 可以通过 trigger 转换到 running_state
     - running_state 可以通过 complete_trigger 转换到下一阶段的 pending_state（或终态）
     - 如果有 fail_trigger，running_state 可以回退到 pending_state
-    - 如果有 reject_trigger + retry_target，生成驳回和重试转换
+    - 如果有 jump_trigger + jump_target，生成驳回和重试转换
     - parallel 阶段生成 fork/join 转换
     - 所有非终态都可以通过 'cancel' 转换到 'cancelled'
     """
@@ -581,7 +617,7 @@ def build_transitions(workflow_name: str) -> dict[str, list[tuple[str, str]]]:
     terminal_states = set(wf.get("terminal_states", ["cancelled"]))
     transitions: dict[str, list[tuple[str, str]]] = {}
 
-    # 收集所有普通阶段（用于 retry_target 查找）
+    # 收集所有普通阶段（用于 jump_target 查找）
     all_flat_phases = []
     for phase in phases:
         if "parallel" in phase:
@@ -628,18 +664,18 @@ def build_transitions(workflow_name: str) -> dict[str, list[tuple[str, str]]]:
         if fail_trigger:
             transitions.setdefault(running, []).append((fail_trigger, pending))
 
-        # reject_trigger：running → rejected 状态
-        reject_trigger = phase.get("reject_trigger")
-        if reject_trigger:
+        # jump_trigger：running → rejected 状态（或直接跳转）
+        jump_trigger = phase.get("jump_trigger")
+        if jump_trigger:
             rejected_state = f"{phase['name']}_rejected"
-            transitions.setdefault(running, []).append((reject_trigger, rejected_state))
+            transitions.setdefault(running, []).append((jump_trigger, rejected_state))
 
-            # retry_target：rejected → 目标阶段的 pending
-            retry_target = phase.get("retry_target")
-            if retry_target:
-                target_phase = next((p for p in all_flat_phases if p["name"] == retry_target), None)
+            # jump_target：rejected → 目标阶段的 pending
+            jump_target = phase.get("jump_target")
+            if jump_target:
+                target_phase = next((p for p in all_flat_phases if p["name"] == jump_target), None)
                 if target_phase:
-                    retry_trigger = f"retry_{retry_target}"
+                    retry_trigger = f"retry_{jump_target}"
                     transitions.setdefault(rejected_state, []).append((retry_trigger, target_phase["pending_state"]))
 
     # 所有非终态加 cancel 转换
@@ -653,14 +689,14 @@ def build_transitions(workflow_name: str) -> dict[str, list[tuple[str, str]]]:
     for phase in phases:
         if "parallel" in phase:
             for sub in phase["parallel"].get("phases", []):
-                if sub.get("reject_trigger"):
+                if sub.get("jump_trigger"):
                     rejected_state = f"{sub['name']}_rejected"
                     if rejected_state in transitions:
                         existing_triggers = {t for t, _ in transitions[rejected_state]}
                         if "cancel" not in existing_triggers:
                             transitions[rejected_state].append(("cancel", "cancelled"))
         else:
-            if phase.get("reject_trigger"):
+            if phase.get("jump_trigger"):
                 rejected_state = f"{phase['name']}_rejected"
                 if rejected_state in transitions:
                     existing_triggers = {t for t, _ in transitions[rejected_state]}
@@ -777,12 +813,12 @@ def get_all_states(workflow_name: str) -> list[str]:
             for sub in par.get("phases", []):
                 states.append(sub["pending_state"])
                 states.append(sub["running_state"])
-                if sub.get("reject_trigger"):
+                if sub.get("jump_trigger"):
                     states.append(f"{sub['name']}_rejected")
         else:
             states.append(phase["pending_state"])
             states.append(phase["running_state"])
-            if phase.get("reject_trigger"):
+            if phase.get("jump_trigger"):
                 states.append(f"{phase['name']}_rejected")
     states.extend(wf.get("terminal_states", ["cancelled"]))
     return states
