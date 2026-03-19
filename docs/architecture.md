@@ -93,7 +93,6 @@
 | | `release_lock(task_id)` | 释放锁 |
 | | `is_locked(task_id)` | 检查锁状态 |
 | 通知 | `notify(task, message)` | 调度通知（委托工作流 notify_func 或 notify 后端） |
-| AI | `run_claude(prompt, repo_path)` | 调用 AI CLI（默认实现使用 Claude） |
 
 ### db.py — 数据库
 

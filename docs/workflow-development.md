@@ -279,7 +279,7 @@ def run_my_phase(task_id: str) -> None:
     plan = (task_dir / "plan.md").read_text()
 
     # 3. 执行核心逻辑
-    result = run_claude(prompt, repo_path=task['repo_path'])
+    result = my_execute(prompt, repo_path=task['repo_path'])
 
     # 4. 保存产出物
     (task_dir / "output.md").write_text(result)

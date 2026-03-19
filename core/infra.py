@@ -154,24 +154,6 @@ def notify(task: dict, message: str, media_path: str | None = None, event: str =
 # ──────────────────────────────────────────────────────────
 
 
-def run_claude(prompt: str, repo_path: str | None = None, timeout: int = 900) -> str:
-    log.info("调用 Claude CLI (timeout=%ds, cwd=%s)", timeout, repo_path or "None")
-    try:
-        r = subprocess.run(
-            ["claude", "--permission-mode", "bypassPermissions", "--print", prompt],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=repo_path if repo_path and Path(repo_path).exists() else None,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"Claude CLI 超时（{timeout}s），prompt 长度 {len(prompt)} 字符")
-    if r.returncode != 0:
-        raise RuntimeError(f"Claude CLI 失败: {r.stderr[:500]}")
-    return r.stdout.strip()
-
 
 def get_task_dir(task_id: str) -> Path:
     d = DEVTASKS_DIR / task_id

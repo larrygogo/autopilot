@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 from core.db import CONFIG, get_task, now
-from core.infra import get_task_dir, run_claude
+from core.infra import get_task_dir
 from core.logger import get_logger
 from core.state_machine import transition
 
@@ -40,6 +40,26 @@ PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 # ──────────────────────────────────────────────────────────
 # 自包含辅助函数
 # ──────────────────────────────────────────────────────────
+
+
+def run_claude(prompt: str, repo_path: str | None = None, timeout: int = 900) -> str:
+    """调用 Claude CLI 执行 AI 任务（工作流专属，非框架核心）"""
+    log.info("调用 Claude CLI (timeout=%ds, cwd=%s)", timeout, repo_path or "None")
+    try:
+        r = subprocess.run(
+            ["claude", "--permission-mode", "bypassPermissions", "--print", prompt],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=repo_path if repo_path and Path(repo_path).exists() else None,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Claude CLI 超时（{timeout}s），prompt 长度 {len(prompt)} 字符")
+    if r.returncode != 0:
+        raise RuntimeError(f"Claude CLI 失败: {r.stderr[:500]}")
+    return r.stdout.strip()
 
 
 def fetch_req(req_id: str) -> dict | None:

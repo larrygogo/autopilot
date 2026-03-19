@@ -1,8 +1,7 @@
 """
-基础设施测试：锁机制、git 操作、Claude CLI mock
+基础设施测试：锁机制、git 操作
 """
 
-import subprocess
 from unittest import mock
 
 from core.infra import acquire_lock, is_locked, release_lock
@@ -74,39 +73,3 @@ class TestRunGit:
         assert r.returncode == 1
 
 
-class TestRunClaude:
-    """Claude CLI mock 测试"""
-
-    def test_success(self):
-        from core.infra import run_claude
-
-        result = mock.MagicMock()
-        result.returncode = 0
-        result.stdout = "AI response"
-        result.stderr = ""
-        with mock.patch("subprocess.run", return_value=result):
-            output = run_claude("test prompt")
-        assert output == "AI response"
-
-    def test_timeout(self):
-        from core.infra import run_claude
-
-        with mock.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 900)):
-            try:
-                run_claude("test prompt", timeout=900)
-                assert False, "Expected RuntimeError"
-            except RuntimeError as e:
-                assert "超时" in str(e)
-
-    def test_failure(self):
-        from core.infra import run_claude
-
-        result = mock.MagicMock()
-        result.returncode = 1
-        result.stderr = "Claude error"
-        with mock.patch("subprocess.run", return_value=result):
-            try:
-                run_claude("test prompt")
-                assert False, "Expected RuntimeError"
-            except RuntimeError as e:
-                assert "Claude CLI 失败" in str(e)
