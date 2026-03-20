@@ -49,21 +49,38 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
         print(f"  ✓ {d}")
 
-    # 复制示例工作流 / Copy example workflows
+    # 复制示例工作流（支持 YAML 目录和单文件两种格式）
+    # Copy example workflows (supports both YAML directory and single-file formats)
     examples_dir = FRAMEWORK_ROOT / "examples"
     if examples_dir.is_dir():
         for wf_dir in sorted(examples_dir.iterdir()):
             if not wf_dir.is_dir():
                 continue
-            wf_file = wf_dir / "workflow.py"
-            if not wf_file.exists():
-                continue
-            dest = home / "workflows" / f"{wf_dir.name}.py"
-            if not dest.exists():
-                shutil.copy2(wf_file, dest)
-                print(f"  ✓ {dest}（示例工作流）")
-            else:
-                print(f"  - {dest}（已存在，跳过）")
+
+            yaml_file = wf_dir / "workflow.yaml"
+            py_file = wf_dir / "workflow.py"
+
+            if yaml_file.exists():
+                # YAML 工作流：复制整个目录（workflow.yaml + workflow.py）
+                # YAML workflow: copy entire directory (workflow.yaml + workflow.py)
+                dest_dir = home / "workflows" / wf_dir.name
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                for src_file in [yaml_file, py_file]:
+                    if src_file.exists():
+                        dest_file = dest_dir / src_file.name
+                        if not dest_file.exists():
+                            shutil.copy2(src_file, dest_file)
+                            print(f"  ✓ {dest_file}（示例工作流）")
+                        else:
+                            print(f"  - {dest_file}（已存在，跳过）")
+            elif py_file.exists():
+                # 单文件 Python 工作流 / Single-file Python workflow
+                dest = home / "workflows" / f"{wf_dir.name}.py"
+                if not dest.exists():
+                    shutil.copy2(py_file, dest)
+                    print(f"  ✓ {dest}（示例工作流）")
+                else:
+                    print(f"  - {dest}（已存在，跳过）")
 
             # 复制示例提示词 / Copy example prompts
             prompts_dir = wf_dir / "prompts"

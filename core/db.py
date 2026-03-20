@@ -86,7 +86,7 @@ def get_conn() -> sqlite3.Connection:
         try:
             conn.execute("SELECT 1")
             return conn
-        except sqlite3.ProgrammingError:
+        except (sqlite3.ProgrammingError, sqlite3.OperationalError):
             _local.conn = None
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)

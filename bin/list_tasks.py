@@ -20,7 +20,6 @@ def main():
     parser = argparse.ArgumentParser(description="查询任务列表")
     parser.add_argument("--status", help="按状态过滤")
     parser.add_argument("--workflow", help="按工作流过滤")
-    parser.add_argument("--project", help="按项目过滤")
     parser.add_argument("--limit", type=int, default=50, help="最大返回条数（默认 50）")
     args = parser.parse_args()
 

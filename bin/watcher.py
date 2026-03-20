@@ -11,7 +11,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.watcher import main
-
 if __name__ == "__main__":
+    from core.db import init_db
+
+    init_db()
+
+    import core.workflows  # noqa: F401, I001 — 触发工作流发现 / trigger workflow discovery
+    from core.watcher import main
+
     main()

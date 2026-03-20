@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.db import create_task, get_task, init_db
-from core.runner import execute_phase
+from core.runner import execute_parallel_phase, execute_phase
 
 
 def main():
@@ -91,10 +91,14 @@ def main():
     # 获取工作流的第一个阶段（兼容 parallel 首阶段）
     # Get the first phase of the workflow (compatible with parallel first phase)
     first = wf["phases"][0]
-    first_phase = first["parallel"]["name"] if "parallel" in first else first["name"]
-    print(f"  开始 {first_phase}...")
-
-    execute_phase(task_id, first_phase)
+    if "parallel" in first:
+        first_phase = first["parallel"]["name"]
+        print(f"  开始并行阶段 {first_phase}...")
+        execute_parallel_phase(task_id, first_phase)
+    else:
+        first_phase = first["name"]
+        print(f"  开始 {first_phase}...")
+        execute_phase(task_id, first_phase)
 
 
 if __name__ == "__main__":

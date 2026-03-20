@@ -155,7 +155,7 @@ def cancel(task_id, reason):
         if sub["status"] != "cancelled":
             try:
                 transition(sub["id"], "cancel", note=f"父任务取消：{reason}")
-            except (InvalidTransitionError, Exception):
+            except Exception:
                 with get_conn() as conn:
                     conn.execute(
                         "UPDATE tasks SET status = 'cancelled', updated_at = ? WHERE id = ?",

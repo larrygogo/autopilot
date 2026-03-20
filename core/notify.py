@@ -115,10 +115,16 @@ def _send_command(backend: dict, variables: dict[str, str]) -> None:
     """通过 shell 命令发送通知
     Send notification via shell command."""
     cmd_template = backend.get("command", "")
-    # 先用原始值处理条件块（判断有无值），再用转义值替换变量（防止命令注入）
-    # First process conditional blocks with raw values (check presence), then substitute with escaped values
+    # 两遍渲染：先用原始值处理条件块（判断有无值），再用转义值替换变量（防止命令注入）
+    # Two-pass rendering: first process conditional blocks with raw values, then substitute with escaped values
+    cmd = re.sub(
+        r"\{\{#(\w+)}}(.*?)\{\{/\1}}",
+        lambda m: m.group(2) if variables.get(m.group(1), "") else "",
+        cmd_template,
+        flags=re.DOTALL,
+    )
     safe_variables = {k: shlex.quote(v) if v else "" for k, v in variables.items()}
-    cmd = render_template(cmd_template, safe_variables)
+    cmd = re.sub(r"\{\{(\w+)}}", lambda m: safe_variables.get(m.group(1), ""), cmd)
 
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)

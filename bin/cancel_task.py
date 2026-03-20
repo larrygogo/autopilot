@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.db import get_task
+from core.db import get_conn, get_task, now
 from core.infra import notify
 from core.state_machine import InvalidTransitionError, transition
 
@@ -53,9 +53,14 @@ def main():
             if sub["status"] not in terminal_states:
                 try:
                     transition(sub["id"], "cancel", note="父任务取消，级联取消")
-                    print(f"  ✓ 子任务已取消：{sub['id']}")
                 except (InvalidTransitionError, Exception):
-                    pass
+                    # fallback：强制修改状态 / Force set status
+                    with get_conn() as conn:
+                        conn.execute(
+                            "UPDATE tasks SET status = 'cancelled', updated_at = ? WHERE id = ?",
+                            (now(), sub["id"]),
+                        )
+                print(f"  ✓ 子任务已取消：{sub['id']}")
 
         notify(task, f"🚫 任务已取消：《{task['title']}》\n\n原因：{args.reason}")
     except InvalidTransitionError as e:

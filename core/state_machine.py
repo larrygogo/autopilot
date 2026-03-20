@@ -101,9 +101,18 @@ def transition(
             # 构建更新字段（透明区分列字段 vs extra JSON）
             # Build update fields (transparently distinguish column fields vs extra JSON)
             col_updates: dict = {"status": to_status, "updated_at": now()}
-            # 仅在首次从 pending 进入 running 时更新 started_at，保持"阶段开始时间"语义
-            # Only update started_at on first pending → running transition to preserve "phase start time" semantics
-            if to_status.endswith("_running") or to_status.startswith("running_"):
+            # 仅在进入 running 状态时更新 started_at，保持"阶段开始时间"语义
+            # Only update started_at when entering running state to preserve "phase start time" semantics
+            is_running = False
+            try:
+                from core import registry
+
+                running_map = registry.get_running_state_phase(row["workflow"] or "")
+                is_running = to_status in running_map
+            except Exception:
+                # fallback：按命名模式判断 / Fallback: check by naming pattern
+                is_running = "running" in to_status
+            if is_running:
                 col_updates["started_at"] = now()
             extra_fields = {}
 
