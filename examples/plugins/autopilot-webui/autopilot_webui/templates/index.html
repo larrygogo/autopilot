@@ -3,9 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Autopilot Console</title>
+<title>Autopilot 控制台</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
   :root {
     --bg0: #0a0a0f; --bg1: #0f1117; --bg2: #161822; --bg3: #1e2030;
     --border: #252838; --border2: #2e3348;
@@ -21,8 +20,8 @@
     --shadow: 0 1px 3px rgba(0,0,0,0.4);
     --shadow-lg: 0 8px 24px rgba(0,0,0,0.4);
     --radius: 10px;
-    --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
-    --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono: 'Cascadia Code', 'Consolas', 'SF Mono', 'Menlo', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: var(--sans); background: var(--bg0); color: var(--text); line-height: 1.5; -webkit-font-smoothing: antialiased; }
@@ -140,40 +139,40 @@
 <nav>
   <span class="logo"><span class="dot"></span>AUTOPILOT</span>
   <div class="links">
-    <a href="#dashboard" id="nav-dashboard">dashboard</a>
-    <a href="#tasks" id="nav-tasks">tasks</a>
-    <a href="#workflows" id="nav-workflows">workflows</a>
+    <a href="#dashboard" id="nav-dashboard">仪表盘</a>
+    <a href="#tasks" id="nav-tasks">任务</a>
+    <a href="#workflows" id="nav-workflows">工作流</a>
   </div>
 </nav>
 
 <div class="container">
   <div id="view-dashboard" class="view">
-    <div class="page-hdr"><h2>Dashboard</h2><span>// system overview</span></div>
+    <div class="page-hdr"><h2>仪表盘</h2><span>// 系统概览</span></div>
     <div class="stats" id="stat-cards"></div>
     <div class="dist-row">
-      <div class="dist-card"><h3>by_status</h3><div class="dist" id="status-dist"></div></div>
-      <div class="dist-card"><h3>by_workflow</h3><div class="dist" id="wf-dist"></div></div>
+      <div class="dist-card"><h3>按状态分布</h3><div class="dist" id="status-dist"></div></div>
+      <div class="dist-card"><h3>按工作流分布</h3><div class="dist" id="wf-dist"></div></div>
     </div>
   </div>
 
   <div id="view-tasks" class="view hidden">
-    <div class="page-hdr"><h2>Tasks</h2><span>// execution log</span></div>
+    <div class="page-hdr"><h2>任务</h2><span>// 执行记录</span></div>
     <div class="filters">
-      <select id="filter-status"><option value="">all_status</option></select>
-      <select id="filter-workflow"><option value="">all_workflows</option></select>
+      <select id="filter-status"><option value="">全部状态</option></select>
+      <select id="filter-workflow"><option value="">全部工作流</option></select>
     </div>
     <div class="tbl-wrap">
-      <table><thead><tr><th>ID</th><th>Title</th><th>Workflow</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+      <table><thead><tr><th>ID</th><th>标题</th><th>工作流</th><th>状态</th><th>更新时间</th><th></th></tr></thead>
       <tbody id="task-tbody"></tbody></table>
     </div>
     <div id="task-detail" class="detail-panel hidden"></div>
   </div>
 
   <div id="view-workflows" class="view hidden">
-    <div class="page-hdr"><h2>Workflows</h2><span>// registered definitions</span></div>
+    <div class="page-hdr"><h2>工作流</h2><span>// 已注册定义</span></div>
     <div class="wf-cards" id="wf-list"></div>
     <div id="wf-graph-panel" class="graph-box hidden">
-      <h4 id="wf-graph-title">state_machine</h4>
+      <h4 id="wf-graph-title">状态机</h4>
       <div id="wf-graph-svg"></div>
     </div>
   </div>
@@ -378,14 +377,14 @@
   function loadDashboard() {
     apiGet('/api/stats').then(function(s) {
       setText('stat-cards',
-        '<div class="stat"><div class="lbl">total_tasks</div><div class="num">'+s.total+'</div></div>'+
-        '<div class="stat"><div class="lbl">success_rate</div><div class="num">'+s.success_rate+'%</div></div>'+
-        '<div class="stat"><div class="lbl">avg_duration</div><div class="num">'+fmtDur(s.avg_duration_seconds)+'</div></div>'
+        '<div class="stat"><div class="lbl">任务总数</div><div class="num">'+s.total+'</div></div>'+
+        '<div class="stat"><div class="lbl">成功率</div><div class="num">'+s.success_rate+'%</div></div>'+
+        '<div class="stat"><div class="lbl">平均耗时</div><div class="num">'+fmtDur(s.avg_duration_seconds)+'</div></div>'
       );
       var sd=Object.entries(s.by_status||{});
-      setText('status-dist',sd.length?sd.map(function(e){return'<span>'+esc(e[0])+': '+e[1]+'</span>';}).join(''):'<span style="color:var(--muted)">no data</span>');
+      setText('status-dist',sd.length?sd.map(function(e){return'<span>'+esc(e[0])+': '+e[1]+'</span>';}).join(''):'<span style="color:var(--muted)">暂无数据</span>');
       var wd=Object.entries(s.by_workflow||{});
-      setText('wf-dist',wd.length?wd.map(function(e){return'<span>'+esc(e[0])+': '+e[1]+'</span>';}).join(''):'<span style="color:var(--muted)">no data</span>');
+      setText('wf-dist',wd.length?wd.map(function(e){return'<span>'+esc(e[0])+': '+e[1]+'</span>';}).join(''):'<span style="color:var(--muted)">暂无数据</span>');
     });
   }
 
@@ -397,7 +396,7 @@
     if(st)url+='&status='+encodeURIComponent(st);
     if(wf)url+='&workflow='+encodeURIComponent(wf);
     apiGet(url).then(function(tasks){
-      if(!tasks.length){setText('task-tbody','<tr><td colspan="6" class="empty">no tasks found</td></tr>');return;}
+      if(!tasks.length){setText('task-tbody','<tr><td colspan="6" class="empty">暂无任务</td></tr>');return;}
       setText('task-tbody',tasks.map(function(t){
         return'<tr>'+
           '<td style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);">'+esc(t.id).substring(0,10)+'</td>'+
@@ -405,12 +404,12 @@
           '<td style="font-size:0.8rem;color:var(--muted);">'+esc(t.workflow)+'</td>'+
           '<td>'+badge(t.status)+'</td>'+
           '<td style="font-size:0.78rem;color:var(--muted);font-family:var(--mono);">'+fmtTime(t.updated_at)+'</td>'+
-          '<td><button class="btn-link" data-task-id="'+esc(t.id)+'">view</button></td></tr>';
+          '<td><button class="btn-link" data-task-id="'+esc(t.id)+'">查看</button></td></tr>';
       }).join(''));
       var sts=tasks.map(function(t){return t.status;}).filter(function(v,i,a){return a.indexOf(v)===i;});
       var wfs=tasks.map(function(t){return t.workflow;}).filter(function(v,i,a){return a.indexOf(v)===i;});
-      populateFilter('filter-status',sts,'all_status');
-      populateFilter('filter-workflow',wfs,'all_workflows');
+      populateFilter('filter-status',sts,'全部状态');
+      populateFilter('filter-workflow',wfs,'全部工作流');
       document.getElementById('task-detail').classList.add('hidden');
     });
   }
@@ -441,11 +440,11 @@
       panel.innerHTML=
         '<h3>'+esc(task.title||tid)+'</h3>'+
         '<p class="detail-meta">ID: <code>'+esc(task.id)+'</code></p>'+
-        '<p class="detail-meta">workflow: '+esc(task.workflow)+' &middot; status: '+badge(task.status)+'</p>'+
-        '<p class="detail-meta">created: '+fmtTime(task.created_at)+' &middot; updated: '+fmtTime(task.updated_at)+'</p>'+
-        '<div class="graph-box" style="margin-top:1.25rem;"><h4>state_machine</h4><div id="task-graph-svg"></div></div>'+
-        '<div class="detail-section"><h4>transition_logs</h4>'+
-        (lh?'<div class="timeline">'+lh+'</div>':'<p style="color:var(--muted);font-size:0.82rem;font-family:var(--mono);">no transitions</p>')+
+        '<p class="detail-meta">工作流: '+esc(task.workflow)+' &middot; 状态: '+badge(task.status)+'</p>'+
+        '<p class="detail-meta">创建时间: '+fmtTime(task.created_at)+' &middot; 更新时间: '+fmtTime(task.updated_at)+'</p>'+
+        '<div class="graph-box" style="margin-top:1.25rem;"><h4>状态机</h4><div id="task-graph-svg"></div></div>'+
+        '<div class="detail-section"><h4>流转日志</h4>'+
+        (lh?'<div class="timeline">'+lh+'</div>':'<p style="color:var(--muted);font-size:0.82rem;">暂无流转记录</p>')+
         '</div>';
       if(task.workflow){
         apiGet('/api/workflows/'+encodeURIComponent(task.workflow)+'/graph').then(function(g){
@@ -458,14 +457,14 @@
   // --- Workflows ---
   function loadWorkflows(){
     apiGet('/api/workflows').then(function(wfs){
-      if(!wfs.length){setText('wf-list','<div class="empty">no workflows registered</div>');return;}
+      if(!wfs.length){setText('wf-list','<div class="empty">暂无注册工作流</div>');return;}
       setText('wf-list',wfs.map(function(wf){
         var ph=(wf.phases||[]).map(function(p){return'<span class="phase-tag">'+esc(p)+'</span>';}).join('');
         return'<div class="wf-card">'+
           '<h3>'+esc(wf.name)+'</h3>'+
           '<div class="wf-desc">'+esc(wf.description||'—')+'</div>'+
           '<div class="phase-list">'+ph+'</div>'+
-          '<button class="btn-sm" style="margin-top:0.9rem;" data-wf-graph="'+esc(wf.name)+'">state_machine</button>'+
+          '<button class="btn-sm" style="margin-top:0.9rem;" data-wf-graph="'+esc(wf.name)+'">查看状态机</button>'+
           '</div>';
       }).join(''));
       document.getElementById('wf-graph-panel').classList.add('hidden');
@@ -475,8 +474,8 @@
     var btn=e.target.closest('[data-wf-graph]');if(!btn)return;
     var wn=btn.getAttribute('data-wf-graph');
     var panel=document.getElementById('wf-graph-panel');panel.classList.remove('hidden');
-    document.getElementById('wf-graph-title').textContent='state_machine: '+wn;
-    var sc=document.getElementById('wf-graph-svg');sc.textContent='loading...';
+    document.getElementById('wf-graph-title').textContent='状态机: '+wn;
+    var sc=document.getElementById('wf-graph-svg');sc.textContent='加载中...';
     apiGet('/api/workflows/'+encodeURIComponent(wn)+'/graph').then(function(g){renderGraph(g,sc);});
   });
 
