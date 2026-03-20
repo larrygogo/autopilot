@@ -49,15 +49,6 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
         print(f"  ✓ {d}")
 
-    # 复制框架配置模板 / Copy framework config template
-    config_dest = home / "config.yaml"
-    config_src = FRAMEWORK_ROOT / "config.example.yaml"
-    if not config_dest.exists() and config_src.exists():
-        shutil.copy2(config_src, config_dest)
-        print(f"  ✓ {config_dest}（从模板复制）")
-    elif config_dest.exists():
-        print(f"  - {config_dest}（已存在，跳过）")
-
     # 复制示例工作流 / Copy example workflows
     examples_dir = FRAMEWORK_ROOT / "examples"
     if examples_dir.is_dir():

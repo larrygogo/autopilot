@@ -445,13 +445,6 @@ def init(path):
         d.mkdir(parents=True, exist_ok=True)
         click.echo(f"  ✓ {d}")
 
-    config_dest = home / "config.yaml"
-    config_src = framework_root / "config.example.yaml"
-    if not config_dest.exists() and config_src.exists():
-        shutil.copy2(config_src, config_dest)
-        click.echo(f"  ✓ {config_dest}（从模板复制）")
-    elif config_dest.exists():
-        click.echo(f"  - {config_dest}（已存在，跳过）")
 
     examples_dir = framework_root / "examples"
     if examples_dir.is_dir():

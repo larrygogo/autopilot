@@ -71,8 +71,7 @@ autopilot/
 │   ├── parallel_build/            # 并行构建流程（fork/join + hooks）
 │   └── data_pipeline/             # 数据处理流水线（前向跳转 + 多终态）
 ├── docs/                          # 架构文档
-├── tests/                         # 单元测试
-└── config.example.yaml            # 极简框架配置
+└── tests/                         # 单元测试
 ```
 
 ## 开发规范
@@ -145,7 +144,7 @@ python -m pytest tests/ -v
 
 ## 配置
 
-参考 `config.example.yaml`，框架本身无内置配置项，所有字段由工作流自行读取。
+框架本身无内置配置项，所有字段由工作流自行读取。
 
 工作流专属配置详见 `examples/` 下各工作流的 `config.example.yaml`。
 
