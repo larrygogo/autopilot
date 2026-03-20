@@ -43,7 +43,7 @@ def main():
             else:
                 label = f" [{phase['label']}]" if phase.get("label") else ""
                 trigger_info = f"trigger={phase.get('trigger')}" if phase.get("trigger") else "(auto)"
-                pending, running = phase['pending_state'], phase['running_state']
+                pending, running = phase["pending_state"], phase["running_state"]
                 print(f"    - {phase['name']}{label}: {pending} → {running}  {trigger_info}")
         print()
 

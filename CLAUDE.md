@@ -154,9 +154,11 @@ python -m pytest tests/ -v
 ## 知识库
 
 详细架构文档见 `docs/` 目录（中文版）和 `docs/en/` 目录（英文版）：
+- `quickstart.md`：5 分钟快速入门教程，从安装到跑通第一个 demo
 - `architecture.md`：整体架构、模块职责、数据流、设计决策
 - `workflow-development.md`：自定义工作流开发指南、YAML 工作流完整字段说明
-- `state-machine.md`：状态转换表、驳回机制、各工作流完整状态图
+- `state-machine.md`：状态转换表、驳回机制、各工作流完整状态图（含 Mermaid 图表）
 - `plugin-development.md`：第三方插件开发指南、扩展点详解、框架 API
+- `faq.md`：常见问题与故障排查（安装、初始化、工作流、运行时、WebUI）
 
 English documentation is available under `docs/en/`.

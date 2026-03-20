@@ -4,6 +4,34 @@
 
 ## Overall Architecture
 
+```mermaid
+graph TB
+    CLI["CLI Entry Layer<br/>autopilot start / list / cancel / ..."]
+    Runner["Runner Execution Engine<br/>acquire_lock → execute_phase → release_lock<br/>run_in_background · parallel fork/join"]
+    Registry["Registry<br/>Workflow registration · YAML loading<br/>State derivation · Transition table gen"]
+    SM["State Machine<br/>Atomic state transitions<br/>Transition validation · Audit logging"]
+    Infra["Infra<br/>git / locks / notifications / AI<br/>Cross-platform file locks"]
+    DB[("DB Persistence Layer<br/>SQLite: tasks + task_logs<br/>with subtask support")]
+    Plugin["Plugin System<br/>entry_points discovery"]
+    Watcher["Watcher Fallback<br/>Stall detection · Auto-recovery"]
+    Workflows["Workflows<br/>~/.autopilot/workflows/"]
+
+    CLI --> Runner
+    Plugin --> CLI
+    Runner --> Registry
+    Runner --> SM
+    Runner --> Infra
+    Registry --> DB
+    SM --> DB
+    Plugin --> Infra
+    Watcher --> Runner
+    Watcher --> DB
+    Workflows --> Registry
+```
+
+<details>
+<summary>ASCII version (terminal / offline viewing)</summary>
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      CLI Entry Layer                          │
@@ -40,6 +68,8 @@
 │  your_flow/     Custom workflows...                         │
 └───────────────────────────────────────────────────────────┘
 ```
+
+</details>
 
 ## Core Module Responsibilities
 
@@ -147,6 +177,43 @@ Core interface:
 
 Using the `dev` workflow as an example:
 
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI
+    participant DB as SQLite DB
+    participant Runner
+    participant SM as State Machine
+    participant Phase as Phase Function
+
+    User->>CLI: autopilot start REQ-001
+    CLI->>DB: create_task(pending_design, workflow=dev)
+    CLI->>Runner: execute_phase(task_id, 'design')
+    Runner->>Runner: acquire_lock()
+    Runner->>SM: transition(pending_design → designing)
+    SM->>DB: UPDATE status + INSERT log
+    Runner->>Phase: run_plan_design(task_id)
+    Phase-->>SM: transition(designing → pending_review)
+    Phase-->>Runner: run_in_background('review')
+    Runner->>Runner: release_lock()
+
+    Note over Runner,Phase: New process spawned
+
+    Runner->>SM: transition(pending_review → reviewing)
+    Runner->>Phase: run_plan_review(task_id)
+    alt Review passed
+        Phase-->>SM: transition(reviewing → developing)
+        Phase-->>Runner: run_in_background('dev')
+    else Review rejected
+        Phase-->>SM: transition(reviewing → review_rejected)
+        SM-->>SM: transition(review_rejected → pending_design)
+        Phase-->>Runner: run_in_background('design') retry
+    end
+```
+
+<details>
+<summary>Text version (terminal / offline viewing)</summary>
+
 ```
 User executes: autopilot start <req_id> --project my-project
     │
@@ -183,6 +250,8 @@ User executes: autopilot start <req_id> --project my-project
 [4-6] dev → code_review → pr → pr_submitted ✓
 ```
 
+</details>
+
 ## Design Decisions: Push Model vs Polling Model
 
 ### Why Push Model?
@@ -211,3 +280,15 @@ File locks + SQLite transactions for dual protection:
 Both are essential:
 - File locks only: state read and update can still be interrupted
 - Database transactions only: two processes may simultaneously enter the phase function and perform duplicate work
+
+---
+
+## Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [5-Minute Quickstart](quickstart.md) | From installation to running your first demo |
+| [Workflow Development Guide](workflow-development.md) | YAML syntax, phase function guidelines |
+| [State Machine Details](state-machine.md) | Transition tables, rejection mechanism, state diagrams |
+| [Plugin Development Guide](plugin-development.md) | Third-party plugins, extension points, framework API |
+| [FAQ & Troubleshooting](faq.md) | Common issues and solutions |

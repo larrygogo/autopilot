@@ -336,3 +336,39 @@ def run_my_phase(task_id: str) -> None:
 See `examples/workflows/dev/` and `examples/workflows/req_review/`:
 - `workflow.yaml` — workflow definition
 - `workflow.py` — phase function implementation
+
+## doc_gen Workflow State Machine
+
+Using the minimal `doc_gen` workflow (2 phases + rejection) as an example, showing the complete state diagram after auto-derivation:
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending_generate
+
+    pending_generate --> running_generate : start_generate
+    running_generate --> pending_review_doc : generate_complete
+    running_generate --> pending_generate : generate_fail
+
+    pending_review_doc --> running_review_doc : start_review_doc
+    running_review_doc --> done : review_doc_complete
+    running_review_doc --> review_doc_rejected : review_doc_reject
+    review_doc_rejected --> pending_generate : retry_generate
+
+    done --> [*]
+
+    state "Any non-terminal → cancelled (cancel)" as cancel_note
+```
+
+> For more workflow state diagrams, see [State Machine Details](state-machine.md)
+
+---
+
+## Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [5-Minute Quickstart](quickstart.md) | From installation to running your first demo |
+| [Architecture Overview](architecture.md) | Overall architecture, module responsibilities, data flow |
+| [State Machine Details](state-machine.md) | Transition tables, rejection mechanism, state diagrams |
+| [Plugin Development Guide](plugin-development.md) | Third-party plugins, extension points, framework API |
+| [FAQ & Troubleshooting](faq.md) | Common issues and solutions |

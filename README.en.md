@@ -46,6 +46,8 @@ autopilot upgrade
 autopilot start <req_id> --project my-project
 ```
 
+> **5-Minute Tutorial**: From installation to running your first demo, see [`docs/en/quickstart.md`](docs/en/quickstart.md)
+
 ## Defining Workflows
 
 Drop into `~/.autopilot/workflows/`, and the framework auto-discovers and registers them. Two approaches are supported:
@@ -123,6 +125,21 @@ WORKFLOW = {
 > Full development guide: [`docs/workflow-development.md`](docs/workflow-development.md)
 
 ## Architecture
+
+```mermaid
+graph TB
+    CLI["CLI Entry"] --> Runner["Runner Engine"]
+    Runner --> Registry["Registry"]
+    Runner --> SM["State Machine"]
+    Runner --> Infra["Infra Locks/Notify"]
+    Registry --> DB[("SQLite DB")]
+    SM --> DB
+    Plugin["Plugin System"] --> CLI
+    Plugin --> Infra
+    Watcher["Watcher Fallback"] --> Runner
+    Watcher --> DB
+    Workflows["User Workflows"] --> Registry
+```
 
 ```
 autopilot/

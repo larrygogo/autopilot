@@ -46,6 +46,8 @@ autopilot upgrade
 autopilot start <req_id> --project my-project
 ```
 
+> **5 分钟入门教程**：从安装到跑通第一个 demo，详见 [`docs/quickstart.md`](docs/quickstart.md)
+
 ## 定义工作流
 
 放入 `~/.autopilot/workflows/`，框架自动发现并注册。支持两种写法：
@@ -123,6 +125,21 @@ WORKFLOW = {
 > 完整开发指南见 [`docs/workflow-development.md`](docs/workflow-development.md)
 
 ## 架构
+
+```mermaid
+graph TB
+    CLI["CLI 入口"] --> Runner["Runner 执行引擎"]
+    Runner --> Registry["Registry 工作流注册"]
+    Runner --> SM["State Machine 状态机"]
+    Runner --> Infra["Infra 锁/通知"]
+    Registry --> DB[("SQLite DB")]
+    SM --> DB
+    Plugin["Plugin 插件系统"] --> CLI
+    Plugin --> Infra
+    Watcher["Watcher 保底恢复"] --> Runner
+    Watcher --> DB
+    Workflows["用户工作流"] --> Registry
+```
 
 ```
 autopilot/

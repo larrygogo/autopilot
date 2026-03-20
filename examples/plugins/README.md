@@ -15,6 +15,12 @@
 - 任务列表：状态/工作流筛选、详情查看、流转日志时间线
 - 工作流列表：卡片式展示名称、描述、阶段列表
 
+<!-- TODO: 补充 WebUI 截图
+![仪表盘](../../docs/screenshots/webui-dashboard.png)
+![任务详情](../../docs/screenshots/webui-task-detail.png)
+![工作流列表](../../docs/screenshots/webui-workflow-list.png)
+-->
+
 **技术特点**：
 - 基于标准库 `http.server.ThreadingHTTPServer`，零外部依赖
 - 单文件 SPA（内嵌 CSS + 原生 JS），无构建步骤

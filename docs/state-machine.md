@@ -129,6 +129,39 @@ Watcher 只关注活跃状态的任务。
 
 ## dev 工作流完整状态图
 
+```mermaid
+stateDiagram-v2
+    [*] --> pending_design : 初始状态
+
+    pending_design --> designing : start_design
+    designing --> pending_review : design_complete
+    designing --> pending_design : design_fail
+
+    pending_review --> reviewing : start_review
+    reviewing --> review_rejected : review_reject
+    reviewing --> developing : review_pass
+    review_rejected --> pending_design : retry_design
+
+    developing --> in_development : start_dev
+    in_development --> pending_code_review : dev_complete
+    in_development --> developing : dev_fail
+
+    pending_code_review --> code_reviewing : start_code_review
+    code_reviewing --> code_rejected : code_reject
+    code_reviewing --> pending_submit_pr : code_pass
+    code_rejected --> developing : retry_dev
+
+    pending_submit_pr --> pr_submitting : start_submit_pr
+    pr_submitting --> pr_submitted : submit_pr_complete
+
+    pr_submitted --> [*]
+
+    state "任意非终态 → cancelled (cancel)" as cancel_note
+```
+
+<details>
+<summary>ASCII 版本（终端 / 离线查看）</summary>
+
 ```
                                     ┌──────────────────┐
                                     │  pending_design   │ ← 初始状态
@@ -178,7 +211,30 @@ Watcher 只关注活跃状态的任务。
                         任意非终态 ──[cancel]──→ cancelled ✓  ← 终态
 ```
 
+</details>
+
 ## req_review 工作流完整状态图
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending_req_analysis : 初始状态
+
+    pending_req_analysis --> running_req_analysis : start_req_analysis
+    running_req_analysis --> pending_req_review : req_analysis_complete
+    running_req_analysis --> pending_req_analysis : req_analysis_fail
+
+    pending_req_review --> running_req_review : start_req_review
+    running_req_review --> done : req_review_complete
+    running_req_review --> req_review_rejected : req_review_reject
+    req_review_rejected --> pending_req_analysis : retry_req_analysis
+
+    done --> [*]
+
+    state "任意非终态 → cancelled (cancel)" as cancel_note
+```
+
+<details>
+<summary>ASCII 版本（终端 / 离线查看）</summary>
 
 ```
                                     ┌──────────────────────┐
@@ -210,6 +266,28 @@ Watcher 只关注活跃状态的任务。
                         任意非终态 ──[cancel]──→ cancelled ✓  ← 终态
 ```
 
+</details>
+
+## doc_gen 工作流状态图
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending_generate : 初始状态
+
+    pending_generate --> running_generate : start_generate
+    running_generate --> pending_review_doc : generate_complete
+    running_generate --> pending_generate : generate_fail
+
+    pending_review_doc --> running_review_doc : start_review_doc
+    running_review_doc --> done : review_doc_complete
+    running_review_doc --> review_doc_rejected : review_doc_reject
+    review_doc_rejected --> pending_generate : retry_generate
+
+    done --> [*]
+
+    state "任意非终态 → cancelled (cancel)" as cancel_note
+```
+
 ## 常见操作
 
 ### 查询任务可用操作
@@ -237,3 +315,15 @@ from core.state_machine import transition
 
 transition(task_id, 'cancel', note='用户手动取消')
 ```
+
+---
+
+## 相关文档
+
+| 文档 | 说明 |
+|------|------|
+| [5 分钟快速入门](quickstart.md) | 从安装到跑通第一个 demo |
+| [架构总览](architecture.md) | 整体架构、模块职责、数据流 |
+| [工作流开发指南](workflow-development.md) | YAML 定义语法、阶段函数编写规范 |
+| [插件开发指南](plugin-development.md) | 第三方插件开发、扩展点、框架 API |
+| [FAQ 与故障排查](faq.md) | 常见问题与解决方案 |
