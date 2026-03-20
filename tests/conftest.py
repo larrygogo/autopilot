@@ -190,3 +190,12 @@ def _register_test_workflows():
 
     _registry.clear()
     _registry.update(old_registry)
+
+
+@pytest.fixture(autouse=True)
+def _reset_plugins():
+    """每个测试后重置插件注册表"""
+    yield
+    from core.plugin import _reset
+
+    _reset()

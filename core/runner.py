@@ -87,6 +87,18 @@ def _invoke_hook(task: dict, hook_name: str, phase: str, error: Exception | None
     except Exception as e:
         log.warning("钩子 %s 执行异常（不影响主流程）：%s", hook_name, e)
 
+    # 插件全局钩子（工作流级钩子之后执行）
+    from core.plugin import get_global_hooks
+
+    for plugin_hook in get_global_hooks(hook_name):
+        try:
+            if hook_name == "on_phase_error":
+                plugin_hook(task["id"], phase, error)
+            else:
+                plugin_hook(task["id"], phase)
+        except Exception as e:
+            log.warning("插件全局钩子 %s 执行异常：%s", hook_name, e)
+
 
 def execute_phase(task_id: str, phase: str) -> None:
     """执行指定阶段（带原子锁保护，防止双重状态转换）"""

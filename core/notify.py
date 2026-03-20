@@ -176,7 +176,14 @@ def dispatch(
                 _send_command(backend, variables)
                 dispatched = True
             else:
-                log.warning("未知通知后端类型：%s（%s）", backend_type, backend.get("name", ""))
+                from core.plugin import get_notify_backend
+
+                plugin_handler = get_notify_backend(backend_type)
+                if plugin_handler:
+                    plugin_handler(backend, variables)
+                    dispatched = True
+                else:
+                    log.warning("未知通知后端类型：%s（%s）", backend_type, backend.get("name", ""))
         except Exception as e:
             log.error("通知后端 %s 异常：%s", backend.get("name", ""), e)
 
@@ -197,7 +204,9 @@ def validate_backends(backends: Any) -> tuple[list[str], list[str]]:
         errors.append("notify_backends 必须是列表")
         return errors, warnings
 
-    valid_types = {"webhook", "command"}
+    from core.plugin import get_all_notify_backend_types
+
+    valid_types = {"webhook", "command"} | get_all_notify_backend_types()
     valid_events = {"progress", "success", "error", "info", "*"}
 
     for i, backend in enumerate(backends):

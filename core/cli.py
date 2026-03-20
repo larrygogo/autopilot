@@ -621,3 +621,25 @@ def watch():
     from core.watcher import main as watcher_main
 
     watcher_main()
+
+
+# ──────────────────────────────────────────────────────────
+# 插件 CLI 命令注册
+# ──────────────────────────────────────────────────────────
+
+
+def _register_plugin_commands() -> None:
+    """发现插件并将其 Click 命令添加到 main 组。"""
+    from core.plugin import discover as discover_plugins, get_cli_commands
+
+    discover_plugins()
+    for cmd in get_cli_commands():
+        try:
+            main.add_command(cmd)
+        except Exception as e:
+            from core.logger import get_logger
+
+            get_logger().warning("插件 CLI 命令注册失败：%s", e)
+
+
+_register_plugin_commands()

@@ -21,6 +21,7 @@
 |---|---|---|
 | **📝** | **YAML 声明式定义** | `workflow.yaml` 定义结构，`workflow.py` 只写阶段函数，状态自动推导 |
 | **🔌** | **插件化工作流** | 放入 `~/.autopilot/workflows/` 即自动发现注册，零配置接入 |
+| **🧩** | **第三方插件** | `pip install` 自动注册扩展：通知后端 / CLI 命令 / 全局钩子 |
 | **⚡** | **并行阶段** | `parallel:` 语法支持 fork/join 并行执行，可配置失败策略 |
 | **🔄** | **状态机驱动** | SQLite 持久化，原子性状态转换，非法转换运行时阻止 |
 | **🚀** | **Push 模型** | 阶段完成后非阻塞启动下一阶段，无需轮询 |
@@ -130,7 +131,8 @@ autopilot/
 │   ├── db.py                # SQLite 持久化（tasks / task_logs / 子任务）
 │   ├── infra.py             # 文件锁 / git / 通知分发
 │   ├── watcher.py           # 卡死检测 & 自动恢复
-│   ├── notify.py            # 多后端通知（webhook / command）
+│   ├── plugin.py            # 第三方插件发现 & 注册（entry_points）
+│   ├── notify.py            # 多后端通知（webhook / command / 插件扩展）
 │   ├── migrate.py           # 数据库迁移引擎
 │   └── cli.py               # 统一 CLI 入口
 ├── examples/                # 示例工作流（dev / req_review / doc_gen / parallel_build / data_pipeline）
@@ -138,7 +140,7 @@ autopilot/
 └── tests/                   # 单元测试
 ```
 
-> 详细架构文档见 [`docs/architecture.md`](docs/architecture.md)
+> 详细架构文档见 [`docs/architecture.md`](docs/architecture.md) · 插件开发见 [`docs/plugin-development.md`](docs/plugin-development.md)
 
 ## CLI
 

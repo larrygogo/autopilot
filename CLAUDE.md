@@ -4,6 +4,7 @@
 
 ## 架构概要
 
+- **第三方插件**：`pip install` 自动注册扩展（通知后端 / CLI 命令 / 全局钩子）
 - **插件化工作流**：`AUTOPILOT_HOME/workflows/`（用户）工作流自动发现
 - **YAML 工作流定义**：`workflow.yaml` 定义结构，`workflow.py` 只写阶段函数
 - **工作流注册中心**：`core/registry.py` 自动发现、注册、查询工作流
@@ -49,7 +50,8 @@ autopilot/
 │   ├── runner.py                  # 执行引擎 & Push 模型 & 并行 fork/join
 │   ├── registry.py                # 工作流插件注册 & 发现 & YAML 加载
 │   ├── infra.py                   # git / 锁 / 通知分发
-│   ├── notify.py                  # 多后端通知系统（webhook / command）
+│   ├── plugin.py                  # 第三方插件发现 & 注册（entry_points）
+│   ├── notify.py                  # 多后端通知系统（webhook / command / 插件扩展）
 │   ├── logger.py                  # 阶段标签日志
 │   ├── watcher.py                 # 卡死任务检测 & 恢复（含并行子任务）
 │   ├── migrate.py                 # 数据库迁移引擎
@@ -153,3 +155,4 @@ python -m pytest tests/ -v
 - `architecture.md`：整体架构、模块职责、数据流、设计决策
 - `workflow-development.md`：自定义工作流开发指南、YAML 工作流完整字段说明
 - `state-machine.md`：状态转换表、驳回机制、各工作流完整状态图
+- `plugin-development.md`：第三方插件开发指南、扩展点详解、框架 API

@@ -61,6 +61,25 @@
 | `load_yaml_workflow(wf_dir)` | 从目录加载 YAML 工作流 |
 | `get_parallel_def(workflow, group)` | 获取并行组定义 |
 
+### plugin.py — 插件系统
+
+- 通过 `importlib.metadata.entry_points(group="autopilot.plugins")` 发现第三方插件
+- 三个扩展点：通知后端（`notify_backends`）、CLI 命令（`cli_commands`）、全局钩子（`global_hooks`）
+- 鸭子类型提取，不要求继承基类
+- 幂等发现，失败隔离（单个插件加载失败只记日志）
+
+核心接口：
+
+| 函数 | 用途 |
+|------|------|
+| `discover()` | 扫描 entry_points 并注册扩展（幂等） |
+| `get_notify_backend(type)` | 查询插件注册的通知后端 |
+| `get_all_notify_backend_types()` | 所有插件通知类型名 |
+| `get_cli_commands()` | 所有插件 CLI 命令 |
+| `get_global_hooks(name)` | 指定名称的全局钩子列表 |
+
+详见 [插件开发指南](plugin-development.md)。
+
 ### state_machine.py — 状态机
 
 - 管理所有状态转换的合法性验证
