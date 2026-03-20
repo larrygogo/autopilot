@@ -6,6 +6,19 @@ This document guides you through developing third-party plugins for autopilot, w
 
 ## How It Works
 
+```mermaid
+flowchart LR
+    A["pip install<br/>autopilot-xxx"] --> B["pyproject.toml<br/>entry_points declaration"]
+    B --> C["Framework startup<br/>importlib.metadata scan"]
+    C --> D{"getattr<br/>duck typing extraction"}
+    D --> E["notify_backends<br/>register with notification dispatch"]
+    D --> F["cli_commands<br/>register with CLI command group"]
+    D --> G["global_hooks<br/>register with execution engine hooks"]
+```
+
+<details>
+<summary>Text version (terminal / offline viewing)</summary>
+
 ```
 pip install autopilot-openclaw
         │
@@ -22,6 +35,8 @@ pip install autopilot-openclaw
         ├── cli_commands    → register with CLI command group
         └── global_hooks    → register with execution engine hooks
 ```
+
+</details>
 
 The framework automatically calls `discover_plugins()` in `core/workflows/__init__.py`, scanning all installed packages for `autopilot.plugins` entry_points. The discovery process is **idempotent**; a single plugin load failure only logs a warning without affecting other plugins or framework operation.
 
@@ -229,6 +244,20 @@ def audit_hook(task_id: str, phase: str) -> None:
 
 **Execution order:**
 
+```mermaid
+flowchart TB
+    A["execute_phase()"] --> B["_invoke_hook('before_phase')"]
+    B --> B1["Workflow-level before_phase<br/>(defined in workflow.yaml)"]
+    B1 --> B2["Plugin global before_phase<br/>(sequential, independent try/except)"]
+    B2 --> C["phase_func()<br/>Phase function execution"]
+    C --> D["_invoke_hook('after_phase')"]
+    D --> D1["Workflow-level after_phase"]
+    D1 --> D2["Plugin global after_phase"]
+```
+
+<details>
+<summary>Text version (terminal / offline viewing)</summary>
+
 ```
 execute_phase()
   │
@@ -242,6 +271,8 @@ execute_phase()
         ├── workflow hooks.after_phase()
         └── plugin global_hooks.after_phase
 ```
+
+</details>
 
 ---
 
@@ -331,3 +362,7 @@ assert "openclaw" in get_all_notify_backend_types()
 ## Complete Reference Implementation
 
 See [`examples/plugins/autopilot-webui/`](../examples/plugins/autopilot-webui/): a stdlib-based WebUI management interface plugin that demonstrates the complete usage of the `cli_commands` extension point (`pyproject.toml` registration + `__init__.py` export + CLI command implementation).
+
+<!-- TODO: Add WebUI screenshots
+![WebUI Dashboard](../screenshots/webui-dashboard.png)
+-->

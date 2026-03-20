@@ -336,3 +336,27 @@ def run_my_phase(task_id: str) -> None:
 参见 `examples/workflows/dev/` 和 `examples/workflows/req_review/`：
 - `workflow.yaml` — 工作流定义
 - `workflow.py` — 阶段函数实现
+
+## doc_gen 工作流状态机
+
+以最简工作流 `doc_gen`（2 阶段 + 驳回）为例，展示自动推导后的完整状态图：
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending_generate
+
+    pending_generate --> running_generate : start_generate
+    running_generate --> pending_review_doc : generate_complete
+    running_generate --> pending_generate : generate_fail
+
+    pending_review_doc --> running_review_doc : start_review_doc
+    running_review_doc --> done : review_doc_complete
+    running_review_doc --> review_doc_rejected : review_doc_reject
+    review_doc_rejected --> pending_generate : retry_generate
+
+    done --> [*]
+
+    state "任意非终态 → cancelled (cancel)" as cancel_note
+```
+
+> 更多工作流状态图见 [状态机详解](state-machine.md)

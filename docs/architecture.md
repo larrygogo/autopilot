@@ -4,6 +4,34 @@
 
 ## 整体架构
 
+```mermaid
+graph TB
+    CLI["CLI 入口层<br/>autopilot start / list / cancel / ..."]
+    Runner["Runner 执行引擎<br/>acquire_lock → execute_phase → release_lock<br/>run_in_background · parallel fork/join"]
+    Registry["Registry<br/>工作流注册 · YAML 加载<br/>状态推导 · 转换表生成"]
+    SM["State Machine<br/>原子状态转换<br/>转换表验证 · 日志记录"]
+    Infra["Infra<br/>git / 锁 / 通知 / AI<br/>跨平台文件锁"]
+    DB[("DB 持久化层<br/>SQLite: tasks + task_logs<br/>含子任务支持")]
+    Plugin["Plugin 插件系统<br/>entry_points 发现"]
+    Watcher["Watcher 保底恢复<br/>卡死检测 · 自动恢复"]
+    Workflows["Workflows 用户工作流<br/>~/.autopilot/workflows/"]
+
+    CLI --> Runner
+    Plugin --> CLI
+    Runner --> Registry
+    Runner --> SM
+    Runner --> Infra
+    Registry --> DB
+    SM --> DB
+    Plugin --> Infra
+    Watcher --> Runner
+    Watcher --> DB
+    Workflows --> Registry
+```
+
+<details>
+<summary>ASCII 版本（终端 / 离线查看）</summary>
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      CLI 入口层                               │
@@ -37,6 +65,8 @@
 │  your_flow/     自定义工作流...                             │
 └───────────────────────────────────────────────────────────┘
 ```
+
+</details>
 
 ## 核心模块职责
 
@@ -144,6 +174,43 @@
 
 以 `dev` 工作流为例：
 
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant CLI
+    participant DB as SQLite DB
+    participant Runner
+    participant SM as State Machine
+    participant Phase as 阶段函数
+
+    User->>CLI: autopilot start REQ-001
+    CLI->>DB: create_task(pending_design, workflow=dev)
+    CLI->>Runner: execute_phase(task_id, 'design')
+    Runner->>Runner: acquire_lock()
+    Runner->>SM: transition(pending_design → designing)
+    SM->>DB: UPDATE status + INSERT log
+    Runner->>Phase: run_plan_design(task_id)
+    Phase-->>SM: transition(designing → pending_review)
+    Phase-->>Runner: run_in_background('review')
+    Runner->>Runner: release_lock()
+
+    Note over Runner,Phase: 新进程启动
+
+    Runner->>SM: transition(pending_review → reviewing)
+    Runner->>Phase: run_plan_review(task_id)
+    alt 评审通过
+        Phase-->>SM: transition(reviewing → developing)
+        Phase-->>Runner: run_in_background('dev')
+    else 评审驳回
+        Phase-->>SM: transition(reviewing → review_rejected)
+        SM-->>SM: transition(review_rejected → pending_design)
+        Phase-->>Runner: run_in_background('design') 重试
+    end
+```
+
+<details>
+<summary>文本版本（终端 / 离线查看）</summary>
+
 ```
 用户执行: autopilot start <req_id> --project my-project
     │
@@ -179,6 +246,8 @@
     ▼ (新进程，仅通过时)
 [4-6] dev → code_review → pr → pr_submitted ✓
 ```
+
+</details>
 
 ## 设计决策：Push 模型 vs 轮询模型
 

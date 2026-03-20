@@ -6,6 +6,19 @@
 
 ## 工作原理
 
+```mermaid
+flowchart LR
+    A["pip install<br/>autopilot-xxx"] --> B["pyproject.toml<br/>entry_points 声明"]
+    B --> C["框架启动<br/>importlib.metadata 扫描"]
+    C --> D{"getattr<br/>鸭子类型提取"}
+    D --> E["notify_backends<br/>注册到通知分发"]
+    D --> F["cli_commands<br/>注册到 CLI 命令组"]
+    D --> G["global_hooks<br/>注册到执行引擎钩子"]
+```
+
+<details>
+<summary>文本版本（终端 / 离线查看）</summary>
+
 ```
 pip install autopilot-openclaw
         │
@@ -22,6 +35,8 @@ pip install autopilot-openclaw
         ├── cli_commands    → 注册到 CLI 命令组
         └── global_hooks    → 注册到执行引擎钩子
 ```
+
+</details>
 
 框架在 `core/workflows/__init__.py` 中自动调用 `discover_plugins()`，扫描所有已安装包的 `autopilot.plugins` entry_points。发现过程**幂等**，单个插件加载失败只记日志，不影响其他插件和框架运行。
 
@@ -229,6 +244,20 @@ def audit_hook(task_id: str, phase: str) -> None:
 
 **执行顺序：**
 
+```mermaid
+flowchart TB
+    A["execute_phase()"] --> B["_invoke_hook('before_phase')"]
+    B --> B1["工作流级 before_phase<br/>（workflow.yaml 中定义）"]
+    B1 --> B2["插件全局 before_phase<br/>（依次执行，独立 try/except）"]
+    B2 --> C["phase_func()<br/>阶段函数执行"]
+    C --> D["_invoke_hook('after_phase')"]
+    D --> D1["工作流级 after_phase"]
+    D1 --> D2["插件全局 after_phase"]
+```
+
+<details>
+<summary>文本版本（终端 / 离线查看）</summary>
+
 ```
 execute_phase()
   │
@@ -242,6 +271,8 @@ execute_phase()
         ├── workflow hooks.after_phase()
         └── plugin global_hooks.after_phase
 ```
+
+</details>
 
 ---
 
@@ -331,3 +362,7 @@ assert "openclaw" in get_all_notify_backend_types()
 ## 完整参考实现
 
 参见 [`examples/plugins/autopilot-webui/`](../examples/plugins/autopilot-webui/)：一个基于标准库的 WebUI 管理界面插件，展示了 `cli_commands` 扩展点的完整用法（`pyproject.toml` 注册 + `__init__.py` 导出 + CLI 命令实现）。
+
+<!-- TODO: 补充 WebUI 截图
+![WebUI 仪表盘](screenshots/webui-dashboard.png)
+-->
