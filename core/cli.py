@@ -490,7 +490,7 @@ def init(path):
 
     click.echo("\n初始化完成！")
     click.echo("\n后续步骤：")
-    click.echo(f"  1. 编辑 {config_dest} 配置框架参数")
+    click.echo(f"  1. 编辑 {home / 'config.yaml'} 配置框架参数")
     click.echo("  2. 运行 autopilot upgrade 初始化数据库")
     if path:
         click.echo(f"  3. 设置环境变量：export AUTOPILOT_HOME={home}")

@@ -80,7 +80,7 @@ def main():
     print("初始化完成！")
     print()
     print("后续步骤：")
-    print(f"  1. 编辑 {config_dest} 配置框架参数")
+    print(f"  1. 编辑 {home / 'config.yaml'} 配置框架参数")
     print("  2. 运行 python bin/upgrade.py 初始化数据库")
     if args.path:
         print(f"  3. 设置环境变量：export AUTOPILOT_HOME={home}")
