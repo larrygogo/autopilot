@@ -51,7 +51,7 @@ def main():
 
     # 复制示例工作流（支持 YAML 目录和单文件两种格式）
     # Copy example workflows (supports both YAML directory and single-file formats)
-    examples_dir = FRAMEWORK_ROOT / "examples"
+    examples_dir = FRAMEWORK_ROOT / "examples" / "workflows"
     if examples_dir.is_dir():
         for wf_dir in sorted(examples_dir.iterdir()):
             if not wf_dir.is_dir():

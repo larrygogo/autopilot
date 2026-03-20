@@ -14,8 +14,8 @@ from core.logger import get_logger
 
 log = get_logger()
 
-# 延迟加载配置，供工作流模块使用（如 examples/dev/workflow.py）
-# Lazy-loaded config for workflow modules (e.g. examples/dev/workflow.py)
+# 延迟加载配置，供工作流模块使用（如 examples/workflows/dev/workflow.py）
+# Lazy-loaded config for workflow modules (e.g. examples/workflows/dev/workflow.py)
 CONFIG = load_config()
 
 DB_PATH = AUTOPILOT_HOME / "runtime/workflow.db"

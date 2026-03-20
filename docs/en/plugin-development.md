@@ -327,3 +327,7 @@ assert "openclaw" in get_all_notify_backend_types()
 - **Duck typing**: the framework extracts extension attributes via `getattr`, no base class inheritance or Protocol implementation required
 - **Python compatibility**: `importlib.metadata.entry_points` is compatible with Python 3.10+ (consistent with framework requirements)
 - **Environment variable expansion**: the framework does not automatically expand `${VAR}` for plugin backends; plugins must call `expand_env_vars()` themselves
+
+## Complete Reference Implementation
+
+See [`examples/plugins/autopilot-webui/`](../examples/plugins/autopilot-webui/): a stdlib-based WebUI management interface plugin that demonstrates the complete usage of the `cli_commands` extension point (`pyproject.toml` registration + `__init__.py` export + CLI command implementation).

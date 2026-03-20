@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autopilot-webui"
+version = "0.1.0"
+description = "Web management UI plugin for autopilot"
+requires-python = ">=3.10"
+dependencies = [
+    "autopilot",
+    "click>=8.0",
+]
+
+[project.entry-points."autopilot.plugins"]
+webui = "autopilot_webui"

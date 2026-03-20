@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Autopilot WebUI</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --card: #fff; --border: #e2e8f0;
+    --text: #1a202c; --muted: #718096; --primary: #3182ce;
+    --green: #38a169; --red: #e53e3e; --blue: #3182ce; --gray: #a0aec0;
+    --orange: #dd6b20;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  nav { background: var(--text); color: #fff; padding: 0 1.5rem; display: flex; align-items: center; height: 52px; }
+  nav .logo { font-weight: 700; font-size: 1.1rem; margin-right: 2rem; }
+  nav a { color: #cbd5e0; text-decoration: none; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.9rem; }
+  nav a.active, nav a:hover { color: #fff; background: rgba(255,255,255,0.12); }
+  .container { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; }
+  .card h3 { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .card .val { font-size: 1.8rem; font-weight: 700; margin-top: 0.3rem; }
+  .dist { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+  .dist span { font-size: 0.78rem; padding: 2px 8px; border-radius: 12px; background: var(--bg); }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+  th, td { text-align: left; padding: 0.65rem 1rem; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+  th { background: var(--bg); font-weight: 600; color: var(--muted); font-size: 0.78rem; text-transform: uppercase; }
+  tr:hover { background: #f7fafc; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: 600; }
+  .badge-pending { background: #edf2f7; color: var(--gray); }
+  .badge-running { background: #ebf8ff; color: var(--blue); }
+  .badge-done, .badge-completed { background: #f0fff4; color: var(--green); }
+  .badge-cancelled { background: #fff5f5; color: var(--red); }
+  .badge-default { background: #fefcbf; color: var(--orange); }
+  .filters { display: flex; gap: 0.8rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .filters select { padding: 0.4rem 0.8rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; background: var(--card); }
+  .btn-link { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 0.88rem; text-decoration: underline; }
+  .detail-panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.5rem; margin-top: 1rem; }
+  .detail-panel h3 { margin-bottom: 1rem; }
+  .timeline { position: relative; padding-left: 1.5rem; }
+  .timeline::before { content: ''; position: absolute; left: 6px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+  .timeline-item { position: relative; margin-bottom: 1rem; }
+  .timeline-item::before { content: ''; position: absolute; left: -1.5rem; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--primary); border: 2px solid var(--card); }
+  .timeline-item .time { font-size: 0.75rem; color: var(--muted); }
+  .timeline-item .desc { font-size: 0.85rem; margin-top: 2px; }
+  .wf-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+  .wf-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; }
+  .wf-card h3 { font-size: 1rem; margin-bottom: 0.5rem; }
+  .wf-card p { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem; }
+  .phase-list { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .phase-tag { font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; background: #ebf8ff; color: var(--blue); }
+  .hidden { display: none; }
+  @media (max-width: 640px) { .cards { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<nav>
+  <span class="logo">Autopilot</span>
+  <a href="#dashboard" id="nav-dashboard">Dashboard</a>
+  <a href="#tasks" id="nav-tasks">Tasks</a>
+  <a href="#workflows" id="nav-workflows">Workflows</a>
+</nav>
+
+<div class="container">
+  <!-- Dashboard -->
+  <div id="view-dashboard" class="view">
+    <h2 style="margin-bottom:1rem;">Dashboard</h2>
+    <div class="cards" id="stat-cards"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+      <div class="card"><h3>Status Distribution</h3><div class="dist" id="status-dist"></div></div>
+      <div class="card"><h3>Workflow Distribution</h3><div class="dist" id="wf-dist"></div></div>
+    </div>
+  </div>
+
+  <!-- Tasks -->
+  <div id="view-tasks" class="view hidden">
+    <h2 style="margin-bottom:1rem;">Tasks</h2>
+    <div class="filters">
+      <select id="filter-status"><option value="">All Status</option></select>
+      <select id="filter-workflow"><option value="">All Workflows</option></select>
+    </div>
+    <table>
+      <thead><tr><th>ID</th><th>Title</th><th>Workflow</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+      <tbody id="task-tbody"></tbody>
+    </table>
+    <div id="task-detail" class="detail-panel hidden"></div>
+  </div>
+
+  <!-- Workflows -->
+  <div id="view-workflows" class="view hidden">
+    <h2 style="margin-bottom:1rem;">Workflows</h2>
+    <div class="wf-cards" id="wf-list"></div>
+  </div>
+</div>
+
+<script>
+/* NOTE: All dynamic text is escaped via esc() which uses textContent for safe
+   HTML encoding. Data source is the local SQLite database, not external user input. */
+(function() {
+  var API = '';
+
+  // --- Routing ---
+  function route() {
+    var hash = location.hash.replace('#','') || 'dashboard';
+    document.querySelectorAll('.view').forEach(function(v) { v.classList.add('hidden'); });
+    document.querySelectorAll('nav a').forEach(function(a) { a.classList.remove('active'); });
+    var view = document.getElementById('view-' + hash);
+    var nav = document.getElementById('nav-' + hash);
+    if (view) view.classList.remove('hidden');
+    if (nav) nav.classList.add('active');
+    if (hash === 'dashboard') loadDashboard();
+    else if (hash === 'tasks') loadTasks();
+    else if (hash === 'workflows') loadWorkflows();
+  }
+  window.addEventListener('hashchange', route);
+
+  // --- Helpers ---
+  function apiGet(path) {
+    return fetch(API + path).then(function(res) { return res.json(); });
+  }
+
+  function badge(status) {
+    var cls = 'badge-default';
+    if (/pending/i.test(status)) cls = 'badge-pending';
+    else if (/running/i.test(status)) cls = 'badge-running';
+    else if (/done|completed/i.test(status)) cls = 'badge-done';
+    else if (/cancelled/i.test(status)) cls = 'badge-cancelled';
+    return '<span class="badge ' + cls + '">' + esc(status) + '</span>';
+  }
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '-';
+    try { return new Date(iso).toLocaleString(); } catch(e) { return esc(iso); }
+  }
+
+  function fmtDur(sec) {
+    if (!sec || sec <= 0) return '-';
+    if (sec < 60) return Math.round(sec) + 's';
+    if (sec < 3600) return Math.round(sec/60) + 'm';
+    return (sec/3600).toFixed(1) + 'h';
+  }
+
+  function setText(id, html) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = html;  // content is pre-escaped via esc()
+  }
+
+  // --- Dashboard ---
+  function loadDashboard() {
+    apiGet('/api/stats').then(function(stats) {
+      setText('stat-cards',
+        '<div class="card"><h3>Total Tasks</h3><div class="val">' + stats.total + '</div></div>' +
+        '<div class="card"><h3>Success Rate</h3><div class="val">' + stats.success_rate + '%</div></div>' +
+        '<div class="card"><h3>Avg Duration</h3><div class="val">' + fmtDur(stats.avg_duration_seconds) + '</div></div>'
+      );
+
+      setText('status-dist', Object.entries(stats.by_status || {}).map(function(e) {
+        return '<span>' + esc(e[0]) + ': ' + e[1] + '</span>';
+      }).join(''));
+
+      setText('wf-dist', Object.entries(stats.by_workflow || {}).map(function(e) {
+        return '<span>' + esc(e[0]) + ': ' + e[1] + '</span>';
+      }).join(''));
+    });
+  }
+
+  // --- Tasks ---
+  function loadTasks() {
+    var status = document.getElementById('filter-status').value;
+    var workflow = document.getElementById('filter-workflow').value;
+    var url = '/api/tasks?limit=100';
+    if (status) url += '&status=' + encodeURIComponent(status);
+    if (workflow) url += '&workflow=' + encodeURIComponent(workflow);
+
+    apiGet(url).then(function(tasks) {
+      setText('task-tbody', tasks.map(function(t) {
+        var shortId = esc(t.id).substring(0, 12);
+        return '<tr>' +
+          '<td style="font-family:monospace;font-size:0.8rem;">' + shortId + '</td>' +
+          '<td>' + esc(t.title) + '</td>' +
+          '<td>' + esc(t.workflow) + '</td>' +
+          '<td>' + badge(t.status) + '</td>' +
+          '<td style="font-size:0.8rem;color:var(--muted);">' + fmtTime(t.updated_at) + '</td>' +
+          '<td><button class="btn-link" data-task-id="' + esc(t.id) + '">Detail</button></td>' +
+          '</tr>';
+      }).join(''));
+
+      // Populate filter options
+      var statuses = tasks.map(function(t) { return t.status; }).filter(function(v, i, a) { return a.indexOf(v) === i; });
+      var workflows = tasks.map(function(t) { return t.workflow; }).filter(function(v, i, a) { return a.indexOf(v) === i; });
+      populateFilter('filter-status', statuses, 'All Status');
+      populateFilter('filter-workflow', workflows, 'All Workflows');
+
+      document.getElementById('task-detail').classList.add('hidden');
+    });
+  }
+
+  function populateFilter(id, values, allLabel) {
+    var el = document.getElementById(id);
+    var current = el.value;
+    var html = '<option value="">' + esc(allLabel) + '</option>';
+    values.forEach(function(v) {
+      html += '<option value="' + esc(v) + '"' + (v === current ? ' selected' : '') + '>' + esc(v) + '</option>';
+    });
+    el.innerHTML = html;  // values are pre-escaped via esc()
+  }
+
+  document.getElementById('filter-status').addEventListener('change', loadTasks);
+  document.getElementById('filter-workflow').addEventListener('change', loadTasks);
+
+  // Event delegation for task detail buttons
+  document.getElementById('task-tbody').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-task-id]');
+    if (!btn) return;
+    var taskId = btn.getAttribute('data-task-id');
+    showDetail(taskId);
+  });
+
+  function showDetail(taskId) {
+    Promise.all([apiGet('/api/tasks/' + taskId), apiGet('/api/tasks/' + taskId + '/logs')])
+      .then(function(results) {
+        var task = results[0];
+        var logs = results[1];
+        var panel = document.getElementById('task-detail');
+        panel.classList.remove('hidden');
+
+        var logsHtml = logs.map(function(l) {
+          return '<div class="timeline-item">' +
+            '<div class="time">' + fmtTime(l.created_at) + '</div>' +
+            '<div class="desc">' + badge(l.from_status || 'init') + ' &rarr; ' + badge(l.to_status) +
+            (l.trigger ? ' <span style="color:var(--muted);font-size:0.8rem;">(' + esc(l.trigger) + ')</span>' : '') +
+            (l.note ? '<br><span style="font-size:0.8rem;color:var(--muted);">' + esc(l.note) + '</span>' : '') +
+            '</div></div>';
+        }).join('');
+
+        panel.innerHTML =  // all dynamic values are pre-escaped via esc()
+          '<h3>' + esc(task.title || taskId) + '</h3>' +
+          '<p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem;">ID: ' + esc(task.id) + ' | Workflow: ' + esc(task.workflow) + ' | Status: ' + badge(task.status) + '</p>' +
+          '<p style="font-size:0.85rem;color:var(--muted);margin-bottom:1rem;">Created: ' + fmtTime(task.created_at) + ' | Updated: ' + fmtTime(task.updated_at) + '</p>' +
+          '<h3 style="font-size:0.9rem;margin-bottom:0.5rem;">Transition Logs</h3>' +
+          '<div class="timeline">' + logsHtml + '</div>';
+      });
+  }
+
+  // --- Workflows ---
+  function loadWorkflows() {
+    apiGet('/api/workflows').then(function(workflows) {
+      setText('wf-list', workflows.map(function(wf) {
+        var phases = (wf.phases || []).map(function(p) {
+          return '<span class="phase-tag">' + esc(p) + '</span>';
+        }).join('');
+        return '<div class="wf-card">' +
+          '<h3>' + esc(wf.name) + '</h3>' +
+          '<p>' + esc(wf.description || 'No description') + '</p>' +
+          '<div class="phase-list">' + phases + '</div>' +
+          '</div>';
+      }).join(''));
+    });
+  }
+
+  // Init
+  route();
+})();
+</script>
+</body>
+</html>

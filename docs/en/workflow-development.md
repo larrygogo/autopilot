@@ -333,6 +333,6 @@ def run_my_phase(task_id: str) -> None:
 
 ## Complete Examples
 
-See `examples/dev/` and `examples/req_review/`:
+See `examples/workflows/dev/` and `examples/workflows/req_review/`:
 - `workflow.yaml` — workflow definition
 - `workflow.py` — phase function implementation

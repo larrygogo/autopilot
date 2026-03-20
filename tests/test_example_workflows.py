@@ -18,7 +18,7 @@ from core.registry import (
 )
 from core.state_machine import transition
 
-EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
+EXAMPLES_DIR = Path(__file__).parent.parent / "examples" / "workflows"
 
 
 # ──────────────────────────────────────────────────────────

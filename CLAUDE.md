@@ -63,13 +63,16 @@ autopilot/
 │   └── workflows/                 # 工作流包（触发用户工作流发现）
 │       └── __init__.py            # discover()
 ├── bin/                           # 通用 CLI
-├── examples/                      # 示例工作流（参考实现）
-│   ├── README.md                  # 安装说明
-│   ├── dev/                       # 完整开发流程（5 阶段）
-│   ├── req_review/                # 需求评审流程（2 阶段）
-│   ├── doc_gen/                   # 文档生成与评审（极简自动推导）
-│   ├── parallel_build/            # 并行构建流程（fork/join + hooks）
-│   └── data_pipeline/             # 数据处理流水线（前向跳转 + 多终态）
+├── examples/                      # 示例（工作流 + 插件）
+│   ├── README.md                  # 总览
+│   ├── workflows/                 # 示例工作流
+│   │   ├── dev/                   # 完整开发流程（5 阶段）
+│   │   ├── req_review/            # 需求评审流程（2 阶段）
+│   │   ├── doc_gen/               # 文档生成与评审（极简自动推导）
+│   │   ├── parallel_build/        # 并行构建流程（fork/join + hooks）
+│   │   └── data_pipeline/         # 数据处理流水线（前向跳转 + 多终态）
+│   └── plugins/                   # 示例插件
+│       └── autopilot-webui/       # WebUI 管理界面插件
 ├── docs/                          # 架构文档
 └── tests/                         # 单元测试
 ```

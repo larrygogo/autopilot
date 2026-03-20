@@ -327,3 +327,7 @@ assert "openclaw" in get_all_notify_backend_types()
 - **鸭子类型**：框架通过 `getattr` 提取扩展属性，不要求继承基类或实现 Protocol
 - **Python 兼容性**：`importlib.metadata.entry_points` 兼容 Python 3.10+（与框架要求一致）
 - **环境变量展开**：框架不会自动为插件后端展开 `${VAR}`，需插件自行调用 `expand_env_vars()`
+
+## 完整参考实现
+
+参见 [`examples/plugins/autopilot-webui/`](../examples/plugins/autopilot-webui/)：一个基于标准库的 WebUI 管理界面插件，展示了 `cli_commands` 扩展点的完整用法（`pyproject.toml` 注册 + `__init__.py` 导出 + CLI 命令实现）。

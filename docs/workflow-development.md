@@ -333,6 +333,6 @@ def run_my_phase(task_id: str) -> None:
 
 ## 完整示例
 
-参见 `examples/dev/` 和 `examples/req_review/`：
+参见 `examples/workflows/dev/` 和 `examples/workflows/req_review/`：
 - `workflow.yaml` — 工作流定义
 - `workflow.py` — 阶段函数实现
