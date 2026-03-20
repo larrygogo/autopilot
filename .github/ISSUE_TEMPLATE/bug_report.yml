@@ -1,49 +1,58 @@
-name: Bug 报告
-description: 报告一个 Bug
+name: Bug 报告 / Bug Report
+description: 报告一个 Bug / Report a bug
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
         感谢你提交 Bug 报告！请尽量填写完整信息，帮助我们更快定位问题。
+        Thanks for filing a bug report! Please fill in as much detail as possible to help us locate the issue quickly.
 
   - type: textarea
     id: description
     attributes:
-      label: Bug 描述
-      description: 清晰简洁地描述这个 Bug
+      label: Bug 描述 / Bug Description
+      description: |
+        清晰简洁地描述这个 Bug
+        A clear and concise description of the bug
     validations:
       required: true
 
   - type: textarea
     id: reproduce
     attributes:
-      label: 复现步骤
-      description: 如何触发这个 Bug？
+      label: 复现步骤 / Steps to Reproduce
+      description: |
+        如何触发这个 Bug？
+        How can this bug be triggered?
       placeholder: |
-        1. 执行 `autopilot start ...`
-        2. 等待阶段 xxx 完成
-        3. 出现错误 ...
+        1. 执行 / Run `autopilot start ...`
+        2. 等待阶段 xxx 完成 / Wait for phase xxx to finish
+        3. 出现错误 ... / Error occurs ...
     validations:
       required: true
 
   - type: textarea
     id: expected
     attributes:
-      label: 期望行为
-      description: 你期望发生什么？
+      label: 期望行为 / Expected Behavior
+      description: |
+        你期望发生什么？
+        What did you expect to happen?
 
   - type: textarea
     id: actual
     attributes:
-      label: 实际行为
-      description: 实际发生了什么？
+      label: 实际行为 / Actual Behavior
+      description: |
+        实际发生了什么？
+        What actually happened?
 
   - type: input
     id: version
     attributes:
-      label: autopilot 版本
-      description: "运行 `autopilot --version` 获取"
+      label: autopilot 版本 / autopilot Version
+      description: "运行 `autopilot --version` 获取 / Run `autopilot --version` to get it"
       placeholder: "0.2.0"
     validations:
       required: true
@@ -51,7 +60,7 @@ body:
   - type: dropdown
     id: python
     attributes:
-      label: Python 版本
+      label: Python 版本 / Python Version
       options:
         - "3.10"
         - "3.11"
@@ -63,7 +72,7 @@ body:
   - type: dropdown
     id: os
     attributes:
-      label: 操作系统
+      label: 操作系统 / Operating System
       options:
         - Windows
         - macOS
@@ -74,12 +83,16 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: 相关日志
-      description: 粘贴相关的错误日志或终端输出
+      label: 相关日志 / Relevant Logs
+      description: |
+        粘贴相关的错误日志或终端输出
+        Paste any relevant error logs or terminal output
       render: shell
 
   - type: textarea
     id: context
     attributes:
-      label: 补充信息
-      description: 其他有助于定位问题的信息
+      label: 补充信息 / Additional Context
+      description: |
+        其他有助于定位问题的信息
+        Any other information that may help locate the issue
