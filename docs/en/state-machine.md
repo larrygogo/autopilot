@@ -1,17 +1,17 @@
-[中文](state-machine.md) | [English](en/state-machine.md)
+[中文](../state-machine.md) | [English](state-machine.md)
 
-# 状态机详解
+# State Machine Details
 
-## 状态转换表结构
+## Transition Table Structure
 
-转换表是一个字典，键为当前状态，值为该状态下可用的 `(trigger, target_state)` 列表：
+The transition table is a dictionary where keys are current states and values are lists of `(trigger, target_state)` tuples available from that state:
 
 ```python
 {
     'state_a': [
         ('trigger_1', 'state_b'),   # state_a + trigger_1 → state_b
         ('trigger_2', 'state_c'),   # state_a + trigger_2 → state_c
-        ('cancel', 'cancelled'),    # 任何非终态都可取消
+        ('cancel', 'cancelled'),    # Any non-terminal state can be cancelled
     ],
     'state_b': [
         ('trigger_3', 'state_d'),
@@ -21,117 +21,118 @@
 }
 ```
 
-## 动态转换表查询
+## Dynamic Transition Table Lookup
 
-状态机在每次转换时动态加载转换表：
+The state machine dynamically loads the transition table on each transition:
 
 ```
 transition(task_id, trigger)
     │
     ▼
 _resolve_transitions(task_id, conn)
-    ├── 查询 task.workflow 字段
+    ├── Query task.workflow field
     ├── registry.build_transitions(workflow_name)
-    │   ├── 工作流有 'transitions' 字段？→ 直接返回
-    │   └── 否则从 'phases' 自动生成
-    └── 回退：返回空转换表 {}
+    │   ├── Workflow has 'transitions' field? → return directly
+    │   └── Otherwise auto-generate from 'phases'
+    └── Fallback: return empty transition table {}
 ```
 
-这意味着：
-- 不同工作流可以有完全不同的状态空间
-- 新增工作流无需修改 `state_machine.py`
-- 转换表验证在运行时进行
+This means:
+- Different workflows can have completely different state spaces
+- Adding new workflows requires no changes to `state_machine.py`
+- Transition table validation occurs at runtime
 
-## 原子转换过程
+## Atomic Transition Process
 
-每次 `transition()` 调用执行以下原子操作：
+Each `transition()` call performs the following atomic operations:
 
 ```sql
-BEGIN IMMEDIATE;                              -- 获取排他写锁
-SELECT status, workflow FROM tasks WHERE id = ?;  -- 读取当前状态
--- Python: 验证 (current_state, trigger) 在转换表中
-UPDATE tasks SET status = ?, updated_at = ?, ...  -- 更新状态
+BEGIN IMMEDIATE;                              -- Acquire exclusive write lock
+SELECT status, workflow FROM tasks WHERE id = ?;  -- Read current state
+-- Python: verify (current_state, trigger) exists in transition table
+UPDATE tasks SET status = ?, updated_at = ?, ...  -- Update state
     WHERE id = ?;
-INSERT INTO task_logs (task_id, from_status,       -- 写入审计日志
+INSERT INTO task_logs (task_id, from_status,       -- Write audit log
     to_status, trigger, note, created_at) VALUES ...;
-COMMIT;                                        -- 提交（全部成功或全部回滚）
+COMMIT;                                        -- Commit (all succeed or all rollback)
 ```
 
-如果触发器不合法，抛出 `InvalidTransitionError`，事务回滚。
+If the trigger is invalid, an `InvalidTransitionError` is raised and the transaction rolls back.
 
-## 跳转机制（Jump）
+## Jump Mechanism
 
-底层使用 `jump_trigger` / `jump_target` 实现方向无关的阶段跳转。
+The underlying implementation uses `jump_trigger` / `jump_target` for direction-agnostic phase jumping.
 
-### reject 语法糖
+### reject Syntactic Sugar
 
-`reject` 是 jump 的语法糖，只允许往回跳（目标必须在当前阶段之前）：
+`reject` is syntactic sugar for jump, only allowing backward jumps (target must be before the current phase):
 
 ```yaml
 - name: review
-  reject: design     # 语法糖，展开为 jump_trigger + jump_target
+  reject: design     # Syntactic sugar, expands to jump_trigger + jump_target
 ```
 
-展开后等价于：
+Expands to the equivalent:
 ```yaml
 - name: review
   jump_trigger: review_reject
   jump_target: design
 ```
 
-### 驳回转换过程
+### Rejection Transition Process
 
-驳回是一个两步转换过程：
+Rejection is a two-step transition process:
 
 ```
 reviewing ──[review_reject]──→ review_rejected ──[retry_design]──→ pending_design
    │                                                                     │
-   │            第一步：标记为驳回态                                        │
+   │            Step 1: Mark as rejected state                           │
    │                                                                     │
-   └─── 第二步：从驳回态回退到目标阶段的 pending 态 ─────────────────────────┘
+   └─── Step 2: Roll back from rejected state to target phase's ────────┘
+        pending state
 ```
 
-### 直接跳转
+### Direct Jump
 
-直接使用 `jump_trigger` / `jump_target` 可以跳转到任意阶段（包括前后方向）：
+Using `jump_trigger` / `jump_target` directly allows jumping to any phase (both forward and backward):
 
 ```yaml
 - name: step1
   jump_trigger: step1_jump
-  jump_target: step3    # 可以跳到后方阶段
+  jump_target: step3    # Can jump to a later phase
 ```
 
-### 驳回计数
+### Rejection Count
 
-- `rejection_counts` 是 JSON 字段：`{"design": 2, "code": 0}`
-- 每次驳回递增对应阶段计数
-- 超过 `max_rejections`（默认 10）自动取消任务
+- `rejection_counts` is a JSON field: `{"design": 2, "code": 0}`
+- Each rejection increments the corresponding phase count
+- Exceeding `max_rejections` (default 10) automatically cancels the task
 
-### 兼容性
+### Compatibility
 
-旧字段 `reject_trigger` / `retry_target` 仍可使用，会自动映射为 `jump_trigger` / `jump_target`。
+Legacy fields `reject_trigger` / `retry_target` can still be used and are automatically mapped to `jump_trigger` / `jump_target`.
 
-## 终态与活跃状态
+## Terminal States and Active States
 
-**终态**：任务到达终态后不再允许任何转换（`cancel` 除外，终态本身也不可取消）。
+**Terminal states**: once a task reaches a terminal state, no further transitions are allowed (`cancel` included — terminal states themselves cannot be cancelled).
 
-判断方式：
+Determination method:
 ```python
-# 工作流定义的终态
+# Workflow-defined terminal states
 terminal_states = registry.get_terminal_states(workflow_name)
-# 如：['pr_submitted', 'cancelled']
+# e.g.: ['pr_submitted', 'cancelled']
 
-# 活跃状态 = 所有状态 - 终态
+# Active states = all states - terminal states
 active_states = [s for s in all_states if s not in terminal_states]
 ```
 
-Watcher 只关注活跃状态的任务。
+Watcher only monitors tasks in active states.
 
-## dev 工作流完整状态图
+## dev Workflow Complete State Diagram
 
 ```
                                     ┌──────────────────┐
-                                    │  pending_design   │ ← 初始状态
+                                    │  pending_design   │ ← Initial state
                                     └────────┬─────────┘
                                              │ start_design
                                     ┌────────▼─────────┐
@@ -172,17 +173,17 @@ Watcher 只关注活跃状态的任务。
                                                                      └───────┬─────────┘
                                                                              │
                                                                      ┌───────▼─────────┐
-                                                                     │  pr_submitted ✓  │ ← 终态
+                                                                     │  pr_submitted ✓  │ ← Terminal state
                                                                      └─────────────────┘
 
-                        任意非终态 ──[cancel]──→ cancelled ✓  ← 终态
+                        Any non-terminal state ──[cancel]──→ cancelled ✓  ← Terminal state
 ```
 
-## req_review 工作流完整状态图
+## req_review Workflow Complete State Diagram
 
 ```
                                     ┌──────────────────────┐
-                                    │  pending_analysis     │ ← 初始状态
+                                    │  pending_analysis     │ ← Initial state
                                     └────────┬─────────────┘
                                              │ start_analysis
                                     ┌────────▼─────────────┐
@@ -199,7 +200,7 @@ Watcher 只关注活跃状态的任务。
                  req_review_reject                                │ req_review_pass
                               │                                   │
                     ┌─────────▼──────────────┐          ┌────────▼──────────┐
-                    │ req_review_rejected     │          │ req_review_done ✓ │ ← 终态
+                    │ req_review_rejected     │          │ req_review_done ✓ │ ← Terminal state
                     └─────────┬──────────────┘          └───────────────────┘
                               │ retry_req_analysis
                               │
@@ -207,21 +208,21 @@ Watcher 只关注活跃状态的任务。
                     │  pending_analysis       │
                     └────────────────────────┘
 
-                        任意非终态 ──[cancel]──→ cancelled ✓  ← 终态
+                        Any non-terminal state ──[cancel]──→ cancelled ✓  ← Terminal state
 ```
 
-## 常见操作
+## Common Operations
 
-### 查询任务可用操作
+### Query Available Actions for a Task
 
 ```python
 from core.state_machine import get_available_triggers
 
 triggers = get_available_triggers(task_id)
-# 返回如：['start_design', 'cancel']
+# Returns e.g.: ['start_design', 'cancel']
 ```
 
-### 检查转换合法性
+### Check Transition Validity
 
 ```python
 from core.state_machine import can_transition
@@ -230,10 +231,10 @@ if can_transition(task_id, 'review_pass'):
     transition(task_id, 'review_pass')
 ```
 
-### 手动取消任务
+### Manually Cancel a Task
 
 ```python
 from core.state_machine import transition
 
-transition(task_id, 'cancel', note='用户手动取消')
+transition(task_id, 'cancel', note='Manually cancelled by user')
 ```

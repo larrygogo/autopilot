@@ -1,11 +1,14 @@
 name: req_review
-description: "[AI] 需求评审流程（需求分析 → 需求评审）"
+description: "[AI] 需求评审流程（需求分析 → 需求评审） / Requirement review workflow (Requirement Analysis → Requirement Review)"
 
 phases:
+  # 需求分析阶段 / Requirement analysis phase
   - name: req_analysis
     timeout: 900
 
+  # 需求评审阶段 / Requirement review phase
   - name: req_review
     timeout: 900
     reject: req_analysis
+    # 最大驳回次数 / Maximum rejection count
     max_rejections: 5

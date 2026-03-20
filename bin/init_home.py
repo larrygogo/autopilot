@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
 初始化用户工作空间。
-用法：
-  python3 bin/init_home.py                     # 初始化 ~/.autopilot/
-  python3 bin/init_home.py --path /custom/path  # 自定义路径
+Initialize user workspace.
+
+用法 / Usage：
+  python3 bin/init_home.py                     # 初始化 ~/.autopilot/ / Initialize ~/.autopilot/
+  python3 bin/init_home.py --path /custom/path  # 自定义路径 / Custom path
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ def main():
 
     print(f"初始化用户工作空间：{home}")
 
-    # 创建目录结构
+    # 创建目录结构 / Create directory structure
     dirs = [
         home / "workflows",
         home / "prompts",
@@ -47,7 +49,7 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
         print(f"  ✓ {d}")
 
-    # 复制框架配置模板
+    # 复制框架配置模板 / Copy framework config template
     config_dest = home / "config.yaml"
     config_src = FRAMEWORK_ROOT / "config.example.yaml"
     if not config_dest.exists() and config_src.exists():
@@ -56,7 +58,7 @@ def main():
     elif config_dest.exists():
         print(f"  - {config_dest}（已存在，跳过）")
 
-    # 复制示例工作流
+    # 复制示例工作流 / Copy example workflows
     examples_dir = FRAMEWORK_ROOT / "examples"
     if examples_dir.is_dir():
         for wf_dir in sorted(examples_dir.iterdir()):
@@ -72,7 +74,7 @@ def main():
             else:
                 print(f"  - {dest}（已存在，跳过）")
 
-            # 复制示例提示词
+            # 复制示例提示词 / Copy example prompts
             prompts_dir = wf_dir / "prompts"
             if prompts_dir.is_dir():
                 dest_prompts = home / "prompts" / wf_dir.name

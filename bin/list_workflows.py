@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 列出所有已注册工作流。
-用法：
+List all registered workflows.
+
+用法 / Usage：
   python bin/list_workflows.py
 """
 

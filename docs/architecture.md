@@ -1,3 +1,5 @@
+[中文](architecture.md) | [English](en/architecture.md)
+
 # 架构总览
 
 ## 整体架构

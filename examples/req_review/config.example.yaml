@@ -1,2 +1,3 @@
-# req_review 工作流配置
+# req_review 工作流配置 / req_review workflow configuration
 # 当前无必需配置项，需求内容从 task_dir/requirement.md 读取
+# No required config fields; requirement content is read from task_dir/requirement.md

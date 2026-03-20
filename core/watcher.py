@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""
-Watcher：异常恢复保底机制（非主流程）
+"""Watcher：异常恢复保底机制（非主流程）
+Watcher: exception recovery safety net (non-critical path).
+
 - 检测卡死任务（运行超时 + 无锁文件）
+  Detect stuck tasks (timeout + no lock file)
 - 重新触发卡住的阶段
-由外部 cron 定期调用
+  Re-trigger stuck phases
+- 由外部 cron 定期调用
+  Called periodically by external cron
 """
 
 from __future__ import annotations
@@ -19,7 +23,8 @@ log = get_logger()
 
 
 def _get_state_mappings(task: dict) -> tuple[dict, dict]:
-    """获取任务对应工作流的状态映射（动态查注册表，查不到返回空字典）"""
+    """获取任务对应工作流的状态映射（动态查注册表，查不到返回空字典）
+    Get state mappings for the task's workflow (dynamic registry lookup, returns empty dict if not found)."""
     workflow_name = task.get("workflow", "")
 
     try:
@@ -35,30 +40,32 @@ def _get_state_mappings(task: dict) -> tuple[dict, dict]:
 
 
 def _calculate_delay(policy: dict, attempt: int) -> float:
-    """根据重试策略和尝试次数计算延迟"""
+    """根据重试策略和尝试次数计算延迟
+    Calculate delay based on retry policy and attempt count."""
     if policy.get("backoff") == "exponential":
         return min(policy["delay"] * (2 ** (attempt - 1)), policy["max_delay"])
     return policy["delay"]
 
 
 def is_stuck(task):
-    """判断任务是否卡死"""
+    """判断任务是否卡死
+    Determine if a task is stuck."""
     status = task["status"]
     running_map, pending_map = _get_state_mappings(task)
 
     if status not in running_map and status not in pending_map:
         return False
 
-    # 如果有锁文件（进程还活着），不算卡死
+    # 如果有锁文件（进程还活着），不算卡死 / If lock file exists (process still alive), not stuck
     if is_locked(task["id"]):
         return False
 
-    # 检查更新时间
+    # 检查更新时间 / Check update time
     started_at = task.get("started_at") or task.get("updated_at")
     if not started_at:
         return False
 
-    # 从策略获取超时值
+    # 从策略获取超时值 / Get timeout from retry policy
     workflow_name = task.get("workflow", "")
     phase_name = running_map.get(status) or pending_map.get(status)
     try:
@@ -82,7 +89,8 @@ def is_stuck(task):
 
 
 def _iter_all_phases(wf: dict):
-    """遍历所有阶段（包括 parallel 子阶段）"""
+    """遍历所有阶段（包括 parallel 子阶段）
+    Iterate all phases (including parallel sub-phases)."""
     for phase in wf.get("phases", []):
         if "parallel" in phase:
             yield from phase["parallel"].get("phases", [])
@@ -91,7 +99,8 @@ def _iter_all_phases(wf: dict):
 
 
 def _get_fail_trigger(task: dict, status: str) -> str | None:
-    """获取 running 状态对应的 fail trigger"""
+    """获取 running 状态对应的 fail trigger
+    Get the fail trigger for a running state."""
     workflow_name = task.get("workflow", "")
 
     try:
@@ -109,7 +118,8 @@ def _get_fail_trigger(task: dict, status: str) -> str | None:
 
 
 def _get_pending_state(task: dict, status: str) -> str | None:
-    """获取 running 状态对应的回退 pending 状态"""
+    """获取 running 状态对应的回退 pending 状态
+    Get the fallback pending state for a running state."""
     workflow_name = task.get("workflow", "")
 
     try:
@@ -127,7 +137,8 @@ def _get_pending_state(task: dict, status: str) -> str | None:
 
 
 def recover_task(task):
-    """尝试恢复卡死的任务"""
+    """尝试恢复卡死的任务
+    Attempt to recover a stuck task."""
     status = task["status"]
     task_id = task["id"]
     running_map, pending_map = _get_state_mappings(task)
@@ -140,11 +151,11 @@ def recover_task(task):
     failure_count = task.get("failure_count", 0) + 1
     log.warning("检测到卡死（%s），尝试恢复（第%d次）", status, failure_count)
 
-    # 更新失败计数
+    # 更新失败计数 / Update failure count
     with get_conn() as conn:
         conn.execute("UPDATE tasks SET failure_count = ?, updated_at = ? WHERE id = ?", (failure_count, now(), task_id))
 
-    # 从策略获取 max_retries
+    # 从策略获取 max_retries / Get max_retries from retry policy
     workflow_name = task.get("workflow", "")
     try:
         from core.registry import get_retry_policy
@@ -161,6 +172,7 @@ def recover_task(task):
         return
 
     # running 状态：先回退到 pending，再重新触发
+    # Running state: first rollback to pending, then re-trigger
     if status in running_map:
         fail_trigger = _get_fail_trigger(task, status)
         if fail_trigger:
@@ -183,6 +195,7 @@ def recover_task(task):
                     )
         else:
             # 无 fail trigger 的 running 状态，直接强制改回 pending
+            # Running state without fail trigger, force change back to pending
             pending = _get_pending_state(task, status)
             if not pending:
                 log.error("无法确定 %s 的回退状态，跳过恢复", status)
@@ -194,23 +207,25 @@ def recover_task(task):
                     (pending, now(), now(), task_id),
                 )
 
-        # 回退后重新触发对应 phase
-        task = get_task(task_id)  # 重新读取，状态已更新
+        # 回退后重新触发对应 phase / Re-trigger phase after rollback
+        task = get_task(task_id)  # 重新读取，状态已更新 / Re-read, state has been updated
         execute_phase(task_id, phase)
         return
 
-    # pending 状态：直接重新触发
+    # pending 状态：直接重新触发 / Pending state: re-trigger directly
     if status in pending_map:
         execute_phase(task_id, phase)
 
 
 def _is_waiting_state(status: str) -> bool:
-    """检查是否是并行组的 waiting 状态"""
+    """检查是否是并行组的 waiting 状态
+    Check if status is a parallel group waiting state."""
     return status.startswith("waiting_")
 
 
 def _check_waiting_task(task: dict) -> None:
-    """检查 waiting_* 状态的父任务：检查子任务是否卡死"""
+    """检查 waiting_* 状态的父任务：检查子任务是否卡死
+    Check parent task in waiting_* state: check if sub-tasks are stuck."""
     from core.db import get_sub_tasks
 
     subs = get_sub_tasks(task["id"])
@@ -223,6 +238,8 @@ def _check_waiting_task(task: dict) -> None:
 
 
 def main():
+    """Watcher 主入口：扫描活跃任务并恢复卡死任务
+    Watcher main entry: scan active tasks and recover stuck ones."""
     tasks = get_active_tasks()
     if not tasks:
         return
@@ -231,6 +248,7 @@ def main():
         status = task["status"]
 
         # waiting_* 状态的父任务：检查子任务，不检查父任务本身
+        # Parent tasks in waiting_* state: check sub-tasks, not the parent itself
         if _is_waiting_state(status):
             _check_waiting_task(task)
             continue
@@ -239,6 +257,7 @@ def main():
             recover_task(task)
         else:
             # 任务正常，检查有没有 pending 状态但没有锁（可能 push 失败了）
+            # Task is normal, check for pending state without lock (push may have failed)
             _, pending_map = _get_state_mappings(task)
             if status in pending_map and not is_locked(task["id"]):
                 from datetime import timezone as tz
@@ -249,7 +268,7 @@ def main():
                     if started.tzinfo is None:
                         started = started.replace(tzinfo=tz.utc)
                     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-                    # 从策略获取延迟值
+                    # 从策略获取延迟值 / Get delay from retry policy
                     phase_name = pending_map[status]
                     workflow_name = task.get("workflow", "")
                     try:

@@ -132,7 +132,8 @@ class TestRunMigrations:
             def up(conn):
                 conn.execute("CREATE TABLE good_table (id INTEGER)")
                 raise RuntimeError("故意失败")
-        """)
+        """),
+            encoding="utf-8",
         )
         with mock.patch.object(migrate_mod, "MIGRATIONS_DIR", tmp_path):
             with pytest.raises(RuntimeError, match="故意失败"):
@@ -150,14 +151,16 @@ class TestRunMigrations:
             textwrap.dedent("""\
             def up(conn):
                 conn.execute("CREATE TABLE ok_table (id INTEGER)")
-        """)
+        """),
+            encoding="utf-8",
         )
         mig2 = tmp_path / "002_bad.py"
         mig2.write_text(
             textwrap.dedent("""\
             def up(conn):
                 raise RuntimeError("第二个失败")
-        """)
+        """),
+            encoding="utf-8",
         )
         with mock.patch.object(migrate_mod, "MIGRATIONS_DIR", tmp_path):
             with pytest.raises(RuntimeError):

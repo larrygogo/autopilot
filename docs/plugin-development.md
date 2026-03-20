@@ -1,3 +1,5 @@
+[中文](plugin-development.md) | [English](en/plugin-development.md)
+
 # 插件开发指南
 
 本文档指导你如何为 autopilot 开发第三方插件，通过 `pip install` 自动注册扩展，无需修改框架代码。

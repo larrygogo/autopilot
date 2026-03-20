@@ -1,8 +1,8 @@
-# dev 工作流配置
-# 复制到 ~/.autopilot/config.yaml 并填写实际值
+# dev 工作流配置 / dev workflow configuration
+# 复制到 ~/.autopilot/config.yaml 并填写实际值 / Copy to ~/.autopilot/config.yaml and fill in actual values
 
-# 本地 Git 仓库路径，AI 在此目录下读写代码
+# 本地 Git 仓库路径，AI 在此目录下读写代码 / Local Git repo path where AI reads/writes code
 repo_path: ~/repos/my-project
 
-# Git 主分支名（checkout / diff / PR base）
+# Git 主分支名（checkout / diff / PR base）/ Git main branch name (checkout / diff / PR base)
 default_branch: main

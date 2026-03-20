@@ -1,11 +1,16 @@
 name: doc_gen
-description: 文档生成与评审
+description: "文档生成与评审 / Document generation and review"
 
 phases:
+  # 文档生成阶段 / Document generation phase
   - name: generate
+    # 超时时间（秒）/ Timeout in seconds
     timeout: 600
 
+  # 文档评审阶段 / Document review phase
   - name: review_doc
+    # 超时时间（秒）/ Timeout in seconds
     timeout: 600
     reject: generate
+    # 最大驳回次数 / Maximum rejection count
     max_rejections: 5

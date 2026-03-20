@@ -1,7 +1,8 @@
-"""
-通知系统：多后端通知分发
+"""通知系统：多后端通知分发
+Notification system: multi-backend notification dispatch.
+
 支持 webhook 和 command 两种后端，通过工作流 WORKFLOW['notify_backends'] 配置。
-"""
+Supports webhook and command backends, configured via WORKFLOW['notify_backends']."""
 
 from __future__ import annotations
 
@@ -18,40 +19,43 @@ log = get_logger()
 
 
 def expand_env_vars(value: str) -> str:
-    """展开字符串中的 ${VAR} 环境变量引用"""
+    """展开字符串中的 ${VAR} 环境变量引用
+    Expand ${VAR} environment variable references in string."""
 
     def _replace(m: re.Match) -> str:
         var_name = m.group(1)
         val = os.environ.get(var_name)
         if val is None:
             log.warning("环境变量未设置：%s", var_name)
-            return m.group(0)  # 保持原样
+            return m.group(0)  # 保持原样 / Keep original
         return val
 
     return re.sub(r"\$\{(\w+)}", _replace, value)
 
 
 def render_template(template: str, variables: dict[str, str]) -> str:
-    """
-    两遍渲染模板：
-    1. 条件块：{{#var}}content{{/var}} — 变量有值时渲染 content，否则移除整个块
-    2. 变量替换：{{var}} → value
+    """两遍渲染模板
+    Two-pass template rendering.
+
+    1. 条件块 / Conditional blocks: {{#var}}content{{/var}} — 变量有值时渲染 content，否则移除整个块
+       Render content when variable has value, otherwise remove entire block
+    2. 变量替换 / Variable substitution: {{var}} → value
     """
     result = template
 
-    # 第一遍：条件块
+    # 第一遍：条件块 / First pass: conditional blocks
     def _replace_block(m: re.Match) -> str:
         var_name = m.group(1)
         block_content = m.group(2)
         val = variables.get(var_name, "")
         if val:
-            # 递归渲染块内的变量
+            # 递归渲染块内的变量 / Recursively render variables within block
             return render_template(block_content, variables)
         return ""
 
     result = re.sub(r"\{\{#(\w+)}}(.*?)\{\{/\1}}", _replace_block, result, flags=re.DOTALL)
 
-    # 第二遍：变量替换
+    # 第二遍：变量替换 / Second pass: variable substitution
     def _replace_var(m: re.Match) -> str:
         var_name = m.group(1)
         return variables.get(var_name, "")
@@ -62,19 +66,21 @@ def render_template(template: str, variables: dict[str, str]) -> str:
 
 
 def _matches_event(backend: dict, event: str) -> bool:
-    """检查后端是否接收指定事件"""
+    """检查后端是否接收指定事件
+    Check if backend accepts the specified event."""
     events = backend.get("events")
     if events is None:
-        return True  # 未配置 events 表示全部接收
+        return True  # 未配置 events 表示全部接收 / No events config means accept all
     if not events:
-        return False  # 空列表不匹配任何事件
+        return False  # 空列表不匹配任何事件 / Empty list matches no events
     if "*" in events:
         return True
     return event in events
 
 
 def _send_webhook(backend: dict, variables: dict[str, str]) -> None:
-    """通过 HTTP 发送 webhook 通知"""
+    """通过 HTTP 发送 webhook 通知
+    Send webhook notification via HTTP."""
     url = expand_env_vars(backend["url"])
     method = backend.get("method", "POST").upper()
     headers = {}
@@ -105,7 +111,8 @@ def _send_webhook(backend: dict, variables: dict[str, str]) -> None:
 
 
 def _send_command(backend: dict, variables: dict[str, str]) -> None:
-    """通过 shell 命令发送通知"""
+    """通过 shell 命令发送通知
+    Send notification via shell command."""
     cmd_template = backend.get("command", "")
     cmd = render_template(cmd_template, variables)
 
@@ -126,11 +133,12 @@ def dispatch(
     media_path: str | None = None,
     extra_vars: dict[str, str] | None = None,
 ) -> bool:
-    """
-    从工作流注册表获取 notify_backends，匹配事件后分发。
+    """从工作流注册表获取 notify_backends，匹配事件后分发。
+    Retrieve notify_backends from workflow registry, match events, and dispatch.
 
     Returns:
         True 如果至少有一个后端被调用，False 如果没有配置后端
+        True if at least one backend was called, False if no backends configured.
     """
     workflow_name = task.get("workflow", "")
     backends = None
@@ -146,7 +154,7 @@ def dispatch(
     if not backends:
         return False
 
-    # 构建模板变量
+    # 构建模板变量 / Build template variables
     variables: dict[str, str] = {
         "message": message,
         "event": event,
@@ -191,8 +199,8 @@ def dispatch(
 
 
 def validate_backends(backends: Any) -> tuple[list[str], list[str]]:
-    """
-    校验 notify_backends 配置。
+    """校验 notify_backends 配置。
+    Validate notify_backends configuration.
 
     Returns:
         (errors, warnings)
@@ -216,22 +224,22 @@ def validate_backends(backends: Any) -> tuple[list[str], list[str]]:
             errors.append(f"{prefix} 必须是字典")
             continue
 
-        # type 必填
+        # type 必填 / type is required
         backend_type = backend.get("type")
         if not backend_type:
             errors.append(f"{prefix} 缺少 type 字段")
         elif backend_type not in valid_types:
             errors.append(f"{prefix} type 无效：{backend_type}，可选：{valid_types}")
 
-        # webhook 必须有 url
+        # webhook 必须有 url / webhook requires url
         if backend_type == "webhook" and not backend.get("url"):
             errors.append(f"{prefix} webhook 类型缺少 url 字段")
 
-        # command 必须有 command
+        # command 必须有 command / command type requires command field
         if backend_type == "command" and not backend.get("command"):
             errors.append(f"{prefix} command 类型缺少 command 字段")
 
-        # events 校验
+        # events 校验 / Validate events
         events = backend.get("events")
         if events is not None:
             if not isinstance(events, list):

@@ -1,6 +1,9 @@
 """
 需求评审工作流：需求分析 → 需求评审
+Requirement review workflow: Requirement Analysis → Requirement Review
+
 展示框架标准模式：读本地需求 → AI 分析 → AI 评审 → PASS/REJECT
+Demonstrates standard framework pattern: read local requirement → AI analysis → AI review → PASS/REJECT
 """
 
 from __future__ import annotations
@@ -20,11 +23,13 @@ REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT"
 
 # ──────────────────────────────────────────────────────────
 # 辅助函数
+# Helper functions
 # ──────────────────────────────────────────────────────────
 
 
 def run_claude(prompt: str, timeout: int = 900) -> str:
-    """调用 Claude CLI 执行 AI 任务"""
+    """调用 Claude CLI 执行 AI 任务
+    Call Claude CLI to execute an AI task."""
     log.info("调用 Claude CLI (timeout=%ds)", timeout)
     try:
         r = subprocess.run(
@@ -44,11 +49,13 @@ def run_claude(prompt: str, timeout: int = 900) -> str:
 
 # ──────────────────────────────────────────────────────────
 # 阶段函数
+# Phase functions
 # ──────────────────────────────────────────────────────────
 
 
 def run_req_analysis(task_id: str) -> None:
-    """需求分析：读 requirement.md → 调用 AI 整理 → 保存分析报告"""
+    """需求分析：读 requirement.md → 调用 AI 整理 → 保存分析报告
+    Requirement analysis: read requirement.md → call AI → save analysis report"""
     task_dir = get_task_dir(task_id)
 
     req_path = task_dir / "requirement.md"
@@ -75,7 +82,8 @@ def run_req_analysis(task_id: str) -> None:
 
 
 def run_req_review(task_id: str) -> None:
-    """需求评审：读分析报告 → 调用 AI 评审 → 判断 PASS/REJECT"""
+    """需求评审：读分析报告 → 调用 AI 评审 → 判断 PASS/REJECT
+    Requirement review: read analysis report → call AI review → determine PASS/REJECT"""
     task_dir = get_task_dir(task_id)
 
     req_content = (task_dir / "requirement_analysis.md").read_text(encoding="utf-8")

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
 后台阶段执行入口（由 runner.run_in_background 调用）
-用法：python3 bin/run_phase.py <task_id> <phase>
+Background phase execution entry point (called by runner.run_in_background).
+
+用法 / Usage：python3 bin/run_phase.py <task_id> <phase>
 """
 
 import sys
 from pathlib import Path
 
-# 把 src 加入路径
+# 把项目根目录加入路径 / Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.runner import execute_phase

@@ -7,12 +7,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from core.plugin import (
-    _cli_commands,
-    _global_hooks,
-    _notify_backends,
     _register_plugin,
     _reset,
     discover,
@@ -21,7 +16,6 @@ from core.plugin import (
     get_global_hooks,
     get_notify_backend,
 )
-
 
 # ── 手动注册 ───────────────────────────────────────────
 

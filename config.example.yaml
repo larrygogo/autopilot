@@ -1,10 +1,12 @@
-# autopilot 框架配置
+# autopilot 框架配置 / autopilot framework configuration
 #
-# 配置文件查找优先级：
-#   1. 环境变量 DEV_WORKFLOW_CONFIG 指定的路径
-#   2. AUTOPILOT_HOME/config.yaml（默认 ~/.autopilot/config.yaml）
-#   3. 当前工作目录的 config.yaml
-#   4. 项目目录的 config.yaml
+# 配置文件查找优先级 / Config file lookup priority:
+#   1. 环境变量 DEV_WORKFLOW_CONFIG 指定的路径 / Path specified by DEV_WORKFLOW_CONFIG env var
+#   2. AUTOPILOT_HOME/config.yaml（默认 ~/.autopilot/config.yaml）/ AUTOPILOT_HOME/config.yaml (default ~/.autopilot/config.yaml)
+#   3. 当前工作目录的 config.yaml / config.yaml in current working directory
+#   4. 项目目录的 config.yaml / config.yaml in project directory
 #
 # 框架本身无内置配置项，所有字段由工作流自行读取。
+# The framework has no built-in config fields; all fields are read by workflows.
 # 工作流专属配置详见 examples/ 下各工作流的 config.example.yaml。
+# For workflow-specific config, see config.example.yaml under each workflow in examples/.

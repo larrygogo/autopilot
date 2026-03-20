@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 查询任务列表。
-用法：
+List tasks.
+
+用法 / Usage：
   python bin/list_tasks.py [--status pending_design] [--workflow dev] [--project myproj] [--limit 20]
 """
 
@@ -36,7 +38,7 @@ def main():
         print("暂无任务")
         return
 
-    # 表格输出
+    # 表格输出 / Table output
     header = f"{'ID':<12} {'工作流':<14} {'状态':<20} {'标题':<30} {'更新时间':<26}"
     print(header)
     print("-" * len(header))

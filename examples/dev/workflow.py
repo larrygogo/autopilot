@@ -1,6 +1,9 @@
 """
 完整开发工作流：方案设计 → 方案评审 → 开发 → 代码审查 → PR 提交
+Full development workflow: Design → Review → Develop → Code Review → PR Submit
+
 展示框架标准模式：读任务 → 执行 → 保存产出物 → transition → push 下一阶段
+Demonstrates standard framework pattern: read task → execute → save artifacts → transition → push next phase
 """
 
 from __future__ import annotations
@@ -23,11 +26,13 @@ REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT"
 
 # ──────────────────────────────────────────────────────────
 # 辅助函数
+# Helper functions
 # ──────────────────────────────────────────────────────────
 
 
 def _run_git(args: list[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:
-    """执行 git 命令"""
+    """执行 git 命令
+    Execute a git command."""
     cmd_str = " ".join(["git"] + args)
     log.debug("执行: %s (cwd=%s)", cmd_str, cwd)
     r = subprocess.run(["git"] + args, capture_output=True, text=True, cwd=cwd, encoding="utf-8", errors="replace")
@@ -37,7 +42,8 @@ def _run_git(args: list[str], cwd: str, check: bool = True) -> subprocess.Comple
 
 
 def run_claude(prompt: str, repo_path: str | None = None, timeout: int = 900) -> str:
-    """调用 Claude CLI 执行 AI 任务"""
+    """调用 Claude CLI 执行 AI 任务
+    Call Claude CLI to execute an AI task."""
     log.info("调用 Claude CLI (timeout=%ds, cwd=%s)", timeout, repo_path or "None")
     try:
         r = subprocess.run(
@@ -57,7 +63,8 @@ def run_claude(prompt: str, repo_path: str | None = None, timeout: int = 900) ->
 
 
 def _get_rejection_counts(task: dict) -> dict:
-    """从任务中获取驳回计数字典"""
+    """从任务中获取驳回计数字典
+    Get rejection count dict from task."""
     raw = task.get("rejection_counts", "{}")
     if not raw:
         raw = "{}"
@@ -69,7 +76,8 @@ def _get_rejection_counts(task: dict) -> dict:
 
 
 def _get_phase_config(task: dict, phase_name: str, key: str, default):
-    """从工作流定义中获取阶段配置值"""
+    """从工作流定义中获取阶段配置值
+    Get phase config value from workflow definition."""
     from core.registry import get_phase
 
     workflow = task.get("workflow", "dev")
@@ -80,12 +88,14 @@ def _get_phase_config(task: dict, phase_name: str, key: str, default):
 
 
 # ──────────────────────────────────────────────────────────
-# setup
+# 任务初始化
+# Task setup
 # ──────────────────────────────────────────────────────────
 
 
 def setup_dev_task(args) -> dict:
-    """dev 工作流的任务初始化钩子"""
+    """dev 工作流的任务初始化钩子
+    Task initialization hook for dev workflow."""
     repo_path = CONFIG.get("repo_path", "")
     if repo_path:
         repo_path = str(Path(repo_path).expanduser())
@@ -103,11 +113,13 @@ def setup_dev_task(args) -> dict:
 
 # ──────────────────────────────────────────────────────────
 # 阶段函数
+# Phase functions
 # ──────────────────────────────────────────────────────────
 
 
 def run_design(task_id: str) -> None:
-    """方案设计：读 requirement.md → 调用 AI → 保存 plan.md"""
+    """方案设计：读 requirement.md → 调用 AI → 保存 plan.md
+    Design phase: read requirement.md → call AI → save plan.md"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
     repo_path = task["repo_path"]
@@ -121,7 +133,7 @@ def run_design(task_id: str) -> None:
         raise RuntimeError(f"需求文件不存在：{req_path}")
     requirement = req_path.read_text(encoding="utf-8")
 
-    # 驳回历史
+    # 驳回历史 / Rejection history
     rejection_history = ""
     review_path = task_dir / "plan_review.md"
     rejection_counts = _get_rejection_counts(task)
@@ -151,7 +163,8 @@ def run_design(task_id: str) -> None:
 
 
 def run_review(task_id: str) -> None:
-    """方案评审：读 plan.md → 调用 AI → 判断 PASS/REJECT"""
+    """方案评审：读 plan.md → 调用 AI → 判断 PASS/REJECT
+    Review phase: read plan.md → call AI → determine PASS/REJECT"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
     repo_path = task["repo_path"]
@@ -219,7 +232,8 @@ def run_review(task_id: str) -> None:
 
 
 def run_develop(task_id: str) -> None:
-    """开发执行：读 plan.md → 在 repo 中调用 AI → git commit"""
+    """开发执行：读 plan.md → 在 repo 中调用 AI → git commit
+    Development phase: read plan.md → call AI in repo → git commit"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
     repo_path = task["repo_path"]
@@ -257,7 +271,8 @@ def run_develop(task_id: str) -> None:
 
 
 def run_code_review(task_id: str) -> None:
-    """代码审查：git diff → 调用 AI → 判断 PASS/REJECT"""
+    """代码审查：git diff → 调用 AI → 判断 PASS/REJECT
+    Code review phase: git diff → call AI → determine PASS/REJECT"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
     repo_path = task["repo_path"]
@@ -325,7 +340,8 @@ def run_code_review(task_id: str) -> None:
 
 
 def run_submit_pr(task_id: str) -> None:
-    """提交 PR：git push → gh pr create"""
+    """提交 PR：git push → gh pr create
+    Submit PR phase: git push → gh pr create"""
     task = get_task(task_id)
     task_dir = get_task_dir(task_id)
     repo_path = task["repo_path"]
@@ -349,7 +365,7 @@ def run_submit_pr(task_id: str) -> None:
 
     pr_body = run_claude(prompt, repo_path, timeout=300)
 
-    # 检查是否已存在 PR
+    # 检查是否已存在 PR / Check if PR already exists
     existing = subprocess.run(
         ["gh", "pr", "view", "--json", "url"],
         capture_output=True,

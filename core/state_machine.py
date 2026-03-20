@@ -1,11 +1,12 @@
-"""
-状态机：执行状态转换，记录日志
+"""状态机：执行状态转换，记录日志
+State machine: execute state transitions, record logs.
+
 转换表完全由工作流注册表提供，框架不内置任何业务状态
-"""
+Transition table is entirely provided by the workflow registry; the framework has no built-in business states."""
 
 from __future__ import annotations
 
-from core.db import _TABLE_COLUMNS, get_conn, now
+from core.db import _TABLE_COLUMNS, get_conn, merge_extra_json, now
 
 
 class InvalidTransitionError(Exception):
@@ -13,10 +14,11 @@ class InvalidTransitionError(Exception):
 
 
 def _resolve_transitions(task_id: str, conn) -> dict[str, list[tuple[str, str]]]:
-    """
-    解析任务对应的转换表。
+    """解析任务对应的转换表。
+    Resolve the transition table for the given task.
+
     从工作流注册表查询，查不到返回空字典。
-    """
+    Queries the workflow registry; returns empty dict if not found."""
     row = conn.execute("SELECT workflow FROM tasks WHERE id = ?", (task_id,)).fetchone()
     if not row:
         return {}
@@ -29,8 +31,12 @@ def _resolve_transitions(task_id: str, conn) -> dict[str, list[tuple[str, str]]]
         transitions = registry.build_transitions(workflow_name)
         if transitions:
             return transitions
-    except Exception:
+    except ImportError:
         pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning("解析转换表失败（workflow=%s）：%s", workflow_name, e)
 
     return {}
 
@@ -42,25 +48,30 @@ def transition(
     extra_updates: dict | None = None,
     transitions: dict | None = None,
 ) -> tuple[str, str]:
-    """
-    执行状态转换（原子操作，完全手动事务管理）
+    """执行状态转换（原子操作，完全手动事务管理）
+    Execute state transition (atomic operation, fully manual transaction management).
 
     Args:
-        task_id: 任务 ID
-        trigger: 触发器名称
-        note: 可选备注
+        task_id: 任务 ID / Task ID
+        trigger: 触发器名称 / Trigger name
+        note: 可选备注 / Optional note
         extra_updates: 额外要更新的字段 dict（如 rejection_counts）
+                       Additional fields to update (e.g. rejection_counts)
         transitions: 可选，外部传入的转换表。不传时自动从任务的 workflow 查注册表。
+                     Optional externally provided transition table.
+                     Auto-resolved from workflow registry if not provided.
 
     Returns:
         (from_status, to_status)
 
     Raises:
-        InvalidTransitionError: 非法状态转换
+        InvalidTransitionError: 非法状态转换 / Invalid state transition
     """
     conn = get_conn()
     original_isolation = conn.isolation_level
-    conn.isolation_level = None  # 手动事务管理，避免与 autocommit 冲突
+    # 手动事务管理，避免与 autocommit 冲突
+    # Manual transaction management to avoid autocommit conflicts
+    conn.isolation_level = None
     try:
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -70,11 +81,11 @@ def transition(
 
             from_status = row["status"]
 
-            # 确定使用的转换表
+            # 确定使用的转换表 / Determine transition table to use
             if transitions is None:
                 transitions = _resolve_transitions(task_id, conn)
 
-            # 查找合法目标状态
+            # 查找合法目标状态 / Find valid target state
             allowed = transitions.get(from_status, [])
             to_status = None
             for t, dest in allowed:
@@ -88,8 +99,7 @@ def transition(
                 )
 
             # 构建更新字段（透明区分列字段 vs extra JSON）
-            import json
-
+            # Build update fields (transparently distinguish column fields vs extra JSON)
             col_updates = {"status": to_status, "updated_at": now(), "started_at": now()}
             extra_fields = {}
 
@@ -101,20 +111,13 @@ def transition(
                         extra_fields[k] = v
 
             if extra_fields:
-                # 读取当前 extra 并合并
-                current_row = conn.execute("SELECT extra FROM tasks WHERE id = ?", (task_id,)).fetchone()
-                try:
-                    current_extra = json.loads(current_row["extra"]) if current_row and current_row["extra"] else {}
-                except (json.JSONDecodeError, TypeError):
-                    current_extra = {}
-                current_extra.update(extra_fields)
-                col_updates["extra"] = json.dumps(current_extra, ensure_ascii=False)
+                col_updates["extra"] = merge_extra_json(conn, task_id, extra_fields)
 
             set_clause = ", ".join(f"{k} = ?" for k in col_updates)
             values = list(col_updates.values()) + [task_id]
             conn.execute(f"UPDATE tasks SET {set_clause} WHERE id = ?", values)
 
-            # 记录日志
+            # 记录日志 / Record transition log
             conn.execute(
                 """
                 INSERT INTO task_logs (task_id, from_status, to_status, trigger, note, created_at)
@@ -131,11 +134,12 @@ def transition(
             raise
     finally:
         conn.isolation_level = original_isolation
-    # 不 close()：复用线程本地连接
+    # 不 close()：复用线程本地连接 / Don't close(): reuse thread-local connection
 
 
 def can_transition(task_id: str, trigger: str) -> bool:
-    """检查是否可以执行某个 trigger"""
+    """检查是否可以执行某个 trigger
+    Check if a given trigger can be executed."""
     from core.db import get_task
 
     task = get_task(task_id)
@@ -150,14 +154,19 @@ def can_transition(task_id: str, trigger: str) -> bool:
         if transitions:
             allowed = transitions.get(task["status"], [])
             return any(t == trigger for t, _ in allowed)
-    except Exception:
+    except ImportError:
         pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning("检查转换可行性失败：%s", e)
 
     return False
 
 
 def get_available_triggers(task_id: str) -> list[str]:
-    """获取当前状态下可用的 trigger 列表"""
+    """获取当前状态下可用的 trigger 列表
+    Get list of available triggers for the current state."""
     from core.db import get_task
 
     task = get_task(task_id)
@@ -171,7 +180,11 @@ def get_available_triggers(task_id: str) -> list[str]:
         transitions = registry.build_transitions(workflow_name)
         if transitions:
             return [t for t, _ in transitions.get(task["status"], [])]
-    except Exception:
+    except ImportError:
         pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning("获取可用触发器失败：%s", e)
 
     return []

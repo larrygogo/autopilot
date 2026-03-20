@@ -1,6 +1,5 @@
-"""
-配置加载与校验
-"""
+"""配置加载与校验
+Configuration loading and validation."""
 
 from __future__ import annotations
 
@@ -14,7 +13,8 @@ log = get_logger()
 
 
 def load_config() -> dict:
-    """加载配置文件，按优先级查找"""
+    """加载配置文件，按优先级查找
+    Load configuration file, searching by priority."""
     try:
         import yaml
     except ImportError:
@@ -28,24 +28,30 @@ def load_config() -> dict:
     ]
     for p in search_paths:
         if p and p.is_file():
-            with open(p, encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
+            try:
+                with open(p, encoding="utf-8") as f:
+                    return yaml.safe_load(f) or {}
+            except yaml.YAMLError as e:
+                log.error("配置文件解析失败（%s）：%s", p, e)
+                return {}
     return {}
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # Schema 定义
-# ──────────────────────────────────────────────────────────
+# Schema definitions
+# ──────────────────────────────────────────────
 
 _SCHEMA: dict[str, dict] = {}
 
 
 def validate_config(config: dict) -> tuple[list[str], list[str]]:
-    """
-    校验配置字典。
+    """校验配置字典。
+    Validate configuration dictionary.
 
     Returns:
         (errors, warnings) — errors 是类型错误，warnings 是未知 key
+        (errors, warnings) — errors for type mismatches, warnings for unknown keys.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -65,7 +71,8 @@ def _validate_level(
     errors: list[str],
     warnings: list[str],
 ) -> None:
-    """递归校验一层配置"""
+    """递归校验一层配置
+    Recursively validate one level of configuration."""
     for key, value in config.items():
         full_key = f"{prefix}{key}" if not prefix else f"{prefix}.{key}"
 
@@ -81,6 +88,6 @@ def _validate_level(
             errors.append(f"{full_key} 类型错误：期望 {expected_type.__name__}，得到 {actual}")
             continue
 
-        # 递归校验子级
+        # 递归校验子级 / Recursively validate children
         if isinstance(value, dict) and "children" in spec:
             _validate_level(value, spec["children"], full_key, errors, warnings)

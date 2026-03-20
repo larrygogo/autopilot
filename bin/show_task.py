@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 查看任务详情。
-用法：
+Show task details.
+
+用法 / Usage：
   python bin/show_task.py <task_id> [--logs 10]
 """
 
@@ -28,7 +30,7 @@ def main():
         print(f"任务不存在：{args.task_id}")
         sys.exit(1)
 
-    # 基本信息
+    # 基本信息 / Basic information
     print(f"任务 ID:    {task['id']}")
     print(f"标题:       {task['title']}")
     print(f"工作流:     {task['workflow']}")
@@ -40,20 +42,20 @@ def main():
     print(f"创建时间:   {task['created_at']}")
     print(f"更新时间:   {task['updated_at']}")
 
-    # 驳回/失败计数
+    # 驳回/失败计数 / Rejection/failure counts
     failure_count = task.get("failure_count", 0)
     rejection_count = task.get("rejection_count", 0)
     if failure_count or rejection_count:
         print(f"\n失败次数:   {failure_count}")
         print(f"驳回次数:   {rejection_count}")
 
-    # 锁状态
+    # 锁状态 / Lock status
     from core.infra import is_locked
 
     locked = is_locked(args.task_id)
     print(f"\n锁状态:     {'已锁定（有进程运行中）' if locked else '未锁定'}")
 
-    # 可用操作
+    # 可用操作 / Available actions
     from core.state_machine import get_available_triggers
 
     triggers = get_available_triggers(args.task_id)
@@ -62,7 +64,7 @@ def main():
     else:
         print("可用操作:   无（终态或无转换）")
 
-    # 最近日志
+    # 最近日志 / Recent logs
     logs = get_task_logs(args.task_id, limit=args.logs)
     if logs:
         print(f"\n最近 {len(logs)} 条状态变更日志:")

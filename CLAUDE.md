@@ -151,8 +151,10 @@ python -m pytest tests/ -v
 
 ## 知识库
 
-详细架构文档见 `docs/` 目录：
+详细架构文档见 `docs/` 目录（中文版）和 `docs/en/` 目录（英文版）：
 - `architecture.md`：整体架构、模块职责、数据流、设计决策
 - `workflow-development.md`：自定义工作流开发指南、YAML 工作流完整字段说明
 - `state-machine.md`：状态转换表、驳回机制、各工作流完整状态图
 - `plugin-development.md`：第三方插件开发指南、扩展点详解、框架 API
+
+English documentation is available under `docs/en/`.

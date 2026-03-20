@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 任务统计概览。
-用法：
+Task statistics overview.
+
+用法 / Usage：
   python bin/task_stats.py
 """
 

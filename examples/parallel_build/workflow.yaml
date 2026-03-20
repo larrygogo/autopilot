@@ -1,22 +1,29 @@
 name: parallel_build
-description: 并行构建流程
+description: "并行构建流程 / Parallel build workflow"
 
+# 钩子函数 / Hook functions
 hooks:
   before_phase: on_before_phase
   after_phase: on_after_phase
 
 phases:
+  # 准备阶段 / Prepare phase
   - name: prepare
     timeout: 300
 
+  # 并行构建阶段 / Parallel build phase
   - parallel:
       name: build
+      # 失败策略：cancel_all 或 continue / Fail strategy: cancel_all or continue
       fail_strategy: cancel_all
       phases:
+        # 前端构建 / Frontend build
         - name: build_frontend
           timeout: 1200
+        # 后端构建 / Backend build
         - name: build_backend
           timeout: 1200
 
+  # 集成测试阶段 / Integration test phase
   - name: integration_test
     timeout: 900

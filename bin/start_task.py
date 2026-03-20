@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 注册新任务并启动工作流。
-用法：
+Register a new task and start the workflow.
+
+用法 / Usage：
   python3 bin/start_task.py <req_id> [--project <project>] [--repo <repo_path>]
                                     [--workflow <workflow>] [--title <title>]
 """
@@ -27,10 +29,10 @@ def main():
 
     init_db()
 
-    # 确保工作流已注册
+    # 确保工作流已注册 / Ensure workflows are registered
     import core.workflows  # noqa: F401
 
-    # 自动选择工作流
+    # 自动选择工作流 / Auto-select workflow
     from core.registry import get_workflow, list_workflows
 
     available = list_workflows()
@@ -53,7 +55,7 @@ def main():
         print(f"未知工作流：{args.workflow}，可用工作流：{names}")
         sys.exit(1)
 
-    # 检查是否已注册
+    # 检查是否已注册 / Check if already registered
     task_id = f"{args.req_id[:8]}"
     existing = get_task(task_id)
     if existing:
@@ -61,6 +63,7 @@ def main():
         sys.exit(0)
 
     # 通过工作流的 setup_func 获取参数，或使用通用默认值
+    # Get params via workflow's setup_func, or use generic defaults
     setup_func = wf.get("setup_func")
     if setup_func:
         params = setup_func(args)
@@ -85,7 +88,7 @@ def main():
     print(f"✓ 任务已注册：{task_id} — {title}")
     print(f"  工作流：{args.workflow}")
 
-    # 获取工作流的第一个阶段
+    # 获取工作流的第一个阶段 / Get the first phase of the workflow
     first_phase = wf["phases"][0]["name"]
     print(f"  开始 {first_phase}...")
 

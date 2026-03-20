@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
 数据库升级 CLI。
-用法：
-  python3 bin/upgrade.py              # 执行所有待执行迁移
-  python3 bin/upgrade.py --status     # 查看当前版本和待迁移数
-  python3 bin/upgrade.py --dry-run    # 预览将执行的迁移
+Database upgrade CLI.
+
+用法 / Usage：
+  python3 bin/upgrade.py              # 执行所有待执行迁移 / Run all pending migrations
+  python3 bin/upgrade.py --status     # 查看当前版本和待迁移数 / Show current version and pending count
+  python3 bin/upgrade.py --dry-run    # 预览将执行的迁移 / Preview pending migrations
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ def main():
     print(f"AUTOPILOT_HOME: {AUTOPILOT_HOME}")
     print()
 
-    # 确保数据库存在
+    # 确保数据库存在 / Ensure database exists
     init_db()
     conn = get_conn()
     ensure_schema_version_table(conn)

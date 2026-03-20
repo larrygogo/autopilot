@@ -1,6 +1,5 @@
-"""
-autopilot 框架核心包
-"""
+"""autopilot 框架核心包
+Autopilot framework core package."""
 
 from __future__ import annotations
 

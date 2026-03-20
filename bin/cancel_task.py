@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 取消指定任务。
-用法：python3 bin/cancel_task.py <task_id> [--reason <reason>]
+Cancel a specific task.
+
+用法 / Usage：python3 bin/cancel_task.py <task_id> [--reason <reason>]
 """
 
 import argparse
@@ -21,7 +23,7 @@ def main():
     parser.add_argument("--reason", default="用户手动取消", help="取消原因")
     args = parser.parse_args()
 
-    # 确保工作流已注册
+    # 确保工作流已注册 / Ensure workflows are registered
     import core.workflows  # noqa: F401
 
     task = get_task(args.task_id)
@@ -29,11 +31,11 @@ def main():
         print(f"任务不存在：{args.task_id}")
         sys.exit(1)
 
-    # 从 registry 动态获取终态
+    # 从 registry 动态获取终态 / Dynamically get terminal states from registry
     from core.registry import get_terminal_states
 
     terminal_states = set(get_terminal_states(task.get("workflow", "")))
-    terminal_states.add("cancelled")  # cancelled 始终是终态
+    terminal_states.add("cancelled")  # cancelled 始终是终态 / cancelled is always a terminal state
 
     if task["status"] in terminal_states:
         print(f"任务已处于终态：{task['status']}")

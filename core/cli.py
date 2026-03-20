@@ -1,6 +1,5 @@
-"""
-autopilot 统一 CLI 入口（click）
-"""
+"""autopilot 统一 CLI 入口（click）
+Autopilot unified CLI entry point (click)."""
 
 from __future__ import annotations
 
@@ -19,13 +18,14 @@ def main():
 
 
 def _ensure_workflows():
-    """确保工作流已注册"""
+    """确保工作流已注册
+    Ensure workflows are registered."""
     import core.workflows  # noqa: F401
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # start
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.command()
@@ -69,7 +69,7 @@ def start(req_id, title, workflow):
 
     setup_func = wf.get("setup_func")
     if setup_func:
-        # 构建类似 argparse 的命名空间
+        # 构建类似 argparse 的命名空间 / Build argparse-like namespace
         from types import SimpleNamespace
 
         args = SimpleNamespace(req_id=req_id, title=title, workflow=workflow)
@@ -79,7 +79,7 @@ def start(req_id, title, workflow):
             "title": title or f"Task {req_id[:8]}",
         }
 
-    # 从 params 中提取核心字段，其余作为 extra
+    # 从 params 中提取核心字段，其余作为 extra / Extract core fields from params, rest as extra
     task_title = params.pop("title", title or f"Task {req_id[:8]}")
     task_channel = params.pop("channel", "log")
     task_notify_target = params.pop("notify_target", "")
@@ -110,9 +110,9 @@ def start(req_id, title, workflow):
         execute_phase(task_id, first_phase)
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # cancel
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.command()
@@ -147,7 +147,7 @@ def cancel(task_id, reason):
         click.echo(f"取消失败：{e}")
         sys.exit(1)
 
-    # 级联取消子任务
+    # 级联取消子任务 / Cascade cancel sub-tasks
     from core.db import get_conn, get_sub_tasks, now
 
     subs = get_sub_tasks(task_id)
@@ -164,9 +164,9 @@ def cancel(task_id, reason):
             click.echo(f"  ✓ 子任务已取消：{sub['id']}")
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # list
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.command("list")
@@ -183,7 +183,7 @@ def list_cmd(status, workflow, limit, show_all):
 
     tasks = list_tasks(status=status, workflow=workflow, limit=limit)
 
-    # 默认隐藏子任务
+    # 默认隐藏子任务 / Hide sub-tasks by default
     if not show_all:
         tasks = [t for t in tasks if not t.get("parent_task_id")]
 
@@ -203,9 +203,9 @@ def list_cmd(status, workflow, limit, show_all):
     click.echo(f"\n共 {len(tasks)} 条")
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # show
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.command()
@@ -236,7 +236,7 @@ def show(task_id, log_count):
     if failure_count:
         click.echo(f"\n失败次数:   {failure_count}")
 
-    # 显示 extra 字段（非核心列字段）
+    # 显示 extra 字段（非核心列字段）/ Display extra fields (non-core column fields)
     _skip = _TABLE_COLUMNS | {"id", "title", "workflow", "status", "created_at", "updated_at", "failure_count"}
     extra_items = {k: v for k, v in task.items() if k not in _skip and v is not None and v != ""}
     if extra_items:
@@ -244,7 +244,7 @@ def show(task_id, log_count):
         for k, v in extra_items.items():
             click.echo(f"  {k}: {v}")
 
-    # 父子任务关系
+    # 父子任务关系 / Parent-child task relationship
     parent_id = task.get("parent_task_id")
     if parent_id:
         click.echo(f"父任务:     {parent_id}")
@@ -252,7 +252,7 @@ def show(task_id, log_count):
         if group:
             click.echo(f"并行组:     {group}")
 
-    # 子任务列表
+    # 子任务列表 / Sub-task list
     from core.db import get_sub_tasks
 
     subs = get_sub_tasks(task_id)
@@ -286,9 +286,9 @@ def show(task_id, log_count):
             click.echo(f"  {log_entry['created_at']:<26} {from_s:<20} {to_s:<20} {trigger:<16} {note}")
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # validate
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.command()
@@ -334,9 +334,9 @@ def validate(name):
             sys.exit(1)
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # workflows
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.command()
@@ -380,9 +380,9 @@ def workflows():
         click.echo()
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # stats
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.command()
@@ -417,9 +417,9 @@ def stats():
             click.echo(f"  {wf_name:<24} {count}")
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # init
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.command()
@@ -465,6 +465,7 @@ def init(path):
 
             if yaml_file.exists():
                 # YAML 工作流：复制整个目录（workflow.yaml + workflow.py）
+                # YAML workflow: copy entire directory (workflow.yaml + workflow.py)
                 dest_dir = home / "workflows" / wf_dir.name
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 for src_file in [yaml_file, py_file]:
@@ -476,6 +477,7 @@ def init(path):
                         click.echo(f"  - {dest_file}（已存在，跳过）")
             else:
                 # 单文件 Python 工作流：复制 .py 文件
+                # Single-file Python workflow: copy .py file
                 dest = home / "workflows" / f"{wf_dir.name}.py"
                 if not dest.exists():
                     shutil.copy2(py_file, dest)
@@ -501,9 +503,9 @@ def init(path):
         click.echo(f"  3. 设置环境变量：export AUTOPILOT_HOME={home}")
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # upgrade
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.command()
@@ -564,9 +566,9 @@ def upgrade(show_status, dry_run):
         sys.exit(1)
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # config
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.group()
@@ -608,9 +610,9 @@ def config_check(config_file):
         sys.exit(1)
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # watch
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 
 
 @main.command()
@@ -623,14 +625,17 @@ def watch():
     watcher_main()
 
 
-# ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────
 # 插件 CLI 命令注册
-# ──────────────────────────────────────────────────────────
+# Plugin CLI command registration
+# ──────────────────────────────────────────────
 
 
 def _register_plugin_commands() -> None:
-    """发现插件并将其 Click 命令添加到 main 组。"""
-    from core.plugin import discover as discover_plugins, get_cli_commands
+    """发现插件并将其 Click 命令添加到 main 组。
+    Discover plugins and add their Click commands to the main group."""
+    from core.plugin import discover as discover_plugins
+    from core.plugin import get_cli_commands
 
     discover_plugins()
     for cmd in get_cli_commands():

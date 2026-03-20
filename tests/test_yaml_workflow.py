@@ -118,8 +118,8 @@ def run_step1(task_id):
 def run_step2(task_id):
     pass
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         assert mod is not None
@@ -157,8 +157,8 @@ phases:
 def run_build(task_id):
     pass
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         wf = mod.WORKFLOW
@@ -184,8 +184,8 @@ phases:
 def my_custom_func(task_id):
     return "custom"
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         wf = mod.WORKFLOW
@@ -210,8 +210,8 @@ def my_notify(task, msg):
 def run_step1(task_id):
     pass
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         wf = mod.WORKFLOW
@@ -238,8 +238,8 @@ def on_after(task_id, phase):
 def run_step1(task_id):
     pass
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         wf = mod.WORKFLOW
@@ -270,8 +270,8 @@ transitions:
 def run_step1(task_id):
     pass
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         wf = mod.WORKFLOW
@@ -308,8 +308,8 @@ def run_design(task_id):
 def run_review(task_id):
     pass
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         wf = mod.WORKFLOW
@@ -331,8 +331,8 @@ phases:
 """
         py_content = "def run_step1(task_id): pass"
 
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         warnings = validate_workflow(mod.WORKFLOW)
@@ -354,8 +354,8 @@ phases:
 def run_step1(task_id): pass
 def run_step2(task_id): pass
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         from core.registry import _registry, register
@@ -397,8 +397,8 @@ phases:
 def run_step1(task_id): pass
 def run_step2(task_id): pass
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         with pytest.raises(WorkflowValidationError, match="必须在当前阶段之前"):
@@ -414,8 +414,8 @@ phases:
 """
         py_content = "def run_step1(task_id): pass"
 
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         with pytest.raises(WorkflowValidationError, match="必须在当前阶段之前"):
@@ -437,8 +437,8 @@ def run_step1(task_id): pass
 def run_step2(task_id): pass
 def run_step3(task_id): pass
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         warns = validate_workflow(mod.WORKFLOW)
@@ -457,8 +457,8 @@ phases:
 def run_step1(task_id): pass
 def run_step2(task_id): pass
 """
-        (tmp_path / "workflow.yaml").write_text(yaml_content)
-        (tmp_path / "workflow.py").write_text(py_content)
+        (tmp_path / "workflow.yaml").write_text(yaml_content, encoding="utf-8")
+        (tmp_path / "workflow.py").write_text(py_content, encoding="utf-8")
 
         mod = load_yaml_workflow(tmp_path)
         warns = validate_workflow(mod.WORKFLOW)

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Watcher 入口（由外部 cron 调用）
-用法：python3 bin/watcher.py
+Watcher entry point (called by external cron).
+
+用法 / Usage：python3 bin/watcher.py
 """
 
 import sys

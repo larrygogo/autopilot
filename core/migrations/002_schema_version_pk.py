@@ -1,8 +1,8 @@
-"""
-为 schema_version 表添加 PRIMARY KEY 约束。
+"""为 schema_version 表添加 PRIMARY KEY 约束。
+Add PRIMARY KEY constraint to schema_version table.
 
 SQLite 不支持 ALTER TABLE ADD PRIMARY KEY，需要重建表。
-"""
+SQLite does not support ALTER TABLE ADD PRIMARY KEY; table rebuild is required."""
 
 from __future__ import annotations
 
@@ -10,7 +10,9 @@ import sqlite3
 
 
 def up(conn: sqlite3.Connection) -> None:
-    # 检查表是否存在
+    """重建 schema_version 表以添加主键约束
+    Rebuild schema_version table to add primary key constraint."""
+    # 检查表是否存在 / Check if table exists
     row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'").fetchone()
     if not row:
         return
