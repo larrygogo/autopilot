@@ -3,271 +3,483 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Autopilot WebUI</title>
+<title>Autopilot Console</title>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
   :root {
-    --bg: #f5f7fa; --card: #fff; --border: #e2e8f0;
-    --text: #1a202c; --muted: #718096; --primary: #3182ce;
-    --green: #38a169; --red: #e53e3e; --blue: #3182ce; --gray: #a0aec0;
-    --orange: #dd6b20;
+    --bg0: #0a0a0f; --bg1: #0f1117; --bg2: #161822; --bg3: #1e2030;
+    --border: #252838; --border2: #2e3348;
+    --text: #e2e4ea; --text2: #a0a4b8; --muted: #636882;
+    --accent: #6366f1; --accent2: #818cf8; --accent-dim: rgba(99,102,241,0.12);
+    --cyan: #22d3ee; --cyan-dim: rgba(34,211,238,0.1);
+    --green: #34d399; --green-dim: rgba(52,211,153,0.1); --green-border: rgba(52,211,153,0.25);
+    --red: #f87171; --red-dim: rgba(248,113,113,0.1); --red-border: rgba(248,113,113,0.25);
+    --blue: #60a5fa; --blue-dim: rgba(96,165,250,0.1); --blue-border: rgba(96,165,250,0.25);
+    --yellow: #fbbf24; --yellow-dim: rgba(251,191,36,0.1); --yellow-border: rgba(251,191,36,0.25);
+    --orange: #fb923c;
+    --glow: 0 0 20px rgba(99,102,241,0.15);
+    --shadow: 0 1px 3px rgba(0,0,0,0.4);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,0.4);
+    --radius: 10px;
+    --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
-  nav { background: var(--text); color: #fff; padding: 0 1.5rem; display: flex; align-items: center; height: 52px; }
-  nav .logo { font-weight: 700; font-size: 1.1rem; margin-right: 2rem; }
-  nav a { color: #cbd5e0; text-decoration: none; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.9rem; }
-  nav a.active, nav a:hover { color: #fff; background: rgba(255,255,255,0.12); }
-  .container { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; }
-  .card h3 { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-  .card .val { font-size: 1.8rem; font-weight: 700; margin-top: 0.3rem; }
-  .dist { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
-  .dist span { font-size: 0.78rem; padding: 2px 8px; border-radius: 12px; background: var(--bg); }
-  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
-  th, td { text-align: left; padding: 0.65rem 1rem; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
-  th { background: var(--bg); font-weight: 600; color: var(--muted); font-size: 0.78rem; text-transform: uppercase; }
-  tr:hover { background: #f7fafc; }
-  tr:last-child td { border-bottom: none; }
-  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: 600; }
-  .badge-pending { background: #edf2f7; color: var(--gray); }
-  .badge-running { background: #ebf8ff; color: var(--blue); }
-  .badge-done, .badge-completed { background: #f0fff4; color: var(--green); }
-  .badge-cancelled { background: #fff5f5; color: var(--red); }
-  .badge-default { background: #fefcbf; color: var(--orange); }
-  .filters { display: flex; gap: 0.8rem; margin-bottom: 1rem; flex-wrap: wrap; }
-  .filters select { padding: 0.4rem 0.8rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; background: var(--card); }
-  .btn-link { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 0.88rem; text-decoration: underline; }
-  .detail-panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.5rem; margin-top: 1rem; }
-  .detail-panel h3 { margin-bottom: 1rem; }
-  .timeline { position: relative; padding-left: 1.5rem; }
-  .timeline::before { content: ''; position: absolute; left: 6px; top: 0; bottom: 0; width: 2px; background: var(--border); }
-  .timeline-item { position: relative; margin-bottom: 1rem; }
-  .timeline-item::before { content: ''; position: absolute; left: -1.5rem; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--primary); border: 2px solid var(--card); }
-  .timeline-item .time { font-size: 0.75rem; color: var(--muted); }
-  .timeline-item .desc { font-size: 0.85rem; margin-top: 2px; }
-  .wf-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
-  .wf-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; }
-  .wf-card h3 { font-size: 1rem; margin-bottom: 0.5rem; }
-  .wf-card p { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem; }
-  .phase-list { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-  .phase-tag { font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; background: #ebf8ff; color: var(--blue); }
+  body { font-family: var(--sans); background: var(--bg0); color: var(--text); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--accent); color: #fff; }
+
+  /* NAV */
+  nav { background: var(--bg1); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; height: 52px; position: sticky; top: 0; z-index: 100; backdrop-filter: blur(12px); }
+  nav .logo { font-family: var(--mono); font-weight: 700; font-size: 0.95rem; color: var(--cyan); margin-right: 2.5rem; letter-spacing: 0.04em; display: flex; align-items: center; gap: 0.6rem; }
+  nav .logo .dot { width: 7px; height: 7px; background: var(--cyan); border-radius: 50%; box-shadow: 0 0 8px var(--cyan), 0 0 20px rgba(34,211,238,0.3); animation: blink 2s infinite; }
+  @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+  nav .links { display: flex; gap: 2px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 0.4rem 0.9rem; border-radius: 6px; font-size: 0.82rem; font-weight: 500; transition: all 0.15s; font-family: var(--mono); letter-spacing: 0.02em; }
+  nav a:hover { color: var(--text2); background: var(--bg3); }
+  nav a.active { color: var(--cyan); background: var(--cyan-dim); }
+
+  /* LAYOUT */
+  .container { max-width: 1120px; margin: 0 auto; padding: 1.5rem 1.25rem; }
+  .page-hdr { margin-bottom: 1.5rem; display: flex; align-items: baseline; gap: 0.75rem; }
+  .page-hdr h2 { font-size: 1.25rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em; }
+  .page-hdr span { font-size: 0.8rem; color: var(--muted); font-family: var(--mono); }
+
+  /* STAT CARDS */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 1.25rem; }
+  .stat { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.3rem; position: relative; overflow: hidden; transition: border-color 0.2s; }
+  .stat:hover { border-color: var(--border2); }
+  .stat .lbl { font-size: 0.68rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--mono); }
+  .stat .num { font-size: 1.8rem; font-weight: 800; margin-top: 0.3rem; font-family: var(--mono); letter-spacing: -0.03em; }
+  .stat:nth-child(1) .num { color: var(--accent2); }
+  .stat:nth-child(2) .num { color: var(--green); }
+  .stat:nth-child(3) .num { color: var(--cyan); }
+  .stat::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 2px; }
+  .stat:nth-child(1)::after { background: linear-gradient(90deg, var(--accent), transparent); }
+  .stat:nth-child(2)::after { background: linear-gradient(90deg, var(--green), transparent); }
+  .stat:nth-child(3)::after { background: linear-gradient(90deg, var(--cyan), transparent); }
+
+  .dist-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .dist-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.3rem; }
+  .dist-card h3 { font-size: 0.68rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--mono); margin-bottom: 0.7rem; }
+  .dist { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .dist span { font-size: 0.78rem; padding: 3px 10px; border-radius: 4px; background: var(--bg3); color: var(--text2); font-family: var(--mono); border: 1px solid var(--border); }
+
+  /* TABLE */
+  .tbl-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 0.7rem 1.1rem; font-size: 0.65rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--mono); background: var(--bg3); border-bottom: 1px solid var(--border); }
+  td { padding: 0.7rem 1.1rem; font-size: 0.85rem; border-bottom: 1px solid var(--border); color: var(--text2); }
+  tbody tr { transition: background 0.15s; }
+  tbody tr:hover { background: rgba(99,102,241,0.04); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* BADGES */
+  .badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; font-family: var(--mono); letter-spacing: 0.03em; border: 1px solid transparent; }
+  .badge::before { content:''; width: 5px; height: 5px; border-radius: 50%; }
+  .badge-pending { background: var(--bg3); color: var(--muted); border-color: var(--border); }
+  .badge-pending::before { background: var(--muted); }
+  .badge-running { background: var(--blue-dim); color: var(--blue); border-color: var(--blue-border); }
+  .badge-running::before { background: var(--blue); animation: pulse 1.5s infinite; }
+  .badge-done,.badge-completed { background: var(--green-dim); color: var(--green); border-color: var(--green-border); }
+  .badge-done::before,.badge-completed::before { background: var(--green); }
+  .badge-cancelled { background: var(--red-dim); color: var(--red); border-color: var(--red-border); }
+  .badge-cancelled::before { background: var(--red); }
+  .badge-default { background: var(--yellow-dim); color: var(--yellow); border-color: var(--yellow-border); }
+  .badge-default::before { background: var(--yellow); }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+
+  /* FILTERS */
+  .filters { display: flex; gap: 0.6rem; margin-bottom: 1rem; }
+  .filters select { padding: 0.45rem 2rem 0.45rem 0.7rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.82rem; background: var(--bg3); color: var(--text2); cursor: pointer; font-family: var(--mono); appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23636882' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.5rem center; transition: border-color 0.15s; }
+  .filters select:hover { border-color: var(--border2); }
+  .filters select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+
+  /* BUTTONS */
+  .btn-link { background: none; border: none; color: var(--accent2); cursor: pointer; font-size: 0.82rem; font-weight: 500; font-family: var(--mono); transition: color 0.15s; }
+  .btn-link:hover { color: var(--cyan); }
+  .btn-sm { padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg3); cursor: pointer; font-size: 0.78rem; color: var(--text2); font-family: var(--mono); font-weight: 500; transition: all 0.15s; }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent2); background: var(--accent-dim); }
+
+  /* DETAIL */
+  .detail-panel { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; margin-top: 1rem; animation: fadeIn 0.2s; }
+  .detail-panel h3 { margin-bottom: 0.5rem; font-weight: 700; font-size: 1.05rem; }
+  .detail-meta { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.3rem; line-height: 1.7; }
+  .detail-meta code { background: var(--bg3); padding: 2px 6px; border-radius: 3px; font-family: var(--mono); font-size: 0.78rem; color: var(--text2); border: 1px solid var(--border); }
+  .detail-section { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+  .detail-section h4 { font-size: 0.7rem; font-weight: 700; color: var(--muted); margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--mono); }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(6px);} to{opacity:1;transform:translateY(0);} }
+
+  /* TIMELINE */
+  .timeline { position: relative; padding-left: 1.75rem; }
+  .timeline::before { content:''; position: absolute; left: 5px; top: 4px; bottom: 4px; width: 1px; background: linear-gradient(to bottom, var(--border2), transparent); }
+  .timeline-item { position: relative; margin-bottom: 1.1rem; }
+  .timeline-item::before { content:''; position: absolute; left: -1.75rem; top: 5px; width: 9px; height: 9px; border-radius: 50%; background: var(--bg2); border: 2px solid var(--accent); z-index: 1; }
+  .timeline-item .time { font-size: 0.7rem; color: var(--muted); font-family: var(--mono); }
+  .timeline-item .desc { font-size: 0.82rem; margin-top: 3px; line-height: 1.6; }
+
+  /* WF CARDS */
+  .wf-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.75rem; }
+  .wf-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; transition: all 0.2s; }
+  .wf-card:hover { border-color: var(--accent); box-shadow: var(--glow); }
+  .wf-card h3 { font-size: 0.95rem; font-weight: 700; margin-bottom: 0.15rem; font-family: var(--mono); color: var(--text); }
+  .wf-card .wf-desc { font-size: 0.82rem; color: var(--text2); margin-bottom: 0.7rem; line-height: 1.5; }
+  .phase-list { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.25rem; }
+  .phase-tag { font-size: 0.7rem; padding: 2px 8px; border-radius: 3px; background: var(--accent-dim); color: var(--accent2); font-family: var(--mono); border: 1px solid rgba(99,102,241,0.2); }
+
+  /* GRAPH */
+  .graph-box { background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem; margin-top: 1rem; overflow-x: auto; }
+  .graph-box h4 { font-size: 0.68rem; font-weight: 700; color: var(--muted); margin-bottom: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--mono); }
+  .graph-box svg { display: block; margin: 0 auto; }
+
+  .empty { text-align: center; padding: 2.5rem 1rem; color: var(--muted); font-family: var(--mono); font-size: 0.85rem; }
   .hidden { display: none; }
-  @media (max-width: 640px) { .cards { grid-template-columns: 1fr; } }
+  @media(max-width:768px) { .stats{grid-template-columns:1fr;} .dist-row{grid-template-columns:1fr;} }
 </style>
 </head>
 <body>
 <nav>
-  <span class="logo">Autopilot</span>
-  <a href="#dashboard" id="nav-dashboard">Dashboard</a>
-  <a href="#tasks" id="nav-tasks">Tasks</a>
-  <a href="#workflows" id="nav-workflows">Workflows</a>
+  <span class="logo"><span class="dot"></span>AUTOPILOT</span>
+  <div class="links">
+    <a href="#dashboard" id="nav-dashboard">dashboard</a>
+    <a href="#tasks" id="nav-tasks">tasks</a>
+    <a href="#workflows" id="nav-workflows">workflows</a>
+  </div>
 </nav>
 
 <div class="container">
-  <!-- Dashboard -->
   <div id="view-dashboard" class="view">
-    <h2 style="margin-bottom:1rem;">Dashboard</h2>
-    <div class="cards" id="stat-cards"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-      <div class="card"><h3>Status Distribution</h3><div class="dist" id="status-dist"></div></div>
-      <div class="card"><h3>Workflow Distribution</h3><div class="dist" id="wf-dist"></div></div>
+    <div class="page-hdr"><h2>Dashboard</h2><span>// system overview</span></div>
+    <div class="stats" id="stat-cards"></div>
+    <div class="dist-row">
+      <div class="dist-card"><h3>by_status</h3><div class="dist" id="status-dist"></div></div>
+      <div class="dist-card"><h3>by_workflow</h3><div class="dist" id="wf-dist"></div></div>
     </div>
   </div>
 
-  <!-- Tasks -->
   <div id="view-tasks" class="view hidden">
-    <h2 style="margin-bottom:1rem;">Tasks</h2>
+    <div class="page-hdr"><h2>Tasks</h2><span>// execution log</span></div>
     <div class="filters">
-      <select id="filter-status"><option value="">All Status</option></select>
-      <select id="filter-workflow"><option value="">All Workflows</option></select>
+      <select id="filter-status"><option value="">all_status</option></select>
+      <select id="filter-workflow"><option value="">all_workflows</option></select>
     </div>
-    <table>
-      <thead><tr><th>ID</th><th>Title</th><th>Workflow</th><th>Status</th><th>Updated</th><th></th></tr></thead>
-      <tbody id="task-tbody"></tbody>
-    </table>
+    <div class="tbl-wrap">
+      <table><thead><tr><th>ID</th><th>Title</th><th>Workflow</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+      <tbody id="task-tbody"></tbody></table>
+    </div>
     <div id="task-detail" class="detail-panel hidden"></div>
   </div>
 
-  <!-- Workflows -->
   <div id="view-workflows" class="view hidden">
-    <h2 style="margin-bottom:1rem;">Workflows</h2>
+    <div class="page-hdr"><h2>Workflows</h2><span>// registered definitions</span></div>
     <div class="wf-cards" id="wf-list"></div>
+    <div id="wf-graph-panel" class="graph-box hidden">
+      <h4 id="wf-graph-title">state_machine</h4>
+      <div id="wf-graph-svg"></div>
+    </div>
   </div>
 </div>
 
 <script>
-/* NOTE: All dynamic text is escaped via esc() which uses textContent for safe
-   HTML encoding. Data source is the local SQLite database, not external user input. */
 (function() {
-  var API = '';
+  var API = '', SVG_NS = 'http://www.w3.org/2000/svg';
 
-  // --- Routing ---
   function route() {
     var hash = location.hash.replace('#','') || 'dashboard';
     document.querySelectorAll('.view').forEach(function(v) { v.classList.add('hidden'); });
     document.querySelectorAll('nav a').forEach(function(a) { a.classList.remove('active'); });
     var view = document.getElementById('view-' + hash);
-    var nav = document.getElementById('nav-' + hash);
+    var navEl = document.getElementById('nav-' + hash);
     if (view) view.classList.remove('hidden');
-    if (nav) nav.classList.add('active');
+    if (navEl) navEl.classList.add('active');
     if (hash === 'dashboard') loadDashboard();
     else if (hash === 'tasks') loadTasks();
     else if (hash === 'workflows') loadWorkflows();
   }
   window.addEventListener('hashchange', route);
 
-  // --- Helpers ---
-  function apiGet(path) {
-    return fetch(API + path).then(function(res) { return res.json(); });
+  function apiGet(p) { return fetch(API+p).then(function(r){return r.json();}); }
+  function badge(s) {
+    var c='badge-default';
+    if(/pending/i.test(s))c='badge-pending'; else if(/running/i.test(s))c='badge-running';
+    else if(/done|completed/i.test(s))c='badge-done'; else if(/cancelled/i.test(s))c='badge-cancelled';
+    return '<span class="badge '+c+'">'+esc(s)+'</span>';
   }
+  function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
+  function fmtTime(iso){if(!iso)return'-';try{return new Date(iso).toLocaleString();}catch(e){return esc(iso);}}
+  function fmtDur(s){if(!s||s<=0)return'-';if(s<60)return Math.round(s)+'s';if(s<3600)return Math.round(s/60)+'m';return(s/3600).toFixed(1)+'h';}
+  function setText(id,h){var el=document.getElementById(id);if(el)el.innerHTML=h;}
 
-  function badge(status) {
-    var cls = 'badge-default';
-    if (/pending/i.test(status)) cls = 'badge-pending';
-    else if (/running/i.test(status)) cls = 'badge-running';
-    else if (/done|completed/i.test(status)) cls = 'badge-done';
-    else if (/cancelled/i.test(status)) cls = 'badge-cancelled';
-    return '<span class="badge ' + cls + '">' + esc(status) + '</span>';
-  }
+  // =====================================================
+  // SVG State Machine — Dark Theme
+  // =====================================================
+  var NC = {
+    initial:  {fill:'#1e1b4b',stroke:'#6366f1',text:'#a5b4fc'},
+    pending:  {fill:'#1e2030',stroke:'#3f4460',text:'#8b90a8'},
+    running:  {fill:'#172554',stroke:'#3b82f6',text:'#93c5fd'},
+    waiting:  {fill:'#422006',stroke:'#f59e0b',text:'#fcd34d'},
+    rejected: {fill:'#450a0a',stroke:'#ef4444',text:'#fca5a5'},
+    terminal: {fill:'#052e16',stroke:'#22c55e',text:'#86efac'},
+    cancelled:{fill:'#450a0a',stroke:'#ef4444',text:'#fca5a5'},
+    normal:   {fill:'#1e2030',stroke:'#3f4460',text:'#8b90a8'},
+    active:   {fill:'#312e81',stroke:'#818cf8',text:'#e0e7ff'}
+  };
 
-  function esc(s) {
-    var d = document.createElement('div');
-    d.textContent = s || '';
-    return d.innerHTML;
-  }
+  function svgEl(t,a){var e=document.createElementNS(SVG_NS,t);if(a)Object.keys(a).forEach(function(k){e.setAttribute(k,a[k]);});return e;}
 
-  function fmtTime(iso) {
-    if (!iso) return '-';
-    try { return new Date(iso).toLocaleString(); } catch(e) { return esc(iso); }
-  }
+  function renderGraph(data, box, active) {
+    box.innerHTML='';
+    if(!data||!data.nodes||!data.nodes.length)return;
+    var nodes=data.nodes,edges=data.edges;
 
-  function fmtDur(sec) {
-    if (!sec || sec <= 0) return '-';
-    if (sec < 60) return Math.round(sec) + 's';
-    if (sec < 3600) return Math.round(sec/60) + 'm';
-    return (sec/3600).toFixed(1) + 'h';
-  }
+    var phases=[],pm={},terms=[],rest=[];
+    nodes.forEach(function(n){
+      var m;
+      if(n.type==='terminal'||n.id==='cancelled'||n.id==='done'){terms.push(n);}
+      else if((m=n.id.match(/^pending_(.+)$/))){ep(m[1]).pending=n;}
+      else if((m=n.id.match(/^running_(.+)$/))){ep(m[1]).running=n;}
+      else if((m=n.id.match(/^(.+)_rejected$/))){ep(m[1]).rejected=n;}
+      else if((m=n.id.match(/^waiting_(.+)$/))){ep(m[1]).waiting=n;}
+      else{rest.push(n);}
+    });
+    function ep(name){if(!pm.hasOwnProperty(name)){pm[name]=phases.length;phases.push({name:name,pending:null,running:null,rejected:null,waiting:null});}return phases[pm[name]];}
 
-  function setText(id, html) {
-    var el = document.getElementById(id);
-    if (el) el.innerHTML = html;  // content is pre-escaped via esc()
+    var NW=155,NH=38,GX=55,GY=26,RH=NH+GY,LW=115,L=LW+20,P=30;
+    var c0=L,c1=L+NW+GX,c2=L+2*(NW+GX);
+    var pos={},ry=P;
+
+    phases.forEach(function(ph){
+      if(ph.pending)pos[ph.pending.id]={x:c0,y:ry};
+      if(ph.running)pos[ph.running.id]={x:c1,y:ry};
+      if(ph.waiting)pos[ph.waiting.id]={x:c1,y:ry};
+      if(ph.rejected)pos[ph.rejected.id]={x:c2,y:ry};
+      ph._ry=ry; ry+=RH;
+    });
+    rest.forEach(function(n){pos[n.id]={x:c1,y:ry};ry+=RH;});
+    var tY=ry,tW=terms.length*NW+(terms.length-1)*GX,tX=c0+(c1+NW-c0-tW)/2;
+    if(tX<P)tX=P;
+    terms.forEach(function(n,i){pos[n.id]={x:tX+i*(NW+GX),y:tY};});
+    if(terms.length)ry=tY+RH;
+
+    var hasR=phases.some(function(p){return p.rejected;});
+    var sW=(hasR?c2+NW:c1+NW)+P, sH=ry+20;
+
+    var svg=svgEl('svg',{width:sW,height:sH,viewBox:'0 0 '+sW+' '+sH,style:"font-family:'JetBrains Mono','SF Mono',monospace;"});
+
+    // Defs
+    var defs=svgEl('defs');
+    var m1=svgEl('marker',{id:'a1',viewBox:'0 0 10 10',refX:'8',refY:'5',markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'});
+    m1.appendChild(svgEl('path',{d:'M 0 1 L 8 5 L 0 9 z',fill:'#4b5073'}));defs.appendChild(m1);
+    var m2=svgEl('marker',{id:'a2',viewBox:'0 0 10 10',refX:'8',refY:'5',markerWidth:'6',markerHeight:'6',orient:'auto-start-reverse'});
+    m2.appendChild(svgEl('path',{d:'M 0 1 L 8 5 L 0 9 z',fill:'#ef4444'}));defs.appendChild(m2);
+
+    // Glow filter
+    var gf=svgEl('filter',{id:'gf',x:'-30%',y:'-30%',width:'160%',height:'160%'});
+    var gb=svgEl('feGaussianBlur',{stdDeviation:'5',result:'g'});
+    var gm=svgEl('feMerge');gm.appendChild(svgEl('feMergeNode',{in:'g'}));gm.appendChild(svgEl('feMergeNode',{in:'SourceGraphic'}));
+    gf.appendChild(gb);gf.appendChild(gm);defs.appendChild(gf);
+    svg.appendChild(defs);
+
+    // BG grid pattern
+    svg.appendChild(svgEl('rect',{width:sW,height:sH,fill:' #0c0d14'}));
+    // Subtle grid lines
+    for(var gx=0;gx<sW;gx+=40){svg.appendChild(svgEl('line',{x1:gx,y1:0,x2:gx,y2:sH,stroke:'#151828','stroke-width':'0.5'}));}
+    for(var gy=0;gy<sH;gy+=40){svg.appendChild(svgEl('line',{x1:0,y1:gy,x2:sW,y2:gy,stroke:'#151828','stroke-width':'0.5'}));}
+
+    // Phase labels + row bg
+    phases.forEach(function(ph){
+      svg.appendChild(svgEl('rect',{x:L-10,y:ph._ry-6,width:sW-L-P+10,height:NH+12,rx:6,fill:'rgba(30,32,48,0.5)',stroke:'none'}));
+      var lbl=svgEl('text',{x:P-10,y:ph._ry+NH/2+4,'text-anchor':'start','font-size':'10','font-weight':'700',fill:'#4b5073','letter-spacing':'0.06em'});
+      var dn=ph.name.replace(/_/g,' ').toUpperCase();
+      lbl.textContent=dn.length>14?dn.substring(0,12)+'..':dn;
+      svg.appendChild(lbl);
+    });
+
+    // Edges
+    var fwd=[],rejE=[],failE=[];
+    edges.forEach(function(e){
+      if(e.trigger==='cancel')return;
+      if(/reject$/.test(e.trigger)||/retry_/.test(e.trigger)){rejE.push(e);return;}
+      if(/fail$/.test(e.trigger)){failE.push(e);return;}
+      fwd.push(e);
+    });
+
+    function cx(id){var p=pos[id];return p?p.x+NW/2:0;}
+
+    fwd.forEach(function(e){
+      var p1=pos[e.from],p2=pos[e.to];if(!p1||!p2)return;
+      if(Math.abs(p1.y-p2.y)<5){
+        svg.appendChild(svgEl('line',{x1:p1.x+NW+2,y1:p1.y+NH/2,x2:p2.x-2,y2:p2.y+NH/2,stroke:'#3f4460','stroke-width':'1.3','marker-end':'url(#a1)'}));
+        var lt=svgEl('text',{x:(p1.x+NW+p2.x)/2,y:p1.y+NH/2-7,'text-anchor':'middle','font-size':'8',fill:'#4b5073','font-weight':'500'});
+        lt.textContent=e.trigger.replace(/_/g,' ');svg.appendChild(lt);
+      } else {
+        var x1=cx(e.from),y1=p1.y+NH,x2=cx(e.to),y2=p2.y,my=(y1+y2)/2;
+        svg.appendChild(svgEl('path',{d:'M '+x1+' '+(y1+2)+' C '+x1+' '+my+' '+x2+' '+my+' '+x2+' '+(y2-2),fill:'none',stroke:'#3f4460','stroke-width':'1.3','marker-end':'url(#a1)'}));
+        var lt2=svgEl('text',{x:(x1+x2)/2+8,y:my,'text-anchor':'start','font-size':'8',fill:'#3f4460'});
+        lt2.textContent=e.trigger.replace(/_/g,' ');svg.appendChild(lt2);
+      }
+    });
+
+    rejE.forEach(function(e){
+      var p1=pos[e.from],p2=pos[e.to];if(!p1||!p2)return;
+      if(Math.abs(p1.y-p2.y)<5&&p2.x>p1.x){
+        svg.appendChild(svgEl('line',{x1:p1.x+NW+2,y1:p1.y+NH/2,x2:p2.x-2,y2:p2.y+NH/2,stroke:'#ef4444','stroke-width':'1','stroke-dasharray':'4,3','marker-end':'url(#a2)'}));
+        var lt=svgEl('text',{x:(p1.x+NW+p2.x)/2,y:p1.y+NH/2-7,'text-anchor':'middle','font-size':'8',fill:'#ef4444','font-weight':'500'});
+        lt.textContent='reject';svg.appendChild(lt);
+      } else {
+        var cX=L-28;
+        svg.appendChild(svgEl('path',{d:'M '+(p1.x-2)+' '+(p1.y+NH/2)+' C '+cX+' '+(p1.y+NH/2)+' '+cX+' '+(p2.y+NH/2)+' '+(p2.x-2)+' '+(p2.y+NH/2),fill:'none',stroke:'#ef4444','stroke-width':'1','stroke-dasharray':'4,3','marker-end':'url(#a2)'}));
+        var lx=cX-3,ly=(p1.y+p2.y+NH)/2+3;
+        var lt2=svgEl('text',{x:lx,y:ly,'text-anchor':'end','font-size':'8',fill:'#ef4444',transform:'rotate(-90,'+lx+','+ly+')'});
+        lt2.textContent=e.trigger.replace(/_/g,' ');svg.appendChild(lt2);
+      }
+    });
+
+    failE.forEach(function(e){
+      var p1=pos[e.from],p2=pos[e.to];if(!p1||!p2||Math.abs(p1.y-p2.y)>=5)return;
+      var ly=p1.y-12;
+      svg.appendChild(svgEl('path',{d:'M '+(p1.x+NW/2-10)+' '+p1.y+' C '+(p1.x+NW/2-10)+' '+ly+' '+(p2.x+NW/2+10)+' '+ly+' '+(p2.x+NW/2+10)+' '+p2.y,fill:'none',stroke:'#2e3348','stroke-width':'1','stroke-dasharray':'3,3','marker-end':'url(#a1)'}));
+      var lt=svgEl('text',{x:(p1.x+p2.x+NW)/2,y:ly-2,'text-anchor':'middle','font-size':'7',fill:'#3f4460'});
+      lt.textContent='retry';svg.appendChild(lt);
+    });
+
+    // Nodes
+    nodes.forEach(function(n){
+      var p=pos[n.id];if(!p)return;
+      var isA=active&&n.id===active;
+      var ck=n.id==='cancelled'?'cancelled':(isA?'active':n.type);
+      var c=NC[ck]||NC.normal;
+      var isTerm=n.type==='terminal'||n.id==='cancelled'||n.id==='done';
+      var g=svgEl('g');
+      if(isA)g.setAttribute('filter','url(#gf)');
+
+      g.appendChild(svgEl('rect',{x:p.x,y:p.y,width:NW,height:NH,rx:isTerm?19:6,fill:c.fill,stroke:c.stroke,'stroke-width':isA?'2':'1.2'}));
+      if(n.type==='initial')g.appendChild(svgEl('rect',{x:p.x+3,y:p.y+3,width:NW-6,height:NH-6,rx:4,fill:'none',stroke:c.stroke,'stroke-width':'0.8','stroke-dasharray':'3,2'}));
+
+      var label=n.id.replace(/_/g,' ');
+      if(label.length>19)label=label.substring(0,17)+'..';
+      var txt=svgEl('text',{x:p.x+NW/2,y:p.y+NH/2+4,'text-anchor':'middle','font-size':'10','font-weight':isA?'700':'500',fill:c.text});
+      txt.textContent=label;g.appendChild(txt);
+      var tt=svgEl('title');tt.textContent=n.id;g.appendChild(tt);
+      svg.appendChild(g);
+    });
+
+    // Legend
+    var lgY=sH-8,lgX=P;
+    [{l:'pending',c:NC.pending},{l:'running',c:NC.running},{l:'rejected',c:NC.rejected},{l:'terminal',c:NC.terminal}].forEach(function(it){
+      svg.appendChild(svgEl('rect',{x:lgX,y:lgY-7,width:8,height:8,rx:2,fill:it.c.fill,stroke:it.c.stroke,'stroke-width':'1'}));
+      var t=svgEl('text',{x:lgX+12,y:lgY,'font-size':'8',fill:'#4b5073','font-weight':'500'});
+      t.textContent=it.l;svg.appendChild(t);lgX+=it.l.length*5.5+24;
+    });
+
+    box.appendChild(svg);
   }
 
   // --- Dashboard ---
   function loadDashboard() {
-    apiGet('/api/stats').then(function(stats) {
+    apiGet('/api/stats').then(function(s) {
       setText('stat-cards',
-        '<div class="card"><h3>Total Tasks</h3><div class="val">' + stats.total + '</div></div>' +
-        '<div class="card"><h3>Success Rate</h3><div class="val">' + stats.success_rate + '%</div></div>' +
-        '<div class="card"><h3>Avg Duration</h3><div class="val">' + fmtDur(stats.avg_duration_seconds) + '</div></div>'
+        '<div class="stat"><div class="lbl">total_tasks</div><div class="num">'+s.total+'</div></div>'+
+        '<div class="stat"><div class="lbl">success_rate</div><div class="num">'+s.success_rate+'%</div></div>'+
+        '<div class="stat"><div class="lbl">avg_duration</div><div class="num">'+fmtDur(s.avg_duration_seconds)+'</div></div>'
       );
-
-      setText('status-dist', Object.entries(stats.by_status || {}).map(function(e) {
-        return '<span>' + esc(e[0]) + ': ' + e[1] + '</span>';
-      }).join(''));
-
-      setText('wf-dist', Object.entries(stats.by_workflow || {}).map(function(e) {
-        return '<span>' + esc(e[0]) + ': ' + e[1] + '</span>';
-      }).join(''));
+      var sd=Object.entries(s.by_status||{});
+      setText('status-dist',sd.length?sd.map(function(e){return'<span>'+esc(e[0])+': '+e[1]+'</span>';}).join(''):'<span style="color:var(--muted)">no data</span>');
+      var wd=Object.entries(s.by_workflow||{});
+      setText('wf-dist',wd.length?wd.map(function(e){return'<span>'+esc(e[0])+': '+e[1]+'</span>';}).join(''):'<span style="color:var(--muted)">no data</span>');
     });
   }
 
   // --- Tasks ---
   function loadTasks() {
-    var status = document.getElementById('filter-status').value;
-    var workflow = document.getElementById('filter-workflow').value;
-    var url = '/api/tasks?limit=100';
-    if (status) url += '&status=' + encodeURIComponent(status);
-    if (workflow) url += '&workflow=' + encodeURIComponent(workflow);
-
-    apiGet(url).then(function(tasks) {
-      setText('task-tbody', tasks.map(function(t) {
-        var shortId = esc(t.id).substring(0, 12);
-        return '<tr>' +
-          '<td style="font-family:monospace;font-size:0.8rem;">' + shortId + '</td>' +
-          '<td>' + esc(t.title) + '</td>' +
-          '<td>' + esc(t.workflow) + '</td>' +
-          '<td>' + badge(t.status) + '</td>' +
-          '<td style="font-size:0.8rem;color:var(--muted);">' + fmtTime(t.updated_at) + '</td>' +
-          '<td><button class="btn-link" data-task-id="' + esc(t.id) + '">Detail</button></td>' +
-          '</tr>';
+    var st=document.getElementById('filter-status').value;
+    var wf=document.getElementById('filter-workflow').value;
+    var url='/api/tasks?limit=100';
+    if(st)url+='&status='+encodeURIComponent(st);
+    if(wf)url+='&workflow='+encodeURIComponent(wf);
+    apiGet(url).then(function(tasks){
+      if(!tasks.length){setText('task-tbody','<tr><td colspan="6" class="empty">no tasks found</td></tr>');return;}
+      setText('task-tbody',tasks.map(function(t){
+        return'<tr>'+
+          '<td style="font-family:var(--mono);font-size:0.78rem;color:var(--muted);">'+esc(t.id).substring(0,10)+'</td>'+
+          '<td style="font-weight:500;">'+esc(t.title)+'</td>'+
+          '<td style="font-size:0.8rem;color:var(--muted);">'+esc(t.workflow)+'</td>'+
+          '<td>'+badge(t.status)+'</td>'+
+          '<td style="font-size:0.78rem;color:var(--muted);font-family:var(--mono);">'+fmtTime(t.updated_at)+'</td>'+
+          '<td><button class="btn-link" data-task-id="'+esc(t.id)+'">view</button></td></tr>';
       }).join(''));
-
-      // Populate filter options
-      var statuses = tasks.map(function(t) { return t.status; }).filter(function(v, i, a) { return a.indexOf(v) === i; });
-      var workflows = tasks.map(function(t) { return t.workflow; }).filter(function(v, i, a) { return a.indexOf(v) === i; });
-      populateFilter('filter-status', statuses, 'All Status');
-      populateFilter('filter-workflow', workflows, 'All Workflows');
-
+      var sts=tasks.map(function(t){return t.status;}).filter(function(v,i,a){return a.indexOf(v)===i;});
+      var wfs=tasks.map(function(t){return t.workflow;}).filter(function(v,i,a){return a.indexOf(v)===i;});
+      populateFilter('filter-status',sts,'all_status');
+      populateFilter('filter-workflow',wfs,'all_workflows');
       document.getElementById('task-detail').classList.add('hidden');
     });
   }
-
-  function populateFilter(id, values, allLabel) {
-    var el = document.getElementById(id);
-    var current = el.value;
-    var html = '<option value="">' + esc(allLabel) + '</option>';
-    values.forEach(function(v) {
-      html += '<option value="' + esc(v) + '"' + (v === current ? ' selected' : '') + '>' + esc(v) + '</option>';
-    });
-    el.innerHTML = html;  // values are pre-escaped via esc()
+  function populateFilter(id,vals,lbl){
+    var el=document.getElementById(id),cur=el.value;
+    var h='<option value="">'+esc(lbl)+'</option>';
+    vals.forEach(function(v){h+='<option value="'+esc(v)+'"'+(v===cur?' selected':'')+'>'+esc(v)+'</option>';});
+    el.innerHTML=h;
   }
-
-  document.getElementById('filter-status').addEventListener('change', loadTasks);
-  document.getElementById('filter-workflow').addEventListener('change', loadTasks);
-
-  // Event delegation for task detail buttons
-  document.getElementById('task-tbody').addEventListener('click', function(e) {
-    var btn = e.target.closest('[data-task-id]');
-    if (!btn) return;
-    var taskId = btn.getAttribute('data-task-id');
-    showDetail(taskId);
+  document.getElementById('filter-status').addEventListener('change',loadTasks);
+  document.getElementById('filter-workflow').addEventListener('change',loadTasks);
+  document.getElementById('task-tbody').addEventListener('click',function(e){
+    var btn=e.target.closest('[data-task-id]');if(btn)showDetail(btn.getAttribute('data-task-id'));
   });
 
-  function showDetail(taskId) {
-    Promise.all([apiGet('/api/tasks/' + taskId), apiGet('/api/tasks/' + taskId + '/logs')])
-      .then(function(results) {
-        var task = results[0];
-        var logs = results[1];
-        var panel = document.getElementById('task-detail');
-        panel.classList.remove('hidden');
-
-        var logsHtml = logs.map(function(l) {
-          return '<div class="timeline-item">' +
-            '<div class="time">' + fmtTime(l.created_at) + '</div>' +
-            '<div class="desc">' + badge(l.from_status || 'init') + ' &rarr; ' + badge(l.to_status) +
-            (l.trigger ? ' <span style="color:var(--muted);font-size:0.8rem;">(' + esc(l.trigger) + ')</span>' : '') +
-            (l.note ? '<br><span style="font-size:0.8rem;color:var(--muted);">' + esc(l.note) + '</span>' : '') +
-            '</div></div>';
-        }).join('');
-
-        panel.innerHTML =  // all dynamic values are pre-escaped via esc()
-          '<h3>' + esc(task.title || taskId) + '</h3>' +
-          '<p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem;">ID: ' + esc(task.id) + ' | Workflow: ' + esc(task.workflow) + ' | Status: ' + badge(task.status) + '</p>' +
-          '<p style="font-size:0.85rem;color:var(--muted);margin-bottom:1rem;">Created: ' + fmtTime(task.created_at) + ' | Updated: ' + fmtTime(task.updated_at) + '</p>' +
-          '<h3 style="font-size:0.9rem;margin-bottom:0.5rem;">Transition Logs</h3>' +
-          '<div class="timeline">' + logsHtml + '</div>';
-      });
+  function showDetail(tid){
+    Promise.all([apiGet('/api/tasks/'+tid),apiGet('/api/tasks/'+tid+'/logs')]).then(function(r){
+      var task=r[0],logs=r[1];
+      var panel=document.getElementById('task-detail');panel.classList.remove('hidden');
+      var lh=logs.map(function(l){
+        return'<div class="timeline-item">'+
+          '<div class="time">'+fmtTime(l.created_at)+'</div>'+
+          '<div class="desc">'+badge(l.from_status||'init')+' &rarr; '+badge(l.to_status)+
+          (l.trigger?' <span style="color:var(--muted);font-size:0.75rem;font-family:var(--mono);">'+esc(l.trigger)+'</span>':'')+
+          (l.note?'<br><span style="font-size:0.78rem;color:var(--muted);">'+esc(l.note)+'</span>':'')+
+          '</div></div>';
+      }).join('');
+      panel.innerHTML=
+        '<h3>'+esc(task.title||tid)+'</h3>'+
+        '<p class="detail-meta">ID: <code>'+esc(task.id)+'</code></p>'+
+        '<p class="detail-meta">workflow: '+esc(task.workflow)+' &middot; status: '+badge(task.status)+'</p>'+
+        '<p class="detail-meta">created: '+fmtTime(task.created_at)+' &middot; updated: '+fmtTime(task.updated_at)+'</p>'+
+        '<div class="graph-box" style="margin-top:1.25rem;"><h4>state_machine</h4><div id="task-graph-svg"></div></div>'+
+        '<div class="detail-section"><h4>transition_logs</h4>'+
+        (lh?'<div class="timeline">'+lh+'</div>':'<p style="color:var(--muted);font-size:0.82rem;font-family:var(--mono);">no transitions</p>')+
+        '</div>';
+      if(task.workflow){
+        apiGet('/api/workflows/'+encodeURIComponent(task.workflow)+'/graph').then(function(g){
+          var gc=document.getElementById('task-graph-svg');if(gc)renderGraph(g,gc,task.status);
+        });
+      }
+    });
   }
 
   // --- Workflows ---
-  function loadWorkflows() {
-    apiGet('/api/workflows').then(function(workflows) {
-      setText('wf-list', workflows.map(function(wf) {
-        var phases = (wf.phases || []).map(function(p) {
-          return '<span class="phase-tag">' + esc(p) + '</span>';
-        }).join('');
-        return '<div class="wf-card">' +
-          '<h3>' + esc(wf.name) + '</h3>' +
-          '<p>' + esc(wf.description || 'No description') + '</p>' +
-          '<div class="phase-list">' + phases + '</div>' +
+  function loadWorkflows(){
+    apiGet('/api/workflows').then(function(wfs){
+      if(!wfs.length){setText('wf-list','<div class="empty">no workflows registered</div>');return;}
+      setText('wf-list',wfs.map(function(wf){
+        var ph=(wf.phases||[]).map(function(p){return'<span class="phase-tag">'+esc(p)+'</span>';}).join('');
+        return'<div class="wf-card">'+
+          '<h3>'+esc(wf.name)+'</h3>'+
+          '<div class="wf-desc">'+esc(wf.description||'—')+'</div>'+
+          '<div class="phase-list">'+ph+'</div>'+
+          '<button class="btn-sm" style="margin-top:0.9rem;" data-wf-graph="'+esc(wf.name)+'">state_machine</button>'+
           '</div>';
       }).join(''));
+      document.getElementById('wf-graph-panel').classList.add('hidden');
     });
   }
+  document.getElementById('wf-list').addEventListener('click',function(e){
+    var btn=e.target.closest('[data-wf-graph]');if(!btn)return;
+    var wn=btn.getAttribute('data-wf-graph');
+    var panel=document.getElementById('wf-graph-panel');panel.classList.remove('hidden');
+    document.getElementById('wf-graph-title').textContent='state_machine: '+wn;
+    var sc=document.getElementById('wf-graph-svg');sc.textContent='loading...';
+    apiGet('/api/workflows/'+encodeURIComponent(wn)+'/graph').then(function(g){renderGraph(g,sc);});
+  });
 
-  // Init
   route();
 })();
 </script>

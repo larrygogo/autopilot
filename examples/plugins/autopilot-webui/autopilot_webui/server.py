@@ -30,16 +30,20 @@ class WebUIHandler(BaseHTTPRequestHandler):
             "/api/workflows": self._api_workflows,
         }
 
-        # 动态路由：/api/tasks/<id> 和 /api/tasks/<id>/logs
+        # 动态路由 / Dynamic routes
         if path.startswith("/api/tasks/") and path != "/api/tasks/":
             parts = path.split("/")
             if len(parts) == 4:
-                # /api/tasks/<id>
                 self._api_task_detail(parts[3])
                 return
             if len(parts) == 5 and parts[4] == "logs":
-                # /api/tasks/<id>/logs
                 self._api_task_logs(parts[3])
+                return
+        if path.startswith("/api/workflows/") and path != "/api/workflows/":
+            parts = path.split("/")
+            if len(parts) == 5 and parts[4] == "graph":
+                # /api/workflows/<name>/graph
+                self._api_workflow_graph(parts[3])
                 return
 
         handler = routes.get(path)
@@ -94,8 +98,76 @@ class WebUIHandler(BaseHTTPRequestHandler):
     def _api_workflows(self) -> None:
         from core import registry
 
-        workflows = registry.list_workflows()
-        self._send_json(workflows)
+        result = []
+        for wf_info in registry.list_workflows():
+            wf = registry.get_workflow(wf_info["name"])
+            phases = []
+            if wf:
+                for p in wf.get("phases", []):
+                    if "parallel" in p:
+                        par = p["parallel"]
+                        phases.append(f"[parallel] {par['name']}")
+                        for sub in par.get("phases", []):
+                            phases.append(f"  {sub['name']}")
+                    else:
+                        phases.append(p["name"])
+            result.append({**wf_info, "phases": phases})
+        self._send_json(result)
+
+    def _api_workflow_graph(self, workflow_name: str) -> None:
+        from core import registry
+
+        wf = registry.get_workflow(workflow_name)
+        if not wf:
+            self._send_json({"error": "Workflow not found"}, status=404)
+            return
+
+        transitions = registry.build_transitions(workflow_name)
+        all_states = registry.get_all_states(workflow_name)
+        terminal_states = registry.get_terminal_states(workflow_name)
+        initial_state = wf.get("initial_state", "")
+
+        # 构建 edges 列表 / Build edges list
+        edges = []
+        for from_state, trans_list in transitions.items():
+            for trigger, to_state in trans_list:
+                edges.append({"from": from_state, "to": to_state, "trigger": trigger})
+
+        # 补充 edges 中出现但不在 all_states 的状态
+        edge_states = set()
+        for e in edges:
+            edge_states.add(e["from"])
+            edge_states.add(e["to"])
+        all_states_set = set(all_states)
+        for s in edge_states:
+            if s not in all_states_set:
+                all_states.append(s)
+
+        # 节点分类 / Classify nodes
+        nodes = []
+        for s in all_states:
+            node_type = "normal"
+            if s == initial_state:
+                node_type = "initial"
+            elif s in terminal_states:
+                node_type = "terminal"
+            elif "pending" in s:
+                node_type = "pending"
+            elif "running" in s:
+                node_type = "running"
+            elif "rejected" in s:
+                node_type = "rejected"
+            elif "waiting" in s:
+                node_type = "waiting"
+            nodes.append({"id": s, "type": node_type})
+
+        self._send_json({
+            "name": workflow_name,
+            "initial_state": initial_state,
+            "terminal_states": terminal_states,
+            "nodes": nodes,
+            "edges": edges,
+        })
 
     def _send_json(self, data: object, *, status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
