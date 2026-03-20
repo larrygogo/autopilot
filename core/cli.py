@@ -445,7 +445,6 @@ def init(path):
         d.mkdir(parents=True, exist_ok=True)
         click.echo(f"  ✓ {d}")
 
-
     examples_dir = framework_root / "examples" / "workflows"
     if examples_dir.is_dir():
         for wf_dir in sorted(examples_dir.iterdir()):

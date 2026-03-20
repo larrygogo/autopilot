@@ -161,13 +161,15 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 node_type = "waiting"
             nodes.append({"id": s, "type": node_type})
 
-        self._send_json({
-            "name": workflow_name,
-            "initial_state": initial_state,
-            "terminal_states": terminal_states,
-            "nodes": nodes,
-            "edges": edges,
-        })
+        self._send_json(
+            {
+                "name": workflow_name,
+                "initial_state": initial_state,
+                "terminal_states": terminal_states,
+                "nodes": nodes,
+                "edges": edges,
+            }
+        )
 
     def _send_json(self, data: object, *, status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
