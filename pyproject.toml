@@ -5,8 +5,28 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autopilot"
 version = "0.2.0"
+description = "轻量级多阶段任务编排引擎，基于状态机 + Push 模型 + 插件化工作流"
+readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+keywords = ["workflow", "orchestration", "state-machine", "automation", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = ["pyyaml>=6.0", "click>=8.0"]
+
+[project.urls]
+Repository = "https://github.com/larrygogo/autopilot"
+Documentation = "https://github.com/larrygogo/autopilot/tree/main/docs"
+Issues = "https://github.com/larrygogo/autopilot/issues"
+Changelog = "https://github.com/larrygogo/autopilot/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.4.0"]

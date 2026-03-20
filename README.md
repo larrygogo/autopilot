@@ -1,3 +1,5 @@
+[中文](README.md) | [English](README.en.md)
+
 <div align="center">
 
 # autopilot
@@ -174,6 +176,12 @@ ruff check . && ruff format .
 - **PyYAML** >= 6.0
 - **click** >= 8.0
 
+## 参与贡献
+
+欢迎任何形式的贡献！请阅读 [贡献指南](CONTRIBUTING.md) 了解如何参与。
+
+本项目遵循 [Contributor Covenant 行为准则](CODE_OF_CONDUCT.md)。
+
 ## License
 
-MIT
+[MIT](LICENSE)

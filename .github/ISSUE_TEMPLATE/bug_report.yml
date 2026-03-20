@@ -1,0 +1,85 @@
+name: Bug 报告
+description: 报告一个 Bug
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你提交 Bug 报告！请尽量填写完整信息，帮助我们更快定位问题。
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug 描述
+      description: 清晰简洁地描述这个 Bug
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 如何触发这个 Bug？
+      placeholder: |
+        1. 执行 `autopilot start ...`
+        2. 等待阶段 xxx 完成
+        3. 出现错误 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 你期望发生什么？
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 实际发生了什么？
+
+  - type: input
+    id: version
+    attributes:
+      label: autopilot 版本
+      description: "运行 `autopilot --version` 获取"
+      placeholder: "0.2.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: python
+    attributes:
+      label: Python 版本
+      options:
+        - "3.10"
+        - "3.11"
+        - "3.12"
+        - "3.13"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 粘贴相关的错误日志或终端输出
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 其他有助于定位问题的信息
