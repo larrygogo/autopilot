@@ -88,8 +88,10 @@ def main():
     print(f"✓ 任务已注册：{task_id} — {title}")
     print(f"  工作流：{args.workflow}")
 
-    # 获取工作流的第一个阶段 / Get the first phase of the workflow
-    first_phase = wf["phases"][0]["name"]
+    # 获取工作流的第一个阶段（兼容 parallel 首阶段）
+    # Get the first phase of the workflow (compatible with parallel first phase)
+    first = wf["phases"][0]
+    first_phase = first["parallel"]["name"] if "parallel" in first else first["name"]
     print(f"  开始 {first_phase}...")
 
     execute_phase(task_id, first_phase)

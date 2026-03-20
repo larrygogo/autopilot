@@ -73,7 +73,7 @@ class TestRecoverTask:
         tid = _create_test_task(task_id="WATCH-REC", status="designing")
         task = get_task(tid)
         with (
-            mock.patch("core.watcher.execute_phase"),
+            mock.patch("core.watcher.run_in_background"),
             mock.patch("core.watcher.is_locked", return_value=False),
         ):
             recover_task(task)
@@ -89,7 +89,7 @@ class TestRecoverTask:
         task = get_task(tid)
         with (
             mock.patch("core.watcher.notify") as mock_notify,
-            mock.patch("core.watcher.execute_phase") as mock_exec,
+            mock.patch("core.watcher.run_in_background") as mock_exec,
         ):
             recover_task(task)
         # 应该通知而不是重新执行

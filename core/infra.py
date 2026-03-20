@@ -7,6 +7,7 @@ Includes locking mechanism, notification dispatch, and task directory management
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -42,30 +43,67 @@ else:
 
 _lock_fds = {}  # task_id -> fd，持有引用防止 GC / task_id -> fd, hold reference to prevent GC
 
+# task_id 合法字符：字母、数字、短线、下划线、点
+# Valid task_id characters: letters, digits, hyphen, underscore, dot
+_TASK_ID_RE = re.compile(r"^[\w.\-]+$")
+
+
+def _validate_task_id(task_id: str) -> None:
+    """校验 task_id 防止路径遍历
+    Validate task_id to prevent path traversal."""
+    if not _TASK_ID_RE.match(task_id):
+        raise ValueError(f"非法 task_id（仅允许字母数字和 .-_）：{task_id}")
+
 
 def _lock_path(task_id: str) -> str:
+    _validate_task_id(task_id)
     return str(_LOCK_DIR / f"wf_task_{task_id}.lock")
+
+
+def _open_lock_file(path: str):
+    """打开锁文件（跨平台安全）
+    Open lock file (cross-platform safe).
+
+    Windows 上用 a+ 模式避免截断已被锁定的文件导致 PermissionError。
+    Uses a+ mode on Windows to avoid truncating a locked file which causes PermissionError."""
+    if _IS_WINDOWS:
+        fd = open(path, "a+")
+        # 确保文件有内容以支持 msvcrt.locking 锁定 1 字节
+        # Ensure file has content for msvcrt.locking to lock 1 byte
+        fd.seek(0, 2)  # seek to end
+        if fd.tell() == 0:
+            fd.write(" ")
+            fd.flush()
+        fd.seek(0)
+        return fd
+    return open(path, "w")
 
 
 def is_locked(task_id: str) -> bool:
     """检查任务是否已有进程持有锁（非阻塞尝试）
     Check if a task lock is held by another process (non-blocking attempt)."""
     path = _lock_path(task_id)
+    fd = None
     try:
-        fd = open(path, "w")
+        fd = _open_lock_file(path)
         if _IS_WINDOWS:
             msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
             msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
         else:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             fcntl.flock(fd, fcntl.LOCK_UN)
-        fd.close()
         return False
     except (BlockingIOError, OSError):
         return True
     except Exception as e:
         log.debug("检查锁状态异常：%s", e)
         return False
+    finally:
+        if fd:
+            try:
+                fd.close()
+            except OSError:
+                pass
 
 
 def acquire_lock(task_id: str) -> IO | None:
@@ -74,23 +112,31 @@ def acquire_lock(task_id: str) -> IO | None:
     path = _lock_path(task_id)
     fd = None
     try:
-        fd = open(path, "w")
+        fd = _open_lock_file(path)
         if _IS_WINDOWS:
             msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
         else:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fd.seek(0)
+        fd.truncate()
         fd.write(str(os.getpid()))
         fd.flush()
         _lock_fds[task_id] = fd  # 持有引用 / Hold reference
         return fd
     except (BlockingIOError, OSError):
         if fd:
-            fd.close()
+            try:
+                fd.close()
+            except OSError:
+                pass
         return None
     except Exception as e:
         log.warning("获取锁异常（task_id=%s）：%s", task_id, e)
         if fd:
-            fd.close()
+            try:
+                fd.close()
+            except OSError:
+                pass
         return None
 
 
@@ -165,6 +211,7 @@ def notify(task: dict, message: str, media_path: str | None = None, event: str =
 def get_task_dir(task_id: str) -> Path:
     """获取任务工作目录（自动创建）
     Get task working directory (auto-created)."""
+    _validate_task_id(task_id)
     d = TASKS_DIR / task_id
     d.mkdir(parents=True, exist_ok=True)
     return d

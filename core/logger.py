@@ -5,19 +5,28 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 from pathlib import Path
 
 _FMT = "%(asctime)s [%(levelname)s] [%(phase_tag)s] %(message)s"
 _DATEFMT = "%Y-%m-%d %H:%M:%S"
 
+# 线程本地存储，确保并行阶段的日志标签互不干扰
+# Thread-local storage to ensure parallel phase log tags don't interfere with each other
+_thread_local = threading.local()
+
 
 class _PhaseFilter(logging.Filter):
-    """注入 phase_tag 字段到日志记录
-    Inject phase_tag field into log records."""
+    """注入 phase_tag 字段到日志记录（线程安全）
+    Inject phase_tag field into log records (thread-safe)."""
 
-    def __init__(self):
-        super().__init__()
-        self.phase_tag = "SYSTEM"
+    @property
+    def phase_tag(self) -> str:
+        return getattr(_thread_local, "phase_tag", "SYSTEM")
+
+    @phase_tag.setter
+    def phase_tag(self, value: str) -> None:
+        _thread_local.phase_tag = value
 
     def filter(self, record):
         record.phase_tag = self.phase_tag

@@ -34,9 +34,17 @@ def main():
         print(f"  终态:     {', '.join(wf['terminal_states'])}")
         print(f"  阶段 ({len(wf['phases'])}):")
         for phase in wf["phases"]:
-            label = f" [{phase['label']}]" if phase.get("label") else ""
-            trigger_info = f"trigger={phase.get('trigger')}" if phase.get("trigger") else "(auto)"
-            print(f"    - {phase['name']}{label}: {phase['pending_state']} → {phase['running_state']}  {trigger_info}")
+            if "parallel" in phase:
+                p = phase["parallel"]
+                print(f"    - [并行] {p['name']}:")
+                for sub in p.get("phases", []):
+                    sub_label = f" [{sub['label']}]" if sub.get("label") else ""
+                    print(f"        - {sub['name']}{sub_label}: {sub['pending_state']} → {sub['running_state']}")
+            else:
+                label = f" [{phase['label']}]" if phase.get("label") else ""
+                trigger_info = f"trigger={phase.get('trigger')}" if phase.get("trigger") else "(auto)"
+                pending, running = phase['pending_state'], phase['running_state']
+                print(f"    - {phase['name']}{label}: {pending} → {running}  {trigger_info}")
         print()
 
 

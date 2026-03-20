@@ -14,7 +14,8 @@ from core.logger import get_logger
 
 log = get_logger()
 
-
+# 延迟加载配置，供工作流模块使用（如 examples/dev/workflow.py）
+# Lazy-loaded config for workflow modules (e.g. examples/dev/workflow.py)
 CONFIG = load_config()
 
 DB_PATH = AUTOPILOT_HOME / "runtime/workflow.db"
@@ -211,7 +212,11 @@ def _row_to_dict(row) -> dict:
         extra = json.loads(extra_raw) if extra_raw else {}
     except (json.JSONDecodeError, TypeError):
         extra = {}
-    result.update(extra)
+    # 过滤掉与列字段同名的 extra key，防止覆盖实际列值
+    # Filter out extra keys that conflict with column names to prevent overwriting actual column values
+    for k, v in extra.items():
+        if k not in _TABLE_COLUMNS:
+            result[k] = v
     return result
 
 

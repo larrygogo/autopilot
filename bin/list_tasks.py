@@ -30,7 +30,6 @@ def main():
     tasks = list_tasks(
         status=args.status,
         workflow=args.workflow,
-        project=args.project,
         limit=args.limit,
     )
 

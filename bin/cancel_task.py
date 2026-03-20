@@ -44,6 +44,19 @@ def main():
     try:
         transition(args.task_id, "cancel", note=args.reason)
         print(f"✓ 任务已取消：{args.task_id} — {task['title']}")
+
+        # 级联取消子任务 / Cascade cancel sub-tasks
+        from core.db import get_sub_tasks
+
+        subs = get_sub_tasks(args.task_id)
+        for sub in subs:
+            if sub["status"] not in terminal_states:
+                try:
+                    transition(sub["id"], "cancel", note="父任务取消，级联取消")
+                    print(f"  ✓ 子任务已取消：{sub['id']}")
+                except (InvalidTransitionError, Exception):
+                    pass
+
         notify(task, f"🚫 任务已取消：《{task['title']}》\n\n原因：{args.reason}")
     except InvalidTransitionError as e:
         print(f"取消失败：{e}")

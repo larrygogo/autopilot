@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import ssl
 import subprocess
 import urllib.request
@@ -114,7 +115,10 @@ def _send_command(backend: dict, variables: dict[str, str]) -> None:
     """通过 shell 命令发送通知
     Send notification via shell command."""
     cmd_template = backend.get("command", "")
-    cmd = render_template(cmd_template, variables)
+    # 先用原始值处理条件块（判断有无值），再用转义值替换变量（防止命令注入）
+    # First process conditional blocks with raw values (check presence), then substitute with escaped values
+    safe_variables = {k: shlex.quote(v) if v else "" for k, v in variables.items()}
+    cmd = render_template(cmd_template, safe_variables)
 
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)

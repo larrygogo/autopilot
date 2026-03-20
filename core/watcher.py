@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from core.db import get_active_tasks, get_conn, get_task, now
+from core.db import get_active_tasks, get_conn, now
 from core.infra import is_locked, notify
 from core.logger import get_logger
-from core.runner import execute_phase
+from core.runner import run_in_background
 
 log = get_logger()
 
@@ -207,14 +207,13 @@ def recover_task(task):
                     (pending, now(), now(), task_id),
                 )
 
-        # 回退后重新触发对应 phase / Re-trigger phase after rollback
-        task = get_task(task_id)  # 重新读取，状态已更新 / Re-read, state has been updated
-        execute_phase(task_id, phase)
+        # 回退后非阻塞重新触发对应 phase / Non-blocking re-trigger phase after rollback
+        run_in_background(task_id, phase)
         return
 
-    # pending 状态：直接重新触发 / Pending state: re-trigger directly
+    # pending 状态：非阻塞重新触发 / Pending state: non-blocking re-trigger
     if status in pending_map:
-        execute_phase(task_id, phase)
+        run_in_background(task_id, phase)
 
 
 def _is_waiting_state(status: str) -> bool:
@@ -281,7 +280,7 @@ def main():
                         pending_delay = 180
                     if elapsed > pending_delay:
                         log.info("pending 状态超时，重新触发 %s", phase_name)
-                        execute_phase(task["id"], phase_name)
+                        run_in_background(task["id"], phase_name)
 
 
 if __name__ == "__main__":

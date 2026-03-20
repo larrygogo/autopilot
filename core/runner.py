@@ -35,6 +35,7 @@ def run_in_background(task_id: str, phase: str) -> None:
     script = Path(__file__).parent.parent / "bin" / "run_phase.py"
     log_dir = get_task_dir(task_id)
     log_file = log_dir / "background.log"
+    fd = None
     try:
         fd = open(log_file, "a", encoding="utf-8")
         subprocess.Popen(
@@ -42,14 +43,16 @@ def run_in_background(task_id: str, phase: str) -> None:
             stdout=fd,
             stderr=fd,
         )
-        # 注意：fd 不在此处关闭，由子进程继承后在进程退出时自动关闭
-        # Note: fd is not closed here; inherited by subprocess and auto-closed on process exit
     except Exception as e:
         log.error("后台启动阶段 %s 失败：%s", phase, e)
-        try:
-            fd.close()
-        except Exception:
-            pass
+    finally:
+        # 父进程关闭 fd；子进程已继承独立的文件描述符
+        # Parent closes fd; subprocess has inherited its own file descriptor
+        if fd:
+            try:
+                fd.close()
+            except Exception:
+                pass
 
 
 # ──────────────────────────────────────────────
@@ -378,8 +381,6 @@ def _set_phase_label(task_id: str, phase: str) -> None:
 
         phase_def = registry.get_phase(workflow_name, phase)
         if phase_def and phase_def.get("label"):
-            from core.logger import _phase_filter
-
-            _phase_filter.phase_tag = phase_def["label"]
+            set_phase(phase, label=phase_def["label"])
             return
     set_phase(phase)

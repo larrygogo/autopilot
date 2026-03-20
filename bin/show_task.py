@@ -34,9 +34,11 @@ def main():
     print(f"任务 ID:    {task['id']}")
     print(f"标题:       {task['title']}")
     print(f"工作流:     {task['workflow']}")
-    print(f"项目:       {task['project']}")
+    if task.get("project"):
+        print(f"项目:       {task['project']}")
     print(f"状态:       {task['status']}")
-    print(f"分支:       {task['branch']}")
+    if task.get("branch"):
+        print(f"分支:       {task['branch']}")
     if task.get("pr_url"):
         print(f"PR:         {task['pr_url']}")
     print(f"创建时间:   {task['created_at']}")
