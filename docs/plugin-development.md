@@ -366,3 +366,15 @@ assert "openclaw" in get_all_notify_backend_types()
 <!-- TODO: 补充 WebUI 截图
 ![WebUI 仪表盘](screenshots/webui-dashboard.png)
 -->
+
+---
+
+## 相关文档
+
+| 文档 | 说明 |
+|------|------|
+| [5 分钟快速入门](quickstart.md) | 从安装到跑通第一个 demo |
+| [架构总览](architecture.md) | 整体架构、模块职责、数据流 |
+| [工作流开发指南](workflow-development.md) | YAML 定义语法、阶段函数编写规范 |
+| [状态机详解](state-machine.md) | 状态转换表、驳回机制、完整状态图 |
+| [FAQ 与故障排查](faq.md) | 常见问题与解决方案 |

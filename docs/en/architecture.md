@@ -280,3 +280,15 @@ File locks + SQLite transactions for dual protection:
 Both are essential:
 - File locks only: state read and update can still be interrupted
 - Database transactions only: two processes may simultaneously enter the phase function and perform duplicate work
+
+---
+
+## Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [5-Minute Quickstart](quickstart.md) | From installation to running your first demo |
+| [Workflow Development Guide](workflow-development.md) | YAML syntax, phase function guidelines |
+| [State Machine Details](state-machine.md) | Transition tables, rejection mechanism, state diagrams |
+| [Plugin Development Guide](plugin-development.md) | Third-party plugins, extension points, framework API |
+| [FAQ & Troubleshooting](faq.md) | Common issues and solutions |
