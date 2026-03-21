@@ -66,7 +66,7 @@ def discover_migrations() -> list[tuple[int, str, Callable]]:
                 raise RuntimeError(f"迁移 {py_file.name} 缺少 up() 函数")
             migrations.append((version, name, mod.up))
         except Exception as e:
-            log.error("加载迁移 %s 失败：%s", py_file.name, e)
+            log.error("加载迁移 %s 失败：%s", py_file.name, e, exc_info=True)
             raise
     return migrations
 
@@ -83,34 +83,27 @@ def get_pending_migrations(
 def run_pending_migrations(conn: sqlite3.Connection) -> int:
     """执行所有待执行迁移，返回执行数量。失败时回滚当前迁移并抛出异常。
     Run all pending migrations, return count. On failure, rollback current migration and raise."""
+    from core.db import atomic_transaction
+
     ensure_schema_version_table(conn)
     pending = get_pending_migrations(conn)
     if not pending:
         return 0
     executed = 0
-    original_isolation = conn.isolation_level
-    try:
-        # 手动事务管理，避免与 autocommit 冲突
-        # Manual transaction management to avoid autocommit conflicts
-        conn.isolation_level = None
-        for version, name, up_func in pending:
-            log.info("执行迁移 %03d_%s ...", version, name)
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                up_func(conn)
-                conn.execute(
+    for version, name, up_func in pending:
+        log.info("执行迁移 %03d_%s ...", version, name)
+        try:
+            with atomic_transaction(conn) as txn_conn:
+                up_func(txn_conn)
+                txn_conn.execute(
                     "INSERT INTO schema_version (version, name) VALUES (?, ?)",
                     (version, name),
                 )
-                conn.execute("COMMIT")
-                executed += 1
-                log.info("迁移 %03d_%s 完成", version, name)
-            except Exception as e:
-                conn.execute("ROLLBACK")
-                log.error("迁移 %03d_%s 失败：%s", version, name, e)
-                raise
-    finally:
-        conn.isolation_level = original_isolation
+            executed += 1
+            log.info("迁移 %03d_%s 完成", version, name)
+        except Exception as e:
+            log.error("迁移 %03d_%s 失败：%s", version, name, e, exc_info=True)
+            raise
     return executed
 
 

@@ -42,12 +42,13 @@ def run_in_background(task_id: str, phase: str) -> None:
             [sys.executable, str(script), task_id, phase],
             stdout=fd,
             stderr=fd,
+            start_new_session=True,
         )
     except Exception as e:
-        log.error("后台启动阶段 %s 失败：%s", phase, e)
+        log.error("后台启动阶段 %s 失败：%s", phase, e, exc_info=True)
     finally:
-        # 父进程关闭 fd；子进程已继承独立的文件描述符
-        # Parent closes fd; subprocess has inherited its own file descriptor
+        # 父进程关闭 fd；子进程已通过 start_new_session 独立运行，持有继承的文件描述符
+        # Parent closes fd; subprocess runs independently via start_new_session with inherited fd
         if fd:
             try:
                 fd.close()
@@ -263,31 +264,26 @@ def execute_parallel_phase(task_id: str, group_name: str) -> None:
             log.warning("并行组 fork 状态转换失败：%s", e)
             return
 
-    # 创建子任务 / Create sub-tasks
+    # 创建子任务（使用 ignore_existing 避免 TOCTOU 竞态）
+    # Create sub-tasks (use ignore_existing to avoid TOCTOU race condition)
     sub_phases = parallel_def.get("phases", [])
     for i, sub_phase in enumerate(sub_phases):
         sub_task_id = f"{task_id}__{sub_phase['name']}"
 
-        # 检查是否已存在（重试场景）/ Check if already exists (retry scenario)
-        existing = get_task(sub_task_id)
-        if existing:
-            if existing["status"] not in ("cancelled",):
-                log.info("子任务已存在：%s（状态：%s）", sub_task_id, existing["status"])
-                continue
-            else:
-                # 已取消的子任务，跳过 / Cancelled sub-task, skip
-                continue
-
         initial_status = sub_phase["pending_state"]
-        create_sub_task(
-            parent_task_id=task_id,
-            sub_task_id=sub_task_id,
-            phase_name=sub_phase["name"],
-            parallel_group=group_name,
-            parallel_index=i,
-            initial_status=initial_status,
-        )
-        log.info("创建子任务：%s（阶段：%s）", sub_task_id, sub_phase["name"])
+        try:
+            create_sub_task(
+                parent_task_id=task_id,
+                sub_task_id=sub_task_id,
+                phase_name=sub_phase["name"],
+                parallel_group=group_name,
+                parallel_index=i,
+                initial_status=initial_status,
+                ignore_existing=True,
+            )
+            log.info("创建子任务：%s（阶段：%s）", sub_task_id, sub_phase["name"])
+        except Exception as e:
+            log.info("子任务已存在或创建失败：%s（%s）", sub_task_id, e)
 
     # 启动所有子任务 / Launch all sub-tasks
     for sub_phase in sub_phases:
@@ -307,7 +303,7 @@ def check_parallel_completion(sub_task_id: str) -> None:
     If any failed → behavior determined by fail_strategy.
     """
     from core import registry
-    from core.db import all_sub_tasks_done, any_sub_task_failed, get_sub_tasks
+    from core.db import check_sub_tasks_status, get_sub_tasks
 
     sub_task = get_task(sub_task_id)
     if not sub_task:
@@ -332,8 +328,10 @@ def check_parallel_completion(sub_task_id: str) -> None:
 
     fail_strategy = parallel_def.get("fail_strategy", "cancel_all")
 
-    # 检查是否有子任务失败 / Check if any sub-task failed
-    if any_sub_task_failed(parent_task_id):
+    # 原子检查子任务状态（避免 TOCTOU 竞态）/ Atomically check sub-task statuses (avoid TOCTOU race)
+    all_done, any_failed = check_sub_tasks_status(parent_task_id)
+
+    if any_failed:
         if fail_strategy == "cancel_all":
             # 取消所有兄弟子任务 / Cancel all sibling sub-tasks
             subs = get_sub_tasks(parent_task_id)
@@ -342,12 +340,10 @@ def check_parallel_completion(sub_task_id: str) -> None:
                     try:
                         transition(s["id"], "cancel", note="兄弟子任务失败，级联取消")
                     except (InvalidTransitionError, Exception):
-                        # 强制设置状态 / Force set status
-                        with get_conn() as conn:
-                            conn.execute(
-                                "UPDATE tasks SET status = 'cancelled', updated_at = ? WHERE id = ?",
-                                (now(), s["id"]),
-                            )
+                        # 使用 force_transition 记录审计日志 / Use force_transition to record audit log
+                        from core.state_machine import force_transition
+
+                        force_transition(s["id"], "cancelled", note="兄弟子任务失败，强制取消")
             # 父任务回到 pending / Parent task back to pending
             fail_trigger = f"{group_name}_fail"
             try:
@@ -358,7 +354,7 @@ def check_parallel_completion(sub_task_id: str) -> None:
         # fail_strategy == "continue"：等待其他子任务完成 / Wait for other sub-tasks to finish
 
     # 检查是否全部完成 / Check if all completed
-    if all_sub_tasks_done(parent_task_id):
+    if all_done:
         join_trigger = f"{group_name}_complete"
         try:
             transition(parent_task_id, join_trigger, note="所有子任务完成")

@@ -186,7 +186,8 @@ class TestSendCommand:
 
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
-        assert cmd == 'echo "hello" --target user123'
+        # shell=False 模式下，shlex.split 解析为列表 / In shell=False mode, shlex.split parses to list
+        assert cmd == ["echo", "hello", "--target", "user123"]
 
     @patch("core.notify.subprocess.run")
     def test_conditional_block_in_command(self, mock_run):
@@ -204,7 +205,7 @@ class TestSendCommand:
         # With media_path
         _send_command(backend, {"message": "hi", "media_path": "/tmp/file.png"})
         cmd = mock_run.call_args[0][0]
-        assert '--media "/tmp/file.png"' in cmd
+        assert "/tmp/file.png" in cmd
 
     @patch("core.notify.subprocess.run")
     def test_failure_logged_not_raised(self, mock_run):

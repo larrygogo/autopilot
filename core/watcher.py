@@ -182,17 +182,15 @@ def recover_task(task):
                 transition(task_id, fail_trigger, note=f"卡死恢复（第{failure_count}次）")
                 log.info("触发 %s，状态回退", fail_trigger)
             except Exception as e:
-                log.error("回退失败：%s，直接强制改状态", e)
+                log.error("回退失败：%s，直接强制改状态", e, exc_info=True)
                 pending = _get_pending_state(task, status)
                 if not pending:
                     log.error("无法确定 %s 的回退状态，跳过恢复", status)
                     return
 
-                with get_conn() as conn:
-                    conn.execute(
-                        "UPDATE tasks SET status = ?, updated_at = ?, started_at = ? WHERE id = ?",
-                        (pending, now(), now(), task_id),
-                    )
+                from core.state_machine import force_transition
+
+                force_transition(task_id, pending, note=f"卡死恢复强制回退（第{failure_count}次）")
         else:
             # 无 fail trigger 的 running 状态，直接强制改回 pending
             # Running state without fail trigger, force change back to pending
@@ -201,18 +199,39 @@ def recover_task(task):
                 log.error("无法确定 %s 的回退状态，跳过恢复", status)
                 return
             log.warning("强制回退 %s → %s", status, pending)
-            with get_conn() as conn:
-                conn.execute(
-                    "UPDATE tasks SET status = ?, updated_at = ?, started_at = ? WHERE id = ?",
-                    (pending, now(), now(), task_id),
-                )
+            from core.state_machine import force_transition
+
+            force_transition(task_id, pending, note=f"卡死恢复强制回退（第{failure_count}次）")
 
         # 回退后非阻塞重新触发对应 phase / Non-blocking re-trigger phase after rollback
         run_in_background(task_id, phase)
         return
 
-    # pending 状态：非阻塞重新触发 / Pending state: non-blocking re-trigger
+    # pending 状态：非阻塞重新触发（含退避延迟防止洪泛）
+    # Pending state: non-blocking re-trigger (with backoff delay to prevent flooding)
     if status in pending_map:
+        # 根据失败次数计算退避延迟 / Calculate backoff delay based on failure count
+        try:
+            from core.registry import get_retry_policy
+
+            policy = get_retry_policy(workflow_name, phase)
+            backoff_delay = _calculate_delay(policy, max(failure_count, 1))
+        except Exception:
+            backoff_delay = 60 * failure_count  # 简单线性退避兜底 / Simple linear backoff fallback
+
+        started_at = task.get("started_at") or task.get("updated_at")
+        if started_at:
+            try:
+                started = datetime.fromisoformat(started_at)
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=timezone.utc)
+                elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+                if elapsed < backoff_delay:
+                    log.debug("pending 退避中（%.0f/%.0fs），跳过重触发 %s", elapsed, backoff_delay, phase)
+                    return
+            except Exception:
+                pass
+
         run_in_background(task_id, phase)
 
 

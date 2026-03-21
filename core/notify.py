@@ -115,23 +115,28 @@ def _send_command(backend: dict, variables: dict[str, str]) -> None:
     """通过 shell 命令发送通知
     Send notification via shell command."""
     cmd_template = backend.get("command", "")
-    # 两遍渲染：先用原始值处理条件块（判断有无值），再用转义值替换变量（防止命令注入）
-    # Two-pass rendering: first process conditional blocks with raw values, then substitute with escaped values
+    # 两遍渲染：先用转义值处理条件块和变量替换（先 quote 再渲染，防止命令注入）
+    # Two-pass rendering: escape values first, then render template (quote before render to prevent injection)
+    safe_variables = {k: shlex.quote(v) if v else "" for k, v in variables.items()}
+    # 条件块用原始值判断有无值，但替换内容用安全值
+    # Conditional blocks use raw values for presence check, but substituted content uses safe values
     cmd = re.sub(
         r"\{\{#(\w+)}}(.*?)\{\{/\1}}",
         lambda m: m.group(2) if variables.get(m.group(1), "") else "",
         cmd_template,
         flags=re.DOTALL,
     )
-    safe_variables = {k: shlex.quote(v) if v else "" for k, v in variables.items()}
     cmd = re.sub(r"\{\{(\w+)}}", lambda m: safe_variables.get(m.group(1), ""), cmd)
 
     try:
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+        args = shlex.split(cmd)
+        r = subprocess.run(args, capture_output=True, text=True, timeout=30)
         if r.returncode != 0:
             log.error("command %s 执行失败（rc=%d）：%s", backend.get("name", ""), r.returncode, r.stderr[:200])
         else:
             log.debug("command %s 执行成功", backend.get("name", ""))
+    except ValueError as e:
+        log.error("command %s 解析失败（shlex）：%s", backend.get("name", ""), e)
     except Exception as e:
         log.error("command %s 执行异常：%s", backend.get("name", ""), e)
 

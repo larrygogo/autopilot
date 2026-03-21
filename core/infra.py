@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import IO
 
@@ -41,7 +42,8 @@ else:
 
     _LOCK_DIR = Path("/tmp")
 
-_lock_fds = {}  # task_id -> fd，持有引用防止 GC / task_id -> fd, hold reference to prevent GC
+_lock_fds_lock = threading.Lock()
+_lock_fds: dict[str, IO] = {}  # task_id -> fd，持有引用防止 GC / task_id -> fd, hold reference to prevent GC
 
 # task_id 合法字符：字母、数字、短线、下划线、点
 # Valid task_id characters: letters, digits, hyphen, underscore, dot
@@ -121,7 +123,8 @@ def acquire_lock(task_id: str) -> IO | None:
         fd.truncate()
         fd.write(str(os.getpid()))
         fd.flush()
-        _lock_fds[task_id] = fd  # 持有引用 / Hold reference
+        with _lock_fds_lock:
+            _lock_fds[task_id] = fd  # 持有引用 / Hold reference
         return fd
     except (BlockingIOError, OSError):
         if fd:
@@ -143,7 +146,8 @@ def acquire_lock(task_id: str) -> IO | None:
 def release_lock(task_id: str) -> None:
     """释放锁
     Release lock."""
-    fd = _lock_fds.pop(task_id, None)
+    with _lock_fds_lock:
+        fd = _lock_fds.pop(task_id, None)
     if fd:
         try:
             if _IS_WINDOWS:

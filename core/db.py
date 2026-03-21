@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from core import AUTOPILOT_HOME
@@ -96,6 +97,31 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     _local.conn = conn
     return conn
+
+
+@contextmanager
+def atomic_transaction(conn: sqlite3.Connection | None = None):
+    """原子事务上下文管理器（BEGIN IMMEDIATE + COMMIT/ROLLBACK）
+    Atomic transaction context manager (BEGIN IMMEDIATE + COMMIT/ROLLBACK).
+
+    Usage:
+        with atomic_transaction() as conn:
+            conn.execute(...)
+    """
+    if conn is None:
+        conn = get_conn()
+    original_isolation = conn.isolation_level
+    conn.isolation_level = None
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.isolation_level = original_isolation
 
 
 def close_conn() -> None:
@@ -437,9 +463,15 @@ def create_sub_task(
     parallel_group: str,
     parallel_index: int,
     initial_status: str = "pending",
+    ignore_existing: bool = False,
 ) -> None:
     """创建子任务（继承父任务的基本信息和 extra 字段）
-    Create sub-task (inherits parent task's basic info and extra fields)."""
+    Create sub-task (inherits parent task's basic info and extra fields).
+
+    Args:
+        ignore_existing: 为 True 时使用 INSERT OR IGNORE 避免重复创建（原子操作，无 TOCTOU 竞态）
+                         When True, uses INSERT OR IGNORE to avoid duplicate creation (atomic, no TOCTOU race)
+    """
     parent = get_task(parent_task_id)
     if not parent:
         raise ValueError(f"父任务不存在：{parent_task_id}")
@@ -448,10 +480,11 @@ def create_sub_task(
     parent_extra = {k: v for k, v in parent.items() if k not in _TABLE_COLUMNS}
     extra_json = json.dumps(parent_extra, ensure_ascii=False) if parent_extra else "{}"
 
+    insert_verb = "INSERT OR IGNORE" if ignore_existing else "INSERT"
     with get_conn() as conn:
         conn.execute(
-            """
-            INSERT INTO tasks
+            f"""
+            {insert_verb} INTO tasks
             (id, title, workflow, channel, notify_target, extra,
              status, created_at, updated_at, started_at,
              parent_task_id, parallel_index, parallel_group)
@@ -520,6 +553,41 @@ def any_sub_task_failed(parent_task_id: str) -> bool:
         if sub["status"] == "cancelled":
             return True
     return False
+
+
+def check_sub_tasks_status(parent_task_id: str) -> tuple[bool, bool]:
+    """原子检查子任务状态（在同一次查询中判断，避免 TOCTOU 竞态）
+    Atomically check sub-task statuses (single query to avoid TOCTOU race condition).
+
+    Returns:
+        (all_done, any_failed) — 基于同一份子任务快照
+        (all_done, any_failed) — based on the same sub-task snapshot
+    """
+    terminal = {"cancelled"}
+    try:
+        from core import registry
+
+        for wf_info in registry.list_workflows():
+            wf = registry.get_workflow(wf_info["name"])
+            if wf:
+                terminal.update(wf.get("terminal_states", []))
+    except Exception:
+        pass
+
+    subs = get_sub_tasks(parent_task_id)
+    if not subs:
+        return True, False
+
+    all_done = True
+    any_failed = False
+    for sub in subs:
+        status = sub["status"]
+        if status == "cancelled":
+            any_failed = True
+        if status not in terminal and not status.endswith("_done"):
+            all_done = False
+
+    return all_done, any_failed
 
 
 if __name__ == "__main__":

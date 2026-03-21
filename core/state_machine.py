@@ -6,7 +6,7 @@ Transition table is entirely provided by the workflow registry; the framework ha
 
 from __future__ import annotations
 
-from core.db import _TABLE_COLUMNS, get_conn, merge_extra_json, now
+from core.db import _TABLE_COLUMNS, atomic_transaction, merge_extra_json, now
 
 
 class InvalidTransitionError(Exception):
@@ -67,87 +67,110 @@ def transition(
     Raises:
         InvalidTransitionError: 非法状态转换 / Invalid state transition
     """
-    conn = get_conn()
-    original_isolation = conn.isolation_level
-    # 手动事务管理，避免与 autocommit 冲突
-    # Manual transaction management to avoid autocommit conflicts
-    conn.isolation_level = None
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
-            if not row:
-                raise ValueError(f"任务不存在：{task_id}")
+    with atomic_transaction() as conn:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not row:
+            raise ValueError(f"任务不存在：{task_id}")
 
-            from_status = row["status"]
+        from_status = row["status"]
 
-            # 确定使用的转换表 / Determine transition table to use
-            if transitions is None:
-                transitions = _resolve_transitions(task_id, conn)
+        # 确定使用的转换表 / Determine transition table to use
+        if transitions is None:
+            transitions = _resolve_transitions(task_id, conn)
 
-            # 查找合法目标状态 / Find valid target state
-            allowed = transitions.get(from_status, [])
-            to_status = None
-            for t, dest in allowed:
-                if t == trigger:
-                    to_status = dest
-                    break
+        # 查找合法目标状态 / Find valid target state
+        allowed = transitions.get(from_status, [])
+        to_status = None
+        for t, dest in allowed:
+            if t == trigger:
+                to_status = dest
+                break
 
-            if to_status is None:
-                raise InvalidTransitionError(
-                    f"非法转换：{from_status} --[{trigger}]--> ??? （允许的 trigger：{[t for t, _ in allowed]}）"
-                )
-
-            # 构建更新字段（透明区分列字段 vs extra JSON）
-            # Build update fields (transparently distinguish column fields vs extra JSON)
-            col_updates: dict = {"status": to_status, "updated_at": now()}
-            # 仅在进入 running 状态时更新 started_at，保持"阶段开始时间"语义
-            # Only update started_at when entering running state to preserve "phase start time" semantics
-            is_running = False
-            try:
-                from core import registry
-
-                running_map = registry.get_running_state_phase(row["workflow"] or "")
-                is_running = to_status in running_map
-            except Exception:
-                # fallback：按命名模式判断 / Fallback: check by naming pattern
-                is_running = "running" in to_status
-            if is_running:
-                col_updates["started_at"] = now()
-            extra_fields = {}
-
-            if extra_updates:
-                for k, v in extra_updates.items():
-                    if k in _TABLE_COLUMNS:
-                        col_updates[k] = v
-                    else:
-                        extra_fields[k] = v
-
-            if extra_fields:
-                col_updates["extra"] = merge_extra_json(conn, task_id, extra_fields)
-
-            set_clause = ", ".join(f"{k} = ?" for k in col_updates)
-            values = list(col_updates.values()) + [task_id]
-            conn.execute(f"UPDATE tasks SET {set_clause} WHERE id = ?", values)
-
-            # 记录日志 / Record transition log
-            conn.execute(
-                """
-                INSERT INTO task_logs (task_id, from_status, to_status, trigger, note, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """,
-                (task_id, from_status, to_status, trigger, note, now()),
+        if to_status is None:
+            raise InvalidTransitionError(
+                f"非法转换：{from_status} --[{trigger}]--> ??? （允许的 trigger：{[t for t, _ in allowed]}）"
             )
 
-            conn.execute("COMMIT")
-            return from_status, to_status
+        # 构建更新字段（透明区分列字段 vs extra JSON）
+        # Build update fields (transparently distinguish column fields vs extra JSON)
+        col_updates: dict = {"status": to_status, "updated_at": now()}
+        # 仅在进入 running 状态时更新 started_at，保持"阶段开始时间"语义
+        # Only update started_at when entering running state to preserve "phase start time" semantics
+        is_running = False
+        try:
+            from core import registry
 
+            running_map = registry.get_running_state_phase(row["workflow"] or "")
+            is_running = to_status in running_map
         except Exception:
-            conn.execute("ROLLBACK")
-            raise
-    finally:
-        conn.isolation_level = original_isolation
-    # 不 close()：复用线程本地连接 / Don't close(): reuse thread-local connection
+            # fallback：按命名模式判断 / Fallback: check by naming pattern
+            is_running = "running" in to_status
+        if is_running:
+            col_updates["started_at"] = now()
+        extra_fields = {}
+
+        if extra_updates:
+            for k, v in extra_updates.items():
+                if k in _TABLE_COLUMNS:
+                    col_updates[k] = v
+                else:
+                    extra_fields[k] = v
+
+        if extra_fields:
+            col_updates["extra"] = merge_extra_json(conn, task_id, extra_fields)
+
+        set_clause = ", ".join(f"{k} = ?" for k in col_updates)
+        values = list(col_updates.values()) + [task_id]
+        conn.execute(f"UPDATE tasks SET {set_clause} WHERE id = ?", values)
+
+        # 记录日志 / Record transition log
+        conn.execute(
+            """
+            INSERT INTO task_logs (task_id, from_status, to_status, trigger, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """,
+            (task_id, from_status, to_status, trigger, note, now()),
+        )
+
+        return from_status, to_status
+
+
+def force_transition(task_id: str, to_status: str, note: str | None = None) -> str:
+    """强制状态转换（绕过转换表验证，仅用于 watcher 恢复等紧急场景）
+    Force state transition (bypass transition table validation, only for watcher recovery etc.).
+
+    与直接 SQL 不同，此函数仍记录审计日志。
+    Unlike direct SQL, this function still records audit logs.
+
+    Args:
+        task_id: 任务 ID / Task ID
+        to_status: 目标状态 / Target state
+        note: 备注 / Note
+
+    Returns:
+        from_status
+    """
+    import logging
+
+    logging.getLogger(__name__).warning("force_transition：%s → %s（note=%s）", task_id, to_status, note)
+    with atomic_transaction() as conn:
+        row = conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not row:
+            raise ValueError(f"任务不存在：{task_id}")
+
+        from_status = row["status"]
+        conn.execute(
+            "UPDATE tasks SET status = ?, updated_at = ?, started_at = ? WHERE id = ?",
+            (to_status, now(), now(), task_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_logs (task_id, from_status, to_status, trigger, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """,
+            (task_id, from_status, to_status, "force_transition", note, now()),
+        )
+        return from_status
 
 
 def can_transition(task_id: str, trigger: str) -> bool:

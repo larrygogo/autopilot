@@ -230,8 +230,13 @@ def _bind_phase_func(phase: dict, py_module: Any) -> None:
             phase["func"] = getattr(py_module, func_name)
         else:
             log.warning("找不到阶段函数 %s", func_name)
-            # 设为占位 noop，避免校验失败 / Set to noop placeholder to avoid validation failure
-            phase["func"] = lambda task_id: None
+            # 设为运行时报错函数，防止静默跳过 / Set to runtime error func to prevent silent skip
+            _missing_name = func_name
+
+            def _missing_func(task_id, _name=_missing_name):
+                raise RuntimeError(f"阶段函数未实现：{_name}（请在 workflow.py 中定义）")
+
+            phase["func"] = _missing_func
 
 
 def _bind_workflow_funcs(wf_def: dict, py_module: Any) -> None:
