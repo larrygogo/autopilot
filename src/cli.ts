@@ -4,6 +4,7 @@ import { mkdirSync } from "fs";
 import { join } from "path";
 import { VERSION, AUTOPILOT_HOME } from "./index";
 import { initDb, createTask, getTask, listTasks } from "./core/db";
+import { runPendingMigrations } from "./core/migrate";
 import {
   discover,
   listWorkflows,
@@ -233,9 +234,14 @@ program
 program
   .command("upgrade")
   .description("运行数据库迁移")
-  .action(() => {
+  .action(async () => {
     initDb();
-    console.log("数据库已升级（schema 已应用）。");
+    const count = await runPendingMigrations();
+    if (count === 0) {
+      console.log("数据库已是最新版本，无需迁移。");
+    } else {
+      console.log(`数据库升级完成，共执行 ${count} 条迁移。`);
+    }
   });
 
 // ──────────────────────────────────────────────

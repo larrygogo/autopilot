@@ -1,8 +1,12 @@
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
-import { tmpdir, platform } from "os";
-import { AUTOPILOT_HOME } from "../index";
+import { tmpdir, homedir } from "os";
 import { log } from "./logger";
+
+/** 动态读取 AUTOPILOT_HOME，支持测试中修改 env */
+function getAutopilotHome(): string {
+  return process.env.AUTOPILOT_HOME || join(homedir(), ".autopilot");
+}
 
 const TASK_ID_RE = /^[\w.\-]+$/;
 const LOCK_DIR = tmpdir();
@@ -19,7 +23,7 @@ export function getTaskDir(taskId: string): string {
     throw new Error(`Invalid task ID: ${taskId}. Must match /^[\\w.\\-]+$/`);
   }
 
-  const taskDir = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
+  const taskDir = join(getAutopilotHome(), "runtime", "tasks", taskId);
 
   if (!existsSync(taskDir)) {
     mkdirSync(taskDir, { recursive: true });
@@ -88,12 +92,14 @@ export function releaseLock(taskId: string): void {
 }
 
 /**
- * 检查任务是否被锁定
+ * 检查任务是否被锁定（同时检查进程内 Map 和锁文件，支持跨进程检测）
  * @param taskId - 任务ID
  * @returns true if task is locked
  */
 export function isLocked(taskId: string): boolean {
-  return activeLocks.has(taskId);
+  if (activeLocks.has(taskId)) return true;
+  const lockFilePath = join(LOCK_DIR, `autopilot-${taskId}.lock`);
+  return existsSync(lockFilePath);
 }
 
 /**

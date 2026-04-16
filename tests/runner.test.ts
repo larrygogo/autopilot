@@ -168,8 +168,7 @@ describe("runner - executePhase", () => {
       runnerModule.executePhase("task-lock-001", "step1"),
     ]);
 
-    // 由于锁保护，阶段函数调用次数不超过 2
-    // 第一次获取锁成功执行；第二次获取锁失败直接跳过
-    expect(callCount).toBeLessThanOrEqual(2);
+    // 由于锁保护，阶段函数只应被调用一次：第一次获取锁成功执行，第二次获取锁失败直接跳过
+    expect(callCount).toBe(1);
   });
 });

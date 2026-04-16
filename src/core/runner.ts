@@ -2,7 +2,7 @@ import { getTask } from "./db";
 import { acquireLock, releaseLock } from "./infra";
 import { log, setPhase, resetPhase } from "./logger";
 import { transition, InvalidTransitionError } from "./state-machine";
-import { getWorkflow, getPhase, getPhaseFunc, buildTransitions } from "./registry";
+import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates } from "./registry";
 import { closeAgents } from "../agents/registry";
 
 // ──────────────────────────────────────────────
@@ -111,10 +111,15 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
   } finally {
     resetPhase();
     releaseLock(taskId);
-    // 关闭任务相关的 agent 连接（如有）
+    // 只在任务进入终态时才关闭 agent 连接，避免破坏会话复用
     const task = getTask(taskId);
     if (task) {
-      await closeAgents(task.workflow).catch(() => {});
+      const terminalStates = new Set(getTerminalStates(task.workflow));
+      terminalStates.add("done");
+      terminalStates.add("cancelled");
+      if (terminalStates.has(task.status)) {
+        await closeAgents(task.workflow).catch(() => {});
+      }
     }
   }
 }

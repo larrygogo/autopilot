@@ -103,11 +103,11 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
     }
 
     log.warn(
-      "watcher: 检测到卡死任务 [task=%s phase=%s status=%s elapsed=%.0fs]，尝试恢复",
+      "watcher: 检测到卡死任务 [task=%s phase=%s status=%s elapsed=%ss]，尝试恢复",
       task.id,
       phaseName,
       task.status,
-      elapsedMs / 1000
+      Math.round(elapsedMs / 1000)
     );
 
     runInBackground(task.id, phaseName);
