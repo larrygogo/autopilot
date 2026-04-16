@@ -9,6 +9,7 @@ import {
   listWorkflows,
   getWorkflow,
   buildTransitions,
+  isParallelPhase,
 } from "./core/registry";
 import { executePhase } from "./core/runner";
 import { transition } from "./core/state-machine";
@@ -104,7 +105,7 @@ program
       process.exit(1);
     }
     const firstPhaseName =
-      "parallel" in firstPhaseEntry
+      isParallelPhase(firstPhaseEntry)
         ? firstPhaseEntry.parallel.name
         : firstPhaseEntry.name;
 

@@ -49,6 +49,13 @@ export interface WorkflowDefinition {
   [key: string]: unknown;
 }
 
+// 类型守卫：判断阶段条目是否为 parallel 块
+export function isParallelPhase(
+  phase: PhaseDefinition | { parallel: ParallelDefinition }
+): phase is { parallel: ParallelDefinition } {
+  return "parallel" in phase && phase.parallel instanceof Object;
+}
+
 // ──────────────────────────────────────────────
 // 全局注册表
 // ──────────────────────────────────────────────
@@ -129,7 +136,7 @@ function expandParallelDefaults(
   const rawPhases = (expanded["phases"] as Record<string, unknown>[]) ?? [];
   expanded["phases"] = rawPhases.map((sub) => expandPhaseDefaults(sub, allPhaseNames));
 
-  return expanded as ParallelDefinition;
+  return expanded as unknown as ParallelDefinition;
 }
 
 // ──────────────────────────────────────────────
@@ -339,7 +346,7 @@ export function buildTransitions(workflow: WorkflowDefinition): TransitionTable 
   // 收集所有普通阶段（用于 jump_target 查找）
   const allFlatPhases: PhaseDefinition[] = [];
   for (const phase of phases) {
-    if ("parallel" in phase) {
+    if (isParallelPhase(phase)) {
       for (const sub of phase.parallel.phases) {
         allFlatPhases.push(sub);
       }
@@ -351,7 +358,7 @@ export function buildTransitions(workflow: WorkflowDefinition): TransitionTable 
   function getNextPending(idx: number): string | null {
     if (idx + 1 < phases.length) {
       const next = phases[idx + 1];
-      if ("parallel" in next) {
+      if (isParallelPhase(next)) {
         return `pending_${next.parallel.name}`;
       }
       return (next as PhaseDefinition).pending_state;
@@ -362,7 +369,7 @@ export function buildTransitions(workflow: WorkflowDefinition): TransitionTable 
   for (let i = 0; i < phases.length; i++) {
     const phase = phases[i];
 
-    if ("parallel" in phase) {
+    if (isParallelPhase(phase)) {
       buildParallelTransitions(phase.parallel, i, phases, terminalStates, transitions);
       continue;
     }
@@ -426,7 +433,7 @@ export function buildTransitions(workflow: WorkflowDefinition): TransitionTable 
 
   // rejected 状态也加 cancel（rejected 状态可能不在 transitions keys 中）
   for (const phase of phases) {
-    if ("parallel" in phase) {
+    if (isParallelPhase(phase)) {
       for (const sub of phase.parallel.phases) {
         if (sub.jump_trigger) {
           const rejectedState = `${sub.name}_rejected`;
@@ -500,7 +507,7 @@ function buildParallelTransitions(
   if (idx + 1 < allPhases.length) {
     const nextP = allPhases[idx + 1];
     const nextPending =
-      "parallel" in nextP
+      isParallelPhase(nextP)
         ? `pending_${nextP.parallel.name}`
         : (nextP as PhaseDefinition).pending_state;
     transitions[waitingGroup].push([joinTrigger, nextPending]);
@@ -582,7 +589,7 @@ export function getPhase(
   if (!wf) return null;
 
   for (const phase of wf.phases) {
-    if ("parallel" in phase) {
+    if (isParallelPhase(phase)) {
       for (const sub of phase.parallel.phases) {
         if (sub.name === phaseName) return sub;
       }
@@ -618,20 +625,20 @@ export function getNextPhase(
   const phases = wf.phases;
   for (let i = 0; i < phases.length; i++) {
     const phase = phases[i];
-    const name = "parallel" in phase ? phase.parallel.name : (phase as PhaseDefinition).name;
+    const name = isParallelPhase(phase) ? phase.parallel.name : (phase as PhaseDefinition).name;
 
     if (name === currentPhase && i + 1 < phases.length) {
       const next = phases[i + 1];
-      return "parallel" in next ? next.parallel.name : (next as PhaseDefinition).name;
+      return isParallelPhase(next) ? next.parallel.name : (next as PhaseDefinition).name;
     }
 
     // 也检查 parallel 子阶段名
-    if ("parallel" in phase) {
+    if (isParallelPhase(phase)) {
       for (const sub of phase.parallel.phases) {
         if (sub.name === currentPhase) {
           if (i + 1 < phases.length) {
             const next = phases[i + 1];
-            return "parallel" in next ? next.parallel.name : (next as PhaseDefinition).name;
+            return isParallelPhase(next) ? next.parallel.name : (next as PhaseDefinition).name;
           }
           return null;
         }

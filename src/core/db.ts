@@ -265,7 +265,7 @@ export interface ListTasksFilters {
 export function listTasks(filters: ListTasksFilters = {}): Task[] {
   const db = getDb();
   const conditions: string[] = [];
-  const values: unknown[] = [];
+  const values: any[] = [];
 
   if (filters.status !== undefined) {
     conditions.push("status = ?");
@@ -280,7 +280,7 @@ export function listTasks(filters: ListTasksFilters = {}): Task[] {
   const limitClause = filters.limit !== undefined ? "LIMIT " + Number(filters.limit) : "";
 
   const rows = db
-    .query<RawRow, unknown[]>(
+    .query<RawRow, any[]>(
       "SELECT * FROM tasks " + where + " ORDER BY created_at DESC " + limitClause
     )
     .all(...values);
