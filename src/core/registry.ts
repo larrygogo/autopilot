@@ -281,8 +281,12 @@ function bindPhaseFunc(
     phase.func = tsModule[funcName] as (taskId: string) => Promise<void>;
   } else {
     log.warn("找不到阶段函数 %s", funcName);
-    // 设为占位 noop，避免校验失败
-    phase.func = async (_taskId: string) => {};
+    // 缺失的阶段函数在执行时抛出错误，防止工作流静默空跑
+    phase.func = async (_taskId: string) => {
+      throw new Error(
+        `阶段函数 "${funcName}" 未定义，请在 workflow.ts 中导出该函数`
+      );
+    };
   }
 }
 

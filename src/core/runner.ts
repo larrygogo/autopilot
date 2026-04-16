@@ -106,7 +106,8 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     if (err instanceof InvalidTransitionError) {
       log.warn("InvalidTransitionError [task=%s phase=%s]: %s", taskId, phase, err.message);
     } else {
-      log.error("阶段执行异常 [task=%s phase=%s]: %s", taskId, phase, String(err));
+      log.error("阶段执行异常 [task=%s phase=%s]: %s", taskId, phase,
+        err instanceof Error ? err.stack ?? err.message : String(err));
     }
   } finally {
     resetPhase();

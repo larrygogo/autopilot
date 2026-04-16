@@ -328,7 +328,7 @@ export function createSubTask(opts: CreateSubTaskOpts): void {
 
   const ts = now();
   db.run(
-    "INSERT INTO tasks" +
+    "INSERT OR IGNORE INTO tasks" +
     " (id, title, workflow, status, channel, notify_target, extra," +
     "  created_at, updated_at, parent_task_id, parallel_index, parallel_group)" +
     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

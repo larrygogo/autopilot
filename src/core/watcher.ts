@@ -2,8 +2,16 @@ import { getDb, type Task } from "./db";
 import { isLocked } from "./infra";
 import { log } from "./logger";
 import { runInBackground } from "./runner";
-import { getWorkflow, listWorkflows, getTerminalStates } from "./registry";
+import { forceTransition } from "./state-machine";
+import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./registry";
 import type { PhaseDefinition, ParallelDefinition } from "./registry";
+
+// ──────────────────────────────────────────────
+// 洪泛防护：记录每个任务上次恢复时间
+// ──────────────────────────────────────────────
+
+const lastRecoveryAttempt = new Map<string, number>();
+const MIN_RECOVERY_INTERVAL_MS = 60_000; // 至少间隔 60 秒
 
 // ──────────────────────────────────────────────
 // 辅助：构建 running_state → phase_name 映射
@@ -34,6 +42,30 @@ function getRunningStatePhaseMap(workflowName: string): Map<string, string> {
 }
 
 // ──────────────────────────────────────────────
+// 辅助：构建 running_state → pending_state 映射
+// ──────────────────────────────────────────────
+
+function getRunningToPendingMap(workflowName: string): Map<string, string> {
+  const workflow = getWorkflow(workflowName);
+  const map = new Map<string, string>();
+  if (!workflow) return map;
+
+  for (const phase of workflow.phases) {
+    if ("parallel" in phase) {
+      const par = phase.parallel as ParallelDefinition;
+      for (const sub of par.phases) {
+        map.set(sub.running_state, sub.pending_state);
+      }
+    } else {
+      const p = phase as PhaseDefinition;
+      map.set(p.running_state, p.pending_state);
+    }
+  }
+
+  return map;
+}
+
+// ──────────────────────────────────────────────
 // 卡死任务检测
 // ──────────────────────────────────────────────
 
@@ -45,7 +77,9 @@ function getRunningStatePhaseMap(workflowName: string): Map<string, string> {
  * - 任务未持有活跃锁（进程已崩溃或退出）
  * - 任务的 updated_at 距今超过 stuckTimeoutSeconds 秒
  *
- * 恢复方式：调用 runInBackground 重新执行对应阶段。
+ * 恢复方式：
+ * 1. 使用 forceTransition 将状态回退到 pending（保留审计日志）
+ * 2. 调用 runInBackground 重新执行对应阶段
  */
 export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
   const db = getDb();
@@ -88,6 +122,17 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
     const elapsedMs = nowMs - updatedAt;
     if (elapsedMs < thresholdMs) continue;
 
+    // 洪泛防护：检查上次恢复间隔
+    const lastAttempt = lastRecoveryAttempt.get(task.id) ?? 0;
+    if (nowMs - lastAttempt < MIN_RECOVERY_INTERVAL_MS) {
+      log.debug(
+        "watcher: 跳过任务 %s 的恢复（距上次恢复不足 %ds）",
+        task.id,
+        MIN_RECOVERY_INTERVAL_MS / 1000
+      );
+      continue;
+    }
+
     // 找到对应 phase name
     const phaseMap = getRunningStatePhaseMap(task.workflow);
     const phaseName = phaseMap.get(task.status);
@@ -102,6 +147,18 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
       continue;
     }
 
+    // 找到对应 pending state，使用 forceTransition 回退并记录审计日志
+    const pendingMap = getRunningToPendingMap(task.workflow);
+    const pendingState = pendingMap.get(task.status);
+
+    if (pendingState) {
+      forceTransition(
+        task.id,
+        pendingState,
+        `watcher: 检测到卡死任务，回退到 ${pendingState}（elapsed=${Math.round(elapsedMs / 1000)}s）`
+      );
+    }
+
     log.warn(
       "watcher: 检测到卡死任务 [task=%s phase=%s status=%s elapsed=%ss]，尝试恢复",
       task.id,
@@ -110,6 +167,12 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
       Math.round(elapsedMs / 1000)
     );
 
+    lastRecoveryAttempt.set(task.id, nowMs);
     runInBackground(task.id, phaseName);
   }
+}
+
+/** 仅供测试：清除恢复记录 */
+export function _clearRecoveryHistory(): void {
+  lastRecoveryAttempt.clear();
 }

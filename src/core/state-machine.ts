@@ -141,6 +141,44 @@ export function transition(
 }
 
 /**
+ * 强制状态转换（绕过转换表校验），保留审计日志。
+ * 仅供 watcher 等系统组件在恢复卡死任务时使用。
+ */
+export function forceTransition(
+  taskId: string,
+  toStatus: string,
+  note: string
+): void {
+  const db = getDb();
+
+  db.transaction(() => {
+    const task = db
+      .query<{ status: string }, [string]>(
+        "SELECT status FROM tasks WHERE id = ?"
+      )
+      .get(taskId);
+
+    if (!task) {
+      throw new InvalidTransitionError(`任务不存在：${taskId}`);
+    }
+
+    const fromStatus = task.status;
+    const ts = now();
+
+    db.run(
+      "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+      [toStatus, ts, taskId]
+    );
+
+    db.run(
+      "INSERT INTO task_logs (task_id, from_status, to_status, trigger_name, note, created_at)" +
+        " VALUES (?, ?, ?, ?, ?, ?)",
+      [taskId, fromStatus, toStatus, "force_transition", note, ts]
+    );
+  })();
+}
+
+/**
  * 检查是否可以从当前状态触发指定 trigger
  */
 export function canTransition(
