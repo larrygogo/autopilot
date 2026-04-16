@@ -10,6 +10,8 @@ export function startServer(opts: { host: string; port: number }): Server<undefi
   const server = Bun.serve({
     hostname: opts.host,
     port: opts.port,
+    // Bun 默认 10s，对空闲 keep-alive 连接过于激进，拉长到 120s
+    idleTimeout: 120,
 
     async fetch(req, server) {
       // WebSocket 升级
