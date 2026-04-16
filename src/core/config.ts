@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, copyFileSync } from "fs";
 import { join } from "path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
 
@@ -63,4 +63,21 @@ export function saveConfigRaw(yamlContent: string): void {
     copyFileSync(p, p + ".bak");
   }
   writeFileSync(p, yamlContent, "utf-8");
+}
+
+/**
+ * 从全局 config.yaml 读取 `agents.<name>` 段，返回 `name -> partial AgentConfig` 映射。
+ * 不校验字段，由 agents/registry 在合并后的 AgentConfig 上做校验。
+ */
+export function loadGlobalAgents(): Record<string, Record<string, unknown>> {
+  const raw = loadConfig();
+  const section = raw["agents"];
+  if (!section || typeof section !== "object" || Array.isArray(section)) return {};
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [name, value] of Object.entries(section as Record<string, unknown>)) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      out[name] = value as Record<string, unknown>;
+    }
+  }
+  return out;
 }

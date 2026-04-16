@@ -12,14 +12,16 @@ export class GoogleProvider extends BaseProvider {
       );
     }
 
-    const model = (this.config["model"] as string | undefined) ?? "gemini-2.5-pro";
-    const maxTurns = (this.config["max_turns"] as number | undefined) ?? 10;
+    const model = this.resolveModel(options, "gemini-2.5-pro");
+    const maxTurns = this.resolveMaxTurns(options, 10);
+    const systemPrompt = this.resolveSystemPrompt(options);
 
     const runOptions: Record<string, unknown> = {
       model,
       max_turns: maxTurns,
       ...this.buildRunOptions(options),
     };
+    if (systemPrompt) runOptions["system_prompt"] = systemPrompt;
 
     const result = await sdk.run(prompt, runOptions);
 

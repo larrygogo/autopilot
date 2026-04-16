@@ -128,7 +128,7 @@ export function Settings() {
               className="yaml-editor"
               value={configYaml}
               onChange={(e) => setConfigYaml(e.target.value)}
-              placeholder="# 全局配置（YAML 格式）"
+              placeholder={CONFIG_PLACEHOLDER}
               spellCheck={false}
             />
             <div className="card-actions">
@@ -190,3 +190,27 @@ function formatUptime(s: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
+
+const CONFIG_PLACEHOLDER = `# 全局配置。字段由各工作流自行读取（框架无内置 schema）。
+#
+# agents：共享的命名 agent 定义。工作流可通过同名条目引用/继承，
+#   调用 agent.run() 时可再用 RunOptions 覆盖提示词与模型。
+#
+# agents:
+#   coder:
+#     provider: anthropic          # 支持 anthropic / openai / google
+#     model: claude-sonnet-4-6
+#     max_turns: 10
+#     permission_mode: auto
+#     system_prompt: |
+#       你是通用编码助手。
+#   reviewer:
+#     provider: anthropic
+#     model: claude-opus-4-7
+#     system_prompt: |
+#       你是严苛的代码审查员。
+#
+# 工作流级通用字段（示例）：
+#   notify:
+#     dingtalk_webhook: https://...
+`;

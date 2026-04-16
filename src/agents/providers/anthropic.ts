@@ -14,9 +14,10 @@ export class AnthropicProvider extends BaseProvider {
       );
     }
 
-    const model = (this.config["model"] as string | undefined) ?? "claude-sonnet-4-6";
-    const maxTurns = (this.config["max_turns"] as number | undefined) ?? 10;
+    const model = this.resolveModel(options, "claude-sonnet-4-6");
+    const maxTurns = this.resolveMaxTurns(options, 10);
     const permissionMode = (this.config["permission_mode"] as string | undefined) ?? "auto";
+    const systemPrompt = this.resolveSystemPrompt(options);
 
     const runOptions: Record<string, unknown> = {
       model,
@@ -24,6 +25,7 @@ export class AnthropicProvider extends BaseProvider {
       permission_mode: permissionMode,
       ...this.buildRunOptions(options),
     };
+    if (systemPrompt) runOptions["system_prompt"] = systemPrompt;
 
     if (this.sessionId) {
       runOptions["session_id"] = this.sessionId;
