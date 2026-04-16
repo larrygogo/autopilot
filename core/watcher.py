@@ -33,8 +33,8 @@ def _get_state_mappings(task: dict) -> tuple[dict, dict]:
         running_map = registry.get_running_state_phase(workflow_name)
         pending_map = registry.get_pending_state_phase(workflow_name)
         return running_map, pending_map
-    except Exception as e:
-        log.debug("获取工作流 %s 状态映射失败：%s", workflow_name, e)
+    except (ImportError, AttributeError) as e:
+        log.warning("获取工作流 %s 状态映射失败：%s", workflow_name, e)
 
     return {}, {}
 
@@ -73,7 +73,7 @@ def is_stuck(task):
 
         policy = get_retry_policy(workflow_name, phase_name)
         stuck_timeout = policy["stuck_timeout"]
-    except Exception:
+    except (ImportError, KeyError, AttributeError):
         stuck_timeout = 600
 
     try:
@@ -84,7 +84,7 @@ def is_stuck(task):
             started = started.replace(tzinfo=tz.utc)
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
         return elapsed > stuck_timeout
-    except Exception:
+    except (ValueError, TypeError, OverflowError):
         return False
 
 
@@ -111,8 +111,8 @@ def _get_fail_trigger(task: dict, status: str) -> str | None:
             for phase in _iter_all_phases(wf):
                 if phase.get("running_state") == status:
                     return phase.get("fail_trigger")
-    except Exception as e:
-        log.debug("获取 fail_trigger 失败：%s", e)
+    except (ImportError, AttributeError) as e:
+        log.warning("获取 fail_trigger 失败：%s", e)
 
     return None
 
@@ -130,8 +130,8 @@ def _get_pending_state(task: dict, status: str) -> str | None:
             for phase in _iter_all_phases(wf):
                 if phase.get("running_state") == status:
                     return phase.get("pending_state")
-    except Exception as e:
-        log.debug("获取 pending_state 失败：%s", e)
+    except (ImportError, AttributeError) as e:
+        log.warning("获取 pending_state 失败：%s", e)
 
     return None
 
@@ -162,7 +162,7 @@ def recover_task(task):
 
         policy = get_retry_policy(workflow_name, phase)
         max_retries = policy["max_retries"]
-    except Exception:
+    except (ImportError, KeyError, AttributeError):
         max_retries = 3
 
     if failure_count >= max_retries:
@@ -276,7 +276,7 @@ def main():
                         policy = get_retry_policy(workflow_name, phase_name)
                         failure_count = task.get("failure_count", 0)
                         pending_delay = _calculate_delay(policy, max(failure_count, 1))
-                    except Exception:
+                    except (ImportError, KeyError, AttributeError):
                         pending_delay = 180
                     if elapsed > pending_delay:
                         log.info("pending 状态超时，重新触发 %s", phase_name)

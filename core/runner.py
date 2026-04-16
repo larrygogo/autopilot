@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from core.db import get_conn, get_task, now
 from core.infra import acquire_lock, get_task_dir, notify, release_lock
@@ -61,7 +63,7 @@ def run_in_background(task_id: str, phase: str) -> None:
 # ──────────────────────────────────────────────
 
 
-def _get_phase_config_and_func(task: dict, phase: str):
+def _get_phase_config_and_func(task: dict, phase: str) -> tuple[dict[str, Any] | None, Callable | None]:
     """从注册表查阶段配置和执行函数
     Look up phase config and execution function from registry."""
     workflow_name = task.get("workflow", "")

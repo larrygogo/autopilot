@@ -6,6 +6,7 @@ Supports webhook and command backends, configured via WORKFLOW['notify_backends'
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import shlex
@@ -13,6 +14,7 @@ import ssl
 import subprocess
 import urllib.request
 from typing import Any
+from urllib.parse import urlparse
 
 from core.logger import get_logger
 
@@ -79,10 +81,33 @@ def _matches_event(backend: dict, event: str) -> bool:
     return event in events
 
 
+def _validate_webhook_url(url: str) -> None:
+    """校验 webhook URL：仅允许 http/https scheme，IP 字面量时拒绝私网/回环地址
+    Validate webhook URL: only allow http/https scheme, reject private/loopback IP literals."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"不允许的 webhook URL scheme：{parsed.scheme!r}（仅支持 http/https）")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("webhook URL 缺少 hostname")
+
+    # 仅校验 IP 字面量（如 127.0.0.1、169.254.169.254），域名不做 DNS 解析以避免副作用
+    # Only validate IP literals; skip DNS resolution to avoid side effects
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        return  # 非 IP 字面量（域名），放行 / Not an IP literal (hostname), allow
+
+    if addr.is_private or addr.is_loopback or addr.is_link_local:
+        raise ValueError(f"webhook URL 指向私网/回环地址：{hostname}")
+
+
 def _send_webhook(backend: dict, variables: dict[str, str]) -> None:
     """通过 HTTP 发送 webhook 通知
     Send webhook notification via HTTP."""
     url = expand_env_vars(backend["url"])
+    _validate_webhook_url(url)
     method = backend.get("method", "POST").upper()
     headers = {}
     for k, v in (backend.get("headers") or {}).items():
@@ -112,27 +137,35 @@ def _send_webhook(backend: dict, variables: dict[str, str]) -> None:
 
 
 def _send_command(backend: dict, variables: dict[str, str]) -> None:
-    """通过 shell 命令发送通知
-    Send notification via shell command."""
+    """通过 shell 命令发送通知（shell=False，变量由模板引号保护）
+    Send notification via shell command (shell=False, variables protected by template quoting)."""
     cmd_template = backend.get("command", "")
-    # 两遍渲染：先用原始值处理条件块（判断有无值），再用转义值替换变量（防止命令注入）
-    # Two-pass rendering: first process conditional blocks with raw values, then substitute with escaped values
+    # 两遍渲染：先用原始值处理条件块，再替换变量（shell=False 下由模板引号保护分词）
+    # Two-pass rendering: conditional blocks first, then variable substitution
+    # (shell=False: template quoting protects tokenization, no shlex.quote needed)
     cmd = re.sub(
         r"\{\{#(\w+)}}(.*?)\{\{/\1}}",
         lambda m: m.group(2) if variables.get(m.group(1), "") else "",
         cmd_template,
         flags=re.DOTALL,
     )
-    safe_variables = {k: shlex.quote(v) if v else "" for k, v in variables.items()}
-    cmd = re.sub(r"\{\{(\w+)}}", lambda m: safe_variables.get(m.group(1), ""), cmd)
+    cmd = re.sub(r"\{\{(\w+)}}", lambda m: variables.get(m.group(1), ""), cmd)
 
     try:
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+        args = shlex.split(cmd)
+        if not args:
+            log.error("command %s 渲染结果为空，跳过执行", backend.get("name", ""))
+            return
+        r = subprocess.run(args, capture_output=True, text=True, timeout=30)
         if r.returncode != 0:
             log.error("command %s 执行失败（rc=%d）：%s", backend.get("name", ""), r.returncode, r.stderr[:200])
         else:
             log.debug("command %s 执行成功", backend.get("name", ""))
-    except Exception as e:
+    except ValueError as e:
+        log.error("command %s 命令解析失败：%s", backend.get("name", ""), e)
+    except subprocess.TimeoutExpired:
+        log.error("command %s 执行超时（30s）", backend.get("name", ""))
+    except OSError as e:
         log.error("command %s 执行异常：%s", backend.get("name", ""), e)
 
 
@@ -158,7 +191,7 @@ def dispatch(
         wf = registry.get_workflow(workflow_name)
         if wf:
             backends = wf.get("notify_backends")
-    except Exception:
+    except (ImportError, AttributeError):
         pass
 
     if not backends:

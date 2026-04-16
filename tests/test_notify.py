@@ -8,10 +8,13 @@ import os
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from core.notify import (
     _matches_event,
     _send_command,
     _send_webhook,
+    _validate_webhook_url,
     dispatch,
     expand_env_vars,
     render_template,
@@ -103,6 +106,40 @@ class TestMatchesEvent:
         assert _matches_event({"events": None}, "error") is True
 
 
+class TestValidateWebhookUrl:
+    """webhook URL 校验"""
+
+    def test_http_allowed(self):
+        _validate_webhook_url("http://example.com/hook")
+
+    def test_https_allowed(self):
+        _validate_webhook_url("https://example.com/hook")
+
+    def test_file_scheme_rejected(self):
+        with pytest.raises(ValueError, match="scheme"):
+            _validate_webhook_url("file:///etc/passwd")
+
+    def test_ftp_scheme_rejected(self):
+        with pytest.raises(ValueError, match="scheme"):
+            _validate_webhook_url("ftp://example.com/file")
+
+    def test_no_scheme_rejected(self):
+        with pytest.raises(ValueError, match="scheme"):
+            _validate_webhook_url("example.com/hook")
+
+    def test_loopback_ip_rejected(self):
+        with pytest.raises(ValueError, match="私网|回环"):
+            _validate_webhook_url("http://127.0.0.1/hook")
+
+    def test_private_ip_rejected(self):
+        with pytest.raises(ValueError, match="私网|回环"):
+            _validate_webhook_url("http://10.0.0.1/hook")
+
+    def test_link_local_rejected(self):
+        with pytest.raises(ValueError, match="私网|回环"):
+            _validate_webhook_url("http://169.254.169.254/latest/meta-data")
+
+
 class TestSendWebhook:
     """webhook 后端"""
 
@@ -186,7 +223,7 @@ class TestSendCommand:
 
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
-        assert cmd == 'echo "hello" --target user123'
+        assert cmd == ["echo", "hello", "--target", "user123"]
 
     @patch("core.notify.subprocess.run")
     def test_conditional_block_in_command(self, mock_run):
@@ -204,7 +241,8 @@ class TestSendCommand:
         # With media_path
         _send_command(backend, {"message": "hi", "media_path": "/tmp/file.png"})
         cmd = mock_run.call_args[0][0]
-        assert '--media "/tmp/file.png"' in cmd
+        assert "--media" in cmd
+        assert "/tmp/file.png" in cmd
 
     @patch("core.notify.subprocess.run")
     def test_failure_logged_not_raised(self, mock_run):
@@ -214,7 +252,7 @@ class TestSendCommand:
         # Should not raise
         _send_command(backend, {})
 
-    @patch("core.notify.subprocess.run", side_effect=Exception("exec error"))
+    @patch("core.notify.subprocess.run", side_effect=OSError("exec error"))
     def test_exception_logged_not_raised(self, mock_run):
         backend = {"name": "exc-cmd", "command": "bad_cmd"}
         # Should not raise
