@@ -8,10 +8,10 @@
 
 定义阶段，写每步逻辑，框架负责按顺序跑、失败重试、驳回回退、并行执行、卡死恢复。
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1.svg)](https://bun.sh/)
+[![TypeScript](https://img.shields.io/badge/language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
 [![CI](https://github.com/larrygogo/autopilot/actions/workflows/ci.yml/badge.svg)](https://github.com/larrygogo/autopilot/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
 </div>
 
@@ -21,13 +21,13 @@
 
 | | 特性 | 说明 |
 |---|---|---|
-| **📝** | **YAML 声明式定义** | `workflow.yaml` 定义结构，`workflow.py` 只写阶段函数，状态自动推导 |
+| **📝** | **YAML 声明式定义** | `workflow.yaml` 定义结构，`workflow.ts` 只写阶段函数，状态自动推导 |
 | **🔌** | **插件化工作流** | 放入 `~/.autopilot/workflows/` 即自动发现注册，零配置接入 |
-| **🧩** | **第三方插件** | `pip install` 自动注册扩展：通知后端 / CLI 命令 / 全局钩子 |
+| **🤖** | **多 Agent 支持** | 内置 Anthropic / OpenAI / Google 三大 Agent 提供商，可在阶段中调用 AI Agent |
 | **⚡** | **并行阶段** | `parallel:` 语法支持 fork/join 并行执行，可配置失败策略 |
-| **🔄** | **状态机驱动** | SQLite 持久化，原子性状态转换，非法转换运行时阻止 |
+| **🔄** | **状态机驱动** | SQLite 持久化，原子性状态转换（乐观锁），非法转换运行时阻止 |
 | **🚀** | **Push 模型** | 阶段完成后非阻塞启动下一阶段，无需轮询 |
-| **🔒** | **并发安全** | 文件锁 + SQLite 事务双重保障，防止竞态 |
+| **🔒** | **并发安全** | 文件锁（PID 存活检测）+ SQLite 事务双重保障，防止竞态 |
 | **👀** | **Watcher 保底** | 定期检测卡死任务，自动恢复执行 |
 | **📦** | **用户空间分离** | 框架代码与用户数据分离，`git pull` 升级无冲突 |
 
@@ -36,25 +36,25 @@
 ```bash
 # 安装
 git clone https://github.com/larrygogo/autopilot && cd autopilot
-pip install -e ".[dev]"
+bun install
 
 # 初始化
-autopilot init
-autopilot upgrade
+bun run dev init
+bun run dev upgrade
 
 # 启动任务
-autopilot start <req_id> --project my-project
+bun run dev start <req_id> --workflow <name>
 ```
 
 > **5 分钟入门教程**：从安装到跑通第一个 demo，详见 [`docs/quickstart.md`](docs/quickstart.md)
 
 ## 定义工作流
 
-放入 `~/.autopilot/workflows/`，框架自动发现并注册。支持两种写法：
+放入 `~/.autopilot/workflows/`，框架自动发现并注册。
 
-### 方式一：YAML + Python（推荐）
+### YAML + TypeScript（推荐）
 
-每个工作流一个目录，`workflow.yaml` 定义结构，`workflow.py` 只写阶段函数：
+每个工作流一个目录，`workflow.yaml` 定义结构，`workflow.ts` 只写阶段函数：
 
 ```yaml
 # workflow.yaml
@@ -73,16 +73,19 @@ phases:
     timeout: 1800
 ```
 
-```python
-# workflow.py
-def run_design(task_id: str) -> None:
-    ...
+```typescript
+// workflow.ts
+export async function run_design(taskId: string): Promise<void> {
+  // ...
+}
 
-def run_review(task_id: str) -> None:
-    ...
+export async function run_review(taskId: string): Promise<void> {
+  // ...
+}
 
-def run_develop(task_id: str) -> None:
-    ...
+export async function run_develop(taskId: string): Promise<void> {
+  // ...
+}
 ```
 
 > 从 phase `name` 自动推导：`pending_state` · `running_state` · `trigger` · `complete_trigger` · `fail_trigger` · `label` · `func`
@@ -107,23 +110,6 @@ phases:
     timeout: 1200
 ```
 
-### 方式二：纯 Python
-
-单个 `.py` 文件，导出 `WORKFLOW` 字典：
-
-```python
-# ~/.autopilot/workflows/my_workflow.py
-WORKFLOW = {
-    'name': 'my_workflow',
-    'phases': [
-        {'name': 'step1', 'func': run_step1, ...},
-        {'name': 'step2', 'func': run_step2, ...},
-    ],
-}
-```
-
-> 完整开发指南见 [`docs/workflow-development.md`](docs/workflow-development.md)
-
 ## 架构
 
 ```mermaid
@@ -131,11 +117,10 @@ graph TB
     CLI["CLI 入口"] --> Runner["Runner 执行引擎"]
     Runner --> Registry["Registry 工作流注册"]
     Runner --> SM["State Machine 状态机"]
-    Runner --> Infra["Infra 锁/通知"]
+    Runner --> Infra["Infra 锁"]
+    Runner --> Agents["Agent 系统"]
     Registry --> DB[("SQLite DB")]
     SM --> DB
-    Plugin["Plugin 插件系统"] --> CLI
-    Plugin --> Infra
     Watcher["Watcher 保底恢复"] --> Runner
     Watcher --> DB
     Workflows["用户工作流"] --> Registry
@@ -143,55 +128,63 @@ graph TB
 
 ```
 autopilot/
-├── core/                    # 框架核心
-│   ├── registry.py          # 工作流发现 + YAML 加载 + 状态推导
-│   ├── state_machine.py     # 原子性状态转换
-│   ├── runner.py            # 执行引擎 + Push 模型 + 并行 fork/join
-│   ├── db.py                # SQLite 持久化（tasks / task_logs / 子任务）
-│   ├── infra.py             # 文件锁 / git / 通知分发
-│   ├── watcher.py           # 卡死检测 & 自动恢复
-│   ├── plugin.py            # 第三方插件发现 & 注册（entry_points）
-│   ├── notify.py            # 多后端通知（webhook / command / 插件扩展）
-│   ├── migrate.py           # 数据库迁移引擎
-│   └── cli.py               # 统一 CLI 入口
-├── examples/                # 示例工作流（dev / req_review / doc_gen / parallel_build / data_pipeline）
-├── docs/                    # 架构文档
-└── tests/                   # 单元测试
+├── src/
+│   ├── core/                    # 框架核心
+│   │   ├── registry.ts          # 工作流发现 + YAML 加载 + 状态推导
+│   │   ├── state-machine.ts     # 原子性状态转换（乐观锁）
+│   │   ├── runner.ts            # 执行引擎 + Push 模型 + 并行 fork/join
+│   │   ├── db.ts                # SQLite 持久化（tasks / task_logs / 子任务）
+│   │   ├── infra.ts             # 文件锁（PID 存活检测 + 僵尸锁清理）
+│   │   ├── watcher.ts           # 卡死检测 & 自动恢复
+│   │   ├── notify.ts            # 通知系统
+│   │   ├── migrate.ts           # 数据库迁移引擎
+│   │   ├── config.ts            # 配置加载
+│   │   └── logger.ts            # 阶段标签日志
+│   ├── agents/                  # Agent 系统
+│   │   ├── registry.ts          # Agent 缓存管理
+│   │   └── providers/           # Agent 提供商（anthropic / openai / google）
+│   ├── migrations/              # 迁移脚本
+│   ├── cli.ts                   # 统一 CLI 入口（commander）
+│   └── index.ts                 # 版本号 + AUTOPILOT_HOME
+├── bin/                         # CLI 入口脚本
+├── examples/                    # 示例工作流
+├── docs/                        # 架构文档
+└── tests/                       # 单元测试
 ```
 
-> 详细架构文档见 [`docs/architecture.md`](docs/architecture.md) · 插件开发见 [`docs/plugin-development.md`](docs/plugin-development.md)
+> 详细架构文档见 [`docs/architecture.md`](docs/architecture.md)
 
 ## CLI
 
 ```bash
-autopilot start <req_id> [--project <p>] [--workflow <w>]              # 启动任务
-autopilot list [--status <s>] [--workflow <w>] [--project <p>] [--all] # 任务列表
-autopilot show <task_id> [--logs <n>]                                  # 任务详情
-autopilot cancel <task_id> [--reason <r>]                              # 取消任务
-autopilot stats                                                        # 统计概览
-autopilot workflows                                                    # 已注册工作流
-autopilot validate [<name>]                                            # 校验工作流定义
-autopilot init                                                         # 初始化工作空间
-autopilot upgrade [--status] [--dry-run]                               # 数据库迁移
-autopilot watch                                                        # 卡死检测
-autopilot config check                                                 # 校验配置
+autopilot init                                          # 初始化工作空间
+autopilot start <req-id> [-t <title>] [-w <workflow>]   # 启动任务
+autopilot status [<task-id>]                            # 任务状态（详情/列表）
+autopilot cancel <task-id>                              # 取消任务
+autopilot list                                          # 已注册工作流
+autopilot upgrade                                       # 数据库迁移
 ```
 
 ## 开发
 
 ```bash
-pip install -e ".[dev]"
-pytest tests/ -v
-ruff check . && ruff format .
+bun install
+bun test
+bun run typecheck
 ```
 
-**规范**：Python 3.10+ · `from __future__ import annotations` · ruff（行宽 120） · 框架核心不引入工作流专属逻辑
+**规范**：TypeScript strict · Bun runtime · 框架核心不引入工作流专属逻辑
 
 ## 依赖
 
-- **Python** 3.10+
-- **PyYAML** >= 6.0
-- **click** >= 8.0
+- **Bun** >= 1.0
+- **commander** >= 13.0
+- **yaml** >= 2.8
+
+可选 Agent SDK（按需安装）：
+- `@anthropic-ai/claude-agent-sdk`
+- `@openai/codex`
+- `@google/gemini-cli-sdk`
 
 ## 参与贡献
 
