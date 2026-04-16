@@ -16,9 +16,10 @@ export function loadConfig(): Record<string, unknown> {
       try {
         const content = readFileSync(p, "utf-8");
         return parseYaml(content) ?? {};
-      } catch (e: any) {
-        log.error("配置文件解析失败（%s）：%s", p, e.message);
-        return {};
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        log.error("配置文件解析失败（%s）：%s", p, message);
+        throw new Error(`配置文件解析失败（${p}）：${message}`);
       }
     }
   }

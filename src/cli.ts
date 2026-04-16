@@ -184,22 +184,36 @@ program
       process.exit(1);
     }
 
-    // 需要工作流转换表才能执行 cancel
-    // 直接构建一个包含 cancel 的简单转换表
-    // 因为 buildTransitions 需要已注册的工作流，这里先尝试直接 transition
-    // 构建一个只含当前状态 → cancelled 的最小转换表
-    const minimalTransitions = {
-      [task.status]: [["cancel", "cancelled"] as [string, string]],
-    };
+    // 检查是否已处于终态
+    const terminalStates = new Set(["done", "cancelled"]);
+    const wf = getWorkflow(task.workflow);
+    if (wf) {
+      for (const s of wf.terminal_states ?? []) terminalStates.add(s);
+    }
+    if (terminalStates.has(task.status)) {
+      console.error(`任务已处于终态 "${task.status}"，无需取消。`);
+      process.exit(1);
+    }
+
+    // 优先使用工作流转换表，回退到最小转换表
+    let transitions;
+    if (wf) {
+      transitions = buildTransitions(wf);
+    } else {
+      transitions = {
+        [task.status]: [["cancel", "cancelled"] as [string, string]],
+      };
+    }
 
     try {
       const [from, to] = transition(taskId, "cancel", {
-        transitions: minimalTransitions,
+        transitions,
         note: "CLI 手动取消",
       });
       console.log(`任务已取消 [id=${taskId} ${from} → ${to}]`);
-    } catch (e: any) {
-      console.error(`取消失败：${e.message}`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(`取消失败：${message}`);
       process.exit(1);
     }
   });

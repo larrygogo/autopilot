@@ -66,10 +66,14 @@ const SCHEMA = [
   "    created_at TEXT NOT NULL,",
   "    FOREIGN KEY (task_id) REFERENCES tasks(id)",
   ");",
+  "",
+  "CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks (workflow);",
+  "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);",
+  "CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs (task_id);",
 ].join("\n");
 
 // tasks 表中实际存在的列字段（用于区分列字段和 extra JSON 字段）
-const TABLE_COLUMNS = new Set([
+export const TABLE_COLUMNS = new Set([
   "id",
   "title",
   "workflow",
@@ -84,6 +88,13 @@ const TABLE_COLUMNS = new Set([
   "parent_task_id",
   "parallel_index",
   "parallel_group",
+]);
+
+// 受保护的列字段，不允许通过 extraUpdates/updateTask 修改
+export const PROTECTED_COLUMNS = new Set([
+  "id",
+  "workflow",
+  "created_at",
 ]);
 
 // ──────────────────────────────────────────────
@@ -204,7 +215,7 @@ export function updateTask(
   const extraUpdates: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(fields)) {
-    if (key === "extra") continue;
+    if (key === "extra" || PROTECTED_COLUMNS.has(key)) continue;
     if (TABLE_COLUMNS.has(key)) {
       colUpdates.push(key + " = ?");
       colValues.push(value);
@@ -277,7 +288,10 @@ export function listTasks(filters: ListTasksFilters = {}): Task[] {
   }
 
   const where = conditions.length > 0 ? "WHERE " + conditions.join(" AND ") : "";
-  const limitClause = filters.limit !== undefined ? "LIMIT " + Number(filters.limit) : "";
+  if (filters.limit !== undefined) {
+    values.push(filters.limit);
+  }
+  const limitClause = filters.limit !== undefined ? "LIMIT ?" : "";
 
   const rows = db
     .query<RawRow, any[]>(

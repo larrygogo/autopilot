@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from "fs";
 import { join } from "path";
-import { tmpdir, homedir } from "os";
+import { homedir } from "os";
 import { log } from "./logger";
 
 /** 动态读取 AUTOPILOT_HOME，支持测试中修改 env */
@@ -8,9 +8,54 @@ function getAutopilotHome(): string {
   return process.env.AUTOPILOT_HOME || join(homedir(), ".autopilot");
 }
 
+function getLockDir(): string {
+  const dir = join(getAutopilotHome(), "runtime", "locks");
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
 const TASK_ID_RE = /^[\w.\-]+$/;
-const LOCK_DIR = tmpdir();
 const activeLocks = new Map<string, string>(); // taskId -> lockFilePath
+
+/**
+ * 检查锁文件对应的进程是否仍然存活
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 清理僵尸锁文件（进程已死但锁文件未删除）
+ * @returns true 如果清理了僵尸锁
+ */
+function cleanStaleLock(lockFilePath: string): boolean {
+  try {
+    const content = readFileSync(lockFilePath, "utf-8").trim();
+    const pid = parseInt(content, 10);
+    if (isNaN(pid)) {
+      // 锁文件内容无效，视为僵尸锁
+      unlinkSync(lockFilePath);
+      log.warn("清理无效锁文件：%s", lockFilePath);
+      return true;
+    }
+    if (!isProcessAlive(pid)) {
+      unlinkSync(lockFilePath);
+      log.warn("清理僵尸锁文件：%s（PID %d 已不存在）", lockFilePath, pid);
+      return true;
+    }
+    return false;
+  } catch {
+    // 锁文件已被其他进程删除，或读取/删除失败
+    return !existsSync(lockFilePath);
+  }
+}
 
 /**
  * 获取任务目录，自动创建目录结构
@@ -49,7 +94,7 @@ export function acquireLock(taskId: string): boolean {
     return false;
   }
 
-  const lockFilePath = join(LOCK_DIR, `autopilot-${taskId}.lock`);
+  const lockFilePath = join(getLockDir(), `autopilot-${taskId}.lock`);
 
   try {
     // flag: "wx" = write exclusive (fail if file exists)
@@ -60,7 +105,20 @@ export function acquireLock(taskId: string): boolean {
   } catch (err) {
     const error = err as NodeJS.ErrnoException;
     if (error.code === "EEXIST") {
-      log.debug(`Lock file already exists for task %s`, taskId);
+      // 锁文件已存在，检查是否为僵尸锁
+      if (cleanStaleLock(lockFilePath)) {
+        // 僵尸锁已清理，重试获取
+        try {
+          writeFileSync(lockFilePath, String(process.pid), { flag: "wx" });
+          activeLocks.set(taskId, lockFilePath);
+          log.debug(`Acquired lock for task %s after stale lock cleanup`, taskId);
+          return true;
+        } catch {
+          log.debug(`Lock file re-created by another process for task %s`, taskId);
+          return false;
+        }
+      }
+      log.debug(`Lock file already exists for task %s (process alive)`, taskId);
       return false;
     }
     throw error;
@@ -93,13 +151,19 @@ export function releaseLock(taskId: string): void {
 
 /**
  * 检查任务是否被锁定（同时检查进程内 Map 和锁文件，支持跨进程检测）
+ * 自动清理僵尸锁文件（对应进程已死亡）
  * @param taskId - 任务ID
- * @returns true if task is locked
+ * @returns true if task is locked by an alive process
  */
 export function isLocked(taskId: string): boolean {
   if (activeLocks.has(taskId)) return true;
-  const lockFilePath = join(LOCK_DIR, `autopilot-${taskId}.lock`);
-  return existsSync(lockFilePath);
+  const lockFilePath = join(getLockDir(), `autopilot-${taskId}.lock`);
+  if (!existsSync(lockFilePath)) return false;
+  // 锁文件存在，检查进程是否存活
+  if (cleanStaleLock(lockFilePath)) {
+    return false; // 僵尸锁已清理
+  }
+  return true;
 }
 
 /**

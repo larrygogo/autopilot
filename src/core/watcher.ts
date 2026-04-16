@@ -151,12 +151,14 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
     const pendingMap = getRunningToPendingMap(task.workflow);
     const pendingState = pendingMap.get(task.status);
 
-    if (pendingState) {
-      forceTransition(
+    if (!pendingState) {
+      log.warn(
+        "watcher: 无法确定 pending 状态 [task=%s status=%s workflow=%s]，跳过恢复",
         task.id,
-        pendingState,
-        `watcher: 检测到卡死任务，回退到 ${pendingState}（elapsed=${Math.round(elapsedMs / 1000)}s）`
+        task.status,
+        task.workflow
       );
+      continue;
     }
 
     log.warn(
@@ -165,6 +167,12 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
       phaseName,
       task.status,
       Math.round(elapsedMs / 1000)
+    );
+
+    forceTransition(
+      task.id,
+      pendingState,
+      `watcher: 检测到卡死任务，回退到 ${pendingState}（elapsed=${Math.round(elapsedMs / 1000)}s）`
     );
 
     lastRecoveryAttempt.set(task.id, nowMs);

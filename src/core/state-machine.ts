@@ -1,4 +1,4 @@
-import { getDb, getTask, now } from "./db";
+import { getDb, getTask, now, TABLE_COLUMNS, PROTECTED_COLUMNS } from "./db";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -20,23 +20,6 @@ export interface TransitionOptions {
   extraUpdates?: Record<string, unknown>;
 }
 
-// tasks 表中实际存在的列字段
-const TABLE_COLUMNS = new Set([
-  "id",
-  "title",
-  "workflow",
-  "status",
-  "failure_count",
-  "channel",
-  "notify_target",
-  "extra",
-  "created_at",
-  "updated_at",
-  "started_at",
-  "parent_task_id",
-  "parallel_index",
-  "parallel_group",
-]);
 
 // ──────────────────────────────────────────────
 // 核心函数
@@ -95,7 +78,7 @@ export function transition(
 
     if (opts.extraUpdates) {
       for (const [key, value] of Object.entries(opts.extraUpdates)) {
-        if (key === "extra" || key === "status" || key === "updated_at") continue;
+        if (key === "extra" || key === "status" || key === "updated_at" || PROTECTED_COLUMNS.has(key)) continue;
         if (TABLE_COLUMNS.has(key)) {
           extraUpdatesForCol[key] = value;
         } else {
@@ -123,11 +106,17 @@ export function transition(
       colValues.push(JSON.stringify(mergedExtra));
     }
 
-    colValues.push(taskId);
-    db.run(
-      `UPDATE tasks SET ${colUpdates.join(", ")} WHERE id = ?`,
+    colValues.push(taskId, fromStatus);
+    const result = db.run(
+      `UPDATE tasks SET ${colUpdates.join(", ")} WHERE id = ? AND status = ?`,
       colValues as Parameters<typeof db.run>[1]
     );
+
+    if (result.changes === 0) {
+      throw new InvalidTransitionError(
+        `并发冲突：任务 "${taskId}" 状态已被其他进程修改`
+      );
+    }
 
     // 插入日志
     db.run(

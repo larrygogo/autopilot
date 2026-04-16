@@ -87,7 +87,10 @@ export function expandPhaseDefaults(
   phase: Record<string, unknown>,
   allPhaseNames: Set<string>
 ): PhaseDefinition {
-  const name = phase["name"] as string;
+  const name = phase["name"];
+  if (!name || typeof name !== "string") {
+    throw new Error(`阶段定义缺少有效的 name 字段：${JSON.stringify(phase)}`);
+  }
   const expanded: Record<string, unknown> = { ...phase };
 
   if (!expanded["pending_state"]) expanded["pending_state"] = `pending_${name}`;
@@ -166,8 +169,9 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
       return null;
     }
     wfDef = parsed as Record<string, unknown>;
-  } catch (e: any) {
-    log.error("解析 YAML 工作流 %s 失败：%s", yamlPath, e.message);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    log.error("解析 YAML 工作流 %s 失败：%s", yamlPath, message);
     return null;
   }
 
@@ -176,8 +180,9 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
   if (existsSync(tsPath)) {
     try {
       tsModule = await import(tsPath) as Record<string, unknown>;
-    } catch (e: any) {
-      log.warn("加载 YAML 工作流 TS 模块 %s 失败：%s", tsPath, e.message);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      log.warn("加载 YAML 工作流 TS 模块 %s 失败：%s", tsPath, message);
       return null;
     }
   }
@@ -395,8 +400,9 @@ export function buildTransitions(workflow: WorkflowDefinition): TransitionTable 
       if (nextPending) {
         transitions[running].push([p.complete_trigger, nextPending]);
       } else {
-        const doneState =
-          [...terminalStates].find((s) => s !== "cancelled") ?? "done";
+        const doneState = terminalStates.has("done")
+          ? "done"
+          : [...terminalStates].find((s) => s !== "cancelled") ?? "done";
         transitions[running].push([p.complete_trigger, doneState]);
       }
     }
@@ -554,8 +560,9 @@ export async function discover(): Promise<void> {
       if (!wf) continue;
       register(wf);
       log.debug("注册 YAML 工作流：%s（来自 %s）", wf.name, subDir);
-    } catch (e: any) {
-      log.warn("加载 YAML 工作流 %s 失败：%s", subDir, e.message);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      log.warn("加载 YAML 工作流 %s 失败：%s", subDir, message);
     }
   }
 }
