@@ -1,0 +1,25 @@
+{
+  "name": "autopilot",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "轻量级多阶段任务编排引擎",
+  "bin": { "autopilot": "bin/autopilot.ts" },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^13.0.0",
+    "yaml": "^2.8.0"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest",
+    "@openai/codex": "latest",
+    "@google/gemini-cli-sdk": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.4.0"
+  }
+}
