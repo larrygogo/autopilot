@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { Dashboard } from "./pages/Dashboard";
 import { Tasks } from "./pages/Tasks";
@@ -10,6 +10,7 @@ type Page = "dashboard" | "tasks" | "workflows" | "settings" | { type: "task-det
 
 export function App() {
   const [page, setPage] = useState<Page>("dashboard");
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const { state: wsState, subscribe } = useWebSocket();
 
   const currentPage = typeof page === "string" ? page : page.type;
@@ -23,27 +24,87 @@ export function App() {
 
   const wsColor = wsState === "connected" ? "#34d399" : wsState === "connecting" ? "#fbbf24" : "#f87171";
 
+  const navigate = (p: Page) => {
+    setPage(p);
+    setDrawerOpen(false);
+  };
+
+  // drawer 打开时锁滚动 + ESC 关闭
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [drawerOpen]);
+
   return (
     <>
       <style>{GLOBAL_CSS}</style>
       <nav>
+        <button
+          type="button"
+          className="hamburger"
+          aria-label="打开菜单"
+          aria-expanded={drawerOpen}
+          onClick={() => setDrawerOpen(true)}
+        >
+          <span /><span /><span />
+        </button>
         <div className="logo">
           <span className="dot" style={{ background: wsColor, boxShadow: `0 0 8px ${wsColor}` }} />
           AUTOPILOT
         </div>
-        <div className="links">
+        <div className="links desktop-nav">
           {navItems.map((item) => (
             <button
               key={item.key}
               type="button"
               className={currentPage === item.key ? "active" : ""}
-              onClick={() => setPage(item.page)}
+              onClick={() => navigate(item.page)}
             >
               {item.label}
             </button>
           ))}
         </div>
       </nav>
+
+      {drawerOpen && (
+        <>
+          <div className="drawer-overlay" onClick={() => setDrawerOpen(false)} />
+          <aside className="drawer" role="dialog" aria-label="导航菜单">
+            <div className="drawer-header">
+              <span className="drawer-title">菜单</span>
+              <button
+                type="button"
+                className="drawer-close"
+                aria-label="关闭菜单"
+                onClick={() => setDrawerOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <nav className="drawer-links">
+              {navItems.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={currentPage === item.key ? "active" : ""}
+                  onClick={() => navigate(item.page)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </nav>
+          </aside>
+        </>
+      )}
 
       {page === "dashboard" && <Dashboard />}
       {page === "tasks" && (
@@ -86,11 +147,27 @@ a { cursor: pointer; }
 nav { background: var(--bg1); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; height: 52px; position: sticky; top: 0; z-index: 100; gap: 0.5rem; }
 nav .logo { font-family: var(--mono); font-weight: 700; font-size: 0.95rem; color: var(--cyan); margin-right: 2.5rem; display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
 nav .logo .dot { width: 7px; height: 7px; border-radius: 50%; }
-nav .links { display: flex; gap: 2px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-nav .links::-webkit-scrollbar { display: none; }
+nav .links { display: flex; gap: 2px; }
 nav .links button { color: var(--muted); background: transparent; border: none; padding: 0.4rem 0.9rem; border-radius: 6px; font-size: 0.84rem; font-weight: 500; font-family: inherit; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
 nav .links button:hover { color: var(--text2); background: var(--bg3); }
 nav .links button.active { color: var(--cyan); background: var(--cyan-dim); }
+
+nav .hamburger { display: none; flex-direction: column; justify-content: center; gap: 4px; width: 40px; height: 40px; padding: 10px; border: none; background: transparent; cursor: pointer; border-radius: 6px; flex-shrink: 0; }
+nav .hamburger:hover { background: var(--bg3); }
+nav .hamburger span { display: block; width: 20px; height: 2px; background: var(--text2); border-radius: 1px; transition: background 0.15s; }
+
+.drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 199; animation: fadeIn 0.15s ease; }
+.drawer { position: fixed; top: 0; left: 0; bottom: 0; width: 78vw; max-width: 300px; background: var(--bg1); border-right: 1px solid var(--border); z-index: 200; display: flex; flex-direction: column; animation: slideRight 0.2s ease; box-shadow: 4px 0 24px rgba(0,0,0,0.4); }
+.drawer-header { display: flex; align-items: center; justify-content: space-between; padding: 0 1rem; height: 52px; border-bottom: 1px solid var(--border); }
+.drawer-title { font-family: var(--mono); font-weight: 700; font-size: 0.9rem; color: var(--cyan); }
+.drawer-close { background: none; border: none; color: var(--text2); font-size: 1.6rem; line-height: 1; width: 36px; height: 36px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.drawer-close:hover { background: var(--bg3); color: var(--text); }
+.drawer-links { display: flex; flex-direction: column; padding: 0.75rem 0.5rem; gap: 2px; }
+.drawer-links button { text-align: left; color: var(--text2); background: transparent; border: none; padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.95rem; font-weight: 500; font-family: inherit; cursor: pointer; min-height: 44px; }
+.drawer-links button:hover { background: var(--bg3); color: var(--text); }
+.drawer-links button.active { color: var(--cyan); background: var(--cyan-dim); }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideRight { from { transform: translateX(-100%); } to { transform: translateX(0); } }
 
 .container { max-width: 1120px; margin: 0 auto; padding: 1.5rem 1.25rem; }
 .page-hdr { margin-bottom: 1.5rem; display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
@@ -155,9 +232,10 @@ nav .links button.active { color: var(--cyan); background: var(--cyan-dim); }
 @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
 @media (max-width: 640px) {
-  nav { padding: 0 1rem; height: 48px; }
-  nav .logo { margin-right: 1rem; font-size: 0.85rem; }
-  nav .links button { padding: 0.35rem 0.7rem; font-size: 0.8rem; }
+  nav { padding: 0 0.75rem; height: 48px; }
+  nav .logo { margin-right: 0; font-size: 0.85rem; flex: 1; }
+  nav .hamburger { display: flex; }
+  nav .desktop-nav { display: none; }
 
   .container { padding: 1rem 0.875rem; }
   .page-hdr { margin-bottom: 1rem; gap: 0.5rem; }
