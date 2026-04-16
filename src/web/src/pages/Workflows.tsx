@@ -60,10 +60,12 @@ export function Workflows() {
       {selectedGraph && (
         <div className="card" style={{ marginTop: "1rem" }}>
           <h3>状态机: {selectedGraph.name}</h3>
-          <StateMachineGraph
-            nodes={selectedGraph.data.nodes}
-            edges={selectedGraph.data.edges}
-          />
+          <div className="graph-wrap">
+            <StateMachineGraph
+              nodes={selectedGraph.data.nodes}
+              edges={selectedGraph.data.edges}
+            />
+          </div>
         </div>
       )}
     </div>

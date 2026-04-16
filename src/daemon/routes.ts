@@ -1,5 +1,5 @@
 import { existsSync } from "fs";
-import { join } from "path";
+import { join, resolve, sep } from "path";
 import { VERSION } from "../index";
 import { initDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks } from "../core/db";
 import type { ListTasksFilters } from "../core/db";
@@ -27,21 +27,53 @@ import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 const startedAt = Date.now();
 
 // ──────────────────────────────────────────────
+// CORS & 鉴权
+// ──────────────────────────────────────────────
+
+// 只允许显式 allowlist 中的 Origin 跨域访问；同源请求浏览器不发 Origin 头，
+// 因此 Web UI 由 daemon 自身同源提供时不受影响。
+const ALLOWED_ORIGINS = (process.env.AUTOPILOT_ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// 可选 token 鉴权：设置 AUTOPILOT_API_TOKEN 后，所有 /api/* 请求需带
+// `Authorization: Bearer <token>` 或 `X-Autopilot-Token: <token>`。
+const API_TOKEN = process.env.AUTOPILOT_API_TOKEN ?? "";
+
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin");
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    return {
+      "Access-Control-Allow-Origin": origin,
+      "Vary": "Origin",
+      "Access-Control-Allow-Credentials": "true",
+    };
+  }
+  return {};
+}
+
+function checkAuth(req: Request): boolean {
+  if (!API_TOKEN) return true;
+  const header = req.headers.get("authorization") ?? "";
+  if (header.startsWith("Bearer ") && header.slice(7) === API_TOKEN) return true;
+  if (req.headers.get("x-autopilot-token") === API_TOKEN) return true;
+  return false;
+}
+
+// ──────────────────────────────────────────────
 // 辅助
 // ──────────────────────────────────────────────
 
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-    },
-  });
-}
-
-function error(message: string, status = 400): Response {
-  return json({ error: message }, status);
+function makeResponders(req: Request) {
+  const cors = corsHeaders(req);
+  const json = (data: unknown, status = 200): Response =>
+    new Response(JSON.stringify(data), {
+      status,
+      headers: { "Content-Type": "application/json", ...cors },
+    });
+  const error = (message: string, status = 400): Response => json({ error: message }, status);
+  return { json, error };
 }
 
 function extractParam(path: string, pattern: RegExp): string | null {
@@ -71,24 +103,48 @@ const MIME_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-function serveStatic(path: string): Response | null {
+function serveStatic(urlPath: string): Response | null {
   if (!webDistDir) return null;
+  const rootDir = resolve(webDistDir);
 
-  const filePath = join(webDistDir, path === "/" ? "index.html" : path);
-  if (existsSync(filePath)) {
-    const ext = filePath.substring(filePath.lastIndexOf("."));
+  let requestedFile: string | null = null;
+  if (urlPath === "/" || urlPath === "") {
+    requestedFile = join(rootDir, "index.html");
+  } else {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(urlPath);
+    } catch {
+      return null;
+    }
+    // 拒绝含 NUL 字符的路径
+    if (decoded.includes("\0")) return null;
+    // 剥去前导 / 与 \，避免 path.join 把它当作绝对路径
+    const relative = decoded.replace(/^[/\\]+/, "");
+    const candidate = resolve(rootDir, relative);
+    // 强制校验：最终路径必须仍位于 rootDir 之内
+    if (candidate !== rootDir && !candidate.startsWith(rootDir + sep)) {
+      return null;
+    }
+    requestedFile = candidate;
+  }
+
+  if (requestedFile && existsSync(requestedFile)) {
+    const ext = requestedFile.substring(requestedFile.lastIndexOf("."));
     const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
-    return new Response(Bun.file(filePath), {
+    return new Response(Bun.file(requestedFile), {
       headers: { "Content-Type": contentType },
     });
   }
 
-  // SPA fallback
-  const indexPath = join(webDistDir, "index.html");
-  if (existsSync(indexPath)) {
-    return new Response(Bun.file(indexPath), {
-      headers: { "Content-Type": "text/html" },
-    });
+  // SPA fallback — 只在无明确扩展名时生效（避免对 /missing.js 返回 index.html）
+  if (!/\.[a-zA-Z0-9]+$/.test(urlPath)) {
+    const indexPath = join(rootDir, "index.html");
+    if (existsSync(indexPath)) {
+      return new Response(Bun.file(indexPath), {
+        headers: { "Content-Type": "text/html" },
+      });
+    }
   }
 
   return null;
@@ -102,17 +158,23 @@ export async function handleRequest(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const method = req.method;
   const path = url.pathname;
+  const { json, error } = makeResponders(req);
+  const cors = corsHeaders(req);
 
-  // CORS preflight
+  // CORS preflight — 只为 allowlist 中的 Origin 放行
   if (method === "OPTIONS") {
-    return new Response(null, {
-      status: 200,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-      },
-    });
+    const headers: Record<string, string> = {
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Autopilot-Token",
+      "Access-Control-Max-Age": "600",
+      ...cors,
+    };
+    return new Response(null, { status: 204, headers });
+  }
+
+  // Token 鉴权（仅在 /api/* 上生效，静态资源不需要）
+  if (path.startsWith("/api/") && !checkAuth(req)) {
+    return error("Unauthorized", 401);
   }
 
   try {

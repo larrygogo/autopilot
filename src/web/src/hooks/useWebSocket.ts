@@ -8,12 +8,13 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null);
   const [state, setState] = useState<ConnectionState>("disconnected");
   const handlersRef = useRef(new Map<string, Set<EventHandler>>());
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(1000);
+  const shouldReconnectRef = useRef(true);
 
   const getWsUrl = useCallback(() => {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${location.host}`;
+    return `${proto}//${location.host}/ws`;
   }, []);
 
   const sendSubscriptions = useCallback(() => {
@@ -61,7 +62,9 @@ export function useWebSocket() {
     ws.onclose = () => {
       wsRef.current = null;
       setState("disconnected");
+      if (!shouldReconnectRef.current) return;
       reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null;
         connect();
       }, reconnectDelayRef.current);
       reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 30000);
@@ -90,11 +93,20 @@ export function useWebSocket() {
   }, []);
 
   useEffect(() => {
+    shouldReconnectRef.current = true;
     connect();
     return () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      wsRef.current?.close();
+      shouldReconnectRef.current = false;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      const ws = wsRef.current;
       wsRef.current = null;
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+      }
     };
   }, [connect]);
 

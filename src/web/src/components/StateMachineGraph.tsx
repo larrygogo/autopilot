@@ -52,7 +52,13 @@ export function StateMachineGraph({ nodes, edges, currentState }: Props) {
   const height = y + 20;
 
   return (
-    <svg width="800" height={height} style={{ fontFamily: "monospace" }}>
+    <svg
+      width="800"
+      height={height}
+      viewBox={`0 0 800 ${height}`}
+      preserveAspectRatio="xMidYMin meet"
+      style={{ fontFamily: "monospace", minWidth: 640 }}
+    >
       <defs>
         <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
           <polygon points="0 0, 8 3, 0 6" fill="#636882" />

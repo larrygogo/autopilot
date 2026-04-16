@@ -48,28 +48,30 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
       {tasks.length === 0 ? (
         <div className="card"><p className="muted">暂无任务</p></div>
       ) : (
-        <table className="task-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>标题</th>
-              <th>工作流</th>
-              <th>状态</th>
-              <th>更新时间</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.map((t) => (
-              <tr key={t.id} onClick={() => onSelect(t.id)} style={{ cursor: "pointer" }}>
-                <td className="mono">{t.id}</td>
-                <td>{t.title}</td>
-                <td>{t.workflow}</td>
-                <td><Badge status={t.status} /></td>
-                <td className="muted">{new Date(t.updated_at).toLocaleString()}</td>
+        <div className="table-wrap">
+          <table className="task-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>标题</th>
+                <th>工作流</th>
+                <th>状态</th>
+                <th>更新时间</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {tasks.map((t) => (
+                <tr key={t.id} onClick={() => onSelect(t.id)} style={{ cursor: "pointer" }}>
+                  <td className="mono">{t.id}</td>
+                  <td>{t.title}</td>
+                  <td>{t.workflow}</td>
+                  <td><Badge status={t.status} /></td>
+                  <td className="muted">{new Date(t.updated_at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

@@ -18,7 +18,6 @@ export class WsClient {
   private reconnectDelay = 1000;
   private maxReconnectDelay = 30000;
   private shouldReconnect = true;
-  private pendingSubscriptions = new Set<string>();
 
   constructor(private url: string) {}
 
@@ -50,18 +49,14 @@ export class WsClient {
     if (!handlers) {
       handlers = new Set();
       this.subscriptions.set(channel, handlers);
-      // 发送订阅消息
-      this.pendingSubscriptions.add(channel);
-      this.sendSubscriptions();
+      this.send({ type: "subscribe", channels: [channel] });
     }
     handlers.add(handler);
 
-    // 返回取消订阅函数
     return () => {
       handlers!.delete(handler);
       if (handlers!.size === 0) {
         this.subscriptions.delete(channel);
-        this.pendingSubscriptions.delete(channel);
         this.send({ type: "unsubscribe", channels: [channel] });
       }
     };

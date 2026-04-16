@@ -313,9 +313,21 @@ program
   .action(async (opts: { port: string }) => {
     const url = `http://${DEFAULT_HOST}:${opts.port}`;
     console.log(`打开浏览器：${url}`);
-    // 尝试用系统默认浏览器打开
-    const cmd = process.platform === "darwin" ? "open" : "xdg-open";
-    Bun.spawn([cmd, url], { stdio: ["ignore", "ignore", "ignore"] });
+    const platform = process.platform;
+    const cmd: string[] =
+      platform === "darwin" ? ["open", url]
+      : platform === "win32" ? ["cmd", "/c", "start", "", url]
+      : ["xdg-open", url];
+    try {
+      const proc = Bun.spawn(cmd, { stdio: ["ignore", "ignore", "ignore"] });
+      const code = await proc.exited;
+      if (code !== 0) {
+        console.error(`无法自动打开浏览器（${cmd[0]} 退出码 ${code}），请手动访问上面的 URL。`);
+      }
+    } catch (e: unknown) {
+      console.error(`无法运行 ${cmd[0]}：${e instanceof Error ? e.message : String(e)}`);
+      console.error("请手动在浏览器中访问上面的 URL。");
+    }
   });
 
 // ──────────────────────────────────────────────

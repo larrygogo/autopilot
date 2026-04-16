@@ -23,7 +23,7 @@ export class AutopilotClient {
     const host = opts?.host ?? DEFAULT_HOST;
     const port = opts?.port ?? DEFAULT_PORT;
     this.http = new HttpClient(`http://${host}:${port}`);
-    this.ws = new WsClient(`ws://${host}:${port}`);
+    this.ws = new WsClient(`ws://${host}:${port}/ws`);
   }
 
   // ── 便捷方法：代理 HTTP ──

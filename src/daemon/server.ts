@@ -6,7 +6,7 @@ import { wsManager } from "./ws";
 // Bun.serve() — HTTP + WebSocket 统一服务
 // ──────────────────────────────────────────────
 
-export function startServer(opts: { host: string; port: number }): Server {
+export function startServer(opts: { host: string; port: number }): Server<undefined> {
   const server = Bun.serve({
     hostname: opts.host,
     port: opts.port,

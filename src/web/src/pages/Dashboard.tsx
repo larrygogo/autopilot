@@ -59,7 +59,7 @@ export function Dashboard() {
 
       <div className="card">
         <h3>运行信息</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginTop: "0.75rem" }}>
+        <div className="info-grid" style={{ marginTop: "0.75rem" }}>
           <div><span className="muted">运行时间：</span>{formatUptime(status.uptime)}</div>
           <div><span className="muted">PID：</span>{status.pid}</div>
           <div><span className="muted">版本：</span>{status.version}</div>

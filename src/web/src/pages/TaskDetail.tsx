@@ -65,11 +65,13 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       {graph && (
         <div className="card" style={{ marginTop: "0.75rem" }}>
           <h3>状态机</h3>
-          <StateMachineGraph
-            nodes={graph.nodes}
-            edges={graph.edges}
-            currentState={task.status}
-          />
+          <div className="graph-wrap">
+            <StateMachineGraph
+              nodes={graph.nodes}
+              edges={graph.edges}
+              currentState={task.status}
+            />
+          </div>
         </div>
       )}
 

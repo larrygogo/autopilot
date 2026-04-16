@@ -25,6 +25,8 @@ export function LogTimeline({ logs }: { logs: LogEntry[] }) {
             gap: "0.75rem",
             padding: "0.35rem 0",
             borderBottom: "1px solid #252838",
+            flexWrap: "wrap",
+            wordBreak: "break-word",
           }}
         >
           <span style={{ color: "#636882", whiteSpace: "nowrap" }}>
