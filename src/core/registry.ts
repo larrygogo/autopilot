@@ -1,10 +1,9 @@
 import type { TransitionTable } from "./state-machine";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml } from "yaml";
-import { readFileSync } from "fs";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -64,6 +63,14 @@ const _registry: Map<string, WorkflowDefinition> = new Map();
 
 export function _clearRegistry(): void {
   _registry.clear();
+}
+
+/**
+ * 热重载：清空注册表 + 重新发现工作流。
+ */
+export async function reload(): Promise<void> {
+  _registry.clear();
+  await discover();
 }
 
 // ──────────────────────────────────────────────
@@ -666,4 +673,32 @@ export function getTerminalStates(workflowName: string): string[] {
   const wf = getWorkflow(workflowName);
   if (!wf) return ["cancelled"];
   return wf.terminal_states ?? ["cancelled"];
+}
+
+/**
+ * 读取工作流 YAML 原文
+ */
+export function getWorkflowYaml(workflowName: string): string | null {
+  const yamlPath = join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.yaml");
+  if (!existsSync(yamlPath)) return null;
+  return readFileSync(yamlPath, "utf-8");
+}
+
+/**
+ * 保存工作流 YAML（写入磁盘 + 备份）
+ * @throws 如果 YAML 解析失败
+ */
+export function saveWorkflowYaml(workflowName: string, yamlContent: string): void {
+  // 校验 YAML 语法
+  parseYaml(yamlContent);
+
+  const yamlPath = join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.yaml");
+  if (!existsSync(join(AUTOPILOT_HOME, "workflows", workflowName))) {
+    throw new Error(`工作流目录不存在：${workflowName}`);
+  }
+  // 备份
+  if (existsSync(yamlPath)) {
+    copyFileSync(yamlPath, yamlPath + ".bak");
+  }
+  writeFileSync(yamlPath, yamlContent, "utf-8");
 }

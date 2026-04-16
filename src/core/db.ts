@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../index";
+import { emit } from "../daemon/event-bus";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -202,6 +203,8 @@ export function createTask(opts: CreateTaskOpts): void {
       ts,
     ]
   );
+  const created = getTask(opts.id);
+  if (created) emit({ type: "task:created", payload: { task: created } });
 }
 
 export function updateTask(
@@ -265,6 +268,9 @@ export function updateTask(
       colValues as Parameters<typeof db.run>[1]
     );
   }
+
+  const updated = getTask(taskId);
+  if (updated) emit({ type: "task:updated", payload: { task: updated, fields: Object.keys(fields) } });
 }
 
 export interface ListTasksFilters {

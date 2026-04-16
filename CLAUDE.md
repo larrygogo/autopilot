@@ -6,6 +6,12 @@
 
 ## 架构概要
 
+- **Daemon + 多客户端**：核心引擎作为 daemon 长驻运行，TUI/Web/CLI 通过 HTTP+WebSocket 连接
+- **事件总线**：`src/daemon/event-bus.ts` 懒激活模式，daemon 未运行时 emit 是 no-op
+- **HTTP REST API**：`/api/tasks`、`/api/workflows`、`/api/status` 等 CRUD 端点
+- **WebSocket 实时推送**：频道订阅模式（`task:*`、`log:{taskId}` 等）推送状态变化和日志
+- **TUI**：ink (React for CLI) 终端 UI，WebSocket 连接 daemon
+- **Web UI**：React + Vite SPA，daemon 自身 serve 静态资源
 - **插件化工作流**：`AUTOPILOT_HOME/workflows/`（用户）工作流自动发现
 - **YAML 工作流定义**：`workflow.yaml` 定义结构，`workflow.ts` 只写阶段函数
 - **工作流注册中心**：`src/core/registry.ts` 自动发现、注册、查询工作流
@@ -33,11 +39,15 @@
 ├── prompts/                     # 用户提示词模板
 └── runtime/
     ├── workflow.db              # SQLite 数据库
+    ├── daemon.pid               # Daemon PID 文件
     └── locks/                   # 文件锁目录
 ```
 
 初始化：`autopilot init`
 升级：`autopilot upgrade`
+启动 daemon：`autopilot daemon run`
+启动 TUI：`autopilot tui`
+打开 Web UI：`autopilot dashboard`（浏览器访问 `http://127.0.0.1:6180`）
 
 ## 目录结构
 
@@ -45,37 +55,52 @@
 autopilot/
 ├── src/                           # TypeScript 源码
 │   ├── index.ts                   # VERSION + AUTOPILOT_HOME
-│   ├── cli.ts                     # 统一 CLI 入口（commander）
-│   ├── core/                      # 框架核心（通用引擎）
-│   │   ├── db.ts                  # SQLite 数据库（含子任务支持）+ TABLE_COLUMNS / PROTECTED_COLUMNS
-│   │   ├── state-machine.ts       # 纯状态机，原子转换（乐观锁），转换表由注册表提供
-│   │   ├── runner.ts              # 执行引擎 & Push 模型 & 并行 fork/join
+│   ├── core/                      # 框架核心（通用引擎 + 事件发射）
+│   │   ├── db.ts                  # SQLite 数据库 + emit task:created/updated
+│   │   ├── state-machine.ts       # 状态机 + emit task:transition
+│   │   ├── runner.ts              # 执行引擎 + emit phase:started/completed/error
 │   │   ├── registry.ts            # 工作流插件注册 & 发现 & YAML 加载
 │   │   ├── infra.ts               # 文件锁（PID 存活检测 + 僵尸锁清理）
 │   │   ├── notify.ts              # 通知系统
-│   │   ├── logger.ts              # 阶段标签日志（含 logger name）
-│   │   ├── watcher.ts             # 卡死任务检测 & 恢复（含并行子任务）
+│   │   ├── logger.ts              # 阶段标签日志 + emit log:entry
+│   │   ├── watcher.ts             # 卡死任务检测 + emit watcher:recovery
 │   │   ├── migrate.ts             # 数据库迁移引擎
-│   │   └── config.ts              # 配置加载 & 校验（解析失败抛异常）
+│   │   └── config.ts              # 配置加载 & 校验
+│   ├── daemon/                    # Daemon 进程
+│   │   ├── index.ts               # Daemon 入口（init→server→watcher→signal）
+│   │   ├── server.ts              # Bun.serve() HTTP+WS 统一服务
+│   │   ├── routes.ts              # REST API 路由
+│   │   ├── ws.ts                  # WebSocket 连接管理 + 订阅分发
+│   │   ├── event-bus.ts           # 事件总线（enableBus 懒激活）
+│   │   ├── protocol.ts            # JSON 协议类型定义
+│   │   └── pid.ts                 # PID 文件管理
+│   ├── client/                    # 薄客户端库（CLI/TUI/Web 共用）
+│   │   ├── index.ts               # AutopilotClient (HTTP+WS)
+│   │   ├── http.ts                # HTTP REST 方法
+│   │   └── ws.ts                  # WebSocket + 自动重连
+│   ├── cli/                       # CLI 薄客户端
+│   │   └── index.ts               # Commander CLI（daemon/task/workflow 命令组）
+│   ├── tui/                       # 终端 UI (ink/React)
+│   │   ├── index.ts               # ink render 入口
+│   │   ├── app.tsx                # 根组件（Tab 导航）
+│   │   ├── components/            # Header, TaskList, TaskDetail, StatusBar, WorkflowList
+│   │   └── hooks/                 # useClient, useTasks, useConnection
+│   ├── web/                       # Web UI (React+Vite SPA)
+│   │   ├── vite.config.ts
+│   │   ├── index.html
+│   │   └── src/                   # pages/, components/, hooks/
 │   ├── agents/                    # Agent 系统
 │   │   ├── agent.ts               # Agent 基础类
 │   │   ├── types.ts               # Agent 类型定义
 │   │   ├── registry.ts            # Agent 缓存管理
-│   │   └── providers/             # Agent 提供商
-│   │       ├── base.ts            # BaseProvider（含 buildRunOptions）
-│   │       ├── anthropic.ts       # Anthropic Claude Agent
-│   │       ├── openai.ts          # OpenAI Codex Agent
-│   │       └── google.ts          # Google Gemini Agent
+│   │   └── providers/             # Anthropic / OpenAI / Google
 │   ├── migrations/                # 迁移脚本
-│   │   └── 001-baseline.ts        # 基线迁移
 │   └── types/                     # 类型声明
-│       └── optional-sdks.d.ts     # 可选 SDK 类型声明
+├── web-dist/                      # Web UI 构建产物（gitignore）
 ├── bin/                           # CLI 入口脚本
 │   ├── autopilot.ts
 │   └── run-phase.ts
 ├── examples/                      # 示例工作流
-│   └── workflows/
-│       └── dev/                   # 完整开发流程示例（TypeScript + Agent）
 ├── docs/                          # 架构文档
 └── tests/                         # 单元测试（bun:test）
 ```
@@ -137,6 +162,34 @@ bun run dev upgrade              # 执行迁移
 # 日常升级
 git pull                         # 更新框架代码（不影响用户数据）
 bun run dev upgrade              # 执行新迁移（如有）
+```
+
+## 启动和使用
+
+```bash
+# 启动 daemon（前台）
+autopilot daemon run
+
+# 启动 daemon（后台）
+autopilot daemon start
+autopilot daemon status
+autopilot daemon stop
+
+# 任务管理（通过 daemon API）
+autopilot task start <req-id> [-w workflow]
+autopilot task status [task-id]
+autopilot task cancel <task-id>
+autopilot task logs <task-id> [--follow]
+
+# 工作流
+autopilot workflow list
+
+# UI
+autopilot tui                    # 终端 UI
+autopilot dashboard              # 浏览器打开 Web UI
+
+# 构建 Web UI（开发后需重新构建）
+bun run build:web
 ```
 
 ## 运行测试

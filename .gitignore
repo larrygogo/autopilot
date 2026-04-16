@@ -8,3 +8,5 @@ __pycache__/
 *.egg-info/
 claude-progress.md
 feature-list.json
+web-dist/
+node_modules/

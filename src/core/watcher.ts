@@ -5,6 +5,7 @@ import { runInBackground } from "./runner";
 import { forceTransition } from "./state-machine";
 import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./registry";
 import type { PhaseDefinition, ParallelDefinition } from "./registry";
+import { emit } from "../daemon/event-bus";
 
 // ──────────────────────────────────────────────
 // 洪泛防护：记录每个任务上次恢复时间
@@ -175,6 +176,7 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
       `watcher: 检测到卡死任务，回退到 ${pendingState}（elapsed=${Math.round(elapsedMs / 1000)}s）`
     );
 
+    emit({ type: "watcher:recovery", payload: { taskId: task.id, phase: phaseName, fromStatus: task.status, toStatus: pendingState } });
     lastRecoveryAttempt.set(task.id, nowMs);
     runInBackground(task.id, phaseName);
   }
