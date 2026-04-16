@@ -4,9 +4,18 @@ import { Dashboard } from "./pages/Dashboard";
 import { Tasks } from "./pages/Tasks";
 import { TaskDetail } from "./pages/TaskDetail";
 import { Workflows } from "./pages/Workflows";
+import { Providers } from "./pages/Providers";
+import { Agents } from "./pages/Agents";
 import { Settings } from "./pages/Settings";
 
-type Page = "dashboard" | "tasks" | "workflows" | "settings" | { type: "task-detail"; id: string };
+type Page =
+  | "dashboard"
+  | "tasks"
+  | "workflows"
+  | "providers"
+  | "agents"
+  | "settings"
+  | { type: "task-detail"; id: string };
 
 export function App() {
   const [page, setPage] = useState<Page>("dashboard");
@@ -19,6 +28,8 @@ export function App() {
     { key: "dashboard", label: "Dashboard", page: "dashboard" },
     { key: "tasks", label: "任务", page: "tasks" },
     { key: "workflows", label: "工作流", page: "workflows" },
+    { key: "providers", label: "Providers", page: "providers" },
+    { key: "agents", label: "Agents", page: "agents" },
     { key: "settings", label: "设置", page: "settings" },
   ];
 
@@ -121,6 +132,8 @@ export function App() {
         />
       )}
       {page === "workflows" && <Workflows />}
+      {page === "providers" && <Providers />}
+      {page === "agents" && <Agents />}
       {page === "settings" && <Settings />}
     </>
   );
@@ -221,10 +234,41 @@ a { cursor: pointer; }
 .wf-select option { background: var(--bg1); color: var(--text); }
 
 .btn { padding: 0.55rem 1.2rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; min-height: 40px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent2); }
+.btn-primary:hover:not(:disabled) { background: var(--accent2); }
 .btn-secondary { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
-.btn-secondary:hover { background: var(--border); color: var(--text); }
+.btn-secondary:hover:not(:disabled) { background: var(--border); color: var(--text); }
+.btn-danger { background: transparent; color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+.btn-danger:hover:not(:disabled) { background: rgba(248,113,113,0.12); }
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
+.form-grid label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; color: var(--text2); }
+.form-grid label > span { font-weight: 500; }
+.form-grid label small { font-size: 0.72rem; }
+.form-grid .col-span-2 { grid-column: span 2; }
+.form-grid .required { color: var(--red); }
+
+.text-input { width: 100%; padding: 0.55rem 0.75rem; background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 16px; min-height: 40px; transition: border-color 0.15s; }
+.text-input:focus { outline: none; border-color: var(--cyan); }
+.text-input:disabled { opacity: 0.6; cursor: not-allowed; }
+.text-input::placeholder { color: var(--muted); }
+
+.switch { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.82rem; color: var(--text2); }
+.switch input[type="checkbox"] { appearance: none; width: 36px; height: 20px; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; position: relative; cursor: pointer; transition: background 0.15s; }
+.switch input[type="checkbox"]::after { content: ""; position: absolute; top: 1px; left: 1px; width: 16px; height: 16px; border-radius: 50%; background: var(--text2); transition: transform 0.15s, background 0.15s; }
+.switch input[type="checkbox"]:checked { background: var(--accent-dim); border-color: var(--accent); }
+.switch input[type="checkbox"]:checked::after { transform: translateX(16px); background: var(--accent2); }
+
+.provider-list { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+.provider-card .card-header h3 { font-size: 1rem; color: var(--cyan); }
+
+.agent-list { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
+.agent-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; }
+.agent-card-head h3 { font-size: 1rem; margin-bottom: 0.35rem; }
+.agent-meta { font-size: 0.78rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.agent-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+.agent-prompt { margin-top: 0.6rem; font-size: 0.82rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
 .toast { position: fixed; top: 60px; right: 1.5rem; padding: 0.6rem 1.2rem; border-radius: 8px; font-size: 0.82rem; font-weight: 500; z-index: 200; animation: slideIn 0.2s ease; max-width: calc(100vw - 3rem); }
 .toast-success { background: rgba(52,211,153,0.15); color: var(--green); border: 1px solid rgba(52,211,153,0.3); }
@@ -250,6 +294,12 @@ a { cursor: pointer; }
   .info-grid,
   .task-info-grid,
   .settings-info-grid { grid-template-columns: 1fr; gap: 0.35rem; }
+
+  .form-grid { grid-template-columns: 1fr; gap: 0.75rem; }
+  .form-grid .col-span-2 { grid-column: auto; }
+
+  .agent-card-head { flex-direction: column; align-items: stretch; }
+  .agent-actions { justify-content: flex-end; }
 
   .workflow-grid { grid-template-columns: 1fr; }
 

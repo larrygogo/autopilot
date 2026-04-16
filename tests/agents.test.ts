@@ -108,6 +108,36 @@ describe("resolveAgentConfig — 三层合并", () => {
       resolveAgentConfig("x", { name: "x", provider: "unknown" as any }, {})
     ).toThrow("未知 provider");
   });
+
+  test("agent 未指定 model 时使用 providers.<provider>.default_model", () => {
+    const cfg = resolveAgentConfig(
+      "coder",
+      { name: "coder", provider: "anthropic" },
+      {},
+      { anthropic: { default_model: "claude-opus-4-7" }, openai: {}, google: {} }
+    );
+    expect(cfg.model).toBe("claude-opus-4-7");
+  });
+
+  test("agent 自己的 model 优先于 provider 默认", () => {
+    const cfg = resolveAgentConfig(
+      "coder",
+      { name: "coder", provider: "anthropic", model: "claude-haiku-4-5" },
+      {},
+      { anthropic: { default_model: "claude-opus-4-7" }, openai: {}, google: {} }
+    );
+    expect(cfg.model).toBe("claude-haiku-4-5");
+  });
+
+  test("provider 默认 model 缺失时保持 agent.model 为 undefined（交由 provider 自身 fallback）", () => {
+    const cfg = resolveAgentConfig(
+      "coder",
+      { name: "coder", provider: "anthropic" },
+      {},
+      { anthropic: {}, openai: {}, google: {} }
+    );
+    expect(cfg.model).toBeUndefined();
+  });
 });
 
 describe("BaseProvider — 运行时覆盖", () => {

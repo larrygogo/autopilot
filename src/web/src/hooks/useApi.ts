@@ -39,4 +39,38 @@ export const api = {
     request<{ ok: boolean }>(`/api/workflows/${name}/yaml`, { method: "PUT", body: JSON.stringify({ yaml }) }),
   reloadWorkflows: () =>
     request<{ ok: boolean; workflows: any[] }>("/api/reload", { method: "POST" }),
+
+  // Providers
+  listProviders: () => request<ProviderItem[]>("/api/providers"),
+  saveProviderConfig: (name: string, cfg: Record<string, unknown>) =>
+    request<{ ok: boolean }>(`/api/providers/${name}`, { method: "PUT", body: JSON.stringify(cfg) }),
+
+  // Agents
+  listAgents: () => request<AgentItem[]>("/api/agents"),
+  getAgent: (name: string) => request<AgentItem>(`/api/agents/${name}`),
+  createAgent: (body: AgentItem) =>
+    request<{ ok: boolean; name: string }>("/api/agents", { method: "POST", body: JSON.stringify(body) }),
+  updateAgent: (name: string, body: Record<string, unknown>) =>
+    request<{ ok: boolean }>(`/api/agents/${name}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteAgent: (name: string) =>
+    request<{ ok: boolean }>(`/api/agents/${name}`, { method: "DELETE" }),
 };
+
+export interface ProviderItem {
+  name: string;
+  api_key_env?: string;
+  default_model?: string;
+  base_url?: string;
+  enabled?: boolean;
+}
+
+export interface AgentItem {
+  name: string;
+  provider?: string;
+  model?: string;
+  max_turns?: number;
+  permission_mode?: string;
+  system_prompt?: string;
+  extends?: string | null;
+  [key: string]: unknown;
+}

@@ -16,7 +16,17 @@ import {
   getWorkflowYaml,
   saveWorkflowYaml,
 } from "../core/registry";
-import { loadConfigRaw, saveConfigRaw } from "../core/config";
+import {
+  loadConfigRaw,
+  saveConfigRaw,
+  loadProviders,
+  saveProvider,
+  loadGlobalAgents,
+  saveAgent,
+  deleteAgent,
+  PROVIDER_NAMES,
+  type ProviderName,
+} from "../core/config";
 import { emit } from "./event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -451,6 +461,89 @@ export async function handleRequest(req: Request): Promise<Response> {
       await reload();
       emit({ type: "workflow:reloaded", payload: {} });
       return json({ ok: true, workflows: listWorkflows() });
+    }
+
+    // ── Providers API ──
+
+    // GET /api/providers — 返回三个内置 provider 的当前配置
+    if (method === "GET" && path === "/api/providers") {
+      const providers = loadProviders();
+      return json(
+        PROVIDER_NAMES.map((name) => ({ name, ...providers[name] }))
+      );
+    }
+
+    // PUT /api/providers/:name
+    const providerMatch = extractParam(path, /^\/api\/providers\/([\w\-]+)$/);
+    if (method === "PUT" && providerMatch) {
+      if (!(PROVIDER_NAMES as readonly string[]).includes(providerMatch)) {
+        return error(`未知 provider：${providerMatch}`, 400);
+      }
+      const body = await req.json() as Record<string, unknown>;
+      try {
+        saveProvider(providerMatch as ProviderName, body);
+        emit({ type: "config:updated", payload: {} });
+        return json({ ok: true });
+      } catch (e: unknown) {
+        return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 500);
+      }
+    }
+
+    // ── Agents API ──
+
+    // GET /api/agents — 返回全局 agents 列表
+    if (method === "GET" && path === "/api/agents") {
+      const agents = loadGlobalAgents();
+      return json(
+        Object.entries(agents).map(([name, cfg]) => ({ name, ...cfg }))
+      );
+    }
+
+    // GET /api/agents/:name
+    const agentReadMatch = extractParam(path, /^\/api\/agents\/([\w.\-]+)$/);
+    if (method === "GET" && agentReadMatch) {
+      const agents = loadGlobalAgents();
+      const cfg = agents[agentReadMatch];
+      if (!cfg) return error("Agent not found", 404);
+      return json({ name: agentReadMatch, ...cfg });
+    }
+
+    // POST /api/agents — 新建（name 在 body 中）
+    if (method === "POST" && path === "/api/agents") {
+      const body = await req.json() as Record<string, unknown> & { name?: string };
+      const name = body.name;
+      if (typeof name !== "string" || !name) return error("name is required");
+      const agents = loadGlobalAgents();
+      if (agents[name]) return error(`Agent "${name}" 已存在，请用 PUT 更新`, 409);
+      try {
+        const { name: _, ...rest } = body;
+        saveAgent(name, rest);
+        emit({ type: "config:updated", payload: {} });
+        return json({ ok: true, name }, 201);
+      } catch (e: unknown) {
+        return error(`创建失败：${e instanceof Error ? e.message : String(e)}`, 400);
+      }
+    }
+
+    // PUT /api/agents/:name
+    if (method === "PUT" && agentReadMatch) {
+      const body = await req.json() as Record<string, unknown>;
+      try {
+        const { name: _, ...rest } = body;
+        saveAgent(agentReadMatch, rest);
+        emit({ type: "config:updated", payload: {} });
+        return json({ ok: true });
+      } catch (e: unknown) {
+        return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
+      }
+    }
+
+    // DELETE /api/agents/:name
+    if (method === "DELETE" && agentReadMatch) {
+      const removed = deleteAgent(agentReadMatch);
+      if (!removed) return error("Agent not found", 404);
+      emit({ type: "config:updated", payload: {} });
+      return json({ ok: true });
     }
 
     // ── Static files ──

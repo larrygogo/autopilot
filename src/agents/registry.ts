@@ -5,7 +5,7 @@ import { AnthropicProvider } from "./providers/anthropic";
 import { OpenAIProvider } from "./providers/openai";
 import { GoogleProvider } from "./providers/google";
 import { getWorkflow } from "../core/registry";
-import { loadGlobalAgents } from "../core/config";
+import { loadGlobalAgents, loadProviders, type ProviderConfig } from "../core/config";
 
 const PROVIDERS: Record<string, new (config: Record<string, unknown>) => BaseProvider> = {
   anthropic: AnthropicProvider,
@@ -23,6 +23,7 @@ export function resolveAgentConfig(
   agentName: string,
   workflowAgent: Partial<AgentConfig> | undefined,
   globalAgents: Record<string, Record<string, unknown>> = loadGlobalAgents(),
+  providers: Record<string, ProviderConfig> = loadProviders(),
 ): AgentConfig {
   // 确定继承的全局 key：workflow 显式写 extends 则用它；
   // extends === null/false 则跳过继承；未写则默认继承同名。
@@ -36,7 +37,6 @@ export function resolveAgentConfig(
 
   // 浅合并：base < workflow override
   const merged: Record<string, unknown> = { ...base, ...(workflowAgent ?? {}) };
-  // 强制 name，清理不应传递到 provider 的合并辅助字段
   merged["name"] = agentName;
   delete merged["extends"];
 
@@ -46,6 +46,14 @@ export function resolveAgentConfig(
   }
   if (!(provider in PROVIDERS)) {
     throw new Error(`未知 provider：${provider}，支持：${Object.keys(PROVIDERS).join("、")}`);
+  }
+
+  // provider 层 fallback：agent 没写 model 时使用 providers.<provider>.default_model
+  const providerCfg = providers[provider];
+  if (providerCfg) {
+    if (!merged["model"] && providerCfg.default_model) merged["model"] = providerCfg.default_model;
+    if (!merged["base_url"] && providerCfg.base_url) merged["base_url"] = providerCfg.base_url;
+    if (!merged["api_key_env"] && providerCfg.api_key_env) merged["api_key_env"] = providerCfg.api_key_env;
   }
 
   return merged as AgentConfig;
@@ -85,6 +93,7 @@ export function getAgent(agentName: string, workflowName: string): Agent {
   }
 
   const globalAgents = loadGlobalAgents();
+  const providers = loadProviders();
   const workflowAgents = (wf.agents as Partial<AgentConfig>[] | undefined) ?? [];
   const workflowAgent = workflowAgents.find((a) => a?.name === agentName);
 
@@ -92,7 +101,7 @@ export function getAgent(agentName: string, workflowName: string): Agent {
     throw new Error(`找不到 agent "${agentName}"：工作流 ${workflowName} 未定义，全局 config.yaml 中也没有同名条目`);
   }
 
-  const resolved = resolveAgentConfig(agentName, workflowAgent, globalAgents);
+  const resolved = resolveAgentConfig(agentName, workflowAgent, globalAgents, providers);
   const agent = createAgent(resolved);
   _cache.set(cacheKey, agent);
   return agent;
