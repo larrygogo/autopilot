@@ -27,10 +27,8 @@ describe("infra", () => {
   });
 
   afterEach(() => {
-    // Clean up any locks
-    for (const [taskId] of Array.from((infra as any).activeLocks || new Map())) {
-      infra.releaseLock(taskId);
-    }
+    // Clean up all active locks
+    infra._releaseAllLocks();
     cleanTestHome();
   });
 

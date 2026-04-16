@@ -95,3 +95,12 @@ export function releaseLock(taskId: string): void {
 export function isLocked(taskId: string): boolean {
   return activeLocks.has(taskId);
 }
+
+/**
+ * 清理所有活跃锁（测试用）
+ */
+export function _releaseAllLocks(): void {
+  for (const [taskId] of activeLocks) {
+    releaseLock(taskId);
+  }
+}
