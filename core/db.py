@@ -118,6 +118,8 @@ def init_db() -> None:
 
         if not check_schema(get_conn()):
             log.warning("数据库版本落后，请运行 autopilot upgrade")
+    except ImportError as e:
+        log.warning("schema 版本检查失败（模块缺失）：%s", e)
     except Exception as e:
         log.warning("schema 版本检查失败：%s", e)
 
@@ -190,8 +192,8 @@ def get_active_tasks(include_sub_tasks: bool = True) -> list[dict]:
             wf = registry.get_workflow(wf_info["name"])
             if wf:
                 terminal.update(wf.get("terminal_states", []))
-    except Exception as e:
-        log.debug("获取工作流终态失败：%s", e)
+    except (ImportError, AttributeError) as e:
+        log.warning("获取工作流终态失败：%s", e)
     terminal_tuple = tuple(terminal)
     placeholders = ",".join("?" * len(terminal_tuple))
     query = f"SELECT * FROM tasks WHERE status NOT IN ({placeholders})"
@@ -394,8 +396,8 @@ def get_task_stats() -> dict:
                 for s in wf.get("terminal_states", []):
                     if s != "cancelled":
                         success_states.add(s)
-    except Exception as e:
-        log.debug("获取工作流终态失败：%s", e)
+    except (ImportError, AttributeError) as e:
+        log.warning("获取工作流终态失败：%s", e)
 
     success_count = sum(cnt for st, cnt in by_status.items() if st in success_states)
     terminal_count = success_count + by_status.get("cancelled", 0)
@@ -497,7 +499,7 @@ def all_sub_tasks_done(parent_task_id: str) -> bool:
             wf = registry.get_workflow(wf_info["name"])
             if wf:
                 terminal.update(wf.get("terminal_states", []))
-    except Exception:
+    except (ImportError, AttributeError):
         pass
 
     # 子任务完成状态：包含 *_done 和其他终态 / Sub-task done states: includes *_done and other terminal states

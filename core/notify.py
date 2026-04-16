@@ -13,6 +13,7 @@ import ssl
 import subprocess
 import urllib.request
 from typing import Any
+from urllib.parse import urlparse
 
 from core.logger import get_logger
 
@@ -79,10 +80,19 @@ def _matches_event(backend: dict, event: str) -> bool:
     return event in events
 
 
+def _validate_webhook_url(url: str) -> None:
+    """校验 webhook URL：仅允许 http/https scheme
+    Validate webhook URL: only allow http/https scheme."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"不允许的 webhook URL scheme：{parsed.scheme!r}（仅支持 http/https）")
+
+
 def _send_webhook(backend: dict, variables: dict[str, str]) -> None:
     """通过 HTTP 发送 webhook 通知
     Send webhook notification via HTTP."""
     url = expand_env_vars(backend["url"])
+    _validate_webhook_url(url)
     method = backend.get("method", "POST").upper()
     headers = {}
     for k, v in (backend.get("headers") or {}).items():
@@ -127,12 +137,17 @@ def _send_command(backend: dict, variables: dict[str, str]) -> None:
     cmd = re.sub(r"\{\{(\w+)}}", lambda m: safe_variables.get(m.group(1), ""), cmd)
 
     try:
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+        args = shlex.split(cmd)
+        r = subprocess.run(args, capture_output=True, text=True, timeout=30)
         if r.returncode != 0:
             log.error("command %s 执行失败（rc=%d）：%s", backend.get("name", ""), r.returncode, r.stderr[:200])
         else:
             log.debug("command %s 执行成功", backend.get("name", ""))
-    except Exception as e:
+    except ValueError as e:
+        log.error("command %s 命令解析失败：%s", backend.get("name", ""), e)
+    except subprocess.TimeoutExpired:
+        log.error("command %s 执行超时（30s）", backend.get("name", ""))
+    except OSError as e:
         log.error("command %s 执行异常：%s", backend.get("name", ""), e)
 
 
@@ -158,7 +173,7 @@ def dispatch(
         wf = registry.get_workflow(workflow_name)
         if wf:
             backends = wf.get("notify_backends")
-    except Exception:
+    except (ImportError, AttributeError):
         pass
 
     if not backends:

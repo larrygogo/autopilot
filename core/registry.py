@@ -519,7 +519,7 @@ def get_workflow(name: str) -> dict | None:
     """获取工作流定义字典
     Get workflow definition dict."""
     mod = _registry.get(name)
-    return mod.WORKFLOW if mod else None
+    return getattr(mod, "WORKFLOW", None) if mod else None
 
 
 def get_workflow_module(name: str) -> Any | None:
