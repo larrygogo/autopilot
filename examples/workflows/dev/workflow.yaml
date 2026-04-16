@@ -1,30 +1,41 @@
 name: dev
-description: "[AI] 完整开发流程（设计 → 评审 → 开发 → 代码审查 → PR） / Full development workflow (Design → Review → Develop → Code Review → PR)"
+description: "完整开发流程（设计 → 评审 → 开发 → 代码审查 → PR）"
 setup_func: setup_dev_task
 
-phases:
-  # 方案设计阶段 / Design phase
-  - name: design
-    timeout: 900
+config:
+  repo_path: ~/repos/my-project
+  default_branch: main
 
-  # 方案评审阶段 / Review phase
+agents:
+  - name: architect
+    provider: anthropic
+    model: claude-sonnet-4-6
+    permission_mode: bypassPermissions
+  - name: developer
+    provider: anthropic
+    model: claude-opus-4-6
+    permission_mode: bypassPermissions
+  - name: reviewer
+    provider: anthropic
+    model: claude-sonnet-4-6
+    permission_mode: bypassPermissions
+
+phases:
+  - name: design
+    agent: architect
+    timeout: 900
   - name: review
+    agent: reviewer
     timeout: 900
     reject: design
-    # 最大驳回次数 / Maximum rejection count
     max_rejections: 10
-
-  # 开发阶段 / Development phase
   - name: develop
+    agent: developer
     timeout: 1800
-
-  # 代码审查阶段 / Code review phase
   - name: code_review
+    agent: reviewer
     timeout: 1200
     reject: develop
-    # 最大驳回次数 / Maximum rejection count
     max_rejections: 10
-
-  # PR 提交阶段 / PR submission phase
   - name: submit_pr
     timeout: 300
