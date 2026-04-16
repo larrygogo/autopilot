@@ -47,7 +47,7 @@ export function App() {
   return (
     <>
       <style>{GLOBAL_CSS}</style>
-      <nav>
+      <nav className="topbar">
         <button
           type="button"
           className="hamburger"
@@ -144,17 +144,17 @@ body { font-family: var(--sans); background: var(--bg0); color: var(--text); lin
 ::selection { background: var(--accent); color: #fff; }
 a { cursor: pointer; }
 
-nav { background: var(--bg1); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; height: 52px; position: sticky; top: 0; z-index: 100; gap: 0.5rem; }
-nav .logo { font-family: var(--mono); font-weight: 700; font-size: 0.95rem; color: var(--cyan); margin-right: 2.5rem; display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
-nav .logo .dot { width: 7px; height: 7px; border-radius: 50%; }
-nav .links { display: flex; gap: 2px; }
-nav .links button { color: var(--muted); background: transparent; border: none; padding: 0.4rem 0.9rem; border-radius: 6px; font-size: 0.84rem; font-weight: 500; font-family: inherit; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
-nav .links button:hover { color: var(--text2); background: var(--bg3); }
-nav .links button.active { color: var(--cyan); background: var(--cyan-dim); }
+.topbar { background: var(--bg1); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; height: 52px; position: sticky; top: 0; z-index: 100; gap: 0.5rem; }
+.topbar .logo { font-family: var(--mono); font-weight: 700; font-size: 0.95rem; color: var(--cyan); margin-right: 2.5rem; display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
+.topbar .logo .dot { width: 7px; height: 7px; border-radius: 50%; }
+.topbar .links { display: flex; gap: 2px; }
+.topbar .links button { color: var(--muted); background: transparent; border: none; padding: 0.4rem 0.9rem; border-radius: 6px; font-size: 0.84rem; font-weight: 500; font-family: inherit; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.topbar .links button:hover { color: var(--text2); background: var(--bg3); }
+.topbar .links button.active { color: var(--cyan); background: var(--cyan-dim); }
 
-nav .hamburger { display: none; flex-direction: column; justify-content: center; gap: 4px; width: 40px; height: 40px; padding: 10px; border: none; background: transparent; cursor: pointer; border-radius: 6px; flex-shrink: 0; }
-nav .hamburger:hover { background: var(--bg3); }
-nav .hamburger span { display: block; width: 20px; height: 2px; background: var(--text2); border-radius: 1px; transition: background 0.15s; }
+.topbar .hamburger { display: none; flex-direction: column; justify-content: center; gap: 4px; width: 40px; height: 40px; padding: 10px; border: none; background: transparent; cursor: pointer; border-radius: 6px; flex-shrink: 0; }
+.topbar .hamburger:hover { background: var(--bg3); }
+.topbar .hamburger span { display: block; width: 20px; height: 2px; background: var(--text2); border-radius: 1px; transition: background 0.15s; }
 
 .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 199; animation: fadeIn 0.15s ease; }
 .drawer { position: fixed; top: 0; left: 0; bottom: 0; width: 78vw; max-width: 300px; background: var(--bg1); border-right: 1px solid var(--border); z-index: 200; display: flex; flex-direction: column; animation: slideRight 0.2s ease; box-shadow: 4px 0 24px rgba(0,0,0,0.4); }
@@ -232,10 +232,10 @@ nav .hamburger span { display: block; width: 20px; height: 2px; background: var(
 @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
 @media (max-width: 640px) {
-  nav { padding: 0 0.75rem; height: 48px; }
-  nav .logo { margin-right: 0; font-size: 0.85rem; flex: 1; }
-  nav .hamburger { display: flex; }
-  nav .desktop-nav { display: none; }
+  .topbar { padding: 0 0.75rem; height: 48px; }
+  .topbar .logo { margin-right: 0; font-size: 0.85rem; flex: 1; }
+  .topbar .hamburger { display: flex; }
+  .topbar .desktop-nav { display: none; }
 
   .container { padding: 1rem 0.875rem; }
   .page-hdr { margin-bottom: 1rem; gap: 0.5rem; }
