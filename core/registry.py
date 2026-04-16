@@ -518,8 +518,10 @@ def load_yaml_workflow(wf_dir: Path) -> _YAMLWorkflowModule | None:
 def get_workflow(name: str) -> dict | None:
     """获取工作流定义字典
     Get workflow definition dict."""
-    mod = _registry.get(name)
-    return getattr(mod, "WORKFLOW", None) if mod else None
+    if not (mod := _registry.get(name)):
+        return None
+    wf = getattr(mod, "WORKFLOW", None)
+    return wf if isinstance(wf, dict) else None
 
 
 def get_workflow_module(name: str) -> Any | None:

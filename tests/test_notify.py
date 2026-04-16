@@ -8,10 +8,13 @@ import os
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from core.notify import (
     _matches_event,
     _send_command,
     _send_webhook,
+    _validate_webhook_url,
     dispatch,
     expand_env_vars,
     render_template,
@@ -101,6 +104,40 @@ class TestMatchesEvent:
 
     def test_none_events(self):
         assert _matches_event({"events": None}, "error") is True
+
+
+class TestValidateWebhookUrl:
+    """webhook URL 校验"""
+
+    def test_http_allowed(self):
+        _validate_webhook_url("http://example.com/hook")
+
+    def test_https_allowed(self):
+        _validate_webhook_url("https://example.com/hook")
+
+    def test_file_scheme_rejected(self):
+        with pytest.raises(ValueError, match="scheme"):
+            _validate_webhook_url("file:///etc/passwd")
+
+    def test_ftp_scheme_rejected(self):
+        with pytest.raises(ValueError, match="scheme"):
+            _validate_webhook_url("ftp://example.com/file")
+
+    def test_no_scheme_rejected(self):
+        with pytest.raises(ValueError, match="scheme"):
+            _validate_webhook_url("example.com/hook")
+
+    def test_loopback_ip_rejected(self):
+        with pytest.raises(ValueError, match="私网|回环"):
+            _validate_webhook_url("http://127.0.0.1/hook")
+
+    def test_private_ip_rejected(self):
+        with pytest.raises(ValueError, match="私网|回环"):
+            _validate_webhook_url("http://10.0.0.1/hook")
+
+    def test_link_local_rejected(self):
+        with pytest.raises(ValueError, match="私网|回环"):
+            _validate_webhook_url("http://169.254.169.254/latest/meta-data")
 
 
 class TestSendWebhook:
