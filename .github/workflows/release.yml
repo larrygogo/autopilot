@@ -14,14 +14,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: oven-sh/setup-bun@v2
         with:
-          python-version: "3.12"
+          bun-version: latest
 
-      - run: pip install -e ".[dev]"
+      - run: bun install
 
       - name: Run tests
-        run: pytest tests/ -v
+        run: bun test
 
       - name: Extract changelog for this version
         id: changelog
