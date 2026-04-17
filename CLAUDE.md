@@ -223,6 +223,10 @@ agents:                # 命名 agent 定义，工作流可同名引用或 exten
     system_prompt: |
       你是通用编码助手。
 
+daemon:                # 可选：daemon 监听配置（改后 `autopilot daemon restart` 生效）
+  host: 127.0.0.1      # 默认 127.0.0.1；设 0.0.0.0 暴露到局域网
+  port: 6180
+
 workspace_retention:   # 可选：任务 workspace 自动清理策略
   days: 30             # 终态任务超过 30 天自动清 workspace（仅 workspace 目录，日志/记录保留）
   max_total_mb: 5120   # 所有 workspace 总占用超 5 GB 时按旧→新清理终态任务

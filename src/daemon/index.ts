@@ -6,11 +6,12 @@ import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/registry";
 import { checkStuckTasks, pruneWorkspacesByPolicy } from "../core/watcher";
 import { initDaemonFileLog } from "../core/logger";
+import { loadDaemonConfig } from "../core/config";
 import { enableBus, disableBus, bus } from "./event-bus";
 import { wsManager } from "./ws";
 import { startServer } from "./server";
 import { setWebDistDir } from "./routes";
-import { writePid, removePid, isDaemonRunning } from "./pid";
+import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo } from "./pid";
 import type { AutopilotEvent } from "./protocol";
 
 // ──────────────────────────────────────────────
@@ -28,8 +29,16 @@ export interface DaemonOptions {
 }
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
-  const host = opts.host ?? process.env.AUTOPILOT_HOST ?? DEFAULT_HOST;
-  const port = opts.port ?? (process.env.AUTOPILOT_PORT ? parseInt(process.env.AUTOPILOT_PORT, 10) : DEFAULT_PORT);
+  // 优先级：显式参数 > env > config.yaml > 内置默认
+  const cfg = loadDaemonConfig();
+  const host = opts.host
+    ?? process.env.AUTOPILOT_HOST
+    ?? cfg.host
+    ?? DEFAULT_HOST;
+  const port = opts.port
+    ?? (process.env.AUTOPILOT_PORT ? parseInt(process.env.AUTOPILOT_PORT, 10) : undefined)
+    ?? cfg.port
+    ?? DEFAULT_PORT;
 
   // 检查是否已有 daemon 运行
   if (isDaemonRunning()) {
@@ -65,8 +74,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 启动 HTTP + WebSocket 服务
   const server = startServer({ host, port });
 
-  // 写入 PID 文件
+  // 写入 PID 和监听信息
   writePid();
+  writeListenInfo({ host, port });
 
   // 启动 watcher 定时器
   const watcherTimer = setInterval(() => {
@@ -97,6 +107,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     server.stop();
     closeDb();
     removePid();
+    removeListenInfo();
     console.log("daemon 已关闭。");
     process.exit(0);
   };
