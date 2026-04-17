@@ -3,6 +3,13 @@ import { mkdirSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../index";
 import { emit } from "../daemon/event-bus";
+import {
+  writeManifest,
+  updateManifest,
+  MANIFEST_VERSION,
+  type TaskManifest,
+  type WorkflowSnapshot,
+} from "./manifest";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -182,6 +189,11 @@ export interface CreateTaskOpts {
   channel?: string;
   notifyTarget?: string | null;
   extra?: Record<string, unknown>;
+  /**
+   * 工作流定义快照。若提供则同步写入 task-manifest.json 作为权威源（gsd-style）。
+   * 省略时只写 DB（测试 / 老路径兼容）。
+   */
+  workflowSnapshot?: WorkflowSnapshot;
 }
 
 export function createTask(opts: CreateTaskOpts): void {
@@ -203,6 +215,28 @@ export function createTask(opts: CreateTaskOpts): void {
       ts,
     ]
   );
+  if (opts.workflowSnapshot) {
+    const manifest: TaskManifest = {
+      version: MANIFEST_VERSION,
+      taskId: opts.id,
+      title: opts.title,
+      workflow: opts.workflow,
+      workflow_snapshot: opts.workflowSnapshot,
+      status: opts.initialStatus,
+      failure_count: 0,
+      channel: opts.channel ?? "log",
+      notify_target: opts.notifyTarget ?? null,
+      created_at: ts,
+      updated_at: ts,
+      started_at: null,
+      parent_task_id: null,
+      parallel_index: null,
+      parallel_group: null,
+      extra: opts.extra ?? {},
+      transitions: [],
+    };
+    writeManifest(manifest);
+  }
   const created = getTask(opts.id);
   if (created) emit({ type: "task:created", payload: { task: created } });
 }
@@ -270,7 +304,41 @@ export function updateTask(
   }
 
   const updated = getTask(taskId);
-  if (updated) emit({ type: "task:updated", payload: { task: updated, fields: Object.keys(fields) } });
+  if (updated) {
+    syncManifestFromTask(updated);
+    emit({ type: "task:updated", payload: { task: updated, fields: Object.keys(fields) } });
+  }
+}
+
+/**
+ * 把 Task（含合并后的 extra）同步到 task-manifest.json。
+ * manifest 不存在时 best-effort 跳过（老任务或 snapshot 未提供的 createTask 路径）。
+ */
+function syncManifestFromTask(task: Task): void {
+  const patch = {
+    title: task.title,
+    status: task.status,
+    failure_count: task.failure_count,
+    channel: task.channel,
+    notify_target: task.notify_target,
+    updated_at: task.updated_at,
+    started_at: task.started_at,
+    parent_task_id: task.parent_task_id,
+    parallel_index: task.parallel_index,
+    parallel_group: task.parallel_group,
+    extra: extractExtra(task),
+  };
+  updateManifest(task.id, patch);
+}
+
+/** 从 Task 对象里抽取 extra 字段（非列字段） */
+function extractExtra(task: Task): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(task)) {
+    if (TABLE_COLUMNS.has(k)) continue;
+    out[k] = v;
+  }
+  return out;
 }
 
 export interface ListTasksFilters {

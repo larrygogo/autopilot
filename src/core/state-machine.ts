@@ -1,6 +1,7 @@
 import { getDb, getTask, now, TABLE_COLUMNS, PROTECTED_COLUMNS } from "./db";
 import { emit } from "../daemon/event-bus";
 import { appendTaskEvent } from "./task-logs";
+import { appendTransition as appendManifestTransition } from "./manifest";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -128,10 +129,44 @@ export function transition(
     );
   })();
 
+  const transitionTs = now();
+  appendManifestTransition(
+    taskId,
+    { from: fromStatus, to: toStatus, trigger, ts: transitionTs, note: opts.note ?? null },
+    syncPatchFromTask(taskId),
+  );
+
   emit({ type: "task:transition", payload: { taskId, from: fromStatus, to: toStatus, trigger } });
   appendTaskEvent(taskId, { type: "transition", from: fromStatus, to: toStatus, trigger, note: opts.note });
 
   return [fromStatus, toStatus];
+}
+
+/**
+ * 从 DB 的最新任务状态派生 manifest 的同步 patch。
+ * 用于 transition 完成后把 started_at、extra 等更新反映到 manifest。
+ */
+function syncPatchFromTask(taskId: string): {
+  status: string;
+  updated_at: string;
+  started_at: string | null;
+  extra: Record<string, unknown>;
+  failure_count: number;
+} | undefined {
+  const t = getTask(taskId);
+  if (!t) return undefined;
+  const extra: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(t)) {
+    if (TABLE_COLUMNS.has(k)) continue;
+    extra[k] = v;
+  }
+  return {
+    status: t.status,
+    updated_at: t.updated_at,
+    started_at: t.started_at,
+    failure_count: t.failure_count,
+    extra,
+  };
 }
 
 /**
@@ -145,6 +180,9 @@ export function forceTransition(
 ): void {
   const db = getDb();
 
+  let capturedFromStatus = "";
+  let capturedTs = "";
+
   db.transaction(() => {
     const task = db
       .query<{ status: string }, [string]>(
@@ -156,23 +194,29 @@ export function forceTransition(
       throw new InvalidTransitionError(`任务不存在：${taskId}`);
     }
 
-    const fromStatus = task.status;
-    const ts = now();
+    capturedFromStatus = task.status;
+    capturedTs = now();
 
     db.run(
       "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
-      [toStatus, ts, taskId]
+      [toStatus, capturedTs, taskId]
     );
 
     db.run(
       "INSERT INTO task_logs (task_id, from_status, to_status, trigger_name, note, created_at)" +
         " VALUES (?, ?, ?, ?, ?, ?)",
-      [taskId, fromStatus, toStatus, "force_transition", note, ts]
+      [taskId, capturedFromStatus, toStatus, "force_transition", note, capturedTs]
     );
-
-    emit({ type: "task:transition", payload: { taskId, from: fromStatus, to: toStatus, trigger: "force_transition" } });
-    appendTaskEvent(taskId, { type: "transition", from: fromStatus, to: toStatus, trigger: "force_transition", note });
   })();
+
+  appendManifestTransition(
+    taskId,
+    { from: capturedFromStatus, to: toStatus, trigger: "force_transition", ts: capturedTs, note },
+    syncPatchFromTask(taskId),
+  );
+
+  emit({ type: "task:transition", payload: { taskId, from: capturedFromStatus, to: toStatus, trigger: "force_transition" } });
+  appendTaskEvent(taskId, { type: "transition", from: capturedFromStatus, to: toStatus, trigger: "force_transition", note });
 }
 
 /**

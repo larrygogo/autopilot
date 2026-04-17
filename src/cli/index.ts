@@ -2,8 +2,10 @@ import { Command } from "commander";
 import { mkdirSync } from "fs";
 import { join } from "path";
 import { VERSION, AUTOPILOT_HOME } from "../index";
-import { initDb } from "../core/db";
+import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
+import { rebuildIndexFromManifests, rebuildManifestsFromIndex } from "../core/rebuild-index";
+import { discover } from "../core/registry";
 import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
 import {
   readPid,
@@ -359,6 +361,45 @@ task
       console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
       process.exit(1);
     }
+  });
+
+task
+  .command("rebuild-index")
+  .description("从磁盘上的 task-manifest.json 重建 SQLite 索引（要求 daemon 停止）")
+  .action(async () => {
+    if (isDaemonRunning()) {
+      console.error("错误：daemon 运行中。请先 `autopilot daemon stop` 再重建索引。");
+      process.exit(1);
+    }
+    initDb();
+    await runPendingMigrations();
+    const result = rebuildIndexFromManifests();
+    closeDb();
+    console.log(`扫描 ${result.scanned}：新增 ${result.inserted}，更新 ${result.updated}，跳过 ${result.skipped}，失败 ${result.errors.length}`);
+    for (const err of result.errors) {
+      console.error(`  [${err.taskId}] ${err.message}`);
+    }
+    if (result.errors.length > 0) process.exit(1);
+  });
+
+task
+  .command("rebuild-manifest")
+  .description("从 DB 反向给缺失 manifest 的任务补一份（一次性迁移，要求 daemon 停止）")
+  .action(async () => {
+    if (isDaemonRunning()) {
+      console.error("错误：daemon 运行中。请先 `autopilot daemon stop` 再补 manifest。");
+      process.exit(1);
+    }
+    initDb();
+    await runPendingMigrations();
+    await discover();
+    const result = rebuildManifestsFromIndex();
+    closeDb();
+    console.log(`扫描 ${result.scanned}：新增 ${result.created}，已存在 ${result.alreadyExists}，失败 ${result.errors.length}`);
+    for (const err of result.errors) {
+      console.error(`  [${err.taskId}] ${err.message}`);
+    }
+    if (result.errors.length > 0) process.exit(1);
   });
 
 task

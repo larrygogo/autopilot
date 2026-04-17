@@ -2,6 +2,7 @@ import { existsSync } from "fs";
 import { join, resolve, sep } from "path";
 import { VERSION } from "../index";
 import { initDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks } from "../core/db";
+import { snapshotWorkflow } from "../core/manifest";
 import type { ListTasksFilters } from "../core/db";
 import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
@@ -327,6 +328,7 @@ export async function handleRequest(req: Request): Promise<Response> {
         workflow: workflowName,
         initialStatus: wf.initial_state,
         extra,
+        workflowSnapshot: snapshotWorkflow(wf),
       });
 
       // 初始化任务 workspace（若工作流声明了 template 则复制）
