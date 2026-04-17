@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { api, type AgentItem } from "../hooks/useApi";
+import { useToast } from "../components/Toast";
+import { ConfirmDialog } from "../components/Modal";
 
-type Toast = { type: "success" | "error"; message: string } | null;
 type Mode = { type: "list" } | { type: "edit"; original: string | null; draft: AgentItem };
 
 const PROVIDERS = ["anthropic", "openai", "google"] as const;
@@ -11,18 +12,14 @@ function emptyDraft(): AgentItem {
   return { name: "", provider: "anthropic", model: "", max_turns: 10, permission_mode: "auto", system_prompt: "" };
 }
 
-export function Agents() {
+export function Agents({ embedded = false }: { embedded?: boolean }) {
+  const toast = useToast();
   const [agents, setAgents] = useState<AgentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>({ type: "list" });
-  const [toast, setToast] = useState<Toast>(null);
   const [saving, setSaving] = useState(false);
-
-  const showToast = (type: "success" | "error", message: string) => {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 3000);
-  };
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   const refresh = () => {
     setLoading(true);
@@ -39,14 +36,17 @@ export function Agents() {
   const startEdit = (a: AgentItem) => setMode({ type: "edit", original: a.name, draft: { ...a } });
   const cancel = () => setMode({ type: "list" });
 
-  const remove = async (name: string) => {
-    if (!confirm(`确认删除 agent "${name}"？`)) return;
+  const doDelete = async () => {
+    if (!pendingDelete) return;
+    const name = pendingDelete;
     try {
       await api.deleteAgent(name);
-      showToast("success", `已删除 ${name}`);
+      toast.success(`已删除 ${name}`);
       refresh();
     } catch (e: any) {
-      showToast("error", e.message);
+      toast.error("删除失败", e?.message ?? String(e));
+    } finally {
+      setPendingDelete(null);
     }
   };
 
@@ -54,18 +54,16 @@ export function Agents() {
     if (mode.type !== "edit") return;
     const { original, draft } = mode;
     if (!draft.name || !/^[\w.\-]+$/.test(draft.name)) {
-      showToast("error", "名称必须为字母、数字、._- 组成，且非空");
+      toast.warning("名称必须为字母、数字、._- 组成，且非空");
       return;
     }
     if (!draft.provider) {
-      showToast("error", "必须选择 provider");
+      toast.warning("必须选择 provider");
       return;
     }
     setSaving(true);
     try {
-      const body: Record<string, unknown> = {
-        provider: draft.provider,
-      };
+      const body: Record<string, unknown> = { provider: draft.provider };
       if (draft.model) body.model = draft.model;
       if (typeof draft.max_turns === "number") body.max_turns = draft.max_turns;
       if (draft.permission_mode) body.permission_mode = draft.permission_mode;
@@ -75,17 +73,16 @@ export function Agents() {
       if (original && original === draft.name) {
         await api.updateAgent(original, body);
       } else if (original && original !== draft.name) {
-        // 改名：新建 + 删旧
         await api.createAgent({ name: draft.name, ...body });
         await api.deleteAgent(original);
       } else {
         await api.createAgent({ name: draft.name, ...body });
       }
-      showToast("success", "已保存");
+      toast.success("已保存");
       setMode({ type: "list" });
       refresh();
     } catch (e: any) {
-      showToast("error", e.message);
+      toast.error("保存失败", e?.message ?? String(e));
     } finally {
       setSaving(false);
     }
@@ -96,23 +93,25 @@ export function Agents() {
     setMode({ ...mode, draft: { ...mode.draft, [key]: value } });
   };
 
-  if (loading) {
-    return <div className="container"><p className="muted">加载中...</p></div>;
-  }
-
-  return (
-    <div className="container">
-      {toast && <div className={`toast toast-${toast.type}`}>{toast.message}</div>}
-
+  const body = (
+    <>
       {mode.type === "list" && (
         <>
-          <div className="page-hdr">
-            <h2>Agents</h2>
-            <span>{agents.length} 个</span>
-            <button className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={startCreate}>
-              + 新建
-            </button>
-          </div>
+          {!embedded && (
+            <div className="page-hdr">
+              <h2>智能体</h2>
+              <span>{agents.length} 个</span>
+              <button className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={startCreate}>
+                新建
+              </button>
+            </div>
+          )}
+          {embedded && (
+            <div className="subtab-toolbar">
+              <span className="muted">{agents.length} 个智能体</span>
+              <button className="btn btn-primary" onClick={startCreate}>新建</button>
+            </div>
+          )}
 
           {loadError && (
             <div className="card" style={{ marginBottom: "1rem", borderColor: "rgba(248,113,113,0.4)" }}>
@@ -123,9 +122,12 @@ export function Agents() {
             </div>
           )}
 
-          {agents.length === 0 ? (
-            <div className="card">
-              <p className="muted">暂无 agent。点击右上角「新建」创建第一个 agent。</p>
+          {loading ? (
+            <p className="muted">加载中...</p>
+          ) : agents.length === 0 ? (
+            <div className="card empty-state">
+              <p className="muted">暂无智能体</p>
+              <button className="btn btn-primary" onClick={startCreate}>创建第一个智能体</button>
             </div>
           ) : (
             <div className="agent-list">
@@ -142,7 +144,7 @@ export function Agents() {
                     </div>
                     <div className="agent-actions">
                       <button className="btn btn-secondary" onClick={() => startEdit(a)}>编辑</button>
-                      <button className="btn btn-danger" onClick={() => remove(a.name)}>删除</button>
+                      <button className="btn btn-danger" onClick={() => setPendingDelete(a.name)}>删除</button>
                     </div>
                   </div>
                   {a.system_prompt && (
@@ -161,7 +163,7 @@ export function Agents() {
         <>
           <div className="page-hdr">
             <button className="btn-back" onClick={cancel}>← 返回</button>
-            <h2>{mode.original ? `编辑 ${mode.original}` : "新建 Agent"}</h2>
+            <h2>{mode.original ? `编辑 ${mode.original}` : "新建智能体"}</h2>
           </div>
 
           <div className="card">
@@ -180,7 +182,7 @@ export function Agents() {
               </label>
 
               <label>
-                <span>Provider <span className="required">*</span></span>
+                <span>提供商 <span className="required">*</span></span>
                 <select
                   className="wf-select"
                   value={mode.draft.provider ?? ""}
@@ -202,7 +204,7 @@ export function Agents() {
               </label>
 
               <label>
-                <span>Max Turns</span>
+                <span>最大轮数</span>
                 <input
                   type="number"
                   className="text-input"
@@ -213,7 +215,7 @@ export function Agents() {
               </label>
 
               <label>
-                <span>Permission Mode</span>
+                <span>权限模式</span>
                 <select
                   className="wf-select"
                   value={mode.draft.permission_mode ?? "auto"}
@@ -224,7 +226,7 @@ export function Agents() {
               </label>
 
               <label>
-                <span>Extends（继承的 agent 名，可选）</span>
+                <span>继承自（可选）</span>
                 <input
                   type="text"
                   className="text-input mono"
@@ -235,11 +237,11 @@ export function Agents() {
               </label>
 
               <label className="col-span-2">
-                <span>System Prompt</span>
+                <span>系统提示词</span>
                 <textarea
                   className="yaml-editor"
                   style={{ minHeight: 180 }}
-                  placeholder="这里定义该 agent 的基础角色提示词。调用时可追加 additional_system。"
+                  placeholder="这里定义该智能体的基础角色提示词。调用时可追加 additional_system。"
                   value={mode.draft.system_prompt ?? ""}
                   onChange={(e) => updateDraft("system_prompt", e.target.value)}
                 />
@@ -255,6 +257,18 @@ export function Agents() {
           </div>
         </>
       )}
-    </div>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="删除智能体"
+        message={<span>确认删除智能体 <code className="mono">{pendingDelete}</code>？此操作不可恢复。</span>}
+        confirmText="删除"
+        danger
+        onConfirm={doDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
+    </>
   );
+
+  return embedded ? <>{body}</> : <div className="container">{body}</div>;
 }

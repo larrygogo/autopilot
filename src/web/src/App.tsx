@@ -1,23 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { useWebSocket } from "./hooks/useWebSocket";
+import { ToastProvider } from "./components/Toast";
 import { Dashboard } from "./pages/Dashboard";
 import { Tasks } from "./pages/Tasks";
 import { TaskDetail } from "./pages/TaskDetail";
 import { Workflows } from "./pages/Workflows";
-import { Providers } from "./pages/Providers";
-import { Agents } from "./pages/Agents";
-import { Settings } from "./pages/Settings";
+import { Config } from "./pages/Config";
 
 type Page =
   | "dashboard"
   | "tasks"
   | "workflows"
-  | "providers"
-  | "agents"
-  | "settings"
+  | "config"
   | { type: "task-detail"; id: string };
 
-export function App() {
+function AppInner() {
   const [page, setPage] = useState<Page>("dashboard");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { state: wsState, subscribe } = useWebSocket();
@@ -28,9 +25,7 @@ export function App() {
     { key: "dashboard", label: "Dashboard", page: "dashboard" },
     { key: "tasks", label: "任务", page: "tasks" },
     { key: "workflows", label: "工作流", page: "workflows" },
-    { key: "providers", label: "Providers", page: "providers" },
-    { key: "agents", label: "Agents", page: "agents" },
-    { key: "settings", label: "设置", page: "settings" },
+    { key: "config", label: "配置", page: "config" },
   ];
 
   const wsColor = wsState === "connected" ? "#34d399" : wsState === "connecting" ? "#fbbf24" : "#f87171";
@@ -132,10 +127,16 @@ export function App() {
         />
       )}
       {page === "workflows" && <Workflows />}
-      {page === "providers" && <Providers />}
-      {page === "agents" && <Agents />}
-      {page === "settings" && <Settings />}
+      {page === "config" && <Config />}
     </>
+  );
+}
+
+export function App() {
+  return (
+    <ToastProvider>
+      <AppInner />
+    </ToastProvider>
   );
 }
 
@@ -270,10 +271,48 @@ a { cursor: pointer; }
 .agent-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
 .agent-prompt { margin-top: 0.6rem; font-size: 0.82rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
-.toast { position: fixed; top: 60px; right: 1.5rem; padding: 0.6rem 1.2rem; border-radius: 8px; font-size: 0.82rem; font-weight: 500; z-index: 200; animation: slideIn 0.2s ease; max-width: calc(100vw - 3rem); }
-.toast-success { background: rgba(52,211,153,0.15); color: var(--green); border: 1px solid rgba(52,211,153,0.3); }
-.toast-error { background: rgba(248,113,113,0.15); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+.btn-danger-solid { background: var(--red); color: #fff; }
+.btn-danger-solid:hover:not(:disabled) { background: #ef5959; }
+
+.empty-state { text-align: center; padding: 2.5rem 1rem; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+.empty-state p { margin: 0; }
+
+.subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 1.25rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.subtabs::-webkit-scrollbar { display: none; }
+.subtab { background: transparent; border: none; padding: 0.7rem 1.1rem; color: var(--muted); font-size: 0.88rem; font-weight: 500; font-family: inherit; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; min-height: 40px; }
+.subtab:hover { color: var(--text2); }
+.subtab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+.subtab-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; }
+
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 300; animation: fadeIn 0.15s ease; }
+.modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--radius); z-index: 301; width: calc(100vw - 2rem); max-height: calc(100vh - 2rem); display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.6); animation: modalIn 0.15s ease; outline: none; }
+.modal-sm { max-width: 420px; }
+.modal-md { max-width: 560px; }
+.modal-lg { max-width: 800px; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); }
+.modal-header h3 { font-size: 1rem; font-weight: 600; margin: 0; }
+.modal-close { background: none; border: none; color: var(--text2); font-size: 1.6rem; line-height: 1; width: 32px; height: 32px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.modal-close:hover { background: var(--bg3); color: var(--text); }
+.modal-body { padding: 1.25rem; overflow-y: auto; font-size: 0.9rem; }
+.modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; padding: 0.75rem 1.25rem; border-top: 1px solid var(--border); flex-wrap: wrap; }
+@keyframes modalIn { from { opacity: 0; transform: translate(-50%, -48%); } to { opacity: 1; transform: translate(-50%, -50%); } }
+
+.toast-stack { position: fixed; top: 60px; right: 1rem; z-index: 400; display: flex; flex-direction: column; gap: 0.5rem; width: min(380px, calc(100vw - 2rem)); pointer-events: none; }
+.toast-item { pointer-events: auto; border-radius: 8px; padding: 0.7rem 0.9rem; font-size: 0.84rem; border: 1px solid; animation: slideIn 0.2s ease; box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
+.toast-row { display: flex; align-items: center; gap: 0.5rem; }
+.toast-msg { flex: 1; word-break: break-word; }
+.toast-row-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
+.toast-btn { background: transparent; border: 1px solid transparent; color: inherit; opacity: 0.75; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; font-family: inherit; }
+.toast-btn:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+.toast-close { font-size: 1.1rem; line-height: 1; padding: 0 0.4rem; }
+.toast-detail { margin-top: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.3); border-radius: 4px; font-size: 0.75rem; font-family: var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; }
+.toast-success { background: rgba(52,211,153,0.12); color: var(--green); border-color: rgba(52,211,153,0.3); }
+.toast-info { background: rgba(96,165,250,0.12); color: var(--blue); border-color: rgba(96,165,250,0.3); }
+.toast-warning { background: rgba(251,191,36,0.12); color: var(--yellow); border-color: rgba(251,191,36,0.3); }
+.toast-error { background: rgba(248,113,113,0.12); color: var(--red); border-color: rgba(248,113,113,0.3); }
 @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 0.1rem 0.4rem; font-family: var(--mono); font-size: 0.78em; color: var(--text2); }
 
 @media (max-width: 640px) {
   .topbar { padding: 0 0.75rem; height: 48px; }
@@ -303,7 +342,10 @@ a { cursor: pointer; }
 
   .workflow-grid { grid-template-columns: 1fr; }
 
-  .toast { top: auto; bottom: 1rem; left: 1rem; right: 1rem; max-width: none; text-align: center; }
+  .toast-stack { top: auto; bottom: 0.75rem; right: 0.75rem; left: 0.75rem; width: auto; }
+
+  .modal { width: calc(100vw - 1rem); }
+  .modal-header, .modal-body, .modal-actions { padding-left: 1rem; padding-right: 1rem; }
 }
 
 @media (max-width: 380px) {

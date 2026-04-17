@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../hooks/useApi";
+import { NewTaskDialog } from "../components/NewTaskDialog";
 
 interface DaemonStatus {
   version: string;
@@ -10,6 +11,7 @@ interface DaemonStatus {
 
 export function Dashboard() {
   const [status, setStatus] = useState<DaemonStatus | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
 
   useEffect(() => {
     api.getStatus().then(setStatus).catch(() => {});
@@ -40,6 +42,9 @@ export function Dashboard() {
       <div className="page-hdr">
         <h2>Dashboard</h2>
         <span>v{status.version} · PID {status.pid}</span>
+        <button className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setNewOpen(true)}>
+          新建任务
+        </button>
       </div>
 
       <div className="stats">
@@ -79,6 +84,8 @@ export function Dashboard() {
           </div>
         </div>
       )}
+
+      <NewTaskDialog open={newOpen} onClose={() => setNewOpen(false)} />
     </div>
   );
 }

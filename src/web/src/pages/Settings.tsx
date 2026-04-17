@@ -1,107 +1,97 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../hooks/useApi";
+import { useToast } from "../components/Toast";
 
-type Toast = { type: "success" | "error"; message: string } | null;
+export function Settings({ embedded = false }: { embedded?: boolean }) {
+  const toast = useToast();
 
-export function Settings() {
-  // 全局配置
   const [configYaml, setConfigYaml] = useState("");
   const [configLoading, setConfigLoading] = useState(true);
+  const [configSaving, setConfigSaving] = useState(false);
 
-  // 工作流配置
   const [workflows, setWorkflows] = useState<{ name: string; description: string }[]>([]);
   const [selectedWf, setSelectedWf] = useState("");
   const [wfYaml, setWfYaml] = useState("");
   const [wfLoading, setWfLoading] = useState(false);
+  const [wfSaving, setWfSaving] = useState(false);
 
-  // Daemon 信息
   const [status, setStatus] = useState<any>(null);
 
-  // Toast
-  const [toast, setToast] = useState<Toast>(null);
-
-  const showToast = (type: "success" | "error", message: string) => {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  // 加载全局配置
   useEffect(() => {
     api.getConfig()
       .then((res) => setConfigYaml(res.yaml))
-      .catch(() => {})
+      .catch((e) => toast.error("加载全局配置失败", e?.message ?? String(e)))
       .finally(() => setConfigLoading(false));
   }, []);
 
-  // 加载工作流列表
   useEffect(() => {
     api.listWorkflows().then(setWorkflows).catch(() => {});
   }, []);
 
-  // 加载 daemon 状态
   useEffect(() => {
     api.getStatus().then(setStatus).catch(() => {});
   }, []);
 
-  // 选中工作流时加载 YAML
   useEffect(() => {
-    if (!selectedWf) {
-      setWfYaml("");
-      return;
-    }
+    if (!selectedWf) { setWfYaml(""); return; }
     setWfLoading(true);
     api.getWorkflowYaml(selectedWf)
       .then((res) => setWfYaml(res.yaml))
-      .catch((e) => showToast("error", e.message))
+      .catch((e) => toast.error("加载工作流失败", e?.message ?? String(e)))
       .finally(() => setWfLoading(false));
   }, [selectedWf]);
 
-  // 保存全局配置
   const saveConfig = async () => {
+    setConfigSaving(true);
     try {
       await api.saveConfig(configYaml);
-      showToast("success", "全局配置已保存");
+      toast.success("全局配置已保存");
     } catch (e: any) {
-      showToast("error", e.message);
+      toast.error("保存失败", e?.message ?? String(e));
+    } finally {
+      setConfigSaving(false);
     }
   };
 
-  // 保存工作流 YAML
   const saveWorkflow = async () => {
     if (!selectedWf) return;
+    setWfSaving(true);
     try {
       await api.saveWorkflowYaml(selectedWf, wfYaml);
-      showToast("success", `工作流 ${selectedWf} 已保存并重载`);
+      toast.success(`工作流 ${selectedWf} 已保存并重载`);
     } catch (e: any) {
-      showToast("error", e.message);
+      toast.error("保存失败", e?.message ?? String(e));
+    } finally {
+      setWfSaving(false);
     }
   };
 
-  // 重载工作流
   const reloadAll = async () => {
     try {
       const res = await api.reloadWorkflows();
       setWorkflows(res.workflows);
-      showToast("success", "工作流已重载");
+      toast.success("工作流已重载");
     } catch (e: any) {
-      showToast("error", e.message);
+      toast.error("重载失败", e?.message ?? String(e));
     }
   };
 
-  return (
-    <div className="container">
-      {/* Toast */}
-      {toast && (
-        <div className={`toast toast-${toast.type}`}>
-          {toast.message}
+  const body = (
+    <>
+      {!embedded && (
+        <div className="page-hdr">
+          <h2>高级 (YAML)</h2>
         </div>
       )}
 
-      <div className="page-hdr">
-        <h2>设置</h2>
-      </div>
+      {embedded && (
+        <div className="subtab-toolbar">
+          <span className="muted" style={{ fontSize: "0.82rem" }}>
+            优先使用上方的图形化编辑；这里是 YAML 直编后门
+          </span>
+        </div>
+      )}
 
-      {/* Daemon 信息 */}
       {status && (
         <div className="card" style={{ marginBottom: "1rem" }}>
           <h3>Daemon 信息</h3>
@@ -114,7 +104,6 @@ export function Settings() {
         </div>
       )}
 
-      {/* 全局配置 */}
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div className="card-header">
           <h3>全局配置</h3>
@@ -132,13 +121,14 @@ export function Settings() {
               spellCheck={false}
             />
             <div className="card-actions">
-              <button className="btn btn-primary" onClick={saveConfig}>保存</button>
+              <button className="btn btn-primary" onClick={saveConfig} disabled={configSaving}>
+                {configSaving ? "保存中..." : "保存"}
+              </button>
             </div>
           </>
         )}
       </div>
 
-      {/* 工作流配置 */}
       <div className="card">
         <div className="card-header">
           <h3>工作流配置</h3>
@@ -174,15 +164,19 @@ export function Settings() {
                   spellCheck={false}
                 />
                 <div className="card-actions">
-                  <button className="btn btn-primary" onClick={saveWorkflow}>保存并重载</button>
+                  <button className="btn btn-primary" onClick={saveWorkflow} disabled={wfSaving}>
+                    {wfSaving ? "保存中..." : "保存并重载"}
+                  </button>
                 </div>
               </>
             )}
           </>
         )}
       </div>
-    </div>
+    </>
   );
+
+  return embedded ? <>{body}</> : <div className="container">{body}</div>;
 }
 
 function formatUptime(s: number): string {
@@ -191,24 +185,22 @@ function formatUptime(s: number): string {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
-const CONFIG_PLACEHOLDER = `# 全局配置。仅存放跨工作流共享的基础设施（如 agents）；
+const CONFIG_PLACEHOLDER = `# 全局配置。仅存放跨工作流共享的基础设施（providers / agents）；
 # 工作流自己的参数请写在该工作流目录下的 workflow.yaml 或
 # 其独立配置文件里，不要放在这里。
 #
-# agents：共享的命名 agent 定义。工作流可同名覆盖或 extends 别名，
-#   调用 agent.run() 时可再用 RunOptions 覆盖提示词与模型。
+# providers:
+#   anthropic:
+#     default_model: claude-sonnet-4-6
+#     base_url: ""
+#     enabled: true
 #
 # agents:
 #   coder:
-#     provider: anthropic          # 支持 anthropic / openai / google
+#     provider: anthropic
 #     model: claude-sonnet-4-6
 #     max_turns: 10
 #     permission_mode: auto
 #     system_prompt: |
 #       你是通用编码助手。
-#   reviewer:
-#     provider: anthropic
-#     model: claude-opus-4-7
-#     system_prompt: |
-#       你是严苛的代码审查员。
 `;

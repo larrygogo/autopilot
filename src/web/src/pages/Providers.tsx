@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, type ProviderItem } from "../hooks/useApi";
-
-type Toast = { type: "success" | "error"; message: string } | null;
+import { useToast } from "../components/Toast";
 
 const PROVIDER_META: Record<string, { label: string; defaultModel: string; loginCmd: string }> = {
   anthropic: { label: "Anthropic (Claude)", defaultModel: "claude-sonnet-4-6", loginCmd: "claude login" },
@@ -9,17 +8,12 @@ const PROVIDER_META: Record<string, { label: string; defaultModel: string; login
   google: { label: "Google (Gemini)", defaultModel: "gemini-2.5-pro", loginCmd: "gemini auth login" },
 };
 
-export function Providers() {
+export function Providers({ embedded = false }: { embedded?: boolean }) {
+  const toast = useToast();
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [toast, setToast] = useState<Toast>(null);
   const [saving, setSaving] = useState<string | null>(null);
-
-  const showToast = (type: "success" | "error", message: string) => {
-    setToast({ type, message });
-    setTimeout(() => setToast(null), 3000);
-  };
 
   const refresh = () => {
     setLoading(true);
@@ -43,26 +37,22 @@ export function Providers() {
     try {
       const { name, ...cfg } = p;
       await api.saveProviderConfig(name, cfg);
-      showToast("success", `${name} 配置已保存`);
+      toast.success(`${name} 配置已保存`);
     } catch (e: any) {
-      showToast("error", e.message);
+      toast.error("保存失败", e?.message ?? String(e));
     } finally {
       setSaving(null);
     }
   };
 
-  if (loading) {
-    return <div className="container"><p className="muted">加载中...</p></div>;
-  }
-
-  return (
-    <div className="container">
-      {toast && <div className={`toast toast-${toast.type}`}>{toast.message}</div>}
-
-      <div className="page-hdr">
-        <h2>Providers</h2>
-        <span>LLM 提供商全局默认</span>
-      </div>
+  const body = (
+    <>
+      {!embedded && (
+        <div className="page-hdr">
+          <h2>模型提供商</h2>
+          <span>LLM 提供商全局默认</span>
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: "1rem" }}>
         <p className="muted" style={{ fontSize: "0.85rem" }}>
@@ -80,66 +70,72 @@ export function Providers() {
         </div>
       )}
 
-      <div className="provider-list">
-        {providers.map((p) => {
-          const meta = PROVIDER_META[p.name] ?? { label: p.name, defaultModel: "", loginCmd: "" };
-          return (
-            <div key={p.name} className="card provider-card">
-              <div className="card-header">
-                <h3>{meta.label}</h3>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={p.enabled !== false}
-                    onChange={(e) => updateField(p.name, "enabled", e.target.checked)}
-                  />
-                  <span>{p.enabled !== false ? "启用" : "禁用"}</span>
-                </label>
+      {loading ? (
+        <p className="muted">加载中...</p>
+      ) : (
+        <div className="provider-list">
+          {providers.map((p) => {
+            const meta = PROVIDER_META[p.name] ?? { label: p.name, defaultModel: "", loginCmd: "" };
+            return (
+              <div key={p.name} className="card provider-card">
+                <div className="card-header">
+                  <h3>{meta.label}</h3>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={p.enabled !== false}
+                      onChange={(e) => updateField(p.name, "enabled", e.target.checked)}
+                    />
+                    <span>{p.enabled !== false ? "启用" : "禁用"}</span>
+                  </label>
+                </div>
+
+                {meta.loginCmd && (
+                  <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.75rem" }}>
+                    登录命令：<span className="mono">{meta.loginCmd}</span>
+                  </p>
+                )}
+
+                <div className="form-grid">
+                  <label className="col-span-2">
+                    <span>默认模型</span>
+                    <input
+                      type="text"
+                      className="text-input mono"
+                      placeholder={meta.defaultModel}
+                      value={p.default_model ?? ""}
+                      onChange={(e) => updateField(p.name, "default_model", e.target.value)}
+                    />
+                  </label>
+
+                  <label className="col-span-2">
+                    <span>Base URL（可选 — 仅在使用自建代理/兼容端点时填写）</span>
+                    <input
+                      type="text"
+                      className="text-input mono"
+                      placeholder="留空使用官方端点"
+                      value={p.base_url ?? ""}
+                      onChange={(e) => updateField(p.name, "base_url", e.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="card-actions">
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => save(p)}
+                    disabled={saving === p.name}
+                  >
+                    {saving === p.name ? "保存中..." : "保存"}
+                  </button>
+                </div>
               </div>
-
-              {meta.loginCmd && (
-                <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.75rem" }}>
-                  登录命令：<span className="mono">{meta.loginCmd}</span>
-                </p>
-              )}
-
-              <div className="form-grid">
-                <label className="col-span-2">
-                  <span>默认模型</span>
-                  <input
-                    type="text"
-                    className="text-input mono"
-                    placeholder={meta.defaultModel}
-                    value={p.default_model ?? ""}
-                    onChange={(e) => updateField(p.name, "default_model", e.target.value)}
-                  />
-                </label>
-
-                <label className="col-span-2">
-                  <span>Base URL（可选 — 仅在使用自建代理/兼容端点时填写）</span>
-                  <input
-                    type="text"
-                    className="text-input mono"
-                    placeholder="留空使用官方端点"
-                    value={p.base_url ?? ""}
-                    onChange={(e) => updateField(p.name, "base_url", e.target.value)}
-                  />
-                </label>
-              </div>
-
-              <div className="card-actions">
-                <button
-                  className="btn btn-primary"
-                  onClick={() => save(p)}
-                  disabled={saving === p.name}
-                >
-                  {saving === p.name ? "保存中..." : "保存"}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
+
+  return embedded ? <>{body}</> : <div className="container">{body}</div>;
 }

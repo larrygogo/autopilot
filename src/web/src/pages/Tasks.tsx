@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { api } from "../hooks/useApi";
 import { Badge } from "../components/Badge";
+import { NewTaskDialog } from "../components/NewTaskDialog";
 
 interface Task {
   id: string;
@@ -19,6 +20,7 @@ interface TasksProps {
 export function Tasks({ onSelect, subscribe }: TasksProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [newOpen, setNewOpen] = useState(false);
 
   const refresh = useCallback(() => {
     api.listTasks().then(setTasks).catch(() => {}).finally(() => setLoading(false));
@@ -43,10 +45,16 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
       <div className="page-hdr">
         <h2>任务列表</h2>
         <span>{tasks.length} 个任务</span>
+        <button className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setNewOpen(true)}>
+          新建任务
+        </button>
       </div>
 
       {tasks.length === 0 ? (
-        <div className="card"><p className="muted">暂无任务</p></div>
+        <div className="card empty-state">
+          <p className="muted">暂无任务</p>
+          <button className="btn btn-primary" onClick={() => setNewOpen(true)}>创建第一个任务</button>
+        </div>
       ) : (
         <div className="table-wrap">
           <table className="task-table">
@@ -73,6 +81,12 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
           </table>
         </div>
       )}
+
+      <NewTaskDialog
+        open={newOpen}
+        onClose={() => setNewOpen(false)}
+        onCreated={(id) => { refresh(); onSelect(id); }}
+      />
     </div>
   );
 }
