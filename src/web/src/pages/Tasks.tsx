@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../hooks/useApi";
 import { Badge } from "../components/Badge";
 import { NewTaskDialog } from "../components/NewTaskDialog";
+import { ConfirmDialog } from "../components/Modal";
+import { useToast } from "../components/Toast";
 
 interface Task {
   id: string;
@@ -28,13 +30,22 @@ const STATUS_GROUPS: { key: StatusGroup; label: string; match: (s: string) => bo
   { key: "failed", label: "失败", match: (s) => s === "failed" || s === "error" },
 ];
 
+const TERMINAL_PREFIXES = ["done", "cancelled", "canceled", "failed", "error"];
+function isTerminal(status: string): boolean {
+  return TERMINAL_PREFIXES.includes(status);
+}
+
 export function Tasks({ onSelect, subscribe }: TasksProps) {
+  const toast = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [newOpen, setNewOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusGroup>("all");
   const [workflowFilter, setWorkflowFilter] = useState<string>("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const refresh = useCallback(() => {
     api.listTasks().then(setTasks).catch(() => {}).finally(() => setLoading(false));
@@ -65,12 +76,50 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
     });
   }, [tasks, search, statusFilter, workflowFilter]);
 
+  const cancellableSelected = useMemo(() => {
+    return filtered.filter((t) => selected.has(t.id) && !isTerminal(t.status));
+  }, [filtered, selected]);
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const filteredIds = filtered.map((t) => t.id);
+    const allSelected = filteredIds.every((id) => selected.has(id));
+    setSelected(allSelected
+      ? new Set([...selected].filter((id) => !filteredIds.includes(id)))
+      : new Set([...selected, ...filteredIds]));
+  };
+
+  const clearSelection = () => setSelected(new Set());
+
+  const doBulkCancel = async () => {
+    setCancelling(true);
+    let ok = 0, fail = 0;
+    for (const t of cancellableSelected) {
+      try { await api.cancelTask(t.id); ok++; }
+      catch { fail++; }
+    }
+    setCancelling(false);
+    setConfirmOpen(false);
+    if (fail === 0) toast.success(`已请求取消 ${ok} 个任务`);
+    else toast.warning(`请求取消 ${ok} 个任务，${fail} 个失败`);
+    clearSelection();
+    refresh();
+  };
+
   if (loading) {
     return <div className="container"><p className="muted">加载中...</p></div>;
   }
 
   const totalMatched = filtered.length;
   const totalAll = tasks.length;
+  const allFilteredSelected = filtered.length > 0 && filtered.every((t) => selected.has(t.id));
 
   return (
     <div className="container">
@@ -116,6 +165,22 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
         </div>
       )}
 
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <span><strong>{selected.size}</strong> 个已选 · 可取消 <strong>{cancellableSelected.length}</strong> 个</span>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              className="btn btn-danger"
+              onClick={() => setConfirmOpen(true)}
+              disabled={cancellableSelected.length === 0}
+            >
+              批量取消
+            </button>
+            <button className="btn btn-secondary" onClick={clearSelection}>清除选择</button>
+          </div>
+        </div>
+      )}
+
       {totalAll === 0 ? (
         <div className="card empty-state">
           <p className="muted">暂无任务</p>
@@ -135,6 +200,14 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
             <table className="task-table">
               <thead>
                 <tr>
+                  <th style={{ width: 32 }}>
+                    <input
+                      type="checkbox"
+                      aria-label="全选"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
                   <th>ID</th>
                   <th>标题</th>
                   <th>工作流</th>
@@ -144,12 +217,20 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
               </thead>
               <tbody>
                 {filtered.map((t) => (
-                  <tr key={t.id} onClick={() => onSelect(t.id)} style={{ cursor: "pointer" }}>
-                    <td className="mono">{t.id}</td>
-                    <td>{t.title}</td>
-                    <td>{t.workflow}</td>
-                    <td><Badge status={t.status} /></td>
-                    <td className="muted">{new Date(t.updated_at).toLocaleString()}</td>
+                  <tr key={t.id} style={{ cursor: "pointer" }}>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`选中 ${t.id}`}
+                        checked={selected.has(t.id)}
+                        onChange={() => toggleSelect(t.id)}
+                      />
+                    </td>
+                    <td className="mono" onClick={() => onSelect(t.id)}>{t.id}</td>
+                    <td onClick={() => onSelect(t.id)}>{t.title}</td>
+                    <td onClick={() => onSelect(t.id)}>{t.workflow}</td>
+                    <td onClick={() => onSelect(t.id)}><Badge status={t.status} /></td>
+                    <td className="muted" onClick={() => onSelect(t.id)}>{new Date(t.updated_at).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -159,13 +240,23 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
           {/* 移动端：卡片 */}
           <div className="task-card-list mobile-only">
             {filtered.map((t) => (
-              <div key={t.id} className="card task-card" onClick={() => onSelect(t.id)}>
+              <div
+                key={t.id}
+                className={`card task-card ${selected.has(t.id) ? "is-selected" : ""}`}
+              >
                 <div className="task-card-top">
-                  <span className="mono task-card-id">{t.id}</span>
+                  <label onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(t.id)}
+                      onChange={() => toggleSelect(t.id)}
+                    />
+                    <span className="mono task-card-id">{t.id}</span>
+                  </label>
                   <Badge status={t.status} />
                 </div>
-                <div className="task-card-title">{t.title}</div>
-                <div className="task-card-meta">
+                <div className="task-card-title" onClick={() => onSelect(t.id)}>{t.title}</div>
+                <div className="task-card-meta" onClick={() => onSelect(t.id)}>
                   <span className="mono muted">{t.workflow}</span>
                   <span className="muted">{new Date(t.updated_at).toLocaleString()}</span>
                 </div>
@@ -179,6 +270,31 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
         open={newOpen}
         onClose={() => setNewOpen(false)}
         onCreated={(id) => { refresh(); onSelect(id); }}
+      />
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="批量取消任务"
+        message={
+          <div>
+            <p>确认取消以下 {cancellableSelected.length} 个任务？正在运行的阶段将被中止。</p>
+            <ul style={{ marginTop: "0.5rem", marginLeft: "1rem", fontFamily: "var(--mono)", fontSize: "0.82rem", maxHeight: 220, overflow: "auto" }}>
+              {cancellableSelected.map((t) => (
+                <li key={t.id}>{t.id} — {t.title}</li>
+              ))}
+            </ul>
+            {selected.size > cancellableSelected.length && (
+              <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }}>
+                另有 {selected.size - cancellableSelected.length} 个已终态任务会被跳过。
+              </p>
+            )}
+          </div>
+        }
+        confirmText={cancelling ? "处理中..." : "确认取消"}
+        cancelText="不要"
+        danger
+        onConfirm={doBulkCancel}
+        onCancel={() => setConfirmOpen(false)}
       />
     </div>
   );
