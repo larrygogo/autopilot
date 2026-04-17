@@ -526,7 +526,6 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
                 total={items.length}
                 rejectCandidates={namesBeforeTop(idx)}
                 parallelTargets={parallelOptions}
-                otherNames={allNames.filter((n) => n !== it.name)}
                 issues={issuesForTop(issues, idx)}
                 hoveredPhase={hoveredPhase ?? null}
                 onHoverPhase={onHoverPhase}
@@ -645,7 +644,6 @@ interface PhaseRowProps {
   total: number;
   rejectCandidates: string[];
   parallelTargets: { idx: number; name: string }[];
-  otherNames: string[];
   issues: Issue[];
   hoveredPhase: string | null;
   onHoverPhase?: (name: string | null) => void;
@@ -656,7 +654,7 @@ interface PhaseRowProps {
   onMoveIntoParallel: (parallelIdx: number) => void;
 }
 
-function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, otherNames, issues, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
+function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, issues, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
   const nameIssue = fieldIssue(issues, "name");
   const timeoutIssue = fieldIssue(issues, "timeout");
   const rejectIssue = fieldIssue(issues, "reject");
@@ -667,10 +665,7 @@ function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, otherNa
   const commitName = () => {
     const trimmed = nameDraft.trim();
     if (trimmed === item.name) return;
-    if (!/^[a-z][a-z0-9_]*$/.test(trimmed) || otherNames.includes(trimmed)) {
-      setNameDraft(item.name);
-      return;
-    }
+    // 非法值也提交到 state；validatePhases 会标红 + 禁用保存，用户自己修
     onUpdate({ ...item, name: trimmed });
   };
 
@@ -782,7 +777,6 @@ function ParallelRow(props: ParallelRowProps) {
   const { item, idx, total, allNames, issues, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUngroup, onUpdateStrategy, onUpdateName, onAddChild,
     onChildUpdate, onChildDelete, onChildMoveUp, onChildMoveDown, onChildLift } = props;
   const headHighlight = hoveredPhase === item.name;
-  const otherNames = React.useMemo(() => allNames.filter((n) => n !== item.name), [allNames, item.name]);
   const ownIssues = issuesForTop(issues, idx);
   const nameIssue = fieldIssue(ownIssues, "name");
   const strategyIssue = fieldIssue(ownIssues, "fail_strategy");
@@ -792,10 +786,6 @@ function ParallelRow(props: ParallelRowProps) {
   const commitName = () => {
     const trimmed = nameDraft.trim();
     if (trimmed === item.name) return;
-    if (!/^[a-z][a-z0-9_]*$/.test(trimmed) || otherNames.includes(trimmed)) {
-      setNameDraft(item.name);
-      return;
-    }
     onUpdateName(trimmed);
   };
 
@@ -857,7 +847,6 @@ function ParallelRow(props: ParallelRowProps) {
               outerIdx={idx}
               innerIdx={j}
               total={item.phases.length}
-              otherNames={allNames.filter((n) => n !== sub.name)}
               issues={issuesForChild(issues, idx, j)}
               isHighlight={hoveredPhase === sub.name}
               onHoverPhase={onHoverPhase}
@@ -890,7 +879,6 @@ interface ParallelChildRowProps {
   outerIdx: number;
   innerIdx: number;
   total: number;
-  otherNames: string[];
   issues: Issue[];
   isHighlight: boolean;
   onHoverPhase?: (name: string | null) => void;
@@ -901,7 +889,7 @@ interface ParallelChildRowProps {
   onLift: () => void;
 }
 
-function ParallelChildRow({ sub, outerIdx, innerIdx, total, otherNames, issues, isHighlight, onHoverPhase, onUpdate, onDelete, onMoveUp, onMoveDown, onLift }: ParallelChildRowProps) {
+function ParallelChildRow({ sub, outerIdx, innerIdx, total, issues, isHighlight, onHoverPhase, onUpdate, onDelete, onMoveUp, onMoveDown, onLift }: ParallelChildRowProps) {
   const nameIssue = fieldIssue(issues, "name");
   const timeoutIssue = fieldIssue(issues, "timeout");
   const [nameDraft, setNameDraft] = React.useState(sub.name);
@@ -910,10 +898,6 @@ function ParallelChildRow({ sub, outerIdx, innerIdx, total, otherNames, issues, 
   const commitName = () => {
     const trimmed = nameDraft.trim();
     if (trimmed === sub.name) return;
-    if (!/^[a-z][a-z0-9_]*$/.test(trimmed) || otherNames.includes(trimmed)) {
-      setNameDraft(sub.name);
-      return;
-    }
     onUpdate({ ...sub, name: trimmed });
   };
 
