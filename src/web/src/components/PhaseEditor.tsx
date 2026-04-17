@@ -4,21 +4,16 @@ import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
 import { AddPhaseDialog, type NewPhaseData } from "./AddPhaseDialog";
 import { AddParallelDialog, type NewParallelData } from "./AddParallelDialog";
-
-type PhaseItem = {
-  kind: "phase";
-  name: string;
-  timeout?: number;
-  reject?: string | null;
-  extras: Record<string, unknown>;
-};
-type ParallelItem = {
-  kind: "parallel";
-  name: string;
-  fail_strategy?: string;
-  phases: PhaseItem[];
-};
-type Item = PhaseItem | ParallelItem;
+import {
+  validatePhases,
+  issuesForTop,
+  issuesForChild,
+  fieldIssue,
+  type Issue,
+  type PhaseItem,
+  type ParallelItem,
+  type Item,
+} from "./phaseValidation";
 
 const STRATEGIES = ["cancel_all", "continue"] as const;
 
@@ -137,6 +132,8 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   }, [JSON.stringify(initialPhases), workflowName]);
 
   const allNames = useMemo(() => flatNames(items), [items]);
+  const issues = useMemo(() => validatePhases(items), [items]);
+  const hasErrors = issues.length > 0;
   const parallelOptions = useMemo(
     () => items
       .map((it, i) => (it.kind === "parallel" ? { idx: i, name: it.name } : null))
@@ -503,6 +500,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
                   idx={idx}
                   total={items.length}
                   allNames={allNames}
+                  issues={issues}
                   hoveredPhase={hoveredPhase ?? null}
                   onHoverPhase={onHoverPhase}
                   onMoveUp={() => moveTop(idx, -1)}
@@ -529,6 +527,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
                 rejectCandidates={namesBeforeTop(idx)}
                 parallelTargets={parallelOptions}
                 otherNames={allNames.filter((n) => n !== it.name)}
+                issues={issuesForTop(issues, idx)}
                 hoveredPhase={hoveredPhase ?? null}
                 onHoverPhase={onHoverPhase}
                 onMoveUp={() => moveTop(idx, -1)}
@@ -543,14 +542,37 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       )}
 
       {dirty && (
-        <div className="card-actions" style={{ borderTop: "1px solid var(--border)", paddingTop: "0.75rem", marginTop: "0.75rem" }}>
-          <button className="btn btn-primary" onClick={save} disabled={saving}>
-            {saving ? "保存中..." : "保存更改"}
-          </button>
-          <button className="btn btn-secondary" onClick={reset} disabled={saving}>撤销</button>
-          <span className="muted" style={{ fontSize: "0.78rem", alignSelf: "center" }}>
-            保存将写入 workflow.yaml 并自动追加缺失的 run_ 函数
-          </span>
+        <div className="card-actions" style={{ borderTop: "1px solid var(--border)", paddingTop: "0.75rem", marginTop: "0.75rem", flexDirection: "column", alignItems: "flex-start", gap: "0.6rem" }}>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <button
+              className="btn btn-primary"
+              onClick={save}
+              disabled={saving || hasErrors}
+              title={hasErrors ? `有 ${issues.length} 处校验错误，修复后才能保存` : undefined}
+            >
+              {saving ? "保存中..." : "保存更改"}
+            </button>
+            <button className="btn btn-secondary" onClick={reset} disabled={saving}>撤销</button>
+            {!hasErrors && (
+              <span className="muted" style={{ fontSize: "0.78rem", alignSelf: "center" }}>
+                保存将写入 workflow.yaml 并自动追加缺失的 run_ 函数
+              </span>
+            )}
+          </div>
+          {hasErrors && (
+            <div className="validation-summary">
+              <strong>⚠ {issues.length} 处错误需修复：</strong>
+              <ul>
+                {issues.map((iss, i) => (
+                  <li key={i}>
+                    <code className="mono">{iss.path}</code>
+                    <span className="muted" style={{ margin: "0 0.4rem" }}>·</span>
+                    {iss.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
@@ -624,6 +646,7 @@ interface PhaseRowProps {
   rejectCandidates: string[];
   parallelTargets: { idx: number; name: string }[];
   otherNames: string[];
+  issues: Issue[];
   hoveredPhase: string | null;
   onHoverPhase?: (name: string | null) => void;
   onMoveUp: () => void;
@@ -633,7 +656,10 @@ interface PhaseRowProps {
   onMoveIntoParallel: (parallelIdx: number) => void;
 }
 
-function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, otherNames, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
+function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, otherNames, issues, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
+  const nameIssue = fieldIssue(issues, "name");
+  const timeoutIssue = fieldIssue(issues, "timeout");
+  const rejectIssue = fieldIssue(issues, "reject");
   const isHighlight = hoveredPhase === item.name;
   const [nameDraft, setNameDraft] = React.useState(item.name);
   React.useEffect(() => { setNameDraft(item.name); }, [item.name]);
@@ -660,30 +686,35 @@ function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, otherNa
           <div className="phase-title">
             <input
               type="text"
-              className="text-input phase-name-input mono"
+              className={`text-input phase-name-input mono ${nameIssue ? "field-error" : ""}`}
               value={nameDraft}
               onChange={(e) => setNameDraft(e.target.value)}
               onBlur={commitName}
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-              title="阶段名 — 修改后 workflow.ts 需要校准 TS 来追加 run_<新名> 函数"
+              title={nameIssue?.message ?? "阶段名"}
             />
+            {nameIssue && <small className="field-error-msg">{nameIssue.message}</small>}
           </div>
           <div className="phase-fields">
             <label>
               <span className="muted">超时(秒)</span>
               <input
                 type="number"
-                className="text-input phase-input"
+                className={`text-input phase-input ${timeoutIssue ? "field-error" : ""}`}
                 min={1}
                 value={item.timeout ?? ""}
                 placeholder="900"
-                onChange={(e) => onUpdate({ ...item, timeout: parseInt(e.target.value, 10) || undefined })}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  onUpdate({ ...item, timeout: v === "" ? undefined : Number(v) });
+                }}
               />
+              {timeoutIssue && <small className="field-error-msg">{timeoutIssue.message}</small>}
             </label>
             <label>
               <span className="muted">驳回到</span>
               <select
-                className="wf-select phase-input"
+                className={`wf-select phase-input ${rejectIssue ? "field-error" : ""}`}
                 value={item.reject ?? ""}
                 onChange={(e) => onUpdate({ ...item, reject: e.target.value || null })}
                 disabled={rejectCandidates.length === 0}
@@ -691,6 +722,7 @@ function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, otherNa
                 <option value="">（不驳回）</option>
                 {rejectCandidates.map((n) => <option key={n} value={n}>{n}</option>)}
               </select>
+              {rejectIssue && <small className="field-error-msg">{rejectIssue.message}</small>}
             </label>
             {parallelTargets.length > 0 && (
               <label>
@@ -729,6 +761,7 @@ interface ParallelRowProps {
   idx: number;
   total: number;
   allNames: string[];
+  issues: Issue[];
   hoveredPhase: string | null;
   onHoverPhase?: (name: string | null) => void;
   onMoveUp: () => void;
@@ -746,10 +779,14 @@ interface ParallelRowProps {
 }
 
 function ParallelRow(props: ParallelRowProps) {
-  const { item, idx, total, allNames, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUngroup, onUpdateStrategy, onUpdateName, onAddChild,
+  const { item, idx, total, allNames, issues, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUngroup, onUpdateStrategy, onUpdateName, onAddChild,
     onChildUpdate, onChildDelete, onChildMoveUp, onChildMoveDown, onChildLift } = props;
   const headHighlight = hoveredPhase === item.name;
   const otherNames = React.useMemo(() => allNames.filter((n) => n !== item.name), [allNames, item.name]);
+  const ownIssues = issuesForTop(issues, idx);
+  const nameIssue = fieldIssue(ownIssues, "name");
+  const strategyIssue = fieldIssue(ownIssues, "fail_strategy");
+  const phasesIssue = fieldIssue(ownIssues, "phases");
   const [nameDraft, setNameDraft] = React.useState(item.name);
   React.useEffect(() => { setNameDraft(item.name); }, [item.name]);
   const commitName = () => {
@@ -776,25 +813,33 @@ function ParallelRow(props: ParallelRowProps) {
               <span className="pill pill-accent" style={{ marginRight: "0.5rem" }}>并行</span>
               <input
                 type="text"
-                className="text-input phase-name-input mono"
+                className={`text-input phase-name-input mono ${nameIssue ? "field-error" : ""}`}
                 value={nameDraft}
                 onChange={(e) => setNameDraft(e.target.value)}
                 onBlur={commitName}
                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                title={nameIssue?.message}
               />
+              {nameIssue && <small className="field-error-msg">{nameIssue.message}</small>}
             </div>
             <div className="phase-fields">
               <label>
                 <span className="muted">失败策略</span>
                 <select
-                  className="wf-select phase-input"
+                  className={`wf-select phase-input ${strategyIssue ? "field-error" : ""}`}
                   value={item.fail_strategy ?? "cancel_all"}
                   onChange={(e) => onUpdateStrategy(e.target.value)}
                 >
                   {STRATEGIES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
+                {strategyIssue && <small className="field-error-msg">{strategyIssue.message}</small>}
               </label>
             </div>
+            {phasesIssue && (
+              <small className="field-error-msg" style={{ display: "block", marginTop: "0.3rem" }}>
+                {phasesIssue.message}
+              </small>
+            )}
           </div>
           <div className="phase-actions">
             <button className="btn-icon" title="上移" onClick={onMoveUp} disabled={idx === 0}>↑</button>
@@ -813,6 +858,7 @@ function ParallelRow(props: ParallelRowProps) {
               innerIdx={j}
               total={item.phases.length}
               otherNames={allNames.filter((n) => n !== sub.name)}
+              issues={issuesForChild(issues, idx, j)}
               isHighlight={hoveredPhase === sub.name}
               onHoverPhase={onHoverPhase}
               onUpdate={(next) => onChildUpdate(j, next)}
@@ -845,6 +891,7 @@ interface ParallelChildRowProps {
   innerIdx: number;
   total: number;
   otherNames: string[];
+  issues: Issue[];
   isHighlight: boolean;
   onHoverPhase?: (name: string | null) => void;
   onUpdate: (next: PhaseItem) => void;
@@ -854,7 +901,9 @@ interface ParallelChildRowProps {
   onLift: () => void;
 }
 
-function ParallelChildRow({ sub, outerIdx, innerIdx, total, otherNames, isHighlight, onHoverPhase, onUpdate, onDelete, onMoveUp, onMoveDown, onLift }: ParallelChildRowProps) {
+function ParallelChildRow({ sub, outerIdx, innerIdx, total, otherNames, issues, isHighlight, onHoverPhase, onUpdate, onDelete, onMoveUp, onMoveDown, onLift }: ParallelChildRowProps) {
+  const nameIssue = fieldIssue(issues, "name");
+  const timeoutIssue = fieldIssue(issues, "timeout");
   const [nameDraft, setNameDraft] = React.useState(sub.name);
   React.useEffect(() => { setNameDraft(sub.name); }, [sub.name]);
 
@@ -880,24 +929,30 @@ function ParallelChildRow({ sub, outerIdx, innerIdx, total, otherNames, isHighli
           <div className="phase-title">
             <input
               type="text"
-              className="text-input phase-name-input mono"
+              className={`text-input phase-name-input mono ${nameIssue ? "field-error" : ""}`}
               value={nameDraft}
               onChange={(e) => setNameDraft(e.target.value)}
               onBlur={commitName}
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              title={nameIssue?.message}
             />
+            {nameIssue && <small className="field-error-msg">{nameIssue.message}</small>}
           </div>
           <div className="phase-fields">
             <label>
               <span className="muted">超时(秒)</span>
               <input
                 type="number"
-                className="text-input phase-input"
+                className={`text-input phase-input ${timeoutIssue ? "field-error" : ""}`}
                 min={1}
                 value={sub.timeout ?? ""}
                 placeholder="900"
-                onChange={(e) => onUpdate({ ...sub, timeout: parseInt(e.target.value, 10) || undefined })}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  onUpdate({ ...sub, timeout: v === "" ? undefined : Number(v) });
+                }}
               />
+              {timeoutIssue && <small className="field-error-msg">{timeoutIssue.message}</small>}
             </label>
           </div>
         </div>
