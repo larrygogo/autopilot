@@ -4,7 +4,7 @@ import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { appendTaskEvent } from "./task-logs";
 import { runWithTaskContext } from "./task-context";
 import { transition, InvalidTransitionError } from "./state-machine";
-import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase } from "./registry";
+import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./registry";
 import { closeAgents } from "../agents/registry";
 import { emit } from "../daemon/event-bus";
 
@@ -57,6 +57,15 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     const workflow = getWorkflow(task.workflow);
     if (!workflow) {
       log.error("工作流未注册：%s [task=%s]", task.workflow, taskId);
+      return;
+    }
+
+    // 先尝试识别为并行块（name 与顶层 parallel block 的 name 一致）
+    const parallelEntry = workflow.phases.find(
+      (p) => isParallelPhase(p) && p.parallel.name === phase,
+    );
+    if (parallelEntry && isParallelPhase(parallelEntry)) {
+      await executeParallelGroup(taskId, parallelEntry.parallel, workflow);
       return;
     }
 
@@ -166,5 +175,122 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
         await closeAgents(task.workflow).catch(() => {});
       }
     }
+  }
+}
+
+// ──────────────────────────────────────────────
+// 并行块执行
+//
+// 主任务状态在并行期间停在 waiting_<group>。子阶段不触发状态机
+// （因为状态机单状态无法同时表达多个 running），而是并发调用
+// 各自的 phaseFn；进度通过日志与事件流记录。
+// 全部完成后：
+//   - 全部成功 / fail_strategy=continue → transition(<group>_complete) → 推进下一阶段
+//   - 有失败 且 fail_strategy=cancel_all → transition(<group>_fail) 走失败分支
+// ──────────────────────────────────────────────
+
+async function executeParallelGroup(
+  taskId: string,
+  parallel: ParallelDefinition,
+  workflow: WorkflowDefinition,
+): Promise<void> {
+  const groupName = parallel.name;
+  const transitionTable = buildTransitions(workflow);
+
+  // fork：pending_<group> → waiting_<group>
+  const forkTrigger = `start_${groupName}`;
+  try {
+    transition(taskId, forkTrigger, { transitions: transitionTable });
+  } catch (err: unknown) {
+    if (err instanceof InvalidTransitionError) {
+      log.warn("并行块 %s fork 跳过（状态不匹配）[task=%s]: %s",
+        groupName, taskId, err.message);
+      return;
+    }
+    throw err;
+  }
+
+  const subNames = parallel.phases.map((p) => p.name);
+  log.info("并行块开始 %s [task=%s 子阶段=%s]", groupName, taskId, subNames.join(", "));
+  emit({ type: "phase:started", payload: { taskId, phase: groupName, label: parallel.name } });
+  appendTaskEvent(taskId, { type: "parallel-started", phase: groupName, subs: subNames });
+
+  // 并发执行子阶段 —— 不走状态机 transition，仅调用阶段函数
+  const results = await Promise.allSettled(
+    parallel.phases.map(async (sub) => {
+      const subName = sub.name;
+      try {
+        appendTaskEvent(taskId, {
+          type: "phase-started",
+          phase: subName,
+          label: sub.label,
+          parallel: groupName,
+        });
+        // 子阶段的 log 标签独立
+        // 注意：各并发分支共享全局 currentPhaseTag；短阶段里可能错乱，
+        // 但对磁盘 phase-log 我们通过 runWithTaskContext + setPhase 在
+        // 本分支作用域内设置；logger 会用当前的值。由于 Promise 并发时
+        // setPhase 调用会互相覆盖，子阶段日志会记到哪个 phase-log 不稳定。
+        // 折中：不 setPhase 而直接在日志消息里带 sub name。
+        log.info("[parallel] %s 开始 [task=%s]", subName, taskId);
+        const phaseFn = getPhaseFunc(workflow.name, subName);
+        if (typeof phaseFn !== "function") {
+          throw new Error(`阶段函数未定义：run_${subName}`);
+        }
+        await runWithTaskContext({ taskId, phase: subName }, async () => {
+          await phaseFn(taskId);
+        });
+        log.info("[parallel] %s 完成 [task=%s]", subName, taskId);
+        appendTaskEvent(taskId, { type: "phase-completed", phase: subName, parallel: groupName });
+        return { name: subName, ok: true as const };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
+        log.error("[parallel] %s 失败 [task=%s]: %s", subName, taskId, msg);
+        appendTaskEvent(taskId, {
+          type: "phase-error",
+          phase: subName,
+          parallel: groupName,
+          level: "error",
+          message: msg,
+        });
+        return { name: subName, ok: false as const, error: msg };
+      }
+    }),
+  );
+
+  const outcomes = results.map((r) => r.status === "fulfilled" ? r.value : { name: "?", ok: false, error: "rejected" });
+  const failed = outcomes.filter((o) => !o.ok);
+  const failStrategy = parallel.fail_strategy ?? "cancel_all";
+
+  if (failed.length > 0 && failStrategy === "cancel_all") {
+    const failTrigger = `${groupName}_fail`;
+    log.warn("并行块 %s 有 %d 个子阶段失败（策略=cancel_all），触发失败分支 [task=%s]",
+      groupName, failed.length, taskId);
+    try {
+      transition(taskId, failTrigger, { transitions: transitionTable });
+    } catch (err: unknown) {
+      if (!(err instanceof InvalidTransitionError)) throw err;
+    }
+    emit({ type: "phase:error", payload: { taskId, phase: groupName, error: `parallel failed: ${failed.map((f) => f.name).join(",")}` } });
+    appendTaskEvent(taskId, { type: "parallel-failed", phase: groupName, failed: failed.map((f) => f.name) });
+    return;
+  }
+
+  // join：waiting_<group> → 下一阶段 pending
+  const joinTrigger = `${groupName}_complete`;
+  try {
+    transition(taskId, joinTrigger, { transitions: transitionTable });
+  } catch (err: unknown) {
+    if (!(err instanceof InvalidTransitionError)) throw err;
+  }
+  log.info("并行块 %s 完成（%d 成功 %d 失败）[task=%s]",
+    groupName, outcomes.length - failed.length, failed.length, taskId);
+  emit({ type: "phase:completed", payload: { taskId, phase: groupName } });
+  appendTaskEvent(taskId, { type: "parallel-completed", phase: groupName, failed: failed.length });
+
+  // Push 模型：启动下一阶段
+  const nextPhase = getNextPhase(workflow.name, groupName);
+  if (nextPhase) {
+    runInBackground(taskId, nextPhase);
   }
 }
