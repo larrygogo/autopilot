@@ -21,7 +21,9 @@
 - **Push 模型**：每阶段完成后 `runInBackground()` 非阻塞启动下一阶段
 - **并发安全**：文件锁（PID 存活检测 + 僵尸锁清理）防止双重执行
 - **Watcher 保底**：定期检测卡死任务，自动恢复
-- **Agent 系统**：内置 Anthropic / OpenAI / Google 三大 Agent 提供商
+- **Agent 系统**：内置 Anthropic / OpenAI / Google 三大 Agent 提供商（凭证由对应 CLI 自身管理）
+- **Agent 三层配置**：全局 `config.yaml.agents` → 工作流 `agents[]` 覆盖 → 运行时 `RunOptions` 覆盖
+- **Web UI 工作流编辑器**：阶段 CRUD / 并行块 / 驳回 / 智能体覆盖全图形化，`workflow.ts` 自动同步（改名重命名函数、追加缺失、孤儿清理）
 - **框架零业务知识**：核心模块不含任何工作流专属常量或逻辑
 - **用户空间分离**：`AUTOPILOT_HOME`（默认 `~/.autopilot/`）存放用户配置、工作流和运行时数据
 
@@ -201,9 +203,30 @@ bun run typecheck
 
 ## 配置
 
-框架本身无内置配置项，所有字段由工作流自行读取。
+全局 `config.yaml`（位于 `AUTOPILOT_HOME/config.yaml`）只承载**跨工作流共享的基础设施**，两个框架识别段：
 
-工作流专属配置详见 `examples/` 下各工作流的 `config.example.yaml`。
+```yaml
+providers:             # LLM 提供商默认值（凭证由 CLI 管理）
+  anthropic:
+    default_model: claude-sonnet-4-6
+    base_url: ""       # 可选，自建代理时用
+    enabled: true
+  openai: { ... }
+  google: { ... }
+
+agents:                # 命名 agent 定义，工作流可同名引用或 extends
+  coder:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    max_turns: 10
+    permission_mode: auto
+    system_prompt: |
+      你是通用编码助手。
+```
+
+工作流专属字段请写在该工作流目录下的 `workflow.yaml`（或其独立配置文件），不要放全局。
+
+工作流专属示例详见 `examples/` 下各工作流的 `config.example.yaml`。
 
 ## 知识库
 
