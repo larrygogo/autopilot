@@ -44,6 +44,10 @@ export const api = {
     request<{ added: string[]; orphans: string[]; modified: boolean }>(
       `/api/workflows/${name}/sync-ts`, { method: "POST" },
     ),
+  setWorkflowAgents: (name: string, agents: unknown[]) =>
+    request<{ ok: boolean }>(`/api/workflows/${name}/agents`, {
+      method: "PUT", body: JSON.stringify({ agents }),
+    }),
 
   // Config
   getConfig: () => request<{ yaml: string }>("/api/config"),

@@ -19,7 +19,9 @@ import {
   deleteWorkflowDir,
   setWorkflowPhases,
   syncWorkflowTs,
+  setWorkflowAgents,
   type PhaseEntryInput,
+  type WorkflowAgentEntry,
 } from "../core/registry";
 import {
   loadConfigRaw,
@@ -541,6 +543,21 @@ export async function handleRequest(req: Request): Promise<Response> {
         }
         emit({ type: "workflow:reloaded", payload: {} });
         return json({ ok: true, ts: tsResult });
+      } catch (e: unknown) {
+        return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
+      }
+    }
+
+    // PUT /api/workflows/:name/agents — 结构化更新 agents 段
+    const wfAgentsMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/agents$/);
+    if (method === "PUT" && wfAgentsMatch) {
+      const body = await req.json() as { agents: unknown };
+      if (!Array.isArray(body.agents)) return error("agents must be array", 400);
+      try {
+        setWorkflowAgents(wfAgentsMatch, body.agents as WorkflowAgentEntry[]);
+        await reload();
+        emit({ type: "workflow:reloaded", payload: {} });
+        return json({ ok: true });
       } catch (e: unknown) {
         return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
       }

@@ -5,6 +5,7 @@ import { NewWorkflowDialog } from "../components/NewWorkflowDialog";
 import { ConfirmDialog } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { PhaseEditor } from "../components/PhaseEditor";
+import { WorkflowAgentsEditor } from "../components/WorkflowAgentsEditor";
 
 interface WorkflowInfo {
   name: string;
@@ -140,41 +141,20 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
             </div>
           </div>
 
-          {selected.detail.agents && selected.detail.agents.length > 0 && (
-            <div className="card" style={{ marginTop: "0.75rem" }}>
-              <div className="card-header">
-                <h3>使用的智能体</h3>
-                <span className="muted" style={{ fontSize: "0.76rem" }}>
-                  点击跳转到智能体编辑
-                </span>
-              </div>
-              <div className="agent-list">
-                {selected.detail.agents.map((a, i) => {
-                  const baseName = a.extends ?? a.name;
-                  return (
-                    <div
-                      key={i}
-                      className="card agent-card"
-                      style={{ cursor: onJumpToAgent ? "pointer" : "default" }}
-                      onClick={() => onJumpToAgent?.(baseName)}
-                    >
-                      <div className="agent-card-head">
-                        <div>
-                          <h3 className="mono" style={{ color: "var(--cyan)" }}>{a.name}</h3>
-                          <div className="agent-meta mono muted">
-                            {a.extends && <span>继承自 {a.extends}</span>}
-                            {a.provider && <span>· {a.provider}</span>}
-                            {a.model && <span>/ {a.model}</span>}
-                          </div>
-                        </div>
-                        {onJumpToAgent && <span className="muted">→</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <WorkflowAgentsEditor
+            workflowName={selected.name}
+            initialAgents={(selected.detail.agents as any[]) ?? []}
+            onJumpToAgent={onJumpToAgent}
+            onSaved={async () => {
+              try {
+                const [detail, graph] = await Promise.all([
+                  api.getWorkflow(selected.name),
+                  api.getWorkflowGraph(selected.name),
+                ]);
+                setSelected({ name: selected.name, detail, graph });
+              } catch { /* ignore */ }
+            }}
+          />
 
           <PhaseEditor
             workflowName={selected.name}

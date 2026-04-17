@@ -1005,6 +1005,85 @@ function extractRunFunctions(source: string): string[] {
   return names;
 }
 
+// ──────────────────────────────────────────────
+// 工作流内 agents[] 段的结构化读写
+// ──────────────────────────────────────────────
+
+export interface WorkflowAgentEntry {
+  name: string;
+  extends?: string | null;
+  provider?: string;
+  model?: string;
+  max_turns?: number;
+  permission_mode?: string;
+  system_prompt?: string;
+  [key: string]: unknown;
+}
+
+const AGENT_NAME_RE = /^[\w.\-]+$/;
+
+/**
+ * 结构化写入工作流 agents 段。支持空数组（会移除该段）。
+ * 不自动 reload —— 调用方负责。
+ */
+export function setWorkflowAgents(workflowName: string, agents: WorkflowAgentEntry[]): void {
+  if (!Array.isArray(agents)) {
+    throw new Error("agents 必须是数组");
+  }
+
+  // 校验
+  const seen = new Set<string>();
+  for (let i = 0; i < agents.length; i++) {
+    const a = agents[i];
+    if (!a || typeof a !== "object") throw new Error(`第 ${i + 1} 项非法`);
+    if (typeof a.name !== "string" || !AGENT_NAME_RE.test(a.name)) {
+      throw new Error(`第 ${i + 1} 项 name 非法：${a.name}`);
+    }
+    if (seen.has(a.name)) throw new Error(`名称重复：${a.name}`);
+    seen.add(a.name);
+    if (a.extends !== undefined && a.extends !== null && typeof a.extends !== "string") {
+      throw new Error(`"${a.name}" 的 extends 必须是字符串`);
+    }
+    if (a.max_turns !== undefined && (typeof a.max_turns !== "number" || a.max_turns <= 0)) {
+      throw new Error(`"${a.name}" 的 max_turns 必须是正整数`);
+    }
+  }
+
+  const yamlPath = getWorkflowYamlPath(workflowName);
+  if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
+
+  const raw = readFileSync(yamlPath, "utf-8");
+  const doc = parseDocument(raw);
+
+  if (agents.length === 0) {
+    doc.deleteIn(["agents"]);
+  } else {
+    const cleaned = agents.map(cleanWorkflowAgent);
+    doc.setIn(["agents"], cleaned);
+  }
+
+  copyFileSync(yamlPath, yamlPath + ".bak");
+  writeFileSync(yamlPath, doc.toString(), "utf-8");
+}
+
+function cleanWorkflowAgent(a: WorkflowAgentEntry): Record<string, unknown> {
+  const out: Record<string, unknown> = { name: a.name };
+  if (a.extends) out.extends = a.extends;
+  if (a.provider) out.provider = a.provider;
+  if (a.model) out.model = a.model;
+  if (typeof a.max_turns === "number" && a.max_turns > 0) out.max_turns = a.max_turns;
+  if (a.permission_mode) out.permission_mode = a.permission_mode;
+  if (a.system_prompt) out.system_prompt = a.system_prompt;
+  // 保留未知扩展字段
+  const handled = new Set(["name", "extends", "provider", "model", "max_turns", "permission_mode", "system_prompt"]);
+  for (const [k, v] of Object.entries(a)) {
+    if (handled.has(k)) continue;
+    if (v === undefined || v === null || v === "") continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 function renderRunFunctionStub(phaseName: string): string {
   return `export async function run_${phaseName}(ctx: { task: any; log: (msg: string) => void }) {
   const { task, log } = ctx;
