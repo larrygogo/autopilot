@@ -2,6 +2,7 @@ import { getTask } from "./db";
 import { acquireLock, releaseLock } from "./infra";
 import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { appendTaskEvent } from "./task-logs";
+import { runWithTaskContext } from "./task-context";
 import { transition, InvalidTransitionError } from "./state-machine";
 import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates } from "./registry";
 import { closeAgents } from "../agents/registry";
@@ -105,7 +106,9 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     log.info("开始执行阶段 %s [task=%s]", phase, taskId);
     emit({ type: "phase:started", payload: { taskId, phase, label: phaseDef.label } });
     appendTaskEvent(taskId, { type: "phase-started", phase, label: phaseDef.label });
-    await phaseFn(taskId);
+    await runWithTaskContext({ taskId, phase }, async () => {
+      await phaseFn(taskId);
+    });
     log.info("阶段执行完成：%s [task=%s]", phase, taskId);
     emit({ type: "phase:completed", payload: { taskId, phase } });
     appendTaskEvent(taskId, { type: "phase-completed", phase });

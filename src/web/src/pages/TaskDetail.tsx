@@ -6,6 +6,7 @@ import { StateMachineGraph } from "../components/StateMachineGraph";
 import { PhasePipeline } from "../components/PhasePipeline";
 import { WorkspaceBrowser } from "../components/WorkspaceBrowser";
 import { PhaseLogsViewer } from "../components/PhaseLogsViewer";
+import { AgentCallsViewer } from "../components/AgentCallsViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { useToast } from "../components/Toast";
 
@@ -167,6 +168,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       <WorkspaceBrowser taskId={taskId} />
 
       <PhaseLogsViewer taskId={taskId} />
+
+      <AgentCallsViewer taskId={taskId} />
 
       <div className="card" style={{ marginTop: "0.75rem" }}>
         <h3>状态日志</h3>

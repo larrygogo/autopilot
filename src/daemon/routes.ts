@@ -48,7 +48,7 @@ import {
   resolveWorkspacePath,
   spawnWorkspaceZip,
 } from "../core/workspace";
-import { listPhaseLogs, readPhaseLog, readTaskEvents } from "../core/task-logs";
+import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task-logs";
 import { emit } from "./event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -469,6 +469,26 @@ export async function handleRequest(req: Request): Promise<Response> {
       } catch (e: unknown) {
         return error(e instanceof Error ? e.message : String(e), 400);
       }
+    }
+
+    // GET /api/tasks/:id/agent-calls — 列出 agent 调用 transcript 摘要
+    const agentCallsListMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/agent-calls$/);
+    if (method === "GET" && agentCallsListMatch) {
+      try {
+        return json(listAgentCalls(agentCallsListMatch));
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 400);
+      }
+    }
+
+    // GET /api/tasks/:id/agent-calls/:seq — 取单次调用完整记录
+    const agentCallOneMatch = path.match(/^\/api\/tasks\/([\w.\-]+)\/agent-calls\/(\d+)$/);
+    if (method === "GET" && agentCallOneMatch) {
+      const [, acTaskId, seqStr] = agentCallOneMatch;
+      const seq = parseInt(seqStr, 10);
+      const rec = getAgentCall(acTaskId, seq);
+      if (!rec) return error("Agent call not found", 404);
+      return json(rec);
     }
 
     // GET /api/tasks/:id/events — 任务事件流（JSONL）

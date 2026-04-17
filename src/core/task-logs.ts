@@ -51,6 +51,14 @@ function eventsPath(taskId: string): string {
   return join(ensureTaskLogsDir(taskId), "events.jsonl");
 }
 
+function agentCallsPath(taskId: string): string {
+  // 存在 <task>/agent-calls.jsonl（和 logs 同级，因为它是更顶层的调用记录）
+  if (!TASK_ID_RE.test(taskId)) throw new Error(`非法 taskId：${taskId}`);
+  const taskDir = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
+  if (!existsSync(taskDir)) mkdirSync(taskDir, { recursive: true });
+  return join(taskDir, "agent-calls.jsonl");
+}
+
 /**
  * 追加一行到指定阶段日志。自动补换行符。失败静默（不阻塞业务）。
  */
@@ -115,6 +123,115 @@ export function readPhaseLog(taskId: string, phase: string, opts?: { tail?: numb
 /**
  * 读取事件流（JSONL）。默认 tail 最后 N 条。
  */
+// ──────────────────────────────────────────────
+// Agent 调用 transcript
+// ──────────────────────────────────────────────
+
+export interface AgentCallRecord {
+  ts: string;
+  seq: number;
+  phase?: string;
+  agent: string;
+  provider?: string;
+  model?: string;
+  prompt: string;
+  system_prompt?: string;
+  additional_system?: string;
+  elapsed_ms?: number;
+  result_text?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_cost_usd?: number;
+  };
+  error?: string;
+}
+
+export interface AgentCallSummary {
+  seq: number;
+  ts: string;
+  phase?: string;
+  agent: string;
+  provider?: string;
+  model?: string;
+  elapsed_ms?: number;
+  usage?: AgentCallRecord["usage"];
+  error?: string;
+  prompt_preview: string;
+  result_preview: string;
+}
+
+function previewText(s: string | undefined, n = 120): string {
+  if (!s) return "";
+  const compact = s.replace(/\s+/g, " ").trim();
+  return compact.length > n ? compact.slice(0, n - 1) + "…" : compact;
+}
+
+export function appendAgentCall(
+  taskId: string,
+  record: Omit<AgentCallRecord, "ts" | "seq"> & { ts?: string; seq?: number },
+): AgentCallRecord | null {
+  try {
+    const path = agentCallsPath(taskId);
+    // 下一个 seq 号：数当前文件行数 +1（简单可靠，文件一般不会巨大）
+    let nextSeq = 1;
+    if (existsSync(path)) {
+      const current = readFileSync(path, "utf-8");
+      nextSeq = current.split("\n").filter((l) => l.trim()).length + 1;
+    }
+    const full: AgentCallRecord = {
+      ...record,
+      ts: record.ts ?? new Date().toISOString(),
+      seq: record.seq ?? nextSeq,
+    };
+    appendFileSync(path, JSON.stringify(full) + "\n", "utf-8");
+    return full;
+  } catch {
+    return null;
+  }
+}
+
+export function listAgentCalls(taskId: string): AgentCallSummary[] {
+  const path = agentCallsPath(taskId);
+  if (!existsSync(path)) return [];
+  const raw = readFileSync(path, "utf-8");
+  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  const out: AgentCallSummary[] = [];
+  for (const line of lines) {
+    try {
+      const r = JSON.parse(line) as AgentCallRecord;
+      out.push({
+        seq: r.seq,
+        ts: r.ts,
+        phase: r.phase,
+        agent: r.agent,
+        provider: r.provider,
+        model: r.model,
+        elapsed_ms: r.elapsed_ms,
+        usage: r.usage,
+        error: r.error,
+        prompt_preview: previewText(r.prompt),
+        result_preview: previewText(r.result_text),
+      });
+    } catch { /* skip malformed */ }
+  }
+  return out;
+}
+
+export function getAgentCall(taskId: string, seq: number): AgentCallRecord | null {
+  const path = agentCallsPath(taskId);
+  if (!existsSync(path)) return null;
+  const raw = readFileSync(path, "utf-8");
+  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    try {
+      const r = JSON.parse(line) as AgentCallRecord;
+      if (r.seq === seq) return r;
+    } catch { /* skip */ }
+  }
+  return null;
+}
+
 export function readTaskEvents(taskId: string, opts?: { tail?: number }): TaskEvent[] {
   const path = eventsPath(taskId);
   if (!existsSync(path)) return [];
