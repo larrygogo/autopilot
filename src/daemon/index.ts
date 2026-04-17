@@ -5,6 +5,7 @@ import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/registry";
 import { checkStuckTasks } from "../core/watcher";
+import { initDaemonFileLog } from "../core/logger";
 import { enableBus, disableBus, bus } from "./event-bus";
 import { wsManager } from "./ws";
 import { startServer } from "./server";
@@ -37,6 +38,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   // 确保运行时目录存在
   mkdirSync(join(AUTOPILOT_HOME, "runtime"), { recursive: true });
+
+  // 激活 daemon 主日志文件（所有 logger 输出同时写到此文件；带简单 size 轮转）
+  initDaemonFileLog(join(AUTOPILOT_HOME, "runtime", "logs", "daemon.log"));
 
   // 初始化数据库 + 迁移
   initDb();

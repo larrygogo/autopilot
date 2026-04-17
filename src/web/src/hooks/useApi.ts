@@ -51,6 +51,8 @@ export const api = {
     request<{ phase: string; content: string }>(
       `/api/tasks/${id}/phase-logs/${phase}${tail ? `?tail=${tail}` : ""}`,
     ),
+  getDaemonLog: (tail = 500) =>
+    request<{ path: string | null; content: string }>(`/api/daemon/log?tail=${tail}`),
   listAgentCalls: (id: string) =>
     request<AgentCallSummary[]>(`/api/tasks/${id}/agent-calls`),
   getAgentCall: (id: string, seq: number) =>
