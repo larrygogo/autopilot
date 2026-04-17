@@ -55,7 +55,11 @@ export const api = {
   deleteWorkflow: (name: string) =>
     request<{ ok: boolean }>(`/api/workflows/${name}`, { method: "DELETE" }),
   setWorkflowPhases: (name: string, phases: unknown[], syncTs = true) =>
-    request<{ ok: boolean; ts: { added: string[]; orphans: string[]; modified: boolean } | null }>(
+    request<{
+      ok: boolean;
+      ts: { added: string[]; orphans: string[]; modified: boolean } | null;
+      ts_error?: string | null;
+    }>(
       `/api/workflows/${name}/phases`,
       { method: "PUT", body: JSON.stringify({ phases, sync_ts: syncTs }) },
     ),

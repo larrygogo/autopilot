@@ -365,6 +365,9 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 .phase-fields label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.76rem; }
 .phase-fields label > span { font-size: 0.72rem; }
 .phase-input { min-height: 32px; padding: 0.35rem 0.6rem; font-size: 0.85rem; min-width: 100px; }
+.phase-name-input { min-height: 28px; padding: 0.2rem 0.5rem; font-size: 0.9rem; font-weight: 600; color: var(--cyan); background: transparent; border-color: transparent; min-width: 100px; max-width: 260px; }
+.phase-name-input:hover { border-color: var(--border); background: var(--bg0); }
+.phase-name-input:focus { border-color: var(--cyan); background: var(--bg0); }
 .phase-subgrid { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.3rem; }
 .phase-sub { background: var(--bg2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; display: flex; gap: 0.4rem; align-items: center; }
 .phase-actions { display: flex; gap: 0.2rem; flex-shrink: 0; align-self: center; }

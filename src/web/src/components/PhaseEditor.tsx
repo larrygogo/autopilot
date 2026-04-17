@@ -147,17 +147,48 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
 
   const mark = () => setDirty(true);
 
+  /** 重命名阶段 / 并行块：全表同步更新所有指向旧名的 reject 引用 */
+  const applyRename = (items: Item[], oldName: string, newName: string): Item[] => {
+    if (oldName === newName) return items;
+    return items.map((it) => {
+      if (it.kind === "phase" && it.reject === oldName) {
+        return { ...it, reject: newName };
+      }
+      return it;
+    });
+  };
+
   const updateTopItem = (idx: number, fn: (it: Item) => Item) => {
-    setItems((prev) => prev.map((it, i) => (i === idx ? fn(it) : it)));
+    setItems((prev) => {
+      const old = prev[idx];
+      const next = fn(old);
+      const mapped = prev.map((it, i) => (i === idx ? next : it));
+      const oldName = old?.kind === "phase" ? old.name : old?.kind === "parallel" ? old.name : null;
+      const newName = next?.kind === "phase" ? next.name : next?.kind === "parallel" ? next.name : null;
+      if (oldName && newName && oldName !== newName) return applyRename(mapped, oldName, newName);
+      return mapped;
+    });
     mark();
   };
 
   const updateChildPhase = (parallelIdx: number, childIdx: number, fn: (p: PhaseItem) => PhaseItem) => {
-    setItems((prev) => prev.map((it, i) => {
-      if (i !== parallelIdx || it.kind !== "parallel") return it;
-      const phases = it.phases.map((p, j) => (j === childIdx ? fn(p) : p));
-      return { ...it, phases };
-    }));
+    setItems((prev) => {
+      let oldName: string | null = null;
+      let newName: string | null = null;
+      const mapped = prev.map((it, i) => {
+        if (i !== parallelIdx || it.kind !== "parallel") return it;
+        const phases = it.phases.map((p, j) => {
+          if (j !== childIdx) return p;
+          oldName = p.name;
+          const updated = fn(p);
+          newName = updated.name;
+          return updated;
+        });
+        return { ...it, phases };
+      });
+      if (oldName && newName && oldName !== newName) return applyRename(mapped, oldName, newName);
+      return mapped;
+    });
     mark();
   };
 
@@ -323,6 +354,9 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       } else {
         toast.success("已保存");
       }
+      if (res.ts_error) {
+        toast.error("TS 同步失败（YAML 已保存）", res.ts_error);
+      }
       if ((res.ts?.orphans ?? []).length > 0) {
         toast.warning(`孤儿函数：${res.ts!.orphans.join(", ")}（在 workflow.ts 中存在但未使用，未自动删除）`);
       }
@@ -380,6 +414,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
                   item={it}
                   idx={idx}
                   total={items.length}
+                  allNames={allNames}
                   hoveredPhase={hoveredPhase ?? null}
                   onHoverPhase={onHoverPhase}
                   onMoveUp={() => moveTop(idx, -1)}
@@ -387,6 +422,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
                   onDelete={() => setPendingDelete({ kind: "top", idx, name: it.name })}
                   onUngroup={() => ungroupParallel(idx)}
                   onUpdateStrategy={(s) => updateTopItem(idx, (old) => (old.kind === "parallel" ? { ...old, fail_strategy: s } : old))}
+                  onUpdateName={(newName) => updateTopItem(idx, (old) => ({ ...old, name: newName }))}
                   onAddChild={() => addChildToParallel(idx)}
                   onChildUpdate={(childIdx, p) => updateChildPhase(idx, childIdx, () => p)}
                   onChildDelete={(childIdx, name) => setPendingDelete({ kind: "child", parallelIdx: idx, childIdx, name })}
@@ -404,6 +440,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
                 total={items.length}
                 rejectCandidates={namesBeforeTop(idx)}
                 parallelTargets={parallelOptions}
+                otherNames={allNames.filter((n) => n !== it.name)}
                 hoveredPhase={hoveredPhase ?? null}
                 onHoverPhase={onHoverPhase}
                 onMoveUp={() => moveTop(idx, -1)}
@@ -477,6 +514,7 @@ interface PhaseRowProps {
   total: number;
   rejectCandidates: string[];
   parallelTargets: { idx: number; name: string }[];
+  otherNames: string[];
   hoveredPhase: string | null;
   onHoverPhase?: (name: string | null) => void;
   onMoveUp: () => void;
@@ -486,8 +524,21 @@ interface PhaseRowProps {
   onMoveIntoParallel: (parallelIdx: number) => void;
 }
 
-function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
+function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, otherNames, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
   const isHighlight = hoveredPhase === item.name;
+  const [nameDraft, setNameDraft] = React.useState(item.name);
+  React.useEffect(() => { setNameDraft(item.name); }, [item.name]);
+
+  const commitName = () => {
+    const trimmed = nameDraft.trim();
+    if (trimmed === item.name) return;
+    if (!/^[a-z][a-z0-9_]*$/.test(trimmed) || otherNames.includes(trimmed)) {
+      setNameDraft(item.name);
+      return;
+    }
+    onUpdate({ ...item, name: trimmed });
+  };
+
   return (
     <div
       className={`phase-row ${isHighlight ? "highlight" : ""}`}
@@ -498,7 +549,15 @@ function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, hovered
         <span className="phase-idx">{idx + 1}</span>
         <div className="phase-body">
           <div className="phase-title">
-            <span className="mono" style={{ fontSize: "0.95rem", color: "var(--cyan)" }}>{item.name}</span>
+            <input
+              type="text"
+              className="text-input phase-name-input mono"
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              title="阶段名 — 修改后 workflow.ts 需要校准 TS 来追加 run_<新名> 函数"
+            />
           </div>
           <div className="phase-fields">
             <label>
@@ -560,6 +619,7 @@ interface ParallelRowProps {
   item: ParallelItem;
   idx: number;
   total: number;
+  allNames: string[];
   hoveredPhase: string | null;
   onHoverPhase?: (name: string | null) => void;
   onMoveUp: () => void;
@@ -567,6 +627,7 @@ interface ParallelRowProps {
   onDelete: () => void;
   onUngroup: () => void;
   onUpdateStrategy: (s: string) => void;
+  onUpdateName: (newName: string) => void;
   onAddChild: () => void;
   onChildUpdate: (childIdx: number, p: PhaseItem) => void;
   onChildDelete: (childIdx: number, name: string) => void;
@@ -576,9 +637,21 @@ interface ParallelRowProps {
 }
 
 function ParallelRow(props: ParallelRowProps) {
-  const { item, idx, total, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUngroup, onUpdateStrategy, onAddChild,
+  const { item, idx, total, allNames, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUngroup, onUpdateStrategy, onUpdateName, onAddChild,
     onChildUpdate, onChildDelete, onChildMoveUp, onChildMoveDown, onChildLift } = props;
   const headHighlight = hoveredPhase === item.name;
+  const otherNames = React.useMemo(() => allNames.filter((n) => n !== item.name), [allNames, item.name]);
+  const [nameDraft, setNameDraft] = React.useState(item.name);
+  React.useEffect(() => { setNameDraft(item.name); }, [item.name]);
+  const commitName = () => {
+    const trimmed = nameDraft.trim();
+    if (trimmed === item.name) return;
+    if (!/^[a-z][a-z0-9_]*$/.test(trimmed) || otherNames.includes(trimmed)) {
+      setNameDraft(item.name);
+      return;
+    }
+    onUpdateName(trimmed);
+  };
 
   return (
     <div className={`phase-row phase-row-parallel ${headHighlight ? "highlight" : ""}`}>
@@ -592,7 +665,14 @@ function ParallelRow(props: ParallelRowProps) {
           <div className="phase-body">
             <div className="phase-title">
               <span className="pill pill-accent" style={{ marginRight: "0.5rem" }}>并行</span>
-              <span className="mono" style={{ fontSize: "0.95rem" }}>{item.name}</span>
+              <input
+                type="text"
+                className="text-input phase-name-input mono"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={commitName}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              />
             </div>
             <div className="phase-fields">
               <label>
@@ -617,40 +697,21 @@ function ParallelRow(props: ParallelRowProps) {
 
         <div className="parallel-children">
           {item.phases.map((sub, j) => (
-            <div
+            <ParallelChildRow
               key={j}
-              className={`phase-row parallel-child ${hoveredPhase === sub.name ? "highlight" : ""}`}
-              onMouseEnter={() => onHoverPhase?.(sub.name)}
-              onMouseLeave={() => onHoverPhase?.(null)}
-            >
-              <div className="phase-row-main">
-                <span className="phase-idx-small mono muted">{idx + 1}.{j + 1}</span>
-                <div className="phase-body">
-                  <div className="phase-title">
-                    <span className="mono" style={{ color: "var(--cyan)" }}>{sub.name}</span>
-                  </div>
-                  <div className="phase-fields">
-                    <label>
-                      <span className="muted">超时(秒)</span>
-                      <input
-                        type="number"
-                        className="text-input phase-input"
-                        min={1}
-                        value={sub.timeout ?? ""}
-                        placeholder="900"
-                        onChange={(e) => onChildUpdate(j, { ...sub, timeout: parseInt(e.target.value, 10) || undefined })}
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-              <div className="phase-actions">
-                <button className="btn-icon" title="块内上移" onClick={() => onChildMoveUp(j)} disabled={j === 0}>↑</button>
-                <button className="btn-icon" title="块内下移" onClick={() => onChildMoveDown(j)} disabled={j === item.phases.length - 1}>↓</button>
-                <button className="btn-icon" title="移出到顶级" onClick={() => onChildLift(j)}>⇱</button>
-                <button className="btn-icon btn-icon-danger" title="删除子阶段" onClick={() => onChildDelete(j, sub.name)}>✕</button>
-              </div>
-            </div>
+              sub={sub}
+              outerIdx={idx}
+              innerIdx={j}
+              total={item.phases.length}
+              otherNames={allNames.filter((n) => n !== sub.name)}
+              isHighlight={hoveredPhase === sub.name}
+              onHoverPhase={onHoverPhase}
+              onUpdate={(next) => onChildUpdate(j, next)}
+              onDelete={() => onChildDelete(j, sub.name)}
+              onMoveUp={() => onChildMoveUp(j)}
+              onMoveDown={() => onChildMoveDown(j)}
+              onLift={() => onChildLift(j)}
+            />
           ))}
           <button
             className="btn btn-secondary"
@@ -660,6 +721,83 @@ function ParallelRow(props: ParallelRowProps) {
             + 添加子阶段
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// 并行子阶段行（名字可编辑）
+// ──────────────────────────────────────────────
+
+interface ParallelChildRowProps {
+  sub: PhaseItem;
+  outerIdx: number;
+  innerIdx: number;
+  total: number;
+  otherNames: string[];
+  isHighlight: boolean;
+  onHoverPhase?: (name: string | null) => void;
+  onUpdate: (next: PhaseItem) => void;
+  onDelete: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onLift: () => void;
+}
+
+function ParallelChildRow({ sub, outerIdx, innerIdx, total, otherNames, isHighlight, onHoverPhase, onUpdate, onDelete, onMoveUp, onMoveDown, onLift }: ParallelChildRowProps) {
+  const [nameDraft, setNameDraft] = React.useState(sub.name);
+  React.useEffect(() => { setNameDraft(sub.name); }, [sub.name]);
+
+  const commitName = () => {
+    const trimmed = nameDraft.trim();
+    if (trimmed === sub.name) return;
+    if (!/^[a-z][a-z0-9_]*$/.test(trimmed) || otherNames.includes(trimmed)) {
+      setNameDraft(sub.name);
+      return;
+    }
+    onUpdate({ ...sub, name: trimmed });
+  };
+
+  return (
+    <div
+      className={`phase-row parallel-child ${isHighlight ? "highlight" : ""}`}
+      onMouseEnter={() => onHoverPhase?.(sub.name)}
+      onMouseLeave={() => onHoverPhase?.(null)}
+    >
+      <div className="phase-row-main">
+        <span className="phase-idx-small mono muted">{outerIdx + 1}.{innerIdx + 1}</span>
+        <div className="phase-body">
+          <div className="phase-title">
+            <input
+              type="text"
+              className="text-input phase-name-input mono"
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+            />
+          </div>
+          <div className="phase-fields">
+            <label>
+              <span className="muted">超时(秒)</span>
+              <input
+                type="number"
+                className="text-input phase-input"
+                min={1}
+                value={sub.timeout ?? ""}
+                placeholder="900"
+                onChange={(e) => onUpdate({ ...sub, timeout: parseInt(e.target.value, 10) || undefined })}
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+      <div className="phase-actions">
+        <button className="btn-icon" title="块内上移" onClick={onMoveUp} disabled={innerIdx === 0}>↑</button>
+        <button className="btn-icon" title="块内下移" onClick={onMoveDown} disabled={innerIdx === total - 1}>↓</button>
+        <button className="btn-icon" title="移出到顶级" onClick={onLift}>⇱</button>
+        <button className="btn-icon btn-icon-danger" title="删除子阶段" onClick={onDelete}>✕</button>
       </div>
     </div>
   );

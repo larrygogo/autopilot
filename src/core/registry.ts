@@ -182,11 +182,15 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
     return null;
   }
 
-  // 动态 import workflow.ts（如果存在）
+  // 动态 import workflow.ts（如果存在）。
+  // Bun 的 ESM import() 会按路径缓存，一旦首次加载，后续 reload 即使磁盘变化
+  // 仍拿到旧版本。加 ?t=<mtime> query 强制每次文件变动后重新加载。
   let tsModule: Record<string, unknown> | null = null;
   if (existsSync(tsPath)) {
     try {
-      tsModule = await import(tsPath) as Record<string, unknown>;
+      const { statSync } = await import("fs");
+      const mtime = statSync(tsPath).mtimeMs;
+      tsModule = await import(`${tsPath}?t=${mtime}`) as Record<string, unknown>;
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       log.warn("加载 YAML 工作流 TS 模块 %s 失败：%s", tsPath, message);

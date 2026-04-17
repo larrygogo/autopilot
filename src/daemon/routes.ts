@@ -532,17 +532,19 @@ export async function handleRequest(req: Request): Promise<Response> {
         setWorkflowPhases(phasesWriteMatch, body.phases as PhaseEntryInput[]);
         await reload();
         let tsResult: { added: string[]; orphans: string[]; modified: boolean } | null = null;
+        let tsError: string | null = null;
         if (body.sync_ts !== false) {
           try {
             tsResult = syncWorkflowTs(phasesWriteMatch);
             if (tsResult.modified) await reload();
           } catch (e: unknown) {
-            // TS 同步失败不应回滚 yaml；作为 warning 返回
+            // TS 同步失败不回滚 yaml；作为 warning 返回具体错误
+            tsError = e instanceof Error ? e.message : String(e);
             tsResult = { added: [], orphans: [], modified: false };
           }
         }
         emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true, ts: tsResult });
+        return json({ ok: true, ts: tsResult, ts_error: tsError });
       } catch (e: unknown) {
         return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
       }
