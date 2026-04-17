@@ -184,6 +184,8 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
       return null;
     }
     wfDef = parsed as Record<string, unknown>;
+    // Schema 级归一化：允许字段类型宽松但会转为正确类型并记警告
+    normalizeWorkflowFields(wfDef, yamlPath);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
     log.error("解析 YAML 工作流 %s 失败：%s", yamlPath, message);
@@ -788,6 +790,26 @@ export function deleteWorkflowDir(workflowName: string): boolean {
   if (!existsSync(dir)) return false;
   rmSync(dir, { recursive: true, force: true });
   return true;
+}
+
+/**
+ * YAML 字段类型归一化 —— 用户手写 YAML 容易把 description 写成数字、
+ * phases.timeout 写成字符串等。这里做最低限度的容错：非预期类型会警告
+ * 并尽量转换，避免下游组件（Web UI / CLI）渲染 "— 11" 之类异常。
+ */
+function normalizeWorkflowFields(wfDef: Record<string, unknown>, yamlPath: string): void {
+  // description 必须是字符串
+  if ("description" in wfDef && typeof wfDef.description !== "string") {
+    log.warn("workflow.yaml %s：description 应为字符串，当前值 %o 已自动转为字符串",
+      yamlPath, wfDef.description);
+    wfDef.description = wfDef.description == null ? "" : String(wfDef.description);
+  }
+  // name 必须是字符串（虽然缺失更常见）
+  if ("name" in wfDef && typeof wfDef.name !== "string") {
+    log.warn("workflow.yaml %s：name 应为字符串，当前 %o 已转为字符串",
+      yamlPath, wfDef.name);
+    wfDef.name = String(wfDef.name);
+  }
 }
 
 function renderWorkflowYamlTemplate(name: string, description: string | undefined, firstPhase: string): string {
