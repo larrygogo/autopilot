@@ -1,13 +1,32 @@
 const BASE = "";
 
+/** 标记新添加的 API 路径（daemon 须是最新代码才有）。收到 404 时提示重启 daemon。 */
+const NEW_API_PATTERNS: RegExp[] = [
+  /^\/api\/workflows\/[\w.\-]+\/phases$/,
+  /^\/api\/workflows\/[\w.\-]+\/sync-ts$/,
+  /^\/api\/workflows\/[\w.\-]+\/agents$/,
+  /^\/api\/providers/,
+  /^\/api\/agents/,
+];
+
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...opts,
-    headers: { "Content-Type": "application/json", ...opts?.headers },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...opts,
+      headers: { "Content-Type": "application/json", ...opts?.headers },
+    });
+  } catch (e: any) {
+    throw new Error(`网络请求失败：${e?.message ?? String(e)}（daemon 是否在运行？）`);
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error((body as any).error ?? `HTTP ${res.status}`);
+    let msg = (body as any).error ?? `HTTP ${res.status}`;
+    // 特判：新 API 返回 404 往往意味着 daemon 跑的是旧代码
+    if (res.status === 404 && NEW_API_PATTERNS.some((re) => re.test(path))) {
+      msg = `接口 ${path} 不存在（HTTP 404）。请确认 daemon 已重启到最新版本：\n\n  autopilot daemon stop && autopilot daemon start`;
+    }
+    throw new Error(msg);
   }
   return res.json();
 }
