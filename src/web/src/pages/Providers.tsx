@@ -12,6 +12,7 @@ const PROVIDER_META: Record<string, { label: string; defaultModel: string; envHi
 export function Providers() {
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
@@ -22,7 +23,11 @@ export function Providers() {
 
   const refresh = () => {
     setLoading(true);
-    api.listProviders().then(setProviders).catch(() => {}).finally(() => setLoading(false));
+    setLoadError(null);
+    api.listProviders()
+      .then(setProviders)
+      .catch((e) => setLoadError(e?.message ?? String(e)))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { refresh(); }, []);
@@ -58,6 +63,15 @@ export function Providers() {
         <h2>Providers</h2>
         <span>LLM 提供商全局默认</span>
       </div>
+
+      {loadError && (
+        <div className="card" style={{ marginBottom: "1rem", borderColor: "rgba(248,113,113,0.4)" }}>
+          <p style={{ color: "var(--red)" }}>加载失败：{loadError}</p>
+          <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.82rem" }}>
+            常见原因：daemon 未重启（新 API 未生效）。请执行 <code className="mono">autopilot daemon stop && autopilot daemon start</code> 后刷新页面。
+          </p>
+        </div>
+      )}
 
       <div className="provider-list">
         {providers.map((p) => {

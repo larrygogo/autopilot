@@ -14,6 +14,7 @@ function emptyDraft(): AgentItem {
 export function Agents() {
   const [agents, setAgents] = useState<AgentItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>({ type: "list" });
   const [toast, setToast] = useState<Toast>(null);
   const [saving, setSaving] = useState(false);
@@ -25,7 +26,11 @@ export function Agents() {
 
   const refresh = () => {
     setLoading(true);
-    api.listAgents().then(setAgents).catch(() => {}).finally(() => setLoading(false));
+    setLoadError(null);
+    api.listAgents()
+      .then(setAgents)
+      .catch((e) => setLoadError(e?.message ?? String(e)))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { refresh(); }, []);
@@ -108,6 +113,15 @@ export function Agents() {
               + 新建
             </button>
           </div>
+
+          {loadError && (
+            <div className="card" style={{ marginBottom: "1rem", borderColor: "rgba(248,113,113,0.4)" }}>
+              <p style={{ color: "var(--red)" }}>加载失败：{loadError}</p>
+              <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.82rem" }}>
+                常见原因：daemon 未重启（新 API 未生效）。请执行 <code className="mono">autopilot daemon stop && autopilot daemon start</code> 后刷新页面。
+              </p>
+            </div>
+          )}
 
           {agents.length === 0 ? (
             <div className="card">
