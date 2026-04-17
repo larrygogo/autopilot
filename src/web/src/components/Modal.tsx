@@ -14,20 +14,33 @@ interface ModalProps {
 export function Modal({ open, onClose, title, children, actions, size = "md", dismissable = true }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  // 把最新的 onClose / dismissable 存 ref，避免 ESC 监听 effect 因依赖变化重跑，
+  // 从而意外抢走输入框焦点。
+  const onCloseRef = useRef(onClose);
+  const dismissableRef = useRef(dismissable);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => { dismissableRef.current = dismissable; }, [dismissable]);
+
+  // 仅在 open 变化时：锁 body 滚动 + 对对话框容器抢焦点一次
   useEffect(() => {
     if (!open) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && dismissable) onClose();
-    };
-    window.addEventListener("keydown", onKey);
     dialogRef.current?.focus();
     return () => {
       document.body.style.overflow = prevOverflow;
-      window.removeEventListener("keydown", onKey);
     };
-  }, [open, dismissable, onClose]);
+  }, [open]);
+
+  // ESC 监听：同样只随 open 变化注册/卸载
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && dismissableRef.current) onCloseRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   if (!open) return null;
 
