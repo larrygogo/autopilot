@@ -357,6 +357,12 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       if (res.ts_error) {
         toast.error("TS 同步失败（YAML 已保存）", res.ts_error);
       }
+      if ((res.ts?.legacy_signature ?? []).length > 0) {
+        toast.error(
+          `检测到旧签名：${res.ts!.legacy_signature!.join(", ")}`,
+          `这些函数使用 ctx: { task, log } 形式，但 runner 实际只传 taskId 字符串，会导致运行时 "task.id undefined" 报错。\n\n请改为：\nexport async function run_xxx(taskId: string): Promise<void> { ... }`,
+        );
+      }
       if ((res.ts?.orphans ?? []).length > 0) {
         toast.warning(`孤儿函数：${res.ts!.orphans.join(", ")}（在 workflow.ts 中存在但未使用，未自动删除）`);
       }
@@ -380,6 +386,12 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       if (res.modified) toast.success(`已追加 ${res.added.length} 个函数：${res.added.join(", ")}`);
       else toast.info("TS 已是最新");
       if (res.orphans.length > 0) toast.warning(`孤儿函数：${res.orphans.join(", ")}`);
+      if ((res.legacy_signature ?? []).length > 0) {
+        toast.error(
+          `检测到旧签名：${res.legacy_signature!.join(", ")}`,
+          `这些函数使用 ctx: { task, log } 形式，但 runner 实际只传 taskId 字符串，会导致运行时 "task.id undefined" 报错。\n\n请改为：\nexport async function run_xxx(taskId: string): Promise<void> { ... }`,
+        );
+      }
     } catch (e: any) {
       toast.error("校准失败", e?.message ?? String(e));
     }

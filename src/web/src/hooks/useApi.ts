@@ -57,14 +57,14 @@ export const api = {
   setWorkflowPhases: (name: string, phases: unknown[], syncTs = true) =>
     request<{
       ok: boolean;
-      ts: { added: string[]; orphans: string[]; modified: boolean } | null;
+      ts: { added: string[]; orphans: string[]; modified: boolean; legacy_signature?: string[] } | null;
       ts_error?: string | null;
     }>(
       `/api/workflows/${name}/phases`,
       { method: "PUT", body: JSON.stringify({ phases, sync_ts: syncTs }) },
     ),
   syncWorkflowTs: (name: string) =>
-    request<{ added: string[]; orphans: string[]; modified: boolean }>(
+    request<{ added: string[]; orphans: string[]; modified: boolean; legacy_signature?: string[] }>(
       `/api/workflows/${name}/sync-ts`, { method: "POST" },
     ),
   setWorkflowAgents: (name: string, agents: unknown[]) =>

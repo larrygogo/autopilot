@@ -795,17 +795,20 @@ phases:
 
 function renderWorkflowTsTemplate(firstPhase: string): string {
   const fn = `run_${firstPhase}`;
-  return `// 每个 phase 函数接收 { task, log, notify, ... } 上下文
-// 返回 Promise<void>；抛错则该阶段失败，可被重试或驳回
-// 详见 docs/workflow-development.md
+  return `// 每个 phase 函数接收 taskId: string 参数；抛错则该阶段失败，
+// 可被状态机重试或驳回。详见 docs/workflow-development.md
+//
+// 常见用法（按需启用）：
+//   import { getTask } from "@autopilot/db";        // 取任务对象
+//   import { getAgent } from "@autopilot/agents";   // 取配置好的 agent
+//
+//   const task = getTask(taskId);
+//   const agent = getAgent("coder", "<工作流名>");
+//   const result = await agent.run("...prompt...");
 
-export async function ${fn}(ctx: { task: any; log: (msg: string) => void }) {
-  const { task, log } = ctx;
-  log(\`开始执行 ${firstPhase}，task=\${task.id}\`);
+export async function ${fn}(taskId: string): Promise<void> {
+  console.log(\`[\${taskId}] 执行阶段 ${firstPhase}\`);
   // TODO: 在这里实现阶段业务逻辑
-  //   - 调用 agent：const agent = getAgent("coder", "${firstPhase}"); await agent.run("...");
-  //   - 读写文件 / 调用外部服务 / 写入 task.extra 等
-  log(\`完成 ${firstPhase}\`);
 }
 `;
 }
@@ -961,6 +964,8 @@ export interface SyncTsResult {
   orphans: string[];
   /** 是否修改了文件 */
   modified: boolean;
+  /** 使用了旧 `ctx` 签名（runner 实际只传 taskId 字符串，会运行时报错）的函数名 */
+  legacy_signature?: string[];
 }
 
 export function syncWorkflowTs(workflowName: string): SyncTsResult {
@@ -979,9 +984,10 @@ export function syncWorkflowTs(workflowName: string): SyncTsResult {
 
   const missing = phaseNames.filter((n) => !existingSet.has(n));
   const orphans = existingFns.filter((n) => !phaseSet.has(n));
+  const legacy = detectLegacySignatures(content);
 
   if (missing.length === 0) {
-    return { added: [], orphans, modified: false };
+    return { added: [], orphans, modified: false, legacy_signature: legacy };
   }
 
   const appended = missing.map((name) => renderRunFunctionStub(name)).join("\n");
@@ -990,7 +996,18 @@ export function syncWorkflowTs(workflowName: string): SyncTsResult {
   copyFileSync(tsPath, tsPath + ".bak");
   writeFileSync(tsPath, newContent, "utf-8");
 
-  return { added: missing, orphans, modified: true };
+  return { added: missing, orphans, modified: true, legacy_signature: legacy };
+}
+
+/** 检测使用旧 `ctx: { task: any; ... }` 签名的 run_ 函数（运行时会崩） */
+function detectLegacySignatures(source: string): string[] {
+  const names: string[] = [];
+  const re = /export\s+(?:async\s+)?function\s+run_([A-Za-z0-9_]+)\s*\(\s*ctx\s*:/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source))) {
+    if (!names.includes(m[1])) names.push(m[1]);
+  }
+  return names;
 }
 
 function extractRunFunctions(source: string): string[] {
@@ -1089,10 +1106,8 @@ function cleanWorkflowAgent(a: WorkflowAgentEntry): Record<string, unknown> {
 }
 
 function renderRunFunctionStub(phaseName: string): string {
-  return `export async function run_${phaseName}(ctx: { task: any; log: (msg: string) => void }) {
-  const { task, log } = ctx;
-  log(\`开始执行 ${phaseName}，task=\${task.id}\`);
+  return `export async function run_${phaseName}(taskId: string): Promise<void> {
+  console.log(\`[\${taskId}] 执行阶段 ${phaseName}\`);
   // TODO: 实现阶段逻辑
-  log(\`完成 ${phaseName}\`);
 }`;
 }
