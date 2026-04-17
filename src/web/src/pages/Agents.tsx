@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, type AgentItem, type ProviderModelsResult } from "../hooks/useApi";
 import { useToast } from "../components/Toast";
 import { ConfirmDialog } from "../components/Modal";
+import { AgentDryRunDialog } from "../components/AgentDryRunDialog";
 
 type Mode = { type: "list" } | { type: "edit"; original: string | null; draft: AgentItem };
 
@@ -20,6 +21,7 @@ export function Agents({ embedded = false }: { embedded?: boolean }) {
   const [mode, setMode] = useState<Mode>({ type: "list" });
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [dryRunTarget, setDryRunTarget] = useState<AgentItem | null>(null);
   const [models, setModels] = useState<Record<string, ProviderModelsResult>>({});
 
   const refresh = () => {
@@ -154,6 +156,7 @@ export function Agents({ embedded = false }: { embedded?: boolean }) {
                       </div>
                     </div>
                     <div className="agent-actions">
+                      <button className="btn btn-secondary" onClick={() => setDryRunTarget(a)}>试跑</button>
                       <button className="btn btn-secondary" onClick={() => startEdit(a)}>编辑</button>
                       <button className="btn btn-danger" onClick={() => setPendingDelete(a.name)}>删除</button>
                     </div>
@@ -310,6 +313,12 @@ export function Agents({ embedded = false }: { embedded?: boolean }) {
         danger
         onConfirm={doDelete}
         onCancel={() => setPendingDelete(null)}
+      />
+
+      <AgentDryRunDialog
+        open={!!dryRunTarget}
+        onClose={() => setDryRunTarget(null)}
+        agent={dryRunTarget}
       />
     </>
   );

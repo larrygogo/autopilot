@@ -39,6 +39,7 @@ import {
 } from "../core/config";
 import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
 import { listProviderModels } from "../agents/model-list";
+import { runAgentOnce } from "../agents/registry";
 import { emit } from "./event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -749,6 +750,34 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (!removed) return error("Agent not found", 404);
       emit({ type: "config:updated", payload: {} });
       return json({ ok: true });
+    }
+
+    // POST /api/agents/:name/dry-run — 一次性调用，用于 UI 调试
+    const agentDryRunMatch = extractParam(path, /^\/api\/agents\/([\w.\-]+)\/dry-run$/);
+    if (method === "POST" && agentDryRunMatch) {
+      const body = await req.json() as {
+        prompt?: string;
+        system_prompt?: string;
+        additional_system?: string;
+        model?: string;
+        max_turns?: number;
+      };
+      if (typeof body.prompt !== "string" || !body.prompt.trim()) {
+        return error("prompt 不能为空", 400);
+      }
+      try {
+        const started = Date.now();
+        const result = await runAgentOnce(agentDryRunMatch, body.prompt, {
+          system_prompt: body.system_prompt,
+          additional_system: body.additional_system,
+          model: body.model,
+          max_turns: body.max_turns,
+        });
+        const elapsed_ms = Date.now() - started;
+        return json({ ok: true, elapsed_ms, result });
+      } catch (e: unknown) {
+        return error(`试跑失败：${e instanceof Error ? e.message : String(e)}`, 500);
+      }
     }
 
     // ── Static files ──
