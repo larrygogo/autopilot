@@ -58,7 +58,6 @@ export const api = {
 
 export interface ProviderItem {
   name: string;
-  api_key_env?: string;
   default_model?: string;
   base_url?: string;
   enabled?: boolean;

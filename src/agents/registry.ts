@@ -48,12 +48,11 @@ export function resolveAgentConfig(
     throw new Error(`未知 provider：${provider}，支持：${Object.keys(PROVIDERS).join("、")}`);
   }
 
-  // provider 层 fallback：agent 没写 model 时使用 providers.<provider>.default_model
+  // provider 层 fallback：agent 没写 model/base_url 时使用 providers.<provider> 默认值
   const providerCfg = providers[provider];
   if (providerCfg) {
     if (!merged["model"] && providerCfg.default_model) merged["model"] = providerCfg.default_model;
     if (!merged["base_url"] && providerCfg.base_url) merged["base_url"] = providerCfg.base_url;
-    if (!merged["api_key_env"] && providerCfg.api_key_env) merged["api_key_env"] = providerCfg.api_key_env;
   }
 
   return merged as AgentConfig;

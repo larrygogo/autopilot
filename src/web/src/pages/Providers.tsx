@@ -3,10 +3,10 @@ import { api, type ProviderItem } from "../hooks/useApi";
 
 type Toast = { type: "success" | "error"; message: string } | null;
 
-const PROVIDER_META: Record<string, { label: string; defaultModel: string; envHint: string }> = {
-  anthropic: { label: "Anthropic (Claude)", defaultModel: "claude-sonnet-4-6", envHint: "ANTHROPIC_API_KEY" },
-  openai: { label: "OpenAI (Codex)", defaultModel: "o4-mini", envHint: "OPENAI_API_KEY" },
-  google: { label: "Google (Gemini)", defaultModel: "gemini-2.5-pro", envHint: "GEMINI_API_KEY" },
+const PROVIDER_META: Record<string, { label: string; defaultModel: string; loginCmd: string }> = {
+  anthropic: { label: "Anthropic (Claude)", defaultModel: "claude-sonnet-4-6", loginCmd: "claude login" },
+  openai: { label: "OpenAI (Codex)", defaultModel: "o4-mini", loginCmd: "codex login" },
+  google: { label: "Google (Gemini)", defaultModel: "gemini-2.5-pro", loginCmd: "gemini auth login" },
 };
 
 export function Providers() {
@@ -64,6 +64,13 @@ export function Providers() {
         <span>LLM 提供商全局默认</span>
       </div>
 
+      <div className="card" style={{ marginBottom: "1rem" }}>
+        <p className="muted" style={{ fontSize: "0.85rem" }}>
+          Autopilot 通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。
+          如尚未登录，请在终端中运行对应的 <span className="mono">login</span> 命令。
+        </p>
+      </div>
+
       {loadError && (
         <div className="card" style={{ marginBottom: "1rem", borderColor: "rgba(248,113,113,0.4)" }}>
           <p style={{ color: "var(--red)" }}>加载失败：{loadError}</p>
@@ -75,7 +82,7 @@ export function Providers() {
 
       <div className="provider-list">
         {providers.map((p) => {
-          const meta = PROVIDER_META[p.name] ?? { label: p.name, defaultModel: "", envHint: "" };
+          const meta = PROVIDER_META[p.name] ?? { label: p.name, defaultModel: "", loginCmd: "" };
           return (
             <div key={p.name} className="card provider-card">
               <div className="card-header">
@@ -90,35 +97,30 @@ export function Providers() {
                 </label>
               </div>
 
+              {meta.loginCmd && (
+                <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.75rem" }}>
+                  登录命令：<span className="mono">{meta.loginCmd}</span>
+                </p>
+              )}
+
               <div className="form-grid">
-                <label>
+                <label className="col-span-2">
                   <span>默认模型</span>
                   <input
                     type="text"
-                    className="text-input"
+                    className="text-input mono"
                     placeholder={meta.defaultModel}
                     value={p.default_model ?? ""}
                     onChange={(e) => updateField(p.name, "default_model", e.target.value)}
                   />
                 </label>
 
-                <label>
-                  <span>API Key 环境变量</span>
-                  <input
-                    type="text"
-                    className="text-input"
-                    placeholder={meta.envHint}
-                    value={p.api_key_env ?? ""}
-                    onChange={(e) => updateField(p.name, "api_key_env", e.target.value)}
-                  />
-                </label>
-
                 <label className="col-span-2">
-                  <span>Base URL（可选 — 自建代理时填写）</span>
+                  <span>Base URL（可选 — 仅在使用自建代理/兼容端点时填写）</span>
                   <input
                     type="text"
-                    className="text-input"
-                    placeholder="https://api.anthropic.com"
+                    className="text-input mono"
+                    placeholder="留空使用官方端点"
                     value={p.base_url ?? ""}
                     onChange={(e) => updateField(p.name, "base_url", e.target.value)}
                   />

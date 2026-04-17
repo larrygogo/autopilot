@@ -8,9 +8,11 @@ export const PROVIDER_NAMES = ["anthropic", "openai", "google"] as const;
 export type ProviderName = typeof PROVIDER_NAMES[number];
 
 export interface ProviderConfig {
-  api_key_env?: string;
+  /** provider 默认模型。agent 未显式指定 model 时使用此值 */
   default_model?: string;
+  /** 自建代理/兼容端点。留空时 SDK 走官方端点（凭证由对应 CLI 管理） */
   base_url?: string;
+  /** 是否启用。禁用时仍可保留配置，但注册该 provider 的 agent 不会被实例化 */
   enabled?: boolean;
   [key: string]: unknown;
 }
