@@ -6,6 +6,7 @@ import { ConfirmDialog } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { PhaseEditor } from "../components/PhaseEditor";
 import { WorkflowAgentsEditor } from "../components/WorkflowAgentsEditor";
+import { PhasePipeline } from "../components/PhasePipeline";
 
 interface WorkflowInfo {
   name: string;
@@ -40,6 +41,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
 
   const refresh = () => {
     setLoading(true);
@@ -156,9 +158,25 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
             }}
           />
 
+          <div className="card" style={{ marginTop: "0.75rem" }}>
+            <div className="card-header">
+              <h3>流水线</h3>
+              <span className="muted" style={{ fontSize: "0.76rem" }}>
+                鼠标悬停以联动高亮编辑器与状态机图
+              </span>
+            </div>
+            <PhasePipeline
+              phases={(selected.detail.phases as any[]) ?? []}
+              highlight={hoveredPhase}
+              onHoverPhase={setHoveredPhase}
+            />
+          </div>
+
           <PhaseEditor
             workflowName={selected.name}
             initialPhases={(selected.detail.phases as any[]) ?? []}
+            hoveredPhase={hoveredPhase}
+            onHoverPhase={setHoveredPhase}
             onSaved={async () => {
               // 重新拉详情 + 图
               try {
@@ -177,6 +195,8 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
               <StateMachineGraph
                 nodes={selected.graph.nodes}
                 edges={selected.graph.edges}
+                highlightPhase={hoveredPhase}
+                onHoverPhase={setHoveredPhase}
               />
             </div>
           </div>

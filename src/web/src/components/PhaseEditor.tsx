@@ -98,13 +98,16 @@ interface Props {
   workflowName: string;
   initialPhases: any[];
   onSaved?: () => void;
+  /** 由父组件提供的联动 hover 信号（pipeline / state graph 共享） */
+  hoveredPhase?: string | null;
+  onHoverPhase?: (name: string | null) => void;
 }
 
 type DeleteTarget =
   | { kind: "top"; idx: number; name: string }
   | { kind: "child"; parallelIdx: number; childIdx: number; name: string };
 
-export function PhaseEditor({ workflowName, initialPhases, onSaved }: Props) {
+export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase, onHoverPhase }: Props) {
   const toast = useToast();
   const [items, setItems] = useState<Item[]>(() => normalize(initialPhases));
   const [dirty, setDirty] = useState(false);
@@ -377,6 +380,8 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved }: Props) {
                   item={it}
                   idx={idx}
                   total={items.length}
+                  hoveredPhase={hoveredPhase ?? null}
+                  onHoverPhase={onHoverPhase}
                   onMoveUp={() => moveTop(idx, -1)}
                   onMoveDown={() => moveTop(idx, 1)}
                   onDelete={() => setPendingDelete({ kind: "top", idx, name: it.name })}
@@ -399,6 +404,8 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved }: Props) {
                 total={items.length}
                 rejectCandidates={namesBeforeTop(idx)}
                 parallelTargets={parallelOptions}
+                hoveredPhase={hoveredPhase ?? null}
+                onHoverPhase={onHoverPhase}
                 onMoveUp={() => moveTop(idx, -1)}
                 onMoveDown={() => moveTop(idx, 1)}
                 onDelete={() => setPendingDelete({ kind: "top", idx, name: it.name })}
@@ -470,6 +477,8 @@ interface PhaseRowProps {
   total: number;
   rejectCandidates: string[];
   parallelTargets: { idx: number; name: string }[];
+  hoveredPhase: string | null;
+  onHoverPhase?: (name: string | null) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
@@ -477,9 +486,14 @@ interface PhaseRowProps {
   onMoveIntoParallel: (parallelIdx: number) => void;
 }
 
-function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
+function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
+  const isHighlight = hoveredPhase === item.name;
   return (
-    <div className="phase-row">
+    <div
+      className={`phase-row ${isHighlight ? "highlight" : ""}`}
+      onMouseEnter={() => onHoverPhase?.(item.name)}
+      onMouseLeave={() => onHoverPhase?.(null)}
+    >
       <div className="phase-row-main">
         <span className="phase-idx">{idx + 1}</span>
         <div className="phase-body">
@@ -546,6 +560,8 @@ interface ParallelRowProps {
   item: ParallelItem;
   idx: number;
   total: number;
+  hoveredPhase: string | null;
+  onHoverPhase?: (name: string | null) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
@@ -560,13 +576,18 @@ interface ParallelRowProps {
 }
 
 function ParallelRow(props: ParallelRowProps) {
-  const { item, idx, total, onMoveUp, onMoveDown, onDelete, onUngroup, onUpdateStrategy, onAddChild,
+  const { item, idx, total, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUngroup, onUpdateStrategy, onAddChild,
     onChildUpdate, onChildDelete, onChildMoveUp, onChildMoveDown, onChildLift } = props;
+  const headHighlight = hoveredPhase === item.name;
 
   return (
-    <div className="phase-row phase-row-parallel">
+    <div className={`phase-row phase-row-parallel ${headHighlight ? "highlight" : ""}`}>
       <div className="phase-row-main" style={{ flexDirection: "column", alignItems: "stretch" }}>
-        <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", width: "100%" }}>
+        <div
+          style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", width: "100%" }}
+          onMouseEnter={() => onHoverPhase?.(item.name)}
+          onMouseLeave={() => onHoverPhase?.(null)}
+        >
           <span className="phase-idx">{idx + 1}</span>
           <div className="phase-body">
             <div className="phase-title">
@@ -596,7 +617,12 @@ function ParallelRow(props: ParallelRowProps) {
 
         <div className="parallel-children">
           {item.phases.map((sub, j) => (
-            <div key={j} className="phase-row parallel-child">
+            <div
+              key={j}
+              className={`phase-row parallel-child ${hoveredPhase === sub.name ? "highlight" : ""}`}
+              onMouseEnter={() => onHoverPhase?.(sub.name)}
+              onMouseLeave={() => onHoverPhase?.(null)}
+            >
               <div className="phase-row-main">
                 <span className="phase-idx-small mono muted">{idx + 1}.{j + 1}</span>
                 <div className="phase-body">

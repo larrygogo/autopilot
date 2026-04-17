@@ -379,6 +379,26 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 .parallel-child { background: var(--bg2); padding: 0.5rem 0.7rem; }
 .phase-idx-small { font-size: 0.7rem; padding-top: 0.5rem; min-width: 32px; }
 
+.phase-row.highlight { border-color: var(--accent2); box-shadow: 0 0 0 1px rgba(99,102,241,0.3); }
+
+.pipeline-wrap { padding: 0.25rem 0; }
+.pipeline { display: flex; align-items: center; gap: 0.5rem; overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0.5rem 0.25rem 0.75rem; }
+.pipeline-arrow { color: var(--muted); font-size: 1.1rem; flex-shrink: 0; user-select: none; }
+.pipeline-node { background: var(--bg0); border: 1px solid var(--border2); border-radius: 8px; padding: 0.5rem 0.85rem; min-width: 100px; text-align: center; cursor: pointer; transition: all 0.12s; flex-shrink: 0; }
+.pipeline-node:hover, .pipeline-node.highlight { border-color: var(--accent2); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99,102,241,0.2); }
+.pipeline-node.current { border-color: var(--cyan); background: var(--cyan-dim); }
+.pipeline-node-name { font-size: 0.85rem; color: var(--text); white-space: nowrap; }
+.pipeline-node-meta { font-size: 0.7rem; margin-top: 0.15rem; }
+
+.pipeline-parallel { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.4rem 0.5rem; border: 1px dashed rgba(99,102,241,0.5); border-radius: 10px; background: rgba(99,102,241,0.04); flex-shrink: 0; }
+.pipeline-parallel-head { display: flex; align-items: center; gap: 0.4rem; padding: 0.1rem 0.2rem; cursor: pointer; transition: color 0.12s; }
+.pipeline-parallel-head.highlight { color: var(--accent2); }
+.pipeline-parallel-body { display: flex; flex-direction: column; gap: 0.3rem; }
+.pipeline-parallel-body .pipeline-node { min-width: 110px; }
+
+.pipeline-rejects { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; padding: 0.5rem 0.25rem; border-top: 1px dashed var(--border); margin-top: 0.25rem; align-items: center; }
+.pipeline-reject { display: flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; }
+
 @media (max-width: 640px) {
   .topbar { padding: 0 0.75rem; height: 48px; }
   .topbar .logo { margin-right: 0; font-size: 0.85rem; flex: 1; }

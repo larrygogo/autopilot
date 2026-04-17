@@ -16,6 +16,15 @@ interface Props {
   nodes: GraphNode[];
   edges: GraphEdge[];
   currentState?: string;
+  /** 阶段名：pending_X / running_X / complete_X 都视作高亮 */
+  highlightPhase?: string | null;
+  onHoverPhase?: (name: string | null) => void;
+}
+
+/** 从节点 id 推断阶段名：pending_foo / running_foo / complete_foo → foo */
+function nodePhase(id: string): string | null {
+  const m = id.match(/^(?:pending|running|complete|start|reject)_(.+)$/);
+  return m ? m[1] : null;
 }
 
 const NODE_COLORS: Record<string, { fill: string; stroke: string }> = {
@@ -26,7 +35,7 @@ const NODE_COLORS: Record<string, { fill: string; stroke: string }> = {
   other: { fill: "#1e2030", stroke: "#636882" },
 };
 
-export function StateMachineGraph({ nodes, edges, currentState }: Props) {
+export function StateMachineGraph({ nodes, edges, currentState, highlightPhase, onHoverPhase }: Props) {
   if (nodes.length === 0) return null;
 
   // 简单布局：按类型分层
@@ -106,14 +115,23 @@ export function StateMachineGraph({ nodes, edges, currentState }: Props) {
         if (!pos) return null;
         const colors = NODE_COLORS[node.type] ?? NODE_COLORS.other;
         const isCurrent = node.id === currentState;
+        const phase = nodePhase(node.id);
+        const isHighlight = !!highlightPhase && phase === highlightPhase;
+        const strokeColor = isCurrent ? "#22d3ee" : (isHighlight ? "#818cf8" : colors.stroke);
+        const strokeWidth = isCurrent ? 3 : (isHighlight ? 2.5 : 1.5);
 
         return (
-          <g key={node.id}>
+          <g
+            key={node.id}
+            style={{ cursor: onHoverPhase && phase ? "pointer" : "default" }}
+            onMouseEnter={() => phase && onHoverPhase?.(phase)}
+            onMouseLeave={() => onHoverPhase?.(null)}
+          >
             <circle
               cx={pos.x} cy={pos.y} r={28}
               fill={colors.fill}
-              stroke={isCurrent ? "#22d3ee" : colors.stroke}
-              strokeWidth={isCurrent ? 3 : 1.5}
+              stroke={strokeColor}
+              strokeWidth={strokeWidth}
             />
             {isCurrent && (
               <circle
@@ -124,10 +142,20 @@ export function StateMachineGraph({ nodes, edges, currentState }: Props) {
                 opacity={0.3}
               />
             )}
+            {isHighlight && !isCurrent && (
+              <circle
+                cx={pos.x} cy={pos.y} r={32}
+                fill="none"
+                stroke="#818cf8"
+                strokeWidth={1}
+                opacity={0.35}
+              />
+            )}
             <text
               x={pos.x} y={pos.y + 3}
               fill="#e2e4ea" fontSize={8} textAnchor="middle"
               dominantBaseline="middle"
+              pointerEvents="none"
             >
               {node.label.length > 16 ? node.label.slice(0, 15) + "…" : node.label}
             </text>

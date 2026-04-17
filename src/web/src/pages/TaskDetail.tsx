@@ -3,6 +3,7 @@ import { api } from "../hooks/useApi";
 import { Badge } from "../components/Badge";
 import { LogTimeline } from "../components/LogTimeline";
 import { StateMachineGraph } from "../components/StateMachineGraph";
+import { PhasePipeline } from "../components/PhasePipeline";
 import { ConfirmDialog } from "../components/Modal";
 import { useToast } from "../components/Toast";
 
@@ -26,6 +27,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
   const [task, setTask] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [graph, setGraph] = useState<any>(null);
+  const [workflowDetail, setWorkflowDetail] = useState<any>(null);
+  const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
   const [liveLogs, setLiveLogs] = useState<string[]>([]);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
@@ -43,6 +46,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
   useEffect(() => {
     if (!task?.workflow) return;
     api.getWorkflowGraph(task.workflow).then(setGraph).catch(() => {});
+    api.getWorkflow(task.workflow).then(setWorkflowDetail).catch(() => {});
   }, [task?.workflow]);
 
   useEffect(() => {
@@ -116,6 +120,18 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
         </div>
       </div>
 
+      {workflowDetail?.phases && (
+        <div className="card" style={{ marginTop: "0.75rem" }}>
+          <h3>流水线</h3>
+          <PhasePipeline
+            phases={workflowDetail.phases}
+            highlight={hoveredPhase}
+            onHoverPhase={setHoveredPhase}
+            currentState={task.status}
+          />
+        </div>
+      )}
+
       {graph && (
         <div className="card" style={{ marginTop: "0.75rem" }}>
           <h3>状态机</h3>
@@ -124,6 +140,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
               nodes={graph.nodes}
               edges={graph.edges}
               currentState={task.status}
+              highlightPhase={hoveredPhase}
+              onHoverPhase={setHoveredPhase}
             />
           </div>
         </div>
