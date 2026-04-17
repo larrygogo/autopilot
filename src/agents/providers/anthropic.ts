@@ -28,6 +28,36 @@ export class AnthropicProvider extends BaseProvider {
     if (options?.onDelta) {
       queryOpts["includePartialMessages"] = true;
     }
+    // 注入 autopilot tools（用 SDK MCP server 同进程承载）
+    if (options?.enableTools) {
+      const { buildAutopilotTools, TOOL_NAMES } = await import("../tools");
+      const tools = await buildAutopilotTools();
+      queryOpts["mcpServers"] = {
+        autopilot: sdk.createSdkMcpServer({
+          name: "autopilot",
+          version: "1.0.0",
+          tools,
+        }),
+      };
+      // 默认关闭 Claude Code 内建工具，只暴露 autopilot 工具
+      queryOpts["tools"] = [];
+      // 把 autopilot tool 加进 allowedTools，省去交互式 permission 询问
+      queryOpts["allowedTools"] = TOOL_NAMES.map((n) => `mcp__autopilot__${n}`);
+      // 追加工具使用指引到 system prompt
+      const toolsHint = [
+        "你已接入 autopilot 内建工具集，可以：",
+        "- 只读：list_tasks / get_task / get_task_logs / list_workflows / get_workflow / list_sessions / get_session / get_daemon_status",
+        "- 执行：start_task（启动任务）/ cancel_task（取消任务）",
+        "",
+        "调用准则：",
+        "1. 用户问有哪些任务/工作流之类的问题时，直接用对应 list 工具拿真实数据，不要编造",
+        "2. 执行操作前先用 list/get 工具确认当前状态",
+        "3. 操作完成后简短汇报：做了什么 + 影响了哪些资源",
+      ].join("\n");
+      queryOpts["systemPrompt"] = systemPrompt
+        ? `${systemPrompt}\n\n${toolsHint}`
+        : toolsHint;
+    }
 
     let abort: AbortController | undefined;
     if (options?.signal) {
