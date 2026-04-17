@@ -25,6 +25,8 @@ export function Dashboard({ onSelectTask }: { onSelectTask?: (id: string) => voi
   const [status, setStatus] = useState<DaemonStatus | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [newOpen, setNewOpen] = useState(false);
+  const [diskTotal, setDiskTotal] = useState<number | null>(null);
+  const [diskTaskCount, setDiskTaskCount] = useState<number>(0);
 
   useEffect(() => {
     const refresh = () => {
@@ -33,6 +35,18 @@ export function Dashboard({ onSelectTask }: { onSelectTask?: (id: string) => voi
     };
     refresh();
     const timer = setInterval(refresh, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    // 磁盘统计较重，独立周期 60s
+    const loadDisk = () => {
+      api.getWorkspaceUsage()
+        .then((r) => { setDiskTotal(r.total); setDiskTaskCount(r.tasks.filter((t) => t.exists).length); })
+        .catch(() => {});
+    };
+    loadDisk();
+    const timer = setInterval(loadDisk, 60000);
     return () => clearInterval(timer);
   }, []);
 
@@ -124,6 +138,20 @@ export function Dashboard({ onSelectTask }: { onSelectTask?: (id: string) => voi
         )}
       </div>
 
+      {diskTotal !== null && diskTotal > 0 && (
+        <div className="card" style={{ marginBottom: "0.75rem" }}>
+          <div className="card-header">
+            <h3>Workspace 磁盘占用</h3>
+            <span className="muted" style={{ fontSize: "0.76rem" }}>
+              {diskTaskCount} 个任务目录 · 共 <strong style={{ color: "var(--text)" }}>{formatBytes(diskTotal)}</strong>
+            </span>
+          </div>
+          <p className="muted" style={{ fontSize: "0.78rem" }}>
+            单个任务详情页可手动释放；全局 <code className="mono">config.yaml</code> 加 <code className="mono">workspace_retention.days</code> 或 <code className="mono">.max_total_mb</code> 可自动清理终态任务。
+          </p>
+        </div>
+      )}
+
       {Object.keys(status.taskCounts).length > 0 && (
         <div className="card">
           <h3>状态分布</h3>
@@ -141,6 +169,13 @@ export function Dashboard({ onSelectTask }: { onSelectTask?: (id: string) => voi
       <NewTaskDialog open={newOpen} onClose={() => setNewOpen(false)} onCreated={(id) => onSelectTask?.(id)} />
     </div>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 function formatAgo(ms: number): string {

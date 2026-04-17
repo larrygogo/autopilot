@@ -68,6 +68,12 @@ export const api = {
   workspaceDownloadUrl: (id: string, path: string) =>
     `/api/tasks/${id}/ws/download?path=${encodeURIComponent(path)}`,
   workspaceZipUrl: (id: string) => `/api/tasks/${id}/ws/zip`,
+  deleteWorkspace: (id: string) =>
+    request<{ ok: boolean; removed: boolean }>(`/api/tasks/${id}/ws`, { method: "DELETE" }),
+  getWorkspaceUsage: () =>
+    request<{ total: number; tasks: Array<{ taskId: string; size: number; mtime: number; exists: boolean }> }>(
+      `/api/workspaces/usage`,
+    ),
   listWorkflows: () => request<any[]>("/api/workflows"),
   getWorkflow: (name: string) => request<any>(`/api/workflows/${name}`),
   getWorkflowGraph: (name: string) => request<any>(`/api/workflows/${name}/graph`),

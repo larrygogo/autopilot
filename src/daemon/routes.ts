@@ -47,6 +47,9 @@ import {
   readWorkspaceFile,
   resolveWorkspacePath,
   spawnWorkspaceZip,
+  deleteTaskWorkspace,
+  scanTaskWorkspaces,
+  workspaceSize,
 } from "../core/workspace";
 import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task-logs";
 import { readDaemonFileLog, getDaemonFileLogPath } from "../core/logger";
@@ -446,6 +449,28 @@ export async function handleRequest(req: Request): Promise<Response> {
             ...cors,
           },
         });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 500);
+      }
+    }
+
+    // DELETE /api/tasks/:id/ws — 手动清理 workspace
+    const wsDeleteMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/ws$/);
+    if (method === "DELETE" && wsDeleteMatch) {
+      try {
+        const removed = deleteTaskWorkspace(wsDeleteMatch);
+        return json({ ok: true, removed });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 500);
+      }
+    }
+
+    // GET /api/workspaces/usage — 扫描所有任务的 workspace 占用（Dashboard 用）
+    if (method === "GET" && path === "/api/workspaces/usage") {
+      try {
+        const list = scanTaskWorkspaces();
+        const total = list.reduce((a, it) => a + it.size, 0);
+        return json({ total, tasks: list });
       } catch (e: unknown) {
         return error(e instanceof Error ? e.message : String(e), 500);
       }

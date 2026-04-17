@@ -4,7 +4,7 @@ import { AUTOPILOT_HOME, VERSION } from "../index";
 import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/registry";
-import { checkStuckTasks } from "../core/watcher";
+import { checkStuckTasks, pruneWorkspacesByPolicy } from "../core/watcher";
 import { initDaemonFileLog } from "../core/logger";
 import { enableBus, disableBus, bus } from "./event-bus";
 import { wsManager } from "./ws";
@@ -20,6 +20,7 @@ import type { AutopilotEvent } from "./protocol";
 const DEFAULT_PORT = 6180;
 const DEFAULT_HOST = "127.0.0.1";
 const WATCHER_INTERVAL_MS = 60_000;
+const RETENTION_INTERVAL_MS = 3600_000;  // 每小时扫一次 workspace 保留策略
 
 export interface DaemonOptions {
   host?: string;
@@ -76,12 +77,22 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     }
   }, WATCHER_INTERVAL_MS);
 
+  // workspace 保留策略定时器（配置为空时函数内部会提前返回）
+  const retentionTimer = setInterval(() => {
+    try {
+      pruneWorkspacesByPolicy();
+    } catch (e: unknown) {
+      console.error("retention 异常：", e instanceof Error ? e.message : String(e));
+    }
+  }, RETENTION_INTERVAL_MS);
+
   console.log(`autopilot daemon v${VERSION} started on http://${host}:${port} (pid=${process.pid})`);
 
   // 优雅退出
   const shutdown = () => {
     console.log("\ndaemon 正在关闭...");
     clearInterval(watcherTimer);
+    clearInterval(retentionTimer);
     disableBus();
     server.stop();
     closeDb();

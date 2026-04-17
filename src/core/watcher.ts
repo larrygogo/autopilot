@@ -1,4 +1,4 @@
-import { getDb, type Task } from "./db";
+import { getDb, getTask, type Task } from "./db";
 import { isLocked } from "./infra";
 import { log } from "./logger";
 import { runInBackground } from "./runner";
@@ -6,6 +6,7 @@ import { forceTransition } from "./state-machine";
 import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./registry";
 import type { PhaseDefinition, ParallelDefinition } from "./registry";
 import { emit } from "../daemon/event-bus";
+import { applyRetentionPolicy, loadRetentionPolicy } from "./workspace";
 
 // ──────────────────────────────────────────────
 // 洪泛防护：记录每个任务上次恢复时间
@@ -185,4 +186,46 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
 /** 仅供测试：清除恢复记录 */
 export function _clearRecoveryHistory(): void {
   lastRecoveryAttempt.clear();
+}
+
+// ──────────────────────────────────────────────
+// Workspace 保留策略清理（由 daemon 定期触发）
+// ──────────────────────────────────────────────
+
+const terminalStateCache = new Map<string, boolean>();
+
+function isTaskTerminal(taskId: string): boolean {
+  if (terminalStateCache.has(taskId)) return terminalStateCache.get(taskId)!;
+  const task = getTask(taskId);
+  if (!task) return false;
+  const terms = new Set<string>(["done", "cancelled", "canceled", "failed"]);
+  const wf = getWorkflow(task.workflow);
+  if (wf) for (const t of wf.terminal_states ?? []) terms.add(t);
+  const isTerm = terms.has(task.status);
+  if (isTerm) terminalStateCache.set(taskId, true);
+  return isTerm;
+}
+
+/**
+ * 按全局 retention 配置清理老 workspace。安全项：只清终态任务，永远不动
+ * 运行中 / 待处理任务的 workspace。
+ * Daemon 每隔固定周期调一次，无配置 / 空配置直接跳过。
+ */
+export function pruneWorkspacesByPolicy(): void {
+  const policy = loadRetentionPolicy();
+  if (!policy.days && !policy.max_total_mb) return;
+
+  const result = applyRetentionPolicy(policy, {
+    isTerminal: isTaskTerminal,
+  });
+  if (result.removed.length > 0) {
+    const mb = (result.reclaimedBytes / 1024 / 1024).toFixed(1);
+    log.info(
+      "workspace 保留策略清理了 %d 个任务目录（回收 %s MB）",
+      result.removed.length,
+      mb,
+    );
+  }
+  // 每次运行后清缓存，因为下一轮任务状态可能已变
+  terminalStateCache.clear();
 }
