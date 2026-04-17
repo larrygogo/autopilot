@@ -476,6 +476,10 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 .phase-idx-small { font-size: 0.7rem; padding-top: 0.5rem; min-width: 32px; }
 
 .phase-row.highlight { border-color: var(--accent2); box-shadow: 0 0 0 1px rgba(99,102,241,0.3); }
+.phase-row.is-dragging { opacity: 0.4; }
+.phase-row.is-drop-target { border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(34,211,238,0.25); }
+.drag-handle { cursor: grab; user-select: none; }
+.drag-handle:active { cursor: grabbing; }
 
 .pipeline-wrap { padding: 0.25rem 0; }
 .pipeline { display: flex; align-items: center; gap: 0.5rem; overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0.5rem 0.25rem 0.75rem; }
