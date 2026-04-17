@@ -49,6 +49,7 @@ import {
   spawnWorkspaceZip,
 } from "../core/workspace";
 import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task-logs";
+import { readDaemonFileLog, getDaemonFileLogPath } from "../core/logger";
 import { emit } from "./event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -254,6 +255,16 @@ export async function handleRequest(req: Request): Promise<Response> {
         taskCounts,
       };
       return json(status);
+    }
+
+    // GET /api/daemon/log?tail=N
+    if (method === "GET" && path === "/api/daemon/log") {
+      const tailParam = url.searchParams.get("tail");
+      const tail = tailParam ? parseInt(tailParam, 10) : 500;
+      return json({
+        path: getDaemonFileLogPath() ?? null,
+        content: readDaemonFileLog(tail),
+      });
     }
 
     // GET /api/tasks

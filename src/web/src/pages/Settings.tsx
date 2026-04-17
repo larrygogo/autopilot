@@ -104,6 +104,8 @@ export function Settings({ embedded = false }: { embedded?: boolean }) {
         </div>
       )}
 
+      <DaemonLogCard />
+
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div className="card-header">
           <h3>全局配置</h3>
@@ -177,6 +179,82 @@ export function Settings({ embedded = false }: { embedded?: boolean }) {
   );
 
   return embedded ? <>{body}</> : <div className="container">{body}</div>;
+}
+
+function DaemonLogCard(): React.ReactElement {
+  const toast = useToast();
+  const [content, setContent] = useState("");
+  const [path, setPath] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const res = await api.getDaemonLog(1000);
+      setContent(res.content);
+      setPath(res.path);
+    } catch (e: any) {
+      toast.error("加载 daemon 日志失败", e?.message ?? String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { refresh(); /* eslint-disable-line */ }, []);
+
+  const filtered = React.useMemo(() => {
+    if (!content) return [];
+    const lines = content.split("\n");
+    const q = query.trim().toLowerCase();
+    return q ? lines.filter((l) => l.toLowerCase().includes(q)) : lines;
+  }, [content, query]);
+
+  const extractLevel = (line: string): string | null => {
+    const m = line.match(/\s\[(INFO|WARN|ERROR|DEBUG)\]\s/);
+    return m?.[1] ?? null;
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: "1rem" }}>
+      <div className="card-header">
+        <h3>Daemon 日志</h3>
+        <button className="btn btn-secondary" onClick={refresh} disabled={loading}>刷新</button>
+      </div>
+      {path ? (
+        <p className="muted" style={{ fontSize: "0.76rem", marginBottom: "0.5rem" }}>
+          位置：<code className="mono">{path}</code>
+          <span style={{ marginLeft: "0.5rem" }}>（含上一次滚动的 .1 备份，最后 1000 行）</span>
+        </p>
+      ) : (
+        <p className="muted" style={{ fontSize: "0.82rem" }}>daemon 日志未激活或路径未知。</p>
+      )}
+      <input
+        type="search"
+        className="text-input"
+        placeholder="搜索日志..."
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        style={{ marginBottom: "0.5rem" }}
+      />
+      {loading && !content ? (
+        <p className="muted">加载中...</p>
+      ) : filtered.length === 0 ? (
+        <p className="muted" style={{ padding: "0.5rem" }}>
+          {content ? "（当前过滤下无匹配）" : "（空）"}
+        </p>
+      ) : (
+        <pre className="phase-log-body" style={{ maxHeight: 400 }}>
+          {filtered.map((line, i) => {
+            const lvl = extractLevel(line);
+            return (
+              <div key={i} className={`log-row ${lvl ? `log-row-${lvl.toLowerCase()}` : ""}`}>{line}</div>
+            );
+          })}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 function formatUptime(s: number): string {
