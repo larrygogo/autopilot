@@ -375,6 +375,10 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 .btn-icon-danger { color: var(--red); border-color: rgba(248,113,113,0.3); }
 .btn-icon-danger:hover:not(:disabled) { background: rgba(248,113,113,0.12); color: var(--red); }
 
+.parallel-children { margin-top: 0.6rem; margin-left: 34px; padding-left: 0.75rem; border-left: 2px dashed rgba(99,102,241,0.3); display: flex; flex-direction: column; gap: 0.4rem; }
+.parallel-child { background: var(--bg2); padding: 0.5rem 0.7rem; }
+.phase-idx-small { font-size: 0.7rem; padding-top: 0.5rem; min-width: 32px; }
+
 @media (max-width: 640px) {
   .topbar { padding: 0 0.75rem; height: 48px; }
   .topbar .logo { margin-right: 0; font-size: 0.85rem; flex: 1; }
@@ -421,6 +425,8 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
   .phase-actions { align-self: flex-end; }
   .phase-fields label { flex: 1; }
   .phase-input { width: 100%; }
+
+  .parallel-children { margin-left: 0; padding-left: 0.5rem; }
 }
 
 @media (max-width: 380px) {
