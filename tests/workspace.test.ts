@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-import { getTaskWorkspace, ensureTaskWorkspace } from "../src/core/workspace";
+import { getTaskWorkspace, ensureTaskWorkspace, resolveWorkspacePath } from "../src/core/workspace";
 
 let tmpHome: string;
 
@@ -33,6 +33,36 @@ describe("getTaskWorkspace 路径结构", () => {
 
   it("拒绝非法 taskId", () => {
     expect(() => getTaskWorkspace("bad id!")).toThrow(/非法/);
+  });
+});
+
+describe("resolveWorkspacePath 路径穿越防护", () => {
+  it("合法相对路径返回绝对路径", () => {
+    const p = resolveWorkspacePath("t1", "src/index.ts");
+    expect(p).not.toBeNull();
+    expect(p).toMatch(/[/\\]workspace[/\\]src[/\\]index\.ts$/);
+  });
+
+  it("空路径返回 workspace 根", () => {
+    const p = resolveWorkspacePath("t1", "");
+    expect(p).not.toBeNull();
+    expect(p!.endsWith("/workspace")).toBe(true);
+  });
+
+  it("拒绝 .. 穿越", () => {
+    const p = resolveWorkspacePath("t1", "../../../etc/passwd");
+    expect(p).toBeNull();
+  });
+
+  it("拒绝含 NUL 字符", () => {
+    const p = resolveWorkspacePath("t1", "foo\0bar");
+    expect(p).toBeNull();
+  });
+
+  it("根目录开头的 / 被剥离", () => {
+    const p = resolveWorkspacePath("t1", "/absolute/looking");
+    expect(p).not.toBeNull();
+    expect(p).toMatch(/[/\\]workspace[/\\]absolute[/\\]looking$/);
   });
 });
 

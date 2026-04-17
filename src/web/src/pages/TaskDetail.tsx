@@ -4,6 +4,7 @@ import { Badge } from "../components/Badge";
 import { LogTimeline } from "../components/LogTimeline";
 import { StateMachineGraph } from "../components/StateMachineGraph";
 import { PhasePipeline } from "../components/PhasePipeline";
+import { WorkspaceBrowser } from "../components/WorkspaceBrowser";
 import { ConfirmDialog } from "../components/Modal";
 import { useToast } from "../components/Toast";
 
@@ -161,6 +162,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
           </div>
         </div>
       )}
+
+      <WorkspaceBrowser taskId={taskId} />
 
       <div className="card" style={{ marginTop: "0.75rem" }}>
         <h3>状态日志</h3>

@@ -40,7 +40,14 @@ import {
 import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
 import { listProviderModels } from "../agents/model-list";
 import { runAgentOnce } from "../agents/registry";
-import { ensureTaskWorkspace, getTaskWorkspace } from "../core/workspace";
+import {
+  ensureTaskWorkspace,
+  getTaskWorkspace,
+  listWorkspaceDir,
+  readWorkspaceFile,
+  resolveWorkspacePath,
+  spawnWorkspaceZip,
+} from "../core/workspace";
 import { emit } from "./event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -365,6 +372,71 @@ export async function handleRequest(req: Request): Promise<Response> {
       const transitions = buildTransitions(wf);
       const [from, to] = transition(transitionMatch, body.trigger, { transitions, note: body.note });
       return json({ from, to });
+    }
+
+    // GET /api/tasks/:id/ws/tree?path=<relative>
+    const wsTreeMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/ws\/tree$/);
+    if (method === "GET" && wsTreeMatch) {
+      const relPath = url.searchParams.get("path") ?? "";
+      try {
+        const entries = listWorkspaceDir(wsTreeMatch, relPath);
+        return json({ path: relPath, entries });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 400);
+      }
+    }
+
+    // GET /api/tasks/:id/ws/file?path=<relative>
+    const wsFileMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/ws\/file$/);
+    if (method === "GET" && wsFileMatch) {
+      const relPath = url.searchParams.get("path") ?? "";
+      if (!relPath) return error("path 参数必填", 400);
+      try {
+        const file = readWorkspaceFile(wsFileMatch, relPath);
+        return json(file);
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 400);
+      }
+    }
+
+    // GET /api/tasks/:id/ws/download?path=<relative> —— 二进制原样下载单文件
+    const wsDownloadMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/ws\/download$/);
+    if (method === "GET" && wsDownloadMatch) {
+      const relPath = url.searchParams.get("path") ?? "";
+      if (!relPath) return error("path 参数必填", 400);
+      try {
+        const abs = resolveWorkspacePath(wsDownloadMatch, relPath);
+        if (!abs) return error("非法路径", 400);
+        const fileName = relPath.split(/[/\\]/).pop() ?? "file";
+        const file = Bun.file(abs);
+        if (!(await file.exists())) return error("文件不存在", 404);
+        return new Response(file, {
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+            ...cors,
+          },
+        });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 400);
+      }
+    }
+
+    // GET /api/tasks/:id/ws/zip — 整个 workspace 打包
+    const wsZipMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/ws\/zip$/);
+    if (method === "GET" && wsZipMatch) {
+      try {
+        const proc = spawnWorkspaceZip(wsZipMatch);
+        return new Response(proc.stdout as ReadableStream, {
+          headers: {
+            "Content-Type": "application/zip",
+            "Content-Disposition": `attachment; filename="workspace-${wsZipMatch}.zip"`,
+            ...cors,
+          },
+        });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 500);
+      }
     }
 
     // GET /api/tasks/:id/logs

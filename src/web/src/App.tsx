@@ -402,6 +402,25 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 .validation-summary code { background: rgba(248,113,113,0.12); padding: 0.05rem 0.35rem; border-radius: 3px; font-size: 0.78rem; }
 
 .dry-run-result { background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; font-family: var(--mono); font-size: 0.82rem; line-height: 1.55; max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+
+.ws-crumbs { display: flex; align-items: center; gap: 0.25rem; padding: 0.35rem 0; font-size: 0.8rem; flex-wrap: wrap; }
+.ws-crumb { background: transparent; border: none; color: var(--cyan); font-family: var(--mono); padding: 0.15rem 0.35rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+.ws-crumb:hover { background: var(--bg3); }
+
+.ws-layout { display: grid; grid-template-columns: 260px 1fr; gap: 0.75rem; margin-top: 0.5rem; }
+.ws-list { background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; min-height: 240px; max-height: 480px; overflow: auto; }
+.ws-list ul { list-style: none; padding: 0.25rem; margin: 0; display: flex; flex-direction: column; gap: 1px; }
+.ws-entry { display: flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.82rem; white-space: nowrap; overflow: hidden; }
+.ws-entry:hover { background: var(--bg3); }
+.ws-entry.active { background: var(--cyan-dim); color: var(--cyan); }
+.ws-entry-up { color: var(--muted); font-family: var(--mono); }
+.ws-entry-dir .ws-name { color: var(--blue); }
+.ws-icon { font-size: 0.85rem; flex-shrink: 0; }
+.ws-name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.ws-size { font-size: 0.7rem; flex-shrink: 0; }
+
+.ws-preview { background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; min-height: 240px; max-height: 480px; overflow: auto; padding: 0.5rem; }
+.ws-preview-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem 0.6rem; border-bottom: 1px solid var(--border); margin-bottom: 0.5rem; flex-wrap: wrap; }
 .phase-subgrid { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.3rem; }
 .phase-sub { background: var(--bg2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; display: flex; gap: 0.4rem; align-items: center; }
 .phase-actions { display: flex; gap: 0.2rem; flex-shrink: 0; align-self: center; }
@@ -484,6 +503,10 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
   .phase-input { width: 100%; }
 
   .parallel-children { margin-left: 0; padding-left: 0.5rem; }
+
+  .ws-layout { grid-template-columns: 1fr; }
+  .ws-list { max-height: 280px; }
+  .ws-preview { max-height: 400px; }
 }
 
 @media (max-width: 380px) {
