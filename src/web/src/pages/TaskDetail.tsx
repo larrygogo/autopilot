@@ -165,32 +165,14 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
         </div>
       )}
 
-      <WorkspaceBrowser taskId={taskId} />
-
-      <PhaseLogsViewer taskId={taskId} />
-
-      <AgentCallsViewer taskId={taskId} />
-
-      <div className="card" style={{ marginTop: "0.75rem" }}>
-        <h3>状态日志</h3>
-        <LogTimeline logs={logs} />
-      </div>
-
-      {liveLogs.length > 0 && (
-        <div className="card" style={{ marginTop: "0.75rem" }}>
-          <div className="card-header">
-            <h3>实时日志</h3>
-            <span className="muted" style={{ fontSize: "0.72rem" }}>
-              {stickToBottomRef.current ? "自动跟随" : "手动暂停（滚到底恢复）"}
-            </span>
-          </div>
-          <div className="live-log" ref={liveLogRef} onScroll={onLogScroll}>
-            {liveLogs.map((line, i) => (
-              <div key={i} className="log-line">{line}</div>
-            ))}
-          </div>
-        </div>
-      )}
+      <TaskDetailTabs
+        taskId={taskId}
+        logs={logs}
+        liveLogs={liveLogs}
+        liveLogRef={liveLogRef}
+        stickToBottomRef={stickToBottomRef}
+        onLogScroll={onLogScroll}
+      />
 
       <ConfirmDialog
         open={confirmCancel}
@@ -202,6 +184,92 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
         onConfirm={doCancel}
         onCancel={() => setConfirmCancel(false)}
       />
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// 下方细节合为 tabs 避免长页面
+// ──────────────────────────────────────────────
+
+type DetailTab = "workspace" | "phase-logs" | "agent-calls" | "transitions" | "live";
+
+interface TaskDetailTabsProps {
+  taskId: string;
+  logs: any[];
+  liveLogs: string[];
+  liveLogRef: React.RefObject<HTMLDivElement | null>;
+  stickToBottomRef: React.MutableRefObject<boolean>;
+  onLogScroll: () => void;
+}
+
+function TaskDetailTabs({ taskId, logs, liveLogs, liveLogRef, stickToBottomRef, onLogScroll }: TaskDetailTabsProps) {
+  const [tab, setTab] = useState<DetailTab>("workspace");
+
+  // 有新实时日志 → 若不在 live tab 则给徽章；当前 tab 则不累计
+  const [unreadLive, setUnreadLive] = useState(0);
+  const prevLiveLenRef = useRef(liveLogs.length);
+  useEffect(() => {
+    const grew = liveLogs.length - prevLiveLenRef.current;
+    prevLiveLenRef.current = liveLogs.length;
+    if (grew > 0 && tab !== "live") setUnreadLive((n) => n + grew);
+    if (tab === "live") setUnreadLive(0);
+  }, [liveLogs.length, tab]);
+
+  const tabs: Array<{ key: DetailTab; label: string; badge?: string | number }> = [
+    { key: "workspace", label: "Workspace 文件" },
+    { key: "phase-logs", label: "阶段日志" },
+    { key: "agent-calls", label: "Agent 调用" },
+    { key: "transitions", label: "状态日志", badge: logs.length || undefined },
+    { key: "live", label: "实时日志", badge: unreadLive || undefined },
+  ];
+
+  return (
+    <div style={{ marginTop: "0.75rem" }}>
+      <div className="subtabs" role="tablist">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            role="tab"
+            aria-selected={tab === t.key}
+            className={`subtab ${tab === t.key ? "active" : ""}`}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+            {t.badge != null && t.badge !== 0 && (
+              <span className="pill pill-accent" style={{ marginLeft: "0.4rem", fontSize: "0.68rem", padding: "0.05rem 0.4rem" }}>
+                {t.badge}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === "workspace" && <WorkspaceBrowser taskId={taskId} />}
+      {tab === "phase-logs" && <PhaseLogsViewer taskId={taskId} />}
+      {tab === "agent-calls" && <AgentCallsViewer taskId={taskId} />}
+      {tab === "transitions" && (
+        <div className="card">
+          <LogTimeline logs={logs} />
+        </div>
+      )}
+      {tab === "live" && (
+        <div className="card">
+          <div className="card-header" style={{ marginBottom: "0.4rem" }}>
+            <h3>实时日志</h3>
+            <span className="muted" style={{ fontSize: "0.74rem" }}>
+              {liveLogs.length === 0
+                ? "暂无；运行中任务会推送到此"
+                : stickToBottomRef.current ? "自动跟随中（滚到顶暂停）" : "手动暂停（滚到底恢复）"}
+            </span>
+          </div>
+          <div className="live-log" ref={liveLogRef} onScroll={onLogScroll}>
+            {liveLogs.map((line, i) => (
+              <div key={i} className="log-line">{line}</div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
