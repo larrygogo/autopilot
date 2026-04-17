@@ -115,6 +115,8 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   const [addPhaseOpen, setAddPhaseOpen] = useState(false);
   const [addParallelOpen, setAddParallelOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
+  const [orphans, setOrphans] = useState<string[]>([]);
+  const [pruneConfirm, setPruneConfirm] = useState(false);
 
   // 追踪"原始阶段改名"的映射：oldName -> newName。
   // 保存时随 phases 一起发给后端，后端会把 workflow.ts 里的
@@ -412,9 +414,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
           `这些函数使用 ctx: { task, log } 形式，但 runner 实际只传 taskId 字符串，会导致运行时 "task.id undefined" 报错。\n\n请改为：\nexport async function run_xxx(taskId: string): Promise<void> { ... }`,
         );
       }
-      if ((res.ts?.orphans ?? []).length > 0) {
-        toast.warning(`孤儿函数：${res.ts!.orphans.join(", ")}（在 workflow.ts 中存在但未使用，未自动删除）`);
-      }
+      setOrphans(res.ts?.orphans ?? []);
       setDirty(false);
       resetDraftTracking();
       onSaved?.();
@@ -436,7 +436,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       const res = await api.syncWorkflowTs(workflowName);
       if (res.modified) toast.success(`已追加 ${res.added.length} 个函数：${res.added.join(", ")}`);
       else toast.info("TS 已是最新");
-      if (res.orphans.length > 0) toast.warning(`孤儿函数：${res.orphans.join(", ")}`);
+      setOrphans(res.orphans);
       if ((res.legacy_signature ?? []).length > 0) {
         toast.error(
           `检测到旧签名：${res.legacy_signature!.join(", ")}`,
@@ -445,6 +445,19 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       }
     } catch (e: any) {
       toast.error("校准失败", e?.message ?? String(e));
+    }
+  };
+
+  const doPrune = async () => {
+    try {
+      const res = await api.pruneOrphans(workflowName, orphans);
+      toast.success(`已清理 ${res.removed.length} 个孤儿函数：${res.removed.join(", ")}（.bak 已备份）`);
+      setOrphans([]);
+      onSaved?.();
+    } catch (e: any) {
+      toast.error("清理失败", e?.message ?? String(e));
+    } finally {
+      setPruneConfirm(false);
     }
   };
 
@@ -464,6 +477,18 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
           <button className="btn btn-primary" onClick={() => setAddPhaseOpen(true)}>新增阶段</button>
         </div>
       </div>
+
+      {orphans.length > 0 && (
+        <div className="orphan-alert">
+          <span>
+            ⚠ workflow.ts 中存在 {orphans.length} 个孤儿函数：
+            {orphans.map((n) => <code key={n} className="mono" style={{ margin: "0 0.3rem" }}>run_{n}</code>)}
+          </span>
+          <button className="btn btn-danger" onClick={() => setPruneConfirm(true)}>
+            清理孤儿
+          </button>
+        </div>
+      )}
 
       {items.length === 0 ? (
         <p className="muted">暂无阶段</p>
@@ -544,6 +569,27 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
         existingNames={allNames}
         topCount={items.length}
         topLabels={items.map((it) => it.name)}
+      />
+
+      <ConfirmDialog
+        open={pruneConfirm}
+        title="清理孤儿函数"
+        message={
+          <div>
+            <p>将从 workflow.ts 中删除以下 {orphans.length} 个函数：</p>
+            <ul style={{ marginTop: "0.5rem", marginLeft: "1rem", fontFamily: "var(--mono)", fontSize: "0.85rem" }}>
+              {orphans.map((n) => <li key={n}>run_{n}</li>)}
+            </ul>
+            <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.82rem" }}>
+              仅删除函数声明和函数体，字符串 / 注释中的同名字面量不受影响。<br />
+              写入前会备份到 workflow.ts.bak。
+            </p>
+          </div>
+        }
+        confirmText="清理"
+        danger
+        onConfirm={doPrune}
+        onCancel={() => setPruneConfirm(false)}
       />
 
       <ConfirmDialog

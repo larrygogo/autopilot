@@ -7,6 +7,7 @@ import { useToast } from "../components/Toast";
 import { PhaseEditor } from "../components/PhaseEditor";
 import { WorkflowAgentsEditor } from "../components/WorkflowAgentsEditor";
 import { PhasePipeline } from "../components/PhasePipeline";
+import { CodeViewer } from "../components/CodeViewer";
 
 interface WorkflowInfo {
   name: string;
@@ -42,6 +43,9 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   const [newOpen, setNewOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
+  const [tsSource, setTsSource] = useState<string | null>(null);
+  const [tsOpen, setTsOpen] = useState(false);
+  const [tsLoading, setTsLoading] = useState(false);
 
   const refresh = () => {
     setLoading(true);
@@ -56,9 +60,13 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   const toggle = async (name: string) => {
     if (selected?.name === name) {
       setSelected(null);
+      setTsOpen(false);
+      setTsSource(null);
       return;
     }
     setLoadingDetail(true);
+    setTsOpen(false);
+    setTsSource(null);
     try {
       const [detail, graph] = await Promise.all([
         api.getWorkflow(name),
@@ -67,6 +75,28 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
       setSelected({ name, detail, graph });
     } catch { /* ignore */ } finally {
       setLoadingDetail(false);
+    }
+  };
+
+  const loadTs = async () => {
+    if (!selected) return;
+    setTsLoading(true);
+    try {
+      const res = await api.getWorkflowTs(selected.name);
+      setTsSource(res.content);
+    } catch (e: any) {
+      toast.error("加载 workflow.ts 失败", e?.message ?? String(e));
+    } finally {
+      setTsLoading(false);
+    }
+  };
+
+  const toggleTs = async () => {
+    if (!tsOpen) {
+      if (tsSource === null) await loadTs();
+      setTsOpen(true);
+    } else {
+      setTsOpen(false);
     }
   };
 
@@ -178,6 +208,10 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
             hoveredPhase={hoveredPhase}
             onHoverPhase={setHoveredPhase}
             onSaved={async () => {
+              // 保存成功后，workflow.ts 可能已被改动，刷新缓存
+              if (tsSource !== null) {
+                api.getWorkflowTs(selected.name).then((r) => setTsSource(r.content)).catch(() => {});
+              }
               // 重新拉详情 + 图
               try {
                 const [detail, graph] = await Promise.all([
@@ -199,6 +233,30 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                 onHoverPhase={setHoveredPhase}
               />
             </div>
+          </div>
+
+          <div className="card" style={{ marginTop: "0.75rem" }}>
+            <div className="card-header">
+              <h3>workflow.ts 源码</h3>
+              <button className="btn btn-secondary" onClick={toggleTs} disabled={tsLoading}>
+                {tsLoading ? "加载中..." : tsOpen ? "收起" : "展开"}
+              </button>
+            </div>
+            {tsOpen && tsSource !== null && (
+              <CodeViewer
+                code={tsSource}
+                highlightPhase={hoveredPhase}
+                scrollToPhase={hoveredPhase}
+              />
+            )}
+            {tsOpen && tsSource === null && !tsLoading && (
+              <p className="muted">加载失败</p>
+            )}
+            {!tsOpen && (
+              <p className="muted" style={{ fontSize: "0.82rem" }}>
+                展开查看 AUTOPILOT_HOME/workflows/{selected.name}/workflow.ts（只读）；hover 阶段会高亮对应 run_ 函数
+              </p>
+            )}
           </div>
         </>
       )}

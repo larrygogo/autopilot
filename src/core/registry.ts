@@ -680,6 +680,15 @@ export function getTerminalStates(workflowName: string): string[] {
 }
 
 /**
+ * 读取工作流 TS 源文件原文
+ */
+export function getWorkflowTs(workflowName: string): string | null {
+  const tsPath = join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.ts");
+  if (!existsSync(tsPath)) return null;
+  return readFileSync(tsPath, "utf-8");
+}
+
+/**
  * 读取工作流 YAML 原文
  */
 export function getWorkflowYaml(workflowName: string): string | null {
@@ -1040,6 +1049,115 @@ export function renameRunFunctions(
     writeFileSync(tsPath, content, "utf-8");
   }
   return { renamed };
+}
+
+/**
+ * 删除 workflow.ts 中指定的 run_<name> 函数声明（整个函数）。
+ * 用字符级 tokenizer 处理字符串 / 注释 / 模板字符串，平衡花括号定位函数体结束。
+ * 写入前先备份 .bak。返回真正删除的函数名。
+ */
+export function pruneOrphanRunFunctions(
+  workflowName: string,
+  names: string[],
+): { removed: string[] } {
+  const tsPath = getWorkflowTsPath(workflowName);
+  if (!existsSync(tsPath)) return { removed: [] };
+
+  let content = readFileSync(tsPath, "utf-8");
+  const removed: string[] = [];
+
+  for (const name of names) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+    const range = findRunFunctionRange(content, name);
+    if (!range) continue;
+    // 同时吃掉前后多余空行，避免留下两个空行
+    let before = range.start;
+    while (before > 0 && (content[before - 1] === "\n" || content[before - 1] === " ")) {
+      if (content[before - 1] === "\n" && (before - 2 < 0 || content[before - 2] === "\n")) break;
+      before--;
+    }
+    let after = range.end;
+    while (after < content.length && content[after] === "\n") after++;
+    content = content.slice(0, before) + (before > 0 ? "\n" : "") + content.slice(after);
+    removed.push(name);
+  }
+
+  if (removed.length > 0) {
+    copyFileSync(tsPath, tsPath + ".bak");
+    writeFileSync(tsPath, content, "utf-8");
+  }
+  return { removed };
+}
+
+/**
+ * 定位 `export (async) function run_<name>(...)` 整段函数的起止范围。
+ * 不支持 `export const run_x = ...` 箭头函数形式（需要额外处理，少见）。
+ */
+function findRunFunctionRange(src: string, name: string): { start: number; end: number } | null {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`export\\s+(?:async\\s+)?function\\s+run_${escaped}\\s*\\(`, "g");
+  const m = re.exec(src);
+  if (!m) return null;
+
+  const start = m.index;
+  let i = m.index + m[0].length;
+
+  // 1. 配对闭合最外层 `(` (函数参数)
+  let parenDepth = 1;
+  while (i < src.length && parenDepth > 0) {
+    const c = src[i];
+    if (c === "(") parenDepth++;
+    else if (c === ")") parenDepth--;
+    else if (c === "\"" || c === "'" || c === "`") i = skipString(src, i, c);
+    else if (c === "/" && src[i + 1] === "/") i = skipLineComment(src, i);
+    else if (c === "/" && src[i + 1] === "*") i = skipBlockComment(src, i);
+    i++;
+  }
+
+  // 2. 跳过返回类型到第一个 `{`
+  while (i < src.length && src[i] !== "{") {
+    const c = src[i];
+    if (c === "\"" || c === "'" || c === "`") { i = skipString(src, i, c); i++; continue; }
+    if (c === "/" && src[i + 1] === "/") { i = skipLineComment(src, i); continue; }
+    if (c === "/" && src[i + 1] === "*") { i = skipBlockComment(src, i); continue; }
+    i++;
+  }
+  if (i >= src.length) return null;
+
+  // 3. 花括号平衡定位函数体结束
+  let braceDepth = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === "{") { braceDepth++; i++; continue; }
+    if (c === "}") { braceDepth--; i++; if (braceDepth === 0) break; continue; }
+    if (c === "\"" || c === "'" || c === "`") { i = skipString(src, i, c); i++; continue; }
+    if (c === "/" && src[i + 1] === "/") { i = skipLineComment(src, i); continue; }
+    if (c === "/" && src[i + 1] === "*") { i = skipBlockComment(src, i); continue; }
+    i++;
+  }
+  return { start, end: i };
+}
+
+/** 返回字符串结束字符（闭合引号）的索引。i 指向开始引号。 */
+function skipString(src: string, i: number, quote: string): number {
+  let j = i + 1;
+  while (j < src.length && src[j] !== quote) {
+    if (src[j] === "\\") { j += 2; continue; }
+    j++;
+  }
+  return j; // 指向闭合引号本身，让调用方 i++ 前进
+}
+
+function skipLineComment(src: string, i: number): number {
+  let j = i;
+  while (j < src.length && src[j] !== "\n") j++;
+  return j;
+}
+
+function skipBlockComment(src: string, i: number): number {
+  let j = i + 2;
+  while (j < src.length - 1 && !(src[j] === "*" && src[j + 1] === "/")) j++;
+  return j + 2;
 }
 
 /** 检测使用旧 `ctx: { task: any; ... }` 签名的 run_ 函数（运行时会崩） */

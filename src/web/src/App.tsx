@@ -368,6 +368,21 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 .phase-name-input { min-height: 28px; padding: 0.2rem 0.5rem; font-size: 0.9rem; font-weight: 600; color: var(--cyan); background: transparent; border-color: transparent; min-width: 100px; max-width: 260px; }
 .phase-name-input:hover { border-color: var(--border); background: var(--bg0); }
 .phase-name-input:focus { border-color: var(--cyan); background: var(--bg0); }
+
+.code-viewer { background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; font-family: var(--mono); font-size: 0.8rem; line-height: 1.55; max-height: 480px; overflow: auto; }
+.code-line { display: flex; padding: 0 0.25rem 0 0; white-space: pre; }
+.code-line:hover { background: rgba(255,255,255,0.02); }
+.code-gutter { flex-shrink: 0; padding: 0 0.6rem; color: var(--muted); user-select: none; text-align: right; background: var(--bg1); border-right: 1px solid var(--border); }
+.code-content { padding-left: 0.75rem; white-space: pre; overflow-x: visible; }
+.code-comment { color: var(--muted); font-style: italic; }
+.code-string { color: #a5d6a7; }
+.code-keyword { color: var(--accent2); }
+.code-number { color: #f39c6b; }
+.code-fn { color: var(--cyan); }
+.code-fn-hl { background: rgba(129,140,248,0.2); border-radius: 3px; padding: 0 2px; }
+
+.orphan-alert { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; padding: 0.6rem 0.9rem; background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3); border-radius: 6px; margin-bottom: 0.75rem; font-size: 0.85rem; color: var(--yellow); }
+.orphan-alert code { background: rgba(251,191,36,0.12); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.82rem; }
 .phase-subgrid { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.3rem; }
 .phase-sub { background: var(--bg2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; display: flex; gap: 0.4rem; align-items: center; }
 .phase-actions { display: flex; gap: 0.2rem; flex-shrink: 0; align-self: center; }

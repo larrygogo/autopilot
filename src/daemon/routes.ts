@@ -14,12 +14,14 @@ import {
   getTerminalStates,
   isParallelPhase,
   getWorkflowYaml,
+  getWorkflowTs,
   saveWorkflowYaml,
   createWorkflow,
   deleteWorkflowDir,
   setWorkflowPhases,
   syncWorkflowTs,
   renameRunFunctions,
+  pruneOrphanRunFunctions,
   setWorkflowAgents,
   type PhaseEntryInput,
   type WorkflowAgentEntry,
@@ -509,6 +511,14 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json({ yaml });
     }
 
+    // GET /api/workflows/:name/ts — 读 workflow.ts 源码
+    const tsReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/ts$/);
+    if (method === "GET" && tsReadMatch) {
+      const content = getWorkflowTs(tsReadMatch);
+      if (content === null) return error("workflow.ts not found", 404);
+      return json({ content });
+    }
+
     // PUT /api/workflows/:name/yaml
     const yamlWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
     if (method === "PUT" && yamlWriteMatch) {
@@ -573,6 +583,23 @@ export async function handleRequest(req: Request): Promise<Response> {
         return json({ ok: true });
       } catch (e: unknown) {
         return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
+      }
+    }
+
+    // POST /api/workflows/:name/prune-orphans — 删除指定的孤儿 run_ 函数
+    const pruneMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/prune-orphans$/);
+    if (method === "POST" && pruneMatch) {
+      const body = await req.json() as { names?: string[] };
+      if (!Array.isArray(body.names)) return error("names must be array", 400);
+      try {
+        const result = pruneOrphanRunFunctions(pruneMatch, body.names);
+        if (result.removed.length > 0) {
+          await reload();
+          emit({ type: "workflow:reloaded", payload: {} });
+        }
+        return json(result);
+      } catch (e: unknown) {
+        return error(`清理失败：${e instanceof Error ? e.message : String(e)}`, 400);
       }
     }
 

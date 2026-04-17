@@ -76,6 +76,10 @@ export const api = {
     request<{ added: string[]; orphans: string[]; modified: boolean; legacy_signature?: string[] }>(
       `/api/workflows/${name}/sync-ts`, { method: "POST" },
     ),
+  pruneOrphans: (name: string, names: string[]) =>
+    request<{ removed: string[] }>(`/api/workflows/${name}/prune-orphans`, {
+      method: "POST", body: JSON.stringify({ names }),
+    }),
   setWorkflowAgents: (name: string, agents: unknown[]) =>
     request<{ ok: boolean }>(`/api/workflows/${name}/agents`, {
       method: "PUT", body: JSON.stringify({ agents }),
@@ -86,6 +90,7 @@ export const api = {
   saveConfig: (yaml: string) =>
     request<{ ok: boolean }>("/api/config", { method: "PUT", body: JSON.stringify({ yaml }) }),
   getWorkflowYaml: (name: string) => request<{ yaml: string }>(`/api/workflows/${name}/yaml`),
+  getWorkflowTs: (name: string) => request<{ content: string }>(`/api/workflows/${name}/ts`),
   saveWorkflowYaml: (name: string, yaml: string) =>
     request<{ ok: boolean }>(`/api/workflows/${name}/yaml`, { method: "PUT", body: JSON.stringify({ yaml }) }),
   reloadWorkflows: () =>
