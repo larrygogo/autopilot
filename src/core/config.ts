@@ -7,6 +7,34 @@ import { log } from "./logger";
 export const PROVIDER_NAMES = ["anthropic", "openai", "google"] as const;
 export type ProviderName = typeof PROVIDER_NAMES[number];
 
+// ──────────────────────────────────────────────
+// daemon 监听配置
+// ──────────────────────────────────────────────
+
+export interface DaemonListenConfig {
+  host?: string;
+  port?: number;
+}
+
+/**
+ * 读取 config.yaml 的 daemon 段。返回已校验的部分配置；字段缺失或类型
+ * 非法时忽略（调用方用自己默认值）。
+ */
+export function loadDaemonConfig(): DaemonListenConfig {
+  try {
+    const raw = loadConfig();
+    const section = raw["daemon"];
+    if (!section || typeof section !== "object" || Array.isArray(section)) return {};
+    const out: DaemonListenConfig = {};
+    const s = section as Record<string, unknown>;
+    if (typeof s.host === "string" && s.host.trim()) out.host = s.host.trim();
+    if (typeof s.port === "number" && Number.isInteger(s.port) && s.port > 0 && s.port < 65536) {
+      out.port = s.port;
+    }
+    return out;
+  } catch { return {}; }
+}
+
 export interface ProviderConfig {
   /** provider 默认模型。agent 未显式指定 model 时使用此值 */
   default_model?: string;

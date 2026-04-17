@@ -13,6 +13,7 @@ import {
   readSupervisorPid,
   isSupervisorRunning,
   removeSupervisorPid,
+  readListenInfo,
 } from "../daemon/pid";
 
 // ──────────────────────────────────────────────
@@ -31,8 +32,17 @@ program
 // ──────────────────────────────────────────────
 
 function getClient(opts?: { port?: string }): AutopilotClient {
-  const port = opts?.port ? parseInt(opts.port, 10) : DEFAULT_PORT;
-  return new AutopilotClient({ port });
+  // 优先 CLI --port 覆盖；否则读 daemon.listen.json（daemon 启动时写入）；
+  // 再回退到默认端口
+  if (opts?.port) {
+    return new AutopilotClient({ port: parseInt(opts.port, 10) });
+  }
+  const info = readListenInfo();
+  if (info) {
+    // host 用 127.0.0.1 （客户端总是本机连）
+    return new AutopilotClient({ port: info.port });
+  }
+  return new AutopilotClient({ port: DEFAULT_PORT });
 }
 
 async function ensureDaemon(client: AutopilotClient): Promise<void> {
@@ -72,10 +82,9 @@ daemon
 
 daemon
   .command("start")
-  .description("后台启动 daemon（默认带 supervisor，崩了自动重启）")
-  .option("-p, --port <port>", "端口", String(DEFAULT_PORT))
+  .description("后台启动 daemon（监听地址由 ~/.autopilot/config.yaml 的 daemon 段决定）")
   .option("--no-supervise", "不带 supervisor，直接跑 daemon（崩了不重启）")
-  .action(async (opts: { port: string; supervise: boolean }) => {
+  .action(async (opts: { supervise: boolean }) => {
     if (isDaemonRunning() || isSupervisorRunning()) {
       console.error("错误：daemon 或 supervisor 已在运行中。");
       process.exit(1);
@@ -86,7 +95,7 @@ daemon
       : join(import.meta.dir, "../daemon/index.ts");
 
     const child = Bun.spawn(
-      ["bun", "run", scriptPath, "--port", opts.port],
+      ["bun", "run", scriptPath],
       { stdio: ["ignore", "ignore", "ignore"] }
     );
     child.unref();
@@ -99,7 +108,8 @@ daemon
       if (pid && isProcessAlive(pid)) {
         const supPid = opts.supervise ? readSupervisorPid() : null;
         const supSuffix = supPid ? ` via supervisor (pid=${supPid})` : "";
-        console.log(`daemon 已启动 (pid=${pid}, port=${opts.port})${supSuffix}`);
+        console.log(`daemon 已启动 (pid=${pid})${supSuffix}`);
+        console.log(`  查看监听地址与状态：autopilot daemon status`);
         return;
       }
     }
@@ -149,6 +159,86 @@ daemon
     process.exit(1);
   });
 
+/**
+ * 优雅停止 daemon / supervisor。返回成功与否。供 stop 和 restart 子命令复用。
+ */
+async function stopDaemonProcess(): Promise<boolean> {
+  const supPid = readSupervisorPid();
+  const daemonPid = readPid();
+
+  if (supPid && isProcessAlive(supPid)) {
+    process.kill(supPid, "SIGTERM");
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      await Bun.sleep(200);
+      if (!isProcessAlive(supPid)) return true;
+    }
+    return false;
+  }
+
+  if (!daemonPid || !isProcessAlive(daemonPid)) {
+    removePid();
+    removeSupervisorPid();
+    return true;  // 本来就没跑
+  }
+
+  process.kill(daemonPid, "SIGTERM");
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    await Bun.sleep(200);
+    if (!isProcessAlive(daemonPid)) return true;
+  }
+  return false;
+}
+
+async function startDaemonProcess(supervise: boolean): Promise<number | null> {
+  const scriptPath = supervise
+    ? join(import.meta.dir, "../daemon/supervisor.ts")
+    : join(import.meta.dir, "../daemon/index.ts");
+  const child = Bun.spawn(
+    ["bun", "run", scriptPath],
+    { stdio: ["ignore", "ignore", "ignore"] },
+  );
+  child.unref();
+
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    await Bun.sleep(200);
+    const pid = readPid();
+    if (pid && isProcessAlive(pid)) return pid;
+  }
+  return null;
+}
+
+daemon
+  .command("restart")
+  .description("重启 daemon（应用 ~/.autopilot/config.yaml 的最新 daemon 配置）")
+  .option("--no-supervise", "不带 supervisor 重启")
+  .action(async (opts: { supervise: boolean }) => {
+    const wasRunning = isDaemonRunning() || isSupervisorRunning();
+    if (wasRunning) {
+      const ok = await stopDaemonProcess();
+      if (!ok) {
+        console.error("错误：停止 daemon / supervisor 超时，restart 取消。");
+        process.exit(1);
+      }
+      console.log("daemon 已停止。");
+    } else {
+      console.log("daemon 未在运行，将直接启动。");
+    }
+    // 确保 pid 文件清理完
+    await Bun.sleep(200);
+    const pid = await startDaemonProcess(opts.supervise);
+    if (pid === null) {
+      console.error("错误：启动超时。");
+      process.exit(1);
+    }
+    const supPid = opts.supervise ? readSupervisorPid() : null;
+    const supSuffix = supPid ? ` via supervisor (pid=${supPid})` : "";
+    console.log(`daemon 已启动 (pid=${pid})${supSuffix}`);
+    console.log(`  查看监听地址与状态：autopilot daemon status`);
+  });
+
 daemon
   .command("status")
   .description("查看 daemon 状态")
@@ -170,7 +260,9 @@ daemon
     try {
       const client = getClient(opts);
       const status = await client.getStatus();
+      const listen = readListenInfo();
       console.log(`daemon 运行中 (pid=${status.pid})`);
+      if (listen) console.log(`  监听: ${listen.host}:${listen.port}`);
       console.log(`  版本: ${status.version}`);
       console.log(`  运行时间: ${status.uptime}s`);
       const counts = Object.entries(status.taskCounts);
