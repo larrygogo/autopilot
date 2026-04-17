@@ -1,9 +1,17 @@
-import type { AgentResult, RunOptions } from "../types";
+import type { AgentResult, RunOptions, ChatOptions, ChatResult } from "../types";
 
 export abstract class BaseProvider {
   constructor(protected config: Record<string, unknown>) {}
   abstract run(prompt: string, options?: RunOptions): Promise<AgentResult>;
   abstract close(): Promise<void>;
+
+  /**
+   * 多轮对话。未实现的 provider 默认抛错。
+   * 传入 options.providerSessionId 则续该 session，否则开新 session。
+   */
+  async chat(_message: string, _options?: ChatOptions): Promise<ChatResult> {
+    throw new Error(`${this.constructor.name}.chat 未实现`);
+  }
 
   protected buildRunOptions(options?: RunOptions): Record<string, unknown> {
     const result: Record<string, unknown> = {};

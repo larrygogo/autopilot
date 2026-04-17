@@ -5,7 +5,7 @@ import { AnthropicProvider } from "./providers/anthropic";
 import { OpenAIProvider } from "./providers/openai";
 import { GoogleProvider } from "./providers/google";
 import { getWorkflow } from "../core/registry";
-import { loadGlobalAgents, loadProviders, type ProviderConfig } from "../core/config";
+import { loadGlobalAgents, loadProviders, loadConversationConfig, type ProviderConfig } from "../core/config";
 
 const PROVIDERS: Record<string, new (config: Record<string, unknown>) => BaseProvider> = {
   anthropic: AnthropicProvider,
@@ -130,6 +130,61 @@ export function getAgent(agentName: string, workflowName: string): Agent {
   const agent = createAgent(resolved);
   _cache.set(cacheKey, agent);
   return agent;
+}
+
+// ──────────────────────────────────────────────
+// 对话（chat）agent 解析
+//
+// 优先级：
+//   1. 显式 agentName（CLI --agent，API body.agent）
+//   2. workflow.chat_agent（工作流专属对话 agent）
+//   3. conversation.default_agent（全局主对话 agent）
+// ──────────────────────────────────────────────
+
+export interface ResolveChatAgentOpts {
+  /** 用户显式指定的 agent 名（最高优先级） */
+  agent?: string;
+  /** 聚焦的工作流名 */
+  workflow?: string;
+}
+
+export function resolveChatAgentName(opts: ResolveChatAgentOpts = {}): string {
+  if (opts.agent) return opts.agent;
+  if (opts.workflow) {
+    const wf = getWorkflow(opts.workflow);
+    const fromWf = wf?.chat_agent;
+    if (typeof fromWf === "string" && fromWf.trim()) return fromWf.trim();
+  }
+  const fromGlobal = loadConversationConfig().default_agent;
+  if (fromGlobal) return fromGlobal;
+  throw new Error(
+    "未指定对话 agent：请传入 --agent，或在工作流的 chat_agent 字段、" +
+    "config.yaml 的 conversation.default_agent 中配置"
+  );
+}
+
+/**
+ * 构造一个对话用 Agent 实例（不入缓存，调用方负责 close）。
+ * 传入的 agent 名支持：
+ *   - 存在于全局 config.yaml 的 agents.<name>
+ *   - 若 workflow 提供且该工作流 agents[] 里有同名条目，则合并覆盖
+ */
+export function createChatAgent(agentName: string, workflowName?: string): Agent {
+  const globalAgents = loadGlobalAgents();
+  const providers = loadProviders();
+  let workflowAgent: Partial<AgentConfig> | undefined;
+  if (workflowName) {
+    const wf = getWorkflow(workflowName);
+    const list = (wf?.agents as Partial<AgentConfig>[] | undefined) ?? [];
+    workflowAgent = list.find((a) => a?.name === agentName);
+  }
+  if (!workflowAgent && !globalAgents[agentName]) {
+    throw new Error(
+      `找不到 agent "${agentName}"：请在 config.yaml 的 agents 段或工作流 agents[] 中定义`
+    );
+  }
+  const resolved = resolveAgentConfig(agentName, workflowAgent, globalAgents, providers);
+  return createAgent(resolved);
 }
 
 /**

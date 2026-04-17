@@ -38,3 +38,34 @@ export interface RunOptions {
   /** 临时覆盖 max_turns */
   max_turns?: number;
 }
+
+// ──────────────────────────────────────────────
+// 对话（chat）接口：多轮、session 绑定
+// ──────────────────────────────────────────────
+
+export interface ChatOptions {
+  /** provider 原生 session id；传入则续该 session */
+  providerSessionId?: string;
+  /** 取消信号 */
+  signal?: AbortSignal;
+  /** 临时覆盖模型 */
+  model?: string;
+  /** 覆盖 system_prompt */
+  system_prompt?: string;
+  /** 追加到 system_prompt 之后 */
+  additional_system?: string;
+  cwd?: string;
+  timeout?: number;
+}
+
+export interface ChatResult {
+  /** assistant 的回复文本 */
+  text: string;
+  /** provider 本次返回的 session id（后续续对话用） */
+  providerSessionId?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_cost_usd?: number;
+  };
+}
