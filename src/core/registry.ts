@@ -1,10 +1,9 @@
 import type { TransitionTable } from "./state-machine";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
-import { parse as parseYaml } from "yaml";
-import { readFileSync } from "fs";
+import { parse as parseYaml, parseDocument, type Document } from "yaml";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -64,6 +63,14 @@ const _registry: Map<string, WorkflowDefinition> = new Map();
 
 export function _clearRegistry(): void {
   _registry.clear();
+}
+
+/**
+ * 热重载：清空注册表 + 重新发现工作流。
+ */
+export async function reload(): Promise<void> {
+  _registry.clear();
+  await discover();
 }
 
 // ──────────────────────────────────────────────
@@ -175,11 +182,15 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
     return null;
   }
 
-  // 动态 import workflow.ts（如果存在）
+  // 动态 import workflow.ts（如果存在）。
+  // Bun 的 ESM import() 会按路径缓存，一旦首次加载，后续 reload 即使磁盘变化
+  // 仍拿到旧版本。加 ?t=<mtime> query 强制每次文件变动后重新加载。
   let tsModule: Record<string, unknown> | null = null;
   if (existsSync(tsPath)) {
     try {
-      tsModule = await import(tsPath) as Record<string, unknown>;
+      const { statSync } = await import("fs");
+      const mtime = statSync(tsPath).mtimeMs;
+      tsModule = await import(`${tsPath}?t=${mtime}`) as Record<string, unknown>;
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       log.warn("加载 YAML 工作流 TS 模块 %s 失败：%s", tsPath, message);
@@ -666,4 +677,598 @@ export function getTerminalStates(workflowName: string): string[] {
   const wf = getWorkflow(workflowName);
   if (!wf) return ["cancelled"];
   return wf.terminal_states ?? ["cancelled"];
+}
+
+/**
+ * 读取工作流 TS 源文件原文
+ */
+export function getWorkflowTs(workflowName: string): string | null {
+  const tsPath = join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.ts");
+  if (!existsSync(tsPath)) return null;
+  return readFileSync(tsPath, "utf-8");
+}
+
+/**
+ * 读取工作流 YAML 原文
+ */
+export function getWorkflowYaml(workflowName: string): string | null {
+  const yamlPath = join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.yaml");
+  if (!existsSync(yamlPath)) return null;
+  return readFileSync(yamlPath, "utf-8");
+}
+
+/**
+ * 保存工作流 YAML（写入磁盘 + 备份）
+ * @throws 如果 YAML 解析失败
+ */
+export function saveWorkflowYaml(workflowName: string, yamlContent: string): void {
+  // 校验 YAML 语法
+  parseYaml(yamlContent);
+
+  const yamlPath = join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.yaml");
+  if (!existsSync(join(AUTOPILOT_HOME, "workflows", workflowName))) {
+    throw new Error(`工作流目录不存在：${workflowName}`);
+  }
+  // 备份
+  if (existsSync(yamlPath)) {
+    copyFileSync(yamlPath, yamlPath + ".bak");
+  }
+  writeFileSync(yamlPath, yamlContent, "utf-8");
+}
+
+// ──────────────────────────────────────────────
+// 工作流创建 / 删除
+// ──────────────────────────────────────────────
+
+const WORKFLOW_NAME_RE = /^[a-z][a-z0-9_\-]{0,39}$/;
+
+export interface CreateWorkflowInput {
+  name: string;
+  description?: string;
+  /** 初始阶段名（不含前缀，类似 "step1"），默认 "step1" */
+  firstPhase?: string;
+}
+
+/**
+ * 创建新工作流目录 + 脚手架 workflow.yaml / workflow.ts。
+ * 不注册到 registry —— 调用方需在成功后执行 reload()。
+ * @throws 名称非法 / 目录已存在
+ */
+export function createWorkflow(input: CreateWorkflowInput): { dir: string; yamlPath: string; tsPath: string } {
+  const { name, description, firstPhase = "step1" } = input;
+  if (!WORKFLOW_NAME_RE.test(name)) {
+    throw new Error("工作流名称非法：需以小写字母开头，仅包含小写字母、数字、下划线、连字符，长度 ≤ 40");
+  }
+  if (!/^[a-z][a-z0-9_]*$/.test(firstPhase)) {
+    throw new Error("首阶段名非法：需以小写字母开头，仅包含小写字母、数字、下划线");
+  }
+
+  const wfRoot = join(AUTOPILOT_HOME, "workflows");
+  const dir = join(wfRoot, name);
+  if (existsSync(dir)) {
+    throw new Error(`工作流目录已存在：${name}`);
+  }
+
+  mkdirSync(dir, { recursive: true });
+
+  const yamlPath = join(dir, "workflow.yaml");
+  const tsPath = join(dir, "workflow.ts");
+
+  const yamlContent = renderWorkflowYamlTemplate(name, description, firstPhase);
+  const tsContent = renderWorkflowTsTemplate(firstPhase);
+  writeFileSync(yamlPath, yamlContent, "utf-8");
+  writeFileSync(tsPath, tsContent, "utf-8");
+
+  return { dir, yamlPath, tsPath };
+}
+
+/**
+ * 删除工作流目录（整体移除）。只要工作流在预期根目录下就允许删除。
+ * 不刷新 registry —— 调用方应在成功后执行 reload()。
+ * @returns true if removed, false if dir doesn't exist
+ */
+export function deleteWorkflowDir(workflowName: string): boolean {
+  if (!WORKFLOW_NAME_RE.test(workflowName)) {
+    throw new Error("工作流名称非法");
+  }
+  const wfRoot = join(AUTOPILOT_HOME, "workflows");
+  const dir = join(wfRoot, workflowName);
+  // 安全校验：最终路径必须仍在 wfRoot 下
+  if (!dir.startsWith(wfRoot + "/") && dir !== wfRoot) {
+    throw new Error("非法路径");
+  }
+  if (!existsSync(dir)) return false;
+  rmSync(dir, { recursive: true, force: true });
+  return true;
+}
+
+function renderWorkflowYamlTemplate(name: string, description: string | undefined, firstPhase: string): string {
+  const desc = description?.trim() ? description.trim() : "请补充描述";
+  return `name: ${name}
+description: ${desc}
+
+# 工作流阶段列表。最简写法：只写 name 和 timeout，状态机将自动推导：
+#   pending_<name> / running_<name> / start_<name> / complete_<name>
+# 更多写法（并行、reject 跳转、自定义状态）见 docs/workflow-development.md
+phases:
+  - name: ${firstPhase}
+    timeout: 900
+
+# 可选：覆盖工作流内的智能体（全局 agents 在 config.yaml 定义）
+# agents:
+#   - name: coder
+#     extends: coder       # 继承全局同名 agent，可在此覆盖字段
+#     system_prompt: "特化提示词..."
+`;
+}
+
+function renderWorkflowTsTemplate(firstPhase: string): string {
+  const fn = `run_${firstPhase}`;
+  return `// 每个 phase 函数接收 taskId: string 参数；抛错则该阶段失败，
+// 可被状态机重试或驳回。详见 docs/workflow-development.md
+//
+// 常见用法（按需启用）：
+//   import { getTask } from "@autopilot/db";        // 取任务对象
+//   import { getAgent } from "@autopilot/agents";   // 取配置好的 agent
+//
+//   const task = getTask(taskId);
+//   const agent = getAgent("coder", "<工作流名>");
+//   const result = await agent.run("...prompt...");
+
+export async function ${fn}(taskId: string): Promise<void> {
+  console.log(\`[\${taskId}] 执行阶段 ${firstPhase}\`);
+  // TODO: 在这里实现阶段业务逻辑
+}
+`;
+}
+
+// ──────────────────────────────────────────────
+// 阶段级结构化编辑（保留 YAML 其他段）
+// ──────────────────────────────────────────────
+
+const PHASE_NAME_RE = /^[a-z][a-z0-9_]*$/;
+
+export interface PhaseInput {
+  name: string;
+  timeout?: number;
+  reject?: string | null;
+  retry_on_failure?: boolean;
+  [key: string]: unknown;
+}
+
+export interface ParallelPhaseInput {
+  parallel: {
+    name: string;
+    fail_strategy?: string;
+    phases: PhaseInput[];
+  };
+}
+
+export type PhaseEntryInput = PhaseInput | ParallelPhaseInput;
+
+function isParallelInput(p: PhaseEntryInput): p is ParallelPhaseInput {
+  return "parallel" in p && p.parallel !== null && typeof p.parallel === "object";
+}
+
+function getWorkflowYamlPath(workflowName: string): string {
+  return join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.yaml");
+}
+
+function getWorkflowTsPath(workflowName: string): string {
+  return join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.ts");
+}
+
+/**
+ * 提取 phases 中所有（含 parallel 内）阶段的 name。
+ */
+export function collectPhaseNames(phases: PhaseEntryInput[]): string[] {
+  const names: string[] = [];
+  for (const p of phases) {
+    if (isParallelInput(p)) {
+      for (const sub of p.parallel.phases ?? []) names.push(sub.name);
+    } else {
+      names.push(p.name);
+    }
+  }
+  return names;
+}
+
+/**
+ * 结构化校验 + 写入工作流 phases 段。保留 YAML 中的其他字段与注释。
+ * 不自动调用 reload —— 调用方负责。
+ */
+export function setWorkflowPhases(workflowName: string, phases: PhaseEntryInput[]): void {
+  if (!Array.isArray(phases) || phases.length === 0) {
+    throw new Error("phases 不能为空数组");
+  }
+
+  // 1. 校验
+  const seen = new Set<string>();
+  const allNames = new Set<string>();
+  for (let i = 0; i < phases.length; i++) {
+    const p = phases[i];
+    if (isParallelInput(p)) {
+      if (!p.parallel.name || !PHASE_NAME_RE.test(p.parallel.name)) {
+        throw new Error(`第 ${i + 1} 项 parallel 名称非法：${p.parallel.name}`);
+      }
+      if (!Array.isArray(p.parallel.phases) || p.parallel.phases.length === 0) {
+        throw new Error(`parallel "${p.parallel.name}" 内部 phases 不能为空`);
+      }
+      if (seen.has(p.parallel.name)) throw new Error(`阶段名重复：${p.parallel.name}`);
+      seen.add(p.parallel.name);
+      allNames.add(p.parallel.name);
+      for (const sub of p.parallel.phases) {
+        if (!PHASE_NAME_RE.test(sub.name)) throw new Error(`阶段名非法：${sub.name}`);
+        if (allNames.has(sub.name)) throw new Error(`阶段名重复：${sub.name}`);
+        allNames.add(sub.name);
+      }
+    } else {
+      if (!PHASE_NAME_RE.test(p.name)) throw new Error(`阶段名非法：${p.name}`);
+      if (seen.has(p.name)) throw new Error(`阶段名重复：${p.name}`);
+      seen.add(p.name);
+      allNames.add(p.name);
+    }
+  }
+
+  // 2. reject 必须指向当前阶段之前的某个阶段（仅支持往回跳）
+  const orderedNames: string[] = [];
+  for (const p of phases) {
+    const myName = isParallelInput(p) ? p.parallel.name : p.name;
+    if (!isParallelInput(p) && p.reject) {
+      if (!orderedNames.includes(p.reject)) {
+        throw new Error(`阶段 "${p.name}" 的 reject 目标 "${p.reject}" 不存在或在其后；驳回只能往回跳`);
+      }
+    }
+    orderedNames.push(myName);
+  }
+
+  // 3. 读取 + 写入 yaml Document（保留其他段）
+  const yamlPath = getWorkflowYamlPath(workflowName);
+  if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
+
+  const raw = readFileSync(yamlPath, "utf-8");
+  const doc = parseDocument(raw);
+
+  // 清洗 undefined / null / 空串 避免脏字段
+  const cleaned = phases.map((p) => cleanPhaseEntry(p));
+  doc.setIn(["phases"], cleaned);
+
+  // 备份原文件
+  copyFileSync(yamlPath, yamlPath + ".bak");
+  writeFileSync(yamlPath, doc.toString(), "utf-8");
+}
+
+function cleanPhaseEntry(p: PhaseEntryInput): Record<string, unknown> {
+  if (isParallelInput(p)) {
+    const parallel: Record<string, unknown> = { name: p.parallel.name };
+    if (p.parallel.fail_strategy) parallel.fail_strategy = p.parallel.fail_strategy;
+    parallel.phases = (p.parallel.phases ?? []).map((sub) => cleanSinglePhase(sub));
+    return { parallel };
+  }
+  return cleanSinglePhase(p);
+}
+
+function cleanSinglePhase(p: PhaseInput): Record<string, unknown> {
+  const out: Record<string, unknown> = { name: p.name };
+  if (typeof p.timeout === "number" && p.timeout > 0) out.timeout = p.timeout;
+  if (p.reject) out.reject = p.reject;
+  if (p.retry_on_failure) out.retry_on_failure = p.retry_on_failure;
+  // 保留未知扩展字段（忽略已处理的 name/timeout/reject/retry_on_failure）
+  for (const [k, v] of Object.entries(p)) {
+    if (["name", "timeout", "reject", "retry_on_failure"].includes(k)) continue;
+    if (v === undefined || v === null || v === "") continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+// ──────────────────────────────────────────────
+// workflow.ts 校准 —— 只追加缺失的 run_<phase>，不修改已有函数
+// ──────────────────────────────────────────────
+
+export interface SyncTsResult {
+  /** 新追加的函数名列表 */
+  added: string[];
+  /** 存在但 phases 未引用的孤儿函数（不自动删） */
+  orphans: string[];
+  /** 是否修改了文件 */
+  modified: boolean;
+  /** 使用了旧 `ctx` 签名（runner 实际只传 taskId 字符串，会运行时报错）的函数名 */
+  legacy_signature?: string[];
+}
+
+export function syncWorkflowTs(workflowName: string): SyncTsResult {
+  const tsPath = getWorkflowTsPath(workflowName);
+  if (!existsSync(tsPath)) throw new Error(`workflow.ts 不存在：${workflowName}`);
+
+  const wf = getWorkflow(workflowName);
+  if (!wf) throw new Error(`工作流未注册：${workflowName}（请先 reload）`);
+
+  const phaseNames = collectPhaseNames(wf.phases as PhaseEntryInput[]);
+  const phaseSet = new Set(phaseNames);
+
+  const content = readFileSync(tsPath, "utf-8");
+  const existingFns = extractRunFunctions(content);
+  const existingSet = new Set(existingFns);
+
+  const missing = phaseNames.filter((n) => !existingSet.has(n));
+  const orphans = existingFns.filter((n) => !phaseSet.has(n));
+  const legacy = detectLegacySignatures(content);
+
+  if (missing.length === 0) {
+    return { added: [], orphans, modified: false, legacy_signature: legacy };
+  }
+
+  const appended = missing.map((name) => renderRunFunctionStub(name)).join("\n");
+  const newContent = content.replace(/\s*$/, "") + "\n\n" + appended + "\n";
+
+  copyFileSync(tsPath, tsPath + ".bak");
+  writeFileSync(tsPath, newContent, "utf-8");
+
+  return { added: missing, orphans, modified: true, legacy_signature: legacy };
+}
+
+/**
+ * 重命名 workflow.ts 中的 run_<old> 函数声明为 run_<new>，保留函数体。
+ * 支持 export async function / export function / export const 三种写法。
+ * 不修改字符串字面量或注释中的旧名（避免污染业务代码）。
+ * 返回实际被重命名的旧名列表。
+ */
+export function renameRunFunctions(
+  workflowName: string,
+  renames: Record<string, string>,
+): { renamed: string[] } {
+  const tsPath = getWorkflowTsPath(workflowName);
+  if (!existsSync(tsPath)) return { renamed: [] };
+
+  let content = readFileSync(tsPath, "utf-8");
+  const renamed: string[] = [];
+
+  for (const [oldName, newName] of Object.entries(renames)) {
+    if (!oldName || !newName || oldName === newName) continue;
+    if (!/^[a-z][a-z0-9_]*$/.test(newName)) continue;
+
+    const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const patterns = [
+      new RegExp(`(export\\s+(?:async\\s+)?function\\s+)run_${escaped}(?=\\s*\\()`, "g"),
+      new RegExp(`(export\\s+const\\s+)run_${escaped}(?=\\s*[=:])`, "g"),
+    ];
+    let changed = false;
+    for (const re of patterns) {
+      const replaced = content.replace(re, (_m, prefix: string) => {
+        changed = true;
+        return `${prefix}run_${newName}`;
+      });
+      if (replaced !== content) content = replaced;
+    }
+    if (changed) renamed.push(oldName);
+  }
+
+  if (renamed.length > 0) {
+    copyFileSync(tsPath, tsPath + ".bak");
+    writeFileSync(tsPath, content, "utf-8");
+  }
+  return { renamed };
+}
+
+/**
+ * 删除 workflow.ts 中指定的 run_<name> 函数声明（整个函数）。
+ * 用字符级 tokenizer 处理字符串 / 注释 / 模板字符串，平衡花括号定位函数体结束。
+ * 写入前先备份 .bak。返回真正删除的函数名。
+ */
+export function pruneOrphanRunFunctions(
+  workflowName: string,
+  names: string[],
+): { removed: string[] } {
+  const tsPath = getWorkflowTsPath(workflowName);
+  if (!existsSync(tsPath)) return { removed: [] };
+
+  let content = readFileSync(tsPath, "utf-8");
+  const removed: string[] = [];
+
+  for (const name of names) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+    const range = findRunFunctionRange(content, name);
+    if (!range) continue;
+    // 同时吃掉前后多余空行，避免留下两个空行
+    let before = range.start;
+    while (before > 0 && (content[before - 1] === "\n" || content[before - 1] === " ")) {
+      if (content[before - 1] === "\n" && (before - 2 < 0 || content[before - 2] === "\n")) break;
+      before--;
+    }
+    let after = range.end;
+    while (after < content.length && content[after] === "\n") after++;
+    content = content.slice(0, before) + (before > 0 ? "\n" : "") + content.slice(after);
+    removed.push(name);
+  }
+
+  if (removed.length > 0) {
+    copyFileSync(tsPath, tsPath + ".bak");
+    writeFileSync(tsPath, content, "utf-8");
+  }
+  return { removed };
+}
+
+/**
+ * 定位 `export (async) function run_<name>(...)` 整段函数的起止范围。
+ * 不支持 `export const run_x = ...` 箭头函数形式（需要额外处理，少见）。
+ */
+function findRunFunctionRange(src: string, name: string): { start: number; end: number } | null {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`export\\s+(?:async\\s+)?function\\s+run_${escaped}\\s*\\(`, "g");
+  const m = re.exec(src);
+  if (!m) return null;
+
+  const start = m.index;
+  let i = m.index + m[0].length;
+
+  // 1. 配对闭合最外层 `(` (函数参数)
+  let parenDepth = 1;
+  while (i < src.length && parenDepth > 0) {
+    const c = src[i];
+    if (c === "(") parenDepth++;
+    else if (c === ")") parenDepth--;
+    else if (c === "\"" || c === "'" || c === "`") i = skipString(src, i, c);
+    else if (c === "/" && src[i + 1] === "/") i = skipLineComment(src, i);
+    else if (c === "/" && src[i + 1] === "*") i = skipBlockComment(src, i);
+    i++;
+  }
+
+  // 2. 跳过返回类型到第一个 `{`
+  while (i < src.length && src[i] !== "{") {
+    const c = src[i];
+    if (c === "\"" || c === "'" || c === "`") { i = skipString(src, i, c); i++; continue; }
+    if (c === "/" && src[i + 1] === "/") { i = skipLineComment(src, i); continue; }
+    if (c === "/" && src[i + 1] === "*") { i = skipBlockComment(src, i); continue; }
+    i++;
+  }
+  if (i >= src.length) return null;
+
+  // 3. 花括号平衡定位函数体结束
+  let braceDepth = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === "{") { braceDepth++; i++; continue; }
+    if (c === "}") { braceDepth--; i++; if (braceDepth === 0) break; continue; }
+    if (c === "\"" || c === "'" || c === "`") { i = skipString(src, i, c); i++; continue; }
+    if (c === "/" && src[i + 1] === "/") { i = skipLineComment(src, i); continue; }
+    if (c === "/" && src[i + 1] === "*") { i = skipBlockComment(src, i); continue; }
+    i++;
+  }
+  return { start, end: i };
+}
+
+/** 返回字符串结束字符（闭合引号）的索引。i 指向开始引号。 */
+function skipString(src: string, i: number, quote: string): number {
+  let j = i + 1;
+  while (j < src.length && src[j] !== quote) {
+    if (src[j] === "\\") { j += 2; continue; }
+    j++;
+  }
+  return j; // 指向闭合引号本身，让调用方 i++ 前进
+}
+
+function skipLineComment(src: string, i: number): number {
+  let j = i;
+  while (j < src.length && src[j] !== "\n") j++;
+  return j;
+}
+
+function skipBlockComment(src: string, i: number): number {
+  let j = i + 2;
+  while (j < src.length - 1 && !(src[j] === "*" && src[j + 1] === "/")) j++;
+  return j + 2;
+}
+
+/** 检测使用旧 `ctx: { task: any; ... }` 签名的 run_ 函数（运行时会崩） */
+function detectLegacySignatures(source: string): string[] {
+  const names: string[] = [];
+  const re = /export\s+(?:async\s+)?function\s+run_([A-Za-z0-9_]+)\s*\(\s*ctx\s*:/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source))) {
+    if (!names.includes(m[1])) names.push(m[1]);
+  }
+  return names;
+}
+
+function extractRunFunctions(source: string): string[] {
+  const names: string[] = [];
+  const patterns = [
+    /export\s+async\s+function\s+run_([A-Za-z0-9_]+)/g,
+    /export\s+function\s+run_([A-Za-z0-9_]+)/g,
+    /export\s+const\s+run_([A-Za-z0-9_]+)\s*=/g,
+  ];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(source))) {
+      if (!names.includes(m[1])) names.push(m[1]);
+    }
+  }
+  return names;
+}
+
+// ──────────────────────────────────────────────
+// 工作流内 agents[] 段的结构化读写
+// ──────────────────────────────────────────────
+
+export interface WorkflowAgentEntry {
+  name: string;
+  extends?: string | null;
+  provider?: string;
+  model?: string;
+  max_turns?: number;
+  permission_mode?: string;
+  system_prompt?: string;
+  [key: string]: unknown;
+}
+
+const AGENT_NAME_RE = /^[\w.\-]+$/;
+
+/**
+ * 结构化写入工作流 agents 段。支持空数组（会移除该段）。
+ * 不自动 reload —— 调用方负责。
+ */
+export function setWorkflowAgents(workflowName: string, agents: WorkflowAgentEntry[]): void {
+  if (!Array.isArray(agents)) {
+    throw new Error("agents 必须是数组");
+  }
+
+  // 校验
+  const seen = new Set<string>();
+  for (let i = 0; i < agents.length; i++) {
+    const a = agents[i];
+    if (!a || typeof a !== "object") throw new Error(`第 ${i + 1} 项非法`);
+    if (typeof a.name !== "string" || !AGENT_NAME_RE.test(a.name)) {
+      throw new Error(`第 ${i + 1} 项 name 非法：${a.name}`);
+    }
+    if (seen.has(a.name)) throw new Error(`名称重复：${a.name}`);
+    seen.add(a.name);
+    if (a.extends !== undefined && a.extends !== null && typeof a.extends !== "string") {
+      throw new Error(`"${a.name}" 的 extends 必须是字符串`);
+    }
+    if (a.max_turns !== undefined && (typeof a.max_turns !== "number" || a.max_turns <= 0)) {
+      throw new Error(`"${a.name}" 的 max_turns 必须是正整数`);
+    }
+  }
+
+  const yamlPath = getWorkflowYamlPath(workflowName);
+  if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
+
+  const raw = readFileSync(yamlPath, "utf-8");
+  const doc = parseDocument(raw);
+
+  if (agents.length === 0) {
+    doc.deleteIn(["agents"]);
+  } else {
+    const cleaned = agents.map(cleanWorkflowAgent);
+    doc.setIn(["agents"], cleaned);
+  }
+
+  copyFileSync(yamlPath, yamlPath + ".bak");
+  writeFileSync(yamlPath, doc.toString(), "utf-8");
+}
+
+function cleanWorkflowAgent(a: WorkflowAgentEntry): Record<string, unknown> {
+  const out: Record<string, unknown> = { name: a.name };
+  if (a.extends) out.extends = a.extends;
+  if (a.provider) out.provider = a.provider;
+  if (a.model) out.model = a.model;
+  if (typeof a.max_turns === "number" && a.max_turns > 0) out.max_turns = a.max_turns;
+  if (a.permission_mode) out.permission_mode = a.permission_mode;
+  if (a.system_prompt) out.system_prompt = a.system_prompt;
+  // 保留未知扩展字段
+  const handled = new Set(["name", "extends", "provider", "model", "max_turns", "permission_mode", "system_prompt"]);
+  for (const [k, v] of Object.entries(a)) {
+    if (handled.has(k)) continue;
+    if (v === undefined || v === null || v === "") continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+function renderRunFunctionStub(phaseName: string): string {
+  return `export async function run_${phaseName}(taskId: string): Promise<void> {
+  console.log(\`[\${taskId}] 执行阶段 ${phaseName}\`);
+  // TODO: 实现阶段逻辑
+}`;
 }

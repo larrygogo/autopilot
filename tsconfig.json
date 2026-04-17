@@ -10,7 +10,9 @@
     "outDir": "dist",
     "rootDir": ".",
     "declaration": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
   },
-  "include": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "bin/**/*.ts", "tests/**/*.ts"]
 }

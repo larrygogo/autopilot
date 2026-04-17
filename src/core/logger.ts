@@ -1,4 +1,7 @@
+import { emit } from "../daemon/event-bus";
+
 let currentPhaseTag = "SYSTEM";
+let currentTaskId: string | undefined;
 
 export function setPhase(phase: string, label?: string): void {
   currentPhaseTag = label ?? phase.toUpperCase();
@@ -6,6 +9,11 @@ export function setPhase(phase: string, label?: string): void {
 
 export function resetPhase(): void {
   currentPhaseTag = "SYSTEM";
+  currentTaskId = undefined;
+}
+
+export function setTaskId(taskId: string): void {
+  currentTaskId = taskId;
 }
 
 function fmt(level: string, name: string, msg: string, args: unknown[]): string {
@@ -21,6 +29,19 @@ function fmt(level: string, name: string, msg: string, args: unknown[]): string 
   return `${ts} [${level}] [${currentPhaseTag}] [${name}] ${body}`;
 }
 
+function emitLog(level: string, formatted: string): void {
+  emit({
+    type: "log:entry",
+    payload: {
+      taskId: currentTaskId,
+      phase: currentPhaseTag,
+      level,
+      message: formatted,
+      timestamp: new Date().toISOString(),
+    },
+  });
+}
+
 export interface Logger {
   info(msg: string, ...args: unknown[]): void;
   warn(msg: string, ...args: unknown[]): void;
@@ -30,10 +51,28 @@ export interface Logger {
 
 export function createLogger(name: string): Logger {
   return {
-    info: (msg, ...args) => console.error(fmt("INFO", name, msg, args)),
-    warn: (msg, ...args) => console.error(fmt("WARN", name, msg, args)),
-    error: (msg, ...args) => console.error(fmt("ERROR", name, msg, args)),
-    debug: (msg, ...args) => { if (process.env.DEBUG) console.error(fmt("DEBUG", name, msg, args)); },
+    info: (msg, ...args) => {
+      const s = fmt("INFO", name, msg, args);
+      console.error(s);
+      emitLog("INFO", s);
+    },
+    warn: (msg, ...args) => {
+      const s = fmt("WARN", name, msg, args);
+      console.error(s);
+      emitLog("WARN", s);
+    },
+    error: (msg, ...args) => {
+      const s = fmt("ERROR", name, msg, args);
+      console.error(s);
+      emitLog("ERROR", s);
+    },
+    debug: (msg, ...args) => {
+      if (process.env.DEBUG) {
+        const s = fmt("DEBUG", name, msg, args);
+        console.error(s);
+        emitLog("DEBUG", s);
+      }
+    },
   };
 }
 

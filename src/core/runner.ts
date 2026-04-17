@@ -1,9 +1,10 @@
 import { getTask } from "./db";
 import { acquireLock, releaseLock } from "./infra";
-import { log, setPhase, resetPhase } from "./logger";
+import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { transition, InvalidTransitionError } from "./state-machine";
 import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates } from "./registry";
 import { closeAgents } from "../agents/registry";
+import { emit } from "../daemon/event-bus";
 
 // ──────────────────────────────────────────────
 // Push 模型：非阻塞启动阶段
@@ -72,6 +73,7 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
 
     // 设置日志标签
     setPhase(phase, phaseDef.label);
+    setTaskId(taskId);
 
     // 构建转换表
     const transitionTable = buildTransitions(workflow);
@@ -100,14 +102,17 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
 
     // 执行阶段函数
     log.info("开始执行阶段 %s [task=%s]", phase, taskId);
+    emit({ type: "phase:started", payload: { taskId, phase, label: phaseDef.label } });
     await phaseFn(taskId);
     log.info("阶段执行完成：%s [task=%s]", phase, taskId);
+    emit({ type: "phase:completed", payload: { taskId, phase } });
   } catch (err) {
     if (err instanceof InvalidTransitionError) {
       log.warn("InvalidTransitionError [task=%s phase=%s]: %s", taskId, phase, err.message);
     } else {
-      log.error("阶段执行异常 [task=%s phase=%s]: %s", taskId, phase,
-        err instanceof Error ? err.stack ?? err.message : String(err));
+      const errMsg = err instanceof Error ? err.stack ?? err.message : String(err);
+      log.error("阶段执行异常 [task=%s phase=%s]: %s", taskId, phase, errMsg);
+      emit({ type: "phase:error", payload: { taskId, phase, error: errMsg } });
     }
   } finally {
     resetPhase();
