@@ -33,11 +33,19 @@ export interface ParallelDefinition {
   phases: PhaseDefinition[];
 }
 
+export interface WorkflowWorkspaceSpec {
+  /** 模板目录名（相对工作流目录），创建任务时 copy 到 workspace/ */
+  template?: string;
+  /** 是否在 workspace 里 git init（保留给后续版本，当前未实现） */
+  git?: boolean;
+}
+
 export interface WorkflowDefinition {
   name: string;
   description?: string;
   config?: Record<string, unknown>;
   agents?: Record<string, unknown>[];
+  workspace?: WorkflowWorkspaceSpec;
   phases: (PhaseDefinition | { parallel: ParallelDefinition })[];
   initial_state: string;
   terminal_states: string[];
@@ -787,6 +795,11 @@ function renderWorkflowYamlTemplate(name: string, description: string | undefine
   return `name: ${name}
 description: ${desc}
 
+# 可选：每个任务自动创建一个独立的 workspace 沙盒
+# （runtime/tasks/<task-id>/workspace/），阶段函数在这里工作
+# workspace:
+#   template: workspace_template   # 工作流目录下的模板文件夹，任务启动时 cp -r 到 workspace
+
 # 工作流阶段列表。最简写法：只写 name 和 timeout，状态机将自动推导：
 #   pending_<name> / running_<name> / start_<name> / complete_<name>
 # 更多写法（并行、reject 跳转、自定义状态）见 docs/workflow-development.md
@@ -807,17 +820,30 @@ function renderWorkflowTsTemplate(firstPhase: string): string {
   return `// 每个 phase 函数接收 taskId: string 参数；抛错则该阶段失败，
 // 可被状态机重试或驳回。详见 docs/workflow-development.md
 //
-// 常见用法（按需启用）：
-//   import { getTask } from "@autopilot/db";        // 取任务对象
-//   import { getAgent } from "@autopilot/agents";   // 取配置好的 agent
+// 每次任务自动获得一个独立的 workspace 目录：
+//   \${AUTOPILOT_HOME}/runtime/tasks/\${taskId}/workspace
+// 阶段函数应把所有产出 / 读写都放在这里，保持任务之间隔离。
+// 如需把 workspace 传给 agent，调用 agent.run(prompt, { cwd: wsPath })。
 //
-//   const task = getTask(taskId);
-//   const agent = getAgent("coder", "<工作流名>");
-//   const result = await agent.run("...prompt...");
+// 常见 import（按需启用）：
+//   import { getTask } from "@autopilot/db";                // 取任务对象
+//   import { getAgent } from "@autopilot/agents";           // 取配置好的 agent
+//   import { getTaskWorkspace } from "@autopilot/core";     // 取 workspace 路径
+
+import { homedir } from "os";
+import { join } from "path";
+
+function taskWorkspace(taskId: string): string {
+  const home = process.env.AUTOPILOT_HOME ?? join(homedir(), ".autopilot");
+  return join(home, "runtime", "tasks", taskId, "workspace");
+}
 
 export async function ${fn}(taskId: string): Promise<void> {
-  console.log(\`[\${taskId}] 执行阶段 ${firstPhase}\`);
-  // TODO: 在这里实现阶段业务逻辑
+  const ws = taskWorkspace(taskId);
+  console.log(\`[\${taskId}] 执行阶段 ${firstPhase}，workspace=\${ws}\`);
+  // TODO: 在这里实现阶段业务逻辑。例如：
+  //   const agent = getAgent("coder", "<工作流名>");
+  //   await agent.run("修改 src/index.ts 添加 hello 函数", { cwd: ws });
 }
 `;
 }

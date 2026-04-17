@@ -40,6 +40,7 @@ import {
 import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
 import { listProviderModels } from "../agents/model-list";
 import { runAgentOnce } from "../agents/registry";
+import { ensureTaskWorkspace, getTaskWorkspace } from "../core/workspace";
 import { emit } from "./event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -306,6 +307,14 @@ export async function handleRequest(req: Request): Promise<Response> {
         extra,
       });
 
+      // 初始化任务 workspace（若工作流声明了 template 则复制）
+      try {
+        ensureTaskWorkspace(taskId, workflowName, wf.workspace);
+      } catch (e: unknown) {
+        // workspace 初始化失败不阻塞任务（用户可能手动创建）
+        console.warn("ensureTaskWorkspace 失败：", e instanceof Error ? e.message : e);
+      }
+
       // 异步执行第一阶段
       executePhase(taskId, firstPhaseName).catch(() => {});
 
@@ -318,7 +327,8 @@ export async function handleRequest(req: Request): Promise<Response> {
     if (method === "GET" && taskIdMatch) {
       const task = getTask(taskIdMatch);
       if (!task) return error("Task not found", 404);
-      return json(task);
+      // 附加 workspace 路径（方便 UI 展示 / 用户 cd 过去）
+      return json({ ...task, workspace: getTaskWorkspace(taskIdMatch) });
     }
 
     // POST /api/tasks/:id/cancel

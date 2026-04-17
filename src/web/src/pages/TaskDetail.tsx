@@ -118,6 +118,21 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
           <div><span className="muted">创建时间：</span>{new Date(task.created_at).toLocaleString()}</div>
           <div><span className="muted">更新时间：</span>{new Date(task.updated_at).toLocaleString()}</div>
         </div>
+        {task.workspace && (
+          <div style={{ marginTop: "0.6rem", fontSize: "0.8rem" }}>
+            <span className="muted">Workspace：</span>
+            <code
+              className="mono"
+              style={{ cursor: "pointer", userSelect: "all", wordBreak: "break-all" }}
+              title="点击复制路径"
+              onClick={async () => {
+                try { await navigator.clipboard.writeText(task.workspace); } catch { /* ignore */ }
+              }}
+            >
+              {task.workspace}
+            </code>
+          </div>
+        )}
       </div>
 
       {workflowDetail?.phases && (
