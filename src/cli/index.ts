@@ -514,6 +514,43 @@ program
       output: process.stdout,
       prompt: "你 > ",
     });
+
+    // WS 订阅：按 session_id 动态切换订阅
+    let currentSub: (() => void) | null = null;
+    let streaming = false;
+    let streamHeaderPrinted = false;
+    client.connect();
+
+    const subscribeSession = (sid: string) => {
+      if (currentSub) currentSub();
+      currentSub = client.subscribe(`chat:${sid}`, (event) => {
+        if (event.type === "chat:delta") {
+          if (!streamHeaderPrinted) {
+            process.stdout.write("\x1B[2K\rAgent > ");
+            streamHeaderPrinted = true;
+          }
+          process.stdout.write(event.payload.delta);
+        } else if (event.type === "chat:complete") {
+          streaming = false;
+          if (streamHeaderPrinted) {
+            process.stdout.write("\n");
+          } else {
+            // 没收到任何 delta（可能 SDK 未开流），打印完整消息
+            console.log(`Agent > ${event.payload.message.content}`);
+          }
+          streamHeaderPrinted = false;
+          rl.prompt();
+        } else if (event.type === "chat:error") {
+          streaming = false;
+          process.stdout.write("\x1B[2K\r");
+          console.error(`错误：${event.payload.error}`);
+          streamHeaderPrinted = false;
+          rl.prompt();
+        }
+      });
+    };
+
+    if (sessionId) subscribeSession(sessionId);
     rl.prompt();
 
     rl.on("line", async (line) => {
@@ -521,9 +558,15 @@ program
       if (!text) { rl.prompt(); return; }
       if (text === "/exit" || text === "/quit") { rl.close(); return; }
       if (text === "/reset") { process.stdout.write("\x1Bc"); rl.prompt(); return; }
+      if (streaming) {
+        console.log("（正在生成中，请稍候...）");
+        return;
+      }
 
+      streaming = true;
+      streamHeaderPrinted = false;
+      process.stdout.write("Agent > (思考中...)\r");
       try {
-        process.stdout.write("Agent > (思考中...)\r");
         const result = await client.chat({
           message: text,
           session_id: sessionId,
@@ -531,18 +574,30 @@ program
           workflow: opts.workflow,
           title: opts.title,
         });
-        sessionId = result.session_id;
-        // 清掉"思考中"那一行
-        process.stdout.write("\x1B[2K\r");
-        console.log(`Agent > ${result.message.content}`);
+        if (!sessionId) {
+          sessionId = result.session_id;
+          subscribeSession(sessionId);
+        }
+        // complete 事件通常已经打印并 rl.prompt；若 WS 没到（极端慢），兜底打印
+        if (streaming) {
+          streaming = false;
+          if (!streamHeaderPrinted) {
+            process.stdout.write("\x1B[2K\r");
+            console.log(`Agent > ${result.message.content}`);
+          }
+          rl.prompt();
+        }
       } catch (e: unknown) {
+        streaming = false;
         process.stdout.write("\x1B[2K\r");
         console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        rl.prompt();
       }
-      rl.prompt();
     });
 
     rl.on("close", () => {
+      if (currentSub) currentSub();
+      client.disconnect();
       if (sessionId) console.log(`\n（session 已保存：${sessionId}）`);
       process.exit(0);
     });

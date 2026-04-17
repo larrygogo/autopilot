@@ -143,6 +143,17 @@ export const api = {
     request<{ ok: boolean }>(`/api/agents/${name}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteAgent: (name: string) =>
     request<{ ok: boolean }>(`/api/agents/${name}`, { method: "DELETE" }),
+  // Chat
+  chat: (body: { message: string; session_id?: string; agent?: string; workflow?: string; title?: string }) =>
+    request<{ session_id: string; message: ChatMessage }>("/api/chat", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+  listSessions: () => request<ChatSessionManifest[]>("/api/sessions"),
+  getSession: (id: string) =>
+    request<ChatSessionManifest & { messages: ChatMessage[] }>(`/api/sessions/${id}`),
+  deleteSession: (id: string) =>
+    request<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
+
   dryRunAgent: (name: string, body: {
     prompt: string;
     system_prompt?: string;
@@ -221,4 +232,23 @@ export interface AgentItem {
   extends?: string | null;
   used_by?: string[];
   [key: string]: unknown;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+  ts: string;
+  usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+}
+
+export interface ChatSessionManifest {
+  version: 1;
+  id: string;
+  title?: string;
+  agent: string;
+  workflow?: string;
+  provider_session_id?: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
 }

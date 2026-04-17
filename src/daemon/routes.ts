@@ -1075,7 +1075,8 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
   const userMsg: ChatMessage = { role: "user", content: message, ts: new Date().toISOString() };
   appendMessage(manifest.id, userMsg);
 
-  // 3. 跑 agent.chat
+  // 3. 跑 agent.chat —— 流式 delta 通过 WS 推；POST 仍等完整结果返回
+  const sid = manifest.id;
   const agent = createChatAgent(agentName, workflow);
   let assistantText = "";
   let newProviderSid: string | undefined;
@@ -1083,10 +1084,17 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
   try {
     const result = await agent.chat(message, {
       providerSessionId: manifest.provider_session_id,
+      onDelta: (delta) => {
+        try { emit({ type: "chat:delta", payload: { sessionId: sid, delta } }); } catch { /* ignore */ }
+      },
     });
     assistantText = result.text;
     newProviderSid = result.providerSessionId;
     usage = result.usage;
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    try { emit({ type: "chat:error", payload: { sessionId: sid, error: errMsg } }); } catch { /* ignore */ }
+    throw e;
   } finally {
     try { await agent.close(); } catch { /* ignore */ }
   }
@@ -1104,6 +1112,9 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
   };
   if (usage) assistantMsg.usage = usage;
   appendMessage(manifest.id, assistantMsg);
+
+  // 6. 完整消息到达后推 complete 事件（UI 可用此校准 delta 累积）
+  try { emit({ type: "chat:complete", payload: { sessionId: sid, message: assistantMsg } }); } catch { /* ignore */ }
 
   return { session_id: manifest.id, message: assistantMsg };
 }

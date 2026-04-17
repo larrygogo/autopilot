@@ -24,6 +24,10 @@ export class AnthropicProvider extends BaseProvider {
     if (options?.providerSessionId) queryOpts["resume"] = options.providerSessionId;
     const permissionMode = (this.config["permission_mode"] as string | undefined) ?? "auto";
     queryOpts["permissionMode"] = permissionMode;
+    // 打开 token 级流式事件；onDelta 未提供也无副作用
+    if (options?.onDelta) {
+      queryOpts["includePartialMessages"] = true;
+    }
 
     let abort: AbortController | undefined;
     if (options?.signal) {
@@ -39,7 +43,15 @@ export class AnthropicProvider extends BaseProvider {
     let usage: ChatResult["usage"];
 
     for await (const msg of q) {
-      if (msg?.type === "result" && msg.subtype === "success") {
+      if (msg?.type === "stream_event" && options?.onDelta) {
+        // 形如 { event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '...' } } }
+        const ev = (msg as { event?: unknown }).event as
+          | { type?: string; delta?: { type?: string; text?: string } }
+          | undefined;
+        if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && typeof ev.delta.text === "string") {
+          try { options.onDelta(ev.delta.text); } catch { /* 回调异常不中断流 */ }
+        }
+      } else if (msg?.type === "result" && msg.subtype === "success") {
         text = msg.result ?? "";
         sessionIdOut = msg.session_id;
         if (msg.usage || typeof msg.total_cost_usd === "number") {
