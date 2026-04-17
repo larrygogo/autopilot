@@ -4,7 +4,7 @@ import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { appendTaskEvent } from "./task-logs";
 import { runWithTaskContext } from "./task-context";
 import { transition, InvalidTransitionError } from "./state-machine";
-import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates } from "./registry";
+import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase } from "./registry";
 import { closeAgents } from "../agents/registry";
 import { emit } from "../daemon/event-bus";
 
@@ -112,6 +112,38 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     log.info("阶段执行完成：%s [task=%s]", phase, taskId);
     emit({ type: "phase:completed", payload: { taskId, phase } });
     appendTaskEvent(taskId, { type: "phase-completed", phase });
+
+    // 自动推进下一阶段（若阶段函数没主动 transition）
+    //
+    // 规则：
+    // - 重新读任务状态，若仍停留在当前 running_<phase>，说明用户没手动 transition
+    //   → 自动调 complete_trigger + 启动下一阶段（Push 模型）
+    // - 否则说明阶段函数已主动转到别的路径（reject / cancel / 自定义 trigger），跳过
+    // - 没有下一阶段（当前是最后一个）→ 进入终态（complete_trigger 会自己决定去哪）
+    const current = getTask(taskId);
+    if (current && current.status === phaseDef.running_state && phaseDef.complete_trigger) {
+      try {
+        transition(taskId, phaseDef.complete_trigger, { transitions: transitionTable });
+      } catch (e: unknown) {
+        if (e instanceof InvalidTransitionError) {
+          log.debug("自动推进跳过（状态已变）[task=%s phase=%s]: %s",
+            taskId, phase, e.message);
+        } else {
+          throw e;
+        }
+      }
+      // runInBackground 启动下一阶段仅对顶层阶段自动做；并行块子阶段完成后
+      // 由用户 / 并行协调层决定（避免跳过其他兄弟子阶段）
+      const isChildOfParallel = workflow.phases.some(
+        (p) => isParallelPhase(p) && p.parallel.phases.some((s) => s.name === phase)
+      );
+      if (!isChildOfParallel) {
+        const nextPhase = getNextPhase(task.workflow, phase);
+        if (nextPhase) {
+          runInBackground(taskId, nextPhase);
+        }
+      }
+    }
   } catch (err) {
     if (err instanceof InvalidTransitionError) {
       log.warn("InvalidTransitionError [task=%s phase=%s]: %s", taskId, phase, err.message);

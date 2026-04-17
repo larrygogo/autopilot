@@ -1025,7 +1025,7 @@ export function syncWorkflowTs(workflowName: string): SyncTsResult {
     return { added: [], orphans, modified: false, legacy_signature: legacy };
   }
 
-  const appended = missing.map((name) => renderRunFunctionStub(name)).join("\n");
+  const appended = missing.map((name) => renderRunFunctionStub(name)).join("\n\n");
   const newContent = content.replace(/\s*$/, "") + "\n\n" + appended + "\n";
 
   copyFileSync(tsPath, tsPath + ".bak");

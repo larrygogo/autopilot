@@ -123,10 +123,11 @@ describe("runner - executePhase", () => {
     expect(phaseCalled).toBe(true);
     expect(calledWithTaskId).toBe("task-run-001");
 
-    // 验证状态已转换到 running_step1（阶段函数内部没有触发 complete_trigger，停在 running）
+    // 阶段函数正常返回后，runner 自动触发 complete_trigger 推进状态机。
+    // makeTestWorkflow 只有 step1 一个阶段，complete 后应进入终态 done。
     const task = dbModule.getTask("task-run-001");
     expect(task).not.toBeNull();
-    expect(task!.status).toBe("running_step1");
+    expect(task!.status).toBe("done");
   });
 
   it("executePhase 在任务不存在时应安全跳过（不报错）", async () => {
