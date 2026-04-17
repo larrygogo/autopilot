@@ -17,6 +17,9 @@ import {
   saveWorkflowYaml,
   createWorkflow,
   deleteWorkflowDir,
+  setWorkflowPhases,
+  syncWorkflowTs,
+  type PhaseEntryInput,
 } from "../core/registry";
 import {
   loadConfigRaw,
@@ -515,6 +518,46 @@ export async function handleRequest(req: Request): Promise<Response> {
         return json({ ok: true });
       } catch (e: unknown) {
         return error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    // PUT /api/workflows/:name/phases — 结构化更新 phases 段
+    const phasesWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/phases$/);
+    if (method === "PUT" && phasesWriteMatch) {
+      const body = await req.json() as { phases: unknown; sync_ts?: boolean };
+      if (!Array.isArray(body.phases)) return error("phases must be array", 400);
+      try {
+        setWorkflowPhases(phasesWriteMatch, body.phases as PhaseEntryInput[]);
+        await reload();
+        let tsResult: { added: string[]; orphans: string[]; modified: boolean } | null = null;
+        if (body.sync_ts !== false) {
+          try {
+            tsResult = syncWorkflowTs(phasesWriteMatch);
+            if (tsResult.modified) await reload();
+          } catch (e: unknown) {
+            // TS 同步失败不应回滚 yaml；作为 warning 返回
+            tsResult = { added: [], orphans: [], modified: false };
+          }
+        }
+        emit({ type: "workflow:reloaded", payload: {} });
+        return json({ ok: true, ts: tsResult });
+      } catch (e: unknown) {
+        return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
+      }
+    }
+
+    // POST /api/workflows/:name/sync-ts — 校准 workflow.ts
+    const syncTsMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/sync-ts$/);
+    if (method === "POST" && syncTsMatch) {
+      try {
+        const result = syncWorkflowTs(syncTsMatch);
+        if (result.modified) {
+          await reload();
+          emit({ type: "workflow:reloaded", payload: {} });
+        }
+        return json(result);
+      } catch (e: unknown) {
+        return error(`校准失败：${e instanceof Error ? e.message : String(e)}`, 400);
       }
     }
 

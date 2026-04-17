@@ -4,6 +4,7 @@ import { StateMachineGraph } from "../components/StateMachineGraph";
 import { NewWorkflowDialog } from "../components/NewWorkflowDialog";
 import { ConfirmDialog } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { PhaseEditor } from "../components/PhaseEditor";
 
 interface WorkflowInfo {
   name: string;
@@ -174,6 +175,21 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
               </div>
             </div>
           )}
+
+          <PhaseEditor
+            workflowName={selected.name}
+            initialPhases={(selected.detail.phases as any[]) ?? []}
+            onSaved={async () => {
+              // 重新拉详情 + 图
+              try {
+                const [detail, graph] = await Promise.all([
+                  api.getWorkflow(selected.name),
+                  api.getWorkflowGraph(selected.name),
+                ]);
+                setSelected({ name: selected.name, detail, graph });
+              } catch { /* ignore */ }
+            }}
+          />
 
           <div className="card" style={{ marginTop: "0.75rem" }}>
             <h3>状态机</h3>

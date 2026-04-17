@@ -354,6 +354,27 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 .mobile-only { display: none; }
 .desktop-only { display: block; }
 
+.phase-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.phase-row { display: flex; gap: 0.75rem; align-items: flex-start; background: var(--bg0); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 0.9rem; }
+.phase-row-parallel { border-color: rgba(99,102,241,0.35); background: rgba(99,102,241,0.04); }
+.phase-row-main { display: flex; gap: 0.75rem; align-items: flex-start; flex: 1; min-width: 0; }
+.phase-idx { background: var(--bg3); color: var(--text2); border-radius: 50%; width: 26px; height: 26px; font-size: 0.78rem; font-family: var(--mono); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.phase-body { flex: 1; min-width: 0; }
+.phase-title { display: flex; align-items: center; margin-bottom: 0.4rem; flex-wrap: wrap; }
+.phase-fields { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.phase-fields label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.76rem; }
+.phase-fields label > span { font-size: 0.72rem; }
+.phase-input { min-height: 32px; padding: 0.35rem 0.6rem; font-size: 0.85rem; min-width: 100px; }
+.phase-subgrid { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.3rem; }
+.phase-sub { background: var(--bg2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; display: flex; gap: 0.4rem; align-items: center; }
+.phase-actions { display: flex; gap: 0.2rem; flex-shrink: 0; align-self: center; }
+
+.btn-icon { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid var(--border); border-radius: 5px; color: var(--text2); cursor: pointer; font-size: 0.9rem; padding: 0; font-family: inherit; transition: all 0.12s; }
+.btn-icon:hover:not(:disabled) { background: var(--bg3); color: var(--text); }
+.btn-icon:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-icon-danger { color: var(--red); border-color: rgba(248,113,113,0.3); }
+.btn-icon-danger:hover:not(:disabled) { background: rgba(248,113,113,0.12); color: var(--red); }
+
 @media (max-width: 640px) {
   .topbar { padding: 0 0.75rem; height: 48px; }
   .topbar .logo { margin-right: 0; font-size: 0.85rem; flex: 1; }
@@ -394,6 +415,12 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
   .desktop-only { display: none; }
 
   .task-inline-list li { gap: 0.5rem; font-size: 0.8rem; }
+
+  .phase-row { flex-direction: column; gap: 0.5rem; }
+  .phase-row-main { flex: initial; }
+  .phase-actions { align-self: flex-end; }
+  .phase-fields label { flex: 1; }
+  .phase-input { width: 100%; }
 }
 
 @media (max-width: 380px) {

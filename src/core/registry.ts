@@ -3,7 +3,7 @@ import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
 import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, parseDocument, type Document } from "yaml";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -804,4 +804,212 @@ export async function ${fn}(ctx: { task: any; log: (msg: string) => void }) {
   log(\`完成 ${firstPhase}\`);
 }
 `;
+}
+
+// ──────────────────────────────────────────────
+// 阶段级结构化编辑（保留 YAML 其他段）
+// ──────────────────────────────────────────────
+
+const PHASE_NAME_RE = /^[a-z][a-z0-9_]*$/;
+
+export interface PhaseInput {
+  name: string;
+  timeout?: number;
+  reject?: string | null;
+  retry_on_failure?: boolean;
+  [key: string]: unknown;
+}
+
+export interface ParallelPhaseInput {
+  parallel: {
+    name: string;
+    fail_strategy?: string;
+    phases: PhaseInput[];
+  };
+}
+
+export type PhaseEntryInput = PhaseInput | ParallelPhaseInput;
+
+function isParallelInput(p: PhaseEntryInput): p is ParallelPhaseInput {
+  return "parallel" in p && p.parallel !== null && typeof p.parallel === "object";
+}
+
+function getWorkflowYamlPath(workflowName: string): string {
+  return join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.yaml");
+}
+
+function getWorkflowTsPath(workflowName: string): string {
+  return join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.ts");
+}
+
+/**
+ * 提取 phases 中所有（含 parallel 内）阶段的 name。
+ */
+export function collectPhaseNames(phases: PhaseEntryInput[]): string[] {
+  const names: string[] = [];
+  for (const p of phases) {
+    if (isParallelInput(p)) {
+      for (const sub of p.parallel.phases ?? []) names.push(sub.name);
+    } else {
+      names.push(p.name);
+    }
+  }
+  return names;
+}
+
+/**
+ * 结构化校验 + 写入工作流 phases 段。保留 YAML 中的其他字段与注释。
+ * 不自动调用 reload —— 调用方负责。
+ */
+export function setWorkflowPhases(workflowName: string, phases: PhaseEntryInput[]): void {
+  if (!Array.isArray(phases) || phases.length === 0) {
+    throw new Error("phases 不能为空数组");
+  }
+
+  // 1. 校验
+  const seen = new Set<string>();
+  const allNames = new Set<string>();
+  for (let i = 0; i < phases.length; i++) {
+    const p = phases[i];
+    if (isParallelInput(p)) {
+      if (!p.parallel.name || !PHASE_NAME_RE.test(p.parallel.name)) {
+        throw new Error(`第 ${i + 1} 项 parallel 名称非法：${p.parallel.name}`);
+      }
+      if (!Array.isArray(p.parallel.phases) || p.parallel.phases.length === 0) {
+        throw new Error(`parallel "${p.parallel.name}" 内部 phases 不能为空`);
+      }
+      if (seen.has(p.parallel.name)) throw new Error(`阶段名重复：${p.parallel.name}`);
+      seen.add(p.parallel.name);
+      allNames.add(p.parallel.name);
+      for (const sub of p.parallel.phases) {
+        if (!PHASE_NAME_RE.test(sub.name)) throw new Error(`阶段名非法：${sub.name}`);
+        if (allNames.has(sub.name)) throw new Error(`阶段名重复：${sub.name}`);
+        allNames.add(sub.name);
+      }
+    } else {
+      if (!PHASE_NAME_RE.test(p.name)) throw new Error(`阶段名非法：${p.name}`);
+      if (seen.has(p.name)) throw new Error(`阶段名重复：${p.name}`);
+      seen.add(p.name);
+      allNames.add(p.name);
+    }
+  }
+
+  // 2. reject 必须指向当前阶段之前的某个阶段（仅支持往回跳）
+  const orderedNames: string[] = [];
+  for (const p of phases) {
+    const myName = isParallelInput(p) ? p.parallel.name : p.name;
+    if (!isParallelInput(p) && p.reject) {
+      if (!orderedNames.includes(p.reject)) {
+        throw new Error(`阶段 "${p.name}" 的 reject 目标 "${p.reject}" 不存在或在其后；驳回只能往回跳`);
+      }
+    }
+    orderedNames.push(myName);
+  }
+
+  // 3. 读取 + 写入 yaml Document（保留其他段）
+  const yamlPath = getWorkflowYamlPath(workflowName);
+  if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
+
+  const raw = readFileSync(yamlPath, "utf-8");
+  const doc = parseDocument(raw);
+
+  // 清洗 undefined / null / 空串 避免脏字段
+  const cleaned = phases.map((p) => cleanPhaseEntry(p));
+  doc.setIn(["phases"], cleaned);
+
+  // 备份原文件
+  copyFileSync(yamlPath, yamlPath + ".bak");
+  writeFileSync(yamlPath, doc.toString(), "utf-8");
+}
+
+function cleanPhaseEntry(p: PhaseEntryInput): Record<string, unknown> {
+  if (isParallelInput(p)) {
+    const parallel: Record<string, unknown> = { name: p.parallel.name };
+    if (p.parallel.fail_strategy) parallel.fail_strategy = p.parallel.fail_strategy;
+    parallel.phases = (p.parallel.phases ?? []).map((sub) => cleanSinglePhase(sub));
+    return { parallel };
+  }
+  return cleanSinglePhase(p);
+}
+
+function cleanSinglePhase(p: PhaseInput): Record<string, unknown> {
+  const out: Record<string, unknown> = { name: p.name };
+  if (typeof p.timeout === "number" && p.timeout > 0) out.timeout = p.timeout;
+  if (p.reject) out.reject = p.reject;
+  if (p.retry_on_failure) out.retry_on_failure = p.retry_on_failure;
+  // 保留未知扩展字段（忽略已处理的 name/timeout/reject/retry_on_failure）
+  for (const [k, v] of Object.entries(p)) {
+    if (["name", "timeout", "reject", "retry_on_failure"].includes(k)) continue;
+    if (v === undefined || v === null || v === "") continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+// ──────────────────────────────────────────────
+// workflow.ts 校准 —— 只追加缺失的 run_<phase>，不修改已有函数
+// ──────────────────────────────────────────────
+
+export interface SyncTsResult {
+  /** 新追加的函数名列表 */
+  added: string[];
+  /** 存在但 phases 未引用的孤儿函数（不自动删） */
+  orphans: string[];
+  /** 是否修改了文件 */
+  modified: boolean;
+}
+
+export function syncWorkflowTs(workflowName: string): SyncTsResult {
+  const tsPath = getWorkflowTsPath(workflowName);
+  if (!existsSync(tsPath)) throw new Error(`workflow.ts 不存在：${workflowName}`);
+
+  const wf = getWorkflow(workflowName);
+  if (!wf) throw new Error(`工作流未注册：${workflowName}（请先 reload）`);
+
+  const phaseNames = collectPhaseNames(wf.phases as PhaseEntryInput[]);
+  const phaseSet = new Set(phaseNames);
+
+  const content = readFileSync(tsPath, "utf-8");
+  const existingFns = extractRunFunctions(content);
+  const existingSet = new Set(existingFns);
+
+  const missing = phaseNames.filter((n) => !existingSet.has(n));
+  const orphans = existingFns.filter((n) => !phaseSet.has(n));
+
+  if (missing.length === 0) {
+    return { added: [], orphans, modified: false };
+  }
+
+  const appended = missing.map((name) => renderRunFunctionStub(name)).join("\n");
+  const newContent = content.replace(/\s*$/, "") + "\n\n" + appended + "\n";
+
+  copyFileSync(tsPath, tsPath + ".bak");
+  writeFileSync(tsPath, newContent, "utf-8");
+
+  return { added: missing, orphans, modified: true };
+}
+
+function extractRunFunctions(source: string): string[] {
+  const names: string[] = [];
+  const patterns = [
+    /export\s+async\s+function\s+run_([A-Za-z0-9_]+)/g,
+    /export\s+function\s+run_([A-Za-z0-9_]+)/g,
+    /export\s+const\s+run_([A-Za-z0-9_]+)\s*=/g,
+  ];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(source))) {
+      if (!names.includes(m[1])) names.push(m[1]);
+    }
+  }
+  return names;
+}
+
+function renderRunFunctionStub(phaseName: string): string {
+  return `export async function run_${phaseName}(ctx: { task: any; log: (msg: string) => void }) {
+  const { task, log } = ctx;
+  log(\`开始执行 ${phaseName}，task=\${task.id}\`);
+  // TODO: 实现阶段逻辑
+  log(\`完成 ${phaseName}\`);
+}`;
 }
