@@ -15,6 +15,8 @@ import {
   isParallelPhase,
   getWorkflowYaml,
   saveWorkflowYaml,
+  createWorkflow,
+  deleteWorkflowDir,
 } from "../core/registry";
 import {
   loadConfigRaw,
@@ -360,6 +362,38 @@ export async function handleRequest(req: Request): Promise<Response> {
     // GET /api/workflows
     if (method === "GET" && path === "/api/workflows") {
       return json(listWorkflows());
+    }
+
+    // POST /api/workflows — 创建工作流脚手架
+    if (method === "POST" && path === "/api/workflows") {
+      const body = await req.json() as { name?: string; description?: string; firstPhase?: string };
+      if (typeof body.name !== "string" || !body.name) return error("name is required");
+      try {
+        const result = createWorkflow({
+          name: body.name,
+          description: body.description,
+          firstPhase: body.firstPhase,
+        });
+        await reload();
+        emit({ type: "workflow:reloaded", payload: {} });
+        return json({ ok: true, name: body.name, dir: result.dir }, 201);
+      } catch (e: unknown) {
+        return error(`创建失败：${e instanceof Error ? e.message : String(e)}`, 400);
+      }
+    }
+
+    // DELETE /api/workflows/:name — 删除工作流目录
+    const wfDeleteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)$/);
+    if (method === "DELETE" && wfDeleteMatch) {
+      try {
+        const ok = deleteWorkflowDir(wfDeleteMatch);
+        if (!ok) return error("Workflow not found", 404);
+        await reload();
+        emit({ type: "workflow:reloaded", payload: {} });
+        return json({ ok: true });
+      } catch (e: unknown) {
+        return error(`删除失败：${e instanceof Error ? e.message : String(e)}`, 400);
+      }
     }
 
     // GET /api/workflows/:name

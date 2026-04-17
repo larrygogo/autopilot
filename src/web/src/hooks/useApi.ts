@@ -29,6 +29,12 @@ export const api = {
   listWorkflows: () => request<any[]>("/api/workflows"),
   getWorkflow: (name: string) => request<any>(`/api/workflows/${name}`),
   getWorkflowGraph: (name: string) => request<any>(`/api/workflows/${name}/graph`),
+  createWorkflow: (body: { name: string; description?: string; firstPhase?: string }) =>
+    request<{ ok: boolean; name: string; dir: string }>("/api/workflows", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+  deleteWorkflow: (name: string) =>
+    request<{ ok: boolean }>(`/api/workflows/${name}`, { method: "DELETE" }),
 
   // Config
   getConfig: () => request<{ yaml: string }>("/api/config"),

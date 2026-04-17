@@ -1,7 +1,7 @@
 import type { TransitionTable } from "./state-machine";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
-import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml } from "yaml";
 
@@ -701,4 +701,107 @@ export function saveWorkflowYaml(workflowName: string, yamlContent: string): voi
     copyFileSync(yamlPath, yamlPath + ".bak");
   }
   writeFileSync(yamlPath, yamlContent, "utf-8");
+}
+
+// ──────────────────────────────────────────────
+// 工作流创建 / 删除
+// ──────────────────────────────────────────────
+
+const WORKFLOW_NAME_RE = /^[a-z][a-z0-9_\-]{0,39}$/;
+
+export interface CreateWorkflowInput {
+  name: string;
+  description?: string;
+  /** 初始阶段名（不含前缀，类似 "step1"），默认 "step1" */
+  firstPhase?: string;
+}
+
+/**
+ * 创建新工作流目录 + 脚手架 workflow.yaml / workflow.ts。
+ * 不注册到 registry —— 调用方需在成功后执行 reload()。
+ * @throws 名称非法 / 目录已存在
+ */
+export function createWorkflow(input: CreateWorkflowInput): { dir: string; yamlPath: string; tsPath: string } {
+  const { name, description, firstPhase = "step1" } = input;
+  if (!WORKFLOW_NAME_RE.test(name)) {
+    throw new Error("工作流名称非法：需以小写字母开头，仅包含小写字母、数字、下划线、连字符，长度 ≤ 40");
+  }
+  if (!/^[a-z][a-z0-9_]*$/.test(firstPhase)) {
+    throw new Error("首阶段名非法：需以小写字母开头，仅包含小写字母、数字、下划线");
+  }
+
+  const wfRoot = join(AUTOPILOT_HOME, "workflows");
+  const dir = join(wfRoot, name);
+  if (existsSync(dir)) {
+    throw new Error(`工作流目录已存在：${name}`);
+  }
+
+  mkdirSync(dir, { recursive: true });
+
+  const yamlPath = join(dir, "workflow.yaml");
+  const tsPath = join(dir, "workflow.ts");
+
+  const yamlContent = renderWorkflowYamlTemplate(name, description, firstPhase);
+  const tsContent = renderWorkflowTsTemplate(firstPhase);
+  writeFileSync(yamlPath, yamlContent, "utf-8");
+  writeFileSync(tsPath, tsContent, "utf-8");
+
+  return { dir, yamlPath, tsPath };
+}
+
+/**
+ * 删除工作流目录（整体移除）。只要工作流在预期根目录下就允许删除。
+ * 不刷新 registry —— 调用方应在成功后执行 reload()。
+ * @returns true if removed, false if dir doesn't exist
+ */
+export function deleteWorkflowDir(workflowName: string): boolean {
+  if (!WORKFLOW_NAME_RE.test(workflowName)) {
+    throw new Error("工作流名称非法");
+  }
+  const wfRoot = join(AUTOPILOT_HOME, "workflows");
+  const dir = join(wfRoot, workflowName);
+  // 安全校验：最终路径必须仍在 wfRoot 下
+  if (!dir.startsWith(wfRoot + "/") && dir !== wfRoot) {
+    throw new Error("非法路径");
+  }
+  if (!existsSync(dir)) return false;
+  rmSync(dir, { recursive: true, force: true });
+  return true;
+}
+
+function renderWorkflowYamlTemplate(name: string, description: string | undefined, firstPhase: string): string {
+  const desc = description?.trim() ? description.trim() : "请补充描述";
+  return `name: ${name}
+description: ${desc}
+
+# 工作流阶段列表。最简写法：只写 name 和 timeout，状态机将自动推导：
+#   pending_<name> / running_<name> / start_<name> / complete_<name>
+# 更多写法（并行、reject 跳转、自定义状态）见 docs/workflow-development.md
+phases:
+  - name: ${firstPhase}
+    timeout: 900
+
+# 可选：覆盖工作流内的智能体（全局 agents 在 config.yaml 定义）
+# agents:
+#   - name: coder
+#     extends: coder       # 继承全局同名 agent，可在此覆盖字段
+#     system_prompt: "特化提示词..."
+`;
+}
+
+function renderWorkflowTsTemplate(firstPhase: string): string {
+  const fn = `run_${firstPhase}`;
+  return `// 每个 phase 函数接收 { task, log, notify, ... } 上下文
+// 返回 Promise<void>；抛错则该阶段失败，可被重试或驳回
+// 详见 docs/workflow-development.md
+
+export async function ${fn}(ctx: { task: any; log: (msg: string) => void }) {
+  const { task, log } = ctx;
+  log(\`开始执行 ${firstPhase}，task=\${task.id}\`);
+  // TODO: 在这里实现阶段业务逻辑
+  //   - 调用 agent：const agent = getAgent("coder", "${firstPhase}"); await agent.run("...");
+  //   - 读写文件 / 调用外部服务 / 写入 task.extra 等
+  log(\`完成 ${firstPhase}\`);
+}
+`;
 }

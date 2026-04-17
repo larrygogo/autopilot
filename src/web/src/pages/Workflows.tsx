@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../hooks/useApi";
 import { StateMachineGraph } from "../components/StateMachineGraph";
+import { NewWorkflowDialog } from "../components/NewWorkflowDialog";
+import { ConfirmDialog } from "../components/Modal";
+import { useToast } from "../components/Toast";
 
 interface WorkflowInfo {
   name: string;
@@ -28,17 +31,23 @@ interface Props {
 }
 
 export function Workflows({ onJumpToAgent }: Props = {}) {
+  const toast = useToast();
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Selected | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = () => {
+    setLoading(true);
     api.listWorkflows()
       .then(setWorkflows)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { refresh(); }, []);
 
   const toggle = async (name: string) => {
     if (selected?.name === name) {
@@ -66,13 +75,17 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
       <div className="page-hdr">
         <h2>工作流</h2>
         <span>{workflows.length} 个</span>
+        <button className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setNewOpen(true)}>
+          新建工作流
+        </button>
       </div>
 
       {workflows.length === 0 ? (
         <div className="card empty-state">
           <p className="muted">暂无已注册工作流</p>
+          <button className="btn btn-primary" onClick={() => setNewOpen(true)}>创建第一个工作流</button>
           <p className="muted" style={{ fontSize: "0.78rem" }}>
-            在 <code className="mono">AUTOPILOT_HOME/workflows/</code> 下添加工作流目录即可
+            或手动在 <code className="mono">AUTOPILOT_HOME/workflows/</code> 下添加目录
           </p>
         </div>
       ) : (
@@ -105,9 +118,14 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
           <div className="card" style={{ marginTop: "1rem" }}>
             <div className="card-header">
               <h3>{selected.name}</h3>
-              <button className="btn btn-secondary" onClick={() => setSelected(null)}>
-                收起
-              </button>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button className="btn btn-danger" onClick={() => setPendingDelete(selected.name)}>
+                  删除
+                </button>
+                <button className="btn btn-secondary" onClick={() => setSelected(null)}>
+                  收起
+                </button>
+              </div>
             </div>
             {selected.detail.description && (
               <p className="muted" style={{ marginBottom: "0.75rem" }}>{selected.detail.description}</p>
@@ -168,6 +186,48 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
           </div>
         </>
       )}
+
+      <NewWorkflowDialog
+        open={newOpen}
+        onClose={() => setNewOpen(false)}
+        onCreated={() => refresh()}
+      />
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="删除工作流"
+        message={
+          <div>
+            <p>确认删除工作流 <code className="mono">{pendingDelete}</code>？</p>
+            <div style={{ marginTop: "0.75rem", padding: "0.6rem 0.8rem", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", borderRadius: 6 }}>
+              <p style={{ color: "var(--red)", fontSize: "0.82rem" }}>
+                ⚠ 将永久删除整个目录：<br />
+                <code className="mono">AUTOPILOT_HOME/workflows/{pendingDelete}/</code>
+              </p>
+              <p className="muted" style={{ marginTop: "0.4rem", fontSize: "0.78rem" }}>
+                包括 workflow.yaml、workflow.ts 及该目录内的所有文件。此操作不可恢复。
+              </p>
+            </div>
+          </div>
+        }
+        confirmText="删除"
+        danger
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          const name = pendingDelete;
+          try {
+            await api.deleteWorkflow(name);
+            toast.success(`工作流 ${name} 已删除`);
+            setSelected(null);
+            refresh();
+          } catch (e: any) {
+            toast.error("删除失败", e?.message ?? String(e));
+          } finally {
+            setPendingDelete(null);
+          }
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }
