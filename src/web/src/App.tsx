@@ -112,7 +112,9 @@ function AppInner() {
         </>
       )}
 
-      {page === "dashboard" && <Dashboard />}
+      {page === "dashboard" && (
+        <Dashboard onSelectTask={(id) => setPage({ type: "task-detail", id })} />
+      )}
       {page === "tasks" && (
         <Tasks
           onSelect={(id) => setPage({ type: "task-detail", id })}
@@ -126,7 +128,9 @@ function AppInner() {
           subscribe={subscribe}
         />
       )}
-      {page === "workflows" && <Workflows />}
+      {page === "workflows" && (
+        <Workflows onJumpToAgent={() => setPage("config")} />
+      )}
       {page === "config" && <Config />}
     </>
   );
@@ -314,6 +318,42 @@ a { cursor: pointer; }
 
 kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 0.1rem 0.4rem; font-family: var(--mono); font-size: 0.78em; color: var(--text2); }
 
+.pill { display: inline-flex; align-items: center; padding: 0.12rem 0.55rem; border-radius: 10px; font-size: 0.72rem; font-weight: 500; }
+.pill-cyan { background: var(--cyan-dim); color: var(--cyan); border: 1px solid rgba(34,211,238,0.25); }
+.pill-accent { background: var(--accent-dim); color: var(--accent2); border: 1px solid rgba(99,102,241,0.3); }
+.usage-pills { margin-top: 0.6rem; display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; }
+.usage-label { font-size: 0.76rem; color: var(--muted); margin-right: 0.25rem; }
+
+.alert-card { border-color: rgba(251,191,36,0.35); background: rgba(251,191,36,0.06); }
+.alert-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.alert-head strong { color: var(--yellow); }
+
+.task-inline-list { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
+.task-inline-list li { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; flex-wrap: wrap; }
+.task-inline-list li:hover { background: var(--bg3); }
+.task-inline-title { flex: 1; min-width: 120px; }
+
+.workflow-card.active { border-color: var(--cyan); }
+
+.filter-bar { display: grid; grid-template-columns: 1fr auto auto; gap: 0.6rem; margin-bottom: 1rem; align-items: center; }
+.filter-chips { display: flex; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.filter-chips::-webkit-scrollbar { display: none; }
+.chip { background: var(--bg2); border: 1px solid var(--border); color: var(--text2); padding: 0.35rem 0.75rem; border-radius: 16px; font-size: 0.78rem; font-family: inherit; cursor: pointer; white-space: nowrap; min-height: 32px; transition: all 0.15s; }
+.chip:hover { color: var(--text); border-color: var(--border2); }
+.chip.active { background: var(--cyan-dim); color: var(--cyan); border-color: rgba(34,211,238,0.35); }
+.filter-wf { min-width: 140px; max-width: 220px; }
+
+.task-card-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.task-card { cursor: pointer; transition: border-color 0.15s; padding: 0.9rem; }
+.task-card:hover { border-color: var(--border2); }
+.task-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; gap: 0.5rem; }
+.task-card-id { color: var(--cyan); font-size: 0.85rem; }
+.task-card-title { font-size: 0.92rem; margin-bottom: 0.35rem; word-break: break-word; }
+.task-card-meta { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.76rem; flex-wrap: wrap; }
+
+.mobile-only { display: none; }
+.desktop-only { display: block; }
+
 @media (max-width: 640px) {
   .topbar { padding: 0 0.75rem; height: 48px; }
   .topbar .logo { margin-right: 0; font-size: 0.85rem; flex: 1; }
@@ -346,6 +386,14 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 
   .modal { width: calc(100vw - 1rem); }
   .modal-header, .modal-body, .modal-actions { padding-left: 1rem; padding-right: 1rem; }
+
+  .filter-bar { grid-template-columns: 1fr; gap: 0.5rem; }
+  .filter-wf { min-width: 0; max-width: none; width: 100%; }
+
+  .mobile-only { display: flex; flex-direction: column; }
+  .desktop-only { display: none; }
+
+  .task-inline-list li { gap: 0.5rem; font-size: 0.8rem; }
 }
 
 @media (max-width: 380px) {

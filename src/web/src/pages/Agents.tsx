@@ -147,6 +147,14 @@ export function Agents({ embedded = false }: { embedded?: boolean }) {
                       <button className="btn btn-danger" onClick={() => setPendingDelete(a.name)}>删除</button>
                     </div>
                   </div>
+                  {a.used_by && a.used_by.length > 0 && (
+                    <div className="usage-pills">
+                      <span className="usage-label">被引用：</span>
+                      {a.used_by.map((wf) => (
+                        <span key={wf} className="pill pill-cyan mono">{wf}</span>
+                      ))}
+                    </div>
+                  )}
                   {a.system_prompt && (
                     <p className="agent-prompt muted">
                       {a.system_prompt.length > 140 ? a.system_prompt.slice(0, 140) + "…" : a.system_prompt}
@@ -261,7 +269,26 @@ export function Agents({ embedded = false }: { embedded?: boolean }) {
       <ConfirmDialog
         open={!!pendingDelete}
         title="删除智能体"
-        message={<span>确认删除智能体 <code className="mono">{pendingDelete}</code>？此操作不可恢复。</span>}
+        message={
+          <div>
+            <p>确认删除智能体 <code className="mono">{pendingDelete}</code>？此操作不可恢复。</p>
+            {pendingDelete && (() => {
+              const target = agents.find((a) => a.name === pendingDelete);
+              const refs = target?.used_by ?? [];
+              if (refs.length === 0) return null;
+              return (
+                <div style={{ marginTop: "0.75rem", padding: "0.6rem 0.8rem", background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.25)", borderRadius: 6 }}>
+                  <p style={{ color: "var(--yellow)", fontSize: "0.82rem" }}>
+                    ⚠ 以下 {refs.length} 个工作流引用了此智能体，删除后这些工作流将无法运行：
+                  </p>
+                  <div style={{ marginTop: "0.4rem", display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                    {refs.map((wf) => <span key={wf} className="pill pill-cyan mono">{wf}</span>)}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        }
         confirmText="删除"
         danger
         onConfirm={doDelete}

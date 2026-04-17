@@ -79,7 +79,12 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
             return (
               <div key={p.name} className="card provider-card">
                 <div className="card-header">
-                  <h3>{meta.label}</h3>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                    <h3>{meta.label}</h3>
+                    <span className="pill pill-accent">
+                      {p.agent_count ?? 0} 个智能体
+                    </span>
+                  </div>
                   <label className="switch">
                     <input
                       type="checkbox"

@@ -91,6 +91,34 @@ function extractParam(path: string, pattern: RegExp): string | null {
   return match?.[1] ?? null;
 }
 
+/**
+ * 统计每个全局 agent 被哪些工作流引用。引用条件：
+ *   workflow.agents[] 中存在 name === agentName（同名继承）
+ *   或 extends === agentName（别名继承）
+ * 返回 { [agentName]: [workflowName, ...] }
+ */
+function computeAgentUsage(agentNames: string[]): Record<string, string[]> {
+  const result: Record<string, string[]> = Object.fromEntries(agentNames.map((n) => [n, []]));
+  const wfs = listWorkflows();
+  for (const wf of wfs) {
+    const full = getWorkflow(wf.name);
+    const wfAgents = (full?.agents as Array<Record<string, unknown>> | undefined) ?? [];
+    const refs = new Set<string>();
+    for (const a of wfAgents) {
+      const name = typeof a.name === "string" ? a.name : null;
+      const ext = a.extends;
+      if (name && agentNames.includes(name) && (ext === undefined || ext === name)) {
+        refs.add(name);
+      }
+      if (typeof ext === "string" && agentNames.includes(ext)) {
+        refs.add(ext);
+      }
+    }
+    for (const r of refs) result[r].push(wf.name);
+  }
+  return result;
+}
+
 // ──────────────────────────────────────────────
 // 静态文件服务
 // ──────────────────────────────────────────────
@@ -465,11 +493,21 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     // ── Providers API ──
 
-    // GET /api/providers — 返回三个内置 provider 的当前配置
+    // GET /api/providers — 返回三个内置 provider 的当前配置 + agent_count
     if (method === "GET" && path === "/api/providers") {
       const providers = loadProviders();
+      const agents = loadGlobalAgents();
+      const counts: Record<string, number> = {};
+      for (const cfg of Object.values(agents)) {
+        const p = (cfg as Record<string, unknown>)["provider"];
+        if (typeof p === "string") counts[p] = (counts[p] ?? 0) + 1;
+      }
       return json(
-        PROVIDER_NAMES.map((name) => ({ name, ...providers[name] }))
+        PROVIDER_NAMES.map((name) => ({
+          name,
+          ...providers[name],
+          agent_count: counts[name] ?? 0,
+        }))
       );
     }
 
@@ -491,11 +529,16 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     // ── Agents API ──
 
-    // GET /api/agents — 返回全局 agents 列表
+    // GET /api/agents — 返回全局 agents 列表（含 used_by 工作流）
     if (method === "GET" && path === "/api/agents") {
       const agents = loadGlobalAgents();
+      const usage = computeAgentUsage(Object.keys(agents));
       return json(
-        Object.entries(agents).map(([name, cfg]) => ({ name, ...cfg }))
+        Object.entries(agents).map(([name, cfg]) => ({
+          name,
+          ...cfg,
+          used_by: usage[name] ?? [],
+        }))
       );
     }
 

@@ -61,6 +61,7 @@ export interface ProviderItem {
   default_model?: string;
   base_url?: string;
   enabled?: boolean;
+  agent_count?: number;
 }
 
 export interface AgentItem {
@@ -71,5 +72,6 @@ export interface AgentItem {
   permission_mode?: string;
   system_prompt?: string;
   extends?: string | null;
+  used_by?: string[];
   [key: string]: unknown;
 }
