@@ -66,13 +66,13 @@ describe("providers 段读写", () => {
   it("saveProvider 过滤空字符串和 undefined", () => {
     saveProvider("anthropic", {
       default_model: "claude-sonnet-4-6",
-      api_key_env: "",      // 应被清除
-      base_url: undefined,  // 应被清除
-    });
+      enabled: undefined,   // 应被清除
+      unknown_field: "",    // 应被清除
+    } as any);
     const providers = loadProviders();
     expect(providers.anthropic.default_model).toBe("claude-sonnet-4-6");
-    expect(providers.anthropic.api_key_env).toBeUndefined();
-    expect(providers.anthropic.base_url).toBeUndefined();
+    expect(providers.anthropic.enabled).toBeUndefined();
+    expect((providers.anthropic as any).unknown_field).toBeUndefined();
   });
 });
 

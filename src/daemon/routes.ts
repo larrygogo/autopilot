@@ -37,6 +37,7 @@ import {
   PROVIDER_NAMES,
   type ProviderName,
 } from "../core/config";
+import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
 import { emit } from "./event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -643,6 +644,22 @@ export async function handleRequest(req: Request): Promise<Response> {
           agent_count: counts[name] ?? 0,
         }))
       );
+    }
+
+    // GET /api/providers/status — 全部三家 CLI 健康检查
+    if (method === "GET" && path === "/api/providers/status") {
+      const all = await detectAllProviders();
+      return json(Object.values(all));
+    }
+
+    // GET /api/providers/:name/status — 单独检测某家
+    const providerStatusMatch = extractParam(path, /^\/api\/providers\/([\w\-]+)\/status$/);
+    if (method === "GET" && providerStatusMatch) {
+      if (!(PROVIDER_NAMES as readonly string[]).includes(providerStatusMatch)) {
+        return error(`未知 provider：${providerStatusMatch}`, 400);
+      }
+      const status = await detectProviderCli(providerStatusMatch as ProviderName);
+      return json(status);
     }
 
     // PUT /api/providers/:name

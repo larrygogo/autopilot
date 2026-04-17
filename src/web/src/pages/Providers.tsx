@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api, type ProviderItem } from "../hooks/useApi";
+import { api, type ProviderItem, type ProviderStatus } from "../hooks/useApi";
 import { useToast } from "../components/Toast";
 
 const PROVIDER_META: Record<string, { label: string; defaultModel: string; loginCmd: string }> = {
@@ -14,6 +14,8 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const [statuses, setStatuses] = useState<Record<string, ProviderStatus>>({});
+  const [checking, setChecking] = useState(false);
 
   const refresh = () => {
     setLoading(true);
@@ -24,7 +26,22 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { refresh(); }, []);
+  const refreshStatus = async () => {
+    setChecking(true);
+    try {
+      const list = await api.getProvidersStatus();
+      const map: Record<string, ProviderStatus> = {};
+      for (const s of list) map[s.name] = s;
+      setStatuses(map);
+    } catch (e: any) {
+      // 静默失败 —— 卡片里会显示「未检测」
+      console.warn("状态检测失败", e);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  useEffect(() => { refresh(); refreshStatus(); }, []);
 
   const updateField = (name: string, field: keyof ProviderItem, value: string | boolean | undefined) => {
     setProviders((prev) =>
@@ -55,10 +72,15 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
       )}
 
       <div className="card" style={{ marginBottom: "1rem" }}>
-        <p className="muted" style={{ fontSize: "0.85rem" }}>
-          Autopilot 通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。
-          如尚未登录，请在终端中运行对应的 <span className="mono">login</span> 命令。
-        </p>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+          <p className="muted" style={{ fontSize: "0.85rem", flex: 1, margin: 0 }}>
+            Autopilot 通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。
+            如尚未登录，请在终端中运行对应的 <span className="mono">login</span> 命令。
+          </p>
+          <button className="btn btn-secondary" onClick={refreshStatus} disabled={checking}>
+            {checking ? "检查中..." : "重新检查"}
+          </button>
+        </div>
       </div>
 
       {loadError && (
@@ -81,6 +103,7 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
                 <div className="card-header">
                   <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
                     <h3>{meta.label}</h3>
+                    <ProviderStatusBadge status={statuses[p.name]} />
                     <span className="pill pill-accent">
                       {p.agent_count ?? 0} 个智能体
                     </span>
@@ -95,11 +118,7 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
                   </label>
                 </div>
 
-                {meta.loginCmd && (
-                  <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.75rem" }}>
-                    登录命令：<span className="mono">{meta.loginCmd}</span>
-                  </p>
-                )}
+                <ProviderStatusDetail status={statuses[p.name]} loginCmd={meta.loginCmd} />
 
                 <div className="form-grid">
                   <label className="col-span-2">
@@ -113,16 +132,6 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
                     />
                   </label>
 
-                  <label className="col-span-2">
-                    <span>Base URL（可选 — 仅在使用自建代理/兼容端点时填写）</span>
-                    <input
-                      type="text"
-                      className="text-input mono"
-                      placeholder="留空使用官方端点"
-                      value={p.base_url ?? ""}
-                      onChange={(e) => updateField(p.name, "base_url", e.target.value)}
-                    />
-                  </label>
                 </div>
 
                 <div className="card-actions">
@@ -143,4 +152,63 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
   );
 
   return embedded ? <>{body}</> : <div className="container">{body}</div>;
+}
+
+function ProviderStatusBadge({ status }: { status?: ProviderStatus }) {
+  if (!status) {
+    return <span className="pill status-pill status-unknown">未检测</span>;
+  }
+  if (!status.cli_installed) {
+    return <span className="pill status-pill status-missing">CLI 未安装</span>;
+  }
+  if (status.error) {
+    return <span className="pill status-pill status-warn">CLI 异常</span>;
+  }
+  return <span className="pill status-pill status-ok">CLI 就绪</span>;
+}
+
+function ProviderStatusDetail({ status, loginCmd }: { status?: ProviderStatus; loginCmd: string }) {
+  if (!status) {
+    return (
+      <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.75rem" }}>
+        登录命令：<span className="mono">{loginCmd}</span>
+      </p>
+    );
+  }
+
+  if (!status.cli_installed) {
+    return (
+      <div className="status-detail status-detail-error">
+        <div><strong>⚠ {status.error ?? "CLI 未安装"}</strong></div>
+        {status.install_hint && (
+          <div style={{ fontSize: "0.78rem", marginTop: "0.35rem" }}>
+            安装：<code className="mono">{status.install_hint}</code>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="status-detail">
+      <div>
+        <span className="muted" style={{ fontSize: "0.78rem" }}>CLI：</span>
+        <code className="mono" style={{ fontSize: "0.78rem" }}>{status.cli_path}</code>
+      </div>
+      {status.cli_version && (
+        <div style={{ marginTop: "0.2rem" }}>
+          <span className="muted" style={{ fontSize: "0.78rem" }}>版本：</span>
+          <code className="mono" style={{ fontSize: "0.78rem" }}>{status.cli_version}</code>
+        </div>
+      )}
+      {status.error && (
+        <div style={{ marginTop: "0.3rem", color: "var(--yellow)", fontSize: "0.78rem" }}>
+          ⚠ {status.error}
+        </div>
+      )}
+      <div style={{ marginTop: "0.3rem", fontSize: "0.78rem" }}>
+        <span className="muted">登录：</span><span className="mono">{loginCmd}</span>
+      </div>
+    </div>
+  );
 }

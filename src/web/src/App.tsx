@@ -267,6 +267,13 @@ a { cursor: pointer; }
 
 .provider-list { display: grid; grid-template-columns: 1fr; gap: 1rem; }
 .provider-card .card-header h3 { font-size: 1rem; color: var(--cyan); }
+.status-pill { font-size: 0.7rem; padding: 0.15rem 0.55rem; border: 1px solid; }
+.status-unknown { background: var(--bg3); color: var(--muted); border-color: var(--border); }
+.status-ok { background: rgba(52,211,153,0.12); color: var(--green); border-color: rgba(52,211,153,0.3); }
+.status-warn { background: rgba(251,191,36,0.12); color: var(--yellow); border-color: rgba(251,191,36,0.3); }
+.status-missing { background: rgba(248,113,113,0.12); color: var(--red); border-color: rgba(248,113,113,0.3); }
+.status-detail { background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.75rem; margin-bottom: 0.75rem; word-break: break-all; }
+.status-detail-error { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.06); color: var(--red); }
 
 .agent-list { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
 .agent-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; }
