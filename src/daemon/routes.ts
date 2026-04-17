@@ -1045,6 +1045,8 @@ interface ChatRequestBody {
   agent?: string;
   workflow?: string;
   title?: string;
+  /** 默认开；传 false 关闭工具（纯聊天不做操作） */
+  enable_tools?: boolean;
 }
 
 interface ChatResponsePayload {
@@ -1084,6 +1086,7 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
   try {
     const result = await agent.chat(message, {
       providerSessionId: manifest.provider_session_id,
+      enableTools: body.enable_tools !== false,  // 默认开工具
       onDelta: (delta) => {
         try { emit({ type: "chat:delta", payload: { sessionId: sid, delta } }); } catch { /* ignore */ }
       },

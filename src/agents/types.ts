@@ -61,6 +61,15 @@ export interface ChatOptions {
    * 供 UI 做打字机效果或 WebSocket 推流。
    */
   onDelta?: (delta: string) => void;
+  /**
+   * 开启 autopilot 内建工具集（list_tasks / start_task / ...）。
+   * 对话 agent 用；工作流阶段里的 run() 调用不走这里。
+   */
+  enableTools?: boolean;
+  /**
+   * 工具调用生命周期通知。UI 可用于显示"正在调用 XX 工具..."。
+   */
+  onToolUse?: (event: { tool: string; phase: "start" | "end"; input?: unknown }) => void;
 }
 
 export interface ChatResult {
