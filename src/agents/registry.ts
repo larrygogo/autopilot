@@ -71,6 +71,33 @@ export function createAgent(config: AgentConfig): Agent {
 }
 
 /**
+ * 一次性调用 agent（试跑）—— 不关联任何工作流，不进缓存，跑完立即 close。
+ * 用于 UI 里调试 system_prompt / 验证模型可用性。
+ *
+ * 解析顺序等同 getAgent 但只走 "global agents" 侧；不需要工作流 context。
+ * RunOptions 里的 model / max_turns / system_prompt / additional_system 在
+ * 此次调用时覆盖，不影响持久配置。
+ */
+export async function runAgentOnce(
+  agentName: string,
+  prompt: string,
+  options?: Parameters<Agent["run"]>[1],
+): Promise<Awaited<ReturnType<Agent["run"]>>> {
+  const globalAgents = loadGlobalAgents();
+  const providers = loadProviders();
+  if (!globalAgents[agentName]) {
+    throw new Error(`agent "${agentName}" 未在全局 config.yaml 中定义`);
+  }
+  const resolved = resolveAgentConfig(agentName, undefined, globalAgents, providers);
+  const agent = createAgent(resolved);
+  try {
+    return await agent.run(prompt, options);
+  } finally {
+    try { await agent.close(); } catch { /* ignore */ }
+  }
+}
+
+/**
  * 获取（或创建并缓存）Agent 实例。
  * 缓存 key 为 `workflowName:agentName`，同一工作流内复用同一 Agent。
  *

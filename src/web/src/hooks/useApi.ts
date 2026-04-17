@@ -114,6 +114,21 @@ export const api = {
     request<{ ok: boolean }>(`/api/agents/${name}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteAgent: (name: string) =>
     request<{ ok: boolean }>(`/api/agents/${name}`, { method: "DELETE" }),
+  dryRunAgent: (name: string, body: {
+    prompt: string;
+    system_prompt?: string;
+    additional_system?: string;
+    model?: string;
+    max_turns?: number;
+  }) =>
+    request<{
+      ok: boolean;
+      elapsed_ms: number;
+      result: {
+        text: string;
+        usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+      };
+    }>(`/api/agents/${name}/dry-run`, { method: "POST", body: JSON.stringify(body) }),
 };
 
 export interface ProviderItem {

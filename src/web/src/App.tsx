@@ -400,6 +400,8 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 .validation-summary ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.25rem; }
 .validation-summary li { padding-left: 0.5rem; line-height: 1.5; }
 .validation-summary code { background: rgba(248,113,113,0.12); padding: 0.05rem 0.35rem; border-radius: 3px; font-size: 0.78rem; }
+
+.dry-run-result { background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; font-family: var(--mono); font-size: 0.82rem; line-height: 1.55; max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
 .phase-subgrid { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.3rem; }
 .phase-sub { background: var(--bg2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; display: flex; gap: 0.4rem; align-items: center; }
 .phase-actions { display: flex; gap: 0.2rem; flex-shrink: 0; align-self: center; }
