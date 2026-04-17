@@ -1,5 +1,6 @@
 import type { Task, TaskLog } from "../core/db";
 import type { DaemonStatus, GraphData } from "../daemon/protocol";
+import type { SessionManifest, ChatMessage } from "../core/sessions";
 
 // ──────────────────────────────────────────────
 // HTTP REST 客户端
@@ -85,5 +86,37 @@ export class HttpClient {
 
   async getWorkflowGraph(name: string): Promise<GraphData> {
     return this.request(`/api/workflows/${name}/graph`);
+  }
+
+  // ── Chat ──
+
+  async chat(opts: {
+    message: string;
+    session_id?: string;
+    agent?: string;
+    workflow?: string;
+    title?: string;
+  }): Promise<{ session_id: string; message: ChatMessage }> {
+    return this.request("/api/chat", {
+      method: "POST",
+      body: JSON.stringify(opts),
+    });
+  }
+
+  async listSessions(): Promise<SessionManifest[]> {
+    return this.request("/api/sessions");
+  }
+
+  async getSession(id: string): Promise<SessionManifest & { messages: ChatMessage[] }> {
+    return this.request(`/api/sessions/${id}`);
+  }
+
+  async deleteSession(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/sessions/${id}`, { method: "DELETE" });
+  }
+
+  async getSessionMessages(id: string, limit?: number): Promise<ChatMessage[]> {
+    const qs = limit ? `?limit=${limit}` : "";
+    return this.request(`/api/sessions/${id}/messages${qs}`);
   }
 }

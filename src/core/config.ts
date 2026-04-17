@@ -8,6 +8,29 @@ export const PROVIDER_NAMES = ["anthropic", "openai", "google"] as const;
 export type ProviderName = typeof PROVIDER_NAMES[number];
 
 // ──────────────────────────────────────────────
+// 对话（chat）系统全局配置
+// ──────────────────────────────────────────────
+
+export interface ConversationConfig {
+  /** 全局主对话 agent 的名字；对话命令未指定 --agent / --workflow 时使用 */
+  default_agent?: string;
+}
+
+export function loadConversationConfig(): ConversationConfig {
+  try {
+    const raw = loadConfig();
+    const section = raw["conversation"];
+    if (!section || typeof section !== "object" || Array.isArray(section)) return {};
+    const s = section as Record<string, unknown>;
+    const out: ConversationConfig = {};
+    if (typeof s.default_agent === "string" && s.default_agent.trim()) {
+      out.default_agent = s.default_agent.trim();
+    }
+    return out;
+  } catch { return {}; }
+}
+
+// ──────────────────────────────────────────────
 // daemon 监听配置
 // ──────────────────────────────────────────────
 

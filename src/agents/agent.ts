@@ -1,5 +1,5 @@
 import type { BaseProvider } from "./providers/base";
-import type { AgentConfig, AgentResult, RunOptions } from "./types";
+import type { AgentConfig, AgentResult, RunOptions, ChatOptions, ChatResult } from "./types";
 import { getTaskContext } from "../core/task-context";
 import { appendAgentCall } from "../core/task-logs";
 
@@ -38,6 +38,14 @@ export class Agent {
         });
       }
     }
+  }
+
+  /**
+   * 多轮对话。不走 task context（对话不属于任务）、不写 agent-calls.jsonl。
+   * Session 状态（历史、provider_session_id）由调用方维护。
+   */
+  async chat(message: string, options?: ChatOptions): Promise<ChatResult> {
+    return this.provider.chat(message, options);
   }
 
   async close(): Promise<void> {

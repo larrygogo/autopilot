@@ -3,6 +3,17 @@ import { join, resolve, sep } from "path";
 import { VERSION } from "../index";
 import { initDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks } from "../core/db";
 import { snapshotWorkflow } from "../core/manifest";
+import {
+  createSession,
+  appendMessage,
+  readManifest as readSessionManifest,
+  readMessages as readSessionMessages,
+  updateManifest as updateSessionManifest,
+  listSessions as listChatSessions,
+  deleteSession as deleteChatSession,
+  type ChatMessage,
+} from "../core/sessions";
+import { resolveChatAgentName, createChatAgent } from "../agents/registry";
 import type { ListTasksFilters } from "../core/db";
 import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
@@ -547,6 +558,60 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json(getSubTasks(subtasksMatch));
     }
 
+    // ──────────────────────────────────────────────
+    // 对话（chat）API
+    // ──────────────────────────────────────────────
+
+    // POST /api/chat
+    // body: { message, session_id?, agent?, workflow?, title? }
+    // 传 session_id 则续，否则开新 session
+    if (method === "POST" && path === "/api/chat") {
+      const body = await req.json() as {
+        message?: string;
+        session_id?: string;
+        agent?: string;
+        workflow?: string;
+        title?: string;
+      };
+      if (typeof body.message !== "string" || !body.message.trim()) {
+        return error("message is required");
+      }
+      try {
+        const result = await handleChat(body);
+        return json(result);
+      } catch (e: unknown) {
+        return error(`chat failed: ${e instanceof Error ? e.message : String(e)}`, 500);
+      }
+    }
+
+    // GET /api/sessions
+    if (method === "GET" && path === "/api/sessions") {
+      return json(listChatSessions());
+    }
+
+    // GET /api/sessions/:id (含最近消息)
+    const sessionGetMatch = extractParam(path, /^\/api\/sessions\/([\w.\-]+)$/);
+    if (method === "GET" && sessionGetMatch) {
+      const m = readSessionManifest(sessionGetMatch);
+      if (!m) return error("session not found", 404);
+      const messages = readSessionMessages(sessionGetMatch);
+      return json({ ...m, messages });
+    }
+
+    // DELETE /api/sessions/:id
+    if (method === "DELETE" && sessionGetMatch) {
+      const ok = deleteChatSession(sessionGetMatch);
+      return ok ? json({ ok: true }) : error("session not found", 404);
+    }
+
+    // GET /api/sessions/:id/messages?limit=N
+    const sessionMsgsMatch = extractParam(path, /^\/api\/sessions\/([\w.\-]+)\/messages$/);
+    if (method === "GET" && sessionMsgsMatch) {
+      const limit = url.searchParams.get("limit");
+      const n = limit ? parseInt(limit, 10) : undefined;
+      return json(readSessionMessages(sessionMsgsMatch, Number.isFinite(n) ? n : undefined));
+    }
+
     // GET /api/workflows
     if (method === "GET" && path === "/api/workflows") {
       return json(listWorkflows());
@@ -968,4 +1033,77 @@ export async function handleRequest(req: Request): Promise<Response> {
     const message = e instanceof Error ? e.message : String(e);
     return error(message, 500);
   }
+}
+
+// ──────────────────────────────────────────────
+// 对话 handler
+// ──────────────────────────────────────────────
+
+interface ChatRequestBody {
+  message?: string;
+  session_id?: string;
+  agent?: string;
+  workflow?: string;
+  title?: string;
+}
+
+interface ChatResponsePayload {
+  session_id: string;
+  message: ChatMessage;
+}
+
+async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
+  const message = body.message!;
+
+  // 1. 定位/创建 session
+  let manifest = body.session_id ? readSessionManifest(body.session_id) : null;
+  if (body.session_id && !manifest) {
+    throw new Error(`session 不存在：${body.session_id}`);
+  }
+  const agentName = manifest?.agent ?? resolveChatAgentName({ agent: body.agent, workflow: body.workflow });
+  const workflow = manifest?.workflow ?? body.workflow;
+
+  if (!manifest) {
+    manifest = createSession({
+      agent: agentName,
+      workflow,
+      title: body.title,
+    });
+  }
+
+  // 2. 追加 user 消息
+  const userMsg: ChatMessage = { role: "user", content: message, ts: new Date().toISOString() };
+  appendMessage(manifest.id, userMsg);
+
+  // 3. 跑 agent.chat
+  const agent = createChatAgent(agentName, workflow);
+  let assistantText = "";
+  let newProviderSid: string | undefined;
+  let usage: ChatMessage["usage"];
+  try {
+    const result = await agent.chat(message, {
+      providerSessionId: manifest.provider_session_id,
+    });
+    assistantText = result.text;
+    newProviderSid = result.providerSessionId;
+    usage = result.usage;
+  } finally {
+    try { await agent.close(); } catch { /* ignore */ }
+  }
+
+  // 4. 更新 provider_session_id（新 session 首次拿到 id；续 session 一般不变但也更新）
+  if (newProviderSid && newProviderSid !== manifest.provider_session_id) {
+    updateSessionManifest(manifest.id, { provider_session_id: newProviderSid });
+  }
+
+  // 5. 追加 assistant 消息
+  const assistantMsg: ChatMessage = {
+    role: "assistant",
+    content: assistantText,
+    ts: new Date().toISOString(),
+  };
+  if (usage) assistantMsg.usage = usage;
+  appendMessage(manifest.id, assistantMsg);
+
+  return { session_id: manifest.id, message: assistantMsg };
 }

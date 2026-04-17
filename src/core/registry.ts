@@ -45,6 +45,8 @@ export interface WorkflowDefinition {
   description?: string;
   config?: Record<string, unknown>;
   agents?: Record<string, unknown>[];
+  /** 工作流专属对话 agent 的名字；`autopilot chat --workflow <name>` 时优先用 */
+  chat_agent?: string;
   workspace?: WorkflowWorkspaceSpec;
   phases: (PhaseDefinition | { parallel: ParallelDefinition })[];
   initial_state: string;
@@ -809,6 +811,12 @@ function normalizeWorkflowFields(wfDef: Record<string, unknown>, yamlPath: strin
     log.warn("workflow.yaml %s：name 应为字符串，当前 %o 已转为字符串",
       yamlPath, wfDef.name);
     wfDef.name = String(wfDef.name);
+  }
+  // chat_agent 必须是字符串
+  if ("chat_agent" in wfDef && wfDef.chat_agent != null && typeof wfDef.chat_agent !== "string") {
+    log.warn("workflow.yaml %s：chat_agent 应为字符串，忽略非法值 %o",
+      yamlPath, wfDef.chat_agent);
+    delete wfDef.chat_agent;
   }
 }
 

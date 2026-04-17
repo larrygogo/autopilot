@@ -38,6 +38,11 @@ export class AutopilotClient {
   get listWorkflows() { return this.http.listWorkflows.bind(this.http); }
   get getWorkflow() { return this.http.getWorkflow.bind(this.http); }
   get getWorkflowGraph() { return this.http.getWorkflowGraph.bind(this.http); }
+  get chat() { return this.http.chat.bind(this.http); }
+  get listSessions() { return this.http.listSessions.bind(this.http); }
+  get getSession() { return this.http.getSession.bind(this.http); }
+  get deleteSession() { return this.http.deleteSession.bind(this.http); }
+  get getSessionMessages() { return this.http.getSessionMessages.bind(this.http); }
 
   // ── 便捷方法：代理 WebSocket ──
 

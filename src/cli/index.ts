@@ -465,6 +465,90 @@ workflow
   });
 
 // ──────────────────────────────────────────────
+// chat — 对话
+// ──────────────────────────────────────────────
+
+program
+  .command("chat")
+  .description("与 agent 对话（REPL）")
+  .option("--agent <name>", "显式指定 agent")
+  .option("--workflow <name>", "聚焦工作流（用于选取该工作流的 chat_agent）")
+  .option("--session <id>", "续已有 session")
+  .option("--title <text>", "新 session 的标题")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (opts: {
+    agent?: string;
+    workflow?: string;
+    session?: string;
+    title?: string;
+    port: string;
+  }) => {
+    const client = getClient(opts);
+    await ensureDaemon(client);
+
+    let sessionId: string | undefined = opts.session;
+
+    // 若续 session，打印历史
+    if (sessionId) {
+      try {
+        const s = await client.getSession(sessionId);
+        console.log(`续 session ${s.id}  agent=${s.agent}${s.workflow ? ` workflow=${s.workflow}` : ""}`);
+        for (const m of s.messages) {
+          const who = m.role === "user" ? "你" : "Agent";
+          console.log(`${who}: ${m.content}`);
+        }
+        console.log("");
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      }
+    } else {
+      const resolved = opts.agent ?? "(auto)";
+      const hint = opts.workflow ? ` workflow=${opts.workflow}` : "";
+      console.log(`开始新对话（agent=${resolved}${hint}）。输入 /exit 退出，/reset 清屏。`);
+    }
+
+    const readline = await import("readline");
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      prompt: "你 > ",
+    });
+    rl.prompt();
+
+    rl.on("line", async (line) => {
+      const text = line.trim();
+      if (!text) { rl.prompt(); return; }
+      if (text === "/exit" || text === "/quit") { rl.close(); return; }
+      if (text === "/reset") { process.stdout.write("\x1Bc"); rl.prompt(); return; }
+
+      try {
+        process.stdout.write("Agent > (思考中...)\r");
+        const result = await client.chat({
+          message: text,
+          session_id: sessionId,
+          agent: opts.agent,
+          workflow: opts.workflow,
+          title: opts.title,
+        });
+        sessionId = result.session_id;
+        // 清掉"思考中"那一行
+        process.stdout.write("\x1B[2K\r");
+        console.log(`Agent > ${result.message.content}`);
+      } catch (e: unknown) {
+        process.stdout.write("\x1B[2K\r");
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      }
+      rl.prompt();
+    });
+
+    rl.on("close", () => {
+      if (sessionId) console.log(`\n（session 已保存：${sessionId}）`);
+      process.exit(0);
+    });
+  });
+
+// ──────────────────────────────────────────────
 // tui — 终端 UI
 // ──────────────────────────────────────────────
 
