@@ -1,5 +1,6 @@
 import { getDb, getTask, now, TABLE_COLUMNS, PROTECTED_COLUMNS } from "./db";
 import { emit } from "../daemon/event-bus";
+import { appendTaskEvent } from "./task-logs";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -128,6 +129,7 @@ export function transition(
   })();
 
   emit({ type: "task:transition", payload: { taskId, from: fromStatus, to: toStatus, trigger } });
+  appendTaskEvent(taskId, { type: "transition", from: fromStatus, to: toStatus, trigger, note: opts.note });
 
   return [fromStatus, toStatus];
 }
@@ -169,6 +171,7 @@ export function forceTransition(
     );
 
     emit({ type: "task:transition", payload: { taskId, from: fromStatus, to: toStatus, trigger: "force_transition" } });
+    appendTaskEvent(taskId, { type: "transition", from: fromStatus, to: toStatus, trigger: "force_transition", note });
   })();
 }
 

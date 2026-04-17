@@ -1,6 +1,7 @@
 import { getTask } from "./db";
 import { acquireLock, releaseLock } from "./infra";
 import { log, setPhase, resetPhase, setTaskId } from "./logger";
+import { appendTaskEvent } from "./task-logs";
 import { transition, InvalidTransitionError } from "./state-machine";
 import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates } from "./registry";
 import { closeAgents } from "../agents/registry";
@@ -103,9 +104,11 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     // 执行阶段函数
     log.info("开始执行阶段 %s [task=%s]", phase, taskId);
     emit({ type: "phase:started", payload: { taskId, phase, label: phaseDef.label } });
+    appendTaskEvent(taskId, { type: "phase-started", phase, label: phaseDef.label });
     await phaseFn(taskId);
     log.info("阶段执行完成：%s [task=%s]", phase, taskId);
     emit({ type: "phase:completed", payload: { taskId, phase } });
+    appendTaskEvent(taskId, { type: "phase-completed", phase });
   } catch (err) {
     if (err instanceof InvalidTransitionError) {
       log.warn("InvalidTransitionError [task=%s phase=%s]: %s", taskId, phase, err.message);
@@ -113,6 +116,7 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
       const errMsg = err instanceof Error ? err.stack ?? err.message : String(err);
       log.error("阶段执行异常 [task=%s phase=%s]: %s", taskId, phase, errMsg);
       emit({ type: "phase:error", payload: { taskId, phase, error: errMsg } });
+      appendTaskEvent(taskId, { type: "phase-error", phase, level: "error", message: errMsg });
     }
   } finally {
     resetPhase();

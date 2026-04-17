@@ -421,6 +421,27 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 
 .ws-preview { background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; min-height: 240px; max-height: 480px; overflow: auto; padding: 0.5rem; }
 .ws-preview-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem 0.6rem; border-bottom: 1px solid var(--border); margin-bottom: 0.5rem; flex-wrap: wrap; }
+
+.phase-log-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 0.6rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.phase-log-tabs::-webkit-scrollbar { display: none; }
+.phase-log-tab { background: transparent; border: none; padding: 0.45rem 0.8rem; color: var(--muted); font-size: 0.82rem; font-family: inherit; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; display: flex; align-items: center; }
+.phase-log-tab:hover { color: var(--text2); }
+.phase-log-tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+
+.phase-log-toolbar { display: flex; gap: 0.5rem; margin-bottom: 0.6rem; align-items: center; flex-wrap: wrap; }
+.phase-log-level-filter { display: flex; gap: 4px; flex-wrap: wrap; }
+.phase-log-level-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.55rem; background: var(--bg2); border: 1px solid var(--border); border-radius: 14px; font-size: 0.76rem; cursor: pointer; }
+.phase-log-level-chip input { margin: 0; accent-color: var(--cyan); }
+.phase-log-body { background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; font-family: var(--mono); font-size: 0.78rem; line-height: 1.55; max-height: 500px; overflow: auto; padding: 0.5rem 0.75rem; white-space: pre-wrap; word-break: break-word; margin: 0; }
+.log-row { padding: 0.05rem 0; color: var(--text2); }
+.log-row-error { color: var(--red); }
+.log-row-warn { color: var(--yellow); }
+.log-row-info { color: var(--text2); }
+.log-row-debug { color: var(--muted); }
+.level-error { color: var(--red); font-weight: 600; }
+.level-warn { color: var(--yellow); font-weight: 600; }
+.level-info { color: var(--blue); }
+.level-debug { color: var(--muted); }
 .phase-subgrid { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.3rem; }
 .phase-sub { background: var(--bg2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; display: flex; gap: 0.4rem; align-items: center; }
 .phase-actions { display: flex; gap: 0.2rem; flex-shrink: 0; align-self: center; }

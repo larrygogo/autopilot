@@ -48,6 +48,7 @@ import {
   resolveWorkspacePath,
   spawnWorkspaceZip,
 } from "../core/workspace";
+import { listPhaseLogs, readPhaseLog, readTaskEvents } from "../core/task-logs";
 import { emit } from "./event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -444,6 +445,42 @@ export async function handleRequest(req: Request): Promise<Response> {
     if (method === "GET" && logsMatch) {
       const limit = parseInt(url.searchParams.get("limit") ?? "100", 10);
       return json(getTaskLogs(logsMatch, limit));
+    }
+
+    // GET /api/tasks/:id/phase-logs — 列出已有阶段日志
+    const phaseLogsListMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/phase-logs$/);
+    if (method === "GET" && phaseLogsListMatch) {
+      try {
+        return json(listPhaseLogs(phaseLogsListMatch));
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 400);
+      }
+    }
+
+    // GET /api/tasks/:id/phase-logs/:phase?tail=N — 读单个阶段日志
+    const phaseLogReadMatch = path.match(/^\/api\/tasks\/([\w.\-]+)\/phase-logs\/([A-Za-z][\w\-]*)$/);
+    if (method === "GET" && phaseLogReadMatch) {
+      const [, phaseLogTaskId, phaseName] = phaseLogReadMatch;
+      const tailParam = url.searchParams.get("tail");
+      const tail = tailParam ? parseInt(tailParam, 10) : undefined;
+      try {
+        const content = readPhaseLog(phaseLogTaskId, phaseName, tail !== undefined ? { tail } : undefined);
+        return json({ phase: phaseName, content });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 400);
+      }
+    }
+
+    // GET /api/tasks/:id/events — 任务事件流（JSONL）
+    const eventsMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/events$/);
+    if (method === "GET" && eventsMatch) {
+      const tailParam = url.searchParams.get("tail");
+      const tail = tailParam ? parseInt(tailParam, 10) : undefined;
+      try {
+        return json(readTaskEvents(eventsMatch, tail !== undefined ? { tail } : undefined));
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 400);
+      }
     }
 
     // GET /api/tasks/:id/subtasks

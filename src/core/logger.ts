@@ -1,14 +1,18 @@
 import { emit } from "../daemon/event-bus";
+import { appendPhaseLog } from "./task-logs";
 
 let currentPhaseTag = "SYSTEM";
+let currentPhaseName: string | undefined;  // 原始小写名称（用于文件名）
 let currentTaskId: string | undefined;
 
 export function setPhase(phase: string, label?: string): void {
   currentPhaseTag = label ?? phase.toUpperCase();
+  currentPhaseName = phase;
 }
 
 export function resetPhase(): void {
   currentPhaseTag = "SYSTEM";
+  currentPhaseName = undefined;
   currentTaskId = undefined;
 }
 
@@ -40,6 +44,10 @@ function emitLog(level: string, formatted: string): void {
       timestamp: new Date().toISOString(),
     },
   });
+  // 任务 + 阶段上下文明确时，追加到对应阶段的磁盘日志
+  if (currentTaskId && currentPhaseName) {
+    appendPhaseLog(currentTaskId, currentPhaseName, formatted);
+  }
 }
 
 export interface Logger {

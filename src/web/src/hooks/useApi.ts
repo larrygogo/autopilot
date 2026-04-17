@@ -45,6 +45,12 @@ export const api = {
     request<any>(`/api/tasks/${id}/cancel`, { method: "POST" }),
   getTaskLogs: (id: string, limit = 100) =>
     request<any[]>(`/api/tasks/${id}/logs?limit=${limit}`),
+  getPhaseLogsList: (id: string) =>
+    request<Array<{ phase: string; size: number; mtime: number }>>(`/api/tasks/${id}/phase-logs`),
+  getPhaseLog: (id: string, phase: string, tail?: number) =>
+    request<{ phase: string; content: string }>(
+      `/api/tasks/${id}/phase-logs/${phase}${tail ? `?tail=${tail}` : ""}`,
+    ),
   getWorkspaceTree: (id: string, path: string) =>
     request<{ path: string; entries: WorkspaceEntry[] }>(
       `/api/tasks/${id}/ws/tree?path=${encodeURIComponent(path)}`,
