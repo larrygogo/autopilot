@@ -18,11 +18,11 @@ export function Chat({ subscribe }: ChatProps) {
   const [workflows, setWorkflows] = useState<{ name: string; description: string }[]>([]);
   const [agent, setAgent] = useState<string>("");
   const [workflow, setWorkflow] = useState<string>("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // 1. 初始加载：sessions + agents + workflows
   const refreshSessions = useCallback(() => {
     api.listSessions().then(setSessions).catch(() => {});
   }, []);
@@ -33,7 +33,6 @@ export function Chat({ subscribe }: ChatProps) {
     api.listWorkflows().then(setWorkflows).catch(() => {});
   }, [refreshSessions]);
 
-  // 2. 选中 session 时加载消息
   useEffect(() => {
     if (!selected) { setMessages([]); return; }
     api.getSession(selected).then((s) => {
@@ -43,7 +42,6 @@ export function Chat({ subscribe }: ChatProps) {
     }).catch(() => {});
   }, [selected]); // eslint-disable-line
 
-  // 3. 订阅当前 session 的流式事件
   useEffect(() => {
     if (!selected) return;
     const unsub = subscribe(`chat:${selected}`, (event: any) => {
@@ -61,19 +59,29 @@ export function Chat({ subscribe }: ChatProps) {
     return unsub;
   }, [selected, subscribe, refreshSessions, toast]);
 
-  // 4. 消息区滚到底
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, streaming]);
 
-  // 5. 发消息
+  // 移动端：打开 sidebar 时禁止 body 滚动 + ESC 关闭
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSidebarOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [sidebarOpen]);
+
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
     setStreaming("");
-    // 乐观插入 user 消息
     const userMsg: ChatMessage = { role: "user", content: text, ts: new Date().toISOString() };
     setMessages((prev) => [...prev, userMsg]);
     setDraft("");
@@ -87,7 +95,6 @@ export function Chat({ subscribe }: ChatProps) {
       if (!selected) {
         setSelected(result.session_id);
       }
-      // complete 事件通常已经更新消息；若 WS 滞后，兜底从 API 返回补
       setMessages((prev) => {
         if (prev.some((m) => m.ts === result.message.ts && m.role === "assistant")) return prev;
         return [...prev, result.message];
@@ -104,7 +111,13 @@ export function Chat({ subscribe }: ChatProps) {
     setSelected(null);
     setMessages([]);
     setStreaming("");
+    setSidebarOpen(false);
     inputRef.current?.focus();
+  };
+
+  const selectSession = (id: string) => {
+    setSelected(id);
+    setSidebarOpen(false);
   };
 
   const deleteCurrent = async () => {
@@ -121,59 +134,32 @@ export function Chat({ subscribe }: ChatProps) {
   };
 
   return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: "280px 1fr",
-      gap: 16,
-      height: "calc(100vh - 120px)",
-    }}>
-      {/* 侧栏 */}
-      <aside style={{
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        background: "var(--bg1)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}>
-        <div style={{ padding: 12, borderBottom: "1px solid var(--border)" }}>
+    <div className="chat-layout">
+      {/* 侧栏 —— 桌面常驻；移动端作为 overlay */}
+      {sidebarOpen && (
+        <div className="chat-sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
+      <aside className={`chat-sidebar ${sidebarOpen ? "chat-sidebar-open" : ""}`}>
+        <div className="chat-sidebar-head">
+          <button className="chat-new-btn" onClick={newChat}>+ 新对话</button>
           <button
-            onClick={newChat}
-            style={{
-              width: "100%",
-              padding: "8px 12px",
-              background: "var(--accent)",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontWeight: 500,
-            }}
-          >
-            + 新对话
-          </button>
+            className="chat-sidebar-close mobile-only"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="关闭"
+          >✕</button>
         </div>
-        <div style={{ flex: 1, overflow: "auto" }}>
+        <div className="chat-session-list">
           {sessions.length === 0 && (
-            <div style={{ padding: 16, color: "var(--muted)", fontSize: 13 }}>
-              暂无对话。点击「新对话」开始。
-            </div>
+            <div className="chat-empty">暂无对话，点击「新对话」开始。</div>
           )}
           {sessions.map((s) => (
             <div
               key={s.id}
-              onClick={() => setSelected(s.id)}
-              style={{
-                padding: "10px 12px",
-                borderBottom: "1px solid var(--border)",
-                cursor: "pointer",
-                background: selected === s.id ? "var(--accent-dim)" : "transparent",
-              }}
+              onClick={() => selectSession(s.id)}
+              className={`chat-session-item ${selected === s.id ? "chat-session-active" : ""}`}
             >
-              <div style={{ fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {s.title || s.id.slice(0, 8)}
-              </div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+              <div className="chat-session-title">{s.title || s.id.slice(0, 8)}</div>
+              <div className="chat-session-meta">
                 {s.agent}{s.workflow ? ` · ${s.workflow}` : ""} · {s.message_count} 条
               </div>
             </div>
@@ -182,64 +168,44 @@ export function Chat({ subscribe }: ChatProps) {
       </aside>
 
       {/* 对话区 */}
-      <main style={{
-        border: "1px solid var(--border)",
-        borderRadius: 10,
-        background: "var(--bg1)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}>
-        {/* 顶部 agent / workflow 选择 */}
-        <div style={{
-          padding: "10px 16px",
-          borderBottom: "1px solid var(--border)",
-          display: "flex",
-          gap: 12,
-          alignItems: "center",
-          fontSize: 13,
-        }}>
-          <span style={{ color: "var(--text2)" }}>Agent：</span>
+      <main className="chat-main">
+        <div className="chat-head">
+          <button
+            className="chat-sidebar-toggle mobile-only"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="打开会话列表"
+          >☰</button>
+          <span className="chat-head-label">Agent</span>
           <select
+            className="chat-select"
             value={agent}
             onChange={(e) => setAgent(e.target.value)}
             disabled={!!selected}
-            style={{ padding: "4px 8px", background: "var(--bg2)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 4 }}
           >
             <option value="">(默认)</option>
             {agents.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
           </select>
-          <span style={{ color: "var(--text2)", marginLeft: 12 }}>工作流：</span>
+          <span className="chat-head-label">工作流</span>
           <select
+            className="chat-select"
             value={workflow}
             onChange={(e) => setWorkflow(e.target.value)}
             disabled={!!selected}
-            style={{ padding: "4px 8px", background: "var(--bg2)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 4 }}
           >
             <option value="">(无)</option>
             {workflows.map((w) => <option key={w.name} value={w.name}>{w.name}</option>)}
           </select>
-          <div style={{ flex: 1 }} />
+          <div className="chat-head-spacer" />
           {selected && (
-            <button
-              onClick={deleteCurrent}
-              style={{ padding: "4px 10px", background: "transparent", color: "var(--red)", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer" }}
-            >
-              删除会话
-            </button>
+            <button className="chat-delete-btn" onClick={deleteCurrent}>删除</button>
           )}
         </div>
 
-        {/* 消息列表 */}
-        <div ref={scrollRef} style={{ flex: 1, overflow: "auto", padding: 16 }}>
+        <div ref={scrollRef} className="chat-messages">
           {messages.length === 0 && !streaming && (
-            <div style={{ textAlign: "center", color: "var(--muted)", marginTop: 60 }}>
-              发一条消息开始对话。
-            </div>
+            <div className="chat-empty-hint">发一条消息开始对话。</div>
           )}
-          {messages.map((m, i) => (
-            <MessageBubble key={i} message={m} />
-          ))}
+          {messages.map((m, i) => <MessageBubble key={i} message={m} />)}
           {streaming && (
             <MessageBubble
               message={{ role: "assistant", content: streaming, ts: "" }}
@@ -248,8 +214,7 @@ export function Chat({ subscribe }: ChatProps) {
           )}
         </div>
 
-        {/* 输入区 */}
-        <div style={{ padding: 12, borderTop: "1px solid var(--border)" }}>
+        <div className="chat-input-bar">
           <textarea
             ref={inputRef}
             value={draft}
@@ -261,37 +226,17 @@ export function Chat({ subscribe }: ChatProps) {
               }
             }}
             placeholder="输入消息（Ctrl/Cmd + Enter 发送）"
-            rows={3}
+            rows={2}
             disabled={sending}
-            style={{
-              width: "100%",
-              padding: 10,
-              background: "var(--bg2)",
-              color: "var(--text)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              resize: "vertical",
-              fontFamily: "var(--sans)",
-              fontSize: 14,
-            }}
+            className="chat-input"
           />
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8, gap: 8 }}>
-            <button
-              onClick={send}
-              disabled={sending || !draft.trim()}
-              style={{
-                padding: "8px 20px",
-                background: sending || !draft.trim() ? "var(--bg3)" : "var(--accent)",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: sending || !draft.trim() ? "not-allowed" : "pointer",
-                fontWeight: 500,
-              }}
-            >
-              {sending ? "发送中…" : "发送"}
-            </button>
-          </div>
+          <button
+            className="chat-send-btn"
+            onClick={send}
+            disabled={sending || !draft.trim()}
+          >
+            {sending ? "…" : "发送"}
+          </button>
         </div>
       </main>
     </div>
@@ -301,28 +246,12 @@ export function Chat({ subscribe }: ChatProps) {
 function MessageBubble({ message, streaming }: { message: ChatMessage; streaming?: boolean }) {
   const isUser = message.role === "user";
   return (
-    <div style={{
-      display: "flex",
-      justifyContent: isUser ? "flex-end" : "flex-start",
-      marginBottom: 16,
-    }}>
-      <div style={{
-        maxWidth: "75%",
-        padding: "10px 14px",
-        background: isUser ? "var(--accent)" : "var(--bg2)",
-        color: isUser ? "white" : "var(--text)",
-        borderRadius: 12,
-        borderTopRightRadius: isUser ? 4 : 12,
-        borderTopLeftRadius: isUser ? 12 : 4,
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-        fontSize: 14,
-        lineHeight: 1.6,
-      }}>
+    <div className={`chat-bubble-row ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"}`}>
+      <div className="chat-bubble">
         {message.content}
-        {streaming && <span style={{ opacity: 0.6 }}>▎</span>}
+        {streaming && <span className="chat-cursor">▎</span>}
         {message.usage && (
-          <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }}>
+          <div className="chat-usage">
             {message.usage.input_tokens}+{message.usage.output_tokens} tok · ${message.usage.total_cost_usd?.toFixed(4)}
           </div>
         )}
