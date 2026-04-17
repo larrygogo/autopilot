@@ -116,9 +116,22 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   const [addParallelOpen, setAddParallelOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
 
+  // 追踪"原始阶段改名"的映射：oldName -> newName。
+  // 保存时随 phases 一起发给后端，后端会把 workflow.ts 里的
+  // run_<old> 重命名为 run_<new>（保留函数体），避免产生孤儿。
+  const renamesRef = React.useRef<Map<string, string>>(new Map());
+  // 本次编辑新建的阶段名（改名时不纳入 renames — 因为后端不存在 run_<oldName>）
+  const newlyAddedRef = React.useRef<Set<string>>(new Set());
+
+  const resetDraftTracking = () => {
+    renamesRef.current = new Map();
+    newlyAddedRef.current = new Set();
+  };
+
   React.useEffect(() => {
     setItems(normalize(initialPhases));
     setDirty(false);
+    resetDraftTracking();
   }, [JSON.stringify(initialPhases), workflowName]);
 
   const allNames = useMemo(() => flatNames(items), [items]);
@@ -147,9 +160,32 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
 
   const mark = () => setDirty(true);
 
-  /** 重命名阶段 / 并行块：全表同步更新所有指向旧名的 reject 引用 */
+  /** 重命名阶段 / 并行块：全表同步更新所有指向旧名的 reject 引用；记录 rename 映射 */
   const applyRename = (items: Item[], oldName: string, newName: string): Item[] => {
     if (oldName === newName) return items;
+
+    // 维护 renamesRef
+    const newlyAdded = newlyAddedRef.current;
+    if (newlyAdded.has(oldName)) {
+      // 新建后改名：只更新 newlyAdded，不记录 rename
+      newlyAdded.delete(oldName);
+      newlyAdded.add(newName);
+    } else {
+      const renames = renamesRef.current;
+      // 查 renames 里 value === oldName 的 key（链式改名：source → oldName → newName）
+      let sourceKey: string | null = null;
+      for (const [k, v] of renames.entries()) {
+        if (v === oldName) { sourceKey = k; break; }
+      }
+      if (sourceKey !== null) {
+        if (sourceKey === newName) renames.delete(sourceKey); // 反向回到原名，抵消
+        else renames.set(sourceKey, newName);
+      } else {
+        renames.set(oldName, newName);
+      }
+    }
+
+    // 更新 reject 引用
     return items.map((it) => {
       if (it.kind === "phase" && it.reject === oldName) {
         return { ...it, reject: newName };
@@ -227,6 +263,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       copy.splice(pos + 1, 0, newPhase);
       return copy;
     });
+    newlyAddedRef.current.add(data.name);
     mark();
     setAddPhaseOpen(false);
   };
@@ -244,6 +281,8 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       copy.splice(pos + 1, 0, newPar);
       return copy;
     });
+    newlyAddedRef.current.add(data.name);
+    newlyAddedRef.current.add(data.firstChild);
     mark();
     setAddParallelOpen(false);
   };
@@ -258,6 +297,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       const phases = [...it.phases, { kind: "phase" as const, name: rawName, timeout: 900, reject: null, extras: {} }];
       return { ...it, phases };
     }));
+    newlyAddedRef.current.add(rawName);
     mark();
   };
 
@@ -347,13 +387,22 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
     setSaving(true);
     try {
       const payload = serialize(items);
-      const res = await api.setWorkflowPhases(workflowName, payload, true);
-      const added = res.ts?.added ?? [];
-      if (added.length > 0) {
-        toast.success(`已保存，新增 ${added.length} 个阶段函数：${added.join(", ")}`);
-      } else {
-        toast.success("已保存");
+      // renamesRef 里可能有些 key 是"初始时存在但现在已被删除"的阶段。后端只需要处理仍然存在的改名映射。
+      const currentNames = new Set(flatNames(items));
+      const validRenames: Record<string, string> = {};
+      for (const [oldName, newName] of renamesRef.current.entries()) {
+        if (currentNames.has(newName)) validRenames[oldName] = newName;
       }
+      const renamesToSend = Object.keys(validRenames).length > 0 ? validRenames : undefined;
+
+      const res = await api.setWorkflowPhases(workflowName, payload, true, renamesToSend);
+      const added = res.ts?.added ?? [];
+      const renamed = res.renamed ?? [];
+      const parts: string[] = [];
+      if (renamed.length > 0) parts.push(`重命名 ${renamed.length} 个函数：${renamed.join(", ")}`);
+      if (added.length > 0) parts.push(`新增 ${added.length} 个函数：${added.join(", ")}`);
+      toast.success(parts.length > 0 ? `已保存（${parts.join("；")}）` : "已保存");
+
       if (res.ts_error) {
         toast.error("TS 同步失败（YAML 已保存）", res.ts_error);
       }
@@ -367,6 +416,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
         toast.warning(`孤儿函数：${res.ts!.orphans.join(", ")}（在 workflow.ts 中存在但未使用，未自动删除）`);
       }
       setDirty(false);
+      resetDraftTracking();
       onSaved?.();
     } catch (e: any) {
       toast.error("保存失败", e?.message ?? String(e));
@@ -378,6 +428,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   const reset = () => {
     setItems(normalize(initialPhases));
     setDirty(false);
+    resetDraftTracking();
   };
 
   const syncTs = async () => {

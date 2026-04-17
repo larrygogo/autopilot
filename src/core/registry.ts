@@ -999,6 +999,49 @@ export function syncWorkflowTs(workflowName: string): SyncTsResult {
   return { added: missing, orphans, modified: true, legacy_signature: legacy };
 }
 
+/**
+ * 重命名 workflow.ts 中的 run_<old> 函数声明为 run_<new>，保留函数体。
+ * 支持 export async function / export function / export const 三种写法。
+ * 不修改字符串字面量或注释中的旧名（避免污染业务代码）。
+ * 返回实际被重命名的旧名列表。
+ */
+export function renameRunFunctions(
+  workflowName: string,
+  renames: Record<string, string>,
+): { renamed: string[] } {
+  const tsPath = getWorkflowTsPath(workflowName);
+  if (!existsSync(tsPath)) return { renamed: [] };
+
+  let content = readFileSync(tsPath, "utf-8");
+  const renamed: string[] = [];
+
+  for (const [oldName, newName] of Object.entries(renames)) {
+    if (!oldName || !newName || oldName === newName) continue;
+    if (!/^[a-z][a-z0-9_]*$/.test(newName)) continue;
+
+    const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const patterns = [
+      new RegExp(`(export\\s+(?:async\\s+)?function\\s+)run_${escaped}(?=\\s*\\()`, "g"),
+      new RegExp(`(export\\s+const\\s+)run_${escaped}(?=\\s*[=:])`, "g"),
+    ];
+    let changed = false;
+    for (const re of patterns) {
+      const replaced = content.replace(re, (_m, prefix: string) => {
+        changed = true;
+        return `${prefix}run_${newName}`;
+      });
+      if (replaced !== content) content = replaced;
+    }
+    if (changed) renamed.push(oldName);
+  }
+
+  if (renamed.length > 0) {
+    copyFileSync(tsPath, tsPath + ".bak");
+    writeFileSync(tsPath, content, "utf-8");
+  }
+  return { renamed };
+}
+
 /** 检测使用旧 `ctx: { task: any; ... }` 签名的 run_ 函数（运行时会崩） */
 function detectLegacySignatures(source: string): string[] {
   const names: string[] = [];

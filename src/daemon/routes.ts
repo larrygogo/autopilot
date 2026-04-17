@@ -19,6 +19,7 @@ import {
   deleteWorkflowDir,
   setWorkflowPhases,
   syncWorkflowTs,
+  renameRunFunctions,
   setWorkflowAgents,
   type PhaseEntryInput,
   type WorkflowAgentEntry,
@@ -526,25 +527,35 @@ export async function handleRequest(req: Request): Promise<Response> {
     // PUT /api/workflows/:name/phases — 结构化更新 phases 段
     const phasesWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/phases$/);
     if (method === "PUT" && phasesWriteMatch) {
-      const body = await req.json() as { phases: unknown; sync_ts?: boolean };
+      const body = await req.json() as {
+        phases: unknown;
+        sync_ts?: boolean;
+        renames?: Record<string, string>;
+      };
       if (!Array.isArray(body.phases)) return error("phases must be array", 400);
       try {
+        // 1. 先重命名 run_ 函数（保留函数体），避免产生孤儿
+        let renamedFns: string[] = [];
+        if (body.renames && typeof body.renames === "object") {
+          const r = renameRunFunctions(phasesWriteMatch, body.renames);
+          renamedFns = r.renamed;
+        }
+        // 2. 写入 phases
         setWorkflowPhases(phasesWriteMatch, body.phases as PhaseEntryInput[]);
         await reload();
-        let tsResult: { added: string[]; orphans: string[]; modified: boolean } | null = null;
+        let tsResult: { added: string[]; orphans: string[]; modified: boolean; legacy_signature?: string[] } | null = null;
         let tsError: string | null = null;
         if (body.sync_ts !== false) {
           try {
             tsResult = syncWorkflowTs(phasesWriteMatch);
             if (tsResult.modified) await reload();
           } catch (e: unknown) {
-            // TS 同步失败不回滚 yaml；作为 warning 返回具体错误
             tsError = e instanceof Error ? e.message : String(e);
             tsResult = { added: [], orphans: [], modified: false };
           }
         }
         emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true, ts: tsResult, ts_error: tsError });
+        return json({ ok: true, ts: tsResult, ts_error: tsError, renamed: renamedFns });
       } catch (e: unknown) {
         return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
       }
