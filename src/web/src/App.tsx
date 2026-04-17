@@ -442,6 +442,25 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 .level-warn { color: var(--yellow); font-weight: 600; }
 .level-info { color: var(--blue); }
 .level-debug { color: var(--muted); }
+
+.agent-calls-stats { display: flex; flex-wrap: wrap; gap: 0.9rem; padding: 0.5rem 0.75rem; background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 0.6rem; font-size: 0.8rem; color: var(--text2); }
+.agent-calls-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.agent-call-item { background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; transition: border-color 0.15s; }
+.agent-call-item.is-error { border-color: rgba(248,113,113,0.4); }
+.agent-call-item.is-open { border-color: var(--accent2); }
+.agent-call-head { display: flex; justify-content: space-between; align-items: center; padding: 0.55rem 0.75rem; cursor: pointer; gap: 0.75rem; flex-wrap: wrap; }
+.agent-call-head:hover { background: var(--bg3); }
+.agent-call-meta { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-size: 0.82rem; }
+.agent-call-seq { color: var(--muted); font-family: var(--mono); font-size: 0.76rem; }
+.agent-call-stats { display: flex; gap: 0.55rem; align-items: center; font-size: 0.74rem; flex-wrap: wrap; }
+.agent-call-caret { font-size: 0.65rem; margin-left: 0.25rem; color: var(--muted); }
+.agent-call-preview { padding: 0 0.75rem 0.5rem; font-size: 0.76rem; }
+.agent-call-prompt-preview { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-call-detail { padding: 0.5rem 0.75rem 0.75rem; border-top: 1px solid var(--border); background: var(--bg2); display: flex; flex-direction: column; gap: 0.75rem; }
+.agent-call-block-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem; }
+.agent-call-block-head strong { font-size: 0.78rem; color: var(--text2); }
+.agent-call-body { background: var(--bg0); border: 1px solid var(--border); border-radius: 5px; padding: 0.5rem 0.7rem; font-family: var(--mono); font-size: 0.78rem; line-height: 1.55; max-height: 300px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
+.agent-call-body.is-error { color: var(--red); border-color: rgba(248,113,113,0.3); }
 .phase-subgrid { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.3rem; }
 .phase-sub { background: var(--bg2); padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem; display: flex; gap: 0.4rem; align-items: center; }
 .phase-actions { display: flex; gap: 0.2rem; flex-shrink: 0; align-self: center; }

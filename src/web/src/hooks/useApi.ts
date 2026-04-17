@@ -51,6 +51,10 @@ export const api = {
     request<{ phase: string; content: string }>(
       `/api/tasks/${id}/phase-logs/${phase}${tail ? `?tail=${tail}` : ""}`,
     ),
+  listAgentCalls: (id: string) =>
+    request<AgentCallSummary[]>(`/api/tasks/${id}/agent-calls`),
+  getAgentCall: (id: string, seq: number) =>
+    request<AgentCallRecord>(`/api/tasks/${id}/agent-calls/${seq}`),
   getWorkspaceTree: (id: string, path: string) =>
     request<{ path: string; entries: WorkspaceEntry[] }>(
       `/api/tasks/${id}/ws/tree?path=${encodeURIComponent(path)}`,
@@ -169,6 +173,27 @@ export interface ProviderModelsResult {
   models: string[];
   source: "api" | "catalog";
   error?: string;
+}
+
+export interface AgentCallSummary {
+  seq: number;
+  ts: string;
+  phase?: string;
+  agent: string;
+  provider?: string;
+  model?: string;
+  elapsed_ms?: number;
+  usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+  error?: string;
+  prompt_preview: string;
+  result_preview: string;
+}
+
+export interface AgentCallRecord extends AgentCallSummary {
+  prompt: string;
+  system_prompt?: string;
+  additional_system?: string;
+  result_text?: string;
 }
 
 export interface WorkspaceEntry {

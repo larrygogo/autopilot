@@ -84,6 +84,30 @@ console.log(JSON.stringify(listPhaseLogs("t4").map(p => p.phase)));
     expect(JSON.parse(out)).toEqual(["ok_phase"]);
   });
 
+  it("agent calls append + list + get", async () => {
+    const script = `
+import { appendAgentCall, listAgentCalls, getAgentCall } from "${join(import.meta.dir, "..", "src", "core", "task-logs")}";
+appendAgentCall("t5", { agent: "coder", provider: "anthropic", model: "claude-sonnet-4-6", prompt: "write hello world", result_text: "done.", elapsed_ms: 1200, usage: { input_tokens: 10, output_tokens: 20 } });
+appendAgentCall("t5", { agent: "reviewer", provider: "anthropic", model: "claude-opus-4-7", prompt: "review code", error: "timeout" });
+const list = listAgentCalls("t5");
+const one = getAgentCall("t5", 1);
+console.log(JSON.stringify({
+  count: list.length,
+  seqs: list.map(c => c.seq),
+  firstPreview: list[0].prompt_preview,
+  hasError: !!list[1].error,
+  oneFullPrompt: one?.prompt,
+}));
+`;
+    const out = await runChild(script);
+    const r = JSON.parse(out);
+    expect(r.count).toBe(2);
+    expect(r.seqs).toEqual([1, 2]);
+    expect(r.firstPreview).toContain("hello world");
+    expect(r.hasError).toBe(true);
+    expect(r.oneFullPrompt).toBe("write hello world");
+  });
+
   it("没日志目录时 list/read 返回空", async () => {
     const script = `
 import { listPhaseLogs, readPhaseLog, readTaskEvents } from "${join(import.meta.dir, "..", "src", "core", "task-logs")}";
