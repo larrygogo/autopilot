@@ -5,7 +5,15 @@ import { VERSION, AUTOPILOT_HOME } from "../index";
 import { initDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
-import { readPid, isProcessAlive, isDaemonRunning, removePid } from "../daemon/pid";
+import {
+  readPid,
+  isProcessAlive,
+  isDaemonRunning,
+  removePid,
+  readSupervisorPid,
+  isSupervisorRunning,
+  removeSupervisorPid,
+} from "../daemon/pid";
 
 // ──────────────────────────────────────────────
 // CLI 主程序
@@ -53,28 +61,45 @@ daemon
   });
 
 daemon
-  .command("start")
-  .description("后台启动 daemon")
+  .command("supervise")
+  .description("前台启动 supervisor（崩溃自动重启 daemon）")
   .option("-p, --port <port>", "端口", String(DEFAULT_PORT))
-  .action(async (opts: { port: string }) => {
-    if (isDaemonRunning()) {
-      console.error("错误：daemon 已在运行中。");
+  .option("-H, --host <host>", "主机", DEFAULT_HOST)
+  .action(async (opts: { port: string; host: string }) => {
+    const { runSupervisor } = await import("../daemon/supervisor");
+    await runSupervisor({ host: opts.host, port: parseInt(opts.port, 10) });
+  });
+
+daemon
+  .command("start")
+  .description("后台启动 daemon（默认带 supervisor，崩了自动重启）")
+  .option("-p, --port <port>", "端口", String(DEFAULT_PORT))
+  .option("--no-supervise", "不带 supervisor，直接跑 daemon（崩了不重启）")
+  .action(async (opts: { port: string; supervise: boolean }) => {
+    if (isDaemonRunning() || isSupervisorRunning()) {
+      console.error("错误：daemon 或 supervisor 已在运行中。");
       process.exit(1);
     }
 
+    const scriptPath = opts.supervise
+      ? join(import.meta.dir, "../daemon/supervisor.ts")
+      : join(import.meta.dir, "../daemon/index.ts");
+
     const child = Bun.spawn(
-      ["bun", "run", join(import.meta.dir, "../daemon/index.ts"), "--port", opts.port],
+      ["bun", "run", scriptPath, "--port", opts.port],
       { stdio: ["ignore", "ignore", "ignore"] }
     );
     child.unref();
 
-    // 等待 PID 文件出现
-    const deadline = Date.now() + 5000;
+    // 等待 daemon PID 文件出现（supervisor 里的 daemon 子进程也会写这个）
+    const deadline = Date.now() + 8000;
     while (Date.now() < deadline) {
       await Bun.sleep(200);
       const pid = readPid();
       if (pid && isProcessAlive(pid)) {
-        console.log(`daemon 已启动 (pid=${pid}, port=${opts.port})`);
+        const supPid = opts.supervise ? readSupervisorPid() : null;
+        const supSuffix = supPid ? ` via supervisor (pid=${supPid})` : "";
+        console.log(`daemon 已启动 (pid=${pid}, port=${opts.port})${supSuffix}`);
         return;
       }
     }
@@ -84,22 +109,38 @@ daemon
 
 daemon
   .command("stop")
-  .description("停止 daemon")
+  .description("停止 daemon（若 supervisor 在运行则一并停止）")
   .action(async () => {
-    const pid = readPid();
-    if (!pid || !isProcessAlive(pid)) {
+    const supPid = readSupervisorPid();
+    const daemonPid = readPid();
+
+    if (supPid && isProcessAlive(supPid)) {
+      // 优先停 supervisor，它会负责通知 daemon 子进程
+      process.kill(supPid, "SIGTERM");
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        await Bun.sleep(200);
+        if (!isProcessAlive(supPid)) {
+          console.log("supervisor 已停止（daemon 同步退出）。");
+          return;
+        }
+      }
+      console.error("错误：supervisor 停止超时。");
+      process.exit(1);
+    }
+
+    if (!daemonPid || !isProcessAlive(daemonPid)) {
       console.log("daemon 未在运行。");
       removePid();
+      removeSupervisorPid();
       return;
     }
 
-    process.kill(pid, "SIGTERM");
-
-    // 等待退出
+    process.kill(daemonPid, "SIGTERM");
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
       await Bun.sleep(200);
-      if (!isProcessAlive(pid)) {
+      if (!isProcessAlive(daemonPid)) {
         console.log("daemon 已停止。");
         return;
       }
@@ -114,9 +155,16 @@ daemon
   .option("-p, --port <port>", "端口", String(DEFAULT_PORT))
   .action(async (opts: { port: string }) => {
     const pid = readPid();
+    const supPid = readSupervisorPid();
     if (!pid || !isProcessAlive(pid)) {
       console.log("daemon 未在运行。");
+      if (supPid && isProcessAlive(supPid)) {
+        console.log(`  supervisor 还活着 (pid=${supPid})，daemon 可能正在重启中`);
+      }
       return;
+    }
+    if (supPid && isProcessAlive(supPid)) {
+      console.log(`supervisor 运行中 (pid=${supPid})`);
     }
 
     try {
