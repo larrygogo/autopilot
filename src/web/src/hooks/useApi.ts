@@ -45,6 +45,17 @@ export const api = {
     request<any>(`/api/tasks/${id}/cancel`, { method: "POST" }),
   getTaskLogs: (id: string, limit = 100) =>
     request<any[]>(`/api/tasks/${id}/logs?limit=${limit}`),
+  getWorkspaceTree: (id: string, path: string) =>
+    request<{ path: string; entries: WorkspaceEntry[] }>(
+      `/api/tasks/${id}/ws/tree?path=${encodeURIComponent(path)}`,
+    ),
+  getWorkspaceFile: (id: string, path: string) =>
+    request<{ content: string; binary: boolean; size: number; truncated: boolean }>(
+      `/api/tasks/${id}/ws/file?path=${encodeURIComponent(path)}`,
+    ),
+  workspaceDownloadUrl: (id: string, path: string) =>
+    `/api/tasks/${id}/ws/download?path=${encodeURIComponent(path)}`,
+  workspaceZipUrl: (id: string) => `/api/tasks/${id}/ws/zip`,
   listWorkflows: () => request<any[]>("/api/workflows"),
   getWorkflow: (name: string) => request<any>(`/api/workflows/${name}`),
   getWorkflowGraph: (name: string) => request<any>(`/api/workflows/${name}/graph`),
@@ -152,6 +163,13 @@ export interface ProviderModelsResult {
   models: string[];
   source: "api" | "catalog";
   error?: string;
+}
+
+export interface WorkspaceEntry {
+  name: string;
+  type: "file" | "dir";
+  size?: number;
+  mtime?: number;
 }
 
 export interface AgentItem {

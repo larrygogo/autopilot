@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync } from "fs";
-import { join, resolve } from "path";
+import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSync } from "fs";
+import { join, resolve, sep } from "path";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
 
@@ -94,6 +94,114 @@ function resolveTemplate(workflowName: string, templateName: string): string | n
     return null;
   }
   return templateDir;
+}
+
+// ──────────────────────────────────────────────
+// Workspace 浏览 API —— 用于 UI 文件树 / 预览 / 下载
+// ──────────────────────────────────────────────
+
+export interface WorkspaceEntry {
+  name: string;
+  type: "file" | "dir";
+  size?: number;
+  mtime?: number;
+}
+
+/**
+ * 把用户传入的相对路径安全解析到 workspace 下的绝对路径。
+ * 防越界：解析后必须仍位于 workspace 根目录下；拒绝含 NUL 字符的路径。
+ * @returns 绝对路径或 null（路径非法）
+ */
+export function resolveWorkspacePath(taskId: string, relPath: string): string | null {
+  const ws = getTaskWorkspace(taskId);
+  const root = resolve(ws);
+  if (relPath.includes("\0")) return null;
+  const trimmed = relPath.replace(/^[/\\]+/, "");
+  const candidate = resolve(root, trimmed || ".");
+  if (candidate !== root && !candidate.startsWith(root + sep)) return null;
+  return candidate;
+}
+
+/**
+ * 列目录直接子项（单层，按名称字典序）。目录不存在时抛错。
+ */
+export function listWorkspaceDir(taskId: string, relPath: string): WorkspaceEntry[] {
+  const abs = resolveWorkspacePath(taskId, relPath);
+  if (!abs) throw new Error("非法路径");
+  if (!existsSync(abs)) throw new Error("路径不存在");
+  const info = statSync(abs);
+  if (!info.isDirectory()) throw new Error("不是目录");
+
+  const entries: WorkspaceEntry[] = [];
+  for (const name of readdirSync(abs)) {
+    const full = join(abs, name);
+    try {
+      const s = statSync(full);
+      if (s.isDirectory()) {
+        entries.push({ name, type: "dir" });
+      } else if (s.isFile()) {
+        entries.push({ name, type: "file", size: s.size, mtime: s.mtimeMs });
+      }
+      // 跳过符号链接和特殊文件
+    } catch { /* 忽略不可访问项 */ }
+  }
+  // 目录优先 + 名称排序
+  entries.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return entries;
+}
+
+export interface WorkspaceFileInfo {
+  content: string;
+  /** 若为二进制（非 UTF-8 可解码）则为 true，content 为空 */
+  binary: boolean;
+  size: number;
+  truncated: boolean;
+}
+
+/** 单文件读取上限，超过只返回元信息让用户下载 */
+export const MAX_PREVIEW_BYTES = 1024 * 1024; // 1 MB
+
+/**
+ * 读取文件供 UI 预览。超过上限不读内容；二进制检测失败返回空 content。
+ */
+export function readWorkspaceFile(taskId: string, relPath: string): WorkspaceFileInfo {
+  const abs = resolveWorkspacePath(taskId, relPath);
+  if (!abs) throw new Error("非法路径");
+  if (!existsSync(abs)) throw new Error("文件不存在");
+  const info = statSync(abs);
+  if (info.isDirectory()) throw new Error("路径是目录");
+  const size = info.size;
+  if (size > MAX_PREVIEW_BYTES) {
+    return { content: "", binary: false, size, truncated: true };
+  }
+  const buf = readFileSync(abs);
+  // 二进制检测：含 NUL 或 UTF-8 decode 失败视为二进制
+  if (buf.includes(0)) {
+    return { content: "", binary: true, size, truncated: false };
+  }
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    return { content: text, binary: false, size, truncated: false };
+  } catch {
+    return { content: "", binary: true, size, truncated: false };
+  }
+}
+
+/**
+ * 用 `zip` 命令流式压缩整个 workspace。
+ * 没装 zip 命令时抛错。调用方负责把 stdout 流包装成 Response。
+ */
+export function spawnWorkspaceZip(taskId: string): ReturnType<typeof Bun.spawn> {
+  const ws = getTaskWorkspace(taskId);
+  if (!existsSync(ws)) throw new Error("workspace 不存在");
+  return Bun.spawn(["zip", "-r", "-q", "-", "."], {
+    cwd: ws,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 }
 
 function copyDirRecursive(src: string, dest: string): void {
