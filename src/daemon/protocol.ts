@@ -1,4 +1,5 @@
 import type { Task, TaskLog } from "../core/db";
+import type { ChatMessage } from "../core/sessions";
 
 // ──────────────────────────────────────────────
 // Event Types — 核心模块发射的事件
@@ -15,7 +16,10 @@ export type AutopilotEvent =
   | { type: "watcher:recovery"; payload: { taskId: string; phase: string; fromStatus: string; toStatus: string } }
   | { type: "daemon:status"; payload: { version: string; uptime: number; pid: number; taskCounts: Record<string, number> } }
   | { type: "config:updated"; payload: Record<string, never> }
-  | { type: "workflow:reloaded"; payload: Record<string, never> };
+  | { type: "workflow:reloaded"; payload: Record<string, never> }
+  | { type: "chat:delta"; payload: { sessionId: string; delta: string } }
+  | { type: "chat:complete"; payload: { sessionId: string; message: ChatMessage } }
+  | { type: "chat:error"; payload: { sessionId: string; error: string } };
 
 // ──────────────────────────────────────────────
 // WebSocket Protocol — Client ↔ Server 消息

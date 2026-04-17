@@ -6,11 +6,13 @@ import { Tasks } from "./pages/Tasks";
 import { TaskDetail } from "./pages/TaskDetail";
 import { Workflows } from "./pages/Workflows";
 import { Config } from "./pages/Config";
+import { Chat } from "./pages/Chat";
 
 type Page =
   | "dashboard"
   | "tasks"
   | "workflows"
+  | "chat"
   | "config"
   | { type: "task-detail"; id: string };
 
@@ -25,6 +27,7 @@ function AppInner() {
     { key: "dashboard", label: "Dashboard", page: "dashboard" },
     { key: "tasks", label: "任务", page: "tasks" },
     { key: "workflows", label: "工作流", page: "workflows" },
+    { key: "chat", label: "对话", page: "chat" },
     { key: "config", label: "配置", page: "config" },
   ];
 
@@ -131,6 +134,7 @@ function AppInner() {
       {page === "workflows" && (
         <Workflows onJumpToAgent={() => setPage("config")} />
       )}
+      {page === "chat" && <Chat subscribe={subscribe} />}
       {page === "config" && <Config />}
     </>
   );

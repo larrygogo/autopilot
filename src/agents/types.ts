@@ -56,6 +56,11 @@ export interface ChatOptions {
   additional_system?: string;
   cwd?: string;
   timeout?: number;
+  /**
+   * 流式 delta 回调。实现此参数的 provider 会在生成过程中逐段触发，
+   * 供 UI 做打字机效果或 WebSocket 推流。
+   */
+  onDelta?: (delta: string) => void;
 }
 
 export interface ChatResult {
