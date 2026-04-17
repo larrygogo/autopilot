@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api, type AgentItem } from "../hooks/useApi";
+import { api, type AgentItem, type ProviderModelsResult } from "../hooks/useApi";
 import { useToast } from "../components/Toast";
 import { ConfirmDialog } from "../components/Modal";
 
@@ -20,6 +20,7 @@ export function Agents({ embedded = false }: { embedded?: boolean }) {
   const [mode, setMode] = useState<Mode>({ type: "list" });
   const [saving, setSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [models, setModels] = useState<Record<string, ProviderModelsResult>>({});
 
   const refresh = () => {
     setLoading(true);
@@ -31,6 +32,16 @@ export function Agents({ embedded = false }: { embedded?: boolean }) {
   };
 
   useEffect(() => { refresh(); }, []);
+
+  useEffect(() => {
+    const names = ["anthropic", "openai", "google"];
+    Promise.all(names.map((n) => api.getProviderModels(n).catch(() => null)))
+      .then((list) => {
+        const map: Record<string, ProviderModelsResult> = {};
+        for (const r of list) if (r) map[r.name] = r;
+        setModels(map);
+      });
+  }, []);
 
   const startCreate = () => setMode({ type: "edit", original: null, draft: emptyDraft() });
   const startEdit = (a: AgentItem) => setMode({ type: "edit", original: a.name, draft: { ...a } });
@@ -206,9 +217,15 @@ export function Agents({ embedded = false }: { embedded?: boolean }) {
                   type="text"
                   className="text-input mono"
                   placeholder="claude-sonnet-4-6"
+                  list={mode.draft.provider ? `agent-models-${mode.draft.provider}` : undefined}
                   value={mode.draft.model ?? ""}
                   onChange={(e) => updateDraft("model", e.target.value)}
                 />
+                {mode.draft.provider && models[mode.draft.provider] && (
+                  <datalist id={`agent-models-${mode.draft.provider}`}>
+                    {models[mode.draft.provider].models.map((m) => <option key={m} value={m} />)}
+                  </datalist>
+                )}
               </label>
 
               <label>
