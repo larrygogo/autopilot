@@ -357,6 +357,12 @@ kbd { background: var(--bg3); border: 1px solid var(--border); border-radius: 4p
 .task-card-id { color: var(--cyan); font-size: 0.85rem; }
 .task-card-title { font-size: 0.92rem; margin-bottom: 0.35rem; word-break: break-word; }
 .task-card-meta { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.76rem; flex-wrap: wrap; }
+.task-card.is-selected { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(34,211,238,0.25); }
+
+.bulk-bar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.55rem 0.9rem; background: var(--accent-dim); border: 1px solid rgba(99,102,241,0.35); border-radius: 8px; margin-bottom: 1rem; font-size: 0.85rem; color: var(--text); flex-wrap: wrap; }
+.bulk-bar strong { color: var(--accent2); }
+
+.task-table input[type="checkbox"] { accent-color: var(--cyan); cursor: pointer; }
 
 .mobile-only { display: none; }
 .desktop-only { display: block; }
