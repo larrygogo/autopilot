@@ -112,6 +112,14 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
   const [orphans, setOrphans] = useState<string[]>([]);
   const [pruneConfirm, setPruneConfirm] = useState(false);
+  // 拖拽状态：{ kind:"top", idx }（顶层）或 { kind:"child", pIdx, cIdx }（并行块子项）
+  const [dragSource, setDragSource] = useState<
+    | { kind: "top"; idx: number }
+    | { kind: "child"; parallelIdx: number; childIdx: number }
+    | null
+  >(null);
+  const [dragOverTopIdx, setDragOverTopIdx] = useState<number | null>(null);
+  const [dragOverChild, setDragOverChild] = useState<{ parallelIdx: number; childIdx: number } | null>(null);
 
   // 追踪"原始阶段改名"的映射：oldName -> newName。
   // 保存时随 phases 一起发给后端，后端会把 workflow.ts 里的
@@ -235,6 +243,33 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       [copy[idx], copy[target]] = [copy[target], copy[idx]];
       return copy;
     });
+    mark();
+  };
+
+  /** 拖拽：把顶层 from 项移到 to 位置（to 是插入后的目标 index） */
+  const reorderTop = (from: number, to: number) => {
+    if (from === to) return;
+    setItems((prev) => {
+      if (from < 0 || from >= prev.length || to < 0 || to >= prev.length) return prev;
+      const copy = [...prev];
+      const [moved] = copy.splice(from, 1);
+      copy.splice(to, 0, moved);
+      return copy;
+    });
+    mark();
+  };
+
+  /** 拖拽：并行块内子阶段重排 */
+  const reorderChild = (parallelIdx: number, from: number, to: number) => {
+    if (from === to) return;
+    setItems((prev) => prev.map((it, i) => {
+      if (i !== parallelIdx || it.kind !== "parallel") return it;
+      if (from < 0 || from >= it.phases.length || to < 0 || to >= it.phases.length) return it;
+      const phases = [...it.phases];
+      const [moved] = phases.splice(from, 1);
+      phases.splice(to, 0, moved);
+      return { ...it, phases };
+    }));
     mark();
   };
 
@@ -492,6 +527,25 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       ) : (
         <div className="phase-list">
           {items.map((it, idx) => {
+            const dragHandlers = {
+              draggable: true,
+              isDragging: dragSource?.kind === "top" && dragSource.idx === idx,
+              isDropTarget: dragOverTopIdx === idx && dragSource?.kind === "top" && dragSource.idx !== idx,
+              onDragStart: () => setDragSource({ kind: "top", idx }),
+              onDragOver: (e: React.DragEvent) => {
+                if (dragSource?.kind !== "top") return;
+                e.preventDefault();
+                setDragOverTopIdx(idx);
+              },
+              onDragLeave: () => setDragOverTopIdx((prev) => (prev === idx ? null : prev)),
+              onDrop: (e: React.DragEvent) => {
+                e.preventDefault();
+                if (dragSource?.kind === "top") reorderTop(dragSource.idx, idx);
+                setDragSource(null);
+                setDragOverTopIdx(null);
+              },
+              onDragEnd: () => { setDragSource(null); setDragOverTopIdx(null); },
+            };
             if (it.kind === "parallel") {
               return (
                 <ParallelRow
@@ -503,6 +557,12 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
                   issues={issues}
                   hoveredPhase={hoveredPhase ?? null}
                   onHoverPhase={onHoverPhase}
+                  dragHandlers={dragHandlers}
+                  onReorderChild={(from, to) => reorderChild(idx, from, to)}
+                  dragOverChildState={dragOverChild?.parallelIdx === idx ? dragOverChild : null}
+                  dragSourceForParallel={dragSource?.kind === "child" && dragSource.parallelIdx === idx ? dragSource : null}
+                  setChildDragSource={(src) => setDragSource(src)}
+                  setChildDragOver={setDragOverChild}
                   onMoveUp={() => moveTop(idx, -1)}
                   onMoveDown={() => moveTop(idx, 1)}
                   onDelete={() => setPendingDelete({ kind: "top", idx, name: it.name })}
@@ -527,6 +587,7 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
                 rejectCandidates={namesBeforeTop(idx)}
                 parallelTargets={parallelOptions}
                 issues={issuesForTop(issues, idx)}
+                dragHandlers={dragHandlers}
                 hoveredPhase={hoveredPhase ?? null}
                 onHoverPhase={onHoverPhase}
                 onMoveUp={() => moveTop(idx, -1)}
@@ -638,6 +699,17 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
 // 普通阶段行
 // ──────────────────────────────────────────────
 
+interface DragHandlers {
+  draggable: boolean;
+  isDragging: boolean;
+  isDropTarget: boolean;
+  onDragStart: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: () => void;
+  onDrop: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
+}
+
 interface PhaseRowProps {
   item: PhaseItem;
   idx: number;
@@ -645,6 +717,7 @@ interface PhaseRowProps {
   rejectCandidates: string[];
   parallelTargets: { idx: number; name: string }[];
   issues: Issue[];
+  dragHandlers: DragHandlers;
   hoveredPhase: string | null;
   onHoverPhase?: (name: string | null) => void;
   onMoveUp: () => void;
@@ -654,7 +727,7 @@ interface PhaseRowProps {
   onMoveIntoParallel: (parallelIdx: number) => void;
 }
 
-function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, issues, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
+function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, issues, dragHandlers, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
   const nameIssue = fieldIssue(issues, "name");
   const timeoutIssue = fieldIssue(issues, "timeout");
   const rejectIssue = fieldIssue(issues, "reject");
@@ -671,12 +744,23 @@ function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, issues,
 
   return (
     <div
-      className={`phase-row ${isHighlight ? "highlight" : ""}`}
+      className={`phase-row ${isHighlight ? "highlight" : ""} ${dragHandlers.isDragging ? "is-dragging" : ""} ${dragHandlers.isDropTarget ? "is-drop-target" : ""}`}
       onMouseEnter={() => onHoverPhase?.(item.name)}
       onMouseLeave={() => onHoverPhase?.(null)}
+      onDragOver={dragHandlers.onDragOver}
+      onDragLeave={dragHandlers.onDragLeave}
+      onDrop={dragHandlers.onDrop}
     >
       <div className="phase-row-main">
-        <span className="phase-idx">{idx + 1}</span>
+        <span
+          className="phase-idx drag-handle"
+          draggable={dragHandlers.draggable}
+          onDragStart={dragHandlers.onDragStart}
+          onDragEnd={dragHandlers.onDragEnd}
+          title="拖动以重排"
+        >
+          {idx + 1}
+        </span>
         <div className="phase-body">
           <div className="phase-title">
             <input
@@ -759,6 +843,12 @@ interface ParallelRowProps {
   issues: Issue[];
   hoveredPhase: string | null;
   onHoverPhase?: (name: string | null) => void;
+  dragHandlers: DragHandlers;
+  onReorderChild: (from: number, to: number) => void;
+  dragOverChildState: { parallelIdx: number; childIdx: number } | null;
+  dragSourceForParallel: { kind: "child"; parallelIdx: number; childIdx: number } | null;
+  setChildDragSource: (src: { kind: "child"; parallelIdx: number; childIdx: number } | null) => void;
+  setChildDragOver: (s: { parallelIdx: number; childIdx: number } | null) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
@@ -774,7 +864,9 @@ interface ParallelRowProps {
 }
 
 function ParallelRow(props: ParallelRowProps) {
-  const { item, idx, total, allNames, issues, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUngroup, onUpdateStrategy, onUpdateName, onAddChild,
+  const { item, idx, total, allNames, issues, hoveredPhase, onHoverPhase, dragHandlers,
+    onReorderChild, dragOverChildState, dragSourceForParallel, setChildDragSource, setChildDragOver,
+    onMoveUp, onMoveDown, onDelete, onUngroup, onUpdateStrategy, onUpdateName, onAddChild,
     onChildUpdate, onChildDelete, onChildMoveUp, onChildMoveDown, onChildLift } = props;
   const headHighlight = hoveredPhase === item.name;
   const ownIssues = issuesForTop(issues, idx);
@@ -790,14 +882,27 @@ function ParallelRow(props: ParallelRowProps) {
   };
 
   return (
-    <div className={`phase-row phase-row-parallel ${headHighlight ? "highlight" : ""}`}>
+    <div
+      className={`phase-row phase-row-parallel ${headHighlight ? "highlight" : ""} ${dragHandlers.isDragging ? "is-dragging" : ""} ${dragHandlers.isDropTarget ? "is-drop-target" : ""}`}
+      onDragOver={dragHandlers.onDragOver}
+      onDragLeave={dragHandlers.onDragLeave}
+      onDrop={dragHandlers.onDrop}
+    >
       <div className="phase-row-main" style={{ flexDirection: "column", alignItems: "stretch" }}>
         <div
           style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", width: "100%" }}
           onMouseEnter={() => onHoverPhase?.(item.name)}
           onMouseLeave={() => onHoverPhase?.(null)}
         >
-          <span className="phase-idx">{idx + 1}</span>
+          <span
+            className="phase-idx drag-handle"
+            draggable={dragHandlers.draggable}
+            onDragStart={dragHandlers.onDragStart}
+            onDragEnd={dragHandlers.onDragEnd}
+            title="拖动以重排"
+          >
+            {idx + 1}
+          </span>
           <div className="phase-body">
             <div className="phase-title">
               <span className="pill pill-accent" style={{ marginRight: "0.5rem" }}>并行</span>
@@ -840,7 +945,27 @@ function ParallelRow(props: ParallelRowProps) {
         </div>
 
         <div className="parallel-children">
-          {item.phases.map((sub, j) => (
+          {item.phases.map((sub, j) => {
+            const childDrag: DragHandlers = {
+              draggable: true,
+              isDragging: dragSourceForParallel?.childIdx === j,
+              isDropTarget: dragOverChildState?.childIdx === j && dragSourceForParallel !== null && dragSourceForParallel.childIdx !== j,
+              onDragStart: () => setChildDragSource({ kind: "child", parallelIdx: idx, childIdx: j }),
+              onDragOver: (e) => {
+                if (!dragSourceForParallel) return;
+                e.preventDefault();
+                setChildDragOver({ parallelIdx: idx, childIdx: j });
+              },
+              onDragLeave: () => setChildDragOver(null),
+              onDrop: (e) => {
+                e.preventDefault();
+                if (dragSourceForParallel) onReorderChild(dragSourceForParallel.childIdx, j);
+                setChildDragSource(null);
+                setChildDragOver(null);
+              },
+              onDragEnd: () => { setChildDragSource(null); setChildDragOver(null); },
+            };
+            return (
             <ParallelChildRow
               key={j}
               sub={sub}
@@ -849,6 +974,7 @@ function ParallelRow(props: ParallelRowProps) {
               total={item.phases.length}
               issues={issuesForChild(issues, idx, j)}
               isHighlight={hoveredPhase === sub.name}
+              dragHandlers={childDrag}
               onHoverPhase={onHoverPhase}
               onUpdate={(next) => onChildUpdate(j, next)}
               onDelete={() => onChildDelete(j, sub.name)}
@@ -856,7 +982,8 @@ function ParallelRow(props: ParallelRowProps) {
               onMoveDown={() => onChildMoveDown(j)}
               onLift={() => onChildLift(j)}
             />
-          ))}
+            );
+          })}
           <button
             className="btn btn-secondary"
             style={{ alignSelf: "flex-start", marginTop: "0.4rem" }}
@@ -881,6 +1008,7 @@ interface ParallelChildRowProps {
   total: number;
   issues: Issue[];
   isHighlight: boolean;
+  dragHandlers: DragHandlers;
   onHoverPhase?: (name: string | null) => void;
   onUpdate: (next: PhaseItem) => void;
   onDelete: () => void;
@@ -889,7 +1017,7 @@ interface ParallelChildRowProps {
   onLift: () => void;
 }
 
-function ParallelChildRow({ sub, outerIdx, innerIdx, total, issues, isHighlight, onHoverPhase, onUpdate, onDelete, onMoveUp, onMoveDown, onLift }: ParallelChildRowProps) {
+function ParallelChildRow({ sub, outerIdx, innerIdx, total, issues, isHighlight, dragHandlers, onHoverPhase, onUpdate, onDelete, onMoveUp, onMoveDown, onLift }: ParallelChildRowProps) {
   const nameIssue = fieldIssue(issues, "name");
   const timeoutIssue = fieldIssue(issues, "timeout");
   const [nameDraft, setNameDraft] = React.useState(sub.name);
@@ -903,12 +1031,23 @@ function ParallelChildRow({ sub, outerIdx, innerIdx, total, issues, isHighlight,
 
   return (
     <div
-      className={`phase-row parallel-child ${isHighlight ? "highlight" : ""}`}
+      className={`phase-row parallel-child ${isHighlight ? "highlight" : ""} ${dragHandlers.isDragging ? "is-dragging" : ""} ${dragHandlers.isDropTarget ? "is-drop-target" : ""}`}
       onMouseEnter={() => onHoverPhase?.(sub.name)}
       onMouseLeave={() => onHoverPhase?.(null)}
+      onDragOver={dragHandlers.onDragOver}
+      onDragLeave={dragHandlers.onDragLeave}
+      onDrop={dragHandlers.onDrop}
     >
       <div className="phase-row-main">
-        <span className="phase-idx-small mono muted">{outerIdx + 1}.{innerIdx + 1}</span>
+        <span
+          className="phase-idx-small mono muted drag-handle"
+          draggable={dragHandlers.draggable}
+          onDragStart={dragHandlers.onDragStart}
+          onDragEnd={dragHandlers.onDragEnd}
+          title="拖动以重排"
+        >
+          {outerIdx + 1}.{innerIdx + 1}
+        </span>
         <div className="phase-body">
           <div className="phase-title">
             <input
