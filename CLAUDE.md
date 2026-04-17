@@ -222,6 +222,10 @@ agents:                # 命名 agent 定义，工作流可同名引用或 exten
     permission_mode: auto
     system_prompt: |
       你是通用编码助手。
+
+workspace_retention:   # 可选：任务 workspace 自动清理策略
+  days: 30             # 终态任务超过 30 天自动清 workspace（仅 workspace 目录，日志/记录保留）
+  max_total_mb: 5120   # 所有 workspace 总占用超 5 GB 时按旧→新清理终态任务
 ```
 
 工作流专属字段请写在该工作流目录下的 `workflow.yaml`（或其独立配置文件），不要放全局。

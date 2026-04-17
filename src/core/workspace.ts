@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSync, rmSync } from "fs";
 import { join, resolve, sep } from "path";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
@@ -202,6 +202,148 @@ export function spawnWorkspaceZip(taskId: string): ReturnType<typeof Bun.spawn> 
     stdout: "pipe",
     stderr: "pipe",
   });
+}
+
+/**
+ * 计算任务 workspace 磁盘占用（递归）。
+ * 跳过不可 stat 项，静默忽略错误。
+ */
+export function workspaceSize(taskId: string): number {
+  const ws = getTaskWorkspace(taskId);
+  if (!existsSync(ws)) return 0;
+  return dirSizeBytes(ws);
+}
+
+function dirSizeBytes(dir: string): number {
+  let total = 0;
+  try {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      try {
+        const s = statSync(full);
+        if (s.isDirectory()) total += dirSizeBytes(full);
+        else if (s.isFile()) total += s.size;
+      } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
+  return total;
+}
+
+/**
+ * 删除任务 workspace 目录。返回是否真的删除过。
+ * logs / agent-calls.jsonl 等元数据不受影响（保留在 runtime/tasks/<id>/ 顶层）。
+ */
+export function deleteTaskWorkspace(taskId: string): boolean {
+  const ws = getTaskWorkspace(taskId);
+  if (!existsSync(ws)) return false;
+  rmSync(ws, { recursive: true, force: true });
+  return true;
+}
+
+/**
+ * 扫描所有任务的 workspace 目录，返回每个任务的占用信息。
+ * 用于 Dashboard 汇总 + 清理规则判断。
+ */
+export interface TaskWorkspaceUsage {
+  taskId: string;
+  size: number;
+  mtime: number;
+  exists: boolean;
+}
+
+export interface RetentionPolicy {
+  /** 终态任务 workspace 保留天数；<=0 表示永久保留 */
+  days?: number;
+  /** 保留磁盘占用上限 MB；超出则按 mtime 从旧到新删，直到低于上限 */
+  max_total_mb?: number;
+}
+
+/**
+ * 从全局 config 读 workspace_retention 段。
+ */
+export function loadRetentionPolicy(): RetentionPolicy {
+  try {
+    // 延迟 import 避免循环
+    const { loadConfig } = require("./config") as typeof import("./config");
+    const raw = loadConfig();
+    const section = raw["workspace_retention"];
+    if (!section || typeof section !== "object") return {};
+    return section as RetentionPolicy;
+  } catch { return {}; }
+}
+
+/**
+ * 应用保留策略清理 workspace：按 (a) 超过 days 的任务 (b) 总占用超 max_total_mb
+ * 的老任务清 workspace。返回被清理的 taskId 列表。
+ * 仅清 workspace 目录，不动 logs / agent-calls / DB 记录。
+ */
+export function applyRetentionPolicy(
+  policy: RetentionPolicy,
+  opts?: { isTerminal?: (taskId: string) => boolean; now?: number },
+): { removed: string[]; reclaimedBytes: number } {
+  const now = opts?.now ?? Date.now();
+  const all = scanTaskWorkspaces().filter((u) => u.exists && u.size > 0);
+
+  const removed: string[] = [];
+  let reclaimed = 0;
+
+  const doRemove = (u: TaskWorkspaceUsage) => {
+    if (deleteTaskWorkspace(u.taskId)) {
+      removed.push(u.taskId);
+      reclaimed += u.size;
+    }
+  };
+
+  // (a) 按天数清终态任务
+  if (typeof policy.days === "number" && policy.days > 0) {
+    const threshold = now - policy.days * 86400 * 1000;
+    for (const u of all) {
+      if (u.mtime && u.mtime < threshold) {
+        if (!opts?.isTerminal || opts.isTerminal(u.taskId)) {
+          doRemove(u);
+        }
+      }
+    }
+  }
+
+  // (b) 总占用超限时，按 mtime 旧→新再删
+  if (typeof policy.max_total_mb === "number" && policy.max_total_mb > 0) {
+    const maxBytes = policy.max_total_mb * 1024 * 1024;
+    let remaining = all.filter((u) => !removed.includes(u.taskId));
+    let total = remaining.reduce((a, it) => a + it.size, 0);
+    if (total > maxBytes) {
+      remaining.sort((a, b) => a.mtime - b.mtime);
+      for (const u of remaining) {
+        if (total <= maxBytes) break;
+        if (!opts?.isTerminal || opts.isTerminal(u.taskId)) {
+          doRemove(u);
+          total -= u.size;
+        }
+      }
+    }
+  }
+
+  return { removed, reclaimedBytes: reclaimed };
+}
+
+export function scanTaskWorkspaces(): TaskWorkspaceUsage[] {
+  const root = join(AUTOPILOT_HOME, "runtime", "tasks");
+  if (!existsSync(root)) return [];
+  const out: TaskWorkspaceUsage[] = [];
+  for (const taskId of readdirSync(root)) {
+    const ws = join(root, taskId, "workspace");
+    if (!existsSync(ws)) {
+      out.push({ taskId, size: 0, mtime: 0, exists: false });
+      continue;
+    }
+    try {
+      const s = statSync(ws);
+      out.push({ taskId, size: dirSizeBytes(ws), mtime: s.mtimeMs, exists: true });
+    } catch {
+      out.push({ taskId, size: 0, mtime: 0, exists: false });
+    }
+  }
+  return out;
 }
 
 function copyDirRecursive(src: string, dest: string): void {

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, type WorkspaceEntry } from "../hooks/useApi";
 import { CodeViewer } from "./CodeViewer";
 import { useToast } from "./Toast";
+import { ConfirmDialog } from "./Modal";
 
 interface Props {
   taskId: string;
@@ -30,6 +31,7 @@ export function WorkspaceBrowser({ taskId }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [file, setFile] = useState<FileView | null>(null);
   const [loadingFile, setLoadingFile] = useState(false);
+  const [confirmRelease, setConfirmRelease] = useState(false);
 
   const loadTree = async (path: string) => {
     setLoading(true);
@@ -99,6 +101,13 @@ export function WorkspaceBrowser({ taskId }: Props) {
           >
             打包下载
           </a>
+          <button
+            className="btn btn-danger"
+            onClick={() => setConfirmRelease(true)}
+            title="删除 workspace 目录（不影响任务记录与日志）"
+          >
+            释放
+          </button>
         </div>
       </div>
 
@@ -198,6 +207,38 @@ export function WorkspaceBrowser({ taskId }: Props) {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmRelease}
+        title="释放 Workspace"
+        message={
+          <div>
+            <p>将删除此任务的 workspace 目录：</p>
+            <pre className="mono" style={{ fontSize: "0.78rem", background: "var(--bg0)", padding: "0.4rem 0.6rem", borderRadius: 4, marginTop: "0.4rem" }}>
+              {`~/.autopilot/runtime/tasks/${taskId}/workspace`}
+            </pre>
+            <p className="muted" style={{ marginTop: "0.4rem", fontSize: "0.78rem" }}>
+              任务记录、状态日志、阶段日志、Agent 调用记录都保留，仅删除产出文件。此操作不可恢复。
+            </p>
+          </div>
+        }
+        confirmText="释放"
+        danger
+        onConfirm={async () => {
+          try {
+            const res = await api.deleteWorkspace(taskId);
+            if (res.removed) toast.success("已释放 workspace");
+            else toast.info("workspace 不存在或已被清理");
+            setFile(null);
+            loadTree("");
+          } catch (e: any) {
+            toast.error("释放失败", e?.message ?? String(e));
+          } finally {
+            setConfirmRelease(false);
+          }
+        }}
+        onCancel={() => setConfirmRelease(false)}
+      />
     </div>
   );
 }
