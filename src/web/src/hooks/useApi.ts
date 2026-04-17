@@ -100,6 +100,8 @@ export const api = {
   listProviders: () => request<ProviderItem[]>("/api/providers"),
   saveProviderConfig: (name: string, cfg: Record<string, unknown>) =>
     request<{ ok: boolean }>(`/api/providers/${name}`, { method: "PUT", body: JSON.stringify(cfg) }),
+  getProvidersStatus: () => request<ProviderStatus[]>("/api/providers/status"),
+  getProviderStatus: (name: string) => request<ProviderStatus>(`/api/providers/${name}/status`),
 
   // Agents
   listAgents: () => request<AgentItem[]>("/api/agents"),
@@ -115,9 +117,17 @@ export const api = {
 export interface ProviderItem {
   name: string;
   default_model?: string;
-  base_url?: string;
   enabled?: boolean;
   agent_count?: number;
+}
+
+export interface ProviderStatus {
+  name: string;
+  cli_installed: boolean;
+  cli_path?: string;
+  cli_version?: string;
+  error?: string;
+  install_hint?: string;
 }
 
 export interface AgentItem {
