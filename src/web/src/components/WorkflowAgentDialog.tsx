@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Modal } from "./Modal";
+import { api, type ProviderModelsResult } from "../hooks/useApi";
 
 export interface WorkflowAgentDraft {
   name: string;
@@ -30,10 +31,22 @@ interface Props {
 export function WorkflowAgentDialog({ open, onClose, onSubmit, initial, globalAgentNames, existingOtherNames }: Props) {
   const [draft, setDraft] = useState<WorkflowAgentDraft>(initial ?? { name: "" });
   const [busy, setBusy] = useState(false);
+  const [models, setModels] = useState<Record<string, ProviderModelsResult>>({});
 
   useEffect(() => {
     if (open) setDraft(initial ?? { name: "" });
   }, [open, initial]);
+
+  useEffect(() => {
+    if (!open) return;
+    const names = ["anthropic", "openai", "google"];
+    Promise.all(names.map((n) => api.getProviderModels(n).catch(() => null)))
+      .then((list) => {
+        const map: Record<string, ProviderModelsResult> = {};
+        for (const r of list) if (r) map[r.name] = r;
+        setModels(map);
+      });
+  }, [open]);
 
   const nameValid = NAME_RE.test(draft.name);
   const nameUnique = !existingOtherNames.includes(draft.name);
@@ -148,9 +161,15 @@ export function WorkflowAgentDialog({ open, onClose, onSubmit, initial, globalAg
             type="text"
             className="text-input mono"
             placeholder="claude-sonnet-4-6"
+            list={draft.provider ? `wf-agent-models-${draft.provider}` : undefined}
             value={draft.model ?? ""}
             onChange={(e) => update("model", e.target.value || undefined)}
           />
+          {draft.provider && models[draft.provider] && (
+            <datalist id={`wf-agent-models-${draft.provider}`}>
+              {models[draft.provider].models.map((m) => <option key={m} value={m} />)}
+            </datalist>
+          )}
         </label>
 
         <label>

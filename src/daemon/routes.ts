@@ -38,6 +38,7 @@ import {
   type ProviderName,
 } from "../core/config";
 import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
+import { listProviderModels } from "../agents/model-list";
 import { emit } from "./event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -660,6 +661,16 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
       const status = await detectProviderCli(providerStatusMatch as ProviderName);
       return json(status);
+    }
+
+    // GET /api/providers/:name/models — 列表（API 或 catalog）
+    const providerModelsMatch = extractParam(path, /^\/api\/providers\/([\w\-]+)\/models$/);
+    if (method === "GET" && providerModelsMatch) {
+      if (!(PROVIDER_NAMES as readonly string[]).includes(providerModelsMatch)) {
+        return error(`未知 provider：${providerModelsMatch}`, 400);
+      }
+      const result = await listProviderModels(providerModelsMatch as ProviderName);
+      return json(result);
     }
 
     // PUT /api/providers/:name

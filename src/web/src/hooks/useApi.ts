@@ -102,6 +102,8 @@ export const api = {
     request<{ ok: boolean }>(`/api/providers/${name}`, { method: "PUT", body: JSON.stringify(cfg) }),
   getProvidersStatus: () => request<ProviderStatus[]>("/api/providers/status"),
   getProviderStatus: (name: string) => request<ProviderStatus>(`/api/providers/${name}/status`),
+  getProviderModels: (name: string) =>
+    request<ProviderModelsResult>(`/api/providers/${name}/models`),
 
   // Agents
   listAgents: () => request<AgentItem[]>("/api/agents"),
@@ -128,6 +130,13 @@ export interface ProviderStatus {
   cli_version?: string;
   error?: string;
   install_hint?: string;
+}
+
+export interface ProviderModelsResult {
+  name: string;
+  models: string[];
+  source: "api" | "catalog";
+  error?: string;
 }
 
 export interface AgentItem {

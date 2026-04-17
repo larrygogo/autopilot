@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api, type ProviderItem, type ProviderStatus } from "../hooks/useApi";
+import { api, type ProviderItem, type ProviderStatus, type ProviderModelsResult } from "../hooks/useApi";
 import { useToast } from "../components/Toast";
 
 const PROVIDER_META: Record<string, { label: string; defaultModel: string; loginCmd: string }> = {
@@ -15,6 +15,7 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Record<string, ProviderStatus>>({});
+  const [models, setModels] = useState<Record<string, ProviderModelsResult>>({});
   const [checking, setChecking] = useState(false);
 
   const refresh = () => {
@@ -34,14 +35,21 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
       for (const s of list) map[s.name] = s;
       setStatuses(map);
     } catch (e: any) {
-      // 静默失败 —— 卡片里会显示「未检测」
       console.warn("状态检测失败", e);
     } finally {
       setChecking(false);
     }
   };
 
-  useEffect(() => { refresh(); refreshStatus(); }, []);
+  const refreshModels = async () => {
+    const names = ["anthropic", "openai", "google"];
+    const results = await Promise.all(names.map((n) => api.getProviderModels(n).catch(() => null)));
+    const map: Record<string, ProviderModelsResult> = {};
+    for (const r of results) if (r) map[r.name] = r;
+    setModels(map);
+  };
+
+  useEffect(() => { refresh(); refreshStatus(); refreshModels(); }, []);
 
   const updateField = (name: string, field: keyof ProviderItem, value: string | boolean | undefined) => {
     setProviders((prev) =>
@@ -122,16 +130,29 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
 
                 <div className="form-grid">
                   <label className="col-span-2">
-                    <span>默认模型</span>
+                    <span>
+                      默认模型
+                      {models[p.name] && (
+                        <span className="muted" style={{ fontSize: "0.7rem", marginLeft: "0.4rem" }}>
+                          （{models[p.name].source === "api" ? "API 实时列表" : "内置列表"}
+                          {models[p.name].error ? ` · 降级：${models[p.name].error}` : ""}）
+                        </span>
+                      )}
+                    </span>
                     <input
                       type="text"
                       className="text-input mono"
                       placeholder={meta.defaultModel}
                       value={p.default_model ?? ""}
+                      list={`models-${p.name}`}
                       onChange={(e) => updateField(p.name, "default_model", e.target.value)}
                     />
+                    {models[p.name] && (
+                      <datalist id={`models-${p.name}`}>
+                        {models[p.name].models.map((m) => <option key={m} value={m} />)}
+                      </datalist>
+                    )}
                   </label>
-
                 </div>
 
                 <div className="card-actions">
