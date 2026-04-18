@@ -1,5 +1,31 @@
 [中文](quickstart.md) | [English](en/quickstart.md)
 
+## 为什么用 autopilot
+
+LLM agent 单次调用很厉害，但**真实工作很少是单次的**：要写完代码自己跑测试、出方案先给你看再开干、中途遇到岔路停下来问你、出错回到上一步重做。这不是 agent 能力问题，是**编排层**问题。autopilot 把"agent 调用"作为一等公民，配上状态机、人在中间、可视化和本地持久化——单进程 daemon + SQLite + 自带 Web，照着下面跑完，你就有了一个能改、能审、能复盘的 agent 流水线。
+
+## 5 分钟你能跑出什么
+
+跑通后你会得到一个**自带的 `dev` 工作流**，下次提需求只要 `autopilot task start` 一句话：
+
+```
+你：给我加个任务标签功能
+  ↓
+architect agent 读 repo + 写技术方案 → workspace/00-design/plan.md
+  ↓
+[Gate: 你审方案] ← 通过则继续，驳回带理由回上一步
+  ↓
+developer agent 写代码 + 跑测试 + git commit
+  ↓
+reviewer agent 看 diff 评审 → REVIEW_RESULT: PASS/REJECT
+  ↓
+gh pr create  ← 真的提 PR
+```
+
+每步产物自动归档到 task workspace，Web UI 实时看进度、看日志、按驳回。
+
+---
+
 # 5 分钟快速入门
 
 本教程带你从零开始，5 分钟内跑通第一个 autopilot 任务。

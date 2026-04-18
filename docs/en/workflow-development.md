@@ -331,6 +331,107 @@ def run_my_phase(task_id: str) -> None:
 - **Transition before Push**: call `transition()` before `run_in_background()`
 - **Transparent field storage**: `get_task()` auto-expands extra; developers need not worry about whether a field is in a column or JSON
 
+## Human-in-the-loop (Gate & ask_user)
+
+Workflows are fully automatic by default — all phases run end to end. But sometimes you need a human in the loop. autopilot ships two built-in mechanisms, and **workflow authors barely have to write any code**.
+
+### Gate: manual approval of phase artifacts
+
+**When to use**: a human reviews and gates the next phase after a phase finishes (e.g. plan sign-off / before a high-risk push / final acceptance).
+
+**Usage**: add `gate: true` to a phase in `workflow.yaml`:
+
+```yaml
+phases:
+  - name: design
+    agent: architect
+    gate: true                              # ← suspend after run, wait for human decision
+    gate_message: "Please review the technical plan"   # ← optional, UI banner prompt text
+  - name: develop
+    agent: developer
+```
+
+**Framework's automatic behavior**:
+1. The design phase function finishes → status becomes `awaiting_design`
+2. The UI shows an orange banner: [Pass] / [Reject (reason required)] / [Cancel task]
+3. Pass → enter develop; reject → jump back to the reject target (`reject:` field, defaults to the same phase); cancel → cancelled
+
+**To let the agent see the rejection reason on retry**, the phase function reads `task.last_user_decision`:
+
+```ts
+const lastDecisionRaw = task["last_user_decision"] as string | undefined;
+if (lastDecisionRaw) {
+  const d = JSON.parse(lastDecisionRaw) as {
+    phase: string;
+    decision: "pass" | "reject" | "cancel";
+    note: string;
+    ts: string;
+  };
+  if (d.phase === "design" && d.decision === "reject") {
+    rejectionHistory += `\n\n## Last manual rejection note (${d.ts})\n${d.note}`;
+  }
+}
+```
+
+**Important**: when using gate, **do not** manually call `transition('xxx_complete')` + `runInBackground('next')` at the end of the phase function. The runner only triggers the await when the state is still `running_<phase>` + `gate: true`; advancing inside the phase function bypasses the gate.
+
+### ask_user: agent asks mid-run
+
+**When to use**: an agent gets halfway and finds the direction uncertain (e.g. choose between A/B implementation paths / fuzzy goal scope / confirm before a sensitive operation) and needs human help to decide.
+
+**Usage**: nothing to configure. The framework auto-injects the `mcp__autopilot_workflow__ask_user` tool into every anthropic agent. **Make the agent want to use it** — drop a hint in the prompt:
+
+```ts
+const prompt =
+  `You are a senior architect.\n\n` +
+  `## Requirement\n${requirement}\n\n` +
+  `Before you start, if there are critical decisions where the direction is unclear, you may use the ask_user tool to ask the user before continuing.\n` +
+  `Don't ask frequently for trivia — only when you are truly stuck.\n\n` +
+  `Please produce the technical plan: ...`;
+```
+
+Agent invocation form:
+
+```
+ask_user({
+  question: "Do you prefer A (extra field) or B (separate tag table)?",
+  options: ["A: extra field", "B: separate tag table"]   // optional, UI renders buttons; omit for free-text answer
+})
+```
+
+**Task behavior**:
+- status stays `running_<phase>` (the agent is still running, the phase function is awaiting pending)
+- the question is written to the `task.pending_question` field
+- the UI shows a blue banner: option buttons / Textarea
+- user answers → agent receives the answer and continues
+
+### Quick comparison
+
+| Dimension | Gate | ask_user |
+|---|---|---|
+| Triggered by | runner (auto on phase completion) | agent (actively called during run) |
+| Configuration | `workflow.yaml` `gate: true` | none |
+| Code in phase function | no (optional read of `last_user_decision`) | no (optional encouragement in prompt) |
+| status | `awaiting_<phase>` | `running_<phase>` + non-empty `pending_question` |
+| User input | pass / reject / cancel | text / option |
+| Timing | "agent done, human approves" | "agent halfway, human assists" |
+| Persistence | yes (db field) | no (promise lives in memory, lost on daemon restart) |
+
+### Combined usage
+
+Both can stack. A typical dev flow:
+
+```yaml
+phases:
+  - name: design       # agent writes the plan, may call ask_user when unsure
+    agent: architect
+    gate: true         # human reviews the plan after it's written
+  - name: develop      # only enters after pass
+    agent: developer
+    gate: true         # review the code after development
+  - name: submit_pr    # only does the real push + opens PR after pass
+```
+
 ## Complete Examples
 
 See `examples/workflows/dev/` and `examples/workflows/req_review/`:
