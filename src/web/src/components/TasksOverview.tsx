@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { AlertTriangle, Activity, CheckCircle2, Database, ListTodo } from "lucide-react";
+import { AlertTriangle, Activity, CheckCircle2, Database, ListTodo, Skull } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +9,7 @@ interface Task {
   workflow: string;
   status: string;
   updated_at: string;
+  dangling?: boolean;
 }
 
 interface DaemonStatus {
@@ -65,15 +66,41 @@ export function TasksOverview({
   const stale = tasks.filter(
     (t) => t.status.startsWith("running_") && now - new Date(t.updated_at).getTime() > STALE_THRESHOLD_MS,
   );
+  const dangling = tasks.filter(
+    (t) => !!t.dangling && t.status.startsWith("running_"),
+  );
 
   return (
     <div className="mb-6 space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <Stat label="总任务" value={total} icon={ListTodo} />
         <Stat label="运行中" value={running} icon={Activity} tone="warning" />
         <Stat label="已完成" value={done} icon={CheckCircle2} tone="success" />
         <Stat label="卡住" value={stale.length} icon={AlertTriangle} tone={stale.length > 0 ? "destructive" : "muted"} />
+        <Stat label="失效" value={dangling.length} icon={Skull} tone={dangling.length > 0 ? "destructive" : "muted"} />
       </div>
+
+      {dangling.length > 0 && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
+          <div className="mb-2 flex items-center gap-2 font-medium text-destructive">
+            <Skull className="h-4 w-4" />
+            <span>{dangling.length} 个任务失效（daemon 重启时 agent 进程已死）</span>
+          </div>
+          <ul className="space-y-1">
+            {dangling.slice(0, 5).map((t) => (
+              <li
+                key={t.id}
+                onClick={() => onSelectTask(t.id)}
+                className="flex cursor-pointer items-center gap-3 rounded px-2 py-1 text-xs hover:bg-destructive/10"
+              >
+                <span className="font-mono text-muted-foreground">{t.id}</span>
+                <span className="truncate">{t.title}</span>
+                <span className="ml-auto text-muted-foreground">点击进入并取消</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {stale.length > 0 && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">

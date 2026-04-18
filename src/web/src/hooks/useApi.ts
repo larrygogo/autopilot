@@ -43,6 +43,11 @@ export const api = {
     request<any>("/api/tasks", { method: "POST", body: JSON.stringify(body) }),
   cancelTask: (id: string) =>
     request<any>(`/api/tasks/${id}/cancel`, { method: "POST" }),
+  restartTask: (id: string) =>
+    request<{ ok: true; phase: string; from: string }>(
+      `/api/tasks/${id}/restart`,
+      { method: "POST" },
+    ),
   decideTask: (id: string, decision: "pass" | "reject" | "cancel", note?: string) =>
     request<{ from: string; to: string; decision: string; note: string }>(
       `/api/tasks/${id}/decide`,

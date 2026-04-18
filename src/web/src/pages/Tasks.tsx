@@ -32,6 +32,8 @@ interface Task {
   status: string;
   created_at: string;
   updated_at: string;
+  dangling?: boolean;
+  pending_question?: string;
 }
 
 interface TasksProps {
@@ -39,16 +41,17 @@ interface TasksProps {
   subscribe: (channel: string, handler: (event: any) => void) => () => void;
 }
 
-type StatusGroup = "all" | "awaiting" | "running" | "pending" | "done" | "cancelled" | "failed";
+type StatusGroup = "all" | "dangling" | "awaiting" | "running" | "pending" | "done" | "cancelled" | "failed";
 
-const STATUS_GROUPS: { key: StatusGroup; label: string; match: (s: string) => boolean }[] = [
+const STATUS_GROUPS: { key: StatusGroup; label: string; match: (t: Task) => boolean }[] = [
   { key: "all", label: "全部", match: () => true },
-  { key: "awaiting", label: "待人工", match: (s) => s.startsWith("awaiting_") },
-  { key: "running", label: "运行中", match: (s) => s.startsWith("running_") },
-  { key: "pending", label: "待处理", match: (s) => s.startsWith("pending_") },
-  { key: "done", label: "已完成", match: (s) => s === "done" },
-  { key: "cancelled", label: "已取消", match: (s) => s === "cancelled" || s === "canceled" },
-  { key: "failed", label: "失败", match: (s) => s === "failed" || s === "error" },
+  { key: "dangling", label: "失效", match: (t) => !!t.dangling && t.status.startsWith("running_") },
+  { key: "awaiting", label: "待人工", match: (t) => t.status.startsWith("awaiting_") },
+  { key: "running", label: "运行中", match: (t) => t.status.startsWith("running_") },
+  { key: "pending", label: "待处理", match: (t) => t.status.startsWith("pending_") },
+  { key: "done", label: "已完成", match: (t) => t.status === "done" },
+  { key: "cancelled", label: "已取消", match: (t) => t.status === "cancelled" || t.status === "canceled" },
+  { key: "failed", label: "失败", match: (t) => t.status === "failed" || t.status === "error" },
 ];
 
 const TERMINAL_PREFIXES = ["done", "cancelled", "canceled", "failed", "error"];
@@ -92,7 +95,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
     const q = search.trim().toLowerCase();
     const statusMatch = STATUS_GROUPS.find((g) => g.key === statusFilter)!.match;
     return tasks.filter((t) => {
-      if (!statusMatch(t.status)) return false;
+      if (!statusMatch(t)) return false;
       if (workflowFilter !== "all" && t.workflow !== workflowFilter) return false;
       if (q && !t.id.toLowerCase().includes(q) && !t.title.toLowerCase().includes(q)) return false;
       return true;
@@ -329,7 +332,14 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                       {t.workflow}
                     </TableCell>
                     <TableCell onClick={() => onSelect(t.id)}>
-                      <StatusBadge status={t.status} />
+                      <div className="flex items-center gap-1.5">
+                        <StatusBadge status={t.status} />
+                        {t.dangling && t.status.startsWith("running_") && (
+                          <span className="rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-destructive">
+                            失效
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell
                       className="whitespace-nowrap text-right text-xs text-muted-foreground"
@@ -351,6 +361,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                 className={cn(
                   "rounded-lg border bg-card px-3.5 py-3 shadow-sm transition-colors",
                   selected.has(t.id) && "border-primary/40 ring-1 ring-primary/20",
+                  t.dangling && t.status.startsWith("running_") && "border-destructive/40",
                 )}
               >
                 <div className="mb-2 flex items-center justify-between gap-2">
@@ -366,7 +377,14 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                     />
                     <span className="font-mono text-xs text-primary">{t.id}</span>
                   </label>
-                  <StatusBadge status={t.status} compact />
+                  <div className="flex items-center gap-1.5">
+                    {t.dangling && t.status.startsWith("running_") && (
+                      <span className="rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-destructive">
+                        失效
+                      </span>
+                    )}
+                    <StatusBadge status={t.status} compact />
+                  </div>
                 </div>
                 <div onClick={() => onSelect(t.id)} className="min-w-0">
                   <div className="mb-1 line-clamp-2 break-words text-sm">{t.title}</div>

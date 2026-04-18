@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Copy, FolderTree, FileText, Bot, History, Radio, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Copy, FolderTree, FileText, Bot, History, Radio, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LogTimeline } from "@/components/LogTimeline";
@@ -157,14 +157,31 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
           <StatusBadge status={task.status} />
         </div>
         {canCancel && (
-          <Button
-            variant="destructive"
-            size="sm"
-            className="ml-auto"
-            onClick={() => setConfirmCancel(true)}
-          >
-            取消任务
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  const r = await api.restartTask(taskId);
+                  toast.success(`已重启 · 从 ${r.phase} 阶段重新执行`);
+                } catch (e: any) {
+                  toast.error("重启失败", e?.message ?? String(e));
+                }
+              }}
+              title="把任务从当前阶段重新执行（绕过状态机；用于 dangling / 卡死 救援）"
+            >
+              <RotateCcw className="h-4 w-4" />
+              重新执行
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirmCancel(true)}
+            >
+              取消任务
+            </Button>
+          </div>
         )}
       </div>
 
@@ -420,17 +437,29 @@ function DanglingBanner({
   taskId: string;
   toast: ReturnType<typeof useToast>;
 }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"cancel" | "restart" | null>(null);
+
+  const restart = async () => {
+    setBusy("restart");
+    try {
+      const r = await api.restartTask(taskId);
+      toast.success(`已重新执行 · 从 ${r.phase} 阶段重启`);
+    } catch (e: any) {
+      toast.error("重启失败", e?.message ?? String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const cancelTask = async () => {
-    setBusy(true);
+    setBusy("cancel");
     try {
       await api.cancelTask(taskId);
       toast.success("已取消该 dangling task");
     } catch (e: any) {
       toast.error("取消失败", e?.message ?? String(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -446,18 +475,30 @@ function DanglingBanner({
             任务在 <code className="rounded bg-muted px-1 font-mono">ask_user</code> 等待回答时 daemon 重启了。
             agent 进程的等待 promise 在内存中丢失，即使你现在回答 agent 也收不到。
             <br />
-            建议：取消该任务并重新创建。下次让 daemon 升级时尽量等所有 ask_user 答完。
+            可以选择：
+            <strong>重新执行</strong>当前阶段（沿用原 workspace 历史从头跑），或
+            <strong>取消任务</strong>新建一个。
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="destructive"
-          className="shrink-0"
-          onClick={cancelTask}
-          disabled={busy}
-        >
-          {busy ? "处理中…" : "取消任务"}
-        </Button>
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={restart}
+            disabled={!!busy}
+          >
+            <RotateCcw className="h-4 w-4" />
+            {busy === "restart" ? "重启中…" : "重新执行"}
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={cancelTask}
+            disabled={!!busy}
+          >
+            {busy === "cancel" ? "处理中…" : "取消任务"}
+          </Button>
+        </div>
       </div>
     </Card>
   );

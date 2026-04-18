@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { join, resolve, sep } from "path";
 import { getPhaseIndex } from "../core/artifacts";
 import { VERSION } from "../index";
-import { initDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks } from "../core/db";
+import { initDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks, updateTask } from "../core/db";
+import { log } from "../core/logger";
 import { snapshotWorkflow } from "../core/manifest";
 import {
   createSession,
@@ -464,6 +465,52 @@ export async function handleRequest(req: Request): Promise<Response> {
 
       const [from, to] = transition(cancelMatch, "cancel", { transitions, note: "API cancel" });
       return json({ from, to });
+    }
+
+    // POST /api/tasks/:id/restart — 把未完成的任务从当前阶段重新执行（dangling 救援用）
+    const restartMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/restart$/);
+    if (method === "POST" && restartMatch) {
+      const taskId = restartMatch;
+      const task = getTask(taskId);
+      if (!task) return error("Task not found", 404);
+
+      // 终态不允许重启（用 clone 不过这里没实现）
+      const wf = getWorkflow(task.workflow);
+      const terminalStates = new Set(["done", "cancelled"]);
+      if (wf) for (const s of wf.terminal_states ?? []) terminalStates.add(s);
+      if (terminalStates.has(task.status)) {
+        return error(`Task 已是终态（${task.status}），无法重启；请新建任务`);
+      }
+
+      // 从 status 提取 phase 名（running_X / pending_X / awaiting_X / X_rejected）
+      const m = task.status.match(/^(?:running_|pending_|awaiting_)(.+)$/);
+      const phase = m ? m[1] : null;
+      if (!phase) {
+        return error(`无法从状态 ${task.status} 推断 phase 名，重启失败`);
+      }
+
+      // 验证 phase 在 workflow 里存在
+      if (wf) {
+        const phaseDef = wf.phases.find((p) => {
+          if (isParallelPhase(p)) return p.parallel.name === phase;
+          return (p as { name: string }).name === phase;
+        });
+        if (!phaseDef) return error(`workflow 里没有阶段 ${phase}`);
+      }
+
+      // 直接改 status + 清掉 dangling/pending_question；绕过状态机，因为是用户级救援
+      updateTask(taskId, {
+        status: `pending_${phase}`,
+        dangling: false,
+        pending_question: "",
+      });
+      log.info("任务被用户手动重启 [task=%s phase=%s 原状态=%s]", taskId, phase, task.status);
+      emit({ type: "task:updated", payload: { task: getTask(taskId)!, fields: ["status"] } });
+
+      // 异步触发执行
+      executePhase(taskId, phase).catch(() => {});
+
+      return json({ ok: true, phase, from: task.status });
     }
 
     // POST /api/tasks/:id/answer — 用户回答 agent 的 ask_user 提问
