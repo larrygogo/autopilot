@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { api, type ProviderItem, type ProviderStatus, type ProviderModelsResult } from "../hooks/useApi";
-import { useToast } from "../components/Toast";
+import { AlertTriangle, CheckCircle2, HelpCircle, RefreshCw, XCircle } from "lucide-react";
+import { api, type ProviderItem, type ProviderStatus, type ProviderModelsResult } from "@/hooks/useApi";
+import { useToast } from "@/components/Toast";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 const PROVIDER_META: Record<string, { label: string; defaultModel: string; loginCmd: string }> = {
   anthropic: { label: "Anthropic (Claude)", defaultModel: "claude-sonnet-4-6", loginCmd: "claude login" },
@@ -8,7 +17,8 @@ const PROVIDER_META: Record<string, { label: string; defaultModel: string; login
   google: { label: "Google (Gemini)", defaultModel: "gemini-2.5-pro", loginCmd: "gemini auth login" },
 };
 
-export function Providers({ embedded = false }: { embedded?: boolean }) {
+// 保留 embedded 参数签名以兼容旧调用
+export function Providers(_props: { embedded?: boolean } = {}) {
   const toast = useToast();
   const [providers, setProviders] = useState<ProviderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,7 +44,7 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
       const map: Record<string, ProviderStatus> = {};
       for (const s of list) map[s.name] = s;
       setStatuses(map);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn("状态检测失败", e);
     } finally {
       setChecking(false);
@@ -49,7 +59,11 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
     setModels(map);
   };
 
-  useEffect(() => { refresh(); refreshStatus(); refreshModels(); }, []);
+  useEffect(() => {
+    refresh();
+    refreshStatus();
+    refreshModels();
+  }, []);
 
   const updateField = (name: string, field: keyof ProviderItem, value: string | boolean | undefined) => {
     setProviders((prev) =>
@@ -70,140 +84,169 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
     }
   };
 
-  const body = (
-    <>
-      {!embedded && (
-        <div className="page-hdr">
-          <h2>模型提供商</h2>
-          <span>LLM 提供商全局默认</span>
+  return (
+    <div className="mx-auto w-full max-w-4xl px-5 py-6">
+      {/* Header */}
+      <div className="mb-5 flex items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight">模型提供商</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">LLM 提供商全局默认</p>
         </div>
-      )}
-
-      <div className="card" style={{ marginBottom: "1rem" }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
-          <p className="muted" style={{ fontSize: "0.85rem", flex: 1, margin: 0 }}>
-            Autopilot 通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。
-            如尚未登录，请在终端中运行对应的 <span className="mono">login</span> 命令。
-          </p>
-          <button className="btn btn-secondary" onClick={refreshStatus} disabled={checking}>
-            {checking ? "检查中..." : "重新检查"}
-          </button>
-        </div>
+        <Button variant="secondary" onClick={refreshStatus} disabled={checking} size="sm">
+          <RefreshCw className={cn("h-3.5 w-3.5", checking && "animate-spin")} />
+          {checking ? "检查中…" : "重新检查"}
+        </Button>
       </div>
 
+      {/* 说明 */}
+      <Card className="mb-4 p-4">
+        <p className="text-sm text-muted-foreground">
+          Autopilot 通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。
+          如尚未登录，请在终端中运行对应的 <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">login</code> 命令。
+        </p>
+      </Card>
+
       {loadError && (
-        <div className="card" style={{ marginBottom: "1rem", borderColor: "rgba(248,113,113,0.4)" }}>
-          <p style={{ color: "var(--red)" }}>加载失败：{loadError}</p>
-          <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.82rem" }}>
-            常见原因：daemon 未重启（新 API 未生效）。请执行 <code className="mono">autopilot daemon stop && autopilot daemon start</code> 后刷新页面。
+        <Card className="mb-4 border-destructive/40 bg-destructive/5 p-4">
+          <p className="text-sm font-medium text-destructive">加载失败：{loadError}</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            常见原因：daemon 未重启（新 API 未生效）。请执行{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono">autopilot daemon stop && autopilot daemon start</code> 后刷新页面。
           </p>
-        </div>
+        </Card>
       )}
 
       {loading ? (
-        <p className="muted">加载中...</p>
+        <p className="text-sm text-muted-foreground">加载中…</p>
       ) : (
-        <div className="provider-list">
+        <div className="flex flex-col gap-4">
           {providers.map((p) => {
             const meta = PROVIDER_META[p.name] ?? { label: p.name, defaultModel: "", loginCmd: "" };
+            const status = statuses[p.name];
+            const modelInfo = models[p.name];
             return (
-              <div key={p.name} className="card provider-card">
-                <div className="card-header">
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-                    <h3>{meta.label}</h3>
-                    <ProviderStatusBadge status={statuses[p.name]} />
-                    <span className="pill pill-accent">
+              <Card key={p.name} className="p-5">
+                {/* Card header */}
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-semibold">{meta.label}</h3>
+                    <ProviderStatusBadge status={status} />
+                    <Badge variant="secondary" className="font-normal">
                       {p.agent_count ?? 0} 个智能体
-                    </span>
+                    </Badge>
                   </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
+                  <div className="flex items-center gap-2 text-sm">
+                    <Switch
+                      id={`enabled-${p.name}`}
                       checked={p.enabled !== false}
-                      onChange={(e) => updateField(p.name, "enabled", e.target.checked)}
+                      onCheckedChange={(v) => updateField(p.name, "enabled", v)}
                     />
-                    <span>{p.enabled !== false ? "启用" : "禁用"}</span>
-                  </label>
+                    <Label htmlFor={`enabled-${p.name}`} className="cursor-pointer">
+                      {p.enabled !== false ? "启用" : "禁用"}
+                    </Label>
+                  </div>
                 </div>
 
-                <ProviderStatusDetail status={statuses[p.name]} loginCmd={meta.loginCmd} />
+                {/* 状态详情 */}
+                <ProviderStatusDetail status={status} loginCmd={meta.loginCmd} />
 
-                <div className="form-grid">
-                  <label className="col-span-2">
-                    <span>
-                      默认模型
-                      {models[p.name] && (
-                        <span className="muted" style={{ fontSize: "0.7rem", marginLeft: "0.4rem" }}>
-                          （{models[p.name].source === "api" ? "API 实时列表" : "内置列表"}
-                          {models[p.name].error ? ` · 降级：${models[p.name].error}` : ""}）
-                        </span>
-                      )}
-                    </span>
-                    <input
-                      type="text"
-                      className="text-input mono"
-                      placeholder={meta.defaultModel}
-                      value={p.default_model ?? ""}
-                      list={`models-${p.name}`}
-                      onChange={(e) => updateField(p.name, "default_model", e.target.value)}
-                    />
-                    {models[p.name] && (
-                      <datalist id={`models-${p.name}`}>
-                        {models[p.name].models.map((m) => <option key={m} value={m} />)}
-                      </datalist>
+                <Separator className="my-4" />
+
+                {/* 配置表单 */}
+                <div className="space-y-1.5">
+                  <Label htmlFor={`model-${p.name}`} className="flex flex-wrap items-center gap-2">
+                    <span>默认模型</span>
+                    {modelInfo && (
+                      <span className="text-xs font-normal text-muted-foreground">
+                        （{modelInfo.source === "api" ? "API 实时列表" : "内置列表"}
+                        {modelInfo.error ? ` · 降级：${modelInfo.error}` : ""}）
+                      </span>
                     )}
-                  </label>
+                  </Label>
+                  <Input
+                    id={`model-${p.name}`}
+                    className="font-mono"
+                    placeholder={meta.defaultModel}
+                    value={p.default_model ?? ""}
+                    list={`models-${p.name}`}
+                    onChange={(e) => updateField(p.name, "default_model", e.target.value)}
+                  />
+                  {modelInfo && (
+                    <datalist id={`models-${p.name}`}>
+                      {modelInfo.models.map((m) => <option key={m} value={m} />)}
+                    </datalist>
+                  )}
                 </div>
 
-                <div className="card-actions">
-                  <button
-                    className="btn btn-primary"
+                <div className="mt-4 flex justify-end">
+                  <Button
                     onClick={() => save(p)}
                     disabled={saving === p.name}
                   >
-                    {saving === p.name ? "保存中..." : "保存"}
-                  </button>
+                    {saving === p.name ? "保存中…" : "保存"}
+                  </Button>
                 </div>
-              </div>
+              </Card>
             );
           })}
         </div>
       )}
-    </>
+    </div>
   );
-
-  return embedded ? <>{body}</> : <div className="container">{body}</div>;
 }
 
 function ProviderStatusBadge({ status }: { status?: ProviderStatus }) {
   if (!status) {
-    return <span className="pill status-pill status-unknown">未检测</span>;
+    return (
+      <Badge variant="outline" className="gap-1 font-normal text-muted-foreground">
+        <HelpCircle className="h-3 w-3" />
+        未检测
+      </Badge>
+    );
   }
   if (!status.cli_installed) {
-    return <span className="pill status-pill status-missing">CLI 未安装</span>;
+    return (
+      <Badge variant="destructive" className="gap-1 font-normal">
+        <XCircle className="h-3 w-3" />
+        CLI 未安装
+      </Badge>
+    );
   }
   if (status.error) {
-    return <span className="pill status-pill status-warn">CLI 异常</span>;
+    return (
+      <Badge variant="outline" className="gap-1 border-amber-500/40 bg-amber-500/10 font-normal text-amber-600 dark:text-amber-400">
+        <AlertTriangle className="h-3 w-3" />
+        CLI 异常
+      </Badge>
+    );
   }
-  return <span className="pill status-pill status-ok">CLI 就绪</span>;
+  return (
+    <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 font-normal text-emerald-600 dark:text-emerald-400">
+      <CheckCircle2 className="h-3 w-3" />
+      CLI 就绪
+    </Badge>
+  );
 }
 
 function ProviderStatusDetail({ status, loginCmd }: { status?: ProviderStatus; loginCmd: string }) {
   if (!status) {
     return (
-      <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.75rem" }}>
-        登录命令：<span className="mono">{loginCmd}</span>
+      <p className="text-xs text-muted-foreground">
+        登录命令：<code className="rounded bg-muted px-1 py-0.5 font-mono">{loginCmd}</code>
       </p>
     );
   }
 
   if (!status.cli_installed) {
     return (
-      <div className="status-detail status-detail-error">
-        <div><strong>⚠ {status.error ?? "CLI 未安装"}</strong></div>
+      <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
+        <div className="flex items-center gap-1.5 font-medium text-destructive">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          {status.error ?? "CLI 未安装"}
+        </div>
         {status.install_hint && (
-          <div style={{ fontSize: "0.78rem", marginTop: "0.35rem" }}>
-            安装：<code className="mono">{status.install_hint}</code>
+          <div className="mt-1.5 text-muted-foreground">
+            安装：<code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{status.install_hint}</code>
           </div>
         )}
       </div>
@@ -211,24 +254,26 @@ function ProviderStatusDetail({ status, loginCmd }: { status?: ProviderStatus; l
   }
 
   return (
-    <div className="status-detail">
+    <div className="space-y-1 text-xs">
       <div>
-        <span className="muted" style={{ fontSize: "0.78rem" }}>CLI：</span>
-        <code className="mono" style={{ fontSize: "0.78rem" }}>{status.cli_path}</code>
+        <span className="text-muted-foreground">CLI：</span>
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_path}</code>
       </div>
       {status.cli_version && (
-        <div style={{ marginTop: "0.2rem" }}>
-          <span className="muted" style={{ fontSize: "0.78rem" }}>版本：</span>
-          <code className="mono" style={{ fontSize: "0.78rem" }}>{status.cli_version}</code>
+        <div>
+          <span className="text-muted-foreground">版本：</span>
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_version}</code>
         </div>
       )}
       {status.error && (
-        <div style={{ marginTop: "0.3rem", color: "var(--yellow)", fontSize: "0.78rem" }}>
-          ⚠ {status.error}
+        <div className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+          <AlertTriangle className="h-3 w-3" />
+          {status.error}
         </div>
       )}
-      <div style={{ marginTop: "0.3rem", fontSize: "0.78rem" }}>
-        <span className="muted">登录：</span><span className="mono">{loginCmd}</span>
+      <div>
+        <span className="text-muted-foreground">登录：</span>
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{loginCmd}</code>
       </div>
     </div>
   );

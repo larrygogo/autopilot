@@ -288,17 +288,28 @@ daemon
 const task = program.command("task").description("任务管理");
 
 task
-  .command("start <req-id>")
-  .description("创建并启动任务")
-  .option("-t, --title <title>", "任务标题")
+  .command("start <title>")
+  .description("创建并启动任务（task ID 自动生成）")
   .option("-w, --workflow <name>", "工作流名称")
+  .option("-r, --requirement <text>", "需求详情；以 @ 开头则从文件读，例如 -r @./req.md")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (reqId: string, opts: { title?: string; workflow?: string; port: string }) => {
+  .action(async (title: string, opts: { workflow?: string; requirement?: string; port: string }) => {
     const client = getClient(opts);
     await ensureDaemon(client);
 
+    let requirement = opts.requirement;
+    if (requirement?.startsWith("@")) {
+      const path = requirement.slice(1);
+      try {
+        requirement = await Bun.file(path).text();
+      } catch (e: unknown) {
+        console.error(`读取需求文件失败：${path} - ${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      }
+    }
+
     try {
-      const t = await client.startTask({ reqId, title: opts.title, workflow: opts.workflow });
+      const t = await client.startTask({ title, requirement, workflow: opts.workflow });
       console.log(`任务已创建 [id=${t.id} workflow=${t.workflow} status=${t.status}]`);
     } catch (e: unknown) {
       console.error(`错误：${e instanceof Error ? e.message : String(e)}`);

@@ -325,3 +325,78 @@ export const TOOL_NAMES = [
   "start_task",
   "cancel_task",
 ] as const;
+
+// ──────────────────────────────────────────────
+// 工作流内 agent 用的工具集（仅 ask_user）
+//
+// 跟 buildAutopilotTools 不同：那是 chat agent 用的，能 list/start/cancel；
+// 工作流 agent 不该改 task 元数据，只暴露 ask_user 用于人机交互。
+// ──────────────────────────────────────────────
+
+export const WORKFLOW_TOOL_NAMES = ["ask_user"] as const;
+
+export async function buildWorkflowAgentTools(): Promise<SdkMcpToolDefinition<any>[]> {
+  const sdk = await import("@anthropic-ai/claude-agent-sdk");
+  const tool = sdk.tool;
+
+  const { getTaskContext } = await import("../core/task-context");
+  const { updateTask } = await import("../core/db");
+  const { registerPending } = await import("./pending-questions");
+  const { emit } = await import("../daemon/event-bus");
+
+  return [
+    tool(
+      "ask_user",
+      "向用户提问并等待人工回答。用户在 UI 看到问题并提交后 agent 收到答案继续。仅在确实需要人工决断（如二选一无法判断、敏感操作前确认）时使用，不要为了简单细节问。",
+      {
+        question: z.string().min(1).describe("要问的问题，清晰具体"),
+        options: z
+          .array(z.string())
+          .min(2)
+          .max(8)
+          .optional()
+          .describe("可选项（2-8 个）；用户在 UI 上以按钮选择。不传则纯文本回答"),
+      },
+      async (args) => {
+        const ctx = getTaskContext();
+        if (!ctx) return err("ask_user 必须在 phase 上下文中调用");
+        const taskId = ctx.taskId;
+
+        const askedAt = new Date().toISOString();
+        const meta = {
+          question: args.question,
+          options: args.options ?? null,
+          asked_at: askedAt,
+          phase: ctx.phase,
+        };
+
+        try {
+          updateTask(taskId, { pending_question: JSON.stringify(meta) });
+        } catch {
+          /* ignore — 即便 db 写失败也继续等 promise */
+        }
+        emit({ type: "task:asking", payload: { taskId, phase: ctx.phase, question: args.question } });
+
+        const answer = await new Promise<string>((resolve, reject) => {
+          registerPending(taskId, {
+            resolve,
+            reject,
+            question: args.question,
+            options: args.options ?? null,
+            asked_at: askedAt,
+            phase: ctx.phase,
+          });
+        });
+
+        try {
+          updateTask(taskId, { pending_question: "" });
+        } catch {
+          /* ignore */
+        }
+        emit({ type: "task:answered", payload: { taskId, phase: ctx.phase } });
+
+        return ok({ answer });
+      },
+    ),
+  ];
+}

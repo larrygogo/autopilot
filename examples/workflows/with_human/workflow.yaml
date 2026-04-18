@@ -1,0 +1,33 @@
+name: with_human
+description: "演示人机交互：agent 中途可调 ask_user 询问，phase 完成后人工 gate 审批"
+setup_func: setup_with_human_task
+
+config:
+  # 默认让 agent 阅读这个 repo；可改成你自己的项目路径
+  repo_path: /home/larry/repos/autopilot
+
+agents:
+  - name: planner
+    provider: anthropic
+    model: claude-sonnet-4-6
+    permission_mode: bypassPermissions
+  - name: reviewer
+    provider: anthropic
+    model: claude-sonnet-4-6
+    permission_mode: bypassPermissions
+
+phases:
+  # plan 阶段：agent 写计划，遇到不确定可调 ask_user 问用户；
+  # 写完后 gate=true 卡住等用户审批
+  - name: plan
+    agent: planner
+    timeout: 600
+    gate: true
+    gate_message: "请审阅 plan.md。通过则进入 review，驳回需写明改进方向。"
+
+  # review 阶段：reviewer 评审，未通过自动回 plan 重做（驳回意见喂给下一轮 plan）
+  - name: review
+    agent: reviewer
+    timeout: 600
+    reject: plan
+    max_rejections: 3

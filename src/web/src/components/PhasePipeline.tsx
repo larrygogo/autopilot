@@ -1,4 +1,7 @@
 import React from "react";
+import { ArrowRight, RotateCcw } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 // ──────────────────────────────────────────────
 // 流水线视图 — 横向显示工作流阶段，并行块以分叉展示
@@ -65,15 +68,20 @@ export function PhasePipeline({ phases, highlight, onHoverPhase, currentState }:
   );
 
   if (entries.length === 0) {
-    return <p className="muted">尚无阶段，添加一个阶段以查看流水线</p>;
+    return <p className="text-sm text-muted-foreground">尚无阶段，添加一个阶段以查看流水线</p>;
   }
 
   return (
-    <div className="pipeline-wrap">
-      <div className="pipeline">
+    <div className="space-y-3">
+      <div className="scrollbar-thin flex items-stretch gap-2 overflow-x-auto pb-1">
         {entries.map((entry, i) => (
           <React.Fragment key={i}>
-            {i > 0 && <span className="pipeline-arrow">→</span>}
+            {i > 0 && (
+              <ArrowRight
+                className="h-4 w-4 shrink-0 self-center text-muted-foreground"
+                aria-hidden="true"
+              />
+            )}
             {entry.kind === "phase" ? (
               <PhaseNode
                 phase={entry.phase}
@@ -96,13 +104,16 @@ export function PhasePipeline({ phases, highlight, onHoverPhase, currentState }:
       </div>
 
       {rejects.length > 0 && (
-        <div className="pipeline-rejects">
-          <span className="muted" style={{ fontSize: "0.76rem" }}>驳回规则：</span>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t pt-3">
+          <span className="text-xs text-muted-foreground">驳回规则：</span>
           {rejects.map((r, i) => (
-            <span key={i} className="pipeline-reject">
-              <code className="mono">{r.from}</code>
-              <span style={{ color: "var(--yellow)" }}>↺</span>
-              <code className="mono">{r.to}</code>
+            <span
+              key={i}
+              className="inline-flex items-center gap-1.5 rounded-md border border-warning/30 bg-warning/10 px-2 py-0.5 text-xs"
+            >
+              <code className="font-mono text-foreground">{r.from}</code>
+              <RotateCcw className="h-3 w-3 text-warning" aria-hidden="true" />
+              <code className="font-mono text-foreground">{r.to}</code>
             </span>
           ))}
         </div>
@@ -121,13 +132,25 @@ function PhaseNode({
 }) {
   return (
     <div
-      className={`pipeline-node ${current ? "current" : ""} ${highlight ? "highlight" : ""}`}
+      className={cn(
+        "flex min-w-[7rem] shrink-0 cursor-default flex-col items-center justify-center gap-1 rounded-md border bg-card px-3 py-2 text-center shadow-sm transition-colors",
+        "hover:border-primary/40 hover:bg-accent/40",
+        highlight && "border-primary/50 bg-accent/60 ring-1 ring-primary/30",
+        current && "border-primary bg-primary/10 ring-2 ring-primary/40",
+      )}
       onMouseEnter={() => onHover?.(phase.name)}
       onMouseLeave={() => onHover?.(null)}
     >
-      <div className="pipeline-node-name mono">{phase.name}</div>
+      <div
+        className={cn(
+          "max-w-[10rem] truncate font-mono text-xs font-medium",
+          current ? "text-primary" : "text-foreground",
+        )}
+      >
+        {phase.name}
+      </div>
       {phase.timeout && (
-        <div className="pipeline-node-meta muted">{fmtTimeout(phase.timeout)}</div>
+        <div className="text-[10px] text-muted-foreground">{fmtTimeout(phase.timeout)}</div>
       )}
     </div>
   );
@@ -145,19 +168,22 @@ function ParallelNode({
 }) {
   const headHighlight = highlight === name;
   return (
-    <div className="pipeline-parallel">
+    <div className="flex shrink-0 flex-col gap-1.5 rounded-md border border-dashed bg-muted/30 p-2">
       <div
-        className={`pipeline-parallel-head ${headHighlight ? "highlight" : ""}`}
+        className={cn(
+          "flex cursor-default items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors",
+          headHighlight && "bg-accent/60",
+        )}
         onMouseEnter={() => onHover?.(name)}
         onMouseLeave={() => onHover?.(null)}
       >
-        <span className="pill pill-accent" style={{ fontSize: "0.7rem" }}>并行</span>
-        <span className="mono" style={{ fontSize: "0.85rem" }}>{name}</span>
+        <Badge variant="info" className="px-1.5 py-0 text-[10px]">并行</Badge>
+        <span className="font-mono text-xs">{name}</span>
         {failStrategy && (
-          <span className="muted" style={{ fontSize: "0.7rem" }}>· {failStrategy}</span>
+          <span className="text-[10px] text-muted-foreground">· {failStrategy}</span>
         )}
       </div>
-      <div className="pipeline-parallel-body">
+      <div className="flex items-stretch gap-1.5">
         {phases.map((p) => (
           <PhaseNode
             key={p.name}

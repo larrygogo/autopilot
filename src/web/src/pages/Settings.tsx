@@ -1,8 +1,22 @@
-import React, { useEffect, useState } from "react";
-import { api } from "../hooks/useApi";
-import { useToast } from "../components/Toast";
+import React, { useEffect, useMemo, useState } from "react";
+import { RefreshCw, Search } from "lucide-react";
+import { api } from "@/hooks/useApi";
+import { useToast } from "@/components/Toast";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input, Textarea } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
-export function Settings({ embedded = false }: { embedded?: boolean }) {
+// 保留 embedded 参数签名以兼容旧调用
+export function Settings(_props: { embedded?: boolean } = {}) {
   const toast = useToast();
 
   const [configYaml, setConfigYaml] = useState("");
@@ -76,109 +90,122 @@ export function Settings({ embedded = false }: { embedded?: boolean }) {
     }
   };
 
-  const body = (
-    <>
-      {!embedded && (
-        <div className="page-hdr">
-          <h2>高级 (YAML)</h2>
-        </div>
-      )}
-
-      {embedded && (
-        <div className="subtab-toolbar">
-          <span className="muted" style={{ fontSize: "0.82rem" }}>
-            优先使用上方的图形化编辑；这里是 YAML 直编后门
-          </span>
-        </div>
-      )}
+  return (
+    <div className="mx-auto w-full max-w-4xl px-5 py-6">
+      {/* Header */}
+      <div className="mb-5">
+        <h2 className="text-xl font-semibold tracking-tight">高级设置</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          优先使用图形化的 提供商 / 智能体 页面；这里是 YAML 直编后门。
+        </p>
+      </div>
 
       {status && (
-        <div className="card" style={{ marginBottom: "1rem" }}>
-          <h3>Daemon 信息</h3>
-          <div className="settings-info-grid">
-            <div><span className="muted">版本：</span>{status.version}</div>
-            <div><span className="muted">PID：</span>{status.pid}</div>
-            <div><span className="muted">运行时间：</span>{formatUptime(status.uptime)}</div>
-            <div><span className="muted">端口：</span>{location.port || "80"}</div>
-          </div>
-        </div>
+        <Card className="mb-4 p-4">
+          <h3 className="mb-3 text-sm font-semibold">Daemon 信息</h3>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+            <InfoField label="版本" value={status.version} />
+            <InfoField label="PID" value={String(status.pid)} mono />
+            <InfoField label="运行时间" value={formatUptime(status.uptime)} />
+            <InfoField label="端口" value={location.port || "80"} mono />
+          </dl>
+        </Card>
       )}
 
       <DaemonLogCard />
 
-      <div className="card" style={{ marginBottom: "1rem" }}>
-        <div className="card-header">
-          <h3>全局配置</h3>
-          <span className="muted mono" style={{ fontSize: "0.75rem" }}>config.yaml</span>
+      {/* 全局配置 */}
+      <Card className="mb-4 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold">全局配置</h3>
+            <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">config.yaml</p>
+          </div>
         </div>
         {configLoading ? (
-          <p className="muted">加载中...</p>
+          <p className="text-sm text-muted-foreground">加载中…</p>
         ) : (
           <>
-            <textarea
-              className="yaml-editor"
+            <Textarea
+              className="min-h-[320px] font-mono text-xs"
               value={configYaml}
               onChange={(e) => setConfigYaml(e.target.value)}
               placeholder={CONFIG_PLACEHOLDER}
               spellCheck={false}
             />
-            <div className="card-actions">
-              <button className="btn btn-primary" onClick={saveConfig} disabled={configSaving}>
-                {configSaving ? "保存中..." : "保存"}
-              </button>
+            <div className="mt-3 flex justify-end">
+              <Button onClick={saveConfig} disabled={configSaving}>
+                {configSaving ? "保存中…" : "保存"}
+              </Button>
             </div>
           </>
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <div className="card-header">
-          <h3>工作流配置</h3>
-          <button className="btn btn-secondary" onClick={reloadAll}>重载全部</button>
+      {/* 工作流 YAML */}
+      <Card className="p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">工作流配置</h3>
+          <Button variant="secondary" size="sm" onClick={reloadAll}>
+            <RefreshCw className="h-3.5 w-3.5" />
+            重载全部
+          </Button>
         </div>
 
-        <div style={{ marginBottom: "0.75rem" }}>
-          <select
-            className="wf-select"
-            value={selectedWf}
-            onChange={(e) => setSelectedWf(e.target.value)}
-          >
-            <option value="">选择工作流...</option>
-            {workflows.map((wf) => (
-              <option key={wf.name} value={wf.name}>
-                {wf.name}{wf.description ? ` — ${wf.description}` : ""}
-              </option>
-            ))}
-          </select>
+        <div className="mb-3 space-y-1.5">
+          <Label>选择工作流</Label>
+          <Select value={selectedWf || "__none__"} onValueChange={(v) => setSelectedWf(v === "__none__" ? "" : v)}>
+            <SelectTrigger>
+              <SelectValue placeholder="选择工作流…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">—</SelectItem>
+              {workflows.map((wf) => (
+                <SelectItem key={wf.name} value={wf.name}>
+                  <span className="font-medium">{wf.name}</span>
+                  {wf.description ? (
+                    <span className="ml-2 text-muted-foreground">— {wf.description}</span>
+                  ) : null}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {selectedWf && (
           <>
             {wfLoading ? (
-              <p className="muted">加载中...</p>
+              <p className="text-sm text-muted-foreground">加载中…</p>
             ) : (
               <>
-                <textarea
-                  className="yaml-editor"
+                <Textarea
+                  className="min-h-[320px] font-mono text-xs"
                   value={wfYaml}
                   onChange={(e) => setWfYaml(e.target.value)}
                   placeholder="# workflow.yaml"
                   spellCheck={false}
                 />
-                <div className="card-actions">
-                  <button className="btn btn-primary" onClick={saveWorkflow} disabled={wfSaving}>
-                    {wfSaving ? "保存中..." : "保存并重载"}
-                  </button>
+                <div className="mt-3 flex justify-end">
+                  <Button onClick={saveWorkflow} disabled={wfSaving}>
+                    {wfSaving ? "保存中…" : "保存并重载"}
+                  </Button>
                 </div>
               </>
             )}
           </>
         )}
-      </div>
-    </>
+      </Card>
+    </div>
   );
+}
 
-  return embedded ? <>{body}</> : <div className="container">{body}</div>;
+function InfoField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex flex-col">
+      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dd className={cn("text-sm", mono && "font-mono")}>{value}</dd>
+    </div>
+  );
 }
 
 function DaemonLogCard(): React.ReactElement {
@@ -203,7 +230,7 @@ function DaemonLogCard(): React.ReactElement {
 
   useEffect(() => { refresh(); /* eslint-disable-line */ }, []);
 
-  const filtered = React.useMemo(() => {
+  const filtered = useMemo(() => {
     if (!content) return [];
     const lines = content.split("\n");
     const q = query.trim().toLowerCase();
@@ -215,45 +242,62 @@ function DaemonLogCard(): React.ReactElement {
     return m?.[1] ?? null;
   };
 
+  const levelClass = (lvl: string | null) => {
+    switch (lvl) {
+      case "ERROR": return "text-destructive";
+      case "WARN": return "text-amber-600 dark:text-amber-400";
+      case "DEBUG": return "text-muted-foreground";
+      default: return "text-foreground";
+    }
+  };
+
   return (
-    <div className="card" style={{ marginBottom: "1rem" }}>
-      <div className="card-header">
-        <h3>Daemon 日志</h3>
-        <button className="btn btn-secondary" onClick={refresh} disabled={loading}>刷新</button>
+    <Card className="mb-4 p-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Daemon 日志</h3>
+        <Button variant="secondary" size="sm" onClick={refresh} disabled={loading}>
+          <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+          刷新
+        </Button>
       </div>
+
       {path ? (
-        <p className="muted" style={{ fontSize: "0.76rem", marginBottom: "0.5rem" }}>
-          位置：<code className="mono">{path}</code>
-          <span style={{ marginLeft: "0.5rem" }}>（含上一次滚动的 .1 备份，最后 1000 行）</span>
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          位置：<code className="rounded bg-muted px-1 py-0.5 font-mono">{path}</code>
+          <span className="ml-1">（含上一次滚动的 .1 备份，最后 1000 行）</span>
         </p>
       ) : (
-        <p className="muted" style={{ fontSize: "0.82rem" }}>daemon 日志未激活或路径未知。</p>
+        <p className="mb-2 text-xs text-muted-foreground">daemon 日志未激活或路径未知。</p>
       )}
-      <input
-        type="search"
-        className="text-input"
-        placeholder="搜索日志..."
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        style={{ marginBottom: "0.5rem" }}
-      />
+
+      <div className="relative mb-2">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="search"
+          placeholder="搜索日志…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="pl-8"
+        />
+      </div>
+
       {loading && !content ? (
-        <p className="muted">加载中...</p>
+        <p className="text-sm text-muted-foreground">加载中…</p>
       ) : filtered.length === 0 ? (
-        <p className="muted" style={{ padding: "0.5rem" }}>
+        <p className="rounded-md border bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
           {content ? "（当前过滤下无匹配）" : "（空）"}
         </p>
       ) : (
-        <pre className="phase-log-body" style={{ maxHeight: 400 }}>
+        <pre className="scrollbar-thin max-h-[400px] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
           {filtered.map((line, i) => {
             const lvl = extractLevel(line);
             return (
-              <div key={i} className={`log-row ${lvl ? `log-row-${lvl.toLowerCase()}` : ""}`}>{line}</div>
+              <div key={i} className={cn("whitespace-pre", levelClass(lvl))}>{line}</div>
             );
           })}
         </pre>
       )}
-    </div>
+    </Card>
   );
 }
 

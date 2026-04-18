@@ -1,17 +1,23 @@
 /**
  * dev 工作流阶段函数（TypeScript 版）
  * 完整开发流程：方案设计 → 方案评审 → 开发 → 代码审查 → PR 提交
+ *
+ * 产物路径契约（与 runner 自动归档对齐）：
+ * 所有 agent 产物写到 workspace/<NN-phase>/，与框架自动归档的
+ * agent-trace.md / phase.log 同目录。NN 是 phase 在 workflow.phases
+ * 中的顺序编号，由 getPhaseIndex() 计算。
  */
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { getTask, updateTask } from "../../../src/core/db";
-import { getTaskDir } from "../../../src/core/infra";
-import { transition } from "../../../src/core/state-machine";
-import { getWorkflow, buildTransitions } from "../../../src/core/registry";
-import { runInBackground } from "../../../src/core/runner";
-import { getAgent } from "../../../src/agents/registry";
+import { getTask, updateTask } from "@autopilot/core/db";
+import { transition } from "@autopilot/core/state-machine";
+import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
+import { runInBackground } from "@autopilot/core/runner";
+import { getAgent } from "@autopilot/agents/registry";
+import { getPhaseIndex } from "@autopilot/core/artifacts";
+import { getTaskWorkspace } from "@autopilot/core/workspace";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
 const REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT";
@@ -52,11 +58,24 @@ function expandPath(p: string): string {
   return p;
 }
 
+/**
+ * 计算指定 phase 的产物目录：workspace/<NN-phase>/，幂等创建。
+ */
+function phaseDir(taskId: string, workflowName: string, phaseName: string): string {
+  const wf = getWorkflow(workflowName);
+  if (!wf) throw new Error(`workflow not found: ${workflowName}`);
+  const idx = getPhaseIndex(wf, phaseName);
+  if (idx < 0) throw new Error(`phase not found in workflow: ${phaseName}`);
+  const dir = join(getTaskWorkspace(taskId), `${String(idx).padStart(2, "0")}-${phaseName}`);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 // ──────────────────────────────────────────────
 // 任务初始化
 // ──────────────────────────────────────────────
 
-export function setup_dev_task(args: { title?: string }): Record<string, unknown> {
+export function setup_dev_task(args: { title?: string; requirement?: string }): Record<string, unknown> {
   const wf = getWorkflow("dev");
   const config = (wf?.config ?? {}) as Record<string, string>;
 
@@ -66,6 +85,7 @@ export function setup_dev_task(args: { title?: string }): Record<string, unknown
 
   return {
     title,
+    requirement: args.requirement ?? "",
     repo_path: repoPath,
     default_branch: defaultBranch,
     branch: `feat/${title.slice(0, 20).replace(/\s+/g, "-").toLowerCase()}`,
@@ -80,22 +100,21 @@ export async function run_design(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const taskDir = getTaskDir(taskId);
   const repoPath = task["repo_path"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
   runGit(["checkout", defaultBranch], repoPath);
   runGit(["pull", "--ff-only"], repoPath);
 
-  const reqPath = join(taskDir, "requirement.md");
-  if (!existsSync(reqPath)) {
-    throw new Error(`需求文件不存在：${reqPath}`);
+  const requirement = ((task["requirement"] as string | undefined) ?? "").trim();
+  if (!requirement) {
+    throw new Error("任务 requirement 字段为空，请在创建任务时提供需求描述");
   }
-  const requirement = readFileSync(reqPath, "utf-8");
 
-  // 驳回历史
+  // 驳回历史：上一次 reviewer 驳回意见
   let rejectionHistory = "";
-  const reviewPath = join(taskDir, "plan_review.md");
+  const reviewDir = phaseDir(taskId, task.workflow, "review");
+  const reviewPath = join(reviewDir, "plan_review.md");
   const rejectionCounts = getRejectionCounts(task);
   const designRejections = rejectionCounts["design"] ?? 0;
   if (existsSync(reviewPath) && designRejections > 0) {
@@ -114,7 +133,7 @@ export async function run_design(taskId: string): Promise<void> {
   const agent = getAgent("architect", task.workflow);
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 900_000 });
 
-  const planPath = join(taskDir, "plan.md");
+  const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   writeFileSync(planPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
 
   transition(taskId, "design_complete", {
@@ -128,12 +147,11 @@ export async function run_review(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const taskDir = getTaskDir(taskId);
   const repoPath = task["repo_path"] as string;
 
-  const planContent = readFileSync(join(taskDir, "plan.md"), "utf-8");
-  const reqPath = join(taskDir, "requirement.md");
-  const requirement = existsSync(reqPath) ? readFileSync(reqPath, "utf-8") : "";
+  const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
+  const planContent = readFileSync(planPath, "utf-8");
+  const requirement = ((task["requirement"] as string | undefined) ?? "").trim();
 
   const prompt =
     `你是一位技术评审专家。请评审以下技术方案是否满足需求。\n\n` +
@@ -149,7 +167,7 @@ export async function run_review(taskId: string): Promise<void> {
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 900_000 });
   const text = result.text;
 
-  const reviewPath = join(taskDir, "plan_review.md");
+  const reviewPath = join(phaseDir(taskId, task.workflow, "review"), "plan_review.md");
   writeFileSync(reviewPath, `<!-- generated:${new Date().toISOString()} -->\n${text}`, "utf-8");
 
   const passed = text.includes(REVIEW_RESULT_PASS);
@@ -196,7 +214,6 @@ export async function run_develop(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const taskDir = getTaskDir(taskId);
   const repoPath = task["repo_path"] as string;
   const branch = task["branch"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
@@ -208,7 +225,8 @@ export async function run_develop(taskId: string): Promise<void> {
     runGit(["checkout", branch], repoPath);
   }
 
-  const planContent = readFileSync(join(taskDir, "plan.md"), "utf-8");
+  const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
+  const planContent = readFileSync(planPath, "utf-8");
 
   const prompt =
     `你是一位高级开发工程师。请根据以下技术方案进行开发。\n\n` +
@@ -218,7 +236,7 @@ export async function run_develop(taskId: string): Promise<void> {
   const agent = getAgent("developer", task.workflow);
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
 
-  const reportPath = join(taskDir, "dev_report.md");
+  const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
   writeFileSync(reportPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
 
   const statusResult = runGit(["status", "--porcelain"], repoPath);
@@ -238,14 +256,14 @@ export async function run_code_review(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const taskDir = getTaskDir(taskId);
   const repoPath = task["repo_path"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
   const diffResult = runGit(["diff", `${defaultBranch}...HEAD`, "--no-ext-diff"], repoPath);
   const gitDiff = diffResult.stdout.slice(0, 80000);
 
-  const planContent = readFileSync(join(taskDir, "plan.md"), "utf-8");
+  const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
+  const planContent = readFileSync(planPath, "utf-8");
 
   const prompt =
     `你是一位代码审查专家。请审查以下代码变更是否符合技术方案要求。\n\n` +
@@ -261,7 +279,7 @@ export async function run_code_review(taskId: string): Promise<void> {
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_200_000 });
   const text = result.text;
 
-  const reviewPath = join(taskDir, "code_review_report.md");
+  const reviewPath = join(phaseDir(taskId, task.workflow, "code_review"), "code_review_report.md");
   writeFileSync(reviewPath, `<!-- generated:${new Date().toISOString()} -->\n${text}`, "utf-8");
 
   const passed = text.includes(REVIEW_RESULT_PASS);
@@ -308,14 +326,13 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const taskDir = getTaskDir(taskId);
   const repoPath = task["repo_path"] as string;
   const branch = task["branch"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
   runGit(["push", "-u", "origin", branch], repoPath);
 
-  const planPath = join(taskDir, "plan.md");
+  const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
   const diffStatResult = runGit(["diff", `${defaultBranch}...HEAD`, "--stat"], repoPath);
   const gitDiffStat = diffStatResult.stdout.slice(0, 3000);

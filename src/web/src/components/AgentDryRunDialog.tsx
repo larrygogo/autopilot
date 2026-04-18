@@ -1,7 +1,19 @@
 import React, { useEffect, useState } from "react";
+import { Copy } from "lucide-react";
 import { api, type AgentItem, type ProviderModelsResult } from "../hooks/useApi";
-import { Modal } from "./Modal";
 import { useToast } from "./Toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input, Textarea } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface Props {
   open: boolean;
@@ -38,7 +50,10 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
 
   // 加载 provider 对应的模型列表（只在有 provider 时）
   useEffect(() => {
-    if (!open || !agent?.provider) { setModels(null); return; }
+    if (!open || !agent?.provider) {
+      setModels(null);
+      return;
+    }
     api.getProviderModels(agent.provider).then(setModels).catch(() => setModels(null));
   }, [open, agent?.provider]);
 
@@ -76,7 +91,9 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
     try {
       await navigator.clipboard.writeText(result.text);
       toast.success("已复制到剪贴板");
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -84,117 +101,143 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
   };
 
   return (
-    <Modal
+    <Dialog
       open={open}
-      onClose={() => !running && onClose()}
-      title={`试跑智能体：${agent.name}`}
-      size="lg"
-      dismissable={!running}
-      actions={
-        <>
-          <button className="btn btn-secondary" onClick={onClose} disabled={running}>
-            {result ? "关闭" : "取消"}
-          </button>
-          <button className="btn btn-primary" onClick={run} disabled={!canRun}>
-            {running ? "运行中..." : result ? "重新运行" : "运行"}
-          </button>
-        </>
-      }
+      onOpenChange={(v) => {
+        if (!v && !running) onClose();
+      }}
     >
-      {/* agent 基础信息摘要 */}
-      <div className="card" style={{ background: "var(--bg0)", padding: "0.6rem 0.85rem", marginBottom: "0.75rem", fontSize: "0.82rem" }}>
-        <div className="mono" style={{ color: "var(--cyan)" }}>
-          {agent.provider ?? "—"}{agent.model ? ` / ${agent.model}` : ""}
-          {agent.max_turns !== undefined && <span className="muted"> · {agent.max_turns} turns</span>}
-        </div>
-        {agent.system_prompt && (
-          <p className="muted" style={{ fontSize: "0.76rem", marginTop: "0.3rem", whiteSpace: "pre-wrap" }}>
-            {agent.system_prompt.length > 200 ? agent.system_prompt.slice(0, 200) + "…" : agent.system_prompt}
-          </p>
-        )}
-      </div>
+      <DialogContent className="sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>试跑智能体：{agent.name}</DialogTitle>
+          <DialogDescription>
+            试跑不创建任务、不走工作流；失败不会影响任何运行中的任务。
+          </DialogDescription>
+        </DialogHeader>
 
-      <div className="form-grid" onKeyDown={onKeyDown}>
-        <label className="col-span-2">
-          <span>Prompt <span className="required">*</span></span>
-          <textarea
-            className="yaml-editor"
-            style={{ minHeight: 140 }}
-            placeholder="输入要测试的 prompt；Ctrl/Cmd + Enter 快速运行"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            autoFocus
-          />
-        </label>
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto py-1 pr-1">
+          {/* agent 基础信息摘要 */}
+          <Card className="bg-muted/40 px-3 py-2.5 text-sm">
+            <div className="font-mono text-xs text-primary">
+              {agent.provider ?? "—"}
+              {agent.model ? ` / ${agent.model}` : ""}
+              {agent.max_turns !== undefined && (
+                <span className="text-muted-foreground"> · {agent.max_turns} turns</span>
+              )}
+            </div>
+            {agent.system_prompt && (
+              <p className="mt-1.5 whitespace-pre-wrap text-xs text-muted-foreground">
+                {agent.system_prompt.length > 200
+                  ? agent.system_prompt.slice(0, 200) + "…"
+                  : agent.system_prompt}
+              </p>
+            )}
+          </Card>
 
-        <label>
-          <span>临时覆盖模型（可选）</span>
-          <input
-            type="text"
-            className="text-input mono"
-            placeholder={agent.model ?? "使用 agent 配置的模型"}
-            list={models ? "dry-run-models" : undefined}
-            value={modelOverride}
-            onChange={(e) => setModelOverride(e.target.value)}
-          />
-          {models && (
-            <datalist id="dry-run-models">
-              {models.models.map((m) => <option key={m} value={m} />)}
-            </datalist>
-          )}
-        </label>
+          <div className="space-y-4" onKeyDown={onKeyDown}>
+            <div className="space-y-1.5">
+              <Label htmlFor="dry-run-prompt">
+                Prompt <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="dry-run-prompt"
+                className="min-h-[140px] font-mono text-xs"
+                placeholder="输入要测试的 prompt；Ctrl/Cmd + Enter 快速运行"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                autoFocus
+              />
+            </div>
 
-        <label>
-          <span>最大轮数（可选）</span>
-          <input
-            type="number"
-            className="text-input"
-            min={1}
-            placeholder={String(agent.max_turns ?? 10)}
-            value={maxTurns}
-            onChange={(e) => setMaxTurns(e.target.value)}
-          />
-        </label>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="dry-run-model">临时覆盖模型（可选）</Label>
+                <Input
+                  id="dry-run-model"
+                  className="font-mono"
+                  placeholder={agent.model ?? "使用 agent 配置的模型"}
+                  list={models ? "dry-run-models" : undefined}
+                  value={modelOverride}
+                  onChange={(e) => setModelOverride(e.target.value)}
+                />
+                {models && (
+                  <datalist id="dry-run-models">
+                    {models.models.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                )}
+              </div>
 
-        <label className="col-span-2">
-          <span>追加 system prompt（可选，叠加到 agent 的 system_prompt 之后）</span>
-          <textarea
-            className="yaml-editor"
-            style={{ minHeight: 80 }}
-            placeholder="例如：仅用中文回答 / 严格按 JSON 格式返回"
-            value={additionalSystem}
-            onChange={(e) => setAdditionalSystem(e.target.value)}
-          />
-        </label>
-      </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="dry-run-turns">最大轮数（可选）</Label>
+                <Input
+                  id="dry-run-turns"
+                  type="number"
+                  min={1}
+                  placeholder={String(agent.max_turns ?? 10)}
+                  value={maxTurns}
+                  onChange={(e) => setMaxTurns(e.target.value)}
+                />
+              </div>
+            </div>
 
-      {running && (
-        <div className="card" style={{ marginTop: "1rem", textAlign: "center", padding: "1.2rem" }}>
-          <p className="muted">运行中... CLI 可能会弹出权限确认</p>
-        </div>
-      )}
-
-      {result && (
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <div className="card-header">
-            <h3>结果</h3>
-            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-              <span className="muted" style={{ fontSize: "0.76rem" }}>
-                耗时 {Math.round(result.elapsed_ms / 100) / 10}s
-                {result.usage?.input_tokens != null && ` · in ${result.usage.input_tokens}t`}
-                {result.usage?.output_tokens != null && ` · out ${result.usage.output_tokens}t`}
-                {result.usage?.total_cost_usd != null && ` · $${result.usage.total_cost_usd.toFixed(4)}`}
-              </span>
-              <button className="btn btn-secondary" onClick={copyResult}>复制</button>
+            <div className="space-y-1.5">
+              <Label htmlFor="dry-run-system">追加 system prompt（可选）</Label>
+              <Textarea
+                id="dry-run-system"
+                className="min-h-[80px] font-mono text-xs"
+                placeholder="例如：仅用中文回答 / 严格按 JSON 格式返回"
+                value={additionalSystem}
+                onChange={(e) => setAdditionalSystem(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                叠加到 agent 的 system_prompt 之后。
+              </p>
             </div>
           </div>
-          <pre className="dry-run-result">{result.text || "（空输出）"}</pre>
-        </div>
-      )}
 
-      <p className="muted" style={{ marginTop: "0.6rem", fontSize: "0.74rem" }}>
-        注：试跑不创建任务、不走工作流；失败不会影响任何运行中的任务。
-      </p>
-    </Modal>
+          {running && (
+            <Card className="bg-muted/40 px-4 py-5 text-center">
+              <p className="text-sm text-muted-foreground">运行中… CLI 可能会弹出权限确认</p>
+            </Card>
+          )}
+
+          {result && (
+            <Card className="overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
+                <h3 className="text-sm font-semibold">结果</h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    耗时 {Math.round(result.elapsed_ms / 100) / 10}s
+                    {result.usage?.input_tokens != null && ` · in ${result.usage.input_tokens}t`}
+                    {result.usage?.output_tokens != null &&
+                      ` · out ${result.usage.output_tokens}t`}
+                    {result.usage?.total_cost_usd != null &&
+                      ` · $${result.usage.total_cost_usd.toFixed(4)}`}
+                  </span>
+                  <Button size="sm" variant="secondary" onClick={copyResult}>
+                    <Copy className="h-3.5 w-3.5" />
+                    复制
+                  </Button>
+                </div>
+              </div>
+              <pre className="scrollbar-thin max-h-[40vh] overflow-auto whitespace-pre-wrap break-words bg-muted/30 px-4 py-3 font-mono text-xs leading-relaxed text-foreground">
+                {result.text || "（空输出）"}
+              </pre>
+            </Card>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose} disabled={running}>
+            {result ? "关闭" : "取消"}
+          </Button>
+          <Button onClick={run} disabled={!canRun}>
+            {running ? "运行中…" : result ? "重新运行" : "运行"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -24,6 +24,10 @@ export interface PhaseDefinition {
   jump_target?: string;
   max_rejections?: number;
   _jump_origin?: string;
+  /** 跑完后挂起到 awaiting_<name>，等 UI 决断（pass/reject）才推进 */
+  gate?: boolean;
+  /** 等待界面的提示文案；默认 "请审阅产物后决定" */
+  gate_message?: string;
   [key: string]: unknown;
 }
 
@@ -197,12 +201,36 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
   // 动态 import workflow.ts（如果存在）。
   // Bun 的 ESM import() 会按路径缓存，一旦首次加载，后续 reload 即使磁盘变化
   // 仍拿到旧版本。加 ?t=<mtime> query 强制每次文件变动后重新加载。
+  //
+  // 别名兜底：Bun.plugin 的 onResolve 在 dynamic import 后续静态 import 链上
+  // 不一定生效。所以加载前读文件，把 `@autopilot/...` 字符串替换为绝对路径
+  // 再写到 cache 临时文件 import，确保 examples cp 到 ~/.autopilot/workflows/
+  // 后能直接跑。
   let tsModule: Record<string, unknown> | null = null;
   if (existsSync(tsPath)) {
     try {
-      const { statSync } = await import("fs");
+      const { statSync, readFileSync, writeFileSync, mkdirSync } = await import("fs");
+      const { join: joinPath, dirname: dirnamePath, basename: basenamePath } = await import("path");
+      const { getAutopilotSrcPath } = await import("./autopilot-resolver");
+
       const mtime = statSync(tsPath).mtimeMs;
-      tsModule = await import(`${tsPath}?t=${mtime}`) as Record<string, unknown>;
+      let importPath = tsPath;
+
+      const content = readFileSync(tsPath, "utf-8");
+      if (/(["'])@autopilot\//.test(content)) {
+        const srcPath = getAutopilotSrcPath();
+        const resolved = content.replace(
+          /(["'])@autopilot\//g,
+          (_m, q) => `${q}${srcPath}/`,
+        );
+        const cacheDir = joinPath(AUTOPILOT_HOME, "runtime", "cache", "workflows");
+        if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
+        const wfDirName = basenamePath(dirnamePath(tsPath));
+        importPath = joinPath(cacheDir, `${wfDirName}.${mtime}.ts`);
+        writeFileSync(importPath, resolved, "utf-8");
+      }
+
+      tsModule = await import(`${importPath}?t=${mtime}`) as Record<string, unknown>;
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       log.warn("加载 YAML 工作流 TS 模块 %s 失败：%s", tsPath, message);
@@ -450,6 +478,37 @@ export function buildTransitions(workflow: WorkflowDefinition): TransitionTable 
           if (!transitions[rejectedState]) transitions[rejectedState] = [];
           transitions[rejectedState].push([retryTrigger, targetPhase.pending_state]);
         }
+      }
+    }
+
+    // gate：phase 跑完后挂起到 awaiting_<name>，等用户决断
+    if (p.gate) {
+      const awaiting = `awaiting_${p.name}`;
+      const passTrigger = `${p.name}_pass`;
+      const rejectTrigger = `${p.name}_reject_user`;
+
+      // running → awaiting（runner 在阶段函数完成后自动触发）
+      if (!transitions[running]) transitions[running] = [];
+      transitions[running].push([`await_${p.name}`, awaiting]);
+
+      // awaiting → next pending（用户 pass）
+      if (!transitions[awaiting]) transitions[awaiting] = [];
+      const nextPending = getNextPending(i);
+      if (nextPending) {
+        transitions[awaiting].push([passTrigger, nextPending]);
+      } else {
+        const doneState = terminalStates.has("done")
+          ? "done"
+          : [...terminalStates].find((s) => s !== "cancelled") ?? "done";
+        transitions[awaiting].push([passTrigger, doneState]);
+      }
+
+      // awaiting → reject 目标（用户 reject）
+      // jump_target 优先；否则回 pending_<phase> 重做本阶段
+      const rejectTargetName = p.jump_target ?? p.name;
+      const rejectTargetPhase = allFlatPhases.find((fp) => fp.name === rejectTargetName);
+      if (rejectTargetPhase) {
+        transitions[awaiting].push([rejectTrigger, rejectTargetPhase.pending_state]);
       }
     }
   }

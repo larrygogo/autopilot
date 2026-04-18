@@ -1,5 +1,22 @@
 import React, { useState } from "react";
-import { Modal } from "./Modal";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export interface NewPhaseData {
   name: string;
@@ -20,11 +37,15 @@ interface Props {
 
 export function AddPhaseDialog({ open, onClose, onConfirm, existingNames, count }: Props) {
   const [name, setName] = useState("");
-  const [timeout, setTimeout] = useState(900);
+  const [timeoutSec, setTimeoutSec] = useState(900);
   const [insertAfter, setInsertAfter] = useState<number>(count - 1);
   const [busy, setBusy] = useState(false);
 
-  const reset = () => { setName(""); setTimeout(900); setInsertAfter(count - 1); };
+  const reset = () => {
+    setName("");
+    setTimeoutSec(900);
+    setInsertAfter(count - 1);
+  };
 
   const close = () => {
     if (busy) return;
@@ -34,80 +55,106 @@ export function AddPhaseDialog({ open, onClose, onConfirm, existingNames, count 
 
   const nameValid = PHASE_NAME_RE.test(name);
   const nameUnique = !existingNames.includes(name);
-  const canSubmit = nameValid && nameUnique && timeout > 0 && !busy;
+  const canSubmit = nameValid && nameUnique && timeoutSec > 0 && !busy;
 
   const submit = async () => {
     if (!canSubmit) return;
     setBusy(true);
     try {
-      await onConfirm({ name, timeout, insertAfter });
+      await onConfirm({ name, timeout: timeoutSec, insertAfter });
       reset();
     } finally {
       setBusy(false);
     }
   };
 
+  const nameError =
+    name && !nameValid
+      ? "须以小写字母开头，仅含小写字母 / 数字 / _"
+      : name && !nameUnique
+        ? "该阶段名已存在"
+        : null;
+
   return (
-    <Modal
+    <Dialog
       open={open}
-      onClose={close}
-      title="新增阶段"
-      size="sm"
-      dismissable={!busy}
-      actions={
-        <>
-          <button className="btn btn-secondary" onClick={close} disabled={busy}>取消</button>
-          <button className="btn btn-primary" onClick={submit} disabled={!canSubmit}>
-            {busy ? "保存中..." : "添加"}
-          </button>
-        </>
-      }
+      onOpenChange={(v) => {
+        if (!v && !busy) close();
+      }}
     >
-      <div className="form-grid">
-        <label className="col-span-2">
-          <span>阶段名 <span className="required">*</span></span>
-          <input
-            type="text"
-            className="text-input mono"
-            placeholder="例如：review"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoFocus
-          />
-          {name && !nameValid && (
-            <small style={{ color: "var(--red)" }}>须以小写字母开头，仅含小写字母 / 数字 / _</small>
-          )}
-          {name && nameValid && !nameUnique && (
-            <small style={{ color: "var(--red)" }}>该阶段名已存在</small>
-          )}
-          {!name && <small className="muted">将自动生成 run_&lt;阶段名&gt; 函数</small>}
-        </label>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>新增阶段</DialogTitle>
+          <DialogDescription>添加一个新阶段到工作流中。</DialogDescription>
+        </DialogHeader>
 
-        <label className="col-span-2">
-          <span>超时（秒）</span>
-          <input
-            type="number"
-            className="text-input"
-            min={1}
-            value={timeout}
-            onChange={(e) => setTimeout(parseInt(e.target.value, 10) || 0)}
-          />
-        </label>
+        <div className="space-y-4 py-1">
+          <div className="space-y-1.5">
+            <Label htmlFor="add-phase-name">
+              阶段名 <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="add-phase-name"
+              className={
+                nameError
+                  ? "font-mono border-destructive focus-visible:ring-destructive"
+                  : "font-mono"
+              }
+              placeholder="例如：review"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
+            <p
+              className={
+                nameError ? "text-xs text-destructive" : "text-xs text-muted-foreground"
+              }
+            >
+              {nameError ?? "将自动生成 run_<阶段名> 函数"}
+            </p>
+          </div>
 
-        <label className="col-span-2">
-          <span>插入位置</span>
-          <select
-            className="wf-select"
-            value={insertAfter}
-            onChange={(e) => setInsertAfter(parseInt(e.target.value, 10))}
-          >
-            <option value={-1}>插入到开头</option>
-            {existingNames.map((n, i) => (
-              <option key={n} value={i}>在「{n}」之后</option>
-            ))}
-          </select>
-        </label>
-      </div>
-    </Modal>
+          <div className="space-y-1.5">
+            <Label htmlFor="add-phase-timeout">超时（秒）</Label>
+            <Input
+              id="add-phase-timeout"
+              type="number"
+              min={1}
+              value={timeoutSec}
+              onChange={(e) => setTimeoutSec(parseInt(e.target.value, 10) || 0)}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>插入位置</Label>
+            <Select
+              value={String(insertAfter)}
+              onValueChange={(v) => setInsertAfter(parseInt(v, 10))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="-1">插入到开头</SelectItem>
+                {existingNames.map((n, i) => (
+                  <SelectItem key={n} value={String(i)}>
+                    在「{n}」之后
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={close} disabled={busy}>
+            取消
+          </Button>
+          <Button onClick={submit} disabled={!canSubmit}>
+            {busy ? "保存中…" : "添加"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

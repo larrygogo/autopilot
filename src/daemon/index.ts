@@ -1,11 +1,12 @@
 import { mkdirSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME, VERSION } from "../index";
-import { initDb, closeDb } from "../core/db";
+import { installAutopilotResolver } from "../core/autopilot-resolver";
+import { initDb, closeDb, listTasks, updateTask } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/registry";
 import { checkStuckTasks, pruneWorkspacesByPolicy } from "../core/watcher";
-import { initDaemonFileLog } from "../core/logger";
+import { initDaemonFileLog, log } from "../core/logger";
 import { loadDaemonConfig } from "../core/config";
 import { enableBus, disableBus, bus } from "./event-bus";
 import { wsManager } from "./ws";
@@ -46,6 +47,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     process.exit(1);
   }
 
+  // 安装 @autopilot/* 别名解析器（必须早于任何 dynamic import 用户工作流）
+  installAutopilotResolver();
+
   // 确保运行时目录存在
   mkdirSync(join(AUTOPILOT_HOME, "runtime"), { recursive: true });
 
@@ -77,6 +81,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 写入 PID 和监听信息
   writePid();
   writeListenInfo({ host, port });
+
+  // 重启检测：把所有 status=running_* 且 pending_question 非空的 task 标 dangling
+  // —— ask_user 的 in-memory promise 在 daemon 重启时丢失，agent 永远收不到 tool result，
+  // 这些 task 实际已死，UI 看到 dangling=true 时会提示用户取消重启。
+  recoverDanglingTasks();
 
   // 启动 watcher 定时器
   const watcherTimer = setInterval(() => {
@@ -114,6 +123,29 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+}
+
+function recoverDanglingTasks(): void {
+  try {
+    const tasks = listTasks({});
+    let count = 0;
+    for (const t of tasks) {
+      const pq = t["pending_question"] as string | undefined;
+      if (pq && pq.trim() && t.status.startsWith("running_") && !t["dangling"]) {
+        updateTask(t.id, { dangling: true });
+        log.warn(
+          "task %s 在 daemon 重启时仍处于 running_* + pending_question 非空 → 标记 dangling（agent 已死，UI 会提示用户）",
+          t.id,
+        );
+        count++;
+      }
+    }
+    if (count > 0) {
+      log.warn("共 %d 个 task 因 daemon 重启被标 dangling，请在 UI 取消并重新创建任务", count);
+    }
+  } catch (e: unknown) {
+    console.error("recoverDanglingTasks 异常：", e instanceof Error ? e.message : String(e));
+  }
 }
 
 // 如果直接运行此文件，启动 daemon

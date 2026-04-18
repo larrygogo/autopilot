@@ -11,7 +11,10 @@ export type AutopilotEvent =
   | { type: "task:transition"; payload: { taskId: string; from: string; to: string; trigger: string } }
   | { type: "phase:started"; payload: { taskId: string; phase: string; label: string } }
   | { type: "phase:completed"; payload: { taskId: string; phase: string } }
+  | { type: "phase:awaiting"; payload: { taskId: string; phase: string } }
   | { type: "phase:error"; payload: { taskId: string; phase: string; error: string } }
+  | { type: "task:asking"; payload: { taskId: string; phase: string; question: string } }
+  | { type: "task:answered"; payload: { taskId: string; phase: string } }
   | { type: "log:entry"; payload: { taskId?: string; phase: string; level: string; message: string; timestamp: string } }
   | { type: "watcher:recovery"; payload: { taskId: string; phase: string; fromStatus: string; toStatus: string } }
   | { type: "daemon:status"; payload: { version: string; uptime: number; pid: number; taskCounts: Record<string, number> } }

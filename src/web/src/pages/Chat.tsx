@@ -1,6 +1,32 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { api, type ChatMessage, type ChatSessionManifest, type AgentItem } from "../hooks/useApi";
-import { useToast } from "../components/Toast";
+import {
+  MessageSquare,
+  Plus,
+  Send,
+  Menu,
+  Trash2,
+  Bot,
+  Workflow as WorkflowIcon,
+} from "lucide-react";
+import {
+  api,
+  type ChatMessage,
+  type ChatSessionManifest,
+  type AgentItem,
+} from "@/hooks/useApi";
+import { useToast } from "@/components/Toast";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
 
 interface ChatProps {
   subscribe: (channel: string, handler: (event: any) => void) => () => void;
@@ -34,12 +60,18 @@ export function Chat({ subscribe }: ChatProps) {
   }, [refreshSessions]);
 
   useEffect(() => {
-    if (!selected) { setMessages([]); return; }
-    api.getSession(selected).then((s) => {
-      setMessages(s.messages);
-      if (s.agent) setAgent(s.agent);
-      setWorkflow(s.workflow ?? "");
-    }).catch(() => {});
+    if (!selected) {
+      setMessages([]);
+      return;
+    }
+    api
+      .getSession(selected)
+      .then((s) => {
+        setMessages(s.messages);
+        if (s.agent) setAgent(s.agent);
+        setWorkflow(s.workflow ?? "");
+      })
+      .catch(() => {});
   }, [selected]); // eslint-disable-line
 
   useEffect(() => {
@@ -64,18 +96,6 @@ export function Chat({ subscribe }: ChatProps) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, streaming]);
 
-  useEffect(() => {
-    if (!sidebarOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSidebarOpen(false); };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [sidebarOpen]);
-
   // 输入框自适应高度
   useEffect(() => {
     const el = inputRef.current;
@@ -89,7 +109,11 @@ export function Chat({ subscribe }: ChatProps) {
     if (!text || sending) return;
     setSending(true);
     setStreaming("");
-    const userMsg: ChatMessage = { role: "user", content: text, ts: new Date().toISOString() };
+    const userMsg: ChatMessage = {
+      role: "user",
+      content: text,
+      ts: new Date().toISOString(),
+    };
     setMessages((prev) => [...prev, userMsg]);
     setDraft("");
     try {
@@ -101,7 +125,8 @@ export function Chat({ subscribe }: ChatProps) {
       });
       if (!selected) setSelected(result.session_id);
       setMessages((prev) => {
-        if (prev.some((m) => m.ts === result.message.ts && m.role === "assistant")) return prev;
+        if (prev.some((m) => m.ts === result.message.ts && m.role === "assistant"))
+          return prev;
         return [...prev, result.message];
       });
       refreshSessions();
@@ -139,148 +164,313 @@ export function Chat({ subscribe }: ChatProps) {
   };
 
   const currentSession = sessions.find((s) => s.id === selected) ?? null;
-  const currentTitle = currentSession?.title || (selected ? selected.slice(0, 8) : "新对话");
-  const currentAgent = currentSession?.agent || agent || "(默认)";
+  const currentTitle =
+    currentSession?.title || (selected ? selected.slice(0, 8) : "新对话");
+  const currentAgent = currentSession?.agent || agent || "默认";
   const currentWorkflow = currentSession?.workflow || workflow;
 
+  const sidebar = (
+    <SessionList
+      sessions={sessions}
+      selected={selected}
+      onNew={newChat}
+      onSelect={selectSession}
+    />
+  );
+
   return (
-    <div className="chat-layout">
-      {sidebarOpen && (
-        <div className="chat-sidebar-overlay" onClick={() => setSidebarOpen(false)} />
-      )}
-      <aside className={`chat-sidebar ${sidebarOpen ? "chat-sidebar-open" : ""}`}>
-        <div className="chat-sidebar-head">
-          <button className="chat-new-btn" onClick={newChat}>+ 新对话</button>
-          <button
-            className="chat-sidebar-close mobile-only"
-            onClick={() => setSidebarOpen(false)}
-            aria-label="关闭"
-          >✕</button>
-        </div>
-        <div className="chat-session-list">
-          {sessions.length === 0 && (
-            <div className="chat-empty">暂无对话</div>
-          )}
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              onClick={() => selectSession(s.id)}
-              className={`chat-session-item ${selected === s.id ? "chat-session-active" : ""}`}
-            >
-              <div className="chat-session-title">{s.title || s.id.slice(0, 8)}</div>
-              <div className="chat-session-meta">
-                {s.agent}{s.workflow ? ` · ${s.workflow}` : ""} · {s.message_count} 条
-              </div>
-            </div>
-          ))}
-        </div>
+    <div className="flex h-full min-h-0 w-full">
+      {/* Desktop sidebar */}
+      <aside className="hidden w-64 shrink-0 border-r bg-sidebar md:flex md:flex-col">
+        {sidebar}
       </aside>
 
-      <main className="chat-main">
-        <div className="chat-head">
-          <button
-            className="chat-sidebar-toggle mobile-only"
+      {/* Mobile drawer */}
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent side="left" className="w-72 bg-sidebar p-0">
+          {sidebar}
+        </SheetContent>
+      </Sheet>
+
+      {/* Main */}
+      <main className="flex min-w-0 flex-1 flex-col bg-background">
+        {/* Header */}
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 md:hidden"
             onClick={() => setSidebarOpen(true)}
             aria-label="打开会话列表"
-          >☰</button>
-          <div className="chat-head-title">
-            <span className="chat-head-title-text">{currentTitle}</span>
-          </div>
-          <div className="chat-head-chips">
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+
+          <h2 className="truncate text-sm font-semibold tracking-tight">
+            {currentTitle}
+          </h2>
+
+          <div className="ml-2 hidden min-w-0 flex-wrap items-center gap-1.5 sm:flex">
             {selected ? (
               <>
-                <span className="chat-chip">⚙ {currentAgent}</span>
-                {currentWorkflow && <span className="chat-chip chat-chip-muted">▸ {currentWorkflow}</span>}
+                <Badge variant="default" className="gap-1">
+                  <Bot className="h-3 w-3" />
+                  {currentAgent}
+                </Badge>
+                {currentWorkflow && (
+                  <Badge variant="muted" className="gap-1">
+                    <WorkflowIcon className="h-3 w-3" />
+                    {currentWorkflow}
+                  </Badge>
+                )}
               </>
             ) : (
               <>
-                <select
-                  className="chat-select"
-                  value={agent}
-                  onChange={(e) => setAgent(e.target.value)}
-                >
-                  <option value="">默认 agent</option>
-                  {agents.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
-                </select>
-                <select
-                  className="chat-select"
-                  value={workflow}
-                  onChange={(e) => setWorkflow(e.target.value)}
-                >
-                  <option value="">不限工作流</option>
-                  {workflows.map((w) => <option key={w.name} value={w.name}>{w.name}</option>)}
-                </select>
+                <Select value={agent || "__default__"} onValueChange={(v) => setAgent(v === "__default__" ? "" : v)}>
+                  <SelectTrigger className="h-7 w-auto gap-1 px-2 text-xs">
+                    <Bot className="h-3 w-3 opacity-60" />
+                    <SelectValue placeholder="默认 agent" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">默认 agent</SelectItem>
+                    {agents.map((a) => (
+                      <SelectItem key={a.name} value={a.name}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={workflow || "__none__"} onValueChange={(v) => setWorkflow(v === "__none__" ? "" : v)}>
+                  <SelectTrigger className="h-7 w-auto gap-1 px-2 text-xs">
+                    <WorkflowIcon className="h-3 w-3 opacity-60" />
+                    <SelectValue placeholder="不限工作流" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">不限工作流</SelectItem>
+                    {workflows.map((w) => (
+                      <SelectItem key={w.name} value={w.name}>
+                        {w.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </>
             )}
           </div>
+
           {selected && (
-            <button className="chat-delete-btn" onClick={deleteCurrent}>删除</button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="ml-auto h-8 w-8 text-muted-foreground hover:text-destructive"
+              onClick={deleteCurrent}
+              aria-label="删除对话"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           )}
         </div>
 
-        <div ref={scrollRef} className="chat-messages">
-          <div className="chat-messages-inner">
-            {messages.length === 0 && !streaming && (
-              <div className="chat-empty-hint">发一条消息开始对话</div>
-            )}
-            {messages.map((m, i) => <MessageItem key={i} message={m} />)}
-            {streaming && (
-              <MessageItem
-                message={{ role: "assistant", content: streaming, ts: "" }}
-                streaming
-              />
+        {/* Messages */}
+        <div
+          ref={scrollRef}
+          className="scrollbar-thin flex-1 overflow-y-auto px-4 py-6 md:px-6"
+        >
+          <div className="mx-auto flex max-w-3xl flex-col gap-5">
+            {messages.length === 0 && !streaming ? (
+              <EmptyChat />
+            ) : (
+              <>
+                {messages.map((m, i) => (
+                  <MessageItem key={i} message={m} />
+                ))}
+                {streaming && (
+                  <MessageItem
+                    message={{ role: "assistant", content: streaming, ts: "" }}
+                    streaming
+                  />
+                )}
+              </>
             )}
           </div>
         </div>
 
-        <div className="chat-input-wrap">
-          <div className="chat-input-inner">
-            <textarea
+        {/* Input */}
+        <div className="shrink-0 border-t bg-background px-4 py-3 md:px-6">
+          <div className="relative mx-auto max-w-3xl">
+            <Textarea
               ref={inputRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                const isMod = e.metaKey || e.ctrlKey;
+                if (isMod && e.key === "Enter") {
+                  e.preventDefault();
+                  send();
+                  return;
+                }
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !isMod &&
+                  !e.nativeEvent.isComposing
+                ) {
                   e.preventDefault();
                   send();
                 }
               }}
-              placeholder="输入消息，Enter 发送（Shift+Enter 换行）"
+              placeholder="输入消息，Enter 发送（Shift+Enter 换行，⌘/Ctrl+Enter 也可发送）"
               rows={1}
               disabled={sending}
-              className="chat-input"
+              className="min-h-[52px] resize-none pr-14 text-sm leading-relaxed"
             />
-            <button
-              className="chat-send-btn"
+            <Button
+              type="button"
+              size="icon"
+              className="absolute bottom-2 right-2 h-8 w-8"
               onClick={send}
               disabled={sending || !draft.trim()}
               aria-label="发送"
             >
-              <svg className="chat-send-icon" viewBox="0 0 16 16">
-                <path d="M1.5 14.5 15 8 1.5 1.5 1.5 6.5 10 8 1.5 9.5z" />
-              </svg>
-            </button>
+              <Send className="h-4 w-4" />
+            </Button>
           </div>
+          <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
+            Enter 发送 · Shift+Enter 换行
+          </p>
         </div>
       </main>
     </div>
   );
 }
 
-function MessageItem({ message, streaming }: { message: ChatMessage; streaming?: boolean }) {
+// ──────────────────────────────────────────────
+// Session list
+// ──────────────────────────────────────────────
+
+function SessionList({
+  sessions,
+  selected,
+  onNew,
+  onSelect,
+}: {
+  sessions: ChatSessionManifest[];
+  selected: string | null;
+  onNew: () => void;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+        <Button size="sm" className="w-full gap-1.5" onClick={onNew}>
+          <Plus className="h-4 w-4" />
+          新对话
+        </Button>
+      </div>
+      <div className="scrollbar-thin flex-1 overflow-y-auto p-2">
+        {sessions.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 px-3 py-10 text-center text-xs text-muted-foreground">
+            <MessageSquare className="h-6 w-6 opacity-40" />
+            <span>暂无对话</span>
+          </div>
+        ) : (
+          <ul className="space-y-0.5">
+            {sessions.map((s) => {
+              const active = selected === s.id;
+              return (
+                <li key={s.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(s.id)}
+                    className={cn(
+                      "flex w-full flex-col items-start gap-0.5 rounded-md border-l-2 border-transparent px-2.5 py-2 text-left transition-colors",
+                      active
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                    )}
+                  >
+                    <span className="w-full truncate text-sm font-medium">
+                      {s.title || s.id.slice(0, 8)}
+                    </span>
+                    <span className="w-full truncate text-[11px] text-muted-foreground">
+                      {s.agent}
+                      {s.workflow ? ` · ${s.workflow}` : ""} · {s.message_count} 条
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// Message item
+// ──────────────────────────────────────────────
+
+function MessageItem({
+  message,
+  streaming,
+}: {
+  message: ChatMessage;
+  streaming?: boolean;
+}) {
   const isUser = message.role === "user";
   return (
-    <div className={`chat-msg ${isUser ? "chat-msg-user" : "chat-msg-assistant"}`}>
-      <div className="chat-msg-role">{isUser ? "你" : "Agent"}</div>
-      <div className="chat-bubble">
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {isUser ? (
+          <>
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" />
+            你
+          </>
+        ) : (
+          <>
+            <Bot className="h-3 w-3 text-primary" />
+            Agent
+          </>
+        )}
+      </div>
+      <div
+        className={cn(
+          "whitespace-pre-wrap break-words rounded-lg border px-3.5 py-2.5 text-sm leading-relaxed",
+          isUser
+            ? "border-primary/20 bg-primary/10 text-foreground"
+            : "border-border bg-card text-card-foreground",
+        )}
+      >
         {message.content}
-        {streaming && <span className="chat-cursor" />}
+        {streaming && (
+          <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-primary align-middle" />
+        )}
         {message.usage && (
-          <div className="chat-usage">
-            {message.usage.input_tokens}+{message.usage.output_tokens} tok · ${message.usage.total_cost_usd?.toFixed(4)}
+          <div className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">
+            {message.usage.input_tokens}+{message.usage.output_tokens} tok · $
+            {message.usage.total_cost_usd?.toFixed(4)}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// Empty state
+// ──────────────────────────────────────────────
+
+function EmptyChat() {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/40 px-6 py-16 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <MessageSquare className="h-6 w-6" />
+      </div>
+      <div className="text-sm font-medium">开始一段新对话</div>
+      <p className="max-w-sm text-xs text-muted-foreground">
+        发一条消息问问 autopilot 能做什么，或让 agent 帮你查看任务和工作流。
+      </p>
     </div>
   );
 }
