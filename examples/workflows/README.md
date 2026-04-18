@@ -84,6 +84,20 @@ cp -r examples/workflows/data_pipeline/ ~/.autopilot/workflows/data_pipeline/
 
 **展示特性**：前向跳转（validate_skip → load）、多终态（completed/completed_partial/cancelled）、retry_policy、reject 与 jump 混用
 
+### [AI] with_human — 人机交互示例
+
+2 个阶段：plan → review，配合两种内建人机交互机制：
+
+- `workflow.yaml` — `plan` 配 `gate: true`，跑完后挂起等用户审批
+- `workflow.ts` — `plan` 阶段的 prompt 鼓励 agent 在方向不确定时调 `ask_user` 工具向用户询问
+
+**展示特性**：
+- **Gate**（人工审批）：`gate: true` + `gate_message`，UI 弹橙色 banner [通过 / 驳回 / 取消]，驳回理由通过 `task.last_user_decision` 喂给下一轮
+- **ask_user**（agent 中途提问）：框架自动注入 `mcp__autopilot_workflow__ask_user` 工具，agent 调用后任务保持 `running_<phase>` 但 `pending_question` 字段写入；UI 弹蓝色 banner，options 模式渲染按钮
+- **关键陷阱**：用 gate 时 phase 函数末尾**不要**主动 `transition('xxx_complete')` + `runInBackground('next')`，否则会绕过 gate
+
+完整文档见 `docs/workflow-development.md` 的「人机交互（Gate 与 ask_user）」一节。
+
 ## 开发自定义工作流
 
 参考 `docs/workflow-development.md` 获取完整的工作流开发指南。

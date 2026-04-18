@@ -1,7 +1,24 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../hooks/useApi";
-import { Modal } from "./Modal";
+import { api } from "@/hooks/useApi";
 import { useToast } from "./Toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input, Textarea } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface Workflow {
   name: string;
@@ -19,34 +36,34 @@ export function NewTaskDialog({ open, onClose, onCreated }: Props) {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [loadingWf, setLoadingWf] = useState(false);
   const [workflow, setWorkflow] = useState("");
-  const [reqId, setReqId] = useState("");
   const [title, setTitle] = useState("");
+  const [requirement, setRequirement] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setReqId("");
     setTitle("");
+    setRequirement("");
     setLoadingWf(true);
-    api.listWorkflows()
+    api
+      .listWorkflows()
       .then((list) => {
         setWorkflows(list);
-        // 自动选中：单一工作流 / 第一个
         if (list.length > 0 && !workflow) setWorkflow(list[0].name);
       })
       .catch((e) => toast.error("加载工作流失败", e?.message ?? String(e)))
       .finally(() => setLoadingWf(false));
   }, [open]);
 
-  const canSubmit = !!workflow && !!reqId.trim() && !submitting;
+  const canSubmit = !!workflow && !!title.trim() && !submitting;
 
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
       const task = await api.startTask({
-        reqId: reqId.trim(),
-        title: title.trim() || undefined,
+        title: title.trim(),
+        requirement: requirement.trim() || undefined,
         workflow,
       });
       toast.success(`任务已创建：${task.id}`);
@@ -64,72 +81,89 @@ export function NewTaskDialog({ open, onClose, onCreated }: Props) {
   };
 
   return (
-    <Modal
+    <Dialog
       open={open}
-      onClose={() => !submitting && onClose()}
-      title="新建任务"
-      size="md"
-      dismissable={!submitting}
-      actions={
-        <>
-          <button className="btn btn-secondary" onClick={onClose} disabled={submitting}>取消</button>
-          <button className="btn btn-primary" onClick={submit} disabled={!canSubmit}>
-            {submitting ? "创建中..." : "创建"}
-          </button>
-        </>
-      }
+      onOpenChange={(v) => {
+        if (!v && !submitting) onClose();
+      }}
     >
-      <div className="form-grid" onKeyDown={handleKeyDown}>
-        <label className="col-span-2">
-          <span>工作流 <span className="required">*</span></span>
-          {loadingWf ? (
-            <p className="muted" style={{ fontSize: "0.82rem" }}>加载中...</p>
-          ) : workflows.length === 0 ? (
-            <p style={{ color: "var(--red)", fontSize: "0.82rem" }}>
-              未发现工作流。请先在 AUTOPILOT_HOME/workflows/ 下添加工作流。
+      <DialogContent className="sm:max-w-xl" onKeyDown={handleKeyDown}>
+        <DialogHeader>
+          <DialogTitle>新建任务</DialogTitle>
+          <DialogDescription>选择工作流，填写本次任务的标题和需求详情。</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          <div className="space-y-1.5">
+            <Label>
+              工作流 <span className="text-destructive">*</span>
+            </Label>
+            {loadingWf ? (
+              <p className="text-sm text-muted-foreground">加载中…</p>
+            ) : workflows.length === 0 ? (
+              <p className="text-sm text-destructive">
+                未发现工作流。请先在 <code className="font-mono">AUTOPILOT_HOME/workflows/</code> 下添加。
+              </p>
+            ) : (
+              <Select value={workflow} onValueChange={setWorkflow}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择工作流" />
+                </SelectTrigger>
+                <SelectContent>
+                  {workflows.map((wf) => (
+                    <SelectItem key={wf.name} value={wf.name}>
+                      <span className="font-medium">{wf.name}</span>
+                      {wf.description ? (
+                        <span className="ml-2 text-muted-foreground">— {wf.description}</span>
+                      ) : null}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="new-task-title">
+              标题 <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="new-task-title"
+              placeholder="一句话概括任务（任务列表里展示）"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="new-task-requirement">需求详情（可选）</Label>
+            <Textarea
+              id="new-task-requirement"
+              placeholder="在这里写完整需求 / 上下文 / 验收标准…&#10;支持多行 + Markdown，agent 会读取这里的内容作为执行依据。"
+              value={requirement}
+              onChange={(e) => setRequirement(e.target.value)}
+              className="min-h-[160px] font-mono text-xs"
+            />
+            <p className="text-xs text-muted-foreground">
+              留空则 agent 只看标题。Task ID 由系统自动生成。
             </p>
-          ) : (
-            <select
-              className="wf-select"
-              value={workflow}
-              onChange={(e) => setWorkflow(e.target.value)}
-            >
-              {workflows.map((wf) => (
-                <option key={wf.name} value={wf.name}>
-                  {wf.name}{wf.description ? ` — ${wf.description}` : ""}
-                </option>
-              ))}
-            </select>
-          )}
-        </label>
+          </div>
 
-        <label className="col-span-2">
-          <span>请求 ID <span className="required">*</span></span>
-          <input
-            type="text"
-            className="text-input mono"
-            placeholder="例如：req-20260417-001"
-            value={reqId}
-            onChange={(e) => setReqId(e.target.value)}
-            autoFocus
-          />
-          <small className="muted">唯一标识本次任务；前 8 字符作为 task ID</small>
-        </label>
+          <p className="text-xs text-muted-foreground">
+            提示：<kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">⌘/Ctrl + Enter</kbd> 快速提交
+          </p>
+        </div>
 
-        <label className="col-span-2">
-          <span>标题（可选）</span>
-          <input
-            type="text"
-            className="text-input"
-            placeholder="不填则使用 req ID 作为标题"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </label>
-      </div>
-      <p className="muted" style={{ marginTop: "0.75rem", fontSize: "0.78rem" }}>
-        提示：<kbd>Ctrl/Cmd + Enter</kbd> 快速提交
-      </p>
-    </Modal>
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose} disabled={submitting}>
+            取消
+          </Button>
+          <Button onClick={submit} disabled={!canSubmit}>
+            {submitting ? "创建中…" : "创建"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

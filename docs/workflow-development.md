@@ -331,6 +331,107 @@ def run_my_phase(task_id: str) -> None:
 - **转换必须在 Push 之前**：先 `transition()` 再 `run_in_background()`
 - **字段存储透明**：`get_task()` 自动展开 extra，开发者无需关心字段在列里还是 JSON 里
 
+## 人机交互（Gate 与 ask_user）
+
+工作流默认是全自动的——所有阶段串起来跑完。但有时候需要人工介入。autopilot 提供两种内建机制，**工作流作者基本不用写代码**：
+
+### Gate：阶段产物的人工审批
+
+**适用场景**：阶段干完后人来审一道再放行（例：方案确认 / 高风险 push 前 / 最终验收）。
+
+**用法**：在 `workflow.yaml` 的 phase 上加 `gate: true`：
+
+```yaml
+phases:
+  - name: design
+    agent: architect
+    gate: true                              # ← 跑完后挂起等人决断
+    gate_message: "请审阅技术方案"          # ← 可选，UI banner 提示文案
+  - name: develop
+    agent: developer
+```
+
+**框架自动行为**：
+1. design phase 函数跑完 → status 变 `awaiting_design`
+2. UI 出橙色 banner：[通过] / [驳回（必填理由）] / [取消任务]
+3. 通过 → 进 develop；驳回 → 回 reject 目标（`reject:` 字段，默认本 phase）；取消 → cancelled
+
+**让 agent 重做时看到驳回理由**——phase 函数读 `task.last_user_decision`：
+
+```ts
+const lastDecisionRaw = task["last_user_decision"] as string | undefined;
+if (lastDecisionRaw) {
+  const d = JSON.parse(lastDecisionRaw) as {
+    phase: string;
+    decision: "pass" | "reject" | "cancel";
+    note: string;
+    ts: string;
+  };
+  if (d.phase === "design" && d.decision === "reject") {
+    rejectionHistory += `\n\n## 上次人工驳回意见 (${d.ts})\n${d.note}`;
+  }
+}
+```
+
+**重要**：使用 gate 时，phase 函数末尾**不要**手动 `transition('xxx_complete')` + `runInBackground('next')`。runner 检测到状态仍是 `running_<phase>` + `gate: true` 才会触发 await；阶段函数主动推进会绕过 gate。
+
+### ask_user：agent 中途主动提问
+
+**适用场景**：agent 跑到一半发现方向不确定（例：A/B 实现路径二选一 / 目标范围模糊 / 敏感操作前确认），需要人协助决断。
+
+**用法**：什么都不用配。框架自动给所有 anthropic agent 注入 `mcp__autopilot_workflow__ask_user` 工具。**让 agent 想用它**——在 prompt 里提示一句：
+
+```ts
+const prompt =
+  `你是一位资深架构师。\n\n` +
+  `## 需求\n${requirement}\n\n` +
+  `开始之前，如果方向有不确定的关键决策，可以用 ask_user 工具向用户询问后再继续。\n` +
+  `不要为了细节频繁问，仅在确实卡住时调。\n\n` +
+  `请输出技术方案：...`;
+```
+
+Agent 调用形式：
+
+```
+ask_user({
+  question: "你倾向 A（extra 字段）还是 B（独立 tag 表）？",
+  options: ["A: extra 字段", "B: 独立 tag 表"]   // 可选，UI 渲染按钮；不传则文本回答
+})
+```
+
+**任务表现**：
+- status 保持 `running_<phase>`（agent 还在跑，phase 函数 await pending）
+- `task.pending_question` 字段写入问题
+- UI 弹蓝色 banner：选项按钮 / Textarea
+- 用户答 → agent 收到答案继续
+
+### 对比速查
+
+| 维度 | Gate | ask_user |
+|---|---|---|
+| 谁触发 | runner（阶段完成时自动） | agent（执行中主动调） |
+| 配置 | `workflow.yaml` `gate: true` | 无 |
+| 阶段函数要写代码 | 否（可选读 `last_user_decision`） | 否（可选在 prompt 里鼓励） |
+| status | `awaiting_<phase>` | `running_<phase>` + `pending_question` 非空 |
+| 用户输入 | 通过 / 驳回 / 取消 | 文本 / 选项 |
+| 时机 | "agent 干完，人审批" | "agent 干一半，人协助" |
+| 持久化 | 是（db 字段） | 否（promise 在内存，daemon 重启会丢） |
+
+### 组合用法
+
+两者可叠加。典型开发流：
+
+```yaml
+phases:
+  - name: design       # agent 写方案，遇到不确定可调 ask_user
+    agent: architect
+    gate: true         # 写完后人工审方案
+  - name: develop      # 通过才开发
+    agent: developer
+    gate: true         # 开发完审代码
+  - name: submit_pr    # 通过才真 push + 提 PR
+```
+
 ## 完整示例
 
 参见 `examples/workflows/dev/` 和 `examples/workflows/req_review/`：

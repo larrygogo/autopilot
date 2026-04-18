@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../hooks/useApi";
-import { StateMachineGraph } from "../components/StateMachineGraph";
-import { NewWorkflowDialog } from "../components/NewWorkflowDialog";
-import { ConfirmDialog } from "../components/Modal";
-import { useToast } from "../components/Toast";
-import { PhaseEditor } from "../components/PhaseEditor";
-import { WorkflowAgentsEditor } from "../components/WorkflowAgentsEditor";
-import { PhasePipeline } from "../components/PhasePipeline";
-import { CodeViewer } from "../components/CodeViewer";
+import { Plus, ChevronRight, ChevronDown, Trash2, X } from "lucide-react";
+import { api } from "@/hooks/useApi";
+import { StateMachineGraph } from "@/components/StateMachineGraph";
+import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
+import { ConfirmDialog } from "@/components/Modal";
+import { useToast } from "@/components/Toast";
+import { PhaseEditor } from "@/components/PhaseEditor";
+import { WorkflowAgentsEditor } from "@/components/WorkflowAgentsEditor";
+import { PhasePipeline } from "@/components/PhasePipeline";
+import { CodeViewer } from "@/components/CodeViewer";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface WorkflowInfo {
   name: string;
@@ -49,13 +53,16 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
 
   const refresh = () => {
     setLoading(true);
-    api.listWorkflows()
+    api
+      .listWorkflows()
       .then(setWorkflows)
       .catch(() => {})
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    refresh();
+  }, []);
 
   const toggle = async (name: string) => {
     if (selected?.name === name) {
@@ -73,7 +80,9 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
         api.getWorkflowGraph(name),
       ]);
       setSelected({ name, detail, graph });
-    } catch { /* ignore */ } finally {
+    } catch {
+      /* ignore */
+    } finally {
       setLoadingDetail(false);
     }
   };
@@ -100,98 +109,159 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
     }
   };
 
+  const reloadSelected = async () => {
+    if (!selected) return;
+    try {
+      const [detail, graph] = await Promise.all([
+        api.getWorkflow(selected.name),
+        api.getWorkflowGraph(selected.name),
+      ]);
+      setSelected({ name: selected.name, detail, graph });
+    } catch {
+      /* ignore */
+    }
+  };
+
   if (loading) {
-    return <div className="container"><p className="muted">加载中...</p></div>;
+    return (
+      <div className="mx-auto w-full max-w-6xl px-5 py-8 text-sm text-muted-foreground">
+        加载中…
+      </div>
+    );
   }
 
   return (
-    <div className="container">
-      <div className="page-hdr">
-        <h2>工作流</h2>
-        <span>{workflows.length} 个</span>
-        <button className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setNewOpen(true)}>
+    <div className="mx-auto w-full max-w-6xl px-5 py-6">
+      {/* Header */}
+      <div className="mb-4 flex items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight">工作流</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{workflows.length} 个</p>
+        </div>
+        <Button onClick={() => setNewOpen(true)} className="shrink-0">
+          <Plus className="h-4 w-4" />
           新建工作流
-        </button>
+        </Button>
       </div>
 
+      {/* 列表 / 空态 */}
       {workflows.length === 0 ? (
-        <div className="card empty-state">
-          <p className="muted">暂无已注册工作流</p>
-          <button className="btn btn-primary" onClick={() => setNewOpen(true)}>创建第一个工作流</button>
-          <p className="muted" style={{ fontSize: "0.78rem" }}>
-            或手动在 <code className="mono">AUTOPILOT_HOME/workflows/</code> 下添加目录
-          </p>
-        </div>
+        <EmptyState
+          title="还没有工作流"
+          hint={
+            <>
+              创建第一个工作流，或手动在{" "}
+              <code className="rounded bg-muted px-1 font-mono text-foreground">
+                AUTOPILOT_HOME/workflows/
+              </code>{" "}
+              下添加目录。
+            </>
+          }
+          action={
+            <Button onClick={() => setNewOpen(true)}>
+              <Plus className="h-4 w-4" />
+              创建第一个工作流
+            </Button>
+          }
+        />
       ) : (
-        <div className="workflow-grid">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {workflows.map((wf) => {
             const active = selected?.name === wf.name;
             return (
-              <div
+              <button
                 key={wf.name}
-                className={`card workflow-card ${active ? "active" : ""}`}
+                type="button"
                 onClick={() => toggle(wf.name)}
+                className={cn(
+                  "group flex flex-col gap-1.5 rounded-lg border bg-card px-4 py-3 text-left shadow-sm transition-colors",
+                  active
+                    ? "border-primary/40 ring-1 ring-primary/20"
+                    : "hover:border-primary/30 hover:bg-accent/40",
+                )}
               >
-                <h3 style={{ color: "#22d3ee" }}>{wf.name}</h3>
-                {wf.description && <p className="muted">{wf.description}</p>}
-                <p className="muted" style={{ fontSize: "0.75rem", marginTop: "0.5rem" }}>
-                  {active ? "▼ 点击收起" : "▶ 点击查看详情"}
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="truncate font-mono text-sm font-semibold text-primary">
+                    {wf.name}
+                  </h3>
+                  {active ? (
+                    <ChevronDown className="h-4 w-4 shrink-0 text-primary" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                  )}
+                </div>
+                {wf.description && (
+                  <p className="line-clamp-2 text-xs text-muted-foreground">{wf.description}</p>
+                )}
+                <p className="mt-auto text-[11px] text-muted-foreground">
+                  {active ? "点击收起" : "点击查看详情"}
                 </p>
-              </div>
+              </button>
             );
           })}
         </div>
       )}
 
       {loadingDetail && (
-        <p className="muted" style={{ marginTop: "1rem" }}>加载详情中...</p>
+        <p className="mt-4 text-sm text-muted-foreground">加载详情中…</p>
       )}
 
+      {/* 详情 */}
       {selected && !loadingDetail && (
-        <>
-          <div className="card" style={{ marginTop: "1rem" }}>
-            <div className="card-header">
-              <h3>{selected.name}</h3>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                <button className="btn btn-danger" onClick={() => setPendingDelete(selected.name)}>
+        <div className="mt-6 space-y-4">
+          {/* Summary card */}
+          <Card className="p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="truncate font-mono text-base font-semibold text-primary">
+                {selected.name}
+              </h3>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setPendingDelete(selected.name)}
+                >
+                  <Trash2 className="h-4 w-4" />
                   删除
-                </button>
-                <button className="btn btn-secondary" onClick={() => setSelected(null)}>
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setSelected(null)}>
+                  <X className="h-4 w-4" />
                   收起
-                </button>
+                </Button>
               </div>
             </div>
+
             {selected.detail.description && (
-              <p className="muted" style={{ marginBottom: "0.75rem" }}>{selected.detail.description}</p>
+              <p className="mb-3 text-sm text-muted-foreground">{selected.detail.description}</p>
             )}
 
-            <div className="info-grid">
-              <div><span className="muted">初始状态：</span><span className="mono">{selected.detail.initial_state}</span></div>
-              <div><span className="muted">终态数：</span>{selected.detail.terminal_states?.length ?? 0}</div>
-              <div><span className="muted">阶段数：</span>{selected.detail.phases?.length ?? 0}</div>
-              <div><span className="muted">智能体数：</span>{selected.detail.agents?.length ?? 0}</div>
-            </div>
-          </div>
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+              <SummaryField label="初始状态">
+                <code className="font-mono">{selected.detail.initial_state}</code>
+              </SummaryField>
+              <SummaryField label="终态数">
+                {selected.detail.terminal_states?.length ?? 0}
+              </SummaryField>
+              <SummaryField label="阶段数">{selected.detail.phases?.length ?? 0}</SummaryField>
+              <SummaryField label="智能体数">{selected.detail.agents?.length ?? 0}</SummaryField>
+            </dl>
+          </Card>
 
-          <WorkflowAgentsEditor
-            workflowName={selected.name}
-            initialAgents={(selected.detail.agents as any[]) ?? []}
-            onJumpToAgent={onJumpToAgent}
-            onSaved={async () => {
-              try {
-                const [detail, graph] = await Promise.all([
-                  api.getWorkflow(selected.name),
-                  api.getWorkflowGraph(selected.name),
-                ]);
-                setSelected({ name: selected.name, detail, graph });
-              } catch { /* ignore */ }
-            }}
-          />
+          {/* Agents editor */}
+          <Card className="p-4">
+            <WorkflowAgentsEditor
+              workflowName={selected.name}
+              initialAgents={(selected.detail.agents as any[]) ?? []}
+              onJumpToAgent={onJumpToAgent}
+              onSaved={reloadSelected}
+            />
+          </Card>
 
-          <div className="card" style={{ marginTop: "0.75rem" }}>
-            <div className="card-header">
-              <h3>流水线</h3>
-              <span className="muted" style={{ fontSize: "0.76rem" }}>
+          {/* Pipeline */}
+          <Card className="p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">流水线</h3>
+              <span className="text-xs text-muted-foreground">
                 鼠标悬停以联动高亮编辑器与状态机图
               </span>
             </div>
@@ -200,47 +270,45 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
               highlight={hoveredPhase}
               onHoverPhase={setHoveredPhase}
             />
-          </div>
+          </Card>
 
-          <PhaseEditor
-            workflowName={selected.name}
-            initialPhases={(selected.detail.phases as any[]) ?? []}
-            hoveredPhase={hoveredPhase}
-            onHoverPhase={setHoveredPhase}
-            onSaved={async () => {
-              // 保存成功后，workflow.ts 可能已被改动，刷新缓存
-              if (tsSource !== null) {
-                api.getWorkflowTs(selected.name).then((r) => setTsSource(r.content)).catch(() => {});
-              }
-              // 重新拉详情 + 图
-              try {
-                const [detail, graph] = await Promise.all([
-                  api.getWorkflow(selected.name),
-                  api.getWorkflowGraph(selected.name),
-                ]);
-                setSelected({ name: selected.name, detail, graph });
-              } catch { /* ignore */ }
-            }}
-          />
+          {/* Phase editor */}
+          <Card className="p-4">
+            <PhaseEditor
+              workflowName={selected.name}
+              initialPhases={(selected.detail.phases as any[]) ?? []}
+              hoveredPhase={hoveredPhase}
+              onHoverPhase={setHoveredPhase}
+              onSaved={async () => {
+                if (tsSource !== null) {
+                  api
+                    .getWorkflowTs(selected.name)
+                    .then((r) => setTsSource(r.content))
+                    .catch(() => {});
+                }
+                await reloadSelected();
+              }}
+            />
+          </Card>
 
-          <div className="card" style={{ marginTop: "0.75rem" }}>
-            <h3>状态机</h3>
-            <div className="graph-wrap">
-              <StateMachineGraph
-                nodes={selected.graph.nodes}
-                edges={selected.graph.edges}
-                highlightPhase={hoveredPhase}
-                onHoverPhase={setHoveredPhase}
-              />
-            </div>
-          </div>
+          {/* State machine */}
+          <Card className="p-4">
+            <h3 className="mb-3 text-sm font-semibold">状态机</h3>
+            <StateMachineGraph
+              nodes={selected.graph.nodes}
+              edges={selected.graph.edges}
+              highlightPhase={hoveredPhase}
+              onHoverPhase={setHoveredPhase}
+            />
+          </Card>
 
-          <div className="card" style={{ marginTop: "0.75rem" }}>
-            <div className="card-header">
-              <h3>workflow.ts 源码</h3>
-              <button className="btn btn-secondary" onClick={toggleTs} disabled={tsLoading}>
-                {tsLoading ? "加载中..." : tsOpen ? "收起" : "展开"}
-              </button>
+          {/* workflow.ts viewer */}
+          <Card className="p-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">workflow.ts 源码</h3>
+              <Button variant="secondary" size="sm" onClick={toggleTs} disabled={tsLoading}>
+                {tsLoading ? "加载中…" : tsOpen ? "收起" : "展开"}
+              </Button>
             </div>
             {tsOpen && tsSource !== null && (
               <CodeViewer
@@ -250,15 +318,19 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
               />
             )}
             {tsOpen && tsSource === null && !tsLoading && (
-              <p className="muted">加载失败</p>
+              <p className="text-sm text-muted-foreground">加载失败</p>
             )}
             {!tsOpen && (
-              <p className="muted" style={{ fontSize: "0.82rem" }}>
-                展开查看 AUTOPILOT_HOME/workflows/{selected.name}/workflow.ts（只读）；hover 阶段会高亮对应 run_ 函数
+              <p className="text-xs text-muted-foreground">
+                展开查看{" "}
+                <code className="rounded bg-muted px-1 font-mono">
+                  AUTOPILOT_HOME/workflows/{selected.name}/workflow.ts
+                </code>
+                （只读）；hover 阶段会高亮对应 run_ 函数
               </p>
             )}
-          </div>
-        </>
+          </Card>
+        </div>
       )}
 
       <NewWorkflowDialog
@@ -271,14 +343,20 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
         open={!!pendingDelete}
         title="删除工作流"
         message={
-          <div>
-            <p>确认删除工作流 <code className="mono">{pendingDelete}</code>？</p>
-            <div style={{ marginTop: "0.75rem", padding: "0.6rem 0.8rem", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.25)", borderRadius: 6 }}>
-              <p style={{ color: "var(--red)", fontSize: "0.82rem" }}>
-                ⚠ 将永久删除整个目录：<br />
-                <code className="mono">AUTOPILOT_HOME/workflows/{pendingDelete}/</code>
+          <div className="space-y-3">
+            <p>
+              确认删除工作流{" "}
+              <code className="rounded bg-muted px-1 font-mono">{pendingDelete}</code>？
+            </p>
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
+              <p className="text-xs text-destructive">
+                ⚠ 将永久删除整个目录：
+                <br />
+                <code className="font-mono">
+                  AUTOPILOT_HOME/workflows/{pendingDelete}/
+                </code>
               </p>
-              <p className="muted" style={{ marginTop: "0.4rem", fontSize: "0.78rem" }}>
+              <p className="mt-1 text-xs text-muted-foreground">
                 包括 workflow.yaml、workflow.ts 及该目录内的所有文件。此操作不可恢复。
               </p>
             </div>
@@ -302,6 +380,33 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
         }}
         onCancel={() => setPendingDelete(null)}
       />
+    </div>
+  );
+}
+
+function SummaryField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="truncate text-sm">{children}</dd>
+    </div>
+  );
+}
+
+function EmptyState({
+  title,
+  hint,
+  action,
+}: {
+  title: string;
+  hint?: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/50 px-6 py-12 text-center">
+      <div className="text-sm font-medium">{title}</div>
+      {hint && <p className="max-w-sm text-xs text-muted-foreground">{hint}</p>}
+      {action}
     </div>
   );
 }

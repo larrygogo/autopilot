@@ -1,7 +1,17 @@
 import React, { useState } from "react";
-import { api } from "../hooks/useApi";
-import { Modal } from "./Modal";
+import { api } from "@/hooks/useApi";
 import { useToast } from "./Toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface Props {
   open: boolean;
@@ -19,7 +29,11 @@ export function NewWorkflowDialog({ open, onClose, onCreated }: Props) {
   const [firstPhase, setFirstPhase] = useState("step1");
   const [submitting, setSubmitting] = useState(false);
 
-  const reset = () => { setName(""); setDescription(""); setFirstPhase("step1"); };
+  const reset = () => {
+    setName("");
+    setDescription("");
+    setFirstPhase("step1");
+  };
 
   const close = () => {
     if (submitting) return;
@@ -56,77 +70,109 @@ export function NewWorkflowDialog({ open, onClose, onCreated }: Props) {
   };
 
   return (
-    <Modal
+    <Dialog
       open={open}
-      onClose={close}
-      title="新建工作流"
-      size="md"
-      dismissable={!submitting}
-      actions={
-        <>
-          <button className="btn btn-secondary" onClick={close} disabled={submitting}>取消</button>
-          <button className="btn btn-primary" onClick={submit} disabled={!canSubmit}>
-            {submitting ? "创建中..." : "创建"}
-          </button>
-        </>
-      }
+      onOpenChange={(v) => {
+        if (!v && !submitting) close();
+      }}
     >
-      <div className="form-grid" onKeyDown={onKeyDown}>
-        <label className="col-span-2">
-          <span>名称 <span className="required">*</span></span>
-          <input
-            type="text"
-            className="text-input mono"
-            placeholder="例如：code_review"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoFocus
-          />
-          <small className={name && !nameValid ? "" : "muted"} style={name && !nameValid ? { color: "var(--red)" } : undefined}>
-            {name && !nameValid
-              ? "需以小写字母开头，仅含小写字母 / 数字 / _ / -，长度 ≤ 40"
-              : "工作流目录名，将创建 AUTOPILOT_HOME/workflows/<name>/"}
-          </small>
-        </label>
+      <DialogContent className="sm:max-w-lg" onKeyDown={onKeyDown}>
+        <DialogHeader>
+          <DialogTitle>新建工作流</DialogTitle>
+          <DialogDescription>
+            脚手架会在 AUTOPILOT_HOME/workflows/ 下生成目录，含 workflow.yaml 与 workflow.ts。
+          </DialogDescription>
+        </DialogHeader>
 
-        <label className="col-span-2">
-          <span>描述（可选）</span>
-          <input
-            type="text"
-            className="text-input"
-            placeholder="一句话说明这个工作流的用途"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </label>
+        <div className="space-y-4 py-1">
+          <div className="space-y-1.5">
+            <Label htmlFor="new-wf-name">
+              名称 <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="new-wf-name"
+              className="font-mono"
+              placeholder="例如：code_review"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
+            <p
+              className={
+                name && !nameValid
+                  ? "text-xs text-destructive"
+                  : "text-xs text-muted-foreground"
+              }
+            >
+              {name && !nameValid
+                ? "需以小写字母开头，仅含小写字母 / 数字 / _ / -，长度 ≤ 40"
+                : "工作流目录名，将创建 AUTOPILOT_HOME/workflows/<name>/"}
+            </p>
+          </div>
 
-        <label className="col-span-2">
-          <span>首阶段名</span>
-          <input
-            type="text"
-            className="text-input mono"
-            value={firstPhase}
-            onChange={(e) => setFirstPhase(e.target.value)}
-          />
-          <small className={firstPhase && !phaseValid ? "" : "muted"} style={firstPhase && !phaseValid ? { color: "var(--red)" } : undefined}>
-            {firstPhase && !phaseValid
-              ? "需以小写字母开头，仅含小写字母 / 数字 / _"
-              : "脚手架会生成对应的 run_<name> 阶段函数"}
-          </small>
-        </label>
-      </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-wf-desc">描述（可选）</Label>
+            <Input
+              id="new-wf-desc"
+              placeholder="一句话说明这个工作流的用途"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
 
-      <div className="card" style={{ marginTop: "1rem", background: "var(--bg0)", padding: "0.8rem 1rem" }}>
-        <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.4rem" }}>将生成文件：</p>
-        <ul className="mono" style={{ listStyle: "none", fontSize: "0.78rem", lineHeight: 1.8 }}>
-          <li>AUTOPILOT_HOME/workflows/<span style={{ color: "var(--cyan)" }}>{name || "<name>"}</span>/workflow.yaml</li>
-          <li>AUTOPILOT_HOME/workflows/<span style={{ color: "var(--cyan)" }}>{name || "<name>"}</span>/workflow.ts</li>
-        </ul>
-      </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-wf-phase">首阶段名</Label>
+            <Input
+              id="new-wf-phase"
+              className="font-mono"
+              value={firstPhase}
+              onChange={(e) => setFirstPhase(e.target.value)}
+            />
+            <p
+              className={
+                firstPhase && !phaseValid
+                  ? "text-xs text-destructive"
+                  : "text-xs text-muted-foreground"
+              }
+            >
+              {firstPhase && !phaseValid
+                ? "需以小写字母开头，仅含小写字母 / 数字 / _"
+                : "脚手架会生成对应的 run_<name> 阶段函数"}
+            </p>
+          </div>
 
-      <p className="muted" style={{ marginTop: "0.75rem", fontSize: "0.76rem" }}>
-        提示：<kbd>Ctrl/Cmd + Enter</kbd> 快速提交。创建后可在「高级 (YAML)」中继续编辑。
-      </p>
-    </Modal>
+          <div className="rounded-md border bg-muted/40 px-3 py-2.5">
+            <p className="mb-1 text-xs text-muted-foreground">将生成文件：</p>
+            <ul className="space-y-0.5 font-mono text-xs leading-relaxed">
+              <li>
+                AUTOPILOT_HOME/workflows/
+                <span className="text-primary">{name || "<name>"}</span>/workflow.yaml
+              </li>
+              <li>
+                AUTOPILOT_HOME/workflows/
+                <span className="text-primary">{name || "<name>"}</span>/workflow.ts
+              </li>
+            </ul>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            提示：
+            <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+              ⌘/Ctrl + Enter
+            </kbd>{" "}
+            快速提交。创建后可在「高级 (YAML)」中继续编辑。
+          </p>
+        </div>
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={close} disabled={submitting}>
+            取消
+          </Button>
+          <Button onClick={submit} disabled={!canSubmit}>
+            {submitting ? "创建中…" : "创建"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

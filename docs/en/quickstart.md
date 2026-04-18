@@ -1,5 +1,31 @@
 [中文](../quickstart.md) | [English](quickstart.md)
 
+## Why autopilot
+
+A single LLM agent call is impressive, but **real work is rarely a single call**: you want code written and tested, plans reviewed before execution, a pause when the path forks, and a clean rollback when something breaks. That's not an agent problem — it's an **orchestration** problem. autopilot makes agent calls first-class, wrapped in a state machine, human-in-the-loop hooks, visualization, and local persistence. Single-process daemon + SQLite + built-in Web UI — finish this guide and you'll have an agent pipeline you can edit, gate, and replay.
+
+## What you'll have in 5 minutes
+
+You'll end up with the **built-in `dev` workflow**, fired off with a single `autopilot task start`:
+
+```
+You: add a task-tagging feature
+  ↓
+architect agent reads the repo + writes a plan → workspace/00-design/plan.md
+  ↓
+[Gate: you review the plan] ← Pass to continue, Reject loops back with your reason
+  ↓
+developer agent writes code + runs tests + git commits
+  ↓
+reviewer agent inspects the diff → REVIEW_RESULT: PASS/REJECT
+  ↓
+gh pr create  ← actually opens the PR
+```
+
+Every artifact is auto-archived to the task workspace; the Web UI shows live progress, logs, and a one-click reject button.
+
+---
+
 # 5-Minute Quickstart
 
 This tutorial takes you from zero to running your first autopilot task in 5 minutes.

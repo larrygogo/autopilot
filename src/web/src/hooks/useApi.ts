@@ -39,10 +39,20 @@ export const api = {
     return request<any[]>(`/api/tasks${qs ? `?${qs}` : ""}`);
   },
   getTask: (id: string) => request<any>(`/api/tasks/${id}`),
-  startTask: (body: { reqId: string; title?: string; workflow?: string }) =>
+  startTask: (body: { title?: string; requirement?: string; workflow?: string; reqId?: string }) =>
     request<any>("/api/tasks", { method: "POST", body: JSON.stringify(body) }),
   cancelTask: (id: string) =>
     request<any>(`/api/tasks/${id}/cancel`, { method: "POST" }),
+  decideTask: (id: string, decision: "pass" | "reject" | "cancel", note?: string) =>
+    request<{ from: string; to: string; decision: string; note: string }>(
+      `/api/tasks/${id}/decide`,
+      { method: "POST", body: JSON.stringify({ decision, note }) },
+    ),
+  answerTask: (id: string, text: string) =>
+    request<{ ok: true }>(
+      `/api/tasks/${id}/answer`,
+      { method: "POST", body: JSON.stringify({ text }) },
+    ),
   getTaskLogs: (id: string, limit = 100) =>
     request<any[]>(`/api/tasks/${id}/logs?limit=${limit}`),
   getPhaseLogsList: (id: string) =>

@@ -1,79 +1,12 @@
-import React, { useEffect, useRef } from "react";
-
-interface ModalProps {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  children: React.ReactNode;
-  actions?: React.ReactNode;
-  size?: "sm" | "md" | "lg";
-  /** 禁止遮罩点击关闭（例如保存中） */
-  dismissable?: boolean;
-}
-
-export function Modal({ open, onClose, title, children, actions, size = "md", dismissable = true }: ModalProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // 把最新的 onClose / dismissable 存 ref，避免 ESC 监听 effect 因依赖变化重跑，
-  // 从而意外抢走输入框焦点。
-  const onCloseRef = useRef(onClose);
-  const dismissableRef = useRef(dismissable);
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  useEffect(() => { dismissableRef.current = dismissable; }, [dismissable]);
-
-  // 仅在 open 变化时：锁 body 滚动 + 对对话框容器抢焦点一次
-  useEffect(() => {
-    if (!open) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    dialogRef.current?.focus();
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [open]);
-
-  // ESC 监听：同样只随 open 变化注册/卸载
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && dismissableRef.current) onCloseRef.current();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
-
-  if (!open) return null;
-
-  return (
-    <>
-      <div className="modal-overlay" onClick={() => dismissable && onClose()} />
-      <div
-        ref={dialogRef}
-        className={`modal modal-${size}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
-      >
-        <div className="modal-header">
-          <h3>{title}</h3>
-          {dismissable && (
-            <button
-              type="button"
-              className="modal-close"
-              aria-label="关闭"
-              onClick={onClose}
-            >
-              ×
-            </button>
-          )}
-        </div>
-        <div className="modal-body">{children}</div>
-        {actions && <div className="modal-actions">{actions}</div>}
-      </div>
-    </>
-  );
-}
+import React from "react";
+import {
+  Dialog as ShadcnDialog,
+  DialogContent as ShadcnDialogContent,
+  DialogHeader as ShadcnDialogHeader,
+  DialogTitle as ShadcnDialogTitle,
+  DialogFooter as ShadcnDialogFooter,
+} from "@/components/ui/dialog";
+import { Button as ShadcnButton } from "@/components/ui/button";
 
 interface ConfirmProps {
   open: boolean;
@@ -108,28 +41,30 @@ export function ConfirmDialog({
   };
 
   return (
-    <Modal
+    <ShadcnDialog
       open={open}
-      onClose={onCancel}
-      title={title}
-      size="sm"
-      dismissable={!busy}
-      actions={
-        <>
-          <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>
+      onOpenChange={(v) => {
+        if (!v && !busy) onCancel();
+      }}
+    >
+      <ShadcnDialogContent className="sm:max-w-sm">
+        <ShadcnDialogHeader>
+          <ShadcnDialogTitle>{title}</ShadcnDialogTitle>
+        </ShadcnDialogHeader>
+        <div className="text-sm text-foreground">{message}</div>
+        <ShadcnDialogFooter>
+          <ShadcnButton variant="secondary" onClick={onCancel} disabled={busy}>
             {cancelText}
-          </button>
-          <button
-            className={`btn ${danger ? "btn-danger-solid" : "btn-primary"}`}
+          </ShadcnButton>
+          <ShadcnButton
+            variant={danger ? "destructive" : "default"}
             onClick={handleConfirm}
             disabled={busy}
           >
-            {busy ? "处理中..." : confirmText}
-          </button>
-        </>
-      }
-    >
-      {message}
-    </Modal>
+            {busy ? "处理中…" : confirmText}
+          </ShadcnButton>
+        </ShadcnDialogFooter>
+      </ShadcnDialogContent>
+    </ShadcnDialog>
   );
 }

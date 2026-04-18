@@ -7,6 +7,7 @@ import { transition, InvalidTransitionError } from "./state-machine";
 import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./registry";
 import { closeAgents } from "../agents/registry";
 import { emit } from "../daemon/event-bus";
+import { archivePhaseArtifacts } from "./artifacts";
 
 // ──────────────────────────────────────────────
 // Push 模型：非阻塞启动阶段
@@ -121,35 +122,51 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     log.info("阶段执行完成：%s [task=%s]", phase, taskId);
     emit({ type: "phase:completed", payload: { taskId, phase } });
     appendTaskEvent(taskId, { type: "phase-completed", phase });
+    archivePhaseArtifacts(taskId, workflow, phase);
 
     // 自动推进下一阶段（若阶段函数没主动 transition）
     //
     // 规则：
-    // - 重新读任务状态，若仍停留在当前 running_<phase>，说明用户没手动 transition
-    //   → 自动调 complete_trigger + 启动下一阶段（Push 模型）
-    // - 否则说明阶段函数已主动转到别的路径（reject / cancel / 自定义 trigger），跳过
-    // - 没有下一阶段（当前是最后一个）→ 进入终态（complete_trigger 会自己决定去哪）
+    // - gate=true 的 phase：阶段函数完成后挂起到 awaiting_<phase>，等用户决断
+    //   不自动 complete_trigger，不启动下一阶段
+    // - 否则按原逻辑：若仍停留在 running_<phase> → complete_trigger + 启动下一阶段
     const current = getTask(taskId);
-    if (current && current.status === phaseDef.running_state && phaseDef.complete_trigger) {
-      try {
-        transition(taskId, phaseDef.complete_trigger, { transitions: transitionTable });
-      } catch (e: unknown) {
-        if (e instanceof InvalidTransitionError) {
-          log.debug("自动推进跳过（状态已变）[task=%s phase=%s]: %s",
-            taskId, phase, e.message);
-        } else {
-          throw e;
+    if (current && current.status === phaseDef.running_state) {
+      if (phaseDef.gate) {
+        // 挂起到 awaiting_<phase>，等待 UI 决断
+        try {
+          transition(taskId, `await_${phase}`, { transitions: transitionTable });
+          log.info("阶段完成，等待人工决断 [task=%s phase=%s]", taskId, phase);
+          emit({ type: "phase:awaiting", payload: { taskId, phase } });
+          appendTaskEvent(taskId, { type: "phase-awaiting", phase });
+        } catch (e: unknown) {
+          if (e instanceof InvalidTransitionError) {
+            log.warn("await transition 失败 [task=%s phase=%s]: %s", taskId, phase, e.message);
+          } else {
+            throw e;
+          }
         }
-      }
-      // runInBackground 启动下一阶段仅对顶层阶段自动做；并行块子阶段完成后
-      // 由用户 / 并行协调层决定（避免跳过其他兄弟子阶段）
-      const isChildOfParallel = workflow.phases.some(
-        (p) => isParallelPhase(p) && p.parallel.phases.some((s) => s.name === phase)
-      );
-      if (!isChildOfParallel) {
-        const nextPhase = getNextPhase(task.workflow, phase);
-        if (nextPhase) {
-          runInBackground(taskId, nextPhase);
+      } else if (phaseDef.complete_trigger) {
+        try {
+          transition(taskId, phaseDef.complete_trigger, { transitions: transitionTable });
+        } catch (e: unknown) {
+          if (e instanceof InvalidTransitionError) {
+            log.debug("自动推进跳过（状态已变）[task=%s phase=%s]: %s",
+              taskId, phase, e.message);
+          } else {
+            throw e;
+          }
+        }
+        // runInBackground 启动下一阶段仅对顶层阶段自动做；并行块子阶段完成后
+        // 由用户 / 并行协调层决定（避免跳过其他兄弟子阶段）
+        const isChildOfParallel = workflow.phases.some(
+          (p) => isParallelPhase(p) && p.parallel.phases.some((s) => s.name === phase)
+        );
+        if (!isChildOfParallel) {
+          const nextPhase = getNextPhase(task.workflow, phase);
+          if (nextPhase) {
+            runInBackground(taskId, nextPhase);
+          }
         }
       }
     }
@@ -161,6 +178,8 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
       log.error("阶段执行异常 [task=%s phase=%s]: %s", taskId, phase, errMsg);
       emit({ type: "phase:error", payload: { taskId, phase, error: errMsg } });
       appendTaskEvent(taskId, { type: "phase-error", phase, level: "error", message: errMsg });
+      const wf = getWorkflow(getTask(taskId)?.workflow ?? "");
+      if (wf) archivePhaseArtifacts(taskId, wf, phase);
     }
   } finally {
     resetPhase();
@@ -242,6 +261,7 @@ async function executeParallelGroup(
         });
         log.info("[parallel] %s 完成 [task=%s]", subName, taskId);
         appendTaskEvent(taskId, { type: "phase-completed", phase: subName, parallel: groupName });
+        archivePhaseArtifacts(taskId, workflow, subName);
         return { name: subName, ok: true as const };
       } catch (err: unknown) {
         const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
@@ -253,6 +273,7 @@ async function executeParallelGroup(
           level: "error",
           message: msg,
         });
+        archivePhaseArtifacts(taskId, workflow, subName);
         return { name: subName, ok: false as const, error: msg };
       }
     }),

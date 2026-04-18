@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { cn } from "@/lib/utils";
 
 // ──────────────────────────────────────────────
 // 极简 TS 语法高亮 —— 只分区字符串/注释/关键字/数字
@@ -94,12 +95,31 @@ function tokenize(src: string): Tok[] {
   return out;
 }
 
+// 各 token 类型对应的 Tailwind 色 —— 用语义 token 而非霓虹色
+const TOK_CLASS: Record<Tok["type"], string> = {
+  plain: "",
+  comment: "text-muted-foreground italic",
+  string: "text-success",
+  keyword: "text-primary font-medium",
+  number: "text-warning",
+  fn: "text-info",
+};
+
 function renderTokens(tokens: Tok[], highlightFn?: string): React.ReactNode[] {
   return tokens.map((t, i) => {
     if (t.type === "plain") return t.value;
-    const className = `code-${t.type}`;
-    const extra = t.type === "fn" && highlightFn && t.value === `run_${highlightFn}` ? " code-fn-hl" : "";
-    return <span key={i} className={className + extra}>{t.value}</span>;
+    const isHl = t.type === "fn" && highlightFn && t.value === `run_${highlightFn}`;
+    return (
+      <span
+        key={i}
+        className={cn(
+          TOK_CLASS[t.type],
+          isHl && "rounded bg-primary/15 px-0.5 text-primary font-semibold ring-1 ring-primary/30",
+        )}
+      >
+        {t.value}
+      </span>
+    );
   });
 }
 
@@ -134,15 +154,23 @@ export function CodeViewer({ code, highlightPhase, scrollToPhase }: Props) {
   }, [scrollToPhase, lines]);
 
   return (
-    <div className="code-viewer" ref={ref}>
+    <div
+      ref={ref}
+      className="scrollbar-thin max-h-[32rem] overflow-auto rounded-md border bg-muted/40 py-2 font-mono text-xs leading-relaxed"
+    >
       {lineTokens.map((lt, i) => (
         <div
           key={i}
-          className="code-line"
           ref={(el) => { lineRefs.current[i] = el; }}
+          className="flex whitespace-pre hover:bg-accent/40"
         >
-          <span className="code-gutter" style={{ width: `${digitWidth + 1}ch` }}>{i + 1}</span>
-          <span className="code-content">
+          <span
+            className="select-none pr-3 pl-2 text-right text-muted-foreground/70"
+            style={{ width: `${digitWidth + 2}ch` }}
+          >
+            {i + 1}
+          </span>
+          <span className="flex-1 pr-3 text-foreground">
             {lt.length > 0 ? renderTokens(lt, highlightPhase ?? undefined) : "\u00A0"}
           </span>
         </div>

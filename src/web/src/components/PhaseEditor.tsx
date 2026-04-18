@@ -1,4 +1,15 @@
 import React, { useMemo, useState } from "react";
+import {
+  Plus,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  GripVertical,
+  AlertTriangle,
+  Layers,
+  Ungroup,
+  ArrowUpFromLine,
+} from "lucide-react";
 import { api } from "../hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
@@ -14,6 +25,19 @@ import {
   type ParallelItem,
   type Item,
 } from "./phaseValidation";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 const STRATEGIES = ["cancel_all", "continue"] as const;
 
@@ -102,7 +126,13 @@ type DeleteTarget =
   | { kind: "top"; idx: number; name: string }
   | { kind: "child"; parallelIdx: number; childIdx: number; name: string };
 
-export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase, onHoverPhase }: Props) {
+export function PhaseEditor({
+  workflowName,
+  initialPhases,
+  onSaved,
+  hoveredPhase,
+  onHoverPhase,
+}: Props) {
   const toast = useToast();
   const [items, setItems] = useState<Item[]>(() => normalize(initialPhases));
   const [dirty, setDirty] = useState(false);
@@ -119,7 +149,10 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
     | null
   >(null);
   const [dragOverTopIdx, setDragOverTopIdx] = useState<number | null>(null);
-  const [dragOverChild, setDragOverChild] = useState<{ parallelIdx: number; childIdx: number } | null>(null);
+  const [dragOverChild, setDragOverChild] = useState<{
+    parallelIdx: number;
+    childIdx: number;
+  } | null>(null);
 
   // 追踪"原始阶段改名"的映射：oldName -> newName。
   // 保存时随 phases 一起发给后端，后端会把 workflow.ts 里的
@@ -143,9 +176,10 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   const issues = useMemo(() => validatePhases(items), [items]);
   const hasErrors = issues.length > 0;
   const parallelOptions = useMemo(
-    () => items
-      .map((it, i) => (it.kind === "parallel" ? { idx: i, name: it.name } : null))
-      .filter(Boolean) as { idx: number; name: string }[],
+    () =>
+      items
+        .map((it, i) => (it.kind === "parallel" ? { idx: i, name: it.name } : null))
+        .filter(Boolean) as { idx: number; name: string }[],
     [items],
   );
 
@@ -182,7 +216,10 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       // 查 renames 里 value === oldName 的 key（链式改名：source → oldName → newName）
       let sourceKey: string | null = null;
       for (const [k, v] of renames.entries()) {
-        if (v === oldName) { sourceKey = k; break; }
+        if (v === oldName) {
+          sourceKey = k;
+          break;
+        }
       }
       if (sourceKey !== null) {
         if (sourceKey === newName) renames.delete(sourceKey); // 反向回到原名，抵消
@@ -206,15 +243,22 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       const old = prev[idx];
       const next = fn(old);
       const mapped = prev.map((it, i) => (i === idx ? next : it));
-      const oldName = old?.kind === "phase" ? old.name : old?.kind === "parallel" ? old.name : null;
-      const newName = next?.kind === "phase" ? next.name : next?.kind === "parallel" ? next.name : null;
-      if (oldName && newName && oldName !== newName) return applyRename(mapped, oldName, newName);
+      const oldName =
+        old?.kind === "phase" ? old.name : old?.kind === "parallel" ? old.name : null;
+      const newName =
+        next?.kind === "phase" ? next.name : next?.kind === "parallel" ? next.name : null;
+      if (oldName && newName && oldName !== newName)
+        return applyRename(mapped, oldName, newName);
       return mapped;
     });
     mark();
   };
 
-  const updateChildPhase = (parallelIdx: number, childIdx: number, fn: (p: PhaseItem) => PhaseItem) => {
+  const updateChildPhase = (
+    parallelIdx: number,
+    childIdx: number,
+    fn: (p: PhaseItem) => PhaseItem,
+  ) => {
     setItems((prev) => {
       let oldName: string | null = null;
       let newName: string | null = null;
@@ -229,7 +273,8 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
         });
         return { ...it, phases };
       });
-      if (oldName && newName && oldName !== newName) return applyRename(mapped, oldName, newName);
+      if (oldName && newName && oldName !== newName)
+        return applyRename(mapped, oldName, newName);
       return mapped;
     });
     mark();
@@ -262,26 +307,30 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   /** 拖拽：并行块内子阶段重排 */
   const reorderChild = (parallelIdx: number, from: number, to: number) => {
     if (from === to) return;
-    setItems((prev) => prev.map((it, i) => {
-      if (i !== parallelIdx || it.kind !== "parallel") return it;
-      if (from < 0 || from >= it.phases.length || to < 0 || to >= it.phases.length) return it;
-      const phases = [...it.phases];
-      const [moved] = phases.splice(from, 1);
-      phases.splice(to, 0, moved);
-      return { ...it, phases };
-    }));
+    setItems((prev) =>
+      prev.map((it, i) => {
+        if (i !== parallelIdx || it.kind !== "parallel") return it;
+        if (from < 0 || from >= it.phases.length || to < 0 || to >= it.phases.length) return it;
+        const phases = [...it.phases];
+        const [moved] = phases.splice(from, 1);
+        phases.splice(to, 0, moved);
+        return { ...it, phases };
+      }),
+    );
     mark();
   };
 
   const moveChild = (parallelIdx: number, childIdx: number, delta: number) => {
-    setItems((prev) => prev.map((it, i) => {
-      if (i !== parallelIdx || it.kind !== "parallel") return it;
-      const target = childIdx + delta;
-      if (target < 0 || target >= it.phases.length) return it;
-      const phases = [...it.phases];
-      [phases[childIdx], phases[target]] = [phases[target], phases[childIdx]];
-      return { ...it, phases };
-    }));
+    setItems((prev) =>
+      prev.map((it, i) => {
+        if (i !== parallelIdx || it.kind !== "parallel") return it;
+        const target = childIdx + delta;
+        if (target < 0 || target >= it.phases.length) return it;
+        const phases = [...it.phases];
+        [phases[childIdx], phases[target]] = [phases[target], phases[childIdx]];
+        return { ...it, phases };
+      }),
+    );
     mark();
   };
 
@@ -289,7 +338,11 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
 
   const addPhase = (data: NewPhaseData) => {
     const newPhase: PhaseItem = {
-      kind: "phase", name: data.name, timeout: data.timeout, reject: null, extras: {},
+      kind: "phase",
+      name: data.name,
+      timeout: data.timeout,
+      reject: null,
+      extras: {},
     };
     setItems((prev) => {
       const copy = [...prev];
@@ -307,7 +360,15 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       kind: "parallel",
       name: data.name,
       fail_strategy: data.failStrategy,
-      phases: [{ kind: "phase", name: data.firstChild, timeout: data.firstChildTimeout, reject: null, extras: {} }],
+      phases: [
+        {
+          kind: "phase",
+          name: data.firstChild,
+          timeout: data.firstChildTimeout,
+          reject: null,
+          extras: {},
+        },
+      ],
     };
     setItems((prev) => {
       const copy = [...prev];
@@ -324,13 +385,30 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   const addChildToParallel = (parallelIdx: number) => {
     const rawName = window.prompt("子阶段名（小写字母开头）");
     if (!rawName) return;
-    if (!/^[a-z][a-z0-9_]*$/.test(rawName)) { toast.warning("名称格式非法"); return; }
-    if (allNames.includes(rawName)) { toast.warning("名称已被占用"); return; }
-    setItems((prev) => prev.map((it, i) => {
-      if (i !== parallelIdx || it.kind !== "parallel") return it;
-      const phases = [...it.phases, { kind: "phase" as const, name: rawName, timeout: 900, reject: null, extras: {} }];
-      return { ...it, phases };
-    }));
+    if (!/^[a-z][a-z0-9_]*$/.test(rawName)) {
+      toast.warning("名称格式非法");
+      return;
+    }
+    if (allNames.includes(rawName)) {
+      toast.warning("名称已被占用");
+      return;
+    }
+    setItems((prev) =>
+      prev.map((it, i) => {
+        if (i !== parallelIdx || it.kind !== "parallel") return it;
+        const phases = [
+          ...it.phases,
+          {
+            kind: "phase" as const,
+            name: rawName,
+            timeout: 900,
+            reject: null,
+            extras: {},
+          },
+        ];
+        return { ...it, phases };
+      }),
+    );
     newlyAddedRef.current.add(rawName);
     mark();
   };
@@ -349,7 +427,9 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
           return { ...it, phases: it.phases.filter((_, j) => j !== childIdx) };
         });
         // 子阶段删空时整个并行块移除
-        const filtered = mapped.filter((it) => it.kind !== "parallel" || (it as ParallelItem).phases.length > 0);
+        const filtered = mapped.filter(
+          (it) => it.kind !== "parallel" || (it as ParallelItem).phases.length > 0,
+        );
         return sanitizeRejects(filtered);
       });
     }
@@ -433,7 +513,8 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       const added = res.ts?.added ?? [];
       const renamed = res.renamed ?? [];
       const parts: string[] = [];
-      if (renamed.length > 0) parts.push(`重命名 ${renamed.length} 个函数：${renamed.join(", ")}`);
+      if (renamed.length > 0)
+        parts.push(`重命名 ${renamed.length} 个函数：${renamed.join(", ")}`);
       if (added.length > 0) parts.push(`新增 ${added.length} 个函数：${added.join(", ")}`);
       toast.success(parts.length > 0 ? `已保存（${parts.join("；")}）` : "已保存");
 
@@ -466,7 +547,8 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   const syncTs = async () => {
     try {
       const res = await api.syncWorkflowTs(workflowName);
-      if (res.modified) toast.success(`已追加 ${res.added.length} 个函数：${res.added.join(", ")}`);
+      if (res.modified)
+        toast.success(`已追加 ${res.added.length} 个函数：${res.added.join(", ")}`);
       else toast.info("TS 已是最新");
       setOrphans(res.orphans);
       if ((res.legacy_signature ?? []).length > 0) {
@@ -483,7 +565,9 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   const doPrune = async () => {
     try {
       const res = await api.pruneOrphans(workflowName, orphans);
-      toast.success(`已清理 ${res.removed.length} 个孤儿函数：${res.removed.join(", ")}（.bak 已备份）`);
+      toast.success(
+        `已清理 ${res.removed.length} 个孤儿函数：${res.removed.join(", ")}（.bak 已备份）`,
+      );
       setOrphans([]);
       onSaved?.();
     } catch (e: any) {
@@ -496,55 +580,87 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
   // ── 渲染 ──
 
   return (
-    <div className="card" style={{ marginTop: "0.75rem" }}>
-      <div className="card-header">
-        <h3>阶段</h3>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <button className="btn btn-secondary" onClick={syncTs} title="扫描 workflow.ts 并为缺失阶段追加 run_xxx 函数">
+    <Card className="mt-3 p-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold">阶段</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {items.length === 0 ? "暂无阶段" : `${items.length} 个顶层节点`}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={syncTs}
+            title="扫描 workflow.ts 并为缺失阶段追加 run_xxx 函数"
+          >
             校准 TS
-          </button>
-          <button className="btn btn-secondary" onClick={() => setAddParallelOpen(true)}>
-            + 并行块
-          </button>
-          <button className="btn btn-primary" onClick={() => setAddPhaseOpen(true)}>新增阶段</button>
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setAddParallelOpen(true)}>
+            <Layers className="h-3.5 w-3.5" />
+            并行块
+          </Button>
+          <Button size="sm" onClick={() => setAddPhaseOpen(true)}>
+            <Plus className="h-3.5 w-3.5" />
+            新增阶段
+          </Button>
         </div>
       </div>
 
       {orphans.length > 0 && (
-        <div className="orphan-alert">
-          <span>
-            ⚠ workflow.ts 中存在 {orphans.length} 个孤儿函数：
-            {orphans.map((n) => <code key={n} className="mono" style={{ margin: "0 0.3rem" }}>run_{n}</code>)}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3.5 py-2.5 text-sm">
+          <span className="flex flex-wrap items-center gap-1.5">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>workflow.ts 中存在 {orphans.length} 个孤儿函数：</span>
+            {orphans.map((n) => (
+              <code
+                key={n}
+                className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground"
+              >
+                run_{n}
+              </code>
+            ))}
           </span>
-          <button className="btn btn-danger" onClick={() => setPruneConfirm(true)}>
+          <Button size="sm" variant="destructive" onClick={() => setPruneConfirm(true)}>
+            <Trash2 className="h-3.5 w-3.5" />
             清理孤儿
-          </button>
+          </Button>
         </div>
       )}
 
       {items.length === 0 ? (
-        <p className="muted">暂无阶段</p>
+        <div className="rounded-lg border border-dashed bg-card/50 px-6 py-10 text-center text-sm text-muted-foreground">
+          暂无阶段，点击右上角「新增阶段」开始
+        </div>
       ) : (
-        <div className="phase-list">
+        <div className="flex flex-col gap-2">
           {items.map((it, idx) => {
-            const dragHandlers = {
+            const dragHandlers: DragHandlers = {
               draggable: true,
               isDragging: dragSource?.kind === "top" && dragSource.idx === idx,
-              isDropTarget: dragOverTopIdx === idx && dragSource?.kind === "top" && dragSource.idx !== idx,
+              isDropTarget:
+                dragOverTopIdx === idx &&
+                dragSource?.kind === "top" &&
+                dragSource.idx !== idx,
               onDragStart: () => setDragSource({ kind: "top", idx }),
               onDragOver: (e: React.DragEvent) => {
                 if (dragSource?.kind !== "top") return;
                 e.preventDefault();
                 setDragOverTopIdx(idx);
               },
-              onDragLeave: () => setDragOverTopIdx((prev) => (prev === idx ? null : prev)),
+              onDragLeave: () =>
+                setDragOverTopIdx((prev) => (prev === idx ? null : prev)),
               onDrop: (e: React.DragEvent) => {
                 e.preventDefault();
                 if (dragSource?.kind === "top") reorderTop(dragSource.idx, idx);
                 setDragSource(null);
                 setDragOverTopIdx(null);
               },
-              onDragEnd: () => { setDragSource(null); setDragOverTopIdx(null); },
+              onDragEnd: () => {
+                setDragSource(null);
+                setDragOverTopIdx(null);
+              },
             };
             if (it.kind === "parallel") {
               return (
@@ -559,19 +675,40 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
                   onHoverPhase={onHoverPhase}
                   dragHandlers={dragHandlers}
                   onReorderChild={(from, to) => reorderChild(idx, from, to)}
-                  dragOverChildState={dragOverChild?.parallelIdx === idx ? dragOverChild : null}
-                  dragSourceForParallel={dragSource?.kind === "child" && dragSource.parallelIdx === idx ? dragSource : null}
+                  dragOverChildState={
+                    dragOverChild?.parallelIdx === idx ? dragOverChild : null
+                  }
+                  dragSourceForParallel={
+                    dragSource?.kind === "child" && dragSource.parallelIdx === idx
+                      ? dragSource
+                      : null
+                  }
                   setChildDragSource={(src) => setDragSource(src)}
                   setChildDragOver={setDragOverChild}
                   onMoveUp={() => moveTop(idx, -1)}
                   onMoveDown={() => moveTop(idx, 1)}
                   onDelete={() => setPendingDelete({ kind: "top", idx, name: it.name })}
                   onUngroup={() => ungroupParallel(idx)}
-                  onUpdateStrategy={(s) => updateTopItem(idx, (old) => (old.kind === "parallel" ? { ...old, fail_strategy: s } : old))}
-                  onUpdateName={(newName) => updateTopItem(idx, (old) => ({ ...old, name: newName }))}
+                  onUpdateStrategy={(s) =>
+                    updateTopItem(idx, (old) =>
+                      old.kind === "parallel" ? { ...old, fail_strategy: s } : old,
+                    )
+                  }
+                  onUpdateName={(newName) =>
+                    updateTopItem(idx, (old) => ({ ...old, name: newName }))
+                  }
                   onAddChild={() => addChildToParallel(idx)}
-                  onChildUpdate={(childIdx, p) => updateChildPhase(idx, childIdx, () => p)}
-                  onChildDelete={(childIdx, name) => setPendingDelete({ kind: "child", parallelIdx: idx, childIdx, name })}
+                  onChildUpdate={(childIdx, p) =>
+                    updateChildPhase(idx, childIdx, () => p)
+                  }
+                  onChildDelete={(childIdx, name) =>
+                    setPendingDelete({
+                      kind: "child",
+                      parallelIdx: idx,
+                      childIdx,
+                      name,
+                    })
+                  }
                   onChildMoveUp={(childIdx) => moveChild(idx, childIdx, -1)}
                   onChildMoveDown={(childIdx) => moveChild(idx, childIdx, 1)}
                   onChildLift={(childIdx) => moveChildToTop(idx, childIdx)}
@@ -594,7 +731,9 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
                 onMoveDown={() => moveTop(idx, 1)}
                 onDelete={() => setPendingDelete({ kind: "top", idx, name: it.name })}
                 onUpdate={(next) => updateTopItem(idx, () => next)}
-                onMoveIntoParallel={(parallelIdx) => moveTopPhaseInto(idx, parallelIdx)}
+                onMoveIntoParallel={(parallelIdx) =>
+                  moveTopPhaseInto(idx, parallelIdx)
+                }
               />
             );
           })}
@@ -602,31 +741,43 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
       )}
 
       {dirty && (
-        <div className="card-actions" style={{ borderTop: "1px solid var(--border)", paddingTop: "0.75rem", marginTop: "0.75rem", flexDirection: "column", alignItems: "flex-start", gap: "0.6rem" }}>
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <button
-              className="btn btn-primary"
+        <div className="mt-4 flex flex-col gap-2.5 border-t pt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
               onClick={save}
               disabled={saving || hasErrors}
-              title={hasErrors ? `有 ${issues.length} 处校验错误，修复后才能保存` : undefined}
+              title={
+                hasErrors
+                  ? `有 ${issues.length} 处校验错误，修复后才能保存`
+                  : undefined
+              }
             >
-              {saving ? "保存中..." : "保存更改"}
-            </button>
-            <button className="btn btn-secondary" onClick={reset} disabled={saving}>撤销</button>
+              {saving ? "保存中…" : "保存更改"}
+            </Button>
+            <Button variant="secondary" onClick={reset} disabled={saving}>
+              撤销
+            </Button>
             {!hasErrors && (
-              <span className="muted" style={{ fontSize: "0.78rem", alignSelf: "center" }}>
+              <span className="text-xs text-muted-foreground">
                 保存将写入 workflow.yaml 并自动追加缺失的 run_ 函数
               </span>
             )}
           </div>
           {hasErrors && (
-            <div className="validation-summary">
-              <strong>⚠ {issues.length} 处错误需修复：</strong>
-              <ul>
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3.5 py-2.5 text-sm">
+              <div className="flex items-center gap-1.5 text-destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <strong className="font-semibold">
+                  {issues.length} 处错误需修复：
+                </strong>
+              </div>
+              <ul className="mt-1.5 space-y-0.5 pl-5 text-xs">
                 {issues.map((iss, i) => (
-                  <li key={i}>
-                    <code className="mono">{iss.path}</code>
-                    <span className="muted" style={{ margin: "0 0.4rem" }}>·</span>
+                  <li key={i} className="list-disc">
+                    <code className="rounded bg-muted px-1 font-mono text-foreground">
+                      {iss.path}
+                    </code>
+                    <span className="mx-1.5 text-muted-foreground">·</span>
                     {iss.message}
                   </li>
                 ))}
@@ -657,13 +808,18 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
         open={pruneConfirm}
         title="清理孤儿函数"
         message={
-          <div>
+          <div className="space-y-2">
             <p>将从 workflow.ts 中删除以下 {orphans.length} 个函数：</p>
-            <ul style={{ marginTop: "0.5rem", marginLeft: "1rem", fontFamily: "var(--mono)", fontSize: "0.85rem" }}>
-              {orphans.map((n) => <li key={n}>run_{n}</li>)}
+            <ul className="space-y-0.5 rounded-md border bg-muted/40 p-2 pl-5 font-mono text-xs">
+              {orphans.map((n) => (
+                <li key={n} className="list-disc">
+                  run_{n}
+                </li>
+              ))}
             </ul>
-            <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.82rem" }}>
-              仅删除函数声明和函数体，字符串 / 注释中的同名字面量不受影响。<br />
+            <p className="text-xs text-muted-foreground">
+              仅删除函数声明和函数体，字符串 / 注释中的同名字面量不受影响。
+              <br />
               写入前会备份到 workflow.ts.bak。
             </p>
           </div>
@@ -676,12 +832,21 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
 
       <ConfirmDialog
         open={!!pendingDelete}
-        title={pendingDelete?.kind === "top" && items[pendingDelete.idx]?.kind === "parallel" ? "删除并行块" : "删除阶段"}
+        title={
+          pendingDelete?.kind === "top" &&
+          items[pendingDelete.idx]?.kind === "parallel"
+            ? "删除并行块"
+            : "删除阶段"
+        }
         message={
           <span>
-            确认删除 <code className="mono">{pendingDelete?.name}</code>？
+            确认删除{" "}
+            <code className="rounded bg-muted px-1 font-mono">
+              {pendingDelete?.name}
+            </code>
+            ？
             <br />
-            <span className="muted" style={{ fontSize: "0.82rem" }}>
+            <span className="text-xs text-muted-foreground">
               workflow.ts 中的 run_ 函数不会自动删除；若为并行块，其子阶段也会一并移除。
             </span>
           </span>
@@ -691,12 +856,12 @@ export function PhaseEditor({ workflowName, initialPhases, onSaved, hoveredPhase
         onConfirm={doDelete}
         onCancel={() => setPendingDelete(null)}
       />
-    </div>
+    </Card>
   );
 }
 
 // ──────────────────────────────────────────────
-// 普通阶段行
+// 行容器：统一拖拽视觉
 // ──────────────────────────────────────────────
 
 interface DragHandlers {
@@ -709,6 +874,39 @@ interface DragHandlers {
   onDrop: (e: React.DragEvent) => void;
   onDragEnd: () => void;
 }
+
+/** 序号 chip，承担 drag handle 角色 */
+function IndexHandle({
+  label,
+  size = "md",
+  dragHandlers,
+}: {
+  label: React.ReactNode;
+  size?: "md" | "sm";
+  dragHandlers: DragHandlers;
+}) {
+  return (
+    <span
+      draggable={dragHandlers.draggable}
+      onDragStart={dragHandlers.onDragStart}
+      onDragEnd={dragHandlers.onDragEnd}
+      title="拖动以重排"
+      className={cn(
+        "inline-flex shrink-0 cursor-grab items-center justify-center gap-0.5 rounded-full bg-muted font-mono text-muted-foreground transition-colors hover:text-foreground active:cursor-grabbing",
+        size === "md" ? "size-7 text-xs" : "h-5 px-1.5 text-[10px]",
+      )}
+    >
+      <GripVertical
+        className={cn("opacity-60", size === "md" ? "h-3 w-3" : "h-2.5 w-2.5")}
+      />
+      <span>{label}</span>
+    </span>
+  );
+}
+
+// ──────────────────────────────────────────────
+// 普通阶段行
+// ──────────────────────────────────────────────
 
 interface PhaseRowProps {
   item: PhaseItem;
@@ -727,13 +925,30 @@ interface PhaseRowProps {
   onMoveIntoParallel: (parallelIdx: number) => void;
 }
 
-function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, issues, dragHandlers, hoveredPhase, onHoverPhase, onMoveUp, onMoveDown, onDelete, onUpdate, onMoveIntoParallel }: PhaseRowProps) {
+function PhaseRow({
+  item,
+  idx,
+  total,
+  rejectCandidates,
+  parallelTargets,
+  issues,
+  dragHandlers,
+  hoveredPhase,
+  onHoverPhase,
+  onMoveUp,
+  onMoveDown,
+  onDelete,
+  onUpdate,
+  onMoveIntoParallel,
+}: PhaseRowProps) {
   const nameIssue = fieldIssue(issues, "name");
   const timeoutIssue = fieldIssue(issues, "timeout");
   const rejectIssue = fieldIssue(issues, "reject");
   const isHighlight = hoveredPhase === item.name;
   const [nameDraft, setNameDraft] = React.useState(item.name);
-  React.useEffect(() => { setNameDraft(item.name); }, [item.name]);
+  React.useEffect(() => {
+    setNameDraft(item.name);
+  }, [item.name]);
 
   const commitName = () => {
     const trimmed = nameDraft.trim();
@@ -744,89 +959,191 @@ function PhaseRow({ item, idx, total, rejectCandidates, parallelTargets, issues,
 
   return (
     <div
-      className={`phase-row ${isHighlight ? "highlight" : ""} ${dragHandlers.isDragging ? "is-dragging" : ""} ${dragHandlers.isDropTarget ? "is-drop-target" : ""}`}
+      className={cn(
+        "rounded-lg border bg-card px-3 py-2.5 shadow-sm transition-colors",
+        isHighlight && "border-primary/40 ring-1 ring-primary/20",
+        dragHandlers.isDragging && "opacity-40",
+        dragHandlers.isDropTarget && "border-primary ring-2 ring-primary",
+      )}
       onMouseEnter={() => onHoverPhase?.(item.name)}
       onMouseLeave={() => onHoverPhase?.(null)}
       onDragOver={dragHandlers.onDragOver}
       onDragLeave={dragHandlers.onDragLeave}
       onDrop={dragHandlers.onDrop}
     >
-      <div className="phase-row-main">
-        <span
-          className="phase-idx drag-handle"
-          draggable={dragHandlers.draggable}
-          onDragStart={dragHandlers.onDragStart}
-          onDragEnd={dragHandlers.onDragEnd}
-          title="拖动以重排"
-        >
-          {idx + 1}
-        </span>
-        <div className="phase-body">
-          <div className="phase-title">
-            <input
+      <div className="flex items-start gap-3">
+        <IndexHandle label={idx + 1} dragHandlers={dragHandlers} />
+        <div className="min-w-0 flex-1 space-y-2.5">
+          <div>
+            <Input
               type="text"
-              className={`text-input phase-name-input mono ${nameIssue ? "field-error" : ""}`}
               value={nameDraft}
               onChange={(e) => setNameDraft(e.target.value)}
               onBlur={commitName}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
               title={nameIssue?.message ?? "阶段名"}
+              aria-invalid={!!nameIssue}
+              className={cn(
+                "h-8 max-w-xs font-mono text-sm",
+                nameIssue && "border-destructive focus-visible:ring-destructive",
+              )}
             />
-            {nameIssue && <small className="field-error-msg">{nameIssue.message}</small>}
+            {nameIssue && (
+              <p className="mt-1 text-xs text-destructive">{nameIssue.message}</p>
+            )}
           </div>
-          <div className="phase-fields">
-            <label>
-              <span className="muted">超时(秒)</span>
-              <input
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">超时(秒)</Label>
+              <Input
                 type="number"
-                className={`text-input phase-input ${timeoutIssue ? "field-error" : ""}`}
                 min={1}
                 value={item.timeout ?? ""}
                 placeholder="900"
                 onChange={(e) => {
                   const v = e.target.value;
-                  onUpdate({ ...item, timeout: v === "" ? undefined : Number(v) });
+                  onUpdate({
+                    ...item,
+                    timeout: v === "" ? undefined : Number(v),
+                  });
                 }}
+                aria-invalid={!!timeoutIssue}
+                className={cn(
+                  "h-8 w-24 font-mono text-sm",
+                  timeoutIssue &&
+                    "border-destructive focus-visible:ring-destructive",
+                )}
               />
-              {timeoutIssue && <small className="field-error-msg">{timeoutIssue.message}</small>}
-            </label>
-            <label>
-              <span className="muted">驳回到</span>
-              <select
-                className={`wf-select phase-input ${rejectIssue ? "field-error" : ""}`}
-                value={item.reject ?? ""}
-                onChange={(e) => onUpdate({ ...item, reject: e.target.value || null })}
+              {timeoutIssue && (
+                <p className="text-xs text-destructive">{timeoutIssue.message}</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">驳回到</Label>
+              <Select
+                value={item.reject ?? "__none__"}
+                onValueChange={(v) =>
+                  onUpdate({ ...item, reject: v === "__none__" ? null : v })
+                }
                 disabled={rejectCandidates.length === 0}
               >
-                <option value="">（不驳回）</option>
-                {rejectCandidates.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-              {rejectIssue && <small className="field-error-msg">{rejectIssue.message}</small>}
-            </label>
+                <SelectTrigger
+                  aria-invalid={!!rejectIssue}
+                  className={cn(
+                    "h-8 w-44 text-sm",
+                    rejectIssue &&
+                      "border-destructive focus-visible:ring-destructive",
+                  )}
+                >
+                  <SelectValue placeholder="（不驳回）" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">（不驳回）</SelectItem>
+                  {rejectCandidates.map((n) => (
+                    <SelectItem key={n} value={n} className="font-mono">
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {rejectIssue && (
+                <p className="text-xs text-destructive">{rejectIssue.message}</p>
+              )}
+            </div>
             {parallelTargets.length > 0 && (
-              <label>
-                <span className="muted">移入并行块</span>
-                <select
-                  className="wf-select phase-input"
-                  value=""
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v !== "") onMoveIntoParallel(parseInt(v, 10));
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">移入并行块</Label>
+                <Select
+                  value="__none__"
+                  onValueChange={(v) => {
+                    if (v !== "__none__") onMoveIntoParallel(parseInt(v, 10));
                   }}
                 >
-                  <option value="">（不移动）</option>
-                  {parallelTargets.map((p) => <option key={p.idx} value={p.idx}>{p.name}</option>)}
-                </select>
-              </label>
+                  <SelectTrigger className="h-8 w-44 text-sm">
+                    <SelectValue placeholder="（不移动）" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">（不移动）</SelectItem>
+                    {parallelTargets.map((p) => (
+                      <SelectItem
+                        key={p.idx}
+                        value={String(p.idx)}
+                        className="font-mono"
+                      >
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
           </div>
         </div>
+        <RowActions
+          onMoveUp={onMoveUp}
+          onMoveDown={onMoveDown}
+          onDelete={onDelete}
+          canUp={idx > 0}
+          canDown={idx < total - 1}
+        />
       </div>
-      <div className="phase-actions">
-        <button className="btn-icon" title="上移" onClick={onMoveUp} disabled={idx === 0}>↑</button>
-        <button className="btn-icon" title="下移" onClick={onMoveDown} disabled={idx === total - 1}>↓</button>
-        <button className="btn-icon btn-icon-danger" title="删除" onClick={onDelete}>✕</button>
-      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// 行操作按钮（上移 / 下移 / 删除）
+// ──────────────────────────────────────────────
+
+function RowActions({
+  onMoveUp,
+  onMoveDown,
+  onDelete,
+  canUp,
+  canDown,
+  extras,
+}: {
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onDelete: () => void;
+  canUp: boolean;
+  canDown: boolean;
+  extras?: React.ReactNode;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-0.5">
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-7"
+        title="上移"
+        onClick={onMoveUp}
+        disabled={!canUp}
+      >
+        <ArrowUp className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-7"
+        title="下移"
+        onClick={onMoveDown}
+        disabled={!canDown}
+      >
+        <ArrowDown className="h-3.5 w-3.5" />
+      </Button>
+      {extras}
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+        title="删除"
+        onClick={onDelete}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </Button>
     </div>
   );
 }
@@ -846,8 +1163,14 @@ interface ParallelRowProps {
   dragHandlers: DragHandlers;
   onReorderChild: (from: number, to: number) => void;
   dragOverChildState: { parallelIdx: number; childIdx: number } | null;
-  dragSourceForParallel: { kind: "child"; parallelIdx: number; childIdx: number } | null;
-  setChildDragSource: (src: { kind: "child"; parallelIdx: number; childIdx: number } | null) => void;
+  dragSourceForParallel: {
+    kind: "child";
+    parallelIdx: number;
+    childIdx: number;
+  } | null;
+  setChildDragSource: (
+    src: { kind: "child"; parallelIdx: number; childIdx: number } | null,
+  ) => void;
   setChildDragOver: (s: { parallelIdx: number; childIdx: number } | null) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -864,17 +1187,41 @@ interface ParallelRowProps {
 }
 
 function ParallelRow(props: ParallelRowProps) {
-  const { item, idx, total, allNames, issues, hoveredPhase, onHoverPhase, dragHandlers,
-    onReorderChild, dragOverChildState, dragSourceForParallel, setChildDragSource, setChildDragOver,
-    onMoveUp, onMoveDown, onDelete, onUngroup, onUpdateStrategy, onUpdateName, onAddChild,
-    onChildUpdate, onChildDelete, onChildMoveUp, onChildMoveDown, onChildLift } = props;
+  const {
+    item,
+    idx,
+    total,
+    issues,
+    hoveredPhase,
+    onHoverPhase,
+    dragHandlers,
+    onReorderChild,
+    dragOverChildState,
+    dragSourceForParallel,
+    setChildDragSource,
+    setChildDragOver,
+    onMoveUp,
+    onMoveDown,
+    onDelete,
+    onUngroup,
+    onUpdateStrategy,
+    onUpdateName,
+    onAddChild,
+    onChildUpdate,
+    onChildDelete,
+    onChildMoveUp,
+    onChildMoveDown,
+    onChildLift,
+  } = props;
   const headHighlight = hoveredPhase === item.name;
   const ownIssues = issuesForTop(issues, idx);
   const nameIssue = fieldIssue(ownIssues, "name");
   const strategyIssue = fieldIssue(ownIssues, "fail_strategy");
   const phasesIssue = fieldIssue(ownIssues, "phases");
   const [nameDraft, setNameDraft] = React.useState(item.name);
-  React.useEffect(() => { setNameDraft(item.name); }, [item.name]);
+  React.useEffect(() => {
+    setNameDraft(item.name);
+  }, [item.name]);
   const commitName = () => {
     const trimmed = nameDraft.trim();
     if (trimmed === item.name) return;
@@ -883,89 +1230,140 @@ function ParallelRow(props: ParallelRowProps) {
 
   return (
     <div
-      className={`phase-row phase-row-parallel ${headHighlight ? "highlight" : ""} ${dragHandlers.isDragging ? "is-dragging" : ""} ${dragHandlers.isDropTarget ? "is-drop-target" : ""}`}
+      className={cn(
+        "rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 shadow-sm transition-colors",
+        headHighlight && "border-primary/60 ring-1 ring-primary/20",
+        dragHandlers.isDragging && "opacity-40",
+        dragHandlers.isDropTarget && "border-primary ring-2 ring-primary",
+      )}
       onDragOver={dragHandlers.onDragOver}
       onDragLeave={dragHandlers.onDragLeave}
       onDrop={dragHandlers.onDrop}
     >
-      <div className="phase-row-main" style={{ flexDirection: "column", alignItems: "stretch" }}>
-        <div
-          style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", width: "100%" }}
-          onMouseEnter={() => onHoverPhase?.(item.name)}
-          onMouseLeave={() => onHoverPhase?.(null)}
-        >
-          <span
-            className="phase-idx drag-handle"
-            draggable={dragHandlers.draggable}
-            onDragStart={dragHandlers.onDragStart}
-            onDragEnd={dragHandlers.onDragEnd}
-            title="拖动以重排"
-          >
-            {idx + 1}
-          </span>
-          <div className="phase-body">
-            <div className="phase-title">
-              <span className="pill pill-accent" style={{ marginRight: "0.5rem" }}>并行</span>
-              <input
+      <div
+        className="flex items-start gap-3"
+        onMouseEnter={() => onHoverPhase?.(item.name)}
+        onMouseLeave={() => onHoverPhase?.(null)}
+      >
+        <IndexHandle label={idx + 1} dragHandlers={dragHandlers} />
+        <div className="min-w-0 flex-1 space-y-2.5">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant="default"
+                className="bg-primary/15 text-primary hover:bg-primary/20"
+              >
+                <Layers className="h-3 w-3" />
+                并行
+              </Badge>
+              <Input
                 type="text"
-                className={`text-input phase-name-input mono ${nameIssue ? "field-error" : ""}`}
                 value={nameDraft}
                 onChange={(e) => setNameDraft(e.target.value)}
                 onBlur={commitName}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
                 title={nameIssue?.message}
+                aria-invalid={!!nameIssue}
+                className={cn(
+                  "h-8 max-w-xs font-mono text-sm",
+                  nameIssue && "border-destructive focus-visible:ring-destructive",
+                )}
               />
-              {nameIssue && <small className="field-error-msg">{nameIssue.message}</small>}
             </div>
-            <div className="phase-fields">
-              <label>
-                <span className="muted">失败策略</span>
-                <select
-                  className={`wf-select phase-input ${strategyIssue ? "field-error" : ""}`}
-                  value={item.fail_strategy ?? "cancel_all"}
-                  onChange={(e) => onUpdateStrategy(e.target.value)}
-                >
-                  {STRATEGIES.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-                {strategyIssue && <small className="field-error-msg">{strategyIssue.message}</small>}
-              </label>
-            </div>
-            {phasesIssue && (
-              <small className="field-error-msg" style={{ display: "block", marginTop: "0.3rem" }}>
-                {phasesIssue.message}
-              </small>
+            {nameIssue && (
+              <p className="mt-1 text-xs text-destructive">{nameIssue.message}</p>
             )}
           </div>
-          <div className="phase-actions">
-            <button className="btn-icon" title="上移" onClick={onMoveUp} disabled={idx === 0}>↑</button>
-            <button className="btn-icon" title="下移" onClick={onMoveDown} disabled={idx === total - 1}>↓</button>
-            <button className="btn-icon" title="拆解为顺序阶段" onClick={onUngroup}>⇲</button>
-            <button className="btn-icon btn-icon-danger" title="删除整个并行块" onClick={onDelete}>✕</button>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">失败策略</Label>
+              <Select
+                value={item.fail_strategy ?? "cancel_all"}
+                onValueChange={(v) => onUpdateStrategy(v)}
+              >
+                <SelectTrigger
+                  aria-invalid={!!strategyIssue}
+                  className={cn(
+                    "h-8 w-36 text-sm",
+                    strategyIssue &&
+                      "border-destructive focus-visible:ring-destructive",
+                  )}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STRATEGIES.map((s) => (
+                    <SelectItem key={s} value={s} className="font-mono">
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {strategyIssue && (
+                <p className="text-xs text-destructive">{strategyIssue.message}</p>
+              )}
+            </div>
           </div>
+          {phasesIssue && (
+            <p className="text-xs text-destructive">{phasesIssue.message}</p>
+          )}
         </div>
+        <RowActions
+          onMoveUp={onMoveUp}
+          onMoveDown={onMoveDown}
+          onDelete={onDelete}
+          canUp={idx > 0}
+          canDown={idx < total - 1}
+          extras={
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7"
+              title="拆解为顺序阶段"
+              onClick={onUngroup}
+            >
+              <Ungroup className="h-3.5 w-3.5" />
+            </Button>
+          }
+        />
+      </div>
 
-        <div className="parallel-children">
-          {item.phases.map((sub, j) => {
-            const childDrag: DragHandlers = {
-              draggable: true,
-              isDragging: dragSourceForParallel?.childIdx === j,
-              isDropTarget: dragOverChildState?.childIdx === j && dragSourceForParallel !== null && dragSourceForParallel.childIdx !== j,
-              onDragStart: () => setChildDragSource({ kind: "child", parallelIdx: idx, childIdx: j }),
-              onDragOver: (e) => {
-                if (!dragSourceForParallel) return;
-                e.preventDefault();
-                setChildDragOver({ parallelIdx: idx, childIdx: j });
-              },
-              onDragLeave: () => setChildDragOver(null),
-              onDrop: (e) => {
-                e.preventDefault();
-                if (dragSourceForParallel) onReorderChild(dragSourceForParallel.childIdx, j);
-                setChildDragSource(null);
-                setChildDragOver(null);
-              },
-              onDragEnd: () => { setChildDragSource(null); setChildDragOver(null); },
-            };
-            return (
+      <div className="mt-3 flex flex-col gap-2 border-l-2 border-primary/30 pl-3">
+        {item.phases.map((sub, j) => {
+          const childDrag: DragHandlers = {
+            draggable: true,
+            isDragging: dragSourceForParallel?.childIdx === j,
+            isDropTarget:
+              dragOverChildState?.childIdx === j &&
+              dragSourceForParallel !== null &&
+              dragSourceForParallel.childIdx !== j,
+            onDragStart: () =>
+              setChildDragSource({
+                kind: "child",
+                parallelIdx: idx,
+                childIdx: j,
+              }),
+            onDragOver: (e) => {
+              if (!dragSourceForParallel) return;
+              e.preventDefault();
+              setChildDragOver({ parallelIdx: idx, childIdx: j });
+            },
+            onDragLeave: () => setChildDragOver(null),
+            onDrop: (e) => {
+              e.preventDefault();
+              if (dragSourceForParallel)
+                onReorderChild(dragSourceForParallel.childIdx, j);
+              setChildDragSource(null);
+              setChildDragOver(null);
+            },
+            onDragEnd: () => {
+              setChildDragSource(null);
+              setChildDragOver(null);
+            },
+          };
+          return (
             <ParallelChildRow
               key={j}
               sub={sub}
@@ -982,16 +1380,17 @@ function ParallelRow(props: ParallelRowProps) {
               onMoveDown={() => onChildMoveDown(j)}
               onLift={() => onChildLift(j)}
             />
-            );
-          })}
-          <button
-            className="btn btn-secondary"
-            style={{ alignSelf: "flex-start", marginTop: "0.4rem" }}
-            onClick={onAddChild}
-          >
-            + 添加子阶段
-          </button>
-        </div>
+          );
+        })}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="self-start text-muted-foreground hover:text-foreground"
+          onClick={onAddChild}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          添加子阶段
+        </Button>
       </div>
     </div>
   );
@@ -1017,11 +1416,27 @@ interface ParallelChildRowProps {
   onLift: () => void;
 }
 
-function ParallelChildRow({ sub, outerIdx, innerIdx, total, issues, isHighlight, dragHandlers, onHoverPhase, onUpdate, onDelete, onMoveUp, onMoveDown, onLift }: ParallelChildRowProps) {
+function ParallelChildRow({
+  sub,
+  outerIdx,
+  innerIdx,
+  total,
+  issues,
+  isHighlight,
+  dragHandlers,
+  onHoverPhase,
+  onUpdate,
+  onDelete,
+  onMoveUp,
+  onMoveDown,
+  onLift,
+}: ParallelChildRowProps) {
   const nameIssue = fieldIssue(issues, "name");
   const timeoutIssue = fieldIssue(issues, "timeout");
   const [nameDraft, setNameDraft] = React.useState(sub.name);
-  React.useEffect(() => { setNameDraft(sub.name); }, [sub.name]);
+  React.useEffect(() => {
+    setNameDraft(sub.name);
+  }, [sub.name]);
 
   const commitName = () => {
     const trimmed = nameDraft.trim();
@@ -1031,60 +1446,113 @@ function ParallelChildRow({ sub, outerIdx, innerIdx, total, issues, isHighlight,
 
   return (
     <div
-      className={`phase-row parallel-child ${isHighlight ? "highlight" : ""} ${dragHandlers.isDragging ? "is-dragging" : ""} ${dragHandlers.isDropTarget ? "is-drop-target" : ""}`}
+      className={cn(
+        "rounded-md border bg-card px-2.5 py-2 shadow-sm transition-colors",
+        isHighlight && "border-primary/40 ring-1 ring-primary/20",
+        dragHandlers.isDragging && "opacity-40",
+        dragHandlers.isDropTarget && "border-primary ring-2 ring-primary",
+      )}
       onMouseEnter={() => onHoverPhase?.(sub.name)}
       onMouseLeave={() => onHoverPhase?.(null)}
       onDragOver={dragHandlers.onDragOver}
       onDragLeave={dragHandlers.onDragLeave}
       onDrop={dragHandlers.onDrop}
     >
-      <div className="phase-row-main">
-        <span
-          className="phase-idx-small mono muted drag-handle"
-          draggable={dragHandlers.draggable}
-          onDragStart={dragHandlers.onDragStart}
-          onDragEnd={dragHandlers.onDragEnd}
-          title="拖动以重排"
-        >
-          {outerIdx + 1}.{innerIdx + 1}
-        </span>
-        <div className="phase-body">
-          <div className="phase-title">
-            <input
+      <div className="flex items-start gap-2.5">
+        <IndexHandle
+          label={`${outerIdx + 1}.${innerIdx + 1}`}
+          size="sm"
+          dragHandlers={dragHandlers}
+        />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div>
+            <Input
               type="text"
-              className={`text-input phase-name-input mono ${nameIssue ? "field-error" : ""}`}
               value={nameDraft}
               onChange={(e) => setNameDraft(e.target.value)}
               onBlur={commitName}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
               title={nameIssue?.message}
+              aria-invalid={!!nameIssue}
+              className={cn(
+                "h-8 max-w-xs font-mono text-sm",
+                nameIssue && "border-destructive focus-visible:ring-destructive",
+              )}
             />
-            {nameIssue && <small className="field-error-msg">{nameIssue.message}</small>}
+            {nameIssue && (
+              <p className="mt-1 text-xs text-destructive">{nameIssue.message}</p>
+            )}
           </div>
-          <div className="phase-fields">
-            <label>
-              <span className="muted">超时(秒)</span>
-              <input
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">超时(秒)</Label>
+              <Input
                 type="number"
-                className={`text-input phase-input ${timeoutIssue ? "field-error" : ""}`}
                 min={1}
                 value={sub.timeout ?? ""}
                 placeholder="900"
                 onChange={(e) => {
                   const v = e.target.value;
-                  onUpdate({ ...sub, timeout: v === "" ? undefined : Number(v) });
+                  onUpdate({
+                    ...sub,
+                    timeout: v === "" ? undefined : Number(v),
+                  });
                 }}
+                aria-invalid={!!timeoutIssue}
+                className={cn(
+                  "h-8 w-24 font-mono text-sm",
+                  timeoutIssue &&
+                    "border-destructive focus-visible:ring-destructive",
+                )}
               />
-              {timeoutIssue && <small className="field-error-msg">{timeoutIssue.message}</small>}
-            </label>
+              {timeoutIssue && (
+                <p className="text-xs text-destructive">{timeoutIssue.message}</p>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-      <div className="phase-actions">
-        <button className="btn-icon" title="块内上移" onClick={onMoveUp} disabled={innerIdx === 0}>↑</button>
-        <button className="btn-icon" title="块内下移" onClick={onMoveDown} disabled={innerIdx === total - 1}>↓</button>
-        <button className="btn-icon" title="移出到顶级" onClick={onLift}>⇱</button>
-        <button className="btn-icon btn-icon-danger" title="删除子阶段" onClick={onDelete}>✕</button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            title="块内上移"
+            onClick={onMoveUp}
+            disabled={innerIdx === 0}
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            title="块内下移"
+            onClick={onMoveDown}
+            disabled={innerIdx === total - 1}
+          >
+            <ArrowDown className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            title="移出到顶级"
+            onClick={onLift}
+          >
+            <ArrowUpFromLine className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            title="删除子阶段"
+            onClick={onDelete}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
     </div>
   );

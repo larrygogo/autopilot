@@ -8,12 +8,13 @@ This directory contains example workflow and plugin implementations for the auto
 
 ```
 examples/
-├── workflows/          # Example workflows (5 reference implementations)
-│   ├── dev/            # Full development workflow (5 phases)
+├── workflows/          # Example workflows (6 reference implementations)
+│   ├── dev/            # Full development workflow (5 phases, incl. git push + gh PR)
 │   ├── req_review/     # Requirements review (2 phases)
 │   ├── doc_gen/        # Document generation and review
 │   ├── parallel_build/ # Parallel build workflow (fork/join)
-│   └── data_pipeline/  # Data processing pipeline (forward jump + multiple terminals)
+│   ├── data_pipeline/  # Data processing pipeline (forward jump + multiple terminals)
+│   └── with_human/     # Human-in-the-loop example (gate approval + ask_user)
 └── plugins/            # Example plugins
     └── autopilot-webui/ # WebUI management interface plugin
 ```

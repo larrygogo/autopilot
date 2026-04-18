@@ -8,12 +8,13 @@
 
 ```
 examples/
-├── workflows/          # 示例工作流（5 个参考实现）
-│   ├── dev/            # 完整开发流程（5 阶段）
+├── workflows/          # 示例工作流（6 个参考实现）
+│   ├── dev/            # 完整开发流程（5 阶段，含 git push + gh PR）
 │   ├── req_review/     # 需求评审流程（2 阶段）
 │   ├── doc_gen/        # 文档生成与评审
 │   ├── parallel_build/ # 并行构建流程（fork/join）
-│   └── data_pipeline/  # 数据处理流水线（前向跳转 + 多终态）
+│   ├── data_pipeline/  # 数据处理流水线（前向跳转 + 多终态）
+│   └── with_human/     # 人机交互示例（gate 审批 + ask_user 提问）
 └── plugins/            # 示例插件
     └── autopilot-webui/ # WebUI 管理界面插件
 ```

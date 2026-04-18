@@ -1,5 +1,6 @@
-import { existsSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { join, resolve, sep } from "path";
+import { getPhaseIndex } from "../core/artifacts";
 import { VERSION } from "../index";
 import { initDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks } from "../core/db";
 import { snapshotWorkflow } from "../core/manifest";
@@ -158,6 +159,63 @@ function computeAgentUsage(agentNames: string[]): Record<string, string[]> {
 }
 
 // ──────────────────────────────────────────────
+// gate 决断辅助
+// ──────────────────────────────────────────────
+
+function phaseIndex(wf: ReturnType<typeof getWorkflow>, phase: string): number {
+  if (!wf) return -1;
+  return getPhaseIndex(wf, phase);
+}
+
+function parseDecisionCounts(raw: unknown): Record<string, number> {
+  if (typeof raw !== "string") return {};
+  try {
+    return JSON.parse(raw) as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+function renderDecisionMd(d: { phase: string; decision: string; note: string; ts: string; by: string }): string {
+  return [
+    `# 决断 · ${d.ts}`,
+    "",
+    `- 阶段：\`${d.phase}\``,
+    `- 决断：**${d.decision}**`,
+    `- 提交者：${d.by}`,
+    "",
+    "## 备注",
+    "",
+    d.note || "_（无）_",
+    "",
+  ].join("\n");
+}
+
+// ──────────────────────────────────────────────
+// Task ID 生成
+// ──────────────────────────────────────────────
+
+// 字母表去掉容易混淆的字符（0/1/o/i/l）以及 4（团队偏好）
+const TASK_ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23567";
+
+function genTaskId(len = 8): string {
+  let id = "";
+  for (let i = 0; i < len; i++) {
+    id += TASK_ID_ALPHABET[Math.floor(Math.random() * TASK_ID_ALPHABET.length)];
+  }
+  return id;
+}
+
+function generateUniqueTaskId(): string {
+  // 28^8 ≈ 3.7e11，撞概率极低；做 10 次重试足够。
+  for (let i = 0; i < 10; i++) {
+    const id = genTaskId();
+    if (!getTask(id)) return id;
+  }
+  throw new Error("无法生成唯一 task ID（重试 10 次仍冲突）");
+}
+
+// ──────────────────────────────────────────────
 // 静态文件服务
 // ──────────────────────────────────────────────
 
@@ -296,8 +354,13 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     // POST /api/tasks
     if (method === "POST" && path === "/api/tasks") {
-      const body = await req.json() as { reqId: string; title?: string; workflow?: string };
-      if (!body.reqId) return error("reqId is required");
+      const body = await req.json() as {
+        title?: string;
+        requirement?: string;
+        workflow?: string;
+        /** 兼容老调用：可选传入；不传则后端生成。 */
+        reqId?: string;
+      };
 
       await discover();
       const workflows = listWorkflows();
@@ -315,16 +378,34 @@ export async function handleRequest(req: Request): Promise<Response> {
       const wf = getWorkflow(workflowName);
       if (!wf) return error(`Workflow "${workflowName}" not found`);
 
-      const taskId = body.reqId.slice(0, 8);
-      const title = body.title ?? body.reqId;
+      // ID 策略：优先 body.reqId 前 8 字符（老接口兼容），否则生成唯一短 ID
+      let taskId: string;
+      if (body.reqId) {
+        taskId = body.reqId.slice(0, 8);
+        if (getTask(taskId)) return error(`Task ID 已存在：${taskId}`, 409);
+      } else {
+        taskId = generateUniqueTaskId();
+      }
+      const title = body.title?.trim() || taskId;
+      const requirement = body.requirement?.trim();
 
       let extra: Record<string, unknown> = {};
       if (typeof wf.setup_func === "function") {
         try {
-          extra = wf.setup_func({ reqId: body.reqId, title, taskId }) ?? {};
+          extra = wf.setup_func({
+            reqId: body.reqId ?? taskId,
+            title,
+            taskId,
+            requirement,
+          }) ?? {};
         } catch (e: unknown) {
           return error(`setup_func failed: ${e instanceof Error ? e.message : String(e)}`, 500);
         }
+      }
+      // 如果工作流的 setup_func 没把 requirement 塞进 extra，框架自动塞一份，
+      // 让 task.requirement 字段可被前端展示和工作流读取。
+      if (requirement && extra["requirement"] === undefined) {
+        extra["requirement"] = requirement;
       }
 
       const firstPhaseEntry = wf.phases[0];
@@ -383,6 +464,106 @@ export async function handleRequest(req: Request): Promise<Response> {
 
       const [from, to] = transition(cancelMatch, "cancel", { transitions, note: "API cancel" });
       return json({ from, to });
+    }
+
+    // POST /api/tasks/:id/answer — 用户回答 agent 的 ask_user 提问
+    const answerMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/answer$/);
+    if (method === "POST" && answerMatch) {
+      const body = await req.json() as { text?: string };
+      const text = body.text?.trim() ?? "";
+      if (!text) return error("answer text is required");
+      const { answerPending, hasPending } = await import("../agents/pending-questions");
+      if (!hasPending(answerMatch)) return error("没有待回答的问题");
+      const ok = answerPending(answerMatch, text);
+      if (!ok) return error("无法回答（pending 已被消费？）");
+      return json({ ok: true });
+    }
+
+    // POST /api/tasks/:id/decide  — gate phase 的人工决断（pass / reject / cancel）
+    const decideMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/decide$/);
+    if (method === "POST" && decideMatch) {
+      const body = await req.json() as { decision: string; note?: string };
+      const taskId = decideMatch;
+      if (!body.decision || !["pass", "reject", "cancel"].includes(body.decision)) {
+        return error("decision must be one of: pass, reject, cancel");
+      }
+      const note = body.note?.trim() ?? "";
+      if (body.decision === "reject" && !note) {
+        return error("驳回必须填写理由（让 agent 知道改进方向）");
+      }
+
+      const task = getTask(taskId);
+      if (!task) return error("Task not found", 404);
+
+      // 必须处于 awaiting_<phase>
+      if (!task.status.startsWith("awaiting_")) {
+        return error(`Task 未处于等待状态（current=${task.status}）`);
+      }
+      const phase = task.status.slice("awaiting_".length);
+
+      const wf = getWorkflow(task.workflow);
+      if (!wf) return error("Workflow not found", 500);
+
+      const transitions = buildTransitions(wf);
+
+      let trigger: string;
+      if (body.decision === "pass") trigger = `${phase}_pass`;
+      else if (body.decision === "reject") trigger = `${phase}_reject_user`;
+      else trigger = "cancel";
+
+      // 写决断元数据：task.last_user_decision + workspace/<NN-phase>/decision.md
+      const decisionRecord = {
+        phase,
+        decision: body.decision,
+        note,
+        ts: new Date().toISOString(),
+        by: "user",
+      };
+      const extraUpdates: Record<string, unknown> = {
+        last_user_decision: JSON.stringify(decisionRecord),
+      };
+      if (body.decision === "reject") {
+        // 累加该 phase 的 user 驳回计数（独立于 reviewer 驳回）
+        const counts = parseDecisionCounts(task["user_reject_counts"]);
+        counts[phase] = (counts[phase] ?? 0) + 1;
+        extraUpdates["user_reject_counts"] = JSON.stringify(counts);
+      }
+
+      // 写 workspace/<NN-phase>/decision.md（追加历史）
+      try {
+        const phaseIdx = phaseIndex(wf, phase);
+        if (phaseIdx >= 0) {
+          const dirName = `${String(phaseIdx).padStart(2, "0")}-${phase}`;
+          const phaseDir = join(getTaskWorkspace(taskId), dirName);
+          if (!existsSync(phaseDir)) mkdirSync(phaseDir, { recursive: true });
+          const decisionMd = renderDecisionMd(decisionRecord);
+          const dPath = join(phaseDir, "decision.md");
+          if (existsSync(dPath)) {
+            appendFileSync(dPath, "\n\n" + decisionMd, "utf-8");
+          } else {
+            writeFileSync(dPath, decisionMd, "utf-8");
+          }
+        }
+      } catch (e: unknown) {
+        // 写文件失败不阻塞决断
+        console.warn("写 decision.md 失败：", e instanceof Error ? e.message : e);
+      }
+
+      const [from, to] = transition(taskId, trigger, {
+        transitions,
+        note: note || `用户决断：${body.decision}`,
+        extraUpdates,
+      });
+
+      // pass / reject 后启动下一阶段（cancel 已是终态无需启动）
+      if (body.decision !== "cancel") {
+        const nextPhaseName = to.startsWith("pending_") ? to.slice("pending_".length) : null;
+        if (nextPhaseName) {
+          executePhase(taskId, nextPhaseName).catch(() => {});
+        }
+      }
+
+      return json({ from, to, decision: body.decision, note });
     }
 
     // POST /api/tasks/:id/transition

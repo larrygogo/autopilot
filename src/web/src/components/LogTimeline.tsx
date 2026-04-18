@@ -12,35 +12,23 @@ interface LogEntry {
 
 export function LogTimeline({ logs }: { logs: LogEntry[] }) {
   if (logs.length === 0) {
-    return <div style={{ color: "#636882", padding: "1rem" }}>暂无日志</div>;
+    return <div className="px-3 py-4 text-sm text-muted-foreground">暂无日志</div>;
   }
 
   return (
-    <div style={{ fontFamily: "monospace", fontSize: "0.82rem" }}>
+    <div className="divide-y divide-border font-mono text-xs">
       {logs.map((log) => (
-        <div
-          key={log.id}
-          style={{
-            display: "flex",
-            gap: "0.75rem",
-            padding: "0.35rem 0",
-            borderBottom: "1px solid #252838",
-            flexWrap: "wrap",
-            wordBreak: "break-word",
-          }}
-        >
-          <span style={{ color: "#636882", whiteSpace: "nowrap" }}>
+        <div key={log.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 break-words py-1.5">
+          <span className="whitespace-nowrap text-muted-foreground">
             {new Date(log.created_at).toLocaleTimeString()}
           </span>
-          <span style={{ color: "#60a5fa" }}>
+          <span className="text-info">
             {log.from_status ?? "—"} → {log.to_status}
           </span>
           {log.trigger_name && (
-            <span style={{ color: "#fbbf24" }}>[{log.trigger_name}]</span>
+            <span className="text-warning">[{log.trigger_name}]</span>
           )}
-          {log.note && (
-            <span style={{ color: "#a0a4b8" }}>{log.note}</span>
-          )}
+          {log.note && <span className="text-muted-foreground">{log.note}</span>}
         </div>
       ))}
     </div>

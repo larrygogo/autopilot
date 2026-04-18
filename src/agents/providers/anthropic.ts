@@ -1,5 +1,50 @@
 import { BaseProvider } from "./base";
 import type { AgentResult, RunOptions, ChatOptions, ChatResult } from "../types";
+import { createLogger } from "../../core/logger";
+
+const agentLog = createLogger("agent.anthropic");
+
+/** 把 SDK 流出的消息精简为一行人类可读摘要写到 logger（实时日志/阶段日志可见）。*/
+function bridgeSdkMessage(msg: any): void {
+  if (!msg || typeof msg !== "object") return;
+  if (msg.type === "assistant") {
+    const content = msg.message?.content ?? [];
+    for (const block of content) {
+      if (block?.type === "text" && typeof block.text === "string") {
+        const txt = block.text.replace(/\s+/g, " ").trim();
+        if (txt) agentLog.info("assistant: %s", txt.length > 240 ? txt.slice(0, 240) + "…" : txt);
+      } else if (block?.type === "tool_use") {
+        const name = block.name ?? "?";
+        const summary = summarizeToolInput(block.input);
+        agentLog.info("tool: %s%s", name, summary ? " " + summary : "");
+      }
+    }
+  } else if (msg.type === "user") {
+    const content = msg.message?.content ?? [];
+    for (const block of content) {
+      if (block?.type === "tool_result") {
+        const out = typeof block.content === "string"
+          ? block.content
+          : Array.isArray(block.content)
+            ? block.content.map((c: any) => (typeof c?.text === "string" ? c.text : "")).join("")
+            : "";
+        const trimmed = out.replace(/\s+/g, " ").trim();
+        if (trimmed) agentLog.info("tool_result: %s", trimmed.length > 200 ? trimmed.slice(0, 200) + "…" : trimmed);
+      }
+    }
+  }
+}
+
+function summarizeToolInput(input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const obj = input as Record<string, unknown>;
+  // 常见字段：file_path / path / pattern / command
+  for (const key of ["file_path", "path", "pattern", "command", "url"]) {
+    const v = obj[key];
+    if (typeof v === "string") return `(${key}=${v.length > 80 ? v.slice(0, 80) + "…" : v})`;
+  }
+  return "";
+}
 
 export class AnthropicProvider extends BaseProvider {
   private sessionId?: string;
@@ -114,34 +159,85 @@ export class AnthropicProvider extends BaseProvider {
     const permissionMode = (this.config["permission_mode"] as string | undefined) ?? "auto";
     const systemPrompt = this.resolveSystemPrompt(options);
 
-    const runOptions: Record<string, unknown> = {
+    const queryOpts: Record<string, unknown> = {
       model,
-      max_turns: maxTurns,
-      permission_mode: permissionMode,
-      ...this.buildRunOptions(options),
+      maxTurns,
+      permissionMode,
     };
-    if (systemPrompt) runOptions["system_prompt"] = systemPrompt;
+    if (systemPrompt) queryOpts["systemPrompt"] = systemPrompt;
+    if (options?.cwd) queryOpts["cwd"] = options.cwd;
+    if (this.sessionId) queryOpts["resume"] = this.sessionId;
 
-    if (this.sessionId) {
-      runOptions["session_id"] = this.sessionId;
+    // 注入工作流 agent 工具（目前只有 ask_user）—— 让 agent 中途能向用户提问
+    try {
+      const { buildWorkflowAgentTools, WORKFLOW_TOOL_NAMES } = await import("../tools");
+      const wfTools = await buildWorkflowAgentTools();
+      const userMcp = (queryOpts["mcpServers"] as Record<string, unknown> | undefined) ?? {};
+      queryOpts["mcpServers"] = {
+        ...userMcp,
+        autopilot_workflow: sdk.createSdkMcpServer({
+          name: "autopilot_workflow",
+          version: "1.0.0",
+          tools: wfTools,
+        }),
+      };
+      const allowed = (queryOpts["allowedTools"] as string[] | undefined) ?? [];
+      queryOpts["allowedTools"] = [
+        ...allowed,
+        ...WORKFLOW_TOOL_NAMES.map((n) => `mcp__autopilot_workflow__${n}`),
+      ];
+      // 禁用 Claude Code 内置的 AskUserQuestion，强制 agent 走我们的 mcp ask_user
+      // （否则 agent 调内置版会被 SDK 自动 fake-answer，绕过 autopilot 的人机交互通道）
+      const disallowed = (queryOpts["disallowedTools"] as string[] | undefined) ?? [];
+      queryOpts["disallowedTools"] = [...new Set([...disallowed, "AskUserQuestion"])];
+    } catch {
+      /* 工具注入失败不影响主流程 */
     }
 
-    const result = await sdk.run(prompt, runOptions);
-
-    if (result?.session_id) {
-      this.sessionId = result.session_id;
+    // signal → abortController 转发；timeout 用 setTimeout 触发 abort
+    let abort: AbortController | undefined;
+    if (options?.signal || options?.timeout) {
+      abort = new AbortController();
+      queryOpts["abortController"] = abort;
+      if (options.signal) {
+        options.signal.addEventListener("abort", () => abort?.abort());
+      }
     }
+    const timer = options?.timeout
+      ? setTimeout(() => abort?.abort(), options.timeout)
+      : undefined;
 
-    return {
-      text: result?.result ?? result?.text ?? String(result ?? ""),
-      usage: result?.usage
-        ? {
-            input_tokens: result.usage.input_tokens,
-            output_tokens: result.usage.output_tokens,
-            total_cost_usd: result.usage.total_cost_usd,
+    let text = "";
+    let usage: AgentResult["usage"];
+    let sessionIdOut: string | undefined;
+
+    try {
+      const q = sdk.query({ prompt, options: queryOpts });
+      for await (const msg of q) {
+        bridgeSdkMessage(msg);
+        if (msg?.type === "result" && msg.subtype === "success") {
+          text = msg.result ?? "";
+          sessionIdOut = msg.session_id;
+          if (msg.usage || typeof msg.total_cost_usd === "number") {
+            usage = {
+              input_tokens: msg.usage?.input_tokens,
+              output_tokens: msg.usage?.output_tokens,
+              total_cost_usd: msg.total_cost_usd,
+            };
           }
-        : undefined,
-    };
+        } else if (msg?.type === "result" && msg.subtype === "error_max_turns") {
+          throw new Error(`对话达到 max_turns 上限（${msg.num_turns} 轮）`);
+        }
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+
+    if (sessionIdOut) {
+      this.sessionId = sessionIdOut;
+    }
+
+    return { text, usage };
   }
 
   async close(): Promise<void> {

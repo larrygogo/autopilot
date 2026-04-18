@@ -47,7 +47,13 @@ export class HttpClient {
     return this.request(`/api/tasks/${id}`);
   }
 
-  async startTask(opts: { reqId: string; title?: string; workflow?: string }): Promise<Task> {
+  async startTask(opts: {
+    title?: string;
+    requirement?: string;
+    workflow?: string;
+    /** 旧接口兼容：可选传入 reqId；不传则后端生成 task ID */
+    reqId?: string;
+  }): Promise<Task> {
     return this.request("/api/tasks", {
       method: "POST",
       body: JSON.stringify(opts),

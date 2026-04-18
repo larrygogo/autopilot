@@ -1,9 +1,29 @@
-import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { api } from "../hooks/useApi";
-import { Badge } from "../components/Badge";
-import { NewTaskDialog } from "../components/NewTaskDialog";
-import { ConfirmDialog } from "../components/Modal";
-import { useToast } from "../components/Toast";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Plus, Search, X } from "lucide-react";
+import { api } from "@/hooks/useApi";
+import { NewTaskDialog } from "@/components/NewTaskDialog";
+import { ConfirmDialog } from "@/components/Modal";
+import { useToast } from "@/components/Toast";
+import { TasksOverview } from "@/components/TasksOverview";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 interface Task {
   id: string;
@@ -19,10 +39,11 @@ interface TasksProps {
   subscribe: (channel: string, handler: (event: any) => void) => () => void;
 }
 
-type StatusGroup = "all" | "running" | "pending" | "done" | "cancelled" | "failed";
+type StatusGroup = "all" | "awaiting" | "running" | "pending" | "done" | "cancelled" | "failed";
 
 const STATUS_GROUPS: { key: StatusGroup; label: string; match: (s: string) => boolean }[] = [
   { key: "all", label: "全部", match: () => true },
+  { key: "awaiting", label: "待人工", match: (s) => s.startsWith("awaiting_") },
   { key: "running", label: "运行中", match: (s) => s.startsWith("running_") },
   { key: "pending", label: "待处理", match: (s) => s.startsWith("pending_") },
   { key: "done", label: "已完成", match: (s) => s === "done" },
@@ -42,22 +63,24 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
   const [newOpen, setNewOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusGroup>("all");
-  const [workflowFilter, setWorkflowFilter] = useState<string>("");
+  const [workflowFilter, setWorkflowFilter] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
   const refresh = useCallback(() => {
-    api.listTasks().then(setTasks).catch(() => {}).finally(() => setLoading(false));
+    api
+      .listTasks()
+      .then(setTasks)
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
-
   useEffect(() => {
-    return subscribe("task:*", () => {
-      refresh();
-    });
-  }, [subscribe, refresh]);
+    refresh();
+  }, [refresh]);
+
+  useEffect(() => subscribe("task:*", () => refresh()), [subscribe, refresh]);
 
   const workflowOptions = useMemo(() => {
     const set = new Set<string>();
@@ -70,20 +93,22 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
     const statusMatch = STATUS_GROUPS.find((g) => g.key === statusFilter)!.match;
     return tasks.filter((t) => {
       if (!statusMatch(t.status)) return false;
-      if (workflowFilter && t.workflow !== workflowFilter) return false;
+      if (workflowFilter !== "all" && t.workflow !== workflowFilter) return false;
       if (q && !t.id.toLowerCase().includes(q) && !t.title.toLowerCase().includes(q)) return false;
       return true;
     });
   }, [tasks, search, statusFilter, workflowFilter]);
 
-  const cancellableSelected = useMemo(() => {
-    return filtered.filter((t) => selected.has(t.id) && !isTerminal(t.status));
-  }, [filtered, selected]);
+  const cancellableSelected = useMemo(
+    () => filtered.filter((t) => selected.has(t.id) && !isTerminal(t.status)),
+    [filtered, selected],
+  );
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -91,19 +116,26 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
   const toggleSelectAll = () => {
     const filteredIds = filtered.map((t) => t.id);
     const allSelected = filteredIds.every((id) => selected.has(id));
-    setSelected(allSelected
-      ? new Set([...selected].filter((id) => !filteredIds.includes(id)))
-      : new Set([...selected, ...filteredIds]));
+    setSelected(
+      allSelected
+        ? new Set([...selected].filter((id) => !filteredIds.includes(id)))
+        : new Set([...selected, ...filteredIds]),
+    );
   };
 
   const clearSelection = () => setSelected(new Set());
 
   const doBulkCancel = async () => {
     setCancelling(true);
-    let ok = 0, fail = 0;
+    let ok = 0,
+      fail = 0;
     for (const t of cancellableSelected) {
-      try { await api.cancelTask(t.id); ok++; }
-      catch { fail++; }
+      try {
+        await api.cancelTask(t.id);
+        ok++;
+      } catch {
+        fail++;
+      }
     }
     setCancelling(false);
     setConfirmOpen(false);
@@ -113,152 +145,235 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
     refresh();
   };
 
-  if (loading) {
-    return <div className="container"><p className="muted">加载中...</p></div>;
-  }
-
   const totalMatched = filtered.length;
   const totalAll = tasks.length;
   const allFilteredSelected = filtered.length > 0 && filtered.every((t) => selected.has(t.id));
+  const hasActiveFilter =
+    search.trim().length > 0 || statusFilter !== "all" || workflowFilter !== "all";
+
+  if (loading) {
+    return (
+      <div className="mx-auto w-full max-w-6xl px-5 py-8 text-sm text-muted-foreground">加载中…</div>
+    );
+  }
 
   return (
-    <div className="container">
-      <div className="page-hdr">
-        <h2>任务列表</h2>
-        <span>{totalMatched === totalAll ? `${totalAll} 个` : `${totalMatched} / ${totalAll}`}</span>
-        <button className="btn btn-primary" style={{ marginLeft: "auto" }} onClick={() => setNewOpen(true)}>
+    <div className="mx-auto w-full max-w-6xl px-5 py-6">
+      <TasksOverview tasks={tasks} onSelectTask={onSelect} />
+
+      <div className="mb-4 flex items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight">任务列表</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {totalMatched === totalAll ? `${totalAll} 个` : `${totalMatched} / ${totalAll} 个`}
+          </p>
+        </div>
+        <Button onClick={() => setNewOpen(true)} className="shrink-0">
+          <Plus className="h-4 w-4" />
           新建任务
-        </button>
+        </Button>
       </div>
 
       {totalAll > 0 && (
-        <div className="filter-bar">
-          <input
-            type="search"
-            className="text-input"
-            placeholder="搜索 ID 或标题..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="filter-chips">
-            {STATUS_GROUPS.map((g) => (
-              <button
-                key={g.key}
-                type="button"
-                className={`chip ${statusFilter === g.key ? "active" : ""}`}
-                onClick={() => setStatusFilter(g.key)}
-              >
-                {g.label}
-              </button>
-            ))}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="搜索 ID 或标题…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8"
+            />
           </div>
+
           {workflowOptions.length > 1 && (
-            <select
-              className="wf-select filter-wf"
-              value={workflowFilter}
-              onChange={(e) => setWorkflowFilter(e.target.value)}
-            >
-              <option value="">所有工作流</option>
-              {workflowOptions.map((w) => <option key={w} value={w}>{w}</option>)}
-            </select>
+            <Select value={workflowFilter} onValueChange={setWorkflowFilter}>
+              <SelectTrigger className="w-40 shrink-0">
+                <SelectValue placeholder="工作流" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">所有工作流</SelectItem>
+                {workflowOptions.map((w) => (
+                  <SelectItem key={w} value={w}>
+                    {w}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
         </div>
       )}
 
+      {totalAll > 0 && (
+        <div className="scrollbar-thin mb-4 flex w-full gap-1 overflow-x-auto">
+          {STATUS_GROUPS.map((g) => {
+            const active = statusFilter === g.key;
+            return (
+              <button
+                key={g.key}
+                type="button"
+                onClick={() => setStatusFilter(g.key)}
+                className={cn(
+                  "inline-flex h-7 shrink-0 items-center rounded-full border px-3 text-xs font-medium transition-colors",
+                  active
+                    ? "border-primary/30 bg-primary/10 text-primary"
+                    : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+              >
+                {g.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {selected.size > 0 && (
-        <div className="bulk-bar">
-          <span><strong>{selected.size}</strong> 个已选 · 可取消 <strong>{cancellableSelected.length}</strong> 个</span>
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button
-              className="btn btn-danger"
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
+          <span>
+            <strong className="font-semibold">{selected.size}</strong> 个已选 · 可取消{" "}
+            <strong className="font-semibold">{cancellableSelected.length}</strong> 个
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="destructive"
               onClick={() => setConfirmOpen(true)}
               disabled={cancellableSelected.length === 0}
             >
               批量取消
-            </button>
-            <button className="btn btn-secondary" onClick={clearSelection}>清除选择</button>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={clearSelection}>
+              清除选择
+            </Button>
           </div>
         </div>
       )}
 
       {totalAll === 0 ? (
-        <div className="card empty-state">
-          <p className="muted">暂无任务</p>
-          <button className="btn btn-primary" onClick={() => setNewOpen(true)}>创建第一个任务</button>
-        </div>
+        <EmptyState
+          title="还没有任务"
+          hint="从工作流启动第一个任务开始。"
+          action={
+            <Button onClick={() => setNewOpen(true)}>
+              <Plus className="h-4 w-4" />
+              创建第一个任务
+            </Button>
+          }
+        />
       ) : filtered.length === 0 ? (
-        <div className="card empty-state">
-          <p className="muted">没有匹配的任务</p>
-          <button className="btn btn-secondary" onClick={() => { setSearch(""); setStatusFilter("all"); setWorkflowFilter(""); }}>
-            清除过滤
-          </button>
-        </div>
+        <EmptyState
+          title="没有匹配的任务"
+          hint="调整搜索或筛选条件试试。"
+          action={
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setSearch("");
+                setStatusFilter("all");
+                setWorkflowFilter("all");
+              }}
+            >
+              <X className="h-4 w-4" />
+              清除过滤
+            </Button>
+          }
+        />
       ) : (
         <>
-          {/* 桌面端：表格 */}
-          <div className="table-wrap desktop-only">
-            <table className="task-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 32 }}>
+          {/* Desktop: table */}
+          <div className="hidden rounded-lg border bg-card shadow-sm md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-8">
                     <input
                       type="checkbox"
                       aria-label="全选"
+                      className="accent-primary"
                       checked={allFilteredSelected}
                       onChange={toggleSelectAll}
                     />
-                  </th>
-                  <th>ID</th>
-                  <th>标题</th>
-                  <th>工作流</th>
-                  <th>状态</th>
-                  <th>更新时间</th>
-                </tr>
-              </thead>
-              <tbody>
+                  </TableHead>
+                  <TableHead>ID</TableHead>
+                  <TableHead>标题</TableHead>
+                  <TableHead>工作流</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead className="text-right">更新时间</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {filtered.map((t) => (
-                  <tr key={t.id} style={{ cursor: "pointer" }}>
-                    <td onClick={(e) => e.stopPropagation()}>
+                  <TableRow key={t.id} className="cursor-pointer">
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         aria-label={`选中 ${t.id}`}
+                        className="accent-primary"
                         checked={selected.has(t.id)}
                         onChange={() => toggleSelect(t.id)}
                       />
-                    </td>
-                    <td className="mono" onClick={() => onSelect(t.id)}>{t.id}</td>
-                    <td onClick={() => onSelect(t.id)}>{t.title}</td>
-                    <td onClick={() => onSelect(t.id)}>{t.workflow}</td>
-                    <td onClick={() => onSelect(t.id)}><Badge status={t.status} /></td>
-                    <td className="muted" onClick={() => onSelect(t.id)}>{new Date(t.updated_at).toLocaleString()}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-primary" onClick={() => onSelect(t.id)}>
+                      {t.id}
+                    </TableCell>
+                    <TableCell onClick={() => onSelect(t.id)}>
+                      <div className="max-w-[320px] truncate" title={t.title}>
+                        {t.title}
+                      </div>
+                    </TableCell>
+                    <TableCell
+                      className="font-mono text-xs text-muted-foreground"
+                      onClick={() => onSelect(t.id)}
+                    >
+                      {t.workflow}
+                    </TableCell>
+                    <TableCell onClick={() => onSelect(t.id)}>
+                      <StatusBadge status={t.status} />
+                    </TableCell>
+                    <TableCell
+                      className="whitespace-nowrap text-right text-xs text-muted-foreground"
+                      onClick={() => onSelect(t.id)}
+                    >
+                      {new Date(t.updated_at).toLocaleString()}
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
 
-          {/* 移动端：卡片 */}
-          <div className="task-card-list mobile-only">
+          {/* Mobile: cards */}
+          <div className="flex flex-col gap-2 md:hidden">
             {filtered.map((t) => (
               <div
                 key={t.id}
-                className={`card task-card ${selected.has(t.id) ? "is-selected" : ""}`}
+                className={cn(
+                  "rounded-lg border bg-card px-3.5 py-3 shadow-sm transition-colors",
+                  selected.has(t.id) && "border-primary/40 ring-1 ring-primary/20",
+                )}
               >
-                <div className="task-card-top">
-                  <label onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <label
+                    className="flex items-center gap-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <input
                       type="checkbox"
+                      className="accent-primary"
                       checked={selected.has(t.id)}
                       onChange={() => toggleSelect(t.id)}
                     />
-                    <span className="mono task-card-id">{t.id}</span>
+                    <span className="font-mono text-xs text-primary">{t.id}</span>
                   </label>
-                  <Badge status={t.status} />
+                  <StatusBadge status={t.status} compact />
                 </div>
-                <div className="task-card-title" onClick={() => onSelect(t.id)}>{t.title}</div>
-                <div className="task-card-meta" onClick={() => onSelect(t.id)}>
-                  <span className="mono muted">{t.workflow}</span>
-                  <span className="muted">{new Date(t.updated_at).toLocaleString()}</span>
+                <div onClick={() => onSelect(t.id)} className="min-w-0">
+                  <div className="mb-1 line-clamp-2 break-words text-sm">{t.title}</div>
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span className="truncate font-mono">{t.workflow}</span>
+                    <span className="shrink-0">{new Date(t.updated_at).toLocaleString()}</span>
+                  </div>
                 </div>
               </div>
             ))}
@@ -269,33 +384,56 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
       <NewTaskDialog
         open={newOpen}
         onClose={() => setNewOpen(false)}
-        onCreated={(id) => { refresh(); onSelect(id); }}
+        onCreated={(id) => {
+          refresh();
+          onSelect(id);
+        }}
       />
 
       <ConfirmDialog
         open={confirmOpen}
         title="批量取消任务"
         message={
-          <div>
+          <div className="space-y-2">
             <p>确认取消以下 {cancellableSelected.length} 个任务？正在运行的阶段将被中止。</p>
-            <ul style={{ marginTop: "0.5rem", marginLeft: "1rem", fontFamily: "var(--mono)", fontSize: "0.82rem", maxHeight: 220, overflow: "auto" }}>
+            <ul className="max-h-56 space-y-0.5 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs">
               {cancellableSelected.map((t) => (
-                <li key={t.id}>{t.id} — {t.title}</li>
+                <li key={t.id}>
+                  {t.id} — {t.title}
+                </li>
               ))}
             </ul>
             {selected.size > cancellableSelected.length && (
-              <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.8rem" }}>
+              <p className="text-xs text-muted-foreground">
                 另有 {selected.size - cancellableSelected.length} 个已终态任务会被跳过。
               </p>
             )}
           </div>
         }
-        confirmText={cancelling ? "处理中..." : "确认取消"}
+        confirmText={cancelling ? "处理中…" : "确认取消"}
         cancelText="不要"
         danger
         onConfirm={doBulkCancel}
         onCancel={() => setConfirmOpen(false)}
       />
+    </div>
+  );
+}
+
+function EmptyState({
+  title,
+  hint,
+  action,
+}: {
+  title: string;
+  hint?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/50 px-6 py-12 text-center">
+      <div className="text-sm font-medium">{title}</div>
+      {hint && <p className="max-w-sm text-xs text-muted-foreground">{hint}</p>}
+      {action}
     </div>
   );
 }
