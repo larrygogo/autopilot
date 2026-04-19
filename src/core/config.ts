@@ -31,6 +31,40 @@ export function loadConversationConfig(): ConversationConfig {
 }
 
 // ──────────────────────────────────────────────
+// 默认偏好（defaults）
+// ──────────────────────────────────────────────
+
+export interface DefaultsConfig {
+  /** 创建定时任务时的默认时区；未设置时 scheduler 用机器时区 */
+  timezone?: string;
+}
+
+export function loadDefaultsConfig(): DefaultsConfig {
+  try {
+    const raw = loadConfig();
+    const section = raw["defaults"];
+    if (!section || typeof section !== "object" || Array.isArray(section)) return {};
+    const s = section as Record<string, unknown>;
+    const out: DefaultsConfig = {};
+    if (typeof s.timezone === "string" && s.timezone.trim()) out.timezone = s.timezone.trim();
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function saveDefaultsConfig(cfg: DefaultsConfig): void {
+  const doc = loadDocument();
+  const clean = stripUndefined(cfg as Record<string, unknown>);
+  if (Object.keys(clean).length === 0) {
+    if (doc.hasIn(["defaults"])) doc.deleteIn(["defaults"]);
+  } else {
+    doc.setIn(["defaults"], clean);
+  }
+  writeDocument(doc);
+}
+
+// ──────────────────────────────────────────────
 // daemon 监听配置
 // ──────────────────────────────────────────────
 

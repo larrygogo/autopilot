@@ -19,6 +19,20 @@ import { resolveChatAgentName, createChatAgent } from "../agents/registry";
 import type { ListTasksFilters } from "../core/db";
 import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
+import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
+import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
+import {
+  createSchedule,
+  getSchedule,
+  listSchedules,
+  updateSchedule,
+  deleteSchedule,
+  markScheduleFired,
+  computeNextRun,
+  systemTimezone,
+  isValidTimezone,
+  type ScheduleType,
+} from "../core/schedules";
 import {
   discover,
   reload,
@@ -43,6 +57,8 @@ import {
 import {
   loadConfigRaw,
   saveConfigRaw,
+  loadDefaultsConfig,
+  saveDefaultsConfig,
   loadProviders,
   saveProvider,
   loadGlobalAgents,
@@ -197,24 +213,7 @@ function renderDecisionMd(d: { phase: string; decision: string; note: string; ts
 // ──────────────────────────────────────────────
 
 // 字母表去掉容易混淆的字符（0/1/o/i/l）以及 4（团队偏好）
-const TASK_ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23567";
-
-function genTaskId(len = 8): string {
-  let id = "";
-  for (let i = 0; i < len; i++) {
-    id += TASK_ID_ALPHABET[Math.floor(Math.random() * TASK_ID_ALPHABET.length)];
-  }
-  return id;
-}
-
-function generateUniqueTaskId(): string {
-  // 28^8 ≈ 3.7e11，撞概率极低；做 10 次重试足够。
-  for (let i = 0; i < 10; i++) {
-    const id = genTaskId();
-    if (!getTask(id)) return id;
-  }
-  throw new Error("无法生成唯一 task ID（重试 10 次仍冲突）");
-}
+// task id 生成与任务启动逻辑已迁到 src/core/task-factory.ts
 
 // ──────────────────────────────────────────────
 // 静态文件服务
@@ -355,88 +354,122 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     // POST /api/tasks
     if (method === "POST" && path === "/api/tasks") {
-      const body = await req.json() as {
+      const body = (await req.json()) as {
         title?: string;
         requirement?: string;
         workflow?: string;
-        /** 兼容老调用：可选传入；不传则后端生成。 */
         reqId?: string;
       };
-
-      await discover();
-      const workflows = listWorkflows();
-      if (workflows.length === 0) return error("No workflows found", 500);
-
-      let workflowName: string;
-      if (body.workflow) {
-        workflowName = body.workflow;
-      } else if (workflows.length === 1) {
-        workflowName = workflows[0].name;
-      } else {
-        return error(`Multiple workflows found, specify one: ${workflows.map((w) => w.name).join(", ")}`);
-      }
-
-      const wf = getWorkflow(workflowName);
-      if (!wf) return error(`Workflow "${workflowName}" not found`);
-
-      // ID 策略：优先 body.reqId 前 8 字符（老接口兼容），否则生成唯一短 ID
-      let taskId: string;
-      if (body.reqId) {
-        taskId = body.reqId.slice(0, 8);
-        if (getTask(taskId)) return error(`Task ID 已存在：${taskId}`, 409);
-      } else {
-        taskId = generateUniqueTaskId();
-      }
-      const title = body.title?.trim() || taskId;
-      const requirement = body.requirement?.trim();
-
-      let extra: Record<string, unknown> = {};
-      if (typeof wf.setup_func === "function") {
-        try {
-          extra = wf.setup_func({
-            reqId: body.reqId ?? taskId,
-            title,
-            taskId,
-            requirement,
-          }) ?? {};
-        } catch (e: unknown) {
-          return error(`setup_func failed: ${e instanceof Error ? e.message : String(e)}`, 500);
-        }
-      }
-      // 如果工作流的 setup_func 没把 requirement 塞进 extra，框架自动塞一份，
-      // 让 task.requirement 字段可被前端展示和工作流读取。
-      if (requirement && extra["requirement"] === undefined) {
-        extra["requirement"] = requirement;
-      }
-
-      const firstPhaseEntry = wf.phases[0];
-      if (!firstPhaseEntry) return error("Workflow has no phases", 500);
-      const firstPhaseName = isParallelPhase(firstPhaseEntry)
-        ? firstPhaseEntry.parallel.name
-        : firstPhaseEntry.name;
-
-      createTask({
-        id: taskId,
-        title,
-        workflow: workflowName,
-        initialStatus: wf.initial_state,
-        extra,
-        workflowSnapshot: snapshotWorkflow(wf),
-      });
-
-      // 初始化任务 workspace（若工作流声明了 template 则复制）
       try {
-        ensureTaskWorkspace(taskId, workflowName, wf.workspace);
+        const task = await startTaskFromTemplate(body);
+        return json(task, 201);
       } catch (e: unknown) {
-        // workspace 初始化失败不阻塞任务（用户可能手动创建）
-        console.warn("ensureTaskWorkspace 失败：", e instanceof Error ? e.message : e);
+        if (e instanceof StartTaskError) return error(e.message, e.status);
+        return error(e instanceof Error ? e.message : String(e), 500);
+      }
+    }
+
+    // ─────────── Schedules ───────────
+
+    // GET /api/schedules
+    if (method === "GET" && path === "/api/schedules") {
+      return json(listSchedules());
+    }
+
+    // POST /api/schedules
+    if (method === "POST" && path === "/api/schedules") {
+      const body = (await req.json()) as {
+        name?: string;
+        type?: ScheduleType;
+        run_at?: string | null;
+        cron_expr?: string | null;
+        timezone?: string;
+        workflow?: string;
+        title?: string;
+        requirement?: string | null;
+        enabled?: boolean;
+      };
+      if (!body.name?.trim()) return error("name 不能为空");
+      if (body.type !== "once" && body.type !== "cron") {
+        return error("type 必须是 once 或 cron");
+      }
+      if (!body.workflow?.trim()) return error("workflow 不能为空");
+      if (!body.title?.trim()) return error("title 不能为空");
+
+      // 校验 workflow 存在
+      await discover();
+      if (!getWorkflow(body.workflow)) {
+        return error(`workflow "${body.workflow}" 不存在`);
       }
 
-      // 异步执行第一阶段
-      executePhase(taskId, firstPhaseName).catch(() => {});
+      const timezone =
+        body.timezone?.trim() || loadDefaultsConfig().timezone || systemTimezone();
+      if (!isValidTimezone(timezone)) {
+        return error(`时区无效：${timezone}`);
+      }
+      try {
+        const sch = createSchedule({
+          name: body.name.trim(),
+          type: body.type,
+          run_at: body.run_at ?? null,
+          cron_expr: body.cron_expr ?? null,
+          timezone,
+          workflow: body.workflow,
+          title: body.title.trim(),
+          requirement: body.requirement?.trim() || null,
+          enabled: body.enabled,
+        });
+        return json(sch, 201);
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e));
+      }
+    }
 
-      const task = getTask(taskId);
-      return json(task, 201);
+    // GET /api/schedules/:id
+    const scheduleIdMatch = extractParam(path, /^\/api\/schedules\/([\w.\-]+)$/);
+    if (method === "GET" && scheduleIdMatch) {
+      const sch = getSchedule(scheduleIdMatch);
+      if (!sch) return error("Schedule not found", 404);
+      return json(sch);
+    }
+
+    // PATCH /api/schedules/:id
+    if (method === "PATCH" && scheduleIdMatch) {
+      const body = (await req.json()) as Record<string, unknown>;
+      try {
+        const sch = updateSchedule(scheduleIdMatch, body);
+        if (!sch) return error("Schedule not found", 404);
+        return json(sch);
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e));
+      }
+    }
+
+    // DELETE /api/schedules/:id
+    if (method === "DELETE" && scheduleIdMatch) {
+      const ok = deleteSchedule(scheduleIdMatch);
+      if (!ok) return error("Schedule not found", 404);
+      return json({ ok: true });
+    }
+
+    // POST /api/schedules/:id/run-now —— 立即触发一次（不影响 next_run_at）
+    const runNowMatch = extractParam(path, /^\/api\/schedules\/([\w.\-]+)\/run-now$/);
+    if (method === "POST" && runNowMatch) {
+      const sch = getSchedule(runNowMatch);
+      if (!sch) return error("Schedule not found", 404);
+      try {
+        const task = await startTaskFromTemplate({
+          workflow: sch.workflow,
+          title: sch.title,
+          requirement: sch.requirement ?? undefined,
+        });
+        // 更新最近触发记录，但保留原 next_run_at 不动
+        markScheduleFired(sch.id, task.id, sch.next_run_at, sch.enabled === 0);
+        return json({ ok: true, taskId: task.id });
+      } catch (e: unknown) {
+        if (e instanceof StartTaskError) return error(e.message, e.status);
+        return error(e instanceof Error ? e.message : String(e), 500);
+      }
     }
 
     // GET /api/tasks/:id
@@ -702,6 +735,18 @@ export async function handleRequest(req: Request): Promise<Response> {
         const removed = deleteTaskWorkspace(wsDeleteMatch);
         return json({ ok: true, removed });
       } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 500);
+      }
+    }
+
+    // DELETE /api/tasks/:id — 彻底删除任务（DB + 文件 + 锁；仅终态）
+    const taskDeleteMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)$/);
+    if (method === "DELETE" && taskDeleteMatch) {
+      try {
+        const res = cascadeDeleteTask(taskDeleteMatch);
+        return json({ ok: true, deleted: res.deleted });
+      } catch (e: unknown) {
+        if (e instanceof DeleteTaskError) return error(e.message, e.status);
         return error(e instanceof Error ? e.message : String(e), 500);
       }
     }
@@ -973,6 +1018,32 @@ export async function handleRequest(req: Request): Promise<Response> {
         return json({ ok: true });
       } catch (e: unknown) {
         return error(`Invalid YAML: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    // GET /api/defaults —— 返回默认偏好（含 resolved timezone）
+    if (method === "GET" && path === "/api/defaults") {
+      const cfg = loadDefaultsConfig();
+      return json({
+        timezone: cfg.timezone ?? null,
+        resolved_timezone: cfg.timezone ?? systemTimezone(),
+        system_timezone: systemTimezone(),
+      });
+    }
+
+    // PUT /api/defaults
+    if (method === "PUT" && path === "/api/defaults") {
+      const body = (await req.json()) as { timezone?: string | null };
+      const tz = typeof body.timezone === "string" ? body.timezone.trim() : "";
+      if (tz && !isValidTimezone(tz)) {
+        return error(`时区无效：${tz}`);
+      }
+      try {
+        saveDefaultsConfig({ timezone: tz || undefined });
+        emit({ type: "config:updated", payload: {} });
+        return json({ ok: true, timezone: tz || null });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e));
       }
     }
 

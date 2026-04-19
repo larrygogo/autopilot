@@ -188,6 +188,11 @@ export function _clearRecoveryHistory(): void {
   lastRecoveryAttempt.clear();
 }
 
+/** 任务被删除时调用：移除 watcher 内存中的恢复节流记录 */
+export function forgetTaskRecoveryState(taskId: string): void {
+  lastRecoveryAttempt.delete(taskId);
+}
+
 // ──────────────────────────────────────────────
 // Workspace 保留策略清理（由 daemon 定期触发）
 // ──────────────────────────────────────────────

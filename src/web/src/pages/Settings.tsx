@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { TimezoneSelect } from "@/components/TimezoneSelect";
 
 // 保留 embedded 参数签名以兼容旧调用
 export function Settings(_props: { embedded?: boolean } = {}) {
@@ -22,6 +23,11 @@ export function Settings(_props: { embedded?: boolean } = {}) {
   const [configYaml, setConfigYaml] = useState("");
   const [configLoading, setConfigLoading] = useState(true);
   const [configSaving, setConfigSaving] = useState(false);
+
+  const [defaultsTz, setDefaultsTz] = useState<string | null>(null);
+  const [systemTz, setSystemTz] = useState<string>("");
+  const [defaultsLoading, setDefaultsLoading] = useState(true);
+  const [defaultsSaving, setDefaultsSaving] = useState(false);
 
   const [workflows, setWorkflows] = useState<{ name: string; description: string }[]>([]);
   const [selectedWf, setSelectedWf] = useState("");
@@ -37,6 +43,29 @@ export function Settings(_props: { embedded?: boolean } = {}) {
       .catch((e) => toast.error("加载全局配置失败", e?.message ?? String(e)))
       .finally(() => setConfigLoading(false));
   }, []);
+
+  useEffect(() => {
+    api.getDefaults()
+      .then((res) => {
+        setDefaultsTz(res.timezone);
+        setSystemTz(res.system_timezone);
+      })
+      .catch((e) => toast.error("加载默认偏好失败", e?.message ?? String(e)))
+      .finally(() => setDefaultsLoading(false));
+  }, []);
+
+  const saveDefaults = async (tz: string | null) => {
+    setDefaultsSaving(true);
+    try {
+      const res = await api.saveDefaults({ timezone: tz });
+      setDefaultsTz(res.timezone);
+      toast.success("默认偏好已保存");
+    } catch (e: any) {
+      toast.error("保存失败", e?.message ?? String(e));
+    } finally {
+      setDefaultsSaving(false);
+    }
+  };
 
   useEffect(() => {
     api.listWorkflows().then(setWorkflows).catch(() => {});
@@ -94,11 +123,44 @@ export function Settings(_props: { embedded?: boolean } = {}) {
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
       {/* Header */}
       <div className="mb-5">
-        <h2 className="text-xl font-semibold tracking-tight">高级设置</h2>
+        <h2 className="text-xl font-semibold tracking-tight">设置</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          优先使用图形化的 提供商 / 智能体 页面；这里是 YAML 直编后门。
+          常规偏好与高级 YAML 直编。
         </p>
       </div>
+
+      {/* 常规偏好 */}
+      <Card className="mb-4 p-4">
+        <div className="mb-3">
+          <h3 className="text-sm font-semibold">常规偏好</h3>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            影响新建定时任务时的默认值；已创建的任务不受影响。
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <div className="space-y-1.5">
+            <Label>默认时区</Label>
+            {defaultsLoading ? (
+              <p className="text-sm text-muted-foreground">加载中…</p>
+            ) : (
+              <TimezoneSelect
+                value={defaultsTz}
+                onChange={(tz) => {
+                  setDefaultsTz(tz);
+                  saveDefaults(tz);
+                }}
+                systemTz={systemTz}
+                disabled={defaultsSaving}
+              />
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              当前生效：
+              <span className="font-mono">{defaultsTz || systemTz || "—"}</span>
+              {!defaultsTz && systemTz && <span className="ml-1">（跟随系统）</span>}
+            </p>
+          </div>
+        </div>
+      </Card>
 
       {status && (
         <Card className="mb-4 p-4">
@@ -234,7 +296,9 @@ function DaemonLogCard(): React.ReactElement {
     if (!content) return [];
     const lines = content.split("\n");
     const q = query.trim().toLowerCase();
-    return q ? lines.filter((l) => l.toLowerCase().includes(q)) : lines;
+    const matched = q ? lines.filter((l) => l.toLowerCase().includes(q)) : lines;
+    // 时间倒序：新日志在顶部
+    return matched.slice().reverse();
   }, [content, query]);
 
   const extractLevel = (line: string): string | null => {
@@ -264,7 +328,7 @@ function DaemonLogCard(): React.ReactElement {
       {path ? (
         <p className="mb-2 text-[11px] text-muted-foreground">
           位置：<code className="rounded bg-muted px-1 py-0.5 font-mono">{path}</code>
-          <span className="ml-1">（含上一次滚动的 .1 备份，最后 1000 行）</span>
+          <span className="ml-1">（最后 1000 行，时间倒序 · 新在顶）</span>
         </p>
       ) : (
         <p className="mb-2 text-xs text-muted-foreground">daemon 日志未激活或路径未知。</p>

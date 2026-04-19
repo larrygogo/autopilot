@@ -241,6 +241,20 @@ export function deleteTaskWorkspace(taskId: string): boolean {
 }
 
 /**
+ * 彻底删除任务运行时目录（`runtime/tasks/<task-id>/` 全部内容，包括 workspace、
+ * logs、events、agent-calls、task-manifest.json）。用于"删除任务"路径。
+ */
+export function deleteTaskRuntimeDir(taskId: string): boolean {
+  if (!TASK_ID_RE.test(taskId)) {
+    throw new Error(`非法 task ID：${taskId}`);
+  }
+  const dir = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
+  if (!existsSync(dir)) return false;
+  rmSync(dir, { recursive: true, force: true });
+  return true;
+}
+
+/**
  * 扫描所有任务的 workspace 目录，返回每个任务的占用信息。
  * 用于 Dashboard 汇总 + 清理规则判断。
  */

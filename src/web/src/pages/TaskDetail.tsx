@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Copy, FolderTree, FileText, Bot, History, Radio, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw } from "lucide-react";
+import { ArrowLeft, Copy, FolderTree, FileText, Bot, History, Radio, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2 } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LogTimeline } from "@/components/LogTimeline";
@@ -40,14 +40,16 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
   const [liveLogs, setLiveLogs] = useState<string[]>([]);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const liveLogRef = useRef<HTMLDivElement>(null);
-  const stickToBottomRef = useRef(true);
+  // 实时日志采用时间倒序（新在顶）；sticky = 保持停在顶部追最新
+  const stickToTopRef = useRef(true);
 
   useEffect(() => {
     api.getTask(taskId).then(setTask).catch(() => {});
     api.getTaskLogs(taskId).then(setLogs).catch(() => {});
-    stickToBottomRef.current = true;
+    stickToTopRef.current = true;
     setLiveLogs([]);
 
     // baseline：拉所有阶段日志的最近 50 行作为初始内容，避免实时日志一片空白
@@ -97,15 +99,15 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
 
   useEffect(() => {
     const el = liveLogRef.current;
-    if (!el || !stickToBottomRef.current) return;
-    el.scrollTop = el.scrollHeight;
+    if (!el || !stickToTopRef.current) return;
+    el.scrollTop = 0;
   }, [liveLogs]);
 
   const onLogScroll = () => {
     const el = liveLogRef.current;
     if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 16;
-    stickToBottomRef.current = atBottom;
+    const atTop = el.scrollTop < 16;
+    stickToTopRef.current = atTop;
   };
 
   const doCancel = async () => {
@@ -116,6 +118,19 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       toast.error("取消失败", e?.message ?? String(e));
     } finally {
       setConfirmCancel(false);
+    }
+  };
+
+  const doDelete = async () => {
+    try {
+      const res = await api.deleteTask(taskId);
+      const extra = res.deleted.length > 1 ? `（连带子任务 ${res.deleted.length - 1} 个）` : "";
+      toast.success(`任务 ${taskId} 已删除${extra}`);
+      setConfirmDelete(false);
+      onBack();
+    } catch (e: any) {
+      toast.error("删除失败", e?.message ?? String(e));
+      setConfirmDelete(false);
     }
   };
 
@@ -282,8 +297,55 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
         logs={logs}
         liveLogs={liveLogs}
         liveLogRef={liveLogRef}
-        stickToBottomRef={stickToBottomRef}
+        stickToTopRef={stickToTopRef}
         onLogScroll={onLogScroll}
+      />
+
+      {/* 危险操作区 */}
+      <Card className="mt-4 border-destructive/40 bg-destructive/5 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-destructive">危险操作</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              彻底删除该任务的 DB 记录、manifest、阶段日志、agent 调用记录与 workspace 文件；此操作不可撤销。
+              {canCancel && (
+                <span className="ml-1 font-medium">
+                  任务当前非终态，请先取消后再删除。
+                </span>
+              )}
+            </p>
+          </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmDelete(true)}
+            disabled={canCancel}
+          >
+            <Trash2 className="h-4 w-4" />
+            删除任务
+          </Button>
+        </div>
+      </Card>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="删除任务"
+        danger
+        confirmText="永久删除"
+        cancelText="取消"
+        message={
+          <div className="space-y-2">
+            <p>
+              确认永久删除任务{" "}
+              <code className="rounded bg-muted px-1 font-mono">{task.id}</code>？
+            </p>
+            <p className="text-xs text-muted-foreground">
+              将清理：DB 记录、task-manifest、阶段日志、agent 调用、workspace 目录，以及所有子任务。操作不可撤销。
+            </p>
+          </div>
+        }
+        onConfirm={doDelete}
+        onCancel={() => setConfirmDelete(false)}
       />
 
       <ConfirmDialog
@@ -324,7 +386,7 @@ interface TaskDetailTabsProps {
   logs: any[];
   liveLogs: string[];
   liveLogRef: React.RefObject<HTMLDivElement | null>;
-  stickToBottomRef: React.MutableRefObject<boolean>;
+  stickToTopRef: React.MutableRefObject<boolean>;
   onLogScroll: () => void;
 }
 
@@ -333,7 +395,7 @@ function TaskDetailTabs({
   logs,
   liveLogs,
   liveLogRef,
-  stickToBottomRef,
+  stickToTopRef,
   onLogScroll,
 }: TaskDetailTabsProps) {
   const [tab, setTab] = useState<DetailTab>("workspace");
@@ -396,13 +458,13 @@ function TaskDetailTabs({
       <TabsContent value="live" className="mt-0">
         <Card className="p-4">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">实时日志</h3>
+            <h3 className="text-sm font-semibold">实时日志（新在顶）</h3>
             <span className="text-xs text-muted-foreground">
               {liveLogs.length === 0
                 ? "暂无；运行中任务会推送到此"
-                : stickToBottomRef.current
-                ? "自动跟随中（滚到顶暂停）"
-                : "手动暂停（滚到底恢复）"}
+                : stickToTopRef.current
+                ? "自动跟随中（向下滚暂停）"
+                : "手动暂停（滚回顶部恢复）"}
             </span>
           </div>
           <div
@@ -413,11 +475,14 @@ function TaskDetailTabs({
             {liveLogs.length === 0 ? (
               <p className="text-muted-foreground">等待中…</p>
             ) : (
-              liveLogs.map((line, i) => (
-                <div key={i} className="whitespace-pre text-foreground">
-                  {line}
-                </div>
-              ))
+              liveLogs
+                .slice()
+                .reverse()
+                .map((line, i) => (
+                  <div key={liveLogs.length - 1 - i} className="whitespace-pre text-foreground">
+                    {line}
+                  </div>
+                ))
             )}
           </div>
         </Card>

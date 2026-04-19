@@ -446,3 +446,18 @@ export function getSubTasks(parentTaskId: string): Task[] {
     .all(parentTaskId);
   return rows.map(rowToTask);
 }
+
+/**
+ * 原子级联删除一组 task：先删所有 task_logs，再删 tasks 本身。
+ * 仅做 DB 层删除，不动文件/锁/manifest；不 emit 事件。
+ * 由 task-delete.ts 统一协调，高层负责预校验与外部副作用清理。
+ */
+export function deleteTaskRecords(taskIds: string[]): void {
+  if (taskIds.length === 0) return;
+  const db = getDb();
+  const placeholders = taskIds.map(() => "?").join(",");
+  db.transaction(() => {
+    db.run("DELETE FROM task_logs WHERE task_id IN (" + placeholders + ")", taskIds);
+    db.run("DELETE FROM tasks WHERE id IN (" + placeholders + ")", taskIds);
+  })();
+}

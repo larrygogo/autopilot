@@ -6,6 +6,7 @@ import { initDb, closeDb, listTasks, updateTask } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/registry";
 import { checkStuckTasks, pruneWorkspacesByPolicy } from "../core/watcher";
+import { runScheduledTasks } from "../core/scheduler";
 import { initDaemonFileLog, log } from "../core/logger";
 import { loadDaemonConfig } from "../core/config";
 import { enableBus, disableBus, bus } from "./event-bus";
@@ -23,6 +24,7 @@ const DEFAULT_PORT = 6180;
 const DEFAULT_HOST = "127.0.0.1";
 const WATCHER_INTERVAL_MS = 60_000;
 const RETENTION_INTERVAL_MS = 3600_000;  // 每小时扫一次 workspace 保留策略
+const SCHEDULER_INTERVAL_MS = 30_000;    // 每 30 秒扫一次定时任务（精度到分钟）
 
 export interface DaemonOptions {
   host?: string;
@@ -105,6 +107,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     }
   }, RETENTION_INTERVAL_MS);
 
+  // scheduler 定时器：扫描到期的 schedule，创建对应任务
+  const schedulerTimer = setInterval(() => {
+    runScheduledTasks().catch((e: unknown) => {
+      console.error("scheduler 异常：", e instanceof Error ? e.message : String(e));
+    });
+  }, SCHEDULER_INTERVAL_MS);
+
   console.log(`autopilot daemon v${VERSION} started on http://${host}:${port} (pid=${process.pid})`);
 
   // 优雅退出
@@ -112,6 +121,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     console.log("\ndaemon 正在关闭...");
     clearInterval(watcherTimer);
     clearInterval(retentionTimer);
+    clearInterval(schedulerTimer);
     disableBus();
     server.stop();
     closeDb();

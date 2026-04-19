@@ -1,6 +1,7 @@
 import type { Task, TaskLog } from "../core/db";
 import type { DaemonStatus, GraphData } from "../daemon/protocol";
 import type { SessionManifest, ChatMessage } from "../core/sessions";
+import type { Schedule, ScheduleType } from "../core/schedules";
 
 // ──────────────────────────────────────────────
 // HTTP REST 客户端
@@ -92,6 +93,57 @@ export class HttpClient {
 
   async getWorkflowGraph(name: string): Promise<GraphData> {
     return this.request(`/api/workflows/${name}/graph`);
+  }
+
+  // ── Schedules ──
+
+  async listSchedules(): Promise<Schedule[]> {
+    return this.request("/api/schedules");
+  }
+
+  async getSchedule(id: string): Promise<Schedule> {
+    return this.request(`/api/schedules/${id}`);
+  }
+
+  async createSchedule(body: {
+    name: string;
+    type: ScheduleType;
+    run_at?: string | null;
+    cron_expr?: string | null;
+    timezone: string;
+    workflow: string;
+    title: string;
+    requirement?: string | null;
+    enabled?: boolean;
+  }): Promise<Schedule> {
+    return this.request("/api/schedules", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updateSchedule(id: string, body: Partial<{
+    name: string;
+    enabled: boolean;
+    run_at: string | null;
+    cron_expr: string | null;
+    timezone: string;
+    workflow: string;
+    title: string;
+    requirement: string | null;
+  }>): Promise<Schedule> {
+    return this.request(`/api/schedules/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteSchedule(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/schedules/${id}`, { method: "DELETE" });
+  }
+
+  async runScheduleNow(id: string): Promise<{ ok: true; taskId: string }> {
+    return this.request(`/api/schedules/${id}/run-now`, { method: "POST" });
   }
 
   // ── Chat ──

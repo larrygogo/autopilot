@@ -7,6 +7,8 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/workflows\/[\w.\-]+\/agents$/,
   /^\/api\/providers/,
   /^\/api\/agents/,
+  /^\/api\/schedules/,
+  /^\/api\/defaults/,
 ];
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -43,6 +45,8 @@ export const api = {
     request<any>("/api/tasks", { method: "POST", body: JSON.stringify(body) }),
   cancelTask: (id: string) =>
     request<any>(`/api/tasks/${id}/cancel`, { method: "POST" }),
+  deleteTask: (id: string) =>
+    request<{ ok: true; deleted: string[] }>(`/api/tasks/${id}`, { method: "DELETE" }),
   restartTask: (id: string) =>
     request<{ ok: true; phase: string; from: string }>(
       `/api/tasks/${id}/restart`,
@@ -169,6 +173,41 @@ export const api = {
   deleteSession: (id: string) =>
     request<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
 
+  // Defaults（用户偏好）
+  getDefaults: () =>
+    request<{
+      timezone: string | null;
+      resolved_timezone: string;
+      system_timezone: string;
+    }>("/api/defaults"),
+  saveDefaults: (body: { timezone?: string | null }) =>
+    request<{ ok: true; timezone: string | null }>("/api/defaults", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  // Schedules
+  listSchedules: () => request<Schedule[]>("/api/schedules"),
+  getSchedule: (id: string) => request<Schedule>(`/api/schedules/${id}`),
+  createSchedule: (body: {
+    name: string;
+    type: "once" | "cron";
+    run_at?: string | null;
+    cron_expr?: string | null;
+    /** 省略则后端使用 defaults.timezone 或机器时区 */
+    timezone?: string;
+    workflow: string;
+    title: string;
+    requirement?: string | null;
+    enabled?: boolean;
+  }) => request<Schedule>("/api/schedules", { method: "POST", body: JSON.stringify(body) }),
+  updateSchedule: (id: string, body: Record<string, unknown>) =>
+    request<Schedule>(`/api/schedules/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteSchedule: (id: string) =>
+    request<{ ok: true }>(`/api/schedules/${id}`, { method: "DELETE" }),
+  runScheduleNow: (id: string) =>
+    request<{ ok: true; taskId: string }>(`/api/schedules/${id}/run-now`, { method: "POST" }),
+
   dryRunAgent: (name: string, body: {
     prompt: string;
     system_prompt?: string;
@@ -254,6 +293,25 @@ export interface ChatMessage {
   content: string;
   ts: string;
   usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+}
+
+export interface Schedule {
+  id: string;
+  name: string;
+  type: "once" | "cron";
+  run_at: string | null;
+  cron_expr: string | null;
+  timezone: string;
+  workflow: string;
+  title: string;
+  requirement: string | null;
+  enabled: 0 | 1;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_task_id: string | null;
+  run_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ChatSessionManifest {

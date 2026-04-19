@@ -1,5 +1,6 @@
 import type { Task, TaskLog } from "../core/db";
 import type { ChatMessage } from "../core/sessions";
+import type { Schedule } from "../core/schedules";
 
 // ──────────────────────────────────────────────
 // Event Types — 核心模块发射的事件
@@ -8,6 +9,7 @@ import type { ChatMessage } from "../core/sessions";
 export type AutopilotEvent =
   | { type: "task:created"; payload: { task: Task } }
   | { type: "task:updated"; payload: { task: Task; fields: string[] } }
+  | { type: "task:deleted"; payload: { taskId: string; parentTaskId: string | null } }
   | { type: "task:transition"; payload: { taskId: string; from: string; to: string; trigger: string } }
   | { type: "phase:started"; payload: { taskId: string; phase: string; label: string } }
   | { type: "phase:completed"; payload: { taskId: string; phase: string } }
@@ -22,7 +24,11 @@ export type AutopilotEvent =
   | { type: "workflow:reloaded"; payload: Record<string, never> }
   | { type: "chat:delta"; payload: { sessionId: string; delta: string } }
   | { type: "chat:complete"; payload: { sessionId: string; message: ChatMessage } }
-  | { type: "chat:error"; payload: { sessionId: string; error: string } };
+  | { type: "chat:error"; payload: { sessionId: string; error: string } }
+  | { type: "schedule:created"; payload: { schedule: Schedule } }
+  | { type: "schedule:updated"; payload: { schedule: Schedule } }
+  | { type: "schedule:deleted"; payload: { scheduleId: string } }
+  | { type: "schedule:fired"; payload: { schedule: Schedule; taskId: string } };
 
 // ──────────────────────────────────────────────
 // WebSocket Protocol — Client ↔ Server 消息
@@ -119,6 +125,10 @@ export function getChannelsForEvent(event: AutopilotEvent): string[] {
     case "config":
     case "workflow": {
       channels.push("daemon");
+      break;
+    }
+    case "schedule": {
+      channels.push("schedule:*");
       break;
     }
   }
