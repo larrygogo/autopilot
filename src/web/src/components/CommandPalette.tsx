@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { MessageSquare, ListTodo, Workflow, Plug, Bot, Sliders, Moon, Sun, Plus, FileText } from "lucide-react";
+import { MessageSquare, ListTodo, Workflow, Plug, Bot, Sliders, Moon, Sun, Plus, FileText, Clock } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -12,8 +12,6 @@ import {
 } from "@/components/ui/command";
 import { useTheme } from "@/lib/theme";
 import { api } from "@/hooks/useApi";
-
-export type NavKey = "chat" | "tasks" | "workflows" | "providers" | "agents" | "settings";
 
 interface Task {
   id: string;
@@ -29,7 +27,8 @@ interface Workflow {
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onNavigate: (key: NavKey) => void;
+  /** 传入目标路径（如 "/tasks"、"/settings"） */
+  onNavigate: (path: string) => void;
   onSelectTask: (id: string) => void;
   onNewTask: () => void;
 }
@@ -52,12 +51,13 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
 
   const pages = useMemo(
     () => [
-      { key: "chat" as NavKey, label: "对话", icon: MessageSquare },
-      { key: "tasks" as NavKey, label: "任务", icon: ListTodo },
-      { key: "workflows" as NavKey, label: "工作流", icon: Workflow },
-      { key: "providers" as NavKey, label: "提供商", icon: Plug },
-      { key: "agents" as NavKey, label: "智能体", icon: Bot },
-      { key: "settings" as NavKey, label: "通用设置", icon: Sliders },
+      { path: "/chat", label: "对话", icon: MessageSquare },
+      { path: "/tasks", label: "任务", icon: ListTodo },
+      { path: "/schedules", label: "定时任务", icon: Clock },
+      { path: "/workflows", label: "工作流", icon: Workflow },
+      { path: "/providers", label: "提供商", icon: Plug },
+      { path: "/agents", label: "智能体", icon: Bot },
+      { path: "/settings", label: "通用设置", icon: Sliders },
     ],
     [],
   );
@@ -84,7 +84,7 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
 
         <CommandGroup heading="页面">
           {pages.map((p) => (
-            <CommandItem key={p.key} onSelect={run(() => onNavigate(p.key))}>
+            <CommandItem key={p.path} onSelect={run(() => onNavigate(p.path))}>
               <p.icon className="h-4 w-4" />
               {p.label}
             </CommandItem>
@@ -116,7 +116,7 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
             <CommandSeparator />
             <CommandGroup heading="工作流">
               {workflows.map((w) => (
-                <CommandItem key={w.name} onSelect={run(() => onNavigate("workflows"))}>
+                <CommandItem key={w.name} onSelect={run(() => onNavigate("/workflows"))}>
                   <Workflow className="h-4 w-4" />
                   {w.name}
                 </CommandItem>

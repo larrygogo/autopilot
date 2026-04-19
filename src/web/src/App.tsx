@@ -1,4 +1,13 @@
-import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import React, { lazy, Suspense, useEffect, useState } from "react";
+import {
+  Routes,
+  Route,
+  Navigate,
+  NavLink,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { ToastProvider } from "./components/Toast";
 import { Toaster } from "./components/ui/sonner";
@@ -6,7 +15,7 @@ import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from "./comp
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Separator } from "./components/ui/separator";
-import { CommandPalette, type NavKey } from "./components/CommandPalette";
+import { CommandPalette } from "./components/CommandPalette";
 import { NewTaskDialog } from "./components/NewTaskDialog";
 import { PageLoader } from "./components/PageLoader";
 import { useTheme } from "./lib/theme";
@@ -23,6 +32,7 @@ import {
   Search,
   Menu,
   Circle,
+  Clock,
 } from "lucide-react";
 
 const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
@@ -34,54 +44,58 @@ const Chat = lazy(() => import("./pages/Chat").then((m) => ({ default: m.Chat })
 const Providers = lazy(() => import("./pages/Providers").then((m) => ({ default: m.Providers })));
 const Agents = lazy(() => import("./pages/Agents").then((m) => ({ default: m.Agents })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
-
-type Page =
-  | NavKey
-  | { type: "task-detail"; id: string };
+const Schedules = lazy(() => import("./pages/Schedules").then((m) => ({ default: m.Schedules })));
 
 interface NavItem {
-  key: NavKey;
+  path: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
+  /** 只在严格匹配时激活；不设则前缀匹配（子路由也激活父项） */
+  end?: boolean;
 }
 
 const MAIN_NAV: NavItem[] = [
-  { key: "chat", label: "对话", icon: MessageSquare },
-  { key: "tasks", label: "任务", icon: ListTodo },
-  { key: "workflows", label: "工作流", icon: WorkflowIcon },
+  { path: "/chat", label: "对话", icon: MessageSquare, end: true },
+  { path: "/tasks", label: "任务", icon: ListTodo },
+  { path: "/schedules", label: "定时", icon: Clock, end: true },
+  { path: "/workflows", label: "工作流", icon: WorkflowIcon, end: true },
 ];
 
 const SETTINGS_NAV: NavItem[] = [
-  { key: "providers", label: "提供商", icon: Plug },
-  { key: "agents", label: "智能体", icon: Bot },
-  { key: "settings", label: "通用", icon: Sliders },
+  { path: "/providers", label: "提供商", icon: Plug, end: true },
+  { path: "/agents", label: "智能体", icon: Bot, end: true },
+  { path: "/settings", label: "通用", icon: Sliders, end: true },
 ];
 
-const PAGE_TITLES: Record<NavKey, string> = {
-  chat: "对话",
-  tasks: "任务",
-  workflows: "工作流",
-  providers: "提供商",
-  agents: "智能体",
-  settings: "通用设置",
-};
+function titleForPath(pathname: string): string {
+  if (pathname.startsWith("/tasks/")) {
+    const id = pathname.slice("/tasks/".length);
+    return id ? `任务 · ${id}` : "任务";
+  }
+  if (pathname.startsWith("/chat")) return "对话";
+  if (pathname.startsWith("/tasks")) return "任务";
+  if (pathname.startsWith("/schedules")) return "定时任务";
+  if (pathname.startsWith("/workflows")) return "工作流";
+  if (pathname.startsWith("/providers")) return "提供商";
+  if (pathname.startsWith("/agents")) return "智能体";
+  if (pathname.startsWith("/settings")) return "通用设置";
+  return "Autopilot";
+}
 
 function AppInner() {
-  const [page, setPage] = useState<Page>("tasks");
+  const location = useLocation();
+  const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const { state: wsState, subscribe } = useWebSocket();
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
 
-  const currentKey: NavKey | "task-detail" = typeof page === "string" ? page : page.type;
-
-  const openPage = (p: Page) => {
-    setPage(p);
+  // 路由切换时关闭手机抽屉
+  useEffect(() => {
     setMobileNavOpen(false);
-  };
+  }, [location.pathname]);
 
-  // Cmd/Ctrl+K 打开命令面板
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -93,35 +107,22 @@ function AppInner() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const headerTitle =
-    currentKey === "task-detail" && typeof page !== "string"
-      ? `任务 · ${page.id}`
-      : PAGE_TITLES[currentKey as NavKey];
+  const headerTitle = titleForPath(location.pathname);
+  const isChatRoute = location.pathname.startsWith("/chat");
 
   return (
     <TooltipProvider delayDuration={150}>
       <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
-        {/* Desktop sidebar */}
         <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground lg:flex">
-          <SidebarContent
-            currentKey={currentKey}
-            wsState={wsState}
-            onNavigate={(k) => openPage(k)}
-          />
+          <SidebarContent wsState={wsState} />
         </aside>
 
-        {/* Mobile drawer */}
         <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
           <SheetContent side="left" className="w-64 bg-sidebar p-0 text-sidebar-foreground">
-            <SidebarContent
-              currentKey={currentKey}
-              wsState={wsState}
-              onNavigate={(k) => openPage(k)}
-            />
+            <SidebarContent wsState={wsState} />
           </SheetContent>
         </Sheet>
 
-        {/* Main column */}
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3 md:px-5">
             <Button
@@ -167,34 +168,51 @@ function AppInner() {
           <main
             className={cn(
               "min-w-0 flex-1 scrollbar-thin",
-              currentKey === "chat" ? "overflow-hidden" : "overflow-y-auto",
+              isChatRoute ? "overflow-hidden" : "overflow-y-auto",
             )}
           >
             <Suspense fallback={<PageLoader />}>
-              {currentKey === "tasks" && typeof page === "string" && (
-                <Tasks
-                  onSelect={(id) => openPage({ type: "task-detail", id })}
-                  subscribe={subscribe}
+              <Routes>
+                <Route path="/" element={<Navigate to="/tasks" replace />} />
+                <Route
+                  path="/tasks"
+                  element={
+                    <Tasks
+                      onSelect={(id) => navigate(`/tasks/${id}`)}
+                      subscribe={subscribe}
+                    />
+                  }
                 />
-              )}
-              {currentKey === "task-detail" && typeof page !== "string" && (
-                <TaskDetail
-                  taskId={page.id}
-                  onBack={() => openPage("tasks")}
-                  subscribe={subscribe}
+                <Route
+                  path="/tasks/:id"
+                  element={<TaskDetailRoute subscribe={subscribe} />}
                 />
-              )}
-              {currentKey === "workflows" && (
-                <Workflows onJumpToAgent={() => openPage("agents")} />
-              )}
-              {currentKey === "chat" && (
-                <div className="h-full">
-                  <Chat subscribe={subscribe} />
-                </div>
-              )}
-              {currentKey === "providers" && <Providers />}
-              {currentKey === "agents" && <Agents />}
-              {currentKey === "settings" && <Settings />}
+                <Route
+                  path="/schedules"
+                  element={
+                    <Schedules
+                      onSelectTask={(id) => navigate(`/tasks/${id}`)}
+                      subscribe={subscribe}
+                    />
+                  }
+                />
+                <Route
+                  path="/workflows"
+                  element={<Workflows onJumpToAgent={() => navigate("/agents")} />}
+                />
+                <Route
+                  path="/chat"
+                  element={
+                    <div className="h-full">
+                      <Chat subscribe={subscribe} />
+                    </div>
+                  }
+                />
+                <Route path="/providers" element={<Providers />} />
+                <Route path="/agents" element={<Agents />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={<Navigate to="/tasks" replace />} />
+              </Routes>
             </Suspense>
           </main>
         </div>
@@ -203,15 +221,15 @@ function AppInner() {
       <CommandPalette
         open={cmdOpen}
         onOpenChange={setCmdOpen}
-        onNavigate={(k) => openPage(k)}
-        onSelectTask={(id) => openPage({ type: "task-detail", id })}
+        onNavigate={(path) => navigate(path)}
+        onSelectTask={(id) => navigate(`/tasks/${id}`)}
         onNewTask={() => setNewTaskOpen(true)}
       />
 
       <NewTaskDialog
         open={newTaskOpen}
         onClose={() => setNewTaskOpen(false)}
-        onCreated={(id) => openPage({ type: "task-detail", id })}
+        onCreated={(id) => navigate(`/tasks/${id}`)}
       />
 
       <Toaster position="top-center" richColors closeButton />
@@ -219,16 +237,22 @@ function AppInner() {
   );
 }
 
-function SidebarContent({
-  currentKey,
-  wsState,
-  onNavigate,
+function TaskDetailRoute({
+  subscribe,
 }: {
-  currentKey: NavKey | "task-detail";
-  wsState: "connected" | "connecting" | "disconnected";
-  onNavigate: (k: NavKey) => void;
+  subscribe: (channel: string, handler: (event: any) => void) => () => void;
 }) {
-  const activeKey: NavKey | null = currentKey === "task-detail" ? "tasks" : currentKey;
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  if (!id) return <Navigate to="/tasks" replace />;
+  return <TaskDetail taskId={id} onBack={() => navigate("/tasks")} subscribe={subscribe} />;
+}
+
+function SidebarContent({
+  wsState,
+}: {
+  wsState: "connected" | "connecting" | "disconnected";
+}) {
   const wsColor =
     wsState === "connected"
       ? "text-emerald-500"
@@ -240,7 +264,6 @@ function SidebarContent({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Logo */}
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-sidebar-border px-4">
         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
           <span className="text-[11px] font-bold">A</span>
@@ -248,20 +271,18 @@ function SidebarContent({
         <span className="text-sm font-semibold tracking-tight">Autopilot</span>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 space-y-6 overflow-y-auto scrollbar-thin p-3">
-        <NavGroup items={MAIN_NAV} activeKey={activeKey} onNavigate={onNavigate} />
+        <NavGroup items={MAIN_NAV} />
         <div className="space-y-1">
           <div className="px-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             设置
           </div>
-          <NavGroup items={SETTINGS_NAV} activeKey={activeKey} onNavigate={onNavigate} />
+          <NavGroup items={SETTINGS_NAV} />
         </div>
       </nav>
 
       <Separator className="bg-sidebar-border" />
 
-      {/* Status footer */}
       <div className="flex h-10 shrink-0 items-center gap-2 px-4 text-xs text-muted-foreground">
         <Circle className={cn("h-2 w-2 fill-current", wsColor)} />
         <span>{wsLabel}</span>
@@ -270,37 +291,32 @@ function SidebarContent({
   );
 }
 
-function NavGroup({
-  items,
-  activeKey,
-  onNavigate,
-}: {
-  items: NavItem[];
-  activeKey: NavKey | null;
-  onNavigate: (k: NavKey) => void;
-}) {
+function NavGroup({ items }: { items: NavItem[] }) {
   return (
     <ul className="space-y-0.5">
-      {items.map((item) => {
-        const active = activeKey === item.key;
-        return (
-          <li key={item.key}>
-            <button
-              type="button"
-              onClick={() => onNavigate(item.key)}
-              className={cn(
+      {items.map((item) => (
+        <li key={item.path}>
+          <NavLink
+            to={item.path}
+            end={item.end}
+            className={({ isActive }) =>
+              cn(
                 "group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors",
-                active
+                isActive
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-              )}
-            >
-              <item.icon className={cn("h-4 w-4 shrink-0", active && "text-sidebar-primary")} />
-              <span>{item.label}</span>
-            </button>
-          </li>
-        );
-      })}
+              )
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <item.icon className={cn("h-4 w-4 shrink-0", isActive && "text-sidebar-primary")} />
+                <span>{item.label}</span>
+              </>
+            )}
+          </NavLink>
+        </li>
+      ))}
     </ul>
   );
 }
