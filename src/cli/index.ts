@@ -330,8 +330,9 @@ task
   .description("创建并启动任务（task ID 自动生成）")
   .option("-w, --workflow <name>", "工作流名称")
   .option("-r, --requirement <text>", "需求详情；以 @ 开头则从文件读，例如 -r @./req.md")
+  .option("--repo <alias>", "绑定仓库别名（用于 req_dev 等需要仓库的工作流）")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (title: string, opts: { workflow?: string; requirement?: string; port: string }) => {
+  .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
     const client = getClient(opts);
     await ensureDaemon(client);
 
@@ -347,7 +348,14 @@ task
     }
 
     try {
-      const t = await client.startTask({ title, requirement, workflow: opts.workflow });
+      const startOpts: {
+        title?: string;
+        requirement?: string;
+        workflow?: string;
+        repo_alias?: string;
+      } = { title, requirement, workflow: opts.workflow };
+      if (opts.repo) startOpts.repo_alias = opts.repo;
+      const t = await client.startTask(startOpts);
       console.log(`任务已创建 [id=${t.id} workflow=${t.workflow} status=${t.status}]`);
     } catch (e: unknown) {
       console.error(`错误：${e instanceof Error ? e.message : String(e)}`);

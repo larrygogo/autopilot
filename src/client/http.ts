@@ -74,6 +74,8 @@ export class HttpClient {
     workflow?: string;
     /** 旧接口兼容：可选传入 reqId；不传则后端生成 task ID */
     reqId?: string;
+    /** 额外工作流参数（如 repo_id），透传给 setup_func */
+    [key: string]: unknown;
   }): Promise<Task> {
     return this.request("/api/tasks", {
       method: "POST",

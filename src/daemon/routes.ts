@@ -36,6 +36,7 @@ import {
 import {
   listRepos,
   getRepoById,
+  getRepoByAlias,
   createRepo,
   updateRepo,
   deleteRepo,
@@ -368,7 +369,17 @@ export async function handleRequest(req: Request): Promise<Response> {
         requirement?: string;
         workflow?: string;
         reqId?: string;
+        /** CLI 传入仓库别名，daemon 解析为 repo_id 透传给 setup_func */
+        repo_alias?: string;
+        /** 额外工作流参数（如 repo_id），透传给 setup_func */
+        [key: string]: unknown;
       };
+      // 如果 caller 传了 repo_alias，解析为 repo_id（不覆盖已有 repo_id）
+      if (body.repo_alias && !body.repo_id) {
+        const repo = getRepoByAlias(body.repo_alias as string);
+        if (!repo) return error(`找不到别名为 "${body.repo_alias}" 的仓库`, 404);
+        body.repo_id = repo.id;
+      }
       try {
         const task = await startTaskFromTemplate(body);
         return json(task, 201);
