@@ -755,20 +755,30 @@ export async function handleRequest(req: Request): Promise<Response> {
     // POST /api/requirements/:id/inject_feedback
     const reqInjectMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/inject_feedback$/);
     if (reqInjectMatch && method === "POST") {
+      const id = reqInjectMatch;
       const body = (await req.json()) as {
         body?: string;
         source?: "manual" | "github_review";
         github_review_id?: string;
       };
       if (!body.body?.trim()) return error("body 必填");
-      if (!getRequirementById(reqInjectMatch)) return error("requirement not found", 404);
+      const r = getRequirementById(id);
+      if (!r) return error("requirement not found", 404);
       appendFeedback({
-        requirement_id: reqInjectMatch,
+        requirement_id: id,
         source: body.source ?? "manual",
         body: body.body.trim(),
         github_review_id: body.github_review_id ?? null,
       });
-      // P3 之前：仅追加反馈，不触发状态转换
+      // P3：如果当前 awaiting_review，触发 fix_revision
+      // run_await_review 阶段函数循环会检测到 status 变化，emit jump trigger 切换到 fix_revision 阶段
+      if (r.status === "awaiting_review") {
+        try {
+          setRequirementStatus(id, "fix_revision");
+        } catch (e: unknown) {
+          log.warn("inject_feedback 触发 fix_revision 失败（反馈已写入）[req=%s err=%s]", id, (e as Error).message);
+        }
+      }
       return json({ ok: true });
     }
 

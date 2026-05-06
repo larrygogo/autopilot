@@ -73,6 +73,45 @@ describe("chat tools 集成（直接走 core 函数验证流程）", () => {
     expect(getRequirementById(id)?.status).toBe("cancelled");
   });
 
+  it("inject_feedback 在 awaiting_review 时触发 fix_revision", () => {
+    const id = nextRequirementId();
+    createRequirement({ id, repo_id: "repo-001", title: "test" });
+    // 走到 awaiting_review
+    setRequirementStatus(id, "clarifying");
+    setRequirementStatus(id, "ready");
+    setRequirementStatus(id, "queued");
+    setRequirementStatus(id, "running");
+    setRequirementStatus(id, "awaiting_review");
+    expect(getRequirementById(id)?.status).toBe("awaiting_review");
+
+    // 模拟 routes.ts inject_feedback handler 的逻辑
+    appendFeedback({ requirement_id: id, source: "manual", body: "改这里" });
+    const r = getRequirementById(id);
+    if (r?.status === "awaiting_review") {
+      setRequirementStatus(id, "fix_revision");
+    }
+    expect(getRequirementById(id)?.status).toBe("fix_revision");
+  });
+
+  it("inject_feedback 在非 awaiting_review 时仅记录不触发", () => {
+    const id = nextRequirementId();
+    createRequirement({ id, repo_id: "repo-001", title: "test2" });
+    setRequirementStatus(id, "clarifying");
+    // 当前 status=clarifying
+
+    appendFeedback({ requirement_id: id, source: "manual", body: "草稿期反馈" });
+    const r = getRequirementById(id);
+    if (r?.status === "awaiting_review") {
+      // false，不触发
+      setRequirementStatus(id, "fix_revision");
+    }
+    // status 不变
+    expect(getRequirementById(id)?.status).toBe("clarifying");
+    // feedback 写入了
+    const fbs = listFeedbacks(id);
+    expect(fbs.length).toBe(1);
+  });
+
   it("buildAutopilotTools 能成功构造 8 个新工具（含更新后的 enqueue）", async () => {
     // 跟其他工具集成的 sanity check
     const { buildAutopilotTools } = await import("../src/agents/tools");

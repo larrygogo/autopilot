@@ -454,7 +454,7 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
     // ── 需求队列：反馈 ──
     tool(
       "inject_feedback",
-      "为正在 awaiting_review 的需求注入反馈（如 PR review 意见）。P3 起会自动触发 fix_revision 阶段；P2 仅追加记录到 requirement_feedbacks 表，状态不变。",
+      "为正在 awaiting_review 的需求注入反馈（如 PR review 意见）。如果当前 status=awaiting_review，会自动触发 fix_revision 阶段：req_dev task 切到 fix_revision 阶段，agent 读最新反馈修改代码并 push 同 PR 分支。其他状态下仅记录反馈，不触发。",
       {
         req_id: z.string(),
         body: z.string().describe("反馈正文（用户希望对 PR 做哪些修改）"),
@@ -467,7 +467,16 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
           source: "manual",
           body: args.body,
         });
-        return ok({ id: args.req_id, feedback_added: true });
+        let triggered = false;
+        if (r.status === "awaiting_review") {
+          try {
+            setRequirementStatus(args.req_id, "fix_revision");
+            triggered = true;
+          } catch (e: unknown) {
+            // 状态转换失败不阻塞反馈写入
+          }
+        }
+        return ok({ id: args.req_id, feedback_added: true, fix_revision_triggered: triggered });
       },
     ),
 
