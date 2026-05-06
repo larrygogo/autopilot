@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import { join, resolve, sep, dirname, parse as parsePath } from "path";
 import { getPhaseIndex } from "../core/artifacts";
 import { VERSION } from "../index";
-import { initDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks, updateTask } from "../core/db";
+import { initDb, getDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks, updateTask } from "../core/db";
 import { log } from "../core/logger";
 import { snapshotWorkflow } from "../core/manifest";
 import {
@@ -44,6 +44,15 @@ import {
   nextRepoId,
 } from "../core/repos";
 import { checkRepoHealth } from "../core/repo-health";
+import {
+  listRequirements,
+  getRequirementById,
+  createRequirement,
+  updateRequirement,
+  setRequirementStatus,
+  nextRequirementId,
+} from "../core/requirements";
+import { appendFeedback, listFeedbacks } from "../core/requirement-feedbacks";
 import {
   discover,
   reload,
@@ -677,6 +686,132 @@ export async function handleRequest(req: Request): Promise<Response> {
         updateRepo(repoHealthMatch, patch);
       }
       return json({ healthy: health.healthy, issues: health.issues });
+    }
+
+    // ─────────── Requirements ───────────
+
+    // GET /api/requirements
+    if (method === "GET" && path === "/api/requirements") {
+      const repoId = url.searchParams.get("repo_id") ?? undefined;
+      const status = url.searchParams.get("status") ?? undefined;
+      return json({ requirements: listRequirements({ repo_id: repoId, status }) });
+    }
+
+    // POST /api/requirements
+    if (method === "POST" && path === "/api/requirements") {
+      const body = (await req.json()) as {
+        repo_id?: string;
+        title?: string;
+        spec_md?: string;
+        chat_session_id?: string | null;
+      };
+      if (!body.repo_id?.trim() || !body.title?.trim()) {
+        return error("repo_id 和 title 必填");
+      }
+      if (!getRepoById(body.repo_id)) {
+        return error("repo not found", 404);
+      }
+      const id = nextRequirementId();
+      try {
+        const r = createRequirement({
+          id,
+          repo_id: body.repo_id,
+          title: body.title.trim(),
+          spec_md: body.spec_md ?? "",
+          chat_session_id: body.chat_session_id ?? null,
+        });
+        return json({ requirement: r }, 201);
+      } catch (e: unknown) {
+        return error((e as Error).message, 500);
+      }
+    }
+
+    // POST /api/requirements/:id/transition
+    const reqTransitionMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/transition$/);
+    if (reqTransitionMatch && method === "POST") {
+      const body = (await req.json()) as { to?: string };
+      if (!body.to?.trim()) return error("to 必填");
+      if (!getRequirementById(reqTransitionMatch)) return error("requirement not found", 404);
+      try {
+        return json({ requirement: setRequirementStatus(reqTransitionMatch, body.to.trim()) });
+      } catch (e: unknown) {
+        return error((e as Error).message);
+      }
+    }
+
+    // POST /api/requirements/:id/enqueue
+    const reqEnqueueMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/enqueue$/);
+    if (reqEnqueueMatch && method === "POST") {
+      if (!getRequirementById(reqEnqueueMatch)) return error("requirement not found", 404);
+      // P2 Task 4：仅状态转换；Task 9 起本 handler 会追加创建 req_dev task 的逻辑
+      try {
+        return json({ requirement: setRequirementStatus(reqEnqueueMatch, "queued") });
+      } catch (e: unknown) {
+        return error((e as Error).message);
+      }
+    }
+
+    // POST /api/requirements/:id/inject_feedback
+    const reqInjectMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/inject_feedback$/);
+    if (reqInjectMatch && method === "POST") {
+      const body = (await req.json()) as {
+        body?: string;
+        source?: "manual" | "github_review";
+        github_review_id?: string;
+      };
+      if (!body.body?.trim()) return error("body 必填");
+      if (!getRequirementById(reqInjectMatch)) return error("requirement not found", 404);
+      appendFeedback({
+        requirement_id: reqInjectMatch,
+        source: body.source ?? "manual",
+        body: body.body.trim(),
+        github_review_id: body.github_review_id ?? null,
+      });
+      // P3 之前：仅追加反馈，不触发状态转换
+      return json({ ok: true });
+    }
+
+    // POST /api/requirements/:id/cancel
+    const reqCancelMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/cancel$/);
+    if (reqCancelMatch && method === "POST") {
+      if (!getRequirementById(reqCancelMatch)) return error("requirement not found", 404);
+      try {
+        return json({ requirement: setRequirementStatus(reqCancelMatch, "cancelled") });
+      } catch (e: unknown) {
+        return error((e as Error).message);
+      }
+    }
+
+    // GET|PUT|DELETE /api/requirements/:id
+    const reqDetailMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)$/);
+    if (reqDetailMatch) {
+      const r = getRequirementById(reqDetailMatch);
+      if (!r) return error("requirement not found", 404);
+
+      if (method === "GET") {
+        return json({ requirement: r, feedbacks: listFeedbacks(reqDetailMatch) });
+      }
+      if (method === "PUT") {
+        const body = (await req.json()) as {
+          title?: string;
+          spec_md?: string;
+          chat_session_id?: string | null;
+        };
+        if (body.title !== undefined && !body.title.trim()) {
+          return error("title 不能为空");
+        }
+        return json({ requirement: updateRequirement(reqDetailMatch, body) });
+      }
+      if (method === "DELETE") {
+        if (!["cancelled", "done", "failed"].includes(r.status)) {
+          return error(`仅终态需求可删除，当前 status=${r.status}`);
+        }
+        // 级联删除：先删反馈，再删需求
+        const db = getDb();
+        db.run("DELETE FROM requirement_feedbacks WHERE requirement_id = ?", [reqDetailMatch]);
+        db.run("DELETE FROM requirements WHERE id = ?", [reqDetailMatch]);
+        return json({ ok: true });
+      }
     }
 
     // GET /api/tasks/:id
