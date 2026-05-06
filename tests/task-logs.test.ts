@@ -5,6 +5,10 @@ import { tmpdir } from "os";
 
 // 所有测试在子进程里跑（AUTOPILOT_HOME 注入），避免污染主 process.env
 
+// task-logs 模块路径：用正斜杠避免 Windows 反斜杠在 JS 字符串字面量里被当作转义字符吃掉
+// （相同根因之前在 src/core/registry.ts 已修复）
+const TASK_LOGS_MODULE = join(import.meta.dir, "..", "src", "core", "task-logs").replace(/\\/g, "/");
+
 let tmpHome: string;
 
 beforeEach(() => {
@@ -30,7 +34,7 @@ function runChild(script: string): Promise<string> {
 describe("task-logs 落盘与读取", () => {
   it("appendPhaseLog 追加行 + readPhaseLog 回读", async () => {
     const script = `
-import { appendPhaseLog, readPhaseLog, listPhaseLogs } from "${join(import.meta.dir, "..", "src", "core", "task-logs")}";
+import { appendPhaseLog, readPhaseLog, listPhaseLogs } from "${TASK_LOGS_MODULE}";
 appendPhaseLog("t1", "step1", "first line");
 appendPhaseLog("t1", "step1", "second line\\n");  // 已含换行，不重复补
 appendPhaseLog("t1", "step2", "another phase");
@@ -49,7 +53,7 @@ console.log(JSON.stringify({ list: list.map(p => p.phase).sort(), s1 }));
 
   it("readPhaseLog tail 限制", async () => {
     const script = `
-import { appendPhaseLog, readPhaseLog } from "${join(import.meta.dir, "..", "src", "core", "task-logs")}";
+import { appendPhaseLog, readPhaseLog } from "${TASK_LOGS_MODULE}";
 for (let i = 1; i <= 10; i++) appendPhaseLog("t2", "p", "line " + i);
 const all = readPhaseLog("t2", "p", { tail: 3 });
 console.log(JSON.stringify(all.trim().split("\\n")));
@@ -61,7 +65,7 @@ console.log(JSON.stringify(all.trim().split("\\n")));
 
   it("appendTaskEvent + readTaskEvents", async () => {
     const script = `
-import { appendTaskEvent, readTaskEvents } from "${join(import.meta.dir, "..", "src", "core", "task-logs")}";
+import { appendTaskEvent, readTaskEvents } from "${TASK_LOGS_MODULE}";
 appendTaskEvent("t3", { type: "phase-started", phase: "a" });
 appendTaskEvent("t3", { type: "phase-completed", phase: "a" });
 appendTaskEvent("t3", { type: "transition", from: "pending_a", to: "running_a", trigger: "start_a" });
@@ -74,7 +78,7 @@ console.log(JSON.stringify(events.map(e => e.type)));
 
   it("非法 phase 名被拒绝 append", async () => {
     const script = `
-import { appendPhaseLog, listPhaseLogs } from "${join(import.meta.dir, "..", "src", "core", "task-logs")}";
+import { appendPhaseLog, listPhaseLogs } from "${TASK_LOGS_MODULE}";
 // 非法字符 —— appendFile 路径被拒时 catch 会吞错误
 appendPhaseLog("t4", "bad/../name", "x");
 appendPhaseLog("t4", "ok_phase", "good");
@@ -86,7 +90,7 @@ console.log(JSON.stringify(listPhaseLogs("t4").map(p => p.phase)));
 
   it("agent calls append + list + get", async () => {
     const script = `
-import { appendAgentCall, listAgentCalls, getAgentCall } from "${join(import.meta.dir, "..", "src", "core", "task-logs")}";
+import { appendAgentCall, listAgentCalls, getAgentCall } from "${TASK_LOGS_MODULE}";
 appendAgentCall("t5", { agent: "coder", provider: "anthropic", model: "claude-sonnet-4-6", prompt: "write hello world", result_text: "done.", elapsed_ms: 1200, usage: { input_tokens: 10, output_tokens: 20 } });
 appendAgentCall("t5", { agent: "reviewer", provider: "anthropic", model: "claude-opus-4-7", prompt: "review code", error: "timeout" });
 const list = listAgentCalls("t5");
@@ -110,7 +114,7 @@ console.log(JSON.stringify({
 
   it("没日志目录时 list/read 返回空", async () => {
     const script = `
-import { listPhaseLogs, readPhaseLog, readTaskEvents } from "${join(import.meta.dir, "..", "src", "core", "task-logs")}";
+import { listPhaseLogs, readPhaseLog, readTaskEvents } from "${TASK_LOGS_MODULE}";
 // listPhaseLogs 纯检查磁盘，目录未建
 console.log(JSON.stringify({
   list: listPhaseLogs("no-such"),

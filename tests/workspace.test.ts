@@ -5,6 +5,9 @@ import { tmpdir } from "os";
 
 import { getTaskWorkspace, ensureTaskWorkspace, resolveWorkspacePath } from "../src/core/workspace";
 
+// workspace 模块路径：用正斜杠避免 Windows 反斜杠在 JS 字符串字面量里被当作转义字符吃掉
+const WORKSPACE_MODULE = join(import.meta.dir, "..", "src", "core", "workspace").replace(/\\/g, "/");
+
 let tmpHome: string;
 
 beforeEach(() => {
@@ -46,7 +49,8 @@ describe("resolveWorkspacePath 路径穿越防护", () => {
   it("空路径返回 workspace 根", () => {
     const p = resolveWorkspacePath("t1", "");
     expect(p).not.toBeNull();
-    expect(p!.endsWith("/workspace")).toBe(true);
+    // 跨平台：Windows 用反斜杠，Unix 用正斜杠
+    expect(p).toMatch(/[/\\]workspace$/);
   });
 
   it("拒绝 .. 穿越", () => {
@@ -70,7 +74,7 @@ describe("ensureTaskWorkspace 拷贝 template", () => {
   // 这些用例直接通过子进程跑，确保拿到新的 AUTOPILOT_HOME
   it("能创建空 workspace（无 template）", async () => {
     const script = `
-import { ensureTaskWorkspace } from "${join(import.meta.dir, "..", "src", "core", "workspace")}";
+import { ensureTaskWorkspace } from "${WORKSPACE_MODULE}";
 import { existsSync } from "fs";
 const ws = ensureTaskWorkspace("t001", "wf_a");
 console.log(JSON.stringify({ ws, exists: existsSync(ws) }));
@@ -93,7 +97,7 @@ console.log(JSON.stringify({ ws, exists: existsSync(ws) }));
     writeFileSync(join(wfDir, "workspace_template", "src", "index.ts"), "export {}");
 
     const script = `
-import { ensureTaskWorkspace } from "${join(import.meta.dir, "..", "src", "core", "workspace")}";
+import { ensureTaskWorkspace } from "${WORKSPACE_MODULE}";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 const ws = ensureTaskWorkspace("t002", "wf_b", { template: "workspace_template" });
@@ -115,7 +119,7 @@ console.log(JSON.stringify({
 
   it("拒绝 template 路径穿越", async () => {
     const script = `
-import { ensureTaskWorkspace } from "${join(import.meta.dir, "..", "src", "core", "workspace")}";
+import { ensureTaskWorkspace } from "${WORKSPACE_MODULE}";
 import { readdirSync } from "fs";
 const ws = ensureTaskWorkspace("t003", "wf_c", { template: "../../../etc" });
 console.log(JSON.stringify({ empty: readdirSync(ws).length === 0 }));
