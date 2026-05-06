@@ -226,23 +226,33 @@ export const api = {
       };
     }>(`/api/agents/${name}/dry-run`, { method: "POST", body: JSON.stringify(body) }),
 
-  // Repos
-  listRepos: () => request<Repo[]>("/api/repos"),
-  getRepo: (id: string) => request<Repo>(`/api/repos/${id}`),
+  // Repos —— 后端响应包了 envelope（{ repos } / { repo }），统一在此解包返回裸数据
+  listRepos: () =>
+    request<{ repos: Repo[] }>("/api/repos").then((r) => r.repos),
+  getRepo: (id: string) =>
+    request<{ repo: Repo }>(`/api/repos/${id}`).then((r) => r.repo),
   createRepo: (body: {
     alias: string;
     path: string;
     default_branch?: string;
     github_owner?: string | null;
     github_repo?: string | null;
-  }) => request<Repo>("/api/repos", { method: "POST", body: JSON.stringify(body) }),
+  }) =>
+    request<{ repo: Repo }>("/api/repos", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.repo),
   updateRepo: (id: string, body: Partial<{
     alias: string;
     path: string;
     default_branch: string;
     github_owner: string | null;
     github_repo: string | null;
-  }>) => request<Repo>(`/api/repos/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  }>) =>
+    request<{ repo: Repo }>(`/api/repos/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }).then((r) => r.repo),
   deleteRepo: (id: string) =>
     request<{ ok: true }>(`/api/repos/${id}`, { method: "DELETE" }),
   healthcheckRepo: (id: string) =>
