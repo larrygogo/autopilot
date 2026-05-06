@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
-import { join, resolve, sep } from "path";
+import { readdir } from "node:fs/promises";
+import { join, resolve, sep, dirname, parse as parsePath } from "path";
 import { getPhaseIndex } from "../core/artifacts";
 import { VERSION } from "../index";
 import { initDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks, updateTask } from "../core/db";
@@ -490,6 +491,67 @@ export async function handleRequest(req: Request): Promise<Response> {
         if (e instanceof StartTaskError) return error(e.message, e.status);
         return error(e instanceof Error ? e.message : String(e), 500);
       }
+    }
+
+    // ─────────── 文件系统浏览 ───────────
+
+    // GET /api/fs/list?path=<absolute>&show_hidden=1
+    if (method === "GET" && path === "/api/fs/list") {
+      const reqPath = url.searchParams.get("path") ?? null;
+      const showHidden = url.searchParams.get("show_hidden") === "1";
+      // 省略 path 时默认返回 $HOME
+      const targetPath = reqPath
+        ? resolve(reqPath)
+        : (process.env.HOME ?? process.env.USERPROFILE ?? resolve("/"));
+
+      // 校验路径存在且是目录
+      let stat: import("fs").Stats;
+      try {
+        stat = await import("node:fs/promises").then((m) => m.stat(targetPath));
+      } catch {
+        return error("path not found", 404);
+      }
+      if (!stat.isDirectory()) {
+        return error("not a directory", 400);
+      }
+
+      // 计算 parent_path
+      const parentRaw = dirname(targetPath);
+      const parentPath = parentRaw === targetPath ? null : parentRaw;
+
+      // 读目录条目，跳过无权限条目
+      let rawEntries: import("fs").Dirent[];
+      try {
+        rawEntries = await readdir(targetPath, { withFileTypes: true });
+      } catch {
+        rawEntries = [];
+      }
+
+      const entries: { name: string; is_dir: boolean }[] = [];
+      for (const ent of rawEntries) {
+        // 跳过隐藏文件（以 . 开头）
+        if (!showHidden && ent.name.startsWith(".")) continue;
+        let isDir = false;
+        try {
+          isDir = ent.isDirectory() || ent.isSymbolicLink()
+            ? (await import("node:fs/promises").then((m) =>
+                m.stat(join(targetPath, ent.name)).then((s) => s.isDirectory()).catch(() => false)
+              ))
+            : false;
+        } catch {
+          // 权限不足 —— 跳过
+          continue;
+        }
+        entries.push({ name: ent.name, is_dir: isDir });
+      }
+
+      // 按 (is_dir desc, name asc) 排序
+      entries.sort((a, b) => {
+        if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      return json({ current_path: targetPath, parent_path: parentPath, entries });
     }
 
     // ─────────── Repos ───────────

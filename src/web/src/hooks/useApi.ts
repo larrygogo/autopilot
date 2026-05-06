@@ -10,6 +10,7 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/schedules/,
   /^\/api\/defaults/,
   /^\/api\/repos/, // repos CRUD + healthcheck（Phase 1 新加）
+  /^\/api\/fs\//, // 文件系统浏览（Phase 1 新加）
 ];
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -246,6 +247,15 @@ export const api = {
     request<{ ok: true }>(`/api/repos/${id}`, { method: "DELETE" }),
   healthcheckRepo: (id: string) =>
     request<RepoHealthResult>(`/api/repos/${id}/healthcheck`, { method: "POST" }),
+
+  // 文件系统浏览
+  browseFs: (path?: string, showHidden = false) => {
+    const params = new URLSearchParams();
+    if (path) params.set("path", path);
+    if (showHidden) params.set("show_hidden", "1");
+    const qs = params.toString();
+    return request<FsListResult>(`/api/fs/list${qs ? "?" + qs : ""}`);
+  },
 };
 
 export interface ProviderItem {
@@ -363,4 +373,10 @@ export interface Repo {
 export interface RepoHealthResult {
   healthy: boolean;
   issues: string[];
+}
+
+export interface FsListResult {
+  current_path: string;
+  parent_path: string | null;
+  entries: { name: string; is_dir: boolean }[];
 }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { FolderGit2, Plus, Pencil, Trash2, Activity, RefreshCw } from "lucide-react";
+import { FolderGit2, Plus, Pencil, Trash2, Activity, RefreshCw, FolderOpen } from "lucide-react";
 import { api, type Repo, type RepoHealthResult } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FolderPicker } from "@/components/FolderPicker";
 import { cn } from "@/lib/utils";
 
 interface FormState {
@@ -52,6 +53,9 @@ export function Repos() {
 
   // 删除 busy
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // 文件夹选择器
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -336,12 +340,26 @@ export function Repos() {
               <Label htmlFor="repo-path">
                 路径 <span className="text-destructive">*</span>
               </Label>
-              <Input
-                id="repo-path"
-                placeholder="例如：/home/user/projects/my-app"
-                value={form.path}
-                onChange={(e) => setForm((f) => ({ ...f, path: e.target.value }))}
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  id="repo-path"
+                  placeholder="例如：/home/user/projects/my-app"
+                  value={form.path}
+                  onChange={(e) => setForm((f) => ({ ...f, path: e.target.value }))}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setFolderPickerOpen(true)}
+                  title="浏览文件夹"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  浏览…
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-1.5">
@@ -385,6 +403,17 @@ export function Repos() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 文件夹浏览器 */}
+      <FolderPicker
+        open={folderPickerOpen}
+        initialPath={form.path || undefined}
+        onSelect={(path) => {
+          setForm((f) => ({ ...f, path }));
+          setFolderPickerOpen(false);
+        }}
+        onCancel={() => setFolderPickerOpen(false)}
+      />
     </div>
   );
 }
