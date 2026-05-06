@@ -15,6 +15,11 @@ import {
   canTransitionStatus,
   nextRequirementId,
 } from "../src/core/requirements";
+import {
+  appendFeedback,
+  listFeedbacks,
+  latestFeedback,
+} from "../src/core/requirement-feedbacks";
 
 describe("migration 005-requirements", () => {
   it("创建 requirements 表，含全部 spec 字段", () => {
@@ -183,5 +188,40 @@ describe("requirements CRUD + 状态机", () => {
     expect(next).toMatch(/^req-\d{3}$/);
     const num = parseInt(next.replace("req-", ""), 10);
     expect(num).toBeGreaterThanOrEqual(3); // 已有 req-001, req-002
+  });
+
+  it("appendFeedback + listFeedbacks 升序", () => {
+    appendFeedback({ requirement_id: "req-001", source: "manual", body: "first" });
+    appendFeedback({ requirement_id: "req-001", source: "manual", body: "second" });
+    const list = listFeedbacks("req-001");
+    expect(list.length).toBeGreaterThanOrEqual(2);
+    expect(list[0].body).toBe("first");
+    expect(list[list.length - 1].body).toBe("second");
+  });
+
+  it("latestFeedback 取最新", () => {
+    const latest = latestFeedback("req-001");
+    expect(latest?.body).toBe("second");
+  });
+
+  it("不同 requirement 隔离", () => {
+    const list = listFeedbacks("req-no-such");
+    expect(list).toEqual([]);
+  });
+
+  it("github_review_id 可选，默认 null", () => {
+    const f = appendFeedback({ requirement_id: "req-001", source: "manual", body: "no review id" });
+    expect(f.github_review_id).toBeNull();
+  });
+
+  it("github_review_id 可填", () => {
+    const f = appendFeedback({
+      requirement_id: "req-001",
+      source: "github_review",
+      body: "请改 X",
+      github_review_id: "PRR_kwDOMZkX1c5sample",
+    });
+    expect(f.github_review_id).toBe("PRR_kwDOMZkX1c5sample");
+    expect(f.source).toBe("github_review");
   });
 });
