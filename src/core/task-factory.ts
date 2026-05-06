@@ -37,6 +37,8 @@ export interface StartTaskOpts {
   requirement?: string;
   /** 兼容老接口：可选传入 reqId，不传则生成 */
   reqId?: string;
+  /** 额外工作流参数（如 repo_id），转发给 setup_func */
+  [key: string]: unknown;
 }
 
 export class StartTaskError extends Error {
@@ -81,13 +83,20 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
   let extra: Record<string, unknown> = {};
   if (typeof wf.setup_func === "function") {
     try {
-      extra =
-        wf.setup_func({
-          reqId: opts.reqId ?? taskId,
-          title,
-          taskId,
-          requirement,
-        }) ?? {};
+      // 构建 setup_func 的参数：合并标准字段 + 额外工作流参数
+      const setupArgs: Record<string, unknown> = {
+        reqId: opts.reqId ?? taskId,
+        title,
+        taskId,
+        requirement,
+      };
+      // 添加所有额外参数（如 repo_id）
+      for (const [key, value] of Object.entries(opts)) {
+        if (!["workflow", "title", "requirement", "reqId"].includes(key)) {
+          setupArgs[key] = value;
+        }
+      }
+      extra = wf.setup_func(setupArgs) ?? {};
     } catch (e: unknown) {
       throw new StartTaskError(
         `setup_func failed: ${e instanceof Error ? e.message : String(e)}`,
