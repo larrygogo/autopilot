@@ -18,6 +18,7 @@ const ALLOWLIST = new Set([
   "src/core/rebuild-index.ts",   // 索引重建：从 manifest INSERT/UPDATE 回 DB
   "src/core/schedules.ts",       // schedules 表：SQLite 即权威源，无 manifest 同步需求
   "src/core/repos.ts",           // repos 表：SQLite 即权威源，无 manifest 同步需求
+  "src/core/requirements.ts",    // requirements 表：SQLite 即权威源，无 manifest 同步需求
 ]);
 
 const WRITE_SQL_RE = /\b(INSERT\s+(OR\s+\w+\s+)?INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|REPLACE\s+INTO)\b/i;
