@@ -51,6 +51,9 @@ const Repos = lazy(() => import("./pages/Repos").then((m) => ({ default: m.Repos
 const Requirements = lazy(() =>
   import("./pages/Requirements").then((m) => ({ default: m.Requirements })),
 );
+const RequirementDetail = lazy(() =>
+  import("./pages/RequirementDetail").then((m) => ({ default: m.RequirementDetail })),
+);
 
 interface NavItem {
   path: string;
@@ -88,6 +91,7 @@ function titleForPath(pathname: string): string {
   if (pathname.startsWith("/agents")) return "智能体";
   if (pathname.startsWith("/settings")) return "通用设置";
   if (pathname.startsWith("/repos")) return "仓库管理";
+  if (pathname.startsWith("/requirements/")) return "需求详情";
   if (pathname.startsWith("/requirements")) return "需求池";
   return "Autopilot";
 }
@@ -223,6 +227,7 @@ function AppInner() {
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/repos" element={<Repos />} />
                 <Route path="/requirements" element={<Requirements />} />
+                <Route path="/requirements/:id" element={<RequirementDetail />} />
                 <Route path="*" element={<Navigate to="/tasks" replace />} />
               </Routes>
             </Suspense>
