@@ -13,6 +13,10 @@ import { _setDbForTest, initDb } from "../src/core/db";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
 import { up as migrate003 } from "../src/migrations/003-repos";
+import { checkRepoHealth, parseGithubFromRemote } from "../src/core/repo-health";
+import { mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 // 注意：initDb() 不接受路径参数，通过 _setDbForTest 注入内存 DB，
 // 再手动执行各迁移脚本，确保 repos 表存在且与迁移定义一致。
@@ -106,5 +110,96 @@ describe("repos CRUD", () => {
     expect(next).toMatch(/^repo-\d{3}$/);
     const num = parseInt(next.replace("repo-", ""), 10);
     expect(num).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe("checkRepoHealth", () => {
+  it("路径不存在 → healthy=false", async () => {
+    const r = await checkRepoHealth("/no/such/path/abcxyz123456");
+    expect(r.healthy).toBe(false);
+    expect(r.issues.some(i => i.includes("不存在"))).toBe(true);
+  });
+
+  it("路径存在但不是 git 仓库 → healthy=false", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "health-test-"));
+    try {
+      const r = await checkRepoHealth(dir);
+      expect(r.healthy).toBe(false);
+      expect(r.issues.some(i => i.includes("git"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("autopilot 仓库本身健康（或仅 issue 为远端相关）", async () => {
+    const r = await checkRepoHealth(process.cwd());
+    // 在 CI 或无远端环境，可能 origin 不可达；这是 OK 的
+    expect(r.healthy === true || r.issues.every(i => i.includes("远端"))).toBe(true);
+  });
+});
+
+describe("parseGithubFromRemote", () => {
+  it("解析 https URL", () => {
+    expect(parseGithubFromRemote("https://github.com/larrygogo/autopilot.git")).toEqual({
+      owner: "larrygogo",
+      repo: "autopilot",
+    });
+  });
+  it("解析 https URL 不带 .git 后缀", () => {
+    expect(parseGithubFromRemote("https://github.com/larrygogo/autopilot")).toEqual({
+      owner: "larrygogo",
+      repo: "autopilot",
+    });
+  });
+  it("解析 ssh URL", () => {
+    expect(parseGithubFromRemote("git@github.com:larrygogo/autopilot.git")).toEqual({
+      owner: "larrygogo",
+      repo: "autopilot",
+    });
+  });
+  it("非 GitHub 远端返回 null", () => {
+    expect(parseGithubFromRemote("https://gitlab.com/foo/bar.git")).toBeNull();
+  });
+  it("空字符串返回 null", () => {
+    expect(parseGithubFromRemote("")).toBeNull();
+  });
+
+  it("解析仓库名带点（autopilot.js）", () => {
+    expect(parseGithubFromRemote("https://github.com/larrygogo/autopilot.js.git")).toEqual({
+      owner: "larrygogo",
+      repo: "autopilot.js",
+    });
+    expect(parseGithubFromRemote("https://github.com/larrygogo/autopilot.js")).toEqual({
+      owner: "larrygogo",
+      repo: "autopilot.js",
+    });
+  });
+
+  it("解析 https 带 trailing slash", () => {
+    expect(parseGithubFromRemote("https://github.com/larrygogo/autopilot/")).toEqual({
+      owner: "larrygogo",
+      repo: "autopilot",
+    });
+  });
+
+  it("解析 ssh:// 协议形式", () => {
+    expect(parseGithubFromRemote("ssh://git@github.com/larrygogo/autopilot.git")).toEqual({
+      owner: "larrygogo",
+      repo: "autopilot",
+    });
+  });
+
+  it("解析带凭证的 https URL", () => {
+    expect(parseGithubFromRemote("https://x-access-token:ghp_xxx@github.com/larrygogo/autopilot.git")).toEqual({
+      owner: "larrygogo",
+      repo: "autopilot",
+    });
+  });
+
+  it("大小写不敏感", () => {
+    expect(parseGithubFromRemote("HTTPS://GitHub.com/larrygogo/autopilot.git")).toEqual({
+      owner: "larrygogo",
+      repo: "autopilot",
+    });
   });
 });
