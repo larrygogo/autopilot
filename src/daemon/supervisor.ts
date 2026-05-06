@@ -4,6 +4,8 @@ import {
   writeSupervisorPid,
   removeSupervisorPid,
   readPid,
+  removePid,
+  removeListenInfo,
   isProcessAlive,
   isSupervisorRunning,
   isDaemonRunning,
@@ -68,9 +70,12 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
 
   while (!shuttingDown) {
     const startedAt = Date.now();
+    // stdio 必须用 ignore：当 supervisor 自身是后台 detach 启动时，inherit 的
+    // stdout/stderr 句柄无效，会让 daemon 子进程一启动就崩溃。daemon 自己用 logger
+    // 写文件日志，不依赖标准输出。
     currentChild = Bun.spawn(["bun", ...baseArgs], {
-      stdout: "inherit",
-      stderr: "inherit",
+      stdout: "ignore",
+      stderr: "ignore",
     });
     console.log(`daemon 子进程启动 (pid=${currentChild.pid})`);
     const exitCode = await currentChild.exited;
@@ -120,6 +125,10 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
       if (!isProcessAlive(daemonPid)) break;
     }
   }
+  // Windows 下 SIGTERM 实际是 TerminateProcess，daemon 来不及运行自己的 SIGTERM handler
+  // 来清理 PID 文件，因此 supervisor 退出前兜底清理一次。
+  removePid();
+  removeListenInfo();
   removeSupervisorPid();
   console.log("supervisor 已停止。");
 }
