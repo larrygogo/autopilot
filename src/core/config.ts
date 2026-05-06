@@ -92,6 +92,51 @@ export function loadDaemonConfig(): DaemonListenConfig {
   } catch { return {}; }
 }
 
+// ──────────────────────────────────────────────
+// GitHub 集成配置
+// ──────────────────────────────────────────────
+
+export interface GithubConfig {
+  /** gh 可执行路径 */
+  cli: string;
+  /** PR 轮询间隔（秒），最小 30s */
+  poll_interval_seconds: number;
+}
+
+/**
+ * 读取 config.yaml 的 github 段。缺字段或类型不对走默认值。
+ *
+ * 默认值：
+ *   - cli: "gh"
+ *   - poll_interval_seconds: 300（5 min）
+ *
+ * 最小 poll_interval = 30s，保护 GitHub API rate limit。
+ */
+export function loadGithubConfig(): GithubConfig {
+  try {
+    const raw = loadConfig();
+    const section = raw["github"];
+    if (!section || typeof section !== "object" || Array.isArray(section)) {
+      return { cli: "gh", poll_interval_seconds: 300 };
+    }
+    const s = section as Record<string, unknown>;
+
+    const cliRaw = s["cli"];
+    const cli = typeof cliRaw === "string" && cliRaw.trim()
+      ? cliRaw.trim()
+      : "gh";
+
+    const pollRaw = s["poll_interval_seconds"];
+    const poll = typeof pollRaw === "number" && Number.isFinite(pollRaw) && pollRaw >= 30
+      ? pollRaw
+      : 300;
+
+    return { cli, poll_interval_seconds: poll };
+  } catch {
+    return { cli: "gh", poll_interval_seconds: 300 };
+  }
+}
+
 export interface ProviderConfig {
   /** provider 默认模型。agent 未显式指定 model 时使用此值 */
   default_model?: string;
