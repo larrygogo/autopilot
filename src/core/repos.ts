@@ -11,6 +11,8 @@ export interface Repo {
   default_branch: string;
   github_owner: string | null;
   github_repo: string | null;
+  parent_repo_id: string | null; // 非空表示此 repo 是子模块
+  submodule_path: string | null; // 父 repo 内相对路径
   created_at: number; // epoch ms（注意：跟 tasks/schedules 用 TEXT 不同）
   updated_at: number;
 }
@@ -22,6 +24,8 @@ export interface CreateRepoOpts {
   default_branch?: string;
   github_owner?: string | null;
   github_repo?: string | null;
+  parent_repo_id?: string | null;
+  submodule_path?: string | null;
 }
 
 export interface UpdateRepoOpts {
@@ -30,6 +34,8 @@ export interface UpdateRepoOpts {
   default_branch?: string;
   github_owner?: string | null;
   github_repo?: string | null;
+  parent_repo_id?: string | null;
+  submodule_path?: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -48,8 +54,8 @@ export function createRepo(opts: CreateRepoOpts): Repo {
   const db = getDb();
   const ts = nowMs();
   db.run(
-    "INSERT INTO repos (id, alias, path, default_branch, github_owner, github_repo, created_at, updated_at) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO repos (id, alias, path, default_branch, github_owner, github_repo, parent_repo_id, submodule_path, created_at, updated_at) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       opts.id,
       opts.alias,
@@ -57,6 +63,8 @@ export function createRepo(opts: CreateRepoOpts): Repo {
       opts.default_branch ?? "main",
       opts.github_owner ?? null,
       opts.github_repo ?? null,
+      opts.parent_repo_id ?? null,
+      opts.submodule_path ?? null,
       ts,
       ts,
     ]
@@ -80,11 +88,16 @@ export function getRepoByAlias(alias: string): Repo | null {
   return row ?? null;
 }
 
-export function listRepos(): Repo[] {
+/**
+ * 列出 repos。默认仅顶级父 repo（parent_repo_id IS NULL）。
+ * 传 includeSubmodules=true 列出全部。
+ */
+export function listRepos(opts: { includeSubmodules?: boolean } = {}): Repo[] {
   const db = getDb();
-  return db
-    .query<Repo, []>("SELECT * FROM repos ORDER BY created_at ASC")
-    .all();
+  const sql = opts.includeSubmodules
+    ? "SELECT * FROM repos ORDER BY created_at ASC"
+    : "SELECT * FROM repos WHERE parent_repo_id IS NULL ORDER BY created_at ASC";
+  return db.query<Repo, []>(sql).all();
 }
 
 export function updateRepo(id: string, opts: UpdateRepoOpts): Repo | null {
@@ -112,6 +125,14 @@ export function updateRepo(id: string, opts: UpdateRepoOpts): Repo | null {
     fields.push("github_repo = ?");
     vals.push(opts.github_repo);
   }
+  if (opts.parent_repo_id !== undefined) {
+    fields.push("parent_repo_id = ?");
+    vals.push(opts.parent_repo_id);
+  }
+  if (opts.submodule_path !== undefined) {
+    fields.push("submodule_path = ?");
+    vals.push(opts.submodule_path);
+  }
 
   if (fields.length === 0) return getRepoById(id);
 
@@ -125,6 +146,9 @@ export function updateRepo(id: string, opts: UpdateRepoOpts): Repo | null {
 
 export function deleteRepo(id: string): void {
   const db = getDb();
+  // 先删所有子模块行（如果此 repo 是父）
+  db.run("DELETE FROM repos WHERE parent_repo_id = ?", [id]);
+  // 再删自身
   db.run("DELETE FROM repos WHERE id = ?", [id]);
 }
 
