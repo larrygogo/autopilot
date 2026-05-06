@@ -33,6 +33,7 @@ import {
   Menu,
   Circle,
   Clock,
+  FolderGit2,
 } from "lucide-react";
 
 const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
@@ -45,6 +46,7 @@ const Providers = lazy(() => import("./pages/Providers").then((m) => ({ default:
 const Agents = lazy(() => import("./pages/Agents").then((m) => ({ default: m.Agents })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const Schedules = lazy(() => import("./pages/Schedules").then((m) => ({ default: m.Schedules })));
+const Repos = lazy(() => import("./pages/Repos").then((m) => ({ default: m.Repos })));
 
 interface NavItem {
   path: string;
@@ -59,6 +61,7 @@ const MAIN_NAV: NavItem[] = [
   { path: "/tasks", label: "任务", icon: ListTodo },
   { path: "/schedules", label: "定时", icon: Clock, end: true },
   { path: "/workflows", label: "工作流", icon: WorkflowIcon, end: true },
+  { path: "/repos", label: "仓库", icon: FolderGit2, end: true },
 ];
 
 const SETTINGS_NAV: NavItem[] = [
@@ -79,6 +82,7 @@ function titleForPath(pathname: string): string {
   if (pathname.startsWith("/providers")) return "提供商";
   if (pathname.startsWith("/agents")) return "智能体";
   if (pathname.startsWith("/settings")) return "通用设置";
+  if (pathname.startsWith("/repos")) return "仓库管理";
   return "Autopilot";
 }
 
@@ -211,6 +215,7 @@ function AppInner() {
                 <Route path="/providers" element={<Providers />} />
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/repos" element={<Repos />} />
                 <Route path="*" element={<Navigate to="/tasks" replace />} />
               </Routes>
             </Suspense>
