@@ -4,6 +4,26 @@ import type { SessionManifest, ChatMessage } from "../core/sessions";
 import type { Schedule, ScheduleType } from "../core/schedules";
 
 // ──────────────────────────────────────────────
+// 类型定义
+// ──────────────────────────────────────────────
+
+export interface Repo {
+  id: string;
+  alias: string;
+  path: string;
+  default_branch: string;
+  github_owner: string | null;
+  github_repo: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface RepoHealthResult {
+  healthy: boolean;
+  issues: string[];
+}
+
+// ──────────────────────────────────────────────
 // HTTP REST 客户端
 // ──────────────────────────────────────────────
 
@@ -144,6 +164,50 @@ export class HttpClient {
 
   async runScheduleNow(id: string): Promise<{ ok: true; taskId: string }> {
     return this.request(`/api/schedules/${id}/run-now`, { method: "POST" });
+  }
+
+  // ── Repos ──
+
+  async listRepos(): Promise<Repo[]> {
+    return this.request("/api/repos");
+  }
+
+  async getRepo(id: string): Promise<Repo> {
+    return this.request(`/api/repos/${id}`);
+  }
+
+  async createRepo(body: {
+    alias: string;
+    path: string;
+    default_branch?: string;
+    github_owner?: string | null;
+    github_repo?: string | null;
+  }): Promise<Repo> {
+    return this.request("/api/repos", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updateRepo(id: string, body: Partial<{
+    alias: string;
+    path: string;
+    default_branch: string;
+    github_owner: string | null;
+    github_repo: string | null;
+  }>): Promise<Repo> {
+    return this.request(`/api/repos/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteRepo(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/repos/${id}`, { method: "DELETE" });
+  }
+
+  async healthcheckRepo(id: string): Promise<RepoHealthResult> {
+    return this.request(`/api/repos/${id}/healthcheck`, { method: "POST" });
   }
 
   // ── Chat ──
