@@ -2,11 +2,11 @@
 
 需求队列是 autopilot 替代旧 dev workflow 的新工作模式：你跟 chat agent 提需求 → 多轮澄清 → 用户确认入队 → autopilot 自动跑 req_dev workflow（设计 → 评审 → 开发 → 代码审查 → 提 PR）。
 
-> **当前状态：Phase 3 落地**
+> **当前状态：4 phase 全闭环落地 🎉**
 > - ✅ P1：仓库管理 + req_dev workflow（前 5 阶段）
 > - ✅ P2：需求池 + chat 集成
 > - ✅ P3：调度器（同仓库严格串行）+ await_review/fix_revision + 手动反馈触发回流
-> - ⏳ P4：gh CLI 轮询监听器（PR review 自动感知 + PR merge 自动检测）
+> - ✅ P4：gh CLI 轮询监听器（PR review change request 自动注入 + PR merge 自动检测）
 
 ## 流程概述
 
@@ -111,18 +111,25 @@ PR 反馈到达时：
 4. 状态机跳到 `fix_revision` 阶段，`run_fix_revision` 阶段函数读最新反馈 + 在原 PR 分支跑修改 + push
 5. 跑完 emit `fix_done` jump 回 `await_review`，等待下一轮反馈或 merge
 
-## P3 当前限制
+## 当前限制 / 已知边界
 
 - ✅ 同仓库严格串行（调度器保证）
-- ✅ PR 反馈手动注入触发 fix_revision 修复 + push 同分支
-- ⚠️ **没有 GitHub 自动监听**：PR review change request 不会自动注入；需要手动调 `inject_feedback`（chat 工具或 REST）
-- ⚠️ **PR merge 不自动检测**：需要手动 transition req → done
+- ✅ PR review change request 自动注入反馈触发 fix_revision
+- ✅ PR merge 自动 transition req → done
+- ⚠️ **gh CLI 必须本地已 `gh auth login`**：未登录时 pr-poller log warn 跳过，不影响其他模块
+- ⚠️ **轮询间隔默认 5 min**：可在 `config.yaml.github.poll_interval_seconds` 调；最小 30s 保护 GitHub API rate limit
+- ⚠️ **GitHub Issues / Jira 等外部需求源**：非本工作模式范围，留给后续扩展（详见 spec §15）
 
-完整闭环（GitHub review/merge 自动监听）由 P4 落地。
+## 后续扩展（不在 4 phase 范围）
 
-## 后续 Phase
+完整 4 phase 已落地。后续可能的扩展（详见 spec §15）：
 
-- **P4**：gh CLI 轮询监听器（PR review 自动感知 + PR merge 自动检测）
+- 外部需求源接入器（GitHub Issues / 飞书任务 / Jira）
+- 需求模板 / 类型（feat / fix / chore）
+- 队列优先级 + 拖拽重排
+- 跨需求依赖（"req-002 等 req-001 完成"）
+- PR webhook 替代轮询（实时性更好但需公网 daemon）
+- 多人协作（需求归属 / review 分配）
 
 ## 相关文档
 

@@ -10,6 +10,7 @@ import {
   saveAgent,
   deleteAgent,
   PROVIDER_NAMES,
+  loadGithubConfig,
 } from "../src/core/config";
 
 // 这些测试通过 DEV_WORKFLOW_CONFIG 指向临时文件，避免污染 AUTOPILOT_HOME
@@ -112,5 +113,27 @@ describe("agents 段读写", () => {
 
   it("deleteAgent 对不存在的返回 false", () => {
     expect(deleteAgent("nonexistent")).toBe(false);
+  });
+});
+
+describe("github 段读取", () => {
+  it("空配置返回默认值", () => {
+    const cfg = loadGithubConfig();
+    expect(cfg.cli).toBe("gh");
+    expect(cfg.poll_interval_seconds).toBe(300);
+  });
+
+  it("自定义 cli 和 poll_interval_seconds", () => {
+    writeFileSync(tmpFile, "github:\n  cli: /usr/local/bin/gh\n  poll_interval_seconds: 60\n", "utf-8");
+    const cfg = loadGithubConfig();
+    expect(cfg.cli).toBe("/usr/local/bin/gh");
+    expect(cfg.poll_interval_seconds).toBe(60);
+  });
+
+  it("poll_interval_seconds < 30 走默认值", () => {
+    writeFileSync(tmpFile, "github:\n  cli: gh\n  poll_interval_seconds: 20\n", "utf-8");
+    const cfg = loadGithubConfig();
+    expect(cfg.cli).toBe("gh");
+    expect(cfg.poll_interval_seconds).toBe(300);
   });
 });
