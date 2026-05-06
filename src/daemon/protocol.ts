@@ -28,7 +28,8 @@ export type AutopilotEvent =
   | { type: "schedule:created"; payload: { schedule: Schedule } }
   | { type: "schedule:updated"; payload: { schedule: Schedule } }
   | { type: "schedule:deleted"; payload: { scheduleId: string } }
-  | { type: "schedule:fired"; payload: { schedule: Schedule; taskId: string } };
+  | { type: "schedule:fired"; payload: { schedule: Schedule; taskId: string } }
+  | { type: "requirement:status-changed"; payload: { id: string; from: string; to: string } };
 
 // ──────────────────────────────────────────────
 // WebSocket Protocol — Client ↔ Server 消息
@@ -129,6 +130,10 @@ export function getChannelsForEvent(event: AutopilotEvent): string[] {
     }
     case "schedule": {
       channels.push("schedule:*");
+      break;
+    }
+    case "requirement": {
+      channels.push("requirement:*");
       break;
     }
   }

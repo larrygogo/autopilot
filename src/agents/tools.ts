@@ -25,6 +25,17 @@ import { snapshotWorkflow } from "../core/manifest";
 import { executePhase } from "../core/runner";
 import { randomUUID } from "crypto";
 import { log } from "../core/logger";
+import { listRepos, getRepoByAlias, getRepoById } from "../core/repos";
+import { startTaskFromTemplate } from "../core/task-factory";
+import {
+  listRequirements,
+  getRequirementById,
+  createRequirement,
+  updateRequirement,
+  setRequirementStatus,
+  nextRequirementId,
+} from "../core/requirements";
+import { appendFeedback } from "../core/requirement-feedbacks";
 
 type ToolContent = { content: Array<{ type: "text"; text: string }> };
 
@@ -310,6 +321,198 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
         }
       }
     ),
+
+    // ── 需求队列：仓库 ──
+    tool(
+      "list_repos",
+      "列出 autopilot 已注册的仓库（alias / 路径 / 默认分支）。用户提需求前需要选哪个仓库。",
+      {},
+      async () => {
+        return ok(
+          listRepos().map((r) => ({
+            alias: r.alias,
+            id: r.id,
+            path: r.path,
+            default_branch: r.default_branch,
+          })),
+        );
+      },
+    ),
+
+    // ── 需求队列：草稿 + 澄清 ──
+    tool(
+      "create_requirement_draft",
+      "创建一个新需求草稿（关联到某仓库）。状态从 drafting 开始，后续多轮澄清调 update_requirement_spec 写入 spec_md。仓库需先在 /repos 注册并通过健康检查。",
+      {
+        repo_alias: z.string().describe("仓库 alias（来自 list_repos）"),
+        title: z.string().describe("需求标题（简短）"),
+        initial_text: z.string().optional().describe("可选：用户初始描述，写入 spec_md"),
+      },
+      async (args) => {
+        const repo = getRepoByAlias(args.repo_alias);
+        if (!repo) return err(`repo_alias 不存在：${args.repo_alias}（先在 /repos 注册）`);
+        const id = nextRequirementId();
+        try {
+          const r = createRequirement({
+            id,
+            repo_id: repo.id,
+            title: args.title.trim(),
+            spec_md: args.initial_text ?? "",
+          });
+          return ok({ id: r.id, status: r.status, repo_alias: args.repo_alias });
+        } catch (e: unknown) {
+          return err((e as Error).message);
+        }
+      },
+    ),
+
+    tool(
+      "update_requirement_spec",
+      "更新需求规约 spec_md（覆盖写）。如果当前 status=drafting，自动转 clarifying（表示已经有初版规约）。澄清完成、用户明确确认 spec 完整后调 mark_requirement_ready。",
+      {
+        req_id: z.string().describe("需求 ID（来自 create_requirement_draft 或 list_requirements）"),
+        spec_md: z.string().describe("完整 markdown 规约"),
+      },
+      async (args) => {
+        const r = getRequirementById(args.req_id);
+        if (!r) return err(`需求不存在：${args.req_id}`);
+        updateRequirement(args.req_id, { spec_md: args.spec_md });
+        if (r.status === "drafting") {
+          try {
+            setRequirementStatus(args.req_id, "clarifying");
+          } catch (e: unknown) {
+            // 状态转换失败不阻塞 spec 写入
+          }
+        }
+        const after = getRequirementById(args.req_id);
+        return ok({ id: args.req_id, status: after?.status });
+      },
+    ),
+
+    tool(
+      "mark_requirement_ready",
+      "把需求标记为「已澄清，待入队」（status=ready）。仅在用户明确确认 spec 完整时调用。可从 drafting / clarifying 转入。",
+      {
+        req_id: z.string(),
+      },
+      async (args) => {
+        try {
+          const r = setRequirementStatus(args.req_id, "ready");
+          return ok({ id: r.id, status: r.status });
+        } catch (e: unknown) {
+          return err((e as Error).message);
+        }
+      },
+    ),
+
+    // ── 需求队列：入队执行 ──
+    tool(
+      "enqueue_requirement",
+      "把已 ready 的需求推入执行队列并立即创建 req_dev task 开始执行（P2 临时直接创建；P3 调度器接管后改为仅入队）。返回新 task_id，可在 /tasks 看进度。",
+      {
+        req_id: z.string(),
+      },
+      async (args) => {
+        const r = getRequirementById(args.req_id);
+        if (!r) return err(`需求不存在：${args.req_id}`);
+        const repo = getRepoById(r.repo_id);
+        if (!repo) return err(`requirement 关联的 repo 不存在：${r.repo_id}`);
+
+        try {
+          setRequirementStatus(args.req_id, "queued");
+        } catch (e: unknown) {
+          return err((e as Error).message);
+        }
+
+        let task;
+        try {
+          task = await startTaskFromTemplate({
+            workflow: "req_dev",
+            title: r.title,
+            requirement: r.spec_md,
+            repo_id: repo.id,
+          });
+        } catch (e: unknown) {
+          try { setRequirementStatus(args.req_id, "ready"); } catch { /* ignore */ }
+          return err(`创建 task 失败：${(e as Error).message}`);
+        }
+
+        updateRequirement(args.req_id, { task_id: task.id });
+        try { setRequirementStatus(args.req_id, "running"); } catch { /* ignore */ }
+
+        return ok({
+          id: args.req_id,
+          status: "running",
+          task_id: task.id,
+        });
+      },
+    ),
+
+    // ── 需求队列：查询 ──
+    tool(
+      "list_requirements",
+      "列出需求。可按 repo_alias 或 status 过滤。状态枚举：drafting / clarifying / ready / queued / running / awaiting_review / fix_revision / done / cancelled / failed。",
+      {
+        repo_alias: z.string().optional(),
+        status: z.string().optional(),
+      },
+      async (args) => {
+        let repoId: string | undefined;
+        if (args.repo_alias) {
+          const repo = getRepoByAlias(args.repo_alias);
+          if (!repo) return err(`repo_alias 不存在：${args.repo_alias}`);
+          repoId = repo.id;
+        }
+        const list = listRequirements({ repo_id: repoId, status: args.status });
+        return ok(
+          list.map((r) => ({
+            id: r.id,
+            title: r.title,
+            status: r.status,
+            repo_id: r.repo_id,
+            pr_url: r.pr_url,
+            task_id: r.task_id,
+          })),
+        );
+      },
+    ),
+
+    // ── 需求队列：反馈 ──
+    tool(
+      "inject_feedback",
+      "为正在 awaiting_review 的需求注入反馈（如 PR review 意见）。P3 起会自动触发 fix_revision 阶段；P2 仅追加记录到 requirement_feedbacks 表，状态不变。",
+      {
+        req_id: z.string(),
+        body: z.string().describe("反馈正文（用户希望对 PR 做哪些修改）"),
+      },
+      async (args) => {
+        const r = getRequirementById(args.req_id);
+        if (!r) return err(`需求不存在：${args.req_id}`);
+        appendFeedback({
+          requirement_id: args.req_id,
+          source: "manual",
+          body: args.body,
+        });
+        return ok({ id: args.req_id, feedback_added: true });
+      },
+    ),
+
+    // ── 需求队列：取消 ──
+    tool(
+      "cancel_requirement",
+      "取消需求（任意非终态 → cancelled）。已经 done / cancelled / failed 的需求无法再次取消。",
+      {
+        req_id: z.string(),
+      },
+      async (args) => {
+        try {
+          const r = setRequirementStatus(args.req_id, "cancelled");
+          return ok({ id: r.id, status: r.status });
+        } catch (e: unknown) {
+          return err((e as Error).message);
+        }
+      },
+    ),
   ];
 }
 
@@ -324,6 +527,14 @@ export const TOOL_NAMES = [
   "get_daemon_status",
   "start_task",
   "cancel_task",
+  "list_repos",
+  "create_requirement_draft",
+  "update_requirement_spec",
+  "mark_requirement_ready",
+  "enqueue_requirement",
+  "list_requirements",
+  "inject_feedback",
+  "cancel_requirement",
 ] as const;
 
 // ──────────────────────────────────────────────
