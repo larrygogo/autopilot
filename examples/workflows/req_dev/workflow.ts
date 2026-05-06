@@ -390,3 +390,11 @@ export async function run_submit_pr(taskId: string): Promise<void> {
     note: `PR 已提交：${prUrl}`,
   });
 }
+
+export async function run_await_review(_taskId: string): Promise<void> {
+  throw new Error("run_await_review 未实现，见 P3 Task 2");
+}
+
+export async function run_fix_revision(_taskId: string): Promise<void> {
+  throw new Error("run_fix_revision 未实现，见 P3 Task 3");
+}
