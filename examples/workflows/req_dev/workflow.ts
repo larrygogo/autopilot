@@ -21,6 +21,8 @@ import { getAgent } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 import { getTaskWorkspace } from "@autopilot/core/workspace";
 import { getRepoById } from "@autopilot/core/repos";
+import { setRequirementStatus, getRequirementById } from "@autopilot/core/requirements";
+import { forceTransition } from "@autopilot/core/state-machine";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
 const REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT";
@@ -391,8 +393,56 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   });
 }
 
-export async function run_await_review(_taskId: string): Promise<void> {
-  throw new Error("run_await_review 未实现，见 P3 Task 2");
+export async function run_await_review(taskId: string): Promise<void> {
+  const task = getTask(taskId);
+  if (!task) throw new Error(`任务不存在：${taskId}`);
+
+  const reqId = task["requirement_id"] as string | undefined;
+  if (!reqId) {
+    throw new Error(
+      "await_review 阶段：task 缺少 requirement_id 字段。" +
+        "确保 task 由 requirement-scheduler 创建（会透传 requirement_id），" +
+        "或在 setup_req_dev_task 中传入此字段。"
+    );
+  }
+
+  // 立即同步 requirement.status = awaiting_review，调度器据此释放槽位
+  // 若当前已经是 awaiting_review（从 fix_revision jump 回来）则跳过避免重复写入
+  const initial = getRequirementById(reqId);
+  if (!initial) throw new Error(`requirement ${reqId} 不存在`);
+  if (initial.status !== "awaiting_review") {
+    setRequirementStatus(reqId, "awaiting_review");
+  }
+
+  // 挂起循环：每 15s 轮询 requirement.status
+  // daemon 重启后从头执行此函数，requirement.status 由 DB 持久化保留，逻辑幂等
+  while (true) {
+    const cur = getRequirementById(reqId);
+    if (!cur) {
+      throw new Error(`requirement ${reqId} 已不存在`);
+    }
+
+    if (cur.status === "fix_revision") {
+      // 触发跳转到 fix_revision 阶段（jump_trigger=revision_request）
+      const transitions = getTransitions(task.workflow);
+      transition(taskId, "revision_request", { transitions, note: `requirement ${reqId} 请求修订` });
+      return;
+    }
+
+    if (cur.status === "done") {
+      // PR 已合并，任务进入完成终态
+      forceTransition(taskId, "done", `requirement ${reqId} → done`);
+      return;
+    }
+
+    if (cur.status === "cancelled" || cur.status === "failed") {
+      forceTransition(taskId, "cancelled", `requirement ${reqId} → ${cur.status}`);
+      return;
+    }
+
+    // awaiting_review 或其他中间状态，继续等待
+    await Bun.sleep(15_000);
+  }
 }
 
 export async function run_fix_revision(_taskId: string): Promise<void> {
