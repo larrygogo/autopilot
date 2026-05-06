@@ -51,6 +51,7 @@ import {
   updateRequirement,
   setRequirementStatus,
   nextRequirementId,
+  deleteRequirement,
 } from "../core/requirements";
 import { appendFeedback, listFeedbacks } from "../core/requirement-feedbacks";
 import {
@@ -817,10 +818,7 @@ export async function handleRequest(req: Request): Promise<Response> {
         if (!["cancelled", "done", "failed"].includes(r.status)) {
           return error(`仅终态需求可删除，当前 status=${r.status}`);
         }
-        // 级联删除：先删反馈，再删需求
-        const db = getDb();
-        db.run("DELETE FROM requirement_feedbacks WHERE requirement_id = ?", [reqDetailMatch]);
-        db.run("DELETE FROM requirements WHERE id = ?", [reqDetailMatch]);
+        deleteRequirement(reqDetailMatch);
         return json({ ok: true });
       }
     }
