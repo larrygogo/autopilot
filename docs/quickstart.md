@@ -232,6 +232,25 @@ autopilot show HELLO-001
 
 ---
 
+## 5 分钟跑通需求队列（req_dev workflow）
+
+需求队列是 autopilot 替代旧 dev workflow 的新工作模式。完整功能在 P2-P4 落地，P1 已跑通核心闭环：
+
+1. 启动 daemon：`autopilot daemon start`
+2. 打开 Web UI：`autopilot dashboard`
+3. 在 `/repos` 注册一个仓库（alias / path / default_branch）
+4. 点「健康检查」→ ✓ OK（如果 origin 是 github.com，自动回填 owner/repo）
+5. 启动 req_dev 任务：
+   ```bash
+   autopilot task start --workflow req_dev --repo <你的 alias> \
+     "需求标题" --requirement "详细需求描述"
+   ```
+6. 在 Web UI `/tasks` 看任务进度
+
+完整指南见 [req_dev workflow 使用指南](./req-dev-workflow.md)。
+
+---
+
 ## 下一步
 
 | 想了解... | 阅读 |

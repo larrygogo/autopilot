@@ -9,6 +9,8 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/agents/,
   /^\/api\/schedules/,
   /^\/api\/defaults/,
+  /^\/api\/repos/, // repos CRUD + healthcheck（Phase 1 新加）
+  /^\/api\/fs\//, // 文件系统浏览（Phase 1 新加）
 ];
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -223,6 +225,47 @@ export const api = {
         usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
       };
     }>(`/api/agents/${name}/dry-run`, { method: "POST", body: JSON.stringify(body) }),
+
+  // Repos —— 后端响应包了 envelope（{ repos } / { repo }），统一在此解包返回裸数据
+  listRepos: () =>
+    request<{ repos: Repo[] }>("/api/repos").then((r) => r.repos),
+  getRepo: (id: string) =>
+    request<{ repo: Repo }>(`/api/repos/${id}`).then((r) => r.repo),
+  createRepo: (body: {
+    alias: string;
+    path: string;
+    default_branch?: string;
+    github_owner?: string | null;
+    github_repo?: string | null;
+  }) =>
+    request<{ repo: Repo }>("/api/repos", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.repo),
+  updateRepo: (id: string, body: Partial<{
+    alias: string;
+    path: string;
+    default_branch: string;
+    github_owner: string | null;
+    github_repo: string | null;
+  }>) =>
+    request<{ repo: Repo }>(`/api/repos/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }).then((r) => r.repo),
+  deleteRepo: (id: string) =>
+    request<{ ok: true }>(`/api/repos/${id}`, { method: "DELETE" }),
+  healthcheckRepo: (id: string) =>
+    request<RepoHealthResult>(`/api/repos/${id}/healthcheck`, { method: "POST" }),
+
+  // 文件系统浏览
+  browseFs: (path?: string, showHidden = false) => {
+    const params = new URLSearchParams();
+    if (path) params.set("path", path);
+    if (showHidden) params.set("show_hidden", "1");
+    const qs = params.toString();
+    return request<FsListResult>(`/api/fs/list${qs ? "?" + qs : ""}`);
+  },
 };
 
 export interface ProviderItem {
@@ -324,4 +367,26 @@ export interface ChatSessionManifest {
   created_at: string;
   updated_at: string;
   message_count: number;
+}
+
+export interface Repo {
+  id: string;
+  alias: string;
+  path: string;
+  default_branch: string;
+  github_owner: string | null;
+  github_repo: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface RepoHealthResult {
+  healthy: boolean;
+  issues: string[];
+}
+
+export interface FsListResult {
+  current_path: string;
+  parent_path: string | null;
+  entries: { name: string; is_dir: boolean }[];
 }

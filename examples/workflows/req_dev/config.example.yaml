@@ -1,0 +1,2 @@
+# req_dev 没有专属 config —— 仓库信息从 repos 表读取，agent 配置从全局 config.yaml.agents 派生
+# 此文件留作占位 / 文档说明

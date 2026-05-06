@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
-import { join, resolve, sep } from "path";
+import { readdir } from "node:fs/promises";
+import { join, resolve, sep, dirname, parse as parsePath } from "path";
 import { getPhaseIndex } from "../core/artifacts";
 import { VERSION } from "../index";
 import { initDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks, updateTask } from "../core/db";
@@ -33,6 +34,16 @@ import {
   isValidTimezone,
   type ScheduleType,
 } from "../core/schedules";
+import {
+  listRepos,
+  getRepoById,
+  getRepoByAlias,
+  createRepo,
+  updateRepo,
+  deleteRepo,
+  nextRepoId,
+} from "../core/repos";
+import { checkRepoHealth } from "../core/repo-health";
 import {
   discover,
   reload,
@@ -359,7 +370,17 @@ export async function handleRequest(req: Request): Promise<Response> {
         requirement?: string;
         workflow?: string;
         reqId?: string;
+        /** CLI 传入仓库别名，daemon 解析为 repo_id 透传给 setup_func */
+        repo_alias?: string;
+        /** 额外工作流参数（如 repo_id），透传给 setup_func */
+        [key: string]: unknown;
       };
+      // 如果 caller 传了 repo_alias，解析为 repo_id（不覆盖已有 repo_id）
+      if (body.repo_alias && !body.repo_id) {
+        const repo = getRepoByAlias(body.repo_alias as string);
+        if (!repo) return error(`找不到别名为 "${body.repo_alias}" 的仓库`, 404);
+        body.repo_id = repo.id;
+      }
       try {
         const task = await startTaskFromTemplate(body);
         return json(task, 201);
@@ -470,6 +491,192 @@ export async function handleRequest(req: Request): Promise<Response> {
         if (e instanceof StartTaskError) return error(e.message, e.status);
         return error(e instanceof Error ? e.message : String(e), 500);
       }
+    }
+
+    // ─────────── 文件系统浏览 ───────────
+
+    // GET /api/fs/list?path=<absolute>&show_hidden=1
+    if (method === "GET" && path === "/api/fs/list") {
+      const reqPath = url.searchParams.get("path") ?? null;
+      const showHidden = url.searchParams.get("show_hidden") === "1";
+      // 省略 path 时默认返回 $HOME
+      const targetPath = reqPath
+        ? resolve(reqPath)
+        : (process.env.HOME ?? process.env.USERPROFILE ?? resolve("/"));
+
+      // 校验路径存在且是目录
+      let stat: import("fs").Stats;
+      try {
+        stat = await import("node:fs/promises").then((m) => m.stat(targetPath));
+      } catch {
+        return error("path not found", 404);
+      }
+      if (!stat.isDirectory()) {
+        return error("not a directory", 400);
+      }
+
+      // 计算 parent_path
+      const parentRaw = dirname(targetPath);
+      const parentPath = parentRaw === targetPath ? null : parentRaw;
+
+      // 读目录条目，跳过无权限条目
+      let rawEntries: import("fs").Dirent[];
+      try {
+        rawEntries = await readdir(targetPath, { withFileTypes: true });
+      } catch {
+        rawEntries = [];
+      }
+
+      const entries: { name: string; is_dir: boolean }[] = [];
+      for (const ent of rawEntries) {
+        // 跳过隐藏文件（以 . 开头）
+        if (!showHidden && ent.name.startsWith(".")) continue;
+        let isDir = false;
+        try {
+          isDir = ent.isDirectory() || ent.isSymbolicLink()
+            ? (await import("node:fs/promises").then((m) =>
+                m.stat(join(targetPath, ent.name)).then((s) => s.isDirectory()).catch(() => false)
+              ))
+            : false;
+        } catch {
+          // 权限不足 —— 跳过
+          continue;
+        }
+        entries.push({ name: ent.name, is_dir: isDir });
+      }
+
+      // 按 (is_dir desc, name asc) 排序
+      entries.sort((a, b) => {
+        if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      return json({ current_path: targetPath, parent_path: parentPath, entries });
+    }
+
+    // ─────────── Repos ───────────
+
+    // GET /api/repos
+    if (method === "GET" && path === "/api/repos") {
+      return json({ repos: listRepos() });
+    }
+
+    // POST /api/repos
+    if (method === "POST" && path === "/api/repos") {
+      const body = (await req.json()) as {
+        alias?: string;
+        path?: string;
+        default_branch?: string;
+        github_owner?: string | null;
+        github_repo?: string | null;
+      };
+      if (!body.alias?.trim() || !body.path?.trim()) {
+        return error("alias 和 path 必填");
+      }
+      try {
+        const id = nextRepoId();
+        const repo = createRepo({
+          id,
+          alias: body.alias.trim(),
+          path: body.path.trim(),
+          default_branch: body.default_branch?.trim() || "main",
+          github_owner: body.github_owner ?? null,
+          github_repo: body.github_repo ?? null,
+        });
+        return json({ repo }, 201);
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          code === "SQLITE_CONSTRAINT_UNIQUE" ||
+          code?.startsWith("SQLITE_CONSTRAINT") ||
+          msg.toLowerCase().includes("unique")
+        ) {
+          return error(msg, 409);
+        }
+        return error(msg, 500);
+      }
+    }
+
+    // GET /api/repos/:id
+    const repoIdMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)$/);
+    if (method === "GET" && repoIdMatch) {
+      const repo = getRepoById(repoIdMatch);
+      if (!repo) return error("repo not found", 404);
+      return json({ repo });
+    }
+
+    // PUT /api/repos/:id
+    if (method === "PUT" && repoIdMatch) {
+      const existing = getRepoById(repoIdMatch);
+      if (!existing) return error("repo not found", 404);
+      const body = (await req.json()) as {
+        alias?: string;
+        path?: string;
+        default_branch?: string;
+        github_owner?: string | null;
+        github_repo?: string | null;
+      };
+      if (body.alias !== undefined) {
+        const trimmed = body.alias.trim();
+        if (!trimmed) return error("alias 不能为空", 400);
+        body.alias = trimmed;
+      }
+      if (body.path !== undefined) {
+        const trimmed = body.path.trim();
+        if (!trimmed) return error("path 不能为空", 400);
+        body.path = trimmed;
+      }
+      if (body.default_branch !== undefined) {
+        const trimmed = body.default_branch.trim();
+        if (!trimmed) delete body.default_branch;
+        else body.default_branch = trimmed;
+      }
+      try {
+        const repo = updateRepo(repoIdMatch, {
+          alias: body.alias,
+          path: body.path,
+          default_branch: body.default_branch,
+          github_owner: body.github_owner,
+          github_repo: body.github_repo,
+        });
+        return json({ repo });
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          code === "SQLITE_CONSTRAINT_UNIQUE" ||
+          code?.startsWith("SQLITE_CONSTRAINT") ||
+          msg.toLowerCase().includes("unique")
+        ) {
+          return error(msg, 409);
+        }
+        return error(msg, 500);
+      }
+    }
+
+    // DELETE /api/repos/:id
+    if (method === "DELETE" && repoIdMatch) {
+      const existing = getRepoById(repoIdMatch);
+      if (!existing) return error("repo not found", 404);
+      deleteRepo(repoIdMatch);
+      return json({ ok: true });
+    }
+
+    // POST /api/repos/:id/healthcheck
+    const repoHealthMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)\/healthcheck$/);
+    if (method === "POST" && repoHealthMatch) {
+      const repo = getRepoById(repoHealthMatch);
+      if (!repo) return error("repo not found", 404);
+      const health = await checkRepoHealth(repo.path);
+      // 自动回填 github_owner / github_repo（仅当 DB 里为空且检查结果有值，逐字段独立判断避免覆盖已有值）
+      const patch: { github_owner?: string; github_repo?: string } = {};
+      if (health.github_owner && !repo.github_owner) patch.github_owner = health.github_owner;
+      if (health.github_repo && !repo.github_repo) patch.github_repo = health.github_repo;
+      if (patch.github_owner !== undefined || patch.github_repo !== undefined) {
+        updateRepo(repoHealthMatch, patch);
+      }
+      return json({ healthy: health.healthy, issues: health.issues });
     }
 
     // GET /api/tasks/:id

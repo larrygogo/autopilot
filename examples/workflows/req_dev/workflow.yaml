@@ -1,0 +1,37 @@
+name: req_dev
+description: "需求驱动开发流程（P1：design → review → develop → code_review → submit_pr）；await_review/fix_revision 在 P3 加入"
+setup_func: setup_req_dev_task
+
+agents:
+  - name: architect
+    provider: anthropic
+    model: claude-sonnet-4-6
+    permission_mode: bypassPermissions
+  - name: developer
+    provider: anthropic
+    model: claude-opus-4-6
+    permission_mode: bypassPermissions
+  - name: reviewer
+    provider: anthropic
+    model: claude-sonnet-4-6
+    permission_mode: bypassPermissions
+
+phases:
+  - name: design
+    agent: architect
+    timeout: 900
+  - name: review
+    agent: reviewer
+    timeout: 900
+    reject: design
+    max_rejections: 10
+  - name: develop
+    agent: developer
+    timeout: 1800
+  - name: code_review
+    agent: reviewer
+    timeout: 1200
+    reject: develop
+    max_rejections: 10
+  - name: submit_pr
+    timeout: 300
