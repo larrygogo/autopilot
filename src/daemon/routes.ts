@@ -34,6 +34,15 @@ import {
   type ScheduleType,
 } from "../core/schedules";
 import {
+  listRepos,
+  getRepoById,
+  createRepo,
+  updateRepo,
+  deleteRepo,
+  nextRepoId,
+} from "../core/repos";
+import { checkRepoHealth } from "../core/repo-health";
+import {
   discover,
   reload,
   getWorkflow,
@@ -470,6 +479,131 @@ export async function handleRequest(req: Request): Promise<Response> {
         if (e instanceof StartTaskError) return error(e.message, e.status);
         return error(e instanceof Error ? e.message : String(e), 500);
       }
+    }
+
+    // ─────────── Repos ───────────
+
+    // GET /api/repos
+    if (method === "GET" && path === "/api/repos") {
+      return json({ repos: listRepos() });
+    }
+
+    // POST /api/repos
+    if (method === "POST" && path === "/api/repos") {
+      const body = (await req.json()) as {
+        alias?: string;
+        path?: string;
+        default_branch?: string;
+        github_owner?: string | null;
+        github_repo?: string | null;
+      };
+      if (!body.alias?.trim() || !body.path?.trim()) {
+        return error("alias 和 path 必填");
+      }
+      try {
+        const id = nextRepoId();
+        const repo = createRepo({
+          id,
+          alias: body.alias.trim(),
+          path: body.path.trim(),
+          default_branch: body.default_branch?.trim() || "main",
+          github_owner: body.github_owner ?? null,
+          github_repo: body.github_repo ?? null,
+        });
+        return json({ repo }, 201);
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          code === "SQLITE_CONSTRAINT_UNIQUE" ||
+          code?.startsWith("SQLITE_CONSTRAINT") ||
+          msg.toLowerCase().includes("unique")
+        ) {
+          return error(msg, 409);
+        }
+        return error(msg, 500);
+      }
+    }
+
+    // GET /api/repos/:id
+    const repoIdMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)$/);
+    if (method === "GET" && repoIdMatch) {
+      const repo = getRepoById(repoIdMatch);
+      if (!repo) return error("repo not found", 404);
+      return json({ repo });
+    }
+
+    // PUT /api/repos/:id
+    if (method === "PUT" && repoIdMatch) {
+      const existing = getRepoById(repoIdMatch);
+      if (!existing) return error("repo not found", 404);
+      const body = (await req.json()) as {
+        alias?: string;
+        path?: string;
+        default_branch?: string;
+        github_owner?: string | null;
+        github_repo?: string | null;
+      };
+      if (body.alias !== undefined) {
+        const trimmed = body.alias.trim();
+        if (!trimmed) return error("alias 不能为空", 400);
+        body.alias = trimmed;
+      }
+      if (body.path !== undefined) {
+        const trimmed = body.path.trim();
+        if (!trimmed) return error("path 不能为空", 400);
+        body.path = trimmed;
+      }
+      if (body.default_branch !== undefined) {
+        const trimmed = body.default_branch.trim();
+        if (!trimmed) delete body.default_branch;
+        else body.default_branch = trimmed;
+      }
+      try {
+        const repo = updateRepo(repoIdMatch, {
+          alias: body.alias,
+          path: body.path,
+          default_branch: body.default_branch,
+          github_owner: body.github_owner,
+          github_repo: body.github_repo,
+        });
+        return json({ repo });
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          code === "SQLITE_CONSTRAINT_UNIQUE" ||
+          code?.startsWith("SQLITE_CONSTRAINT") ||
+          msg.toLowerCase().includes("unique")
+        ) {
+          return error(msg, 409);
+        }
+        return error(msg, 500);
+      }
+    }
+
+    // DELETE /api/repos/:id
+    if (method === "DELETE" && repoIdMatch) {
+      const existing = getRepoById(repoIdMatch);
+      if (!existing) return error("repo not found", 404);
+      deleteRepo(repoIdMatch);
+      return json({ ok: true });
+    }
+
+    // POST /api/repos/:id/healthcheck
+    const repoHealthMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)\/healthcheck$/);
+    if (method === "POST" && repoHealthMatch) {
+      const repo = getRepoById(repoHealthMatch);
+      if (!repo) return error("repo not found", 404);
+      const health = await checkRepoHealth(repo.path);
+      // 自动回填 github_owner / github_repo（仅当 DB 里为空且检查结果有值，逐字段独立判断避免覆盖已有值）
+      const patch: { github_owner?: string; github_repo?: string } = {};
+      if (health.github_owner && !repo.github_owner) patch.github_owner = health.github_owner;
+      if (health.github_repo && !repo.github_repo) patch.github_repo = health.github_repo;
+      if (patch.github_owner !== undefined || patch.github_repo !== undefined) {
+        updateRepo(repoHealthMatch, patch);
+      }
+      return json({ healthy: health.healthy, issues: health.issues });
     }
 
     // GET /api/tasks/:id

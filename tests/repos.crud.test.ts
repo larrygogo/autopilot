@@ -12,7 +12,7 @@ import {
 import { _setDbForTest, initDb } from "../src/core/db";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
-import { up as migrate003 } from "../src/migrations/003-repos";
+import { up as migrate004 } from "../src/migrations/004-repos";
 import { checkRepoHealth, parseGithubFromRemote } from "../src/core/repo-health";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -32,7 +32,7 @@ describe("repos CRUD", () => {
     // 执行所有迁移（001 已包含在 initDb schema 里，002/003 需要额外执行）
     migrate001(sqlite);
     migrate002(sqlite);
-    migrate003(sqlite);
+    migrate004(sqlite);
   });
 
   afterAll(() => {
