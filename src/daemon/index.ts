@@ -8,8 +8,9 @@ import { discover } from "../core/registry";
 import { checkStuckTasks, pruneWorkspacesByPolicy } from "../core/watcher";
 import { runScheduledTasks } from "../core/scheduler";
 import { initDaemonFileLog, log } from "../core/logger";
-import { loadDaemonConfig } from "../core/config";
+import { loadDaemonConfig, loadGithubConfig } from "../core/config";
 import { enableBus, disableBus, bus } from "./event-bus";
+import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
 import { startServer } from "./server";
 import { setWebDistDir } from "./routes";
@@ -26,6 +27,7 @@ const DEFAULT_HOST = "127.0.0.1";
 const WATCHER_INTERVAL_MS = 60_000;
 const RETENTION_INTERVAL_MS = 3600_000;  // 每小时扫一次 workspace 保留策略
 const SCHEDULER_INTERVAL_MS = 30_000;    // 每 30 秒扫一次定时任务（精度到分钟）
+// PR_POLL_INTERVAL_MS 由 config.yaml.github.poll_interval_seconds 决定
 
 export interface DaemonOptions {
   host?: string;
@@ -118,6 +120,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     });
   }, SCHEDULER_INTERVAL_MS);
 
+  // pr-poller 定时器：扫 awaiting_review 需求的 PR，自动注入 review 反馈 / 标 done
+  const ghCfg = loadGithubConfig();
+  const prPollerInterval = ghCfg.poll_interval_seconds * 1000;
+  const prPollerTimer = setInterval(() => {
+    pollAllPRs().catch((e: unknown) => {
+      console.error("pr-poller 异常：", e instanceof Error ? e.message : String(e));
+    });
+  }, prPollerInterval);
+  log.info("pr-poller 已启动，轮询间隔 %ss", ghCfg.poll_interval_seconds);
+
   console.log(`autopilot daemon v${VERSION} started on http://${host}:${port} (pid=${process.pid})`);
 
   // 优雅退出
@@ -126,6 +138,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     clearInterval(watcherTimer);
     clearInterval(retentionTimer);
     clearInterval(schedulerTimer);
+    clearInterval(prPollerTimer);
     disposeRequirementScheduler();
     disableBus();
     server.stop();
