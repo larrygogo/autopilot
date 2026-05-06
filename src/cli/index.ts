@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { mkdirSync } from "fs";
 import { join } from "path";
+import { spawn as nodeSpawn } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
 import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
@@ -16,6 +17,7 @@ import {
   isSupervisorRunning,
   removeSupervisorPid,
   readListenInfo,
+  removeListenInfo,
 } from "../daemon/pid";
 
 // ──────────────────────────────────────────────
@@ -92,31 +94,15 @@ daemon
       process.exit(1);
     }
 
-    const scriptPath = opts.supervise
-      ? join(import.meta.dir, "../daemon/supervisor.ts")
-      : join(import.meta.dir, "../daemon/index.ts");
-
-    const child = Bun.spawn(
-      ["bun", "run", scriptPath],
-      { stdio: ["ignore", "ignore", "ignore"] }
-    );
-    child.unref();
-
-    // 等待 daemon PID 文件出现（supervisor 里的 daemon 子进程也会写这个）
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline) {
-      await Bun.sleep(200);
-      const pid = readPid();
-      if (pid && isProcessAlive(pid)) {
-        const supPid = opts.supervise ? readSupervisorPid() : null;
-        const supSuffix = supPid ? ` via supervisor (pid=${supPid})` : "";
-        console.log(`daemon 已启动 (pid=${pid})${supSuffix}`);
-        console.log(`  查看监听地址与状态：autopilot daemon status`);
-        return;
-      }
+    const pid = await startDaemonProcess(opts.supervise);
+    if (pid === null) {
+      console.error("错误：daemon 启动超时。");
+      process.exit(1);
     }
-    console.error("错误：daemon 启动超时。");
-    process.exit(1);
+    const supPid = opts.supervise ? readSupervisorPid() : null;
+    const supSuffix = supPid ? ` via supervisor (pid=${supPid})` : "";
+    console.log(`daemon 已启动 (pid=${pid})${supSuffix}`);
+    console.log(`  查看监听地址与状态：autopilot daemon status`);
   });
 
 daemon
@@ -133,6 +119,11 @@ daemon
       while (Date.now() < deadline) {
         await Bun.sleep(200);
         if (!isProcessAlive(supPid)) {
+          // Windows 下 SIGTERM 是 TerminateProcess，supervisor/daemon 都没机会跑自己的
+          // cleanup handler，CLI 兜底清理 PID 文件。
+          removePid();
+          removeSupervisorPid();
+          removeListenInfo();
           console.log("supervisor 已停止（daemon 同步退出）。");
           return;
         }
@@ -153,6 +144,9 @@ daemon
     while (Date.now() < deadline) {
       await Bun.sleep(200);
       if (!isProcessAlive(daemonPid)) {
+        // 同上：Windows 强杀后 daemon 没机会清自己的 PID 文件
+        removePid();
+        removeListenInfo();
         console.log("daemon 已停止。");
         return;
       }
@@ -173,7 +167,13 @@ async function stopDaemonProcess(): Promise<boolean> {
     const deadline = Date.now() + 8000;
     while (Date.now() < deadline) {
       await Bun.sleep(200);
-      if (!isProcessAlive(supPid)) return true;
+      if (!isProcessAlive(supPid)) {
+        // Windows 下 SIGTERM 是 TerminateProcess，cleanup handler 跑不到，CLI 兜底清。
+        removePid();
+        removeSupervisorPid();
+        removeListenInfo();
+        return true;
+      }
     }
     return false;
   }
@@ -188,22 +188,60 @@ async function stopDaemonProcess(): Promise<boolean> {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     await Bun.sleep(200);
-    if (!isProcessAlive(daemonPid)) return true;
+    if (!isProcessAlive(daemonPid)) {
+      removePid();
+      removeListenInfo();
+      return true;
+    }
   }
   return false;
 }
 
+/**
+ * 后台启动 daemon / supervisor 子进程，并等待其在 PID 文件中登记。
+ *
+ * 跨平台 detach 策略：
+ * - Windows: `cmd /c start /b bun run <path>` —— start 派生进程后 cmd 立即退出，
+ *   子进程脱离 CLI 的 Job 对象。Bun runtime 下 node:child_process 的 detached:true
+ *   不可靠（CLI 仍 hold 住子进程），Bun.spawn 也无 detached 选项。
+ *   两个易踩坑：
+ *     1) cmd /c 后必须接单个完整命令字符串，不能拆多 args；
+ *     2) 不要给 start 加 `""` 标题占位 + 引号包裹绝对路径，会触发 "Access denied"。
+ *   scriptPath 是工程内路径，含空格场景未支持，提前报错让用户改用前台启动。
+ * - POSIX: 标准 node:child_process.spawn + detached:true + stdio:"ignore" + unref()。
+ */
 async function startDaemonProcess(supervise: boolean): Promise<number | null> {
   const scriptPath = supervise
     ? join(import.meta.dir, "../daemon/supervisor.ts")
     : join(import.meta.dir, "../daemon/index.ts");
-  const child = Bun.spawn(
-    ["bun", "run", scriptPath],
-    { stdio: ["ignore", "ignore", "ignore"] },
-  );
-  child.unref();
 
-  const deadline = Date.now() + 8000;
+  if (process.platform === "win32") {
+    if (/\s/.test(scriptPath)) {
+      console.error(
+        `错误：daemon 脚本路径含空格（${scriptPath}），daemon start 暂不支持此场景，` +
+          `请用 \`autopilot daemon run\` 前台启动。`,
+      );
+      return null;
+    }
+    // 关键：cmd /c 后必须接单个完整命令字符串；不要用 "" 标题占位 + 引号包裹路径
+    // （会触发 cmd 的 "Access denied"）。Bun.spawn 在此场景下不可靠，必须用 nodeSpawn。
+    const cmdStr = `start /b bun run ${scriptPath}`;
+    const child = nodeSpawn("cmd.exe", ["/c", cmdStr], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+  } else {
+    const child = nodeSpawn("bun", ["run", scriptPath], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  }
+
+  // Windows 下 daemon 冷启动较慢（migrations + workflow discovery + 静态资源加载），
+  // 给 30 秒余量；POSIX 通常 1-2 秒内就 ready。
+  const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     await Bun.sleep(200);
     const pid = readPid();
