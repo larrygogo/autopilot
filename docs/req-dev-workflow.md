@@ -96,6 +96,25 @@ submit_pr (push 分支 + gh pr create/edit；写回 pr_url / pr_number 到 task 
 
 可在 Web UI 任务详情页查看完整阶段日志。
 
+## PR review/merge 自动监听（P4 起）
+
+daemon 启动后会运行 pr-poller 模块，定期（默认 5 min）扫所有 `awaiting_review` 状态的需求对应的 PR：
+
+- 发现 `CHANGES_REQUESTED` review → 自动 `inject_feedback`（source=github_review）→ 触发 `fix_revision` 阶段：req_dev task 切到 fix_revision，agent 读最新反馈修改代码，push 同 PR 分支
+- 发现 PR merged → 自动 `transition req → done`，task 终结
+
+需要本地已 `gh auth login`（autopilot 不管理 GitHub token）。
+
+配置示例（`config.yaml`）：
+
+```yaml
+github:
+  cli: gh                      # 默认 'gh'，自定义路径时改
+  poll_interval_seconds: 300   # 默认 5 min；最小 30s
+```
+
+未配 github 段或字段缺失时走默认值；`gh auth status` 失败时 pr-poller log warn 跳过，不影响其他模块。
+
 ## 后续 Phase（不在 P1）
 
 - **P2**：需求池 + chat 集成（队列外澄清）
