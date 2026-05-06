@@ -742,13 +742,45 @@ export async function handleRequest(req: Request): Promise<Response> {
     // POST /api/requirements/:id/enqueue
     const reqEnqueueMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/enqueue$/);
     if (reqEnqueueMatch && method === "POST") {
-      if (!getRequirementById(reqEnqueueMatch)) return error("requirement not found", 404);
-      // P2 Task 4：仅状态转换；Task 9 起本 handler 会追加创建 req_dev task 的逻辑
+      const id = reqEnqueueMatch;
+      const r = getRequirementById(id);
+      if (!r) return error("requirement not found", 404);
+      const repo = getRepoById(r.repo_id);
+      if (!repo) return error("requirement 关联的 repo 不存在", 500);
+
+      // 1. ready → queued（校验状态机）
       try {
-        return json({ requirement: setRequirementStatus(reqEnqueueMatch, "queued") });
+        setRequirementStatus(id, "queued");
       } catch (e: unknown) {
         return error((e as Error).message);
       }
+
+      // 2. 同步创建 req_dev task
+      let task;
+      try {
+        task = await startTaskFromTemplate({
+          workflow: "req_dev",
+          title: r.title,
+          requirement: r.spec_md,
+          repo_id: repo.id,
+        });
+      } catch (e: unknown) {
+        // 回滚 status：queued → ready
+        try {
+          setRequirementStatus(id, "ready");
+        } catch { /* 兜底，不阻塞错误返回 */ }
+        return error(`创建 task 失败：${(e as Error).message}`, 500);
+      }
+
+      // 3. 写回 task_id + queued → running
+      updateRequirement(id, { task_id: task.id });
+      try {
+        setRequirementStatus(id, "running");
+      } catch (e: unknown) {
+        // 状态推进失败不致命（task 已创建），仅 log
+      }
+
+      return json({ requirement: getRequirementById(id), task_id: task.id });
     }
 
     // POST /api/requirements/:id/inject_feedback

@@ -73,7 +73,7 @@ describe("chat tools 集成（直接走 core 函数验证流程）", () => {
     expect(getRequirementById(id)?.status).toBe("cancelled");
   });
 
-  it("buildAutopilotTools 能成功构造 8 个新工具", async () => {
+  it("buildAutopilotTools 能成功构造 8 个新工具（含更新后的 enqueue）", async () => {
     // 跟其他工具集成的 sanity check
     const { buildAutopilotTools } = await import("../src/agents/tools");
     const tools = await buildAutopilotTools();
@@ -109,5 +109,34 @@ describe("chat tools 集成（直接走 core 函数验证流程）", () => {
     ]) {
       expect(names).toContain(want);
     }
+  });
+});
+
+describe("enqueue 失败回滚", () => {
+  let db: Database;
+
+  beforeAll(() => {
+    db = new Database(":memory:");
+    _setDbForTest(db);
+    initDb();
+    migrate001(db);
+    migrate004(db);
+    migrate005(db);
+    createRepo({ id: "repo-rollback", alias: "rollback-repo", path: "/tmp/rb", default_branch: "main" });
+  });
+
+  afterAll(() => {
+    _setDbForTest(null);
+    db.close();
+  });
+
+  it("queued 状态可以回滚到 ready（状态表支持 queued → ready 转换）", () => {
+    const id = nextRequirementId();
+    createRequirement({ id, repo_id: "repo-rollback", title: "回滚测试" });
+    setRequirementStatus(id, "clarifying");
+    setRequirementStatus(id, "ready");
+    setRequirementStatus(id, "queued");
+    setRequirementStatus(id, "ready");  // 回滚
+    expect(getRequirementById(id)?.status).toBe("ready");
   });
 });

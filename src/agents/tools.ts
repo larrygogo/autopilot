@@ -25,7 +25,8 @@ import { snapshotWorkflow } from "../core/manifest";
 import { executePhase } from "../core/runner";
 import { randomUUID } from "crypto";
 import { log } from "../core/logger";
-import { listRepos, getRepoByAlias } from "../core/repos";
+import { listRepos, getRepoByAlias, getRepoById } from "../core/repos";
+import { startTaskFromTemplate } from "../core/task-factory";
 import {
   listRequirements,
   getRequirementById,
@@ -407,17 +408,43 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
     // ── 需求队列：入队执行 ──
     tool(
       "enqueue_requirement",
-      "把已 ready 的需求推入执行队列（status=queued）。P2 当前实现：仅置状态；P3 调度器接管后会自动创建 req_dev task；本 phase 后续 task 会让 enqueue 同步创建任务。",
+      "把已 ready 的需求推入执行队列并立即创建 req_dev task 开始执行（P2 临时直接创建；P3 调度器接管后改为仅入队）。返回新 task_id，可在 /tasks 看进度。",
       {
         req_id: z.string(),
       },
       async (args) => {
+        const r = getRequirementById(args.req_id);
+        if (!r) return err(`需求不存在：${args.req_id}`);
+        const repo = getRepoById(r.repo_id);
+        if (!repo) return err(`requirement 关联的 repo 不存在：${r.repo_id}`);
+
         try {
-          const r = setRequirementStatus(args.req_id, "queued");
-          return ok({ id: r.id, status: r.status });
+          setRequirementStatus(args.req_id, "queued");
         } catch (e: unknown) {
           return err((e as Error).message);
         }
+
+        let task;
+        try {
+          task = await startTaskFromTemplate({
+            workflow: "req_dev",
+            title: r.title,
+            requirement: r.spec_md,
+            repo_id: repo.id,
+          });
+        } catch (e: unknown) {
+          try { setRequirementStatus(args.req_id, "ready"); } catch { /* ignore */ }
+          return err(`创建 task 失败：${(e as Error).message}`);
+        }
+
+        updateRequirement(args.req_id, { task_id: task.id });
+        try { setRequirementStatus(args.req_id, "running"); } catch { /* ignore */ }
+
+        return ok({
+          id: args.req_id,
+          status: "running",
+          task_id: task.id,
+        });
       },
     ),
 
