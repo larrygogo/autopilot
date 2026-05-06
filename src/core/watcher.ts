@@ -114,6 +114,9 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
     // 只处理 running 状态的任务
     if (!task.status.startsWith("running_")) continue;
 
+    // await_review 阶段是「等外部 trigger」设计，本来就该长期"running"，不算卡死
+    if (task.status === "running_await_review") continue;
+
     // 已持有活跃锁 → 正在执行，跳过
     if (isLocked(task.id)) continue;
 
