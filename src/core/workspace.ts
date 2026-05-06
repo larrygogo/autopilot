@@ -87,7 +87,8 @@ function resolveTemplate(workflowName: string, templateName: string): string | n
   }
   const workflowDir = join(AUTOPILOT_HOME, "workflows", workflowName);
   const templateDir = resolve(workflowDir, templateName);
-  if (!templateDir.startsWith(workflowDir + "/") && templateDir !== workflowDir) {
+  // 用 path.sep 跨平台：Windows 是 "\\"，POSIX 是 "/"
+  if (!templateDir.startsWith(workflowDir + sep) && templateDir !== workflowDir) {
     return null;
   }
   if (!existsSync(templateDir) || !statSync(templateDir).isDirectory()) {
