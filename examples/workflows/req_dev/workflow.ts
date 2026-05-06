@@ -21,6 +21,9 @@ import { getAgent } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 import { getTaskWorkspace } from "@autopilot/core/workspace";
 import { getRepoById } from "@autopilot/core/repos";
+import { setRequirementStatus, getRequirementById } from "@autopilot/core/requirements";
+import { forceTransition } from "@autopilot/core/state-machine";
+import { latestFeedback } from "@autopilot/core/requirement-feedbacks";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
 const REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT";
@@ -389,4 +392,130 @@ export async function run_submit_pr(taskId: string): Promise<void> {
     transitions: getTransitions(task.workflow),
     note: `PR 已提交：${prUrl}`,
   });
+}
+
+export async function run_await_review(taskId: string): Promise<void> {
+  const task = getTask(taskId);
+  if (!task) throw new Error(`任务不存在：${taskId}`);
+
+  const reqId = task["requirement_id"] as string | undefined;
+  if (!reqId) {
+    throw new Error(
+      "await_review 阶段：task 缺少 requirement_id 字段。" +
+        "确保 task 由 requirement-scheduler 创建（会透传 requirement_id），" +
+        "或在 setup_req_dev_task 中传入此字段。"
+    );
+  }
+
+  // 立即同步 requirement.status = awaiting_review，调度器据此释放槽位
+  // 若当前已经是 awaiting_review（从 fix_revision jump 回来）则跳过避免重复写入
+  const initial = getRequirementById(reqId);
+  if (!initial) throw new Error(`requirement ${reqId} 不存在`);
+  if (initial.status !== "awaiting_review") {
+    setRequirementStatus(reqId, "awaiting_review");
+  }
+
+  // 挂起循环：每 15s 轮询 requirement.status
+  // daemon 重启后从头执行此函数，requirement.status 由 DB 持久化保留，逻辑幂等
+  while (true) {
+    const cur = getRequirementById(reqId);
+    if (!cur) {
+      throw new Error(`requirement ${reqId} 已不存在`);
+    }
+
+    if (cur.status === "fix_revision") {
+      // 触发跳转到 fix_revision 阶段（jump_trigger=revision_request）
+      const transitions = getTransitions(task.workflow);
+      transition(taskId, "revision_request", { transitions, note: `requirement ${reqId} 请求修订` });
+      return;
+    }
+
+    if (cur.status === "done") {
+      // PR 已合并，任务进入完成终态
+      forceTransition(taskId, "done", `requirement ${reqId} → done`);
+      return;
+    }
+
+    if (cur.status === "cancelled" || cur.status === "failed") {
+      forceTransition(taskId, "cancelled", `requirement ${reqId} → ${cur.status}`);
+      return;
+    }
+
+    // awaiting_review 或其他中间状态，继续等待
+    await Bun.sleep(15_000);
+  }
+}
+
+export async function run_fix_revision(taskId: string): Promise<void> {
+  const task = getTask(taskId);
+  if (!task) throw new Error(`任务不存在：${taskId}`);
+
+  const reqId = task["requirement_id"] as string | undefined;
+  if (!reqId) throw new Error("fix_revision 阶段：task 缺少 requirement_id 字段");
+
+  const repoPath = task["repo_path"] as string;
+  const branch = task["branch"] as string;
+  const defaultBranch = (task["default_branch"] as string) ?? "main";
+
+  // 1. 取最新 feedback
+  const latest = latestFeedback(reqId);
+  if (!latest) throw new Error(`requirement ${reqId} 没有反馈记录可处理`);
+
+  // 2. checkout PR 分支（不切默认分支，直接切到原 PR 分支）
+  runGit(["checkout", branch], repoPath);
+  // 拉远端最新；失败不阻塞（可能仅本地有改动）
+  runGit(["pull", "--ff-only", "origin", branch], repoPath, false);
+
+  // 3. 准备产物目录 + 写 feedback.md
+  const fixDir = phaseDir(taskId, task.workflow, "fix_revision");
+  const feedbackPath = join(fixDir, "feedback.md");
+  writeFileSync(feedbackPath, latest.body, "utf-8");
+
+  // 4. 拿设计方案 + 当前 PR diff stat 作为 agent 上下文
+  const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
+  const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8").slice(0, 4000) : "";
+  const diffStat = runGit(["diff", `${defaultBranch}...HEAD`, "--stat"], repoPath, false).stdout.slice(0, 3000);
+
+  // 5. 记录 push 前的 HEAD（用于验证有新 commit）
+  const beforeHeadProc = Bun.spawnSync(
+    ["git", "rev-parse", "HEAD"],
+    { cwd: repoPath, stderr: "pipe" }
+  );
+  const beforeHead = new TextDecoder().decode(beforeHeadProc.stdout ?? new Uint8Array()).trim();
+
+  // 6. 调 developer agent
+  const agent = getAgent("developer", task.workflow);
+  const prompt =
+    `请按以下反馈修改代码（在仓库 ${repoPath}，当前分支 ${branch}）：\n\n` +
+    `## 反馈来源\n${latest.source === "github_review" ? "GitHub PR review" : "用户手动注入"}\n\n` +
+    `## 反馈内容\n${latest.body}\n\n` +
+    `## 原方案摘要\n${planContent}\n\n` +
+    `## 当前 PR 变更统计\n${diffStat}\n\n` +
+    `要求：\n` +
+    `- 修改对应代码满足反馈\n` +
+    `- 写完后 git add & commit（commit message 用中文，标注「按 review 反馈修改」）\n` +
+    `- 不要 push 不要建 PR（push 由后续步骤处理）\n` +
+    `- 不要切换分支（保持在 ${branch}）\n`;
+
+  await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
+
+  // 7. 验证有新 commit
+  const afterHeadProc = Bun.spawnSync(
+    ["git", "rev-parse", "HEAD"],
+    { cwd: repoPath, stderr: "pipe" }
+  );
+  const afterHead = new TextDecoder().decode(afterHeadProc.stdout ?? new Uint8Array()).trim();
+  if (!afterHead || afterHead === beforeHead) {
+    throw new Error("fix_revision 阶段：agent 没有产生新 commit");
+  }
+
+  // 8. push 到原 PR 分支（不 force）
+  runGit(["push", "origin", branch], repoPath);
+
+  // 9. 触发 jump trigger fix_done → 跳回 await_review
+  transition(taskId, "fix_done", {
+    transitions: getTransitions(task.workflow),
+    note: "fix_revision 完成，回到 await_review",
+  });
+  runInBackground(taskId, "await_review");
 }

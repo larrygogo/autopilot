@@ -743,63 +743,42 @@ export async function handleRequest(req: Request): Promise<Response> {
     const reqEnqueueMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/enqueue$/);
     if (reqEnqueueMatch && method === "POST") {
       const id = reqEnqueueMatch;
-      const r = getRequirementById(id);
-      if (!r) return error("requirement not found", 404);
-      const repo = getRepoById(r.repo_id);
-      if (!repo) return error("requirement 关联的 repo 不存在", 500);
-
-      // 1. ready → queued（校验状态机）
+      if (!getRequirementById(id)) return error("requirement not found", 404);
+      // 仅置 queued；调度器（src/daemon/requirement-scheduler.ts）会监听 status 变化触发创建 task
       try {
-        setRequirementStatus(id, "queued");
+        return json({ requirement: setRequirementStatus(id, "queued") });
       } catch (e: unknown) {
         return error((e as Error).message);
       }
-
-      // 2. 同步创建 req_dev task
-      let task;
-      try {
-        task = await startTaskFromTemplate({
-          workflow: "req_dev",
-          title: r.title,
-          requirement: r.spec_md,
-          repo_id: repo.id,
-        });
-      } catch (e: unknown) {
-        // 回滚 status：queued → ready
-        try {
-          setRequirementStatus(id, "ready");
-        } catch { /* 兜底，不阻塞错误返回 */ }
-        return error(`创建 task 失败：${(e as Error).message}`, 500);
-      }
-
-      // 3. 写回 task_id + queued → running
-      updateRequirement(id, { task_id: task.id });
-      try {
-        setRequirementStatus(id, "running");
-      } catch (e: unknown) {
-        // 状态推进失败不致命（task 已创建），仅 log
-      }
-
-      return json({ requirement: getRequirementById(id), task_id: task.id });
     }
 
     // POST /api/requirements/:id/inject_feedback
     const reqInjectMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/inject_feedback$/);
     if (reqInjectMatch && method === "POST") {
+      const id = reqInjectMatch;
       const body = (await req.json()) as {
         body?: string;
         source?: "manual" | "github_review";
         github_review_id?: string;
       };
       if (!body.body?.trim()) return error("body 必填");
-      if (!getRequirementById(reqInjectMatch)) return error("requirement not found", 404);
+      const r = getRequirementById(id);
+      if (!r) return error("requirement not found", 404);
       appendFeedback({
-        requirement_id: reqInjectMatch,
+        requirement_id: id,
         source: body.source ?? "manual",
         body: body.body.trim(),
         github_review_id: body.github_review_id ?? null,
       });
-      // P3 之前：仅追加反馈，不触发状态转换
+      // P3：如果当前 awaiting_review，触发 fix_revision
+      // run_await_review 阶段函数循环会检测到 status 变化，emit jump trigger 切换到 fix_revision 阶段
+      if (r.status === "awaiting_review") {
+        try {
+          setRequirementStatus(id, "fix_revision");
+        } catch (e: unknown) {
+          log.warn("inject_feedback 触发 fix_revision 失败（反馈已写入）[req=%s err=%s]", id, (e as Error).message);
+        }
+      }
       return json({ ok: true });
     }
 

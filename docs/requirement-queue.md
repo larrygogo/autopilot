@@ -2,11 +2,11 @@
 
 需求队列是 autopilot 替代旧 dev workflow 的新工作模式：你跟 chat agent 提需求 → 多轮澄清 → 用户确认入队 → autopilot 自动跑 req_dev workflow（设计 → 评审 → 开发 → 代码审查 → 提 PR）。
 
-> **当前状态：Phase 2 落地**
+> **当前状态：Phase 3 落地**
 > - ✅ P1：仓库管理 + req_dev workflow（前 5 阶段）
-> - ✅ P2：需求池 + chat 集成 + 临时降级 enqueue 直接创建 task
-> - ⏳ P3：调度器 + await_review/fix_revision + PR 反馈循环
-> - ⏳ P4：gh CLI 轮询监听器（PR review 自动感知）
+> - ✅ P2：需求池 + chat 集成
+> - ✅ P3：调度器（同仓库严格串行）+ await_review/fix_revision + 手动反馈触发回流
+> - ⏳ P4：gh CLI 轮询监听器（PR review 自动感知 + PR merge 自动检测）
 
 ## 流程概述
 
@@ -97,18 +97,32 @@ curl http://127.0.0.1:6180/api/tasks/abc123
 
 P3 起，PR review 收到 change request 时会自动注入 github_review 类型反馈，触发 fix_revision 阶段；P2 当前仅记录，不触发。
 
-## P2 当前限制
+## P3 工作流：同仓库串行 + PR 反馈循环
 
-- ✅ 同仓库可以入队多个需求，但**没有调度器**：每个 enqueue 立即创建 task；多个 task 会**并发跑**（不等前一个的 PR）。这跟 spec §A1「同仓库严格串行」**不一致**——P3 调度器才会强制串行。当前 P2 阶段建议一次只入队一个，等其 PR 完成再入下一个。
-- ✅ 没有 PR 反馈循环：PR review change request 不会自动触发修复；需要手动注入反馈（仅记录，不重跑 develop）。
-- ✅ 没有 GitHub 监听：PR merge / review 状态需要你自己看。
+调度器（`src/daemon/requirement-scheduler.ts`）订阅 `requirement:status-changed` event-bus 事件，按 spec §6 规则：
+- **每个 repo 同时只有 1 个「占用槽位」**（running ∨ fix_revision）
+- **`awaiting_review` 不占槽位**（task 跑到 await_review 阶段后立即可释放给下一个 queued 需求）
+- enqueue 仅置 status=queued；调度器响应事件创建 req_dev task
 
-完整闭环（同仓库串行 + 自动反馈循环 + GitHub 监听）由 P3 / P4 落地。
+PR 反馈到达时：
+1. `inject_feedback` REST / chat 工具记录反馈到 `requirement_feedbacks`
+2. 如果 requirement 处于 `awaiting_review`，setStatus → `fix_revision`
+3. `run_await_review` 阶段函数循环检测到状态变化，emit jump trigger `revision_request`
+4. 状态机跳到 `fix_revision` 阶段，`run_fix_revision` 阶段函数读最新反馈 + 在原 PR 分支跑修改 + push
+5. 跑完 emit `fix_done` jump 回 `await_review`，等待下一轮反馈或 merge
+
+## P3 当前限制
+
+- ✅ 同仓库严格串行（调度器保证）
+- ✅ PR 反馈手动注入触发 fix_revision 修复 + push 同分支
+- ⚠️ **没有 GitHub 自动监听**：PR review change request 不会自动注入；需要手动调 `inject_feedback`（chat 工具或 REST）
+- ⚠️ **PR merge 不自动检测**：需要手动 transition req → done
+
+完整闭环（GitHub review/merge 自动监听）由 P4 落地。
 
 ## 后续 Phase
 
-- **P3**：调度器（同仓库串行）+ await_review / fix_revision 阶段函数 + 手动反馈触发回流
-- **P4**：gh CLI 轮询监听器（PR review 自动感知）
+- **P4**：gh CLI 轮询监听器（PR review 自动感知 + PR merge 自动检测）
 
 ## 相关文档
 

@@ -35,3 +35,19 @@ phases:
     max_rejections: 10
   - name: submit_pr
     timeout: 300
+  # await_review：长挂起态，靠外部 trigger 推进
+  # - revision_request: reviewer 反馈到达 → 跳到 fix_revision
+  # - 直接 forceTransition 到 done（gh poller 在 P4 实现）
+  - name: await_review
+    timeout: 2592000
+    jump_trigger: revision_request
+    jump_target: fix_revision
+
+  # fix_revision：独立阶段，agent 读 feedback + checkout PR 分支 + 修复 + push
+  # 完成后 jump 回 await_review 等下一轮
+  - name: fix_revision
+    agent: developer
+    timeout: 1800
+    jump_trigger: fix_done
+    jump_target: await_review
+    max_rejections: 30
