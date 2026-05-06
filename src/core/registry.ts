@@ -218,7 +218,7 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
 
       const content = readFileSync(tsPath, "utf-8");
       if (/(["'])@autopilot\//.test(content)) {
-        const srcPath = getAutopilotSrcPath();
+        const srcPath = getAutopilotSrcPath().replace(/\\/g, "/");
         const resolved = content.replace(
           /(["'])@autopilot\//g,
           (_m, q) => `${q}${srcPath}/`,
