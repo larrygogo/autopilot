@@ -11,6 +11,7 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/defaults/,
   /^\/api\/repos/, // repos CRUD + healthcheck（Phase 1 新加）
   /^\/api\/fs\//, // 文件系统浏览（Phase 1 新加）
+  /^\/api\/requirements/, // requirements CRUD（Phase 2）
 ];
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -266,6 +267,65 @@ export const api = {
     const qs = params.toString();
     return request<FsListResult>(`/api/fs/list${qs ? "?" + qs : ""}`);
   },
+
+  // Requirements
+  listRequirements: (filters?: { repo_id?: string; status?: string }) => {
+    const params = new URLSearchParams();
+    if (filters?.repo_id) params.set("repo_id", filters.repo_id);
+    if (filters?.status) params.set("status", filters.status);
+    const qs = params.toString();
+    return request<{ requirements: Requirement[] }>(`/api/requirements${qs ? "?" + qs : ""}`)
+      .then((r) => r.requirements);
+  },
+
+  getRequirement: (id: string) =>
+    request<{ requirement: Requirement; feedbacks: RequirementFeedback[] }>(`/api/requirements/${id}`),
+
+  createRequirement: (body: {
+    repo_id: string;
+    title: string;
+    spec_md?: string;
+    chat_session_id?: string | null;
+  }) =>
+    request<{ requirement: Requirement }>("/api/requirements", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.requirement),
+
+  updateRequirement: (id: string, body: {
+    title?: string;
+    spec_md?: string;
+    chat_session_id?: string | null;
+  }) =>
+    request<{ requirement: Requirement }>(`/api/requirements/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }).then((r) => r.requirement),
+
+  deleteRequirement: (id: string) =>
+    request<{ ok: true }>(`/api/requirements/${id}`, { method: "DELETE" }),
+
+  transitionRequirement: (id: string, to: string) =>
+    request<{ requirement: Requirement }>(`/api/requirements/${id}/transition`, {
+      method: "POST",
+      body: JSON.stringify({ to }),
+    }).then((r) => r.requirement),
+
+  enqueueRequirement: (id: string) =>
+    request<{ requirement: Requirement }>(`/api/requirements/${id}/enqueue`, {
+      method: "POST",
+    }).then((r) => r.requirement),
+
+  injectFeedback: (id: string, body: string, source: "manual" | "github_review" = "manual") =>
+    request<{ ok: true }>(`/api/requirements/${id}/inject_feedback`, {
+      method: "POST",
+      body: JSON.stringify({ body, source }),
+    }),
+
+  cancelRequirement: (id: string) =>
+    request<{ requirement: Requirement }>(`/api/requirements/${id}/cancel`, {
+      method: "POST",
+    }).then((r) => r.requirement),
 };
 
 export interface ProviderItem {
@@ -383,6 +443,30 @@ export interface Repo {
 export interface RepoHealthResult {
   healthy: boolean;
   issues: string[];
+}
+
+export interface Requirement {
+  id: string;
+  repo_id: string;
+  title: string;
+  status: string;
+  spec_md: string;
+  chat_session_id: string | null;
+  task_id: string | null;
+  pr_url: string | null;
+  pr_number: number | null;
+  last_reviewed_event_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface RequirementFeedback {
+  id: number;
+  requirement_id: string;
+  source: "github_review" | "manual";
+  body: string;
+  github_review_id: string | null;
+  created_at: number;
 }
 
 export interface FsListResult {
