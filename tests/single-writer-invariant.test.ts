@@ -22,6 +22,7 @@ const ALLOWLIST = new Set([
   "src/core/requirement-feedbacks.ts", // requirement_feedbacks 表：SQLite 即权威源，无 manifest 同步需求
   "src/core/requirement-sub-prs.ts", // requirement_sub_prs 表：SQLite 即权威源，无 manifest 同步需求
   "src/core/submodules.ts",      // submodules：通过 createRepo 写 repos 表，SQLite 即权威源
+  "src/core/workflows.ts",       // workflows 表：SQLite 即权威源（file 工作流由 daemon 同步），无 manifest 同步需求
 ]);
 
 const WRITE_SQL_RE = /\b(INSERT\s+(OR\s+\w+\s+)?INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|REPLACE\s+INTO)\b/i;
