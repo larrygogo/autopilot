@@ -60,6 +60,29 @@ function getRejectionCounts(task: ReturnType<typeof getTask>): Record<string, nu
   }
 }
 
+// 从 task extra 读 submodules 数组
+function getTaskSubmodules(task: ReturnType<typeof getTask>): SubmoduleInfo[] {
+  if (!task) return [];
+  const raw = task["submodules"];
+  if (!Array.isArray(raw)) return [];
+  return raw as SubmoduleInfo[];
+}
+
+// 在子模块路径下跑 git，参数风格跟 runGit 一致
+function runGitInSubmodule(
+  sm: SubmoduleInfo,
+  args: string[],
+  check = true,
+): { stdout: string; stderr: string; exitCode: number } {
+  return runGit(args, sm.path, check);
+}
+
+// 检测子模块是否有未提交改动（git status --porcelain 输出非空）
+function submoduleHasChanges(sm: SubmoduleInfo): boolean {
+  const result = runGitInSubmodule(sm, ["status", "--porcelain"], false);
+  return result.exitCode === 0 && result.stdout.length > 0;
+}
+
 /**
  * 计算指定 phase 的产物目录：workspace/<NN-phase>/，幂等创建。
  */
