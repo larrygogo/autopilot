@@ -25,7 +25,7 @@ import { snapshotWorkflow } from "../core/manifest";
 import { executePhase } from "../core/runner";
 import { randomUUID } from "crypto";
 import { log } from "../core/logger";
-import { listRepos, getRepoByAlias } from "../core/repos";
+import { listRepos, getRepoByAlias, getRepoById } from "../core/repos";
 import {
   listRequirements,
   getRequirementById,
@@ -350,6 +350,13 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
       async (args) => {
         const repo = getRepoByAlias(args.repo_alias);
         if (!repo) return err(`repo_alias 不存在：${args.repo_alias}（先在 /repos 注册）`);
+        if (repo.parent_repo_id) {
+          const parent = getRepoById(repo.parent_repo_id);
+          const parentHint = parent ? `请改用父 repo 别名 "${parent.alias}"` : "请用父 repo 别名";
+          return err(
+            `"${args.repo_alias}" 是子模块，不能直接提需求。${parentHint}（autopilot 会在执行时自动跨父子操作）`,
+          );
+        }
         const id = nextRequirementId();
         try {
           const r = createRequirement({
