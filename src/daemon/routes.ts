@@ -44,6 +44,7 @@ import {
   nextRepoId,
 } from "../core/repos";
 import { checkRepoHealth } from "../core/repo-health";
+import { discoverSubmodules } from "../core/submodules";
 import {
   listRequirements,
   getRequirementById,
@@ -686,7 +687,55 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (patch.github_owner !== undefined || patch.github_repo !== undefined) {
         updateRepo(repoHealthMatch, patch);
       }
+      // 健康检查通过 + 回填后，扫 .gitmodules 自动注册子模块（仅顶级 repo，子模块自身跳过避免递归）
+      if (health.healthy && !repo.parent_repo_id) {
+        try {
+          const dr = discoverSubmodules(repo.id);
+          return Response.json({
+            healthy: true,
+            issues: health.issues,
+            submodules: {
+              added: dr.added.map(r => ({
+                id: r.id,
+                alias: r.alias,
+                path: r.submodule_path,
+              })),
+              existing: dr.existing.length,
+              warnings: dr.warnings,
+            },
+          });
+        } catch (e: unknown) {
+          return Response.json({
+            healthy: true,
+            issues: health.issues,
+            submodules: { error: (e as Error).message },
+          });
+        }
+      }
+      // 否则维持原响应：仅 healthy + issues，无 submodules 字段
       return json({ healthy: health.healthy, issues: health.issues });
+    }
+
+    // POST /api/repos/:id/rediscover-submodules
+    const repoRediscoverMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)\/rediscover-submodules$/);
+    if (method === "POST" && repoRediscoverMatch) {
+      const repo = getRepoById(repoRediscoverMatch);
+      if (!repo) return error("repo not found", 404);
+      if (repo.parent_repo_id) return error("子模块自身不能再发现子模块（不支持嵌套）");
+      try {
+        const r = discoverSubmodules(repoRediscoverMatch);
+        return json({
+          added: r.added.map(x => ({
+            id: x.id,
+            alias: x.alias,
+            submodule_path: x.submodule_path,
+          })),
+          existing_count: r.existing.length,
+          warnings: r.warnings,
+        });
+      } catch (e: unknown) {
+        return error((e as Error).message);
+      }
     }
 
     // ─────────── Requirements ───────────
