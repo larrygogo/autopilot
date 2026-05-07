@@ -25,6 +25,7 @@ import { setRequirementStatus, getRequirementById } from "@autopilot/core/requir
 import { forceTransition } from "@autopilot/core/state-machine";
 import { latestFeedback } from "@autopilot/core/requirement-feedbacks";
 import { listSubmodules } from "@autopilot/core/submodules";
+import { appendSubPr } from "@autopilot/core/requirement-sub-prs";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
 const REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT";
@@ -461,9 +462,82 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const repoPath = task["repo_path"] as string;
   const branch = task["branch"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
+  const reqId = task["requirement_id"] as string | undefined;
 
+  // ── 1. 各子模块：先 push + 创建/更新 PR ──
+  type SubResult = { sm: SubmoduleInfo; pr_url: string; pr_number: number };
+  const submoduleResults: SubResult[] = [];
+  const submodules = getTaskSubmodules(task);
+
+  for (const sm of submodules) {
+    // 检查是否有需要 push 的 commit
+    const log = runGitInSubmodule(
+      sm,
+      ["log", "--oneline", `${sm.default_branch}..HEAD`],
+      false,
+    ).stdout;
+    if (!log.trim()) continue;
+
+    runGitInSubmodule(sm, ["push", "-u", "origin", branch]);
+
+    // 检查现有 PR
+    const ghCheck = Bun.spawnSync(
+      ["gh", "pr", "view", "--json", "url,number"],
+      { cwd: sm.path, stderr: "pipe" },
+    );
+
+    const smTitle = `${task.title}（子模块 ${sm.alias}）`;
+    const smBody =
+      `跟父仓库 PR 关联的子模块 PR。\n\n本次 ${sm.alias} 的改动用于响应父需求。`;
+
+    let smPrUrl: string;
+    let smPrNumber: number;
+
+    if (ghCheck.exitCode === 0 && ghCheck.stdout) {
+      const parsed = JSON.parse(new TextDecoder().decode(ghCheck.stdout)) as {
+        url?: string;
+        number?: number;
+      };
+      smPrUrl = parsed.url ?? "";
+      smPrNumber = parsed.number ?? 0;
+      Bun.spawnSync(["gh", "pr", "edit", "--body", smBody], { cwd: sm.path });
+    } else {
+      const create = Bun.spawnSync(
+        [
+          "gh", "pr", "create",
+          "--title", smTitle,
+          "--body", smBody,
+          "--base", sm.default_branch,
+          "--head", branch,
+        ],
+        { cwd: sm.path, stdout: "pipe", stderr: "pipe" },
+      );
+      if (create.exitCode !== 0) {
+        const err = new TextDecoder().decode(create.stderr ?? new Uint8Array());
+        throw new Error(`子模块 ${sm.alias} gh pr create 失败：${err}`);
+      }
+      smPrUrl = new TextDecoder().decode(create.stdout).trim();
+      const m = smPrUrl.match(/\/pull\/(\d+)$/);
+      smPrNumber = m ? parseInt(m[1], 10) : 0;
+    }
+
+    submoduleResults.push({ sm, pr_url: smPrUrl, pr_number: smPrNumber });
+
+    // 写 requirement_sub_prs（如果 task 有 requirement_id）
+    if (reqId) {
+      appendSubPr({
+        requirement_id: reqId,
+        child_repo_id: sm.id,
+        pr_url: smPrUrl,
+        pr_number: smPrNumber,
+      });
+    }
+  }
+
+  // ── 2. 父 repo push ──
   runGit(["push", "-u", "origin", branch], repoPath);
 
+  // ── 3. 生成父 PR body ──
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
   const diffStatResult = runGit(["diff", `${defaultBranch}...HEAD`, "--stat"], repoPath);
@@ -478,12 +552,20 @@ export async function run_submit_pr(taskId: string): Promise<void> {
     `请输出完整的 PR body，包含：概述、主要变更、测试说明。`;
 
   const prResult = await agent.run(prPrompt, { cwd: repoPath, timeout: 300_000 });
-  const prBody = prResult.text;
+  let parentBody = prResult.text;
 
-  // 检查是否已存在 PR
+  // ── 4. 父 PR body 追加关联子模块 PR 清单 ──
+  if (submoduleResults.length > 0) {
+    parentBody += "\n\n---\n\n## 关联子模块 PR\n\n";
+    for (const r of submoduleResults) {
+      parentBody += `- [${r.sm.alias}#${r.pr_number}](${r.pr_url})\n`;
+    }
+  }
+
+  // ── 5. 检查是否已存在父 PR，然后创建/更新 ──
   const existingPr = Bun.spawnSync(
     ["gh", "pr", "view", "--json", "url"],
-    { cwd: repoPath, stderr: "pipe" }
+    { cwd: repoPath, stderr: "pipe" },
   );
   const existingOut = new TextDecoder().decode(existingPr.stdout ?? new Uint8Array()).trim();
 
@@ -491,11 +573,17 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   if (existingPr.exitCode === 0 && existingOut) {
     const parsed = JSON.parse(existingOut) as { url?: string };
     prUrl = parsed.url ?? "";
-    Bun.spawnSync(["gh", "pr", "edit", "--body", prBody], { cwd: repoPath });
+    Bun.spawnSync(["gh", "pr", "edit", "--body", parentBody], { cwd: repoPath });
   } else {
     const createProc = Bun.spawnSync(
-      ["gh", "pr", "create", "--title", task.title, "--body", prBody, "--base", defaultBranch, "--head", branch],
-      { cwd: repoPath, stderr: "pipe" }
+      [
+        "gh", "pr", "create",
+        "--title", task.title,
+        "--body", parentBody,
+        "--base", defaultBranch,
+        "--head", branch,
+      ],
+      { cwd: repoPath, stderr: "pipe" },
     );
     if (createProc.exitCode !== 0) {
       const errMsg = new TextDecoder().decode(createProc.stderr ?? new Uint8Array()).trim();
@@ -504,7 +592,7 @@ export async function run_submit_pr(taskId: string): Promise<void> {
     prUrl = new TextDecoder().decode(createProc.stdout ?? new Uint8Array()).trim();
   }
 
-  // 写回 pr_url / pr_number 到 task extra（P3 await_review 阶段用）
+  // ── 6. 写回 pr_url / pr_number 到 task extra（P3 await_review 阶段用）──
   const prNumberMatch = prUrl.match(/\/pull\/(\d+)$/);
   const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : null;
   updateTask(taskId, { pr_url: prUrl, pr_number: prNumber });
