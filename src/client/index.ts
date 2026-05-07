@@ -38,6 +38,11 @@ export class AutopilotClient {
   get listWorkflows() { return this.http.listWorkflows.bind(this.http); }
   get getWorkflow() { return this.http.getWorkflow.bind(this.http); }
   get getWorkflowGraph() { return this.http.getWorkflowGraph.bind(this.http); }
+  get getWorkflowYaml() { return this.http.getWorkflowYaml.bind(this.http); }
+  get saveWorkflowYaml() { return this.http.saveWorkflowYaml.bind(this.http); }
+  get createWorkflow() { return this.http.createWorkflow.bind(this.http); }
+  get deleteWorkflow() { return this.http.deleteWorkflow.bind(this.http); }
+  get exportWorkflow() { return this.http.exportWorkflow.bind(this.http); }
   get chat() { return this.http.chat.bind(this.http); }
   get listSessions() { return this.http.listSessions.bind(this.http); }
   get getSession() { return this.http.getSession.bind(this.http); }
