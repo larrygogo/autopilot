@@ -115,11 +115,24 @@ github:
 
 未配 github 段或字段缺失时走默认值；`gh auth status` 失败时 pr-poller log warn 跳过，不影响其他模块。
 
+## 子模块支持（P5）
+
+`req_dev` 在 P5 起感知 git submodule，**父 repo + 所有子模块视为一组**跨父子开发：
+
+- `design` 起步先 `git submodule update --init --recursive`；agent prompt 包含本 repo 含哪些子模块（可改的代码路径）
+- `develop` 在父 + 各子模块同名分支 `feat/<title>` 上写代码；扫子模块若有改动 → 子模块内 commit，再父 repo `git add -A` + commit（自动 SHA bump）
+- `code_review` 把父 + 各子模块 diff 拼起来给 reviewer agent 看
+- `submit_pr` 先 push + 开**子模块 PR**（每个有改动的子模块一个），再 push + 开**父 PR**；父 PR body 自动追加「关联子模块 PR」清单
+- `fix_revision` 基于父 PR review 反馈，跨父子改代码 + push 到原分支
+
+调度上「父+子模块」是同一调度组（组内最多 1 个 active task），避免 git 冲突。详见 [需求队列指南 P5 章节](./requirement-queue.md#p5git-submodule-支持) 和 [P5 设计文档](./superpowers/specs/2026-05-07-submodule-support-design.md)。
+
 ## 后续 Phase（不在 P1）
 
 - **P2**：需求池 + chat 集成（队列外澄清）
 - **P3**：调度器 + await_review / fix_revision（同仓库串行 + PR 反馈循环）
 - **P4**：gh CLI 轮询监听器（PR review 自动感知）
+- **P5**：git submodule 支持（自动发现 + 跨父子 commit/PR + 组级调度锁）
 
 ## 旧 dev workflow 退场
 

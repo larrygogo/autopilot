@@ -2,11 +2,12 @@
 
 需求队列是 autopilot 替代旧 dev workflow 的新工作模式：你跟 chat agent 提需求 → 多轮澄清 → 用户确认入队 → autopilot 自动跑 req_dev workflow（设计 → 评审 → 开发 → 代码审查 → 提 PR）。
 
-> **当前状态：4 phase 全闭环落地 🎉**
+> **当前状态：4 phase + 子模块支持全闭环落地 🎉**
 > - ✅ P1：仓库管理 + req_dev workflow（前 5 阶段）
 > - ✅ P2：需求池 + chat 集成
 > - ✅ P3：调度器（同仓库严格串行）+ await_review/fix_revision + 手动反馈触发回流
 > - ✅ P4：gh CLI 轮询监听器（PR review change request 自动注入 + PR merge 自动检测）
+> - ✅ P5：git submodule 支持（自动发现 + 跨父子 commit/PR + 父子组级调度锁）
 
 ## 流程概述
 
@@ -116,13 +117,70 @@ PR 反馈到达时：
 - ✅ 同仓库严格串行（调度器保证）
 - ✅ PR review change request 自动注入反馈触发 fix_revision
 - ✅ PR merge 自动 transition req → done
+- ✅ git submodule 父子联动（详见下节）
 - ⚠️ **gh CLI 必须本地已 `gh auth login`**：未登录时 pr-poller log warn 跳过，不影响其他模块
 - ⚠️ **轮询间隔默认 5 min**：可在 `config.yaml.github.poll_interval_seconds` 调；最小 30s 保护 GitHub API rate limit
 - ⚠️ **GitHub Issues / Jira 等外部需求源**：非本工作模式范围，留给后续扩展（详见 spec §15）
 
-## 后续扩展（不在 4 phase 范围）
+## P5：git submodule 支持
 
-完整 4 phase 已落地。后续可能的扩展（详见 spec §15）：
+如果你的项目用了 git submodule（典型：父项目是前端 + 子模块是后端 / 共用库），autopilot 会把父 + 所有子模块视为**一组**，整个 req_dev 流程跨父子无缝跑通。
+
+### 自动发现
+
+注册父 repo 后点「健康检查」，autopilot 会：
+1. 扫父 repo 根的 `.gitmodules`
+2. 对每个子模块（仅 `github.com` 远端）自动登记成一条 `repos` 行（`parent_repo_id` 指向父）
+3. alias 默认取子模块 name，冲突时加 `-2 / -3` 后缀
+4. `default_branch` 优先取 `.gitmodules` 里的 `branch` 字段，缺省 `main`（subhgit-rs 等用 `master` 的需要登记后手动改 alias / branch）
+
+子模块物理路径不存在 / URL 非 GitHub 时跳过 + 在 health 响应里给出 warning。
+
+需要重新扫（用户后续加了子模块）时，在 `/repos` 父 repo 行点「重新发现子模块」按钮（`POST /api/repos/:id/rediscover-submodules`）。
+
+### 列表展示
+
+`/repos` 默认只列**父 repo**（`listRepos()` 默认过滤 `parent_repo_id IS NULL`）。点父 repo 行最左的展开按钮可看到下属子模块清单（路径 / 别名 / 默认分支 / GitHub）。
+
+chat tool `list_repos` 同样只列父 repo —— 提需求时只能选父。给子模块 alias 调 `create_requirement_draft` 会被拒绝并提示父 alias。
+
+### 跨父子提需求
+
+正常用 chat 提（或 `/requirements` 新建），需求关联到父 repo。req_dev workflow 里：
+
+1. **design**：`git submodule update --init --recursive` 拉齐子模块；agent prompt 列出本 repo 含哪些子模块、每个子模块的 GitHub owner/repo，让 agent 知道可改的代码路径
+2. **develop**：父 + 各子模块都切 `feat/<title>` 分支；agent 在父 / 子任意路径写代码；扫每个子模块若有改动→子模块内 commit，最后父 repo `git add -A`（自动包含子模块 SHA bump）+ commit
+3. **code_review**：父 diff + 各子模块 diff 拼起来给 reviewer agent
+4. **submit_pr**：先 push + 开**子模块 PR**（每个有改动的子模块各开一个）→ 然后 push + 开**父 PR**；父 PR body 自动追加「关联子模块 PR」清单；子 PR 信息存到新表 `requirement_sub_prs`（一个需求对应 N 条子 PR）
+5. **fix_revision**：基于父 PR 上的 review 反馈，agent 切回原分支跨父子改代码 + push 到原分支（不重开 PR）
+
+### 调度策略：组级锁
+
+父 + 所有子模块**同组共享一把调度锁**：
+
+- 组内任一 repo 的 requirement 处于 `running` 或 `fix_revision` → 整组占满槽位，新需求要排队
+- candidate 仅从**父 repo**拉 queued（chat 流程也保证只有父能被选）
+- 不同组之间互不阻塞
+
+避免「跨父子 task 并发改子模块」时的 git 冲突。
+
+### Web UI 关联
+
+- `/repos`：父 repo 行展开看子模块；点「重新发现子模块」（图标 GitBranch）触发同步
+- `/requirements/:id`：Meta 卡下方「关联子模块 PR」列表（每条点击外链跳 GitHub）
+
+### 仅支持的范围（P5）
+
+- ✅ 一层子模块（嵌套子模块不支持）
+- ✅ `github.com` 远端
+- ✅ 子模块默认分支跟父不同（子用 master、父用 main）
+- ❌ 子模块 PR review 自动监听（pr-poller 仅盯父 PR；子 PR 用户在 GitHub 自行 review/merge）
+- ❌ pnpm/yarn workspace 子包关联（同 repo 内多 package，已能正常 work，不需要特殊处理）
+- ❌ GitLab / Bitbucket 等非 GitHub submodule
+
+## 后续扩展（不在 4 phase + P5 范围）
+
+完整 4 phase + P5 子模块支持已落地。后续可能的扩展（详见 spec §15）：
 
 - 外部需求源接入器（GitHub Issues / 飞书任务 / Jira）
 - 需求模板 / 类型（feat / fix / chore）
@@ -135,5 +193,7 @@ PR 反馈到达时：
 
 - [req_dev workflow 使用指南](./req-dev-workflow.md)
 - [需求队列设计文档](./superpowers/specs/2026-05-06-requirement-queue-design.md)
+- [git submodule 支持 设计文档（P5）](./superpowers/specs/2026-05-07-submodule-support-design.md)
 - [P1 实施计划](./superpowers/plans/2026-05-06-requirement-queue-phase1.md)
 - [P2 实施计划](./superpowers/plans/2026-05-06-requirement-queue-phase2.md)
+- [P5.1–5.3 实施计划](./superpowers/plans/)
