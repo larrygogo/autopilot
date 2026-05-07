@@ -12,6 +12,9 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/repos/, // repos CRUD + healthcheck（Phase 1 新加）
   /^\/api\/fs\//, // 文件系统浏览（Phase 1 新加）
   /^\/api\/requirements/, // requirements CRUD（Phase 2）
+  /^\/api\/repos\/[\w.\-]+\/submodules$/,
+  /^\/api\/repos\/[\w.\-]+\/rediscover-submodules$/,
+  /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
 ];
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
