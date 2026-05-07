@@ -370,8 +370,29 @@ export async function run_code_review(taskId: string): Promise<void> {
   const repoPath = task["repo_path"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
-  const diffResult = runGit(["diff", `${defaultBranch}...HEAD`, "--no-ext-diff"], repoPath);
-  const gitDiff = diffResult.stdout.slice(0, 80000);
+  // 父 repo diff
+  const parentDiff = runGit(
+    ["diff", `${defaultBranch}...HEAD`, "--stat", "--patch"],
+    repoPath,
+    false,
+  ).stdout;
+
+  // 各子模块 diff
+  const submodules = getTaskSubmodules(task);
+  let submodulesDiff = "";
+  for (const sm of submodules) {
+    const smDiff = runGitInSubmodule(
+      sm,
+      ["diff", `${sm.default_branch}...HEAD`, "--stat", "--patch"],
+      false,
+    ).stdout;
+    if (smDiff && smDiff.trim()) {
+      submodulesDiff += `\n\n## 子模块 ${sm.alias} (${sm.submodule_path}/)\n\n${smDiff.slice(0, 6000)}`;
+    }
+  }
+
+  // 合并父+子 diff 供 reviewer 使用
+  const fullDiff = parentDiff.slice(0, 8000) + submodulesDiff;
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
@@ -379,7 +400,7 @@ export async function run_code_review(taskId: string): Promise<void> {
   const prompt =
     `你是一位代码审查专家。请审查以下代码变更是否符合技术方案要求。\n\n` +
     `## 技术方案\n${planContent}\n\n` +
-    `## 代码变更\n\`\`\`diff\n${gitDiff}\n\`\`\`\n\n` +
+    `## 代码变更\n\`\`\`diff\n${fullDiff}\n\`\`\`\n\n` +
     `请从以下维度审查：正确性、代码质量、安全性、测试覆盖。\n\n` +
     `最后必须输出以下结论之一（独占一行）：\n` +
     `- ${REVIEW_RESULT_PASS}\n` +
