@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { FolderGit2, Plus, Pencil, Trash2, Activity, RefreshCw, FolderOpen } from "lucide-react";
+import {
+  FolderGit2, Plus, Pencil, Trash2, Activity, RefreshCw, FolderOpen,
+  ChevronRight, ChevronDown, GitBranch,
+} from "lucide-react";
 import { api, type Repo, type RepoHealthResult } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
@@ -56,6 +59,11 @@ export function Repos() {
 
   // 文件夹选择器
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+
+  // 子模块展开状态：parentId -> Repo[] | "loading"
+  const [submodulesMap, setSubmodulesMap] = useState<Record<string, Repo[] | "loading">>({});
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [rediscoveringId, setRediscoveringId] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -169,6 +177,50 @@ export function Repos() {
     }
   };
 
+  const toggleExpand = async (repo: Repo) => {
+    const next = new Set(expanded);
+    if (next.has(repo.id)) {
+      next.delete(repo.id);
+      setExpanded(next);
+      return;
+    }
+    next.add(repo.id);
+    setExpanded(next);
+    if (!submodulesMap[repo.id] || submodulesMap[repo.id] === "loading") {
+      setSubmodulesMap((m) => ({ ...m, [repo.id]: "loading" }));
+      try {
+        const subs = await api.listSubmodules(repo.id);
+        setSubmodulesMap((m) => ({ ...m, [repo.id]: subs }));
+      } catch (e: unknown) {
+        toast.error("加载子模块失败", (e as Error)?.message ?? String(e));
+        setSubmodulesMap((m) => {
+          const c = { ...m };
+          delete c[repo.id];
+          return c;
+        });
+      }
+    }
+  };
+
+  const rediscoverSubmodules = async (repo: Repo) => {
+    setRediscoveringId(repo.id);
+    try {
+      const r = await api.rediscoverSubmodules(repo.id);
+      const parts: string[] = [];
+      if (r.added.length > 0) parts.push(`新增 ${r.added.length}`);
+      parts.push(`已有 ${r.existing_count}`);
+      if (r.warnings.length > 0) parts.push(`警告 ${r.warnings.length}`);
+      toast.success(`已重新发现子模块：${parts.join(" · ")}`);
+      const subs = await api.listSubmodules(repo.id);
+      setSubmodulesMap((m) => ({ ...m, [repo.id]: subs }));
+      setExpanded((s) => new Set(s).add(repo.id));
+    } catch (e: unknown) {
+      toast.error("重新发现失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setRediscoveringId(null);
+    }
+  };
+
   const renderHealthCell = (repo: Repo) => {
     const h = healthMap[repo.id];
     if (!h) return <span className="text-muted-foreground">—</span>;
@@ -227,6 +279,7 @@ export function Repos() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+                  <th className="w-8 px-2 py-2.5"></th>
                   <th className="px-4 py-2.5 font-medium">别名</th>
                   <th className="px-4 py-2.5 font-medium">路径</th>
                   <th className="px-4 py-2.5 font-medium">默认分支</th>
@@ -236,72 +289,165 @@ export function Repos() {
                 </tr>
               </thead>
               <tbody>
-                {repos.map((repo, idx) => (
-                  <tr
-                    key={repo.id}
-                    className={cn(
-                      "border-b last:border-0 transition-colors hover:bg-muted/30",
-                      idx % 2 === 1 && "bg-muted/10",
-                    )}
-                  >
-                    <td className="px-4 py-2.5">
-                      <span className="font-mono font-medium text-sm">{repo.alias}</span>
-                    </td>
-                    <td className="px-4 py-2.5 max-w-[220px]">
-                      <span
-                        className="font-mono text-xs text-muted-foreground truncate block"
-                        title={repo.path}
+                {repos.map((repo, idx) => {
+                  const isExpanded = expanded.has(repo.id);
+                  const subs = submodulesMap[repo.id];
+                  return (
+                    <React.Fragment key={repo.id}>
+                      <tr
+                        className={cn(
+                          "border-b last:border-0 transition-colors hover:bg-muted/30",
+                          idx % 2 === 1 && "bg-muted/10",
+                        )}
                       >
-                        {repo.path}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <Badge variant="secondary" className="font-mono text-[11px] font-normal">
-                        {repo.default_branch}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono">
-                      {repo.github_owner && repo.github_repo
-                        ? `${repo.github_owner}/${repo.github_repo}`
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-2.5">{renderHealthCell(repo)}</td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => checkHealth(repo)}
-                          disabled={healthMap[repo.id] === "loading" || deletingId === repo.id}
-                          title="健康检查"
-                        >
-                          <Activity className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => startEdit(repo)}
-                          disabled={deletingId === repo.id}
-                          title="编辑"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => remove(repo)}
-                          disabled={deletingId === repo.id}
-                          title="删除"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                        <td className="px-2 py-2.5 align-middle">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => toggleExpand(repo)}
+                            title={isExpanded ? "收起子模块" : "展开子模块"}
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            ) : (
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className="font-mono font-medium text-sm">{repo.alias}</span>
+                        </td>
+                        <td className="px-4 py-2.5 max-w-[220px]">
+                          <span
+                            className="font-mono text-xs text-muted-foreground truncate block"
+                            title={repo.path}
+                          >
+                            {repo.path}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <Badge variant="secondary" className="font-mono text-[11px] font-normal">
+                            {repo.default_branch}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono">
+                          {repo.github_owner && repo.github_repo
+                            ? `${repo.github_owner}/${repo.github_repo}`
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-2.5">{renderHealthCell(repo)}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => rediscoverSubmodules(repo)}
+                              disabled={rediscoveringId === repo.id}
+                              title="重新发现子模块"
+                            >
+                              <GitBranch
+                                className={cn(
+                                  "h-3.5 w-3.5",
+                                  rediscoveringId === repo.id && "animate-pulse",
+                                )}
+                              />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => checkHealth(repo)}
+                              disabled={healthMap[repo.id] === "loading" || deletingId === repo.id}
+                              title="健康检查"
+                            >
+                              <Activity className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => startEdit(repo)}
+                              disabled={deletingId === repo.id}
+                              title="编辑"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              onClick={() => remove(repo)}
+                              disabled={deletingId === repo.id}
+                              title="删除"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-muted/10 border-b last:border-0">
+                          <td colSpan={7} className="px-4 py-3">
+                            {subs === "loading" && (
+                              <span className="text-xs text-muted-foreground animate-pulse">
+                                加载子模块…
+                              </span>
+                            )}
+                            {Array.isArray(subs) && subs.length === 0 && (
+                              <span className="text-xs text-muted-foreground">
+                                此仓库无子模块。点
+                                <GitBranch className="inline h-3 w-3 mx-1" />
+                                重新发现以扫描 .gitmodules。
+                              </span>
+                            )}
+                            {Array.isArray(subs) && subs.length > 0 && (
+                              <div className="space-y-1.5 pl-4 border-l-2 border-border/60">
+                                <div className="text-[11px] font-semibold text-muted-foreground mb-1.5">
+                                  子模块（{subs.length}）
+                                </div>
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="text-muted-foreground/80">
+                                      <th className="px-2 py-1 text-left font-medium">路径</th>
+                                      <th className="px-2 py-1 text-left font-medium">别名</th>
+                                      <th className="px-2 py-1 text-left font-medium">默认分支</th>
+                                      <th className="px-2 py-1 text-left font-medium">GitHub</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {subs.map((sm) => (
+                                      <tr key={sm.id} className="border-t border-border/40">
+                                        <td className="px-2 py-1 font-mono text-foreground">
+                                          {sm.submodule_path ?? "—"}
+                                        </td>
+                                        <td className="px-2 py-1 font-mono">{sm.alias}</td>
+                                        <td className="px-2 py-1">
+                                          <Badge
+                                            variant="secondary"
+                                            className="font-mono text-[10px] font-normal"
+                                          >
+                                            {sm.default_branch}
+                                          </Badge>
+                                        </td>
+                                        <td className="px-2 py-1 font-mono text-muted-foreground">
+                                          {sm.github_owner && sm.github_repo
+                                            ? `${sm.github_owner}/${sm.github_repo}`
+                                            : "—"}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
