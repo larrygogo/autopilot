@@ -15,6 +15,14 @@ import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { listTasks, getTask, getTaskLogs } from "../core/db";
 import { listWorkflows, getWorkflow, isParallelPhase } from "../core/registry";
+import { reload as reloadRegistry } from "../core/registry";
+import {
+  listWorkflowsInDb,
+  createDbWorkflow,
+  updateDbWorkflow,
+  deleteDbWorkflow,
+  getWorkflowFromDb,
+} from "../core/workflows";
 import { listSessions, readManifest as readSessionManifest } from "../core/sessions";
 import { VERSION } from "../index";
 import { transition, canTransition } from "../core/state-machine";
@@ -122,15 +130,115 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
     // ── 只读：工作流 ──
     tool(
       "list_workflows",
-      "列出已注册的工作流（name + description）。",
+      "列出已注册的工作流（含 source / derives_from）。",
       {},
       async () => {
         try {
-          return ok(listWorkflows());
+          const inMem = listWorkflows();
+          const dbRows = listWorkflowsInDb();
+          const sourceMap = new Map(dbRows.map((r) => [r.name, r]));
+          const result = inMem.map((wf) => {
+            const row = sourceMap.get(wf.name);
+            return {
+              name: wf.name,
+              description: wf.description,
+              source: row?.source ?? "file",
+              derives_from: row?.derives_from ?? null,
+            };
+          });
+          return ok(result);
         } catch (e: unknown) {
           return err(e instanceof Error ? e.message : String(e));
         }
       }
+    ),
+
+    // ── 工作流动态管理（W3） ──
+
+    tool(
+      "list_phase_functions",
+      "列出某个 file 工作流的可复用 phase 函数名集合。chat 创建 DB 工作流时只能挑这里面的 phase。",
+      { workflow_name: z.string().describe("file workflow 名（如 req_dev）") },
+      async (args) => {
+        const wf = getWorkflow(args.workflow_name);
+        if (!wf) return err(`工作流不存在：${args.workflow_name}`);
+        const row = getWorkflowFromDb(args.workflow_name);
+        if (row && row.source !== "file") {
+          return err(`${args.workflow_name} 是 source=${row.source}，必须用 source=file 工作流的 phase 函数`);
+        }
+        const names: string[] = [];
+        for (const p of wf.phases) {
+          if (isParallelPhase(p)) {
+            for (const sub of p.parallel.phases) names.push(sub.name);
+          } else {
+            names.push(p.name);
+          }
+        }
+        return ok({ workflow: args.workflow_name, phase_functions: names });
+      },
+    ),
+
+    tool(
+      "create_db_workflow",
+      "创建 DB 工作流（必须 derives_from 一个 file workflow）。yaml 里 phase name 必须 ⊆ derives_from 的 phase 集合（先用 list_phase_functions 看）。",
+      {
+        name: z.string().describe("新工作流名（不能跟现有工作流冲突）"),
+        derives_from: z.string().describe("派生自的 file 工作流名（如 req_dev）"),
+        yaml_content: z.string().describe("完整 yaml（含 name / phases 等）"),
+        description: z.string().optional().describe("可选描述"),
+      },
+      async (args) => {
+        try {
+          const wf = createDbWorkflow({
+            name: args.name,
+            description: args.description ?? "",
+            derives_from: args.derives_from,
+            yaml_content: args.yaml_content,
+          });
+          try { await reloadRegistry(); } catch (e: unknown) { /* reload 失败不阻塞 */ }
+          return ok({ name: wf.name, source: wf.source, derives_from: wf.derives_from });
+        } catch (e: unknown) {
+          return err(e instanceof Error ? e.message : String(e));
+        }
+      },
+    ),
+
+    tool(
+      "update_db_workflow",
+      "更新 DB 工作流的 yaml_content（覆盖写）。仅 source=db 可改。",
+      {
+        name: z.string(),
+        yaml_content: z.string(),
+        description: z.string().optional(),
+      },
+      async (args) => {
+        try {
+          const r = updateDbWorkflow(args.name, {
+            yaml_content: args.yaml_content,
+            description: args.description,
+          });
+          if (!r) return err(`工作流不存在：${args.name}`);
+          try { await reloadRegistry(); } catch (e: unknown) { /* reload 失败不阻塞 */ }
+          return ok({ name: r.name, source: r.source });
+        } catch (e: unknown) {
+          return err(e instanceof Error ? e.message : String(e));
+        }
+      },
+    ),
+
+    tool(
+      "delete_db_workflow",
+      "删除 DB 工作流。仅 source=db 可删；file 来源工作流请改 ~/.autopilot/workflows/<name>/ 目录。",
+      { name: z.string() },
+      async (args) => {
+        try {
+          deleteDbWorkflow(args.name);
+          try { await reloadRegistry(); } catch (e: unknown) { /* reload 失败不阻塞 */ }
+          return ok({ name: args.name, deleted: true });
+        } catch (e: unknown) {
+          return err(e instanceof Error ? e.message : String(e));
+        }
+      },
     ),
 
     tool(
@@ -525,6 +633,10 @@ export const TOOL_NAMES = [
   "list_requirements",
   "inject_feedback",
   "cancel_requirement",
+  "list_phase_functions",
+  "create_db_workflow",
+  "update_db_workflow",
+  "delete_db_workflow",
 ] as const;
 
 // ──────────────────────────────────────────────

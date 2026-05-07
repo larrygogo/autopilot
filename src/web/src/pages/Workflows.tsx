@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { Plus, ChevronRight, ChevronDown, Trash2, X } from "lucide-react";
+import {
+  Plus,
+  ChevronRight,
+  ChevronDown,
+  Trash2,
+  X,
+  GitBranch,
+  FileCode,
+  Database,
+} from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { StateMachineGraph } from "@/components/StateMachineGraph";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
@@ -11,11 +20,23 @@ import { PhasePipeline } from "@/components/PhasePipeline";
 import { CodeViewer } from "@/components/CodeViewer";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input, Textarea } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 interface WorkflowInfo {
   name: string;
   description: string;
+  source?: "db" | "file";
+  derives_from?: string | null;
 }
 
 interface WorkflowDetail {
@@ -25,6 +46,8 @@ interface WorkflowDetail {
   phases?: unknown[];
   initial_state?: string;
   terminal_states?: string[];
+  source?: "db" | "file";
+  derives_from?: string | null;
   [key: string]: unknown;
 }
 
@@ -50,6 +73,72 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   const [tsSource, setTsSource] = useState<string | null>(null);
   const [tsOpen, setTsOpen] = useState(false);
   const [tsLoading, setTsLoading] = useState(false);
+
+  // 派生新工作流对话框相关 state
+  const [deriveOpen, setDeriveOpen] = useState(false);
+  const [deriveBase, setDeriveBase] = useState("");
+  const [deriveName, setDeriveName] = useState("");
+  const [deriveDesc, setDeriveDesc] = useState("");
+  const [deriveYaml, setDeriveYaml] = useState("");
+  const [deriveSaving, setDeriveSaving] = useState(false);
+
+  // 仅 file 工作流可作为派生 base
+  const fileWorkflows = workflows.filter((w) => (w.source ?? "file") === "file");
+
+  const openDerive = async () => {
+    const base = fileWorkflows[0]?.name ?? "";
+    setDeriveBase(base);
+    setDeriveName("");
+    setDeriveDesc("");
+    if (base) {
+      try {
+        const r = await api.getWorkflowYaml(base);
+        setDeriveYaml(r.yaml);
+      } catch {
+        setDeriveYaml("");
+      }
+    } else {
+      setDeriveYaml("");
+    }
+    setDeriveOpen(true);
+  };
+
+  const onChangeDeriveBase = async (newBase: string) => {
+    setDeriveBase(newBase);
+    if (!newBase) {
+      setDeriveYaml("");
+      return;
+    }
+    try {
+      const r = await api.getWorkflowYaml(newBase);
+      setDeriveYaml(r.yaml);
+    } catch {
+      setDeriveYaml("");
+    }
+  };
+
+  const saveDerive = async () => {
+    if (!deriveName.trim() || !deriveBase) {
+      toast.error("校验失败", "name 和 base 必填");
+      return;
+    }
+    setDeriveSaving(true);
+    try {
+      await api.createWorkflow({
+        name: deriveName.trim(),
+        description: deriveDesc.trim() || undefined,
+        derives_from: deriveBase,
+        yaml_content: deriveYaml,
+      });
+      toast.success(`已创建派生工作流 ${deriveName.trim()}`);
+      setDeriveOpen(false);
+      refresh();
+    } catch (e: unknown) {
+      toast.error("创建失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setDeriveSaving(false);
+    }
+  };
 
   const refresh = () => {
     setLoading(true);
@@ -138,10 +227,16 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
           <h2 className="text-xl font-semibold tracking-tight">工作流</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{workflows.length} 个</p>
         </div>
-        <Button onClick={() => setNewOpen(true)} className="shrink-0">
-          <Plus className="h-4 w-4" />
-          新建工作流
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={openDerive}>
+            <GitBranch className="h-4 w-4" />
+            派生
+          </Button>
+          <Button onClick={() => setNewOpen(true)}>
+            <Plus className="h-4 w-4" />
+            新建工作流
+          </Button>
+        </div>
       </div>
 
       {/* 列表 / 空态 */}
@@ -181,9 +276,29 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="truncate font-mono text-sm font-semibold text-primary">
-                    {wf.name}
-                  </h3>
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <h3 className="truncate font-mono text-sm font-semibold text-primary">
+                      {wf.name}
+                    </h3>
+                    {wf.source === "db" && (
+                      <span
+                        title={wf.derives_from ? `派生自 ${wf.derives_from}` : "DB 工作流"}
+                        className="inline-flex shrink-0 items-center text-[10px] text-muted-foreground"
+                      >
+                        <Database className="mr-0.5 h-3 w-3" />
+                        db
+                      </span>
+                    )}
+                    {(wf.source ?? "file") === "file" && (
+                      <span
+                        title="文件工作流（位于 AUTOPILOT_HOME/workflows/）"
+                        className="inline-flex shrink-0 items-center text-[10px] text-muted-foreground"
+                      >
+                        <FileCode className="mr-0.5 h-3 w-3" />
+                        file
+                      </span>
+                    )}
+                  </div>
                   {active ? (
                     <ChevronDown className="h-4 w-4 shrink-0 text-primary" />
                   ) : (
@@ -220,6 +335,12 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                   variant="destructive"
                   size="sm"
                   onClick={() => setPendingDelete(selected.name)}
+                  disabled={loadingDetail || (selected.detail.source ?? "file") === "file"}
+                  title={
+                    (selected.detail.source ?? "file") === "file"
+                      ? "文件工作流只读，请改源目录"
+                      : "删除"
+                  }
                 >
                   <Trash2 className="h-4 w-4" />
                   删除
@@ -338,6 +459,86 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
         onClose={() => setNewOpen(false)}
         onCreated={() => refresh()}
       />
+
+      <Dialog
+        open={deriveOpen}
+        onOpenChange={(open) => {
+          if (!open && !deriveSaving) setDeriveOpen(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>派生新工作流</DialogTitle>
+            <DialogDescription>
+              基于一个 file 工作流的 phase 函数集合，新建一个 DB 工作流（仅修改 yaml 配置）。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="derive-base">派生自 (base)</Label>
+              <select
+                id="derive-base"
+                className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                value={deriveBase}
+                onChange={(e) => {
+                  void onChangeDeriveBase(e.target.value);
+                }}
+              >
+                <option value="">选择 file 工作流</option>
+                {fileWorkflows.map((w) => (
+                  <option key={w.name} value={w.name}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="derive-name">新工作流名</Label>
+              <Input
+                id="derive-name"
+                placeholder="例如：req_dev_fast"
+                value={deriveName}
+                onChange={(e) => setDeriveName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="derive-desc">描述（可选）</Label>
+              <Input
+                id="derive-desc"
+                placeholder="一句话说明"
+                value={deriveDesc}
+                onChange={(e) => setDeriveDesc(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="derive-yaml">
+                YAML 内容（默认填了 base 的 yaml，按需修改）
+              </Label>
+              <Textarea
+                id="derive-yaml"
+                className="min-h-[260px] font-mono text-xs"
+                value={deriveYaml}
+                onChange={(e) => setDeriveYaml(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeriveOpen(false)}
+              disabled={deriveSaving}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={saveDerive}
+              disabled={deriveSaving || !deriveName.trim() || !deriveBase}
+            >
+              {deriveSaving ? "创建中…" : "创建"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={!!pendingDelete}
