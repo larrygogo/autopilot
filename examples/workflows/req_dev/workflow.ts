@@ -24,6 +24,8 @@ import { getRepoById } from "@autopilot/core/repos";
 import { setRequirementStatus, getRequirementById } from "@autopilot/core/requirements";
 import { forceTransition } from "@autopilot/core/state-machine";
 import { latestFeedback } from "@autopilot/core/requirement-feedbacks";
+import { listSubmodules } from "@autopilot/core/submodules";
+import { appendSubPr } from "@autopilot/core/requirement-sub-prs";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
 const REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT";
@@ -59,6 +61,29 @@ function getRejectionCounts(task: ReturnType<typeof getTask>): Record<string, nu
   }
 }
 
+// 从 task extra 读 submodules 数组
+function getTaskSubmodules(task: ReturnType<typeof getTask>): SubmoduleInfo[] {
+  if (!task) return [];
+  const raw = task["submodules"];
+  if (!Array.isArray(raw)) return [];
+  return raw as SubmoduleInfo[];
+}
+
+// 在子模块路径下跑 git，参数风格跟 runGit 一致
+function runGitInSubmodule(
+  sm: SubmoduleInfo,
+  args: string[],
+  check = true,
+): { stdout: string; stderr: string; exitCode: number } {
+  return runGit(args, sm.path, check);
+}
+
+// 检测子模块是否有未提交改动（git status --porcelain 输出非空）
+function submoduleHasChanges(sm: SubmoduleInfo): boolean {
+  const result = runGitInSubmodule(sm, ["status", "--porcelain"], false);
+  return result.exitCode === 0 && result.stdout.length > 0;
+}
+
 /**
  * 计算指定 phase 的产物目录：workspace/<NN-phase>/，幂等创建。
  */
@@ -82,6 +107,16 @@ export interface ReqDevSetupArgs {
   requirement?: string;
 }
 
+export interface SubmoduleInfo {
+  id: string;
+  alias: string;
+  path: string;
+  submodule_path: string;
+  default_branch: string;
+  github_owner: string;
+  github_repo: string;
+}
+
 export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknown> {
   if (!args.repo_id) throw new Error("setup_req_dev_task: repo_id 必填");
   const repo = getRepoById(args.repo_id);
@@ -90,6 +125,16 @@ export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknow
   const title = args.title ?? "untitled";
   const requirement = args.requirement ?? "";
   const branch = `feat/${title.slice(0, 20).replace(/\s+/g, "-").toLowerCase()}`;
+
+  const submodules = listSubmodules(args.repo_id).map((sm): SubmoduleInfo => ({
+    id: sm.id,
+    alias: sm.alias,
+    path: sm.path,
+    submodule_path: sm.submodule_path ?? "",
+    default_branch: sm.default_branch,
+    github_owner: sm.github_owner ?? "",
+    github_repo: sm.github_repo ?? "",
+  }));
 
   return {
     title,
@@ -100,6 +145,7 @@ export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknow
     github_owner: repo.github_owner,
     github_repo: repo.github_repo,
     branch,
+    submodules,
   };
 }
 
@@ -116,6 +162,7 @@ export async function run_design(taskId: string): Promise<void> {
 
   runGit(["checkout", defaultBranch], repoPath);
   runGit(["pull", "--ff-only"], repoPath);
+  runGit(["submodule", "update", "--init", "--recursive"], repoPath, false);
 
   const requirement = ((task["requirement"] as string | undefined) ?? "").trim();
   if (!requirement) {
@@ -133,13 +180,23 @@ export async function run_design(taskId: string): Promise<void> {
     rejectionHistory = `\n\n## 上一次评审的驳回意见（第${designRejections}次驳回）\n${prevReview}`;
   }
 
+  const submodules = getTaskSubmodules(task);
+  let submodulesSection = "";
+  if (submodules.length > 0) {
+    submodulesSection = `\n\n## 子模块\n\n本仓库含 ${submodules.length} 个子模块。在制订实现方案时，可以选择改父 repo、子模块、或两者：\n\n`;
+    for (const sm of submodules) {
+      submodulesSection += `- \`${sm.submodule_path}/\` — alias: ${sm.alias}, GitHub: ${sm.github_owner}/${sm.github_repo}, 默认分支: ${sm.default_branch}\n`;
+    }
+  }
+
   const prompt =
     `你是一位资深架构师。请根据以下需求，生成一份完整的技术方案。\n\n` +
     `## 需求\n${requirement}\n\n` +
     `## 仓库路径\n${repoPath}\n\n` +
     `请先阅读仓库代码了解项目结构，然后输出包含以下内容的技术方案：\n` +
     `1. 需求分析\n2. 技术方案\n3. 实现步骤\n4. 影响范围\n5. 测试计划` +
-    rejectionHistory;
+    rejectionHistory +
+    submodulesSection;
 
   const agent = getAgent("architect", task.workflow);
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 900_000 });
@@ -229,20 +286,45 @@ export async function run_develop(taskId: string): Promise<void> {
   const branch = task["branch"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
+  // 1. 父 repo 切默认分支拉新
   runGit(["checkout", defaultBranch], repoPath);
   runGit(["pull", "--ff-only"], repoPath);
+
+  // 2. 父 repo 切到 feat 分支
   const checkoutNew = runGit(["checkout", "-b", branch], repoPath, false);
   if (checkoutNew.exitCode !== 0) {
     runGit(["checkout", branch], repoPath);
   }
 
+  // 3. 各子模块也切到 feat 分支
+  const submodules = getTaskSubmodules(task);
+  for (const sm of submodules) {
+    runGitInSubmodule(sm, ["checkout", sm.default_branch], false);
+    runGitInSubmodule(sm, ["pull", "--ff-only", "origin", sm.default_branch], false);
+    const smCheckoutNew = runGitInSubmodule(sm, ["checkout", "-b", branch], false);
+    if (smCheckoutNew.exitCode !== 0) {
+      runGitInSubmodule(sm, ["checkout", branch], false);
+    }
+  }
+
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
+
+  // 4. 构造 prompt，加可改路径段
+  let submodulesSection = "";
+  if (submodules.length > 0) {
+    submodulesSection = `\n\n## 可改路径\n\n父仓库根：\`${repoPath}\`\n\n子模块（在子模块路径下改代码就行，不要切分支也不要 commit/push）：\n`;
+    for (const sm of submodules) {
+      submodulesSection += `- \`${sm.submodule_path}/\` — ${sm.alias}\n`;
+    }
+  }
 
   const prompt =
     `你是一位高级开发工程师。请根据以下技术方案进行开发。\n\n` +
     `## 技术方案\n${planContent}\n\n` +
-    `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。`;
+    `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。\n` +
+    `写完代码后不要 commit、不要 push，commit 由后续步骤统一处理。` +
+    submodulesSection;
 
   const agent = getAgent("developer", task.workflow);
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
@@ -250,10 +332,29 @@ export async function run_develop(taskId: string): Promise<void> {
   const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
   writeFileSync(reportPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
 
-  const statusResult = runGit(["status", "--porcelain"], repoPath);
-  if (statusResult.stdout.trim()) {
-    runGit(["add", "-A"], repoPath);
+  // 5. 扫每个子模块，有改动 → 在子模块内 commit
+  for (const sm of submodules) {
+    if (submoduleHasChanges(sm)) {
+      runGitInSubmodule(sm, ["add", "-A"]);
+      runGitInSubmodule(sm, ["commit", "-m", `feat: ${task.title}`]);
+    }
+  }
+
+  // 6. 父 repo: git add -A 包含子模块 SHA bump + 父自身改动，再统一 commit
+  runGit(["add", "-A"], repoPath);
+  const cachedProc = Bun.spawnSync(
+    ["git", "diff", "--cached", "--quiet"],
+    { cwd: repoPath }
+  );
+  const hasParentStaged = cachedProc.exitCode !== 0; // exitCode=1 表示有 staged 改动
+  if (hasParentStaged) {
     runGit(["commit", "-m", `feat: ${task.title}`], repoPath);
+  }
+
+  // 7. 验证：父 repo 至少有 1 个新 commit（含 SHA bump 也算）
+  const logResult = runGit(["log", `${defaultBranch}...HEAD`, "--oneline"], repoPath, false);
+  if (!logResult.stdout.trim()) {
+    throw new Error("develop 阶段：开发完成后父仓库没有新 commit，请检查 agent 输出");
   }
 
   transition(taskId, "develop_complete", {
@@ -270,8 +371,29 @@ export async function run_code_review(taskId: string): Promise<void> {
   const repoPath = task["repo_path"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
-  const diffResult = runGit(["diff", `${defaultBranch}...HEAD`, "--no-ext-diff"], repoPath);
-  const gitDiff = diffResult.stdout.slice(0, 80000);
+  // 父 repo diff
+  const parentDiff = runGit(
+    ["diff", `${defaultBranch}...HEAD`, "--stat", "--patch"],
+    repoPath,
+    false,
+  ).stdout;
+
+  // 各子模块 diff
+  const submodules = getTaskSubmodules(task);
+  let submodulesDiff = "";
+  for (const sm of submodules) {
+    const smDiff = runGitInSubmodule(
+      sm,
+      ["diff", `${sm.default_branch}...HEAD`, "--stat", "--patch"],
+      false,
+    ).stdout;
+    if (smDiff && smDiff.trim()) {
+      submodulesDiff += `\n\n## 子模块 ${sm.alias} (${sm.submodule_path}/)\n\n${smDiff.slice(0, 6000)}`;
+    }
+  }
+
+  // 合并父+子 diff 供 reviewer 使用
+  const fullDiff = parentDiff.slice(0, 8000) + submodulesDiff;
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
@@ -279,7 +401,7 @@ export async function run_code_review(taskId: string): Promise<void> {
   const prompt =
     `你是一位代码审查专家。请审查以下代码变更是否符合技术方案要求。\n\n` +
     `## 技术方案\n${planContent}\n\n` +
-    `## 代码变更\n\`\`\`diff\n${gitDiff}\n\`\`\`\n\n` +
+    `## 代码变更\n\`\`\`diff\n${fullDiff}\n\`\`\`\n\n` +
     `请从以下维度审查：正确性、代码质量、安全性、测试覆盖。\n\n` +
     `最后必须输出以下结论之一（独占一行）：\n` +
     `- ${REVIEW_RESULT_PASS}\n` +
@@ -340,9 +462,82 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const repoPath = task["repo_path"] as string;
   const branch = task["branch"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
+  const reqId = task["requirement_id"] as string | undefined;
 
+  // ── 1. 各子模块：先 push + 创建/更新 PR ──
+  type SubResult = { sm: SubmoduleInfo; pr_url: string; pr_number: number };
+  const submoduleResults: SubResult[] = [];
+  const submodules = getTaskSubmodules(task);
+
+  for (const sm of submodules) {
+    // 检查是否有需要 push 的 commit
+    const log = runGitInSubmodule(
+      sm,
+      ["log", "--oneline", `${sm.default_branch}..HEAD`],
+      false,
+    ).stdout;
+    if (!log.trim()) continue;
+
+    runGitInSubmodule(sm, ["push", "-u", "origin", branch]);
+
+    // 检查现有 PR
+    const ghCheck = Bun.spawnSync(
+      ["gh", "pr", "view", "--json", "url,number"],
+      { cwd: sm.path, stderr: "pipe" },
+    );
+
+    const smTitle = `${task.title}（子模块 ${sm.alias}）`;
+    const smBody =
+      `跟父仓库 PR 关联的子模块 PR。\n\n本次 ${sm.alias} 的改动用于响应父需求。`;
+
+    let smPrUrl: string;
+    let smPrNumber: number;
+
+    if (ghCheck.exitCode === 0 && ghCheck.stdout) {
+      const parsed = JSON.parse(new TextDecoder().decode(ghCheck.stdout)) as {
+        url?: string;
+        number?: number;
+      };
+      smPrUrl = parsed.url ?? "";
+      smPrNumber = parsed.number ?? 0;
+      Bun.spawnSync(["gh", "pr", "edit", "--body", smBody], { cwd: sm.path });
+    } else {
+      const create = Bun.spawnSync(
+        [
+          "gh", "pr", "create",
+          "--title", smTitle,
+          "--body", smBody,
+          "--base", sm.default_branch,
+          "--head", branch,
+        ],
+        { cwd: sm.path, stdout: "pipe", stderr: "pipe" },
+      );
+      if (create.exitCode !== 0) {
+        const err = new TextDecoder().decode(create.stderr ?? new Uint8Array());
+        throw new Error(`子模块 ${sm.alias} gh pr create 失败：${err}`);
+      }
+      smPrUrl = new TextDecoder().decode(create.stdout).trim();
+      const m = smPrUrl.match(/\/pull\/(\d+)$/);
+      smPrNumber = m ? parseInt(m[1], 10) : 0;
+    }
+
+    submoduleResults.push({ sm, pr_url: smPrUrl, pr_number: smPrNumber });
+
+    // 写 requirement_sub_prs（如果 task 有 requirement_id）
+    if (reqId) {
+      appendSubPr({
+        requirement_id: reqId,
+        child_repo_id: sm.id,
+        pr_url: smPrUrl,
+        pr_number: smPrNumber,
+      });
+    }
+  }
+
+  // ── 2. 父 repo push ──
   runGit(["push", "-u", "origin", branch], repoPath);
 
+  // ── 3. 生成父 PR body ──
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
   const diffStatResult = runGit(["diff", `${defaultBranch}...HEAD`, "--stat"], repoPath);
@@ -357,12 +552,20 @@ export async function run_submit_pr(taskId: string): Promise<void> {
     `请输出完整的 PR body，包含：概述、主要变更、测试说明。`;
 
   const prResult = await agent.run(prPrompt, { cwd: repoPath, timeout: 300_000 });
-  const prBody = prResult.text;
+  let parentBody = prResult.text;
 
-  // 检查是否已存在 PR
+  // ── 4. 父 PR body 追加关联子模块 PR 清单 ──
+  if (submoduleResults.length > 0) {
+    parentBody += "\n\n---\n\n## 关联子模块 PR\n\n";
+    for (const r of submoduleResults) {
+      parentBody += `- [${r.sm.alias}#${r.pr_number}](${r.pr_url})\n`;
+    }
+  }
+
+  // ── 5. 检查是否已存在父 PR，然后创建/更新 ──
   const existingPr = Bun.spawnSync(
     ["gh", "pr", "view", "--json", "url"],
-    { cwd: repoPath, stderr: "pipe" }
+    { cwd: repoPath, stderr: "pipe" },
   );
   const existingOut = new TextDecoder().decode(existingPr.stdout ?? new Uint8Array()).trim();
 
@@ -370,11 +573,17 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   if (existingPr.exitCode === 0 && existingOut) {
     const parsed = JSON.parse(existingOut) as { url?: string };
     prUrl = parsed.url ?? "";
-    Bun.spawnSync(["gh", "pr", "edit", "--body", prBody], { cwd: repoPath });
+    Bun.spawnSync(["gh", "pr", "edit", "--body", parentBody], { cwd: repoPath });
   } else {
     const createProc = Bun.spawnSync(
-      ["gh", "pr", "create", "--title", task.title, "--body", prBody, "--base", defaultBranch, "--head", branch],
-      { cwd: repoPath, stderr: "pipe" }
+      [
+        "gh", "pr", "create",
+        "--title", task.title,
+        "--body", parentBody,
+        "--base", defaultBranch,
+        "--head", branch,
+      ],
+      { cwd: repoPath, stderr: "pipe" },
     );
     if (createProc.exitCode !== 0) {
       const errMsg = new TextDecoder().decode(createProc.stderr ?? new Uint8Array()).trim();
@@ -383,7 +592,7 @@ export async function run_submit_pr(taskId: string): Promise<void> {
     prUrl = new TextDecoder().decode(createProc.stdout ?? new Uint8Array()).trim();
   }
 
-  // 写回 pr_url / pr_number 到 task extra（P3 await_review 阶段用）
+  // ── 6. 写回 pr_url / pr_number 到 task extra（P3 await_review 阶段用）──
   const prNumberMatch = prUrl.match(/\/pull\/(\d+)$/);
   const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : null;
   updateTask(taskId, { pr_url: prUrl, pr_number: prNumber });
@@ -461,10 +670,16 @@ export async function run_fix_revision(taskId: string): Promise<void> {
   const latest = latestFeedback(reqId);
   if (!latest) throw new Error(`requirement ${reqId} 没有反馈记录可处理`);
 
-  // 2. checkout PR 分支（不切默认分支，直接切到原 PR 分支）
+  // 2. 父 repo 切到 feat 分支并拉最新
   runGit(["checkout", branch], repoPath);
-  // 拉远端最新；失败不阻塞（可能仅本地有改动）
   runGit(["pull", "--ff-only", "origin", branch], repoPath, false);
+
+  // 各子模块也切到 feat 分支并拉最新（失败不阻塞，子模块可能没参与本次需求）
+  const submodules = getTaskSubmodules(task);
+  for (const sm of submodules) {
+    runGitInSubmodule(sm, ["checkout", branch], false);
+    runGitInSubmodule(sm, ["pull", "--ff-only", "origin", branch], false);
+  }
 
   // 3. 准备产物目录 + 写 feedback.md
   const fixDir = phaseDir(taskId, task.workflow, "fix_revision");
@@ -479,11 +694,19 @@ export async function run_fix_revision(taskId: string): Promise<void> {
   // 5. 记录 push 前的 HEAD（用于验证有新 commit）
   const beforeHeadProc = Bun.spawnSync(
     ["git", "rev-parse", "HEAD"],
-    { cwd: repoPath, stderr: "pipe" }
+    { cwd: repoPath, stderr: "pipe" },
   );
   const beforeHead = new TextDecoder().decode(beforeHeadProc.stdout ?? new Uint8Array()).trim();
 
-  // 6. 调 developer agent
+  // 6. 构造 prompt，加可改路径段
+  let submodulesSection = "";
+  if (submodules.length > 0) {
+    submodulesSection = `\n\n## 可改路径\n\n父仓库根：\`${repoPath}\`\n\n子模块：\n`;
+    for (const sm of submodules) {
+      submodulesSection += `- \`${sm.submodule_path}/\` — ${sm.alias}\n`;
+    }
+  }
+
   const agent = getAgent("developer", task.workflow);
   const prompt =
     `请按以下反馈修改代码（在仓库 ${repoPath}，当前分支 ${branch}）：\n\n` +
@@ -493,26 +716,45 @@ export async function run_fix_revision(taskId: string): Promise<void> {
     `## 当前 PR 变更统计\n${diffStat}\n\n` +
     `要求：\n` +
     `- 修改对应代码满足反馈\n` +
-    `- 写完后 git add & commit（commit message 用中文，标注「按 review 反馈修改」）\n` +
-    `- 不要 push 不要建 PR（push 由后续步骤处理）\n` +
-    `- 不要切换分支（保持在 ${branch}）\n`;
+    `- 写完后不要 commit、不要 push（commit 由后续步骤统一处理）\n` +
+    `- 不要切换分支（保持在 ${branch}）\n` +
+    submodulesSection;
 
   await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
 
-  // 7. 验证有新 commit
+  // 7. 各子模块：有改动则 commit + push
+  for (const sm of submodules) {
+    if (submoduleHasChanges(sm)) {
+      runGitInSubmodule(sm, ["add", "-A"]);
+      runGitInSubmodule(sm, ["commit", "-m", `fix: review 反馈修改`]);
+      runGitInSubmodule(sm, ["push", "origin", branch]);
+    }
+  }
+
+  // 8. 父 repo: add -A 一次性（含子模块 SHA bump），有 staged 改动则 commit
+  runGit(["add", "-A"], repoPath);
+  const cached = Bun.spawnSync(
+    ["git", "diff", "--cached", "--quiet"],
+    { cwd: repoPath },
+  );
+  if (cached.exitCode !== 0) {
+    runGit(["commit", "-m", `fix: review 反馈修改`], repoPath);
+  }
+
+  // 9. 验证有新 commit（相对于 push 前的 HEAD）
   const afterHeadProc = Bun.spawnSync(
     ["git", "rev-parse", "HEAD"],
-    { cwd: repoPath, stderr: "pipe" }
+    { cwd: repoPath, stderr: "pipe" },
   );
   const afterHead = new TextDecoder().decode(afterHeadProc.stdout ?? new Uint8Array()).trim();
   if (!afterHead || afterHead === beforeHead) {
     throw new Error("fix_revision 阶段：agent 没有产生新 commit");
   }
 
-  // 8. push 到原 PR 分支（不 force）
+  // 10. push 父 repo 到原 PR 分支（不 force）
   runGit(["push", "origin", branch], repoPath);
 
-  // 9. 触发 jump trigger fix_done → 跳回 await_review
+  // 11. 触发 jump trigger fix_done → 跳回 await_review
   transition(taskId, "fix_done", {
     transitions: getTransitions(task.workflow),
     note: "fix_revision 完成，回到 await_review",

@@ -138,13 +138,14 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
 }
 
 /**
- * 删除需求 + 级联删反馈。仅供调用方自己保证 id 处于终态（cancelled / done / failed）。
+ * 删除需求 + 级联删反馈和 sub_prs。仅供调用方自己保证 id 处于终态（cancelled / done / failed）。
  *
  * 抽出此函数是为了让 REST handler / chat tools 不直接写 SQL，集中数据库写入到 core 层。
  */
 export function deleteRequirement(id: string): void {
   const db = getDb();
   db.run("DELETE FROM requirement_feedbacks WHERE requirement_id = ?", [id]);
+  db.run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [id]);
   db.run("DELETE FROM requirements WHERE id = ?", [id]);
 }
 

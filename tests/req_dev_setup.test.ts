@@ -61,3 +61,59 @@ describe("setup_req_dev_task", () => {
     expect(result.requirement).toBe("");
   });
 });
+
+describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
+  let sqlite: Database;
+
+  beforeAll(() => {
+    sqlite = new Database(":memory:");
+    _setDbForTest(sqlite);
+    initDb();
+    migrate001(sqlite);
+    migrate002(sqlite);
+    migrate004(sqlite);
+    migrate006(sqlite);
+  });
+
+  afterAll(() => {
+    _setDbForTest(null);
+    sqlite.close();
+  });
+
+  it("无子模块时 submodules 为空数组", () => {
+    createRepo({ id: "repo-no-sub", alias: "no-sub", path: "/tmp/no-sub" });
+    const result = setup_req_dev_task({
+      repo_id: "repo-no-sub",
+      title: "x",
+      requirement: "y",
+    });
+    expect(result.submodules).toEqual([]);
+  });
+
+  it("有子模块时注入数组", () => {
+    createRepo({ id: "repo-with-sub", alias: "parent", path: "/tmp/parent" });
+    createRepo({
+      id: "repo-child",
+      alias: "child",
+      path: "/tmp/parent/child",
+      default_branch: "master",
+      github_owner: "foo",
+      github_repo: "child",
+      parent_repo_id: "repo-with-sub",
+      submodule_path: "child",
+    });
+    const result = setup_req_dev_task({
+      repo_id: "repo-with-sub",
+      title: "feat",
+      requirement: "x",
+    });
+    const submodules = result.submodules as Array<Record<string, unknown>>;
+    expect(submodules.length).toBe(1);
+    expect(submodules[0].alias).toBe("child");
+    expect(submodules[0].submodule_path).toBe("child");
+    expect(submodules[0].default_branch).toBe("master");
+    expect(submodules[0].github_owner).toBe("foo");
+    expect(submodules[0].github_repo).toBe("child");
+    expect(submodules[0].id).toBe("repo-child");
+  });
+});
