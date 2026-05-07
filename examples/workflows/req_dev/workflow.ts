@@ -24,6 +24,7 @@ import { getRepoById } from "@autopilot/core/repos";
 import { setRequirementStatus, getRequirementById } from "@autopilot/core/requirements";
 import { forceTransition } from "@autopilot/core/state-machine";
 import { latestFeedback } from "@autopilot/core/requirement-feedbacks";
+import { listSubmodules } from "@autopilot/core/submodules";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
 const REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT";
@@ -82,6 +83,16 @@ export interface ReqDevSetupArgs {
   requirement?: string;
 }
 
+export interface SubmoduleInfo {
+  id: string;
+  alias: string;
+  path: string;
+  submodule_path: string;
+  default_branch: string;
+  github_owner: string;
+  github_repo: string;
+}
+
 export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknown> {
   if (!args.repo_id) throw new Error("setup_req_dev_task: repo_id 必填");
   const repo = getRepoById(args.repo_id);
@@ -90,6 +101,16 @@ export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknow
   const title = args.title ?? "untitled";
   const requirement = args.requirement ?? "";
   const branch = `feat/${title.slice(0, 20).replace(/\s+/g, "-").toLowerCase()}`;
+
+  const submodules = listSubmodules(args.repo_id).map((sm): SubmoduleInfo => ({
+    id: sm.id,
+    alias: sm.alias,
+    path: sm.path,
+    submodule_path: sm.submodule_path ?? "",
+    default_branch: sm.default_branch,
+    github_owner: sm.github_owner ?? "",
+    github_repo: sm.github_repo ?? "",
+  }));
 
   return {
     title,
@@ -100,6 +121,7 @@ export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknow
     github_owner: repo.github_owner,
     github_repo: repo.github_repo,
     branch,
+    submodules,
   };
 }
 
