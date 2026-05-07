@@ -2,290 +2,292 @@
 
 # 架构总览
 
+autopilot 是一个**轻量级多阶段任务编排引擎**，基于状态机 + Push 模型 + 插件化工作流。运行时是 Bun + TypeScript（早期 Python 版本已退役）。
+
+## 核心定位
+
+把"长流程的开发任务"（设计 → 评审 → 编码 → 代码审查 → 提 PR → 等 review → 修订 → 合并）拆成**离散阶段**，状态机驱动按顺序推进。每个阶段是独立的子进程，可挂 AI agent 跑实际工作。框架本身**不持有任何业务逻辑**——业务全部装在用户工作流里。
+
 ## 整体架构
 
 ```mermaid
 graph TB
-    CLI["CLI 入口层<br/>autopilot start / list / cancel / ..."]
-    Runner["Runner 执行引擎<br/>acquire_lock → execute_phase → release_lock<br/>run_in_background · parallel fork/join"]
-    Registry["Registry<br/>工作流注册 · YAML 加载<br/>状态推导 · 转换表生成"]
-    SM["State Machine<br/>原子状态转换<br/>转换表验证 · 日志记录"]
-    Infra["Infra<br/>git / 锁 / 通知 / AI<br/>跨平台文件锁"]
-    DB[("DB 持久化层<br/>SQLite: tasks + task_logs<br/>含子任务支持")]
-    Plugin["Plugin 插件系统<br/>entry_points 发现"]
-    Watcher["Watcher 保底恢复<br/>卡死检测 · 自动恢复"]
-    Workflows["Workflows 用户工作流<br/>~/.autopilot/workflows/"]
+    subgraph Clients["客户端层（薄客户端）"]
+      CLI["CLI<br/>autopilot task / workflow / daemon"]
+      TUI["TUI<br/>ink + React 终端 UI"]
+      WEB["Web UI<br/>React + Vite SPA"]
+    end
 
-    CLI --> Runner
-    Plugin --> CLI
-    Runner --> Registry
-    Runner --> SM
-    Runner --> Infra
-    Registry --> DB
-    SM --> DB
-    Plugin --> Infra
-    Watcher --> Runner
-    Watcher --> DB
-    Workflows --> Registry
+    subgraph Daemon["Daemon 进程（长驻）"]
+      HTTP["HTTP REST<br/>/api/tasks /api/workflows<br/>/api/repos /api/requirements"]
+      WS["WebSocket<br/>频道订阅: task:*  log:{taskId}  ..."]
+      EB["Event Bus<br/>懒激活：daemon 未跑时 emit 是 no-op"]
+      RS["RequirementScheduler<br/>订阅 status-changed 事件"]
+      PRP["PR Poller<br/>gh CLI 轮询 review/merge"]
+      WCH["Watcher<br/>卡死任务保底恢复"]
+    end
+
+    subgraph Core["核心引擎（src/core/）"]
+      Registry["Registry<br/>YAML 工作流发现 + 加载"]
+      SM["State Machine<br/>原子转换 + 乐观锁"]
+      Runner["Runner<br/>execute_phase + run_in_background"]
+      Infra["Infra<br/>文件锁 + 僵尸锁清理"]
+      DB[("SQLite<br/>tasks / task_logs<br/>repos / requirements<br/>requirement_sub_prs ...")]
+    end
+
+    subgraph Agents["Agent 系统（src/agents/）"]
+      AG["Anthropic / OpenAI / Google<br/>三层配置：global → workflow → run"]
+    end
+
+    subgraph Home["AUTOPILOT_HOME（~/.autopilot/）"]
+      WF["workflows/ 用户工作流"]
+      RT["runtime/ DB + locks + tasks"]
+      CFG["config.yaml"]
+    end
+
+    Clients -->|HTTP+WS| Daemon
+    Daemon --> Core
+    Runner --> Agents
+    Core --> DB
+    Daemon --> EB
+    EB --> RS
+    RS --> Runner
+    PRP --> Core
+    WCH --> Runner
+    Registry --> WF
+    DB --> RT
+    Core --> CFG
 ```
 
-<details>
-<summary>ASCII 版本（终端 / 离线查看）</summary>
+**两个层面的解耦**：
+
+1. **Daemon vs 客户端** — 核心引擎只跑在 daemon 进程里；CLI/TUI/Web 都是 HTTP+WS 客户端，没有"哪种 UI 才能用"的概念
+2. **核心引擎 vs 工作流** — `src/core/` 不含任何业务知识，工作流以目录形式装在 `AUTOPILOT_HOME/workflows/<name>/`（YAML + TS）
+
+## 进程模型
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      CLI 入口层                               │
-│              autopilot start / list / cancel / ...           │
-└──────┬──────────────────┬──────────────┬──────────────┬─────┘
-       │                  │              │              │
-┌──────▼──────────────────▼──────────────▼──────────────▼─────┐
-│                      Runner（执行引擎）                       │
-│  acquire_lock → execute_phase → release_lock                │
-│  run_in_background（Push 推进下一阶段）                       │
-│  execute_parallel_phase / check_parallel_completion（并行）   │
-└──────┬──────────────────┬──────────────────────┬────────────┘
-       │                  │                      │
-┌──────▼───────┐  ┌───────▼──────────┐  ┌───────▼──────────┐
-│  Registry    │  │  State Machine   │  │     Infra        │
-│  工作流注册   │  │  原子状态转换     │  │  git/锁/通知/AI  │
-│  YAML 加载   │  │  转换表验证       │  │  跨平台文件锁    │
-│  状态推导     │  │  日志记录         │  │  AI CLI 调用     │
-│  转换表生成   │  │                   │  │                  │
-└──────┬───────┘  └───────┬──────────┘  └──────────────────┘
-       │                  │
-┌──────▼──────────────────▼──────────────────────────────────┐
-│                     DB（持久化层）                           │
-│  SQLite: tasks 表 + task_logs 表（含子任务支持）             │
-└────────────────────────────────────────────────────────────┘
-       │
-┌──────▼────────────────────────────────────────────────────┐
-│                   Workflows（插件层）                       │
-│  dev/           完整开发流程（5 阶段，YAML + Python）       │
-│  req_review/    需求评审（2 阶段，YAML + Python）           │
-│  your_flow/     自定义工作流...                             │
-└───────────────────────────────────────────────────────────┘
+autopilot daemon start
+  └─ supervisor 进程（保活 / 自动重启）
+       └─ daemon 进程
+            ├─ Bun.serve()  HTTP + WebSocket 同端口
+            ├─ Event Bus    内存事件总线
+            ├─ Watcher      定时扫卡死任务
+            ├─ Requirement-Scheduler  订阅事件、按需创建 task
+            └─ PR Poller    定时轮询 GitHub PR review/merge
+
+autopilot task start <req-id>  ← CLI 是薄客户端，HTTP 调 daemon
+autopilot tui                   ← 终端 UI，WebSocket 连 daemon
+autopilot dashboard             ← 浏览器打开 daemon serve 的 SPA
 ```
 
-</details>
+每个**阶段函数**仍走 Push 模型：阶段完成后用 `runInBackground()` 派一个新子进程跑下一阶段；子进程退出后 daemon 继续处理事件。
 
 ## 核心模块职责
 
-### registry.py — 工作流注册中心
+### `src/core/`（框架引擎，零业务知识）
 
-- 启动时自动扫描 `AUTOPILOT_HOME/workflows/` 目录
-- 支持两种工作流格式：
-  - **YAML + Python**（推荐）：子目录下 `workflow.yaml` + `workflow.py`
-  - **单文件 Python**：`.py` 文件导出 `WORKFLOW` 字典
-- 使用 `importlib.util.spec_from_file_location` 动态加载模块
-- 从 phase `name` 自动推导 pending/running/trigger 等状态
-- 支持 `parallel:` 并行阶段定义，生成 fork/join 转换
+| 模块 | 职责 |
+|---|---|
+| `db.ts` | SQLite 持久化、`tasks` / `task_logs` 等表的 CRUD；emit `task:created/updated`；导出 `TABLE_COLUMNS` / `PROTECTED_COLUMNS` 给上层校验 |
+| `state-machine.ts` | 原子状态转换；从 registry 动态加载转换表；`db.transaction()` 事务 + 乐观锁；emit `task:transition` |
+| `runner.ts` | 执行引擎：`execute_phase` 拿锁 → 跑阶段函数 → 释放；`run_in_background` 非阻塞 spawn 下一阶段；emit `phase:started/completed/error` |
+| `registry.ts` | 启动时扫 `AUTOPILOT_HOME/workflows/`；加载 `workflow.yaml` + 同名 TS 模块；自动推导 `pending/running/trigger` 状态名；解析 `parallel:` 块生成 fork/join 转换 |
+| `infra.ts` | 跨平台文件锁；启动时检查 PID 存活清僵尸锁 |
+| `watcher.ts` | 定期扫 `running_*` 状态 + 无锁 + 超时的 task；按策略恢复（重试或失败）；emit `watcher:recovery` |
+| `logger.ts` | 阶段标签日志；emit `log:entry` 让 WS 客户端实时订阅 |
+| `migrate.ts` | DB 迁移引擎：扫 `src/migrations/NNN-*.ts`、按文件名前缀版本号顺序执行；用 `schema_version` 表追踪已应用版本 |
+| `config.ts` | 加载 `config.yaml`、提取 `providers / agents / daemon / workspace_retention` 段 |
+| `task-factory.ts` | 高层工厂：`startTaskFromTemplate` 创建 task 行 + 准备 workspace + 启动首阶段 |
+| `workspace.ts` | `<HOME>/runtime/tasks/<id>/workspace/` 目录管理 + 模板拷贝；路径穿越防护 |
+| `manifest.ts` | task 创建时 snapshot 当前 workflow 定义到 task 行（保证旧 task 在工作流改动后仍能读对状态机） |
+| `repos.ts` / `repo-health.ts` | 仓库注册表 + git/origin 健康检查；`listRepos()` 默认过滤子模块 |
+| `submodules.ts` / `gitmodules-parser.ts` | `.gitmodules` 解析 + 自动登记子模块为带 `parent_repo_id` 的 repos 行 |
+| `requirements.ts` / `requirement-feedbacks.ts` / `requirement-sub-prs.ts` | 需求队列：状态机（10 状态）+ 反馈历史 + 子模块 PR 关联表 |
+| `notify.ts` | 通知调度（委托工作流 `notify_func` 或全局通知后端） |
 
-核心接口：
+### `src/daemon/`（HTTP + WS + 事件订阅者）
 
-| 函数 | 用途 |
-|------|------|
-| `discover()` | 扫描并注册所有工作流模块 |
-| `get_workflow(name)` | 获取工作流定义字典 |
-| `get_phase_func(workflow, phase)` | 获取阶段执行函数 |
-| `get_next_phase(workflow, phase)` | 获取下一阶段名 |
-| `build_transitions(workflow)` | 生成或获取状态转换表 |
-| `list_workflows()` | 列出已注册工作流及描述 |
-| `load_yaml_workflow(wf_dir)` | 从目录加载 YAML 工作流 |
-| `get_parallel_def(workflow, group)` | 获取并行组定义 |
+| 模块 | 职责 |
+|---|---|
+| `index.ts` | Daemon 入口：`init → server → watcher → signal 处理` |
+| `server.ts` | `Bun.serve()` 启动；HTTP+WS 同端口分流 |
+| `routes.ts` | REST 路由：`/api/tasks /api/workflows /api/repos /api/requirements /api/agents /api/sessions` ... |
+| `ws.ts` | WebSocket 连接管理 + 频道订阅分发；从 event-bus 拿事件按 channel 推到客户端 |
+| `event-bus.ts` | 进程内事件总线；`enableBus()` 懒激活——core 模块 emit 时 daemon 没起也不报错 |
+| `protocol.ts` | JSON 协议类型定义（`AutopilotEvent` 联合类型） |
+| `pid.ts` | PID 文件管理 + 监听信息（host/port）持久化 |
+| `supervisor.ts` | 子进程保活（daemon 异常退出时自动重启） |
+| `requirement-scheduler.ts` | 订阅 `requirement:status-changed` 事件；`tickRepo` 算法（组级锁：父 + 子模块作为单一调度槽） |
+| `pr-poller.ts` | 定时跑 `gh pr view` 拉所有 `awaiting_review` 状态需求的父 PR 状态：`CHANGES_REQUESTED` → `inject_feedback`；`MERGED` → `transition req → done` |
 
-### plugin.py — 插件系统
+### `src/agents/`（LLM 调用封装）
 
-- 通过 `importlib.metadata.entry_points(group="autopilot.plugins")` 发现第三方插件
-- 三个扩展点：通知后端（`notify_backends`）、CLI 命令（`cli_commands`）、全局钩子（`global_hooks`）
-- 鸭子类型提取，不要求继承基类
-- 幂等发现，失败隔离（单个插件加载失败只记日志）
+| 模块 | 职责 |
+|---|---|
+| `agent.ts` | Agent 基类（spawn provider CLI + 收集输出 + 解析 usage） |
+| `providers/anthropic.ts / openai.ts / google.ts` | 三大 provider 子类（凭证由对应 CLI 自身管理；autopilot 不存 token） |
+| `registry.ts` | 命名 agent 缓存；解析三层配置：global `config.yaml.agents` → workflow `agents[]` 覆盖 → 运行时 `RunOptions` 覆盖 |
+| `tools.ts` | chat agent 用的工具集（`list_repos / create_requirement_draft / inject_feedback / start_task ...`）+ workflow agent 用的 `ask_user` 工具 |
+| `pending-questions.ts` | `ask_user` 工具的等待中 promise 注册表；用户在 UI 回答后 resolve |
 
-核心接口：
+## 数据流：req_dev workflow 完整生命周期
 
-| 函数 | 用途 |
-|------|------|
-| `discover()` | 扫描 entry_points 并注册扩展（幂等） |
-| `get_notify_backend(type)` | 查询插件注册的通知后端 |
-| `get_all_notify_backend_types()` | 所有插件通知类型名 |
-| `get_cli_commands()` | 所有插件 CLI 命令 |
-| `get_global_hooks(name)` | 指定名称的全局钩子列表 |
-
-详见 [插件开发指南](plugin-development.md)。
-
-### state_machine.py — 状态机
-
-- 管理所有状态转换的合法性验证
-- 使用 SQLite `BEGIN IMMEDIATE` 事务保证原子性
-- 动态从 registry 加载转换表（支持多工作流）
-- 每次转换自动写入 `task_logs` 审计表
-
-核心接口：
-
-| 函数 | 用途 |
-|------|------|
-| `transition(task_id, trigger)` | 执行原子状态转换 |
-| `can_transition(task_id, trigger)` | 检查转换是否合法 |
-| `get_available_triggers(task_id)` | 列出当前状态可用触发器名 |
-
-### runner.py — 执行引擎
-
-- `execute_phase()`：获取锁 → 查找阶段定义 → 执行转换 → 调用阶段函数 → 释放锁
-- `run_in_background()`：通过 `subprocess.Popen` 非阻塞启动下一阶段
-- `execute_parallel_phase()`：fork 创建子任务并行执行
-- `check_parallel_completion()`：join 检查子任务完成状态
-- 异常处理：捕获异常、记录 `failure_count`、通知用户
-
-### infra.py — 基础设施
-
-| 功能 | 函数 | 说明 |
-|------|------|------|
-| 文件锁 | `acquire_lock(task_id)` | 跨平台非阻塞排他锁 |
-| | `release_lock(task_id)` | 释放锁 |
-| | `is_locked(task_id)` | 检查锁状态 |
-| 通知 | `notify(task, message)` | 调度通知（委托工作流 notify_func 或 notify 后端） |
-
-### db.py — 数据库
-
-- SQLite 持久化，WAL 模式
-- `tasks` 表：精简 schema，只保留框架核心列（id, title, workflow, status, failure_count, channel, notify_target, extra, 时间戳, 并行字段）
-- `extra` TEXT 列：JSON 格式，存储工作流自定义字段（如 req_id, project, repo_path 等）
-- `get_task()` 自动将 extra JSON 合并到返回 dict，调用方直接 `task["repo_path"]` 无需关心存储位置
-- `create_task(task_id, title, workflow, **extra)` — 非核心字段自动存入 extra JSON
-- `update_task(task_id, **fields)` — 透明更新，框架自动区分列字段 vs extra
-- `task_logs` 表：状态转换审计日志
-- 子任务 CRUD：`create_sub_task()`、`get_sub_tasks()`、`all_sub_tasks_done()`
-
-### logger.py — 日志
-
-- 阶段标签格式：`YYYY-MM-DD HH:MM:SS [LEVEL] [PHASE_TAG] message`
-- 支持同时输出到控制台和任务目录下的 `workflow.log`
-- 阶段标签动态切换（从工作流定义的 `label` 字段获取）
-
-### watcher.py — 保底恢复
-
-- 检测条件：活跃状态 + 无锁 + 超过 600s
-- 恢复策略：
-  - 运行态：触发 `fail_trigger` 回退到 pending，重新执行
-  - 等待态：直接重新执行阶段
-  - `failure_count >= 3`：放弃重试，通知用户
-- 并行支持：`waiting_*` 状态的父任务检查子任务卡死，不检查父任务本身
-
-## 数据流：任务完整生命周期
-
-以 `dev` 工作流为例：
+以"用户在 chat 给 reverse-bot-gui 提一个跨前后端需求"为例：
 
 ```mermaid
 sequenceDiagram
-    participant User as 用户
-    participant CLI
-    participant DB as SQLite DB
-    participant Runner
-    participant SM as State Machine
-    participant Phase as 阶段函数
+    participant U as 用户
+    participant Chat as Chat Agent
+    participant DB as SQLite
+    participant Sch as Requirement-Scheduler
+    participant R as Runner
+    participant A as Workflow Agent
+    participant GH as GitHub
+    participant PRP as PR Poller
 
-    User->>CLI: autopilot start REQ-001
-    CLI->>DB: create_task(pending_design, workflow=dev)
-    CLI->>Runner: execute_phase(task_id, 'design')
-    Runner->>Runner: acquire_lock()
-    Runner->>SM: transition(pending_design → designing)
-    SM->>DB: UPDATE status + INSERT log
-    Runner->>Phase: run_plan_design(task_id)
-    Phase-->>SM: transition(designing → pending_review)
-    Phase-->>Runner: run_in_background('review')
-    Runner->>Runner: release_lock()
+    U->>Chat: "我有个需求 — 加 hello 接口"
+    Chat->>DB: list_repos / create_requirement_draft
+    Note over Chat,U: 多轮澄清
+    Chat->>DB: update_requirement_spec(spec_md)
+    U->>Chat: "OK 入队"
+    Chat->>DB: mark_requirement_ready + enqueue_requirement
+    DB-->>Sch: emit requirement:status-changed (to=queued)
 
-    Note over Runner,Phase: 新进程启动
+    Sch->>Sch: tickRepo(repo) — 检查组内（父+子模块）active
+    Sch->>R: startTaskFromTemplate(req_dev, repo_id, requirement_id)
+    R->>DB: createTask + workflow snapshot
+    R->>A: run_design (architect agent 写 plan.md)
+    A-->>R: SM transition pending_design → pending_review
+    R-->>R: run_in_background('review')
 
-    Runner->>SM: transition(pending_review → reviewing)
-    Runner->>Phase: run_plan_review(task_id)
-    alt 评审通过
-        Phase-->>SM: transition(reviewing → developing)
-        Phase-->>Runner: run_in_background('dev')
-    else 评审驳回
-        Phase-->>SM: transition(reviewing → review_rejected)
-        SM-->>SM: transition(review_rejected → pending_design)
-        Phase-->>Runner: run_in_background('design') 重试
+    R->>A: run_review (reviewer agent: PASS / REJECT)
+    alt REJECT
+        A-->>R: jump back to design
+    else PASS
+        A-->>R: SM transition → pending_develop
     end
+
+    R->>A: run_develop (developer agent 跨父+子模块写代码)
+    A->>A: 子模块 commit + 父 repo SHA bump commit
+    A-->>R: → pending_code_review
+
+    R->>A: run_code_review (审 父+子 diff 拼起来)
+    R->>A: run_submit_pr
+    A->>GH: gh pr create (子) × N
+    A->>GH: gh pr create (父) — body 列出关联子 PR
+    A->>DB: 写 requirements.pr_url + requirement_sub_prs
+
+    A-->>R: → awaiting_review (槽位释放)
+    DB-->>Sch: emit status-changed (to=awaiting_review)
+    Note over Sch: 组内可拉下一个 queued 需求
+
+    PRP->>GH: gh pr view (轮询)
+    GH-->>PRP: CHANGES_REQUESTED
+    PRP->>DB: inject_feedback + setStatus(fix_revision)
+    DB-->>R: run_await_review 检测状态变 → emit revision_request
+    R->>A: run_fix_revision (跨父子改代码 + push 原分支)
+    A-->>R: → awaiting_review
+
+    PRP->>GH: gh pr view 再轮询
+    GH-->>PRP: MERGED
+    PRP->>DB: setRequirementStatus(done)
+    DB-->>R: run_await_review 检测 → forceTransition(done)
 ```
 
-<details>
-<summary>文本版本（终端 / 离线查看）</summary>
+关键点：
+- **scheduler 不直接调 runner**——它响应事件、拿 candidate、调 `task-factory.startTaskFromTemplate` 创建 task；后续阶段推进靠 Runner 的 Push 模型自然走完
+- **chat 提需求 与 task 执行解耦**——requirement 是用户视角的对象（带状态线 + 反馈历史 + 关联 PR）；task 是工作流执行视角的对象。一对一映射但生命周期独立
+- **PR Poller 单向**——它只读 GitHub 状态、写回 DB；不直接驱动 task 转换。runner 的 `run_await_review` 阶段函数自己轮询 DB 状态变化触发 jump
 
-```
-用户执行: autopilot start <req_id> --project my-project
-    │
-    ▼
-[1] 创建任务记录 (status: pending_design, workflow: dev)
-    │
-    ▼
-[2] execute_phase(task_id, 'design')
-    ├── acquire_lock ✓
-    ├── transition: pending_design ──[start_design]──→ designing
-    ├── run_plan_design(task_id)
-    │   ├── 获取需求
-    │   ├── 调用 AI 生成方案 → plan.md
-    │   ├── transition: designing ──[design_complete]──→ pending_review
-    │   └── run_in_background(task_id, 'review')  ← Push!
-    └── release_lock
-    │
-    ▼ (新进程)
-[3] execute_phase(task_id, 'review')
-    ├── acquire_lock ✓
-    ├── transition: pending_review ──[start_review]──→ reviewing
-    ├── run_plan_review(task_id)
-    │   ├── 读取 plan.md
-    │   ├── 调用 AI 评审
-    │   ├── 解析 REVIEW_RESULT: PASS / REJECT
-    │   ├── 通过: transition ──[review_pass]──→ developing
-    │   │   └── run_in_background(task_id, 'dev')  ← Push!
-    │   └── 驳回: transition ──[review_reject]──→ review_rejected
-    │       └── transition ──[retry_design]──→ pending_design
-    │           └── run_in_background(task_id, 'design')  ← 重试!
-    └── release_lock
-    │
-    ▼ (新进程，仅通过时)
-[4-6] dev → code_review → pr → pr_submitted ✓
+## 状态机驱动
+
+每个工作流定义一组 phase，autopilot 自动给每个 phase 推导 4 类状态：
+
+```yaml
+- name: develop
+  timeout: 1800
+  reject: design   # 语法糖：自动生成 jump_trigger + jump_target
 ```
 
-</details>
+→ 自动展开为：
+- `pending_develop`（前置态，等下一阶段被调度）
+- `running_develop`（阶段函数执行中）
+- 转换：`pending_develop --[start_develop]--> running_develop --[develop_complete]--> pending_<next>`
+- 驳回：`running_develop --[develop_reject]--> review_rejected_develop --[retry_design]--> pending_design`
 
-## 设计决策：Push 模型 vs 轮询模型
+并行块（`parallel:` 块）会生成 fork/join 转换，主任务等所有子任务完成。
 
-### 为什么选择 Push 模型？
+详见 [状态机文档](state-machine.md)。
 
-**轮询模型**的问题：
-- 需要一个长驻进程不断扫描数据库
-- 轮询间隔带来延迟（间隔短浪费资源，间隔长响应慢）
-- 嵌套超时难以管理
+## 用户空间：AUTOPILOT_HOME
 
-**Push 模型**的优势：
-- **即时推进**：阶段完成后立刻启动下一阶段，零延迟
-- **无长驻进程**：每个阶段是独立子进程，执行完即退出
-- **资源高效**：不占用空闲时 CPU，只在有任务时消耗资源
-- **天然隔离**：每个阶段进程独立，一个阶段崩溃不影响其他任务
-- **简化超时**：每个进程只管自己的超时，不需要嵌套计算
+框架代码与用户数据严格分离：
 
-**Watcher 作为保底**：Push 偶尔可能失败（进程启动失败），Watcher 定期扫描卡死任务并恢复，补偿了 Push 的不可靠性。
+```
+~/.autopilot/                    # 默认；可用 AUTOPILOT_HOME 环境变量覆盖
+├── config.yaml                  # providers / agents / daemon / workspace_retention
+├── workflows/                   # 用户工作流
+│   └── req_dev/
+│       ├── workflow.yaml        # 阶段定义（推导状态 + 转换）
+│       └── workflow.ts          # 阶段函数 + setup_func + （可选）notify_func
+├── prompts/                     # 用户提示词模板
+└── runtime/
+    ├── workflow.db              # SQLite
+    ├── daemon.pid               # PID + 监听信息
+    ├── locks/                   # 文件锁
+    └── tasks/<task-id>/workspace/  # 任务工作区（templated）
+```
 
-### 并发控制
+**升级流程**：`git pull` 框架代码 → `bun run dev upgrade` 跑新迁移；用户数据原地保留。
 
-文件锁 + SQLite 事务双重保障：
+## 设计决策
 
-1. **文件锁**（`infra.acquire_lock`）：防止同一任务被多个进程同时执行
-2. **SQLite 事务**（`BEGIN IMMEDIATE`）：防止状态转换竞态条件
+### 为什么 Push 模型而不是事件循环驱动？
 
-两者缺一不可：
-- 只有文件锁：状态读取和更新之间仍可能被打断
-- 只有数据库事务：两个进程可能同时进入阶段函数执行重复工作
+每阶段独立子进程的 Push 模型给我们：
+- **天然隔离**：单阶段崩溃不影响其他任务
+- **简化超时**：每个进程只管自己的超时，不用嵌套
+- **资源高效**：空闲时 0 CPU，daemon 也只是事件订阅
+
+事件总线（在 Push 之上叠加）解决：
+- WS 实时推送给客户端
+- requirement-scheduler 响应 `status-changed` 事件创建 task
+- pr-poller 异步把 GitHub 状态注入回 DB
+
+### 并发控制：文件锁 + 事务双重保障
+
+1. **文件锁**（`infra.acquireLock`）防止同一 task 被多个 phase 进程同时执行
+2. **SQLite `db.transaction()` 事务**（bun:sqlite 的同步事务包装）防止状态读取-更新之间的竞态
+
+文件锁还有 PID 存活检测：daemon 启动时清掉无主僵尸锁，避免上次 crash 后死锁。
+
+### Watcher 作为 Push 的兜底
+
+Push 偶尔会失败（spawn 进程失败 / OOM 杀子进程 / 阶段函数 hang），Watcher 定期扫 `running_*` 状态 + 锁文件不存在 + 时间超阈值的 task → 触发 `fail_trigger` 重试或 → 标 `failed`。
+
+### Daemon 单进程：简化共享状态
+
+需求队列、子模块组级锁、活跃 task 计数等都需要"一致视图"。单 daemon 进程让 event-bus 和内存数据结构（如 pending-questions）天然只有一份。多机扩展（如果有那天）走"daemon 集群 + DB 锁"路线。
+
+### 框架零业务知识
+
+`src/core/` 不允许引用任何工作流专属常量（如 phase 名 `design / develop`）。req_dev 业务全部装在 `examples/workflows/req_dev/workflow.ts` 里——包括跨父子 git 操作、`gh pr create`、子模块切分支、PR body 格式化。换工作流就换目录，框架不变。
+
+详见 [工作流开发指南](workflow-development.md)。
 
 ---
 
 ## 相关文档
 
 | 文档 | 说明 |
-|------|------|
+|---|---|
 | [5 分钟快速入门](quickstart.md) | 从安装到跑通第一个 demo |
-| [工作流开发指南](workflow-development.md) | YAML 定义语法、阶段函数编写规范 |
-| [状态机详解](state-machine.md) | 状态转换表、驳回机制、完整状态图 |
-| [插件开发指南](plugin-development.md) | 第三方插件开发、扩展点、框架 API |
+| [需求队列工作模式指南](requirement-queue.md) | 主用工作模式：chat 提需求 → 自动 PR |
+| [req_dev workflow 指南](req-dev-workflow.md) | 内置工作流 7 阶段细节 |
+| [状态机详解](state-machine.md) | 状态推导规则、驳回机制、完整状态图 |
+| [工作流开发指南](workflow-development.md) | YAML 字段参考、阶段函数编写规范 |
+| [插件开发指南](plugin-development.md) | 自定义工作流 / 通知后端 / Agent provider |
+| [需求队列设计文档](superpowers/specs/2026-05-06-requirement-queue-design.md) | 需求队列模式的设计推演 |
+| [子模块支持设计文档](superpowers/specs/2026-05-07-submodule-support-design.md) | P5 git submodule 集成的设计推演 |
 | [FAQ 与故障排查](faq.md) | 常见问题与解决方案 |
