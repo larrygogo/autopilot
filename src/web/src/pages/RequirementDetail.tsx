@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type Repo } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -56,19 +56,22 @@ export function RequirementDetail() {
   const [feedbackBody, setFeedbackBody] = useState("");
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [subPrs, setSubPrs] = useState<RequirementSubPr[]>([]);
 
   async function refresh() {
     if (!id) return;
     setLoading(true);
     try {
-      const [data, repoList] = await Promise.all([
+      const [data, repoList, sub] = await Promise.all([
         api.getRequirement(id),
         api.listRepos(),
+        api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
       ]);
       setReq(data.requirement);
       setFeedbacks(data.feedbacks);
       setSpecDraft(data.requirement.spec_md);
       setRepos(repoList);
+      setSubPrs(sub);
     } catch (e: unknown) {
       toast.error("加载失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -227,6 +230,34 @@ export function RequirementDetail() {
           </div>
         </div>
       </Card>
+
+      {/* 关联子模块 PR */}
+      {subPrs.length > 0 && (
+        <Card className="mb-6 p-5">
+          <h2 className="mb-3 text-sm font-semibold">
+            关联子模块 PR <span className="text-muted-foreground font-normal">（{subPrs.length}）</span>
+          </h2>
+          <ul className="space-y-2">
+            {subPrs.map((p) => (
+              <li key={p.id} className="flex items-center gap-2 text-xs">
+                <span className="font-mono font-medium text-muted-foreground">
+                  {p.child_repo_id}
+                </span>
+                <span className="text-muted-foreground">·</span>
+                <a
+                  href={p.pr_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-primary hover:underline font-mono"
+                >
+                  PR #{p.pr_number}
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {/* 主体：左右两栏 */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

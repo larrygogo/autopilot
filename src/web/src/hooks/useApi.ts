@@ -12,6 +12,9 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/repos/, // repos CRUD + healthcheck（Phase 1 新加）
   /^\/api\/fs\//, // 文件系统浏览（Phase 1 新加）
   /^\/api\/requirements/, // requirements CRUD（Phase 2）
+  /^\/api\/repos\/[\w.\-]+\/submodules$/,
+  /^\/api\/repos\/[\w.\-]+\/rediscover-submodules$/,
+  /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
 ];
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -259,6 +262,15 @@ export const api = {
   healthcheckRepo: (id: string) =>
     request<RepoHealthResult>(`/api/repos/${id}/healthcheck`, { method: "POST" }),
 
+  // Submodules（仅查询；自动发现写在 healthcheck 里）
+  listSubmodules: (parentId: string) =>
+    request<{ submodules: Repo[] }>(`/api/repos/${parentId}/submodules`).then((r) => r.submodules),
+  rediscoverSubmodules: (parentId: string) =>
+    request<RediscoverSubmodulesResult>(
+      `/api/repos/${parentId}/rediscover-submodules`,
+      { method: "POST" },
+    ),
+
   // 文件系统浏览
   browseFs: (path?: string, showHidden = false) => {
     const params = new URLSearchParams();
@@ -326,6 +338,9 @@ export const api = {
     request<{ requirement: Requirement }>(`/api/requirements/${id}/cancel`, {
       method: "POST",
     }).then((r) => r.requirement),
+
+  listRequirementSubPrs: (id: string) =>
+    request<{ sub_prs: RequirementSubPr[] }>(`/api/requirements/${id}/sub-prs`).then((r) => r.sub_prs),
 };
 
 export interface ProviderItem {
@@ -436,6 +451,8 @@ export interface Repo {
   default_branch: string;
   github_owner: string | null;
   github_repo: string | null;
+  parent_repo_id: string | null;  // 非空表示此 repo 是子模块
+  submodule_path: string | null;  // 父 repo 内相对路径
   created_at: number;
   updated_at: number;
 }
@@ -467,6 +484,21 @@ export interface RequirementFeedback {
   body: string;
   github_review_id: string | null;
   created_at: number;
+}
+
+export interface RequirementSubPr {
+  id: number;
+  requirement_id: string;
+  child_repo_id: string;
+  pr_url: string;
+  pr_number: number;
+  created_at: number;
+}
+
+export interface RediscoverSubmodulesResult {
+  added: Array<{ id: string; alias: string; submodule_path: string | null }>;
+  existing_count: number;
+  warnings: string[];
 }
 
 export interface FsListResult {

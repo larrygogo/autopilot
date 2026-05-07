@@ -115,3 +115,97 @@ describe("tickRepo", () => {
     expect(r2Active.length).toBe(0); // repo-002 无活跃任务，可拉新
   });
 });
+
+describe("tickRepo 组级锁（父 + 子模块同组 1 active）", () => {
+  let db: Database;
+
+  beforeAll(() => {
+    db = new Database(":memory:");
+    migrate001(db);
+    migrate004(db);
+    migrate005(db);
+    migrate006(db);
+    _setDbForTest(db);
+    // 父 repo
+    createRepo({ id: "repo-p1", alias: "parent1", path: "/tmp/p1", default_branch: "main" });
+    // 子模块（parent_repo_id = repo-p1）
+    createRepo({
+      id: "repo-c1",
+      alias: "child1",
+      path: "/tmp/p1/child1",
+      default_branch: "main",
+      parent_repo_id: "repo-p1",
+      submodule_path: "child1",
+    });
+    // 另一独立父 repo
+    createRepo({ id: "repo-p2", alias: "parent2", path: "/tmp/p2", default_branch: "main" });
+  });
+
+  afterAll(() => {
+    _setDbForTest(null);
+    db.close();
+  });
+
+  beforeEach(() => {
+    db.run("DELETE FROM requirement_feedbacks");
+    db.run("DELETE FROM requirements");
+  });
+
+  it("子模块上的 running 阻塞父 repo 拉新（组级锁）", async () => {
+    const idChild = nextRequirementId();
+    createRequirement({ id: idChild, repo_id: "repo-c1", title: "child-task" });
+    setRequirementStatus(idChild, "clarifying");
+    setRequirementStatus(idChild, "ready");
+    setRequirementStatus(idChild, "queued");
+    setRequirementStatus(idChild, "running");
+
+    const idParent = nextRequirementId();
+    createRequirement({ id: idParent, repo_id: "repo-p1", title: "parent-task" });
+    setRequirementStatus(idParent, "clarifying");
+    setRequirementStatus(idParent, "ready");
+    setRequirementStatus(idParent, "queued");
+
+    await tickRepo("repo-p1");
+    expect(getRequirementById(idParent)?.status).toBe("queued");
+  });
+
+  it("传入子模块 id 也走同一组（groupId 归一化）", async () => {
+    const idParent = nextRequirementId();
+    createRequirement({ id: idParent, repo_id: "repo-p1", title: "parent-task" });
+    setRequirementStatus(idParent, "clarifying");
+    setRequirementStatus(idParent, "ready");
+    setRequirementStatus(idParent, "queued");
+    setRequirementStatus(idParent, "running");
+
+    await tickRepo("repo-c1");
+    expect(getRequirementById(idParent)?.status).toBe("running");
+  });
+
+  it("组级 candidate 仅从组主仓库（父）拉取，子模块上的 queued 被忽略", async () => {
+    const idChildQueued = nextRequirementId();
+    createRequirement({ id: idChildQueued, repo_id: "repo-c1", title: "child-only-queued" });
+    setRequirementStatus(idChildQueued, "clarifying");
+    setRequirementStatus(idChildQueued, "ready");
+    setRequirementStatus(idChildQueued, "queued");
+
+    await tickRepo("repo-p1");
+    expect(getRequirementById(idChildQueued)?.status).toBe("queued");
+  });
+
+  it("不同组之间不互相阻塞", async () => {
+    const idA = nextRequirementId();
+    createRequirement({ id: idA, repo_id: "repo-c1", title: "group1-running" });
+    setRequirementStatus(idA, "clarifying");
+    setRequirementStatus(idA, "ready");
+    setRequirementStatus(idA, "queued");
+    setRequirementStatus(idA, "running");
+
+    const all2 = listRequirements({ repo_id: "repo-p2" });
+    const active2 = all2.filter((r) => r.status === "running" || r.status === "fix_revision");
+    expect(active2.length).toBe(0);
+
+    const all1 = listRequirements({ repo_id: "repo-c1" });
+    const active1 = all1.filter((r) => r.status === "running" || r.status === "fix_revision");
+    expect(active1.length).toBe(1);
+  });
+});

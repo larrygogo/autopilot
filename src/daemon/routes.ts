@@ -44,7 +44,8 @@ import {
   nextRepoId,
 } from "../core/repos";
 import { checkRepoHealth } from "../core/repo-health";
-import { discoverSubmodules } from "../core/submodules";
+import { discoverSubmodules, listSubmodules } from "../core/submodules";
+import { listSubPrs } from "../core/requirement-sub-prs";
 import {
   listRequirements,
   getRequirementById,
@@ -738,6 +739,15 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
     }
 
+    // GET /api/repos/:id/submodules
+    const repoSubmodulesMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)\/submodules$/);
+    if (method === "GET" && repoSubmodulesMatch) {
+      const repo = getRepoById(repoSubmodulesMatch);
+      if (!repo) return error("repo not found", 404);
+      // 子模块自身 / 普通父 repo 都按 listSubmodules 走（前者返回空数组）
+      return json({ submodules: listSubmodules(repoSubmodulesMatch) });
+    }
+
     // ─────────── Requirements ───────────
 
     // GET /api/requirements
@@ -841,6 +851,14 @@ export async function handleRequest(req: Request): Promise<Response> {
       } catch (e: unknown) {
         return error((e as Error).message);
       }
+    }
+
+    // GET /api/requirements/:id/sub-prs
+    const reqSubPrsMatch = extractParam(path, /^\/api\/requirements\/([\w.\-]+)\/sub-prs$/);
+    if (method === "GET" && reqSubPrsMatch) {
+      const r = getRequirementById(reqSubPrsMatch);
+      if (!r) return error("requirement not found", 404);
+      return json({ sub_prs: listSubPrs(reqSubPrsMatch) });
     }
 
     // GET|PUT|DELETE /api/requirements/:id
