@@ -285,20 +285,45 @@ export async function run_develop(taskId: string): Promise<void> {
   const branch = task["branch"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
+  // 1. 父 repo 切默认分支拉新
   runGit(["checkout", defaultBranch], repoPath);
   runGit(["pull", "--ff-only"], repoPath);
+
+  // 2. 父 repo 切到 feat 分支
   const checkoutNew = runGit(["checkout", "-b", branch], repoPath, false);
   if (checkoutNew.exitCode !== 0) {
     runGit(["checkout", branch], repoPath);
   }
 
+  // 3. 各子模块也切到 feat 分支
+  const submodules = getTaskSubmodules(task);
+  for (const sm of submodules) {
+    runGitInSubmodule(sm, ["checkout", sm.default_branch], false);
+    runGitInSubmodule(sm, ["pull", "--ff-only", "origin", sm.default_branch], false);
+    const smCheckoutNew = runGitInSubmodule(sm, ["checkout", "-b", branch], false);
+    if (smCheckoutNew.exitCode !== 0) {
+      runGitInSubmodule(sm, ["checkout", branch], false);
+    }
+  }
+
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
+
+  // 4. 构造 prompt，加可改路径段
+  let submodulesSection = "";
+  if (submodules.length > 0) {
+    submodulesSection = `\n\n## 可改路径\n\n父仓库根：\`${repoPath}\`\n\n子模块（在子模块路径下改代码就行，不要切分支也不要 commit/push）：\n`;
+    for (const sm of submodules) {
+      submodulesSection += `- \`${sm.submodule_path}/\` — ${sm.alias}\n`;
+    }
+  }
 
   const prompt =
     `你是一位高级开发工程师。请根据以下技术方案进行开发。\n\n` +
     `## 技术方案\n${planContent}\n\n` +
-    `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。`;
+    `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。\n` +
+    `写完代码后不要 commit、不要 push，commit 由后续步骤统一处理。` +
+    submodulesSection;
 
   const agent = getAgent("developer", task.workflow);
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
@@ -306,10 +331,29 @@ export async function run_develop(taskId: string): Promise<void> {
   const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
   writeFileSync(reportPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
 
-  const statusResult = runGit(["status", "--porcelain"], repoPath);
-  if (statusResult.stdout.trim()) {
-    runGit(["add", "-A"], repoPath);
+  // 5. 扫每个子模块，有改动 → 在子模块内 commit
+  for (const sm of submodules) {
+    if (submoduleHasChanges(sm)) {
+      runGitInSubmodule(sm, ["add", "-A"]);
+      runGitInSubmodule(sm, ["commit", "-m", `feat: ${task.title}`]);
+    }
+  }
+
+  // 6. 父 repo: git add -A 包含子模块 SHA bump + 父自身改动，再统一 commit
+  runGit(["add", "-A"], repoPath);
+  const cachedProc = Bun.spawnSync(
+    ["git", "diff", "--cached", "--quiet"],
+    { cwd: repoPath }
+  );
+  const hasParentStaged = cachedProc.exitCode !== 0; // exitCode=1 表示有 staged 改动
+  if (hasParentStaged) {
     runGit(["commit", "-m", `feat: ${task.title}`], repoPath);
+  }
+
+  // 7. 验证：父 repo 至少有 1 个新 commit（含 SHA bump 也算）
+  const logResult = runGit(["log", `${defaultBranch}...HEAD`, "--oneline"], repoPath, false);
+  if (!logResult.stdout.trim()) {
+    throw new Error("develop 阶段：开发完成后父仓库没有新 commit，请检查 agent 输出");
   }
 
   transition(taskId, "develop_complete", {
