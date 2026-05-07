@@ -8,6 +8,7 @@ import { runPendingMigrations } from "../core/migrate";
 import { rebuildIndexFromManifests, rebuildManifestsFromIndex } from "../core/rebuild-index";
 import { discover } from "../core/registry";
 import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
+import { registerWorkflowCommands } from "./workflow";
 import {
   readPid,
   isProcessAlive,
@@ -495,31 +496,14 @@ task
   });
 
 // ──────────────────────────────────────────────
-// workflow — 工作流管理
+// workflow — 工作流管理（list / show / create / edit / delete / export / import）
 // ──────────────────────────────────────────────
 
-const workflow = program.command("workflow").description("工作流管理");
-
-workflow
-  .command("list")
-  .description("列出已注册工作流")
-  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (opts: { port: string }) => {
-    const client = getClient(opts);
-    await ensureDaemon(client);
-
-    const workflows = await client.listWorkflows();
-    if (workflows.length === 0) {
-      console.log("暂无已注册工作流。");
-      return;
-    }
-
-    console.log(`已注册工作流（共 ${workflows.length} 个）：\n`);
-    for (const wf of workflows) {
-      const desc = wf.description ? `  — ${wf.description}` : "";
-      console.log(`  ${wf.name}${desc}`);
-    }
-  });
+registerWorkflowCommands(program, {
+  getClient,
+  ensureDaemon,
+  defaultPort: DEFAULT_PORT,
+});
 
 // ──────────────────────────────────────────────
 // chat — 对话

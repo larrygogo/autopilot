@@ -105,16 +105,66 @@ export class HttpClient {
 
   // ── Workflows ──
 
-  async listWorkflows(): Promise<{ name: string; description: string }[]> {
+  async listWorkflows(): Promise<{ name: string; description: string; source?: "db" | "file"; derives_from?: string | null }[]> {
     return this.request("/api/workflows");
   }
 
   async getWorkflow(name: string): Promise<Record<string, unknown>> {
-    return this.request(`/api/workflows/${name}`);
+    return this.request(`/api/workflows/${encodeURIComponent(name)}`);
   }
 
   async getWorkflowGraph(name: string): Promise<GraphData> {
-    return this.request(`/api/workflows/${name}/graph`);
+    return this.request(`/api/workflows/${encodeURIComponent(name)}/graph`);
+  }
+
+  async getWorkflowYaml(name: string): Promise<{ yaml: string }> {
+    return this.request(`/api/workflows/${encodeURIComponent(name)}/yaml`);
+  }
+
+  async saveWorkflowYaml(name: string, yaml: string): Promise<{ ok: boolean }> {
+    return this.request(`/api/workflows/${encodeURIComponent(name)}/yaml`, {
+      method: "PUT",
+      body: JSON.stringify({ yaml }),
+    });
+  }
+
+  async createWorkflow(body: {
+    name: string;
+    description?: string;
+    firstPhase?: string;
+    derives_from?: string;
+    yaml_content?: string;
+  }): Promise<{ ok: boolean; name: string; source?: string; dir?: string }> {
+    return this.request("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteWorkflow(name: string): Promise<{ ok: boolean }> {
+    return this.request(`/api/workflows/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /**
+   * 导出工作流的 yaml 纯文本（GET /api/workflows/:name/export 返回 text/yaml）。
+   * 不走 this.request（它默认 JSON.parse 响应体），需手写 fetch + text()。
+   */
+  async exportWorkflow(name: string): Promise<string> {
+    const res = await fetch(`${this.baseUrl}/api/workflows/${encodeURIComponent(name)}/export`);
+    if (!res.ok) {
+      // 错误响应可能是 JSON（带 error 字段），尝试解析；失败则用 statusText
+      let msg: string;
+      try {
+        const body = (await res.json()) as { error?: string };
+        msg = body.error ?? `HTTP ${res.status}`;
+      } catch {
+        msg = `HTTP ${res.status} ${res.statusText}`;
+      }
+      throw new Error(msg);
+    }
+    return res.text();
   }
 
   // ── Schedules ──

@@ -78,6 +78,13 @@ import {
   type WorkflowAgentEntry,
 } from "../core/registry";
 import {
+  listWorkflowsInDb,
+  getWorkflowFromDb,
+  createDbWorkflow,
+  updateDbWorkflow,
+  deleteDbWorkflow,
+} from "../core/workflows";
+import {
   loadConfigRaw,
   saveConfigRaw,
   loadDefaultsConfig,
@@ -1305,13 +1312,52 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     // GET /api/workflows
     if (method === "GET" && path === "/api/workflows") {
-      return json(listWorkflows());
+      const inMem = listWorkflows();              // registry 内存里的（含描述）
+      const dbRows = listWorkflowsInDb();          // DB 的来源 + derives_from
+      const sourceMap = new Map(dbRows.map((r) => [r.name, r]));
+      const result = inMem.map((wf) => {
+        const row = sourceMap.get(wf.name);
+        return {
+          ...wf,
+          source: row?.source ?? "file",
+          derives_from: row?.derives_from ?? null,
+        };
+      });
+      return json(result);
     }
 
-    // POST /api/workflows — 创建工作流脚手架
+    // POST /api/workflows — 创建工作流（脚手架 / DB 派生）
     if (method === "POST" && path === "/api/workflows") {
-      const body = await req.json() as { name?: string; description?: string; firstPhase?: string };
+      const body = await req.json() as {
+        name?: string;
+        description?: string;
+        firstPhase?: string;
+        derives_from?: string;
+        yaml_content?: string;
+      };
       if (typeof body.name !== "string" || !body.name) return error("name is required");
+
+      // 带 derives_from → 创建 DB 工作流
+      if (body.derives_from) {
+        if (typeof body.yaml_content !== "string") {
+          return error("derives_from 模式下 yaml_content 必填");
+        }
+        try {
+          const wf = createDbWorkflow({
+            name: body.name,
+            description: body.description ?? "",
+            derives_from: body.derives_from,
+            yaml_content: body.yaml_content,
+          });
+          await reload();
+          emit({ type: "workflow:reloaded", payload: {} });
+          return json({ ok: true, name: wf.name, source: wf.source }, 201);
+        } catch (e: unknown) {
+          return error(`创建失败：${e instanceof Error ? e.message : String(e)}`, 400);
+        }
+      }
+
+      // 否则走原文件脚手架
       try {
         const result = createWorkflow({
           name: body.name,
@@ -1320,15 +1366,28 @@ export async function handleRequest(req: Request): Promise<Response> {
         });
         await reload();
         emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true, name: body.name, dir: result.dir }, 201);
+        return json({ ok: true, name: body.name, source: "file", dir: result.dir }, 201);
       } catch (e: unknown) {
         return error(`创建失败：${e instanceof Error ? e.message : String(e)}`, 400);
       }
     }
 
-    // DELETE /api/workflows/:name — 删除工作流目录
+    // DELETE /api/workflows/:name — 删除工作流（区分 source）
     const wfDeleteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)$/);
     if (method === "DELETE" && wfDeleteMatch) {
+      const row = getWorkflowFromDb(wfDeleteMatch);
+      // DB 工作流走 deleteDbWorkflow
+      if (row && row.source === "db") {
+        try {
+          deleteDbWorkflow(wfDeleteMatch);
+          await reload();
+          emit({ type: "workflow:reloaded", payload: {} });
+          return json({ ok: true });
+        } catch (e: unknown) {
+          return error(`删除失败：${e instanceof Error ? e.message : String(e)}`, 400);
+        }
+      }
+      // 文件来源走原文件目录删除
       try {
         const ok = deleteWorkflowDir(wfDeleteMatch);
         if (!ok) return error("Workflow not found", 404);
@@ -1362,7 +1421,13 @@ export async function handleRequest(req: Request): Promise<Response> {
         const { func, ...rest } = p;
         return rest;
       });
-      return json({ ...safe, phases: safePhasesArr });
+      const row = getWorkflowFromDb(wfMatch);
+      return json({
+        ...safe,
+        phases: safePhasesArr,
+        source: row?.source ?? "file",
+        derives_from: row?.derives_from ?? null,
+      });
     }
 
     // GET /api/workflows/:name/graph
@@ -1468,9 +1533,31 @@ export async function handleRequest(req: Request): Promise<Response> {
     // GET /api/workflows/:name/yaml
     const yamlReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
     if (method === "GET" && yamlReadMatch) {
+      const row = getWorkflowFromDb(yamlReadMatch);
+      if (row && row.source === "db") {
+        return json({ yaml: row.yaml_content });
+      }
       const yaml = getWorkflowYaml(yamlReadMatch);
       if (yaml === null) return error("Workflow not found", 404);
       return json({ yaml });
+    }
+
+    // GET /api/workflows/:name/export — 纯 yaml 文本响应（用于 CLI export 备份）
+    // 注意：必须放在 /api/workflows/:name 通配匹配前面（位于 yaml 端点附近避免被吃掉）
+    const exportMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/export$/);
+    if (method === "GET" && exportMatch) {
+      const row = getWorkflowFromDb(exportMatch);
+      let yaml: string | null = null;
+      if (row && row.source === "db") {
+        yaml = row.yaml_content;
+      } else {
+        yaml = getWorkflowYaml(exportMatch);
+      }
+      if (yaml === null) return error("Workflow not found", 404);
+      return new Response(yaml, {
+        status: 200,
+        headers: { "Content-Type": "text/yaml; charset=utf-8" },
+      });
     }
 
     // GET /api/workflows/:name/ts — 读 workflow.ts 源码
@@ -1481,11 +1568,25 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json({ content });
     }
 
-    // PUT /api/workflows/:name/yaml
+    // PUT /api/workflows/:name/yaml — 区分 source：db 走 updateDbWorkflow，file 写文件
     const yamlWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
     if (method === "PUT" && yamlWriteMatch) {
       const body = await req.json() as { yaml: string };
       if (typeof body.yaml !== "string") return error("yaml field is required");
+
+      const row = getWorkflowFromDb(yamlWriteMatch);
+      if (row && row.source === "db") {
+        try {
+          updateDbWorkflow(yamlWriteMatch, { yaml_content: body.yaml });
+          await reload();
+          emit({ type: "workflow:reloaded", payload: {} });
+          return json({ ok: true });
+        } catch (e: unknown) {
+          return error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      // file 来源 → 写文件（保持原行为）
       try {
         saveWorkflowYaml(yamlWriteMatch, body.yaml);
         await reload();
