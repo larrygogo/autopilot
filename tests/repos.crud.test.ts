@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   createRepo,
@@ -13,6 +13,7 @@ import { _setDbForTest, initDb } from "../src/core/db";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
 import { up as migrate004 } from "../src/migrations/004-repos";
+import { up as migrate006 } from "../src/migrations/006-submodules";
 import { checkRepoHealth, parseGithubFromRemote } from "../src/core/repo-health";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -33,6 +34,7 @@ describe("repos CRUD", () => {
     migrate001(sqlite);
     migrate002(sqlite);
     migrate004(sqlite);
+    migrate006(sqlite);
   });
 
   afterAll(() => {
@@ -201,5 +203,92 @@ describe("parseGithubFromRemote", () => {
       owner: "larrygogo",
       repo: "autopilot",
     });
+  });
+});
+
+describe("repos submodule 字段（P5.1）", () => {
+  let db: Database;
+
+  beforeAll(() => {
+    db = new Database(":memory:");
+    _setDbForTest(db);
+    initDb();
+    migrate001(db);
+    migrate002(db);
+    migrate004(db);
+    migrate006(db);
+  });
+
+  afterAll(() => {
+    _setDbForTest(null);
+    db.close();
+  });
+
+  beforeEach(() => {
+    // 清表避免 case 污染
+    db.run("DELETE FROM repos");
+  });
+
+  it("createRepo 接受 parent_repo_id + submodule_path", () => {
+    createRepo({
+      id: "repo-parent",
+      alias: "parent",
+      path: "/tmp/parent",
+    });
+    createRepo({
+      id: "repo-child",
+      alias: "child",
+      path: "/tmp/parent/child",
+      parent_repo_id: "repo-parent",
+      submodule_path: "child",
+    });
+    const child = getRepoById("repo-child");
+    expect(child?.parent_repo_id).toBe("repo-parent");
+    expect(child?.submodule_path).toBe("child");
+    const parent = getRepoById("repo-parent");
+    expect(parent?.parent_repo_id).toBeNull();
+    expect(parent?.submodule_path).toBeNull();
+  });
+
+  it("listRepos 默认不含子模块（仅父 repo）", () => {
+    createRepo({ id: "repo-parent", alias: "parent", path: "/tmp/parent" });
+    createRepo({
+      id: "repo-child",
+      alias: "child",
+      path: "/tmp/parent/child",
+      parent_repo_id: "repo-parent",
+      submodule_path: "child",
+    });
+    const list = listRepos();
+    expect(list.find(r => r.id === "repo-child")).toBeUndefined();
+    expect(list.find(r => r.id === "repo-parent")).toBeDefined();
+  });
+
+  it("listRepos({ includeSubmodules: true }) 含全部", () => {
+    createRepo({ id: "repo-parent", alias: "parent", path: "/tmp/parent" });
+    createRepo({
+      id: "repo-child",
+      alias: "child",
+      path: "/tmp/parent/child",
+      parent_repo_id: "repo-parent",
+      submodule_path: "child",
+    });
+    const list = listRepos({ includeSubmodules: true });
+    expect(list.find(r => r.id === "repo-child")).toBeDefined();
+    expect(list.find(r => r.id === "repo-parent")).toBeDefined();
+  });
+
+  it("deleteRepo 级联删子模块", () => {
+    createRepo({ id: "repo-parent", alias: "parent", path: "/tmp/parent" });
+    createRepo({
+      id: "repo-child",
+      alias: "child",
+      path: "/tmp/parent/child",
+      parent_repo_id: "repo-parent",
+      submodule_path: "child",
+    });
+    deleteRepo("repo-parent");
+    expect(getRepoById("repo-parent")).toBeNull();
+    expect(getRepoById("repo-child")).toBeNull();
   });
 });

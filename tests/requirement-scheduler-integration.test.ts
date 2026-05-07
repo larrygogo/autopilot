@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate004 } from "../src/migrations/004-repos";
 import { up as migrate005 } from "../src/migrations/005-requirements";
+import { up as migrate006 } from "../src/migrations/006-submodules";
 import { _setDbForTest } from "../src/core/db";
 import { createRepo } from "../src/core/repos";
 import {
@@ -22,6 +23,7 @@ describe("调度器集成（不走真实 task runner，验证状态流转）", (
     migrate001(db);
     migrate004(db);
     migrate005(db);
+    migrate006(db);
     _setDbForTest(db);
     createRepo({ id: "repo-A", alias: "rA", path: "/tmp/A", default_branch: "main" });
     createRepo({ id: "repo-B", alias: "rB", path: "/tmp/B", default_branch: "main" });
