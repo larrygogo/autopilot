@@ -99,11 +99,32 @@ export const api = {
     request<{ total: number; tasks: Array<{ taskId: string; size: number; mtime: number; exists: boolean }> }>(
       `/api/workspaces/usage`,
     ),
-  listWorkflows: () => request<any[]>("/api/workflows"),
-  getWorkflow: (name: string) => request<any>(`/api/workflows/${name}`),
+  listWorkflows: () =>
+    request<
+      Array<{
+        name: string;
+        description: string;
+        source?: "db" | "file";
+        derives_from?: string | null;
+      }>
+    >("/api/workflows"),
+  getWorkflow: (name: string) =>
+    request<{
+      name: string;
+      description?: string;
+      source?: "db" | "file";
+      derives_from?: string | null;
+      [key: string]: unknown;
+    }>(`/api/workflows/${name}`),
   getWorkflowGraph: (name: string) => request<any>(`/api/workflows/${name}/graph`),
-  createWorkflow: (body: { name: string; description?: string; firstPhase?: string }) =>
-    request<{ ok: boolean; name: string; dir: string }>("/api/workflows", {
+  createWorkflow: (body: {
+    name: string;
+    description?: string;
+    firstPhase?: string;
+    derives_from?: string;
+    yaml_content?: string;
+  }) =>
+    request<{ ok: boolean; name: string; source?: string; dir?: string }>("/api/workflows", {
       method: "POST", body: JSON.stringify(body),
     }),
   deleteWorkflow: (name: string) =>
