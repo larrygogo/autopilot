@@ -2,8 +2,19 @@ import type { TransitionTable } from "./state-machine";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
 import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync } from "fs";
+import { homedir } from "os";
 import { join } from "path";
 import { parse as parseYaml, parseDocument, type Document } from "yaml";
+import {
+  syncFileWorkflowsToDb,
+  listWorkflowsInDb,
+  type FileWorkflowScan,
+} from "./workflows";
+
+/** 动态读取 AUTOPILOT_HOME，便于测试通过 env 注入临时目录 */
+function getAutopilotHomeDynamic(): string {
+  return process.env.AUTOPILOT_HOME || join(homedir(), ".autopilot");
+}
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -618,33 +629,205 @@ function buildParallelTransitions(
 // ──────────────────────────────────────────────
 
 /**
- * 扫描 AUTOPILOT_HOME/workflows/ 子目录，注册所有 YAML 工作流
+ * 由 DB 工作流的 yaml 派生出一个完整 WorkflowDefinition：
+ * - 解析 yaml 拿 phases / 元信息
+ * - 校验 phase name 必须 ⊆ base 的 phase 集合
+ * - 复用 base 的 phase 函数引用（不重新加载 TS）
+ *
+ * W1 限制：DB 工作流不支持 parallel 子句（W3 视情况扩）。
  */
-export async function discover(): Promise<void> {
-  const userWfDir = join(AUTOPILOT_HOME, "workflows");
-  if (!existsSync(userWfDir)) return;
-
-  let entries: string[];
-  try {
-    entries = readdirSync(userWfDir);
-  } catch {
-    return;
+function composeDbWorkflow(
+  name: string,
+  description: string,
+  yamlContent: string,
+  base: WorkflowDefinition,
+): WorkflowDefinition {
+  const parsed = parseYaml(yamlContent) as { phases?: unknown[] } | null;
+  if (!parsed || !Array.isArray(parsed.phases)) {
+    throw new Error(`DB 工作流 ${name} yaml 缺少 phases 字段`);
   }
 
-  for (const entry of entries.sort()) {
-    if (entry.startsWith("_")) continue;
-    const subDir = join(userWfDir, entry);
-    const yamlPath = join(subDir, "workflow.yaml");
-    if (!existsSync(yamlPath)) continue;
+  // 收集 base 已注册的 phase name 集合（含 parallel 子项）
+  const basePhaseFunctions = new Set<string>();
+  for (const p of base.phases) {
+    if (isParallelPhase(p)) {
+      for (const sub of p.parallel.phases) basePhaseFunctions.add(sub.name);
+    } else {
+      basePhaseFunctions.add((p as PhaseDefinition).name);
+    }
+  }
 
+  const newPhases: WorkflowDefinition["phases"] = [];
+  for (const ph of parsed.phases) {
+    if (typeof ph !== "object" || ph === null) {
+      throw new Error(`DB 工作流 ${name} phase 项必须是对象`);
+    }
+    const phaseObj = ph as Record<string, unknown>;
+    const phName = phaseObj.name;
+    if (typeof phName !== "string") {
+      throw new Error(`DB 工作流 ${name} phase 缺 name`);
+    }
+    if (!basePhaseFunctions.has(phName)) {
+      throw new Error(
+        `DB 工作流 ${name} 含 base "${base.name}" 没有的 phase: ${phName}`
+      );
+    }
+    const basePhase = findFlatPhase(base, phName);
+    if (!basePhase) {
+      throw new Error(`base ${base.name} 内部找不到 phase ${phName}（不应发生）`);
+    }
+    const merged: PhaseDefinition = { ...basePhase };
+    if (typeof phaseObj.timeout === "number") merged.timeout = phaseObj.timeout;
+    if (typeof phaseObj.agent === "string") merged.agent = phaseObj.agent;
+    if (typeof phaseObj.label === "string") merged.label = phaseObj.label;
+    if (typeof phaseObj.reject === "string") {
+      merged.jump_trigger = `${phName}_reject`;
+      merged.jump_target = phaseObj.reject;
+    }
+    newPhases.push(merged);
+  }
+
+  const composed: WorkflowDefinition = {
+    name,
+    description,
+    phases: newPhases,
+    initial_state: base.initial_state,
+    terminal_states: base.terminal_states,
+  };
+  if (base.agents !== undefined) composed.agents = base.agents;
+  if (base.chat_agent !== undefined) composed.chat_agent = base.chat_agent;
+  if (base.workspace !== undefined) composed.workspace = base.workspace;
+  if (base.setup_func !== undefined) composed.setup_func = base.setup_func;
+  if (base.notify_func !== undefined) composed.notify_func = base.notify_func;
+  if (base.config !== undefined) composed.config = base.config;
+  if (base.hooks !== undefined) composed.hooks = base.hooks;
+  return composed;
+}
+
+/** 在 base 的 phases 里扁平查找指定 name，含 parallel 子项 */
+function findFlatPhase(
+  base: WorkflowDefinition,
+  name: string,
+): PhaseDefinition | null {
+  for (const p of base.phases) {
+    if (isParallelPhase(p)) {
+      for (const sub of p.parallel.phases) {
+        if (sub.name === name) return sub;
+      }
+    } else if ((p as PhaseDefinition).name === name) {
+      return p as PhaseDefinition;
+    }
+  }
+  return null;
+}
+
+/**
+ * Discover 多源加载（W1）：
+ *   1. 扫文件系统 ~/.autopilot/workflows/（沿用 loadYamlWorkflow 加载 yaml + ts）
+ *   2. 把扫到的文件工作流同步到 workflows 表（source=file 镜像）
+ *   3. 扫 workflows 表所有行：
+ *      - source=file：用 step 1 的内存 def 注册
+ *      - source=db：解析 yaml，校验 phase name ⊆ derives_from 的 phase 集合，
+ *        从 base 复制 phase 函数引用，注册
+ */
+export async function discover(): Promise<void> {
+  const userWfDir = join(getAutopilotHomeDynamic(), "workflows");
+
+  // (1) 扫文件系统
+  const fileDefs = new Map<string, WorkflowDefinition>();
+  const scanInputs: FileWorkflowScan[] = [];
+  if (existsSync(userWfDir)) {
+    let entries: string[] = [];
     try {
-      const wf = await loadYamlWorkflow(subDir);
-      if (!wf) continue;
-      register(wf);
-      log.debug("注册 YAML 工作流：%s（来自 %s）", wf.name, subDir);
+      entries = readdirSync(userWfDir).sort();
+    } catch {
+      entries = [];
+    }
+    for (const entry of entries) {
+      if (entry.startsWith("_")) continue;
+      const subDir = join(userWfDir, entry);
+      const yamlPath = join(subDir, "workflow.yaml");
+      if (!existsSync(yamlPath)) continue;
+      try {
+        const wf = await loadYamlWorkflow(subDir);
+        if (!wf) continue;
+        fileDefs.set(wf.name, wf);
+        const yaml_content = readFileSync(yamlPath, "utf-8");
+        scanInputs.push({
+          name: wf.name,
+          description: wf.description ?? "",
+          yaml_content,
+          file_path: subDir,
+        });
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        log.warn("加载 YAML 工作流 %s 失败：%s", subDir, message);
+      }
+    }
+  }
+
+  // (2) 同步到 DB
+  let syncOk = true;
+  try {
+    syncFileWorkflowsToDb(scanInputs);
+  } catch (e: unknown) {
+    syncOk = false;
+    log.error(
+      "同步文件工作流到 DB 失败：%s",
+      e instanceof Error ? e.message : String(e)
+    );
+  }
+
+  // (3) 从 DB 读所有行注册；DB 不可用时回退为仅注册文件
+  let rows: ReturnType<typeof listWorkflowsInDb> = [];
+  if (syncOk) {
+    try {
+      rows = listWorkflowsInDb();
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      log.warn("加载 YAML 工作流 %s 失败：%s", subDir, message);
+      log.error(
+        "读取 workflows 表失败：%s",
+        e instanceof Error ? e.message : String(e)
+      );
+    }
+  }
+  if (rows.length === 0 && fileDefs.size > 0) {
+    // DB 不可用 / 表不存在 / 同步失败 — 至少把文件工作流注册进去
+    for (const def of fileDefs.values()) {
+      register(def);
+      log.debug("注册 file 工作流（仅文件，DB 同步未就绪）：%s", def.name);
+    }
+    return;
+  }
+  for (const row of rows) {
+    if (row.source === "file") {
+      const def = fileDefs.get(row.name);
+      if (!def) {
+        log.error("DB workflow %s source=file 但内存没有对应 def，跳过", row.name);
+        continue;
+      }
+      register(def);
+      log.debug("注册 file 工作流：%s（来自 %s）", row.name, row.file_path);
+    } else {
+      const base = fileDefs.get(row.derives_from!);
+      if (!base) {
+        log.error(
+          "DB 工作流 %s derives_from %s 不存在或未加载成功，跳过",
+          row.name,
+          row.derives_from
+        );
+        continue;
+      }
+      try {
+        const wf = composeDbWorkflow(row.name, row.description, row.yaml_content, base);
+        register(wf);
+        log.debug("注册 db 工作流：%s（派生自 %s）", row.name, row.derives_from);
+      } catch (e: unknown) {
+        log.error(
+          "加载 DB 工作流 %s 失败：%s",
+          row.name,
+          e instanceof Error ? e.message : String(e)
+        );
+      }
     }
   }
 }
