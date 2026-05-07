@@ -4,6 +4,7 @@ import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
 import { up as migrate004 } from "../src/migrations/004-repos";
 import { up as migrate005 } from "../src/migrations/005-requirements";
+import { up as migrate006 } from "../src/migrations/006-submodules";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { createRepo } from "../src/core/repos";
 import {
@@ -28,6 +29,7 @@ describe("migration 005-requirements", () => {
     migrate002(db);
     migrate004(db);
     migrate005(db);
+    migrate006(db);
 
     const cols = db.query<{ name: string }, []>("PRAGMA table_info(requirements)").all();
     const names = cols.map(c => c.name).sort();
@@ -53,6 +55,7 @@ describe("migration 005-requirements", () => {
     migrate002(db);
     migrate004(db);
     migrate005(db);
+    migrate006(db);
 
     const cols = db.query<{ name: string }, []>("PRAGMA table_info(requirement_feedbacks)").all();
     const names = cols.map(c => c.name).sort();
@@ -72,6 +75,7 @@ describe("migration 005-requirements", () => {
     migrate002(db);
     migrate004(db);
     migrate005(db);
+    migrate006(db);
     db.exec("PRAGMA foreign_keys = ON;");
     expect(() => {
       db.run(
@@ -87,6 +91,7 @@ describe("migration 005-requirements", () => {
     migrate002(db);
     migrate004(db);
     migrate005(db);
+    migrate006(db);
     const idxs = db
       .query<{ name: string }, []>(
         "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name IN ('requirements','requirement_feedbacks')"
@@ -115,6 +120,7 @@ describe("requirements CRUD + 状态机", () => {
     migrate002(testDb);
     migrate004(testDb);
     migrate005(testDb);
+    migrate006(testDb);
     // 准备关联的 repo 记录
     createRepo({ id: "repo-001", alias: "test", path: "/tmp/x", default_branch: "main" });
   });

@@ -5,6 +5,7 @@ import { _clearRegistry, register } from "../src/core/registry";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
 import { up as migrate004 } from "../src/migrations/004-repos";
+import { up as migrate006 } from "../src/migrations/006-submodules";
 import { createRepo } from "../src/core/repos";
 import { startTaskFromTemplate } from "../src/core/task-factory";
 import { setup_req_dev_task } from "../examples/workflows/req_dev/workflow";
@@ -21,6 +22,7 @@ describe("req_dev e2e smoke", () => {
     migrate001(sqlite);
     migrate002(sqlite);
     migrate004(sqlite);
+    migrate006(sqlite);
 
     // 创建测试 repo
     createRepo({

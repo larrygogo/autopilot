@@ -5,6 +5,7 @@ import { _setDbForTest, initDb } from "../src/core/db";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
 import { up as migrate004 } from "../src/migrations/004-repos";
+import { up as migrate006 } from "../src/migrations/006-submodules";
 import { createRepo } from "../src/core/repos";
 
 describe("setup_req_dev_task", () => {
@@ -17,6 +18,7 @@ describe("setup_req_dev_task", () => {
     migrate001(sqlite);
     migrate002(sqlite);
     migrate004(sqlite);
+    migrate006(sqlite);
     createRepo({
       id: "repo-001",
       alias: "autopilot",
