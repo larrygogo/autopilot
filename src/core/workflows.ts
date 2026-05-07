@@ -174,3 +174,57 @@ export function deleteDbWorkflow(name: string): void {
   const db = getDb();
   db.run("DELETE FROM workflows WHERE name = ? AND source = 'db'", [name]);
 }
+
+// ──────────────────────────────────────────────
+// 整体同步：文件扫描 → DB
+// ──────────────────────────────────────────────
+
+export interface FileWorkflowScan {
+  name: string;
+  description: string;
+  yaml_content: string;
+  file_path: string;
+}
+
+export interface SyncResult {
+  added: string[];
+  updated: string[];
+  removed: string[];
+}
+
+/**
+ * 把一次文件扫描结果同步到 DB。
+ *
+ * 行为：
+ *   - 文件里有，DB 里没 → INSERT，记入 added
+ *   - 文件里有，DB 里也有 → 比较 description / yaml_content / file_path，
+ *     有任一不同则 UPDATE 并记入 updated
+ *   - DB 中 source=file 但本次扫描没看到 → DELETE，记入 removed（孤儿清理）
+ *   - DB 中 source=db 的行不受影响
+ */
+export function syncFileWorkflowsToDb(scans: FileWorkflowScan[]): SyncResult {
+  const added: string[] = [];
+  const updated: string[] = [];
+
+  const seen = new Set<string>();
+  for (const scan of scans) {
+    seen.add(scan.name);
+    const existing = getWorkflowFromDb(scan.name);
+    if (!existing || existing.source !== "file") {
+      upsertFileWorkflow(scan);
+      added.push(scan.name);
+      continue;
+    }
+    const changed =
+      existing.description !== scan.description ||
+      existing.yaml_content !== scan.yaml_content ||
+      existing.file_path !== scan.file_path;
+    if (changed) {
+      upsertFileWorkflow(scan);
+      updated.push(scan.name);
+    }
+  }
+
+  const removed = deleteOrphanFileWorkflows(seen);
+  return { added: added.sort(), updated: updated.sort(), removed: removed.sort() };
+}
