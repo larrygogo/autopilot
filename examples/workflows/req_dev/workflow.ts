@@ -161,6 +161,7 @@ export async function run_design(taskId: string): Promise<void> {
 
   runGit(["checkout", defaultBranch], repoPath);
   runGit(["pull", "--ff-only"], repoPath);
+  runGit(["submodule", "update", "--init", "--recursive"], repoPath, false);
 
   const requirement = ((task["requirement"] as string | undefined) ?? "").trim();
   if (!requirement) {
@@ -178,13 +179,23 @@ export async function run_design(taskId: string): Promise<void> {
     rejectionHistory = `\n\n## 上一次评审的驳回意见（第${designRejections}次驳回）\n${prevReview}`;
   }
 
+  const submodules = getTaskSubmodules(task);
+  let submodulesSection = "";
+  if (submodules.length > 0) {
+    submodulesSection = `\n\n## 子模块\n\n本仓库含 ${submodules.length} 个子模块。在制订实现方案时，可以选择改父 repo、子模块、或两者：\n\n`;
+    for (const sm of submodules) {
+      submodulesSection += `- \`${sm.submodule_path}/\` — alias: ${sm.alias}, GitHub: ${sm.github_owner}/${sm.github_repo}, 默认分支: ${sm.default_branch}\n`;
+    }
+  }
+
   const prompt =
     `你是一位资深架构师。请根据以下需求，生成一份完整的技术方案。\n\n` +
     `## 需求\n${requirement}\n\n` +
     `## 仓库路径\n${repoPath}\n\n` +
     `请先阅读仓库代码了解项目结构，然后输出包含以下内容的技术方案：\n` +
     `1. 需求分析\n2. 技术方案\n3. 实现步骤\n4. 影响范围\n5. 测试计划` +
-    rejectionHistory;
+    rejectionHistory +
+    submodulesSection;
 
   const agent = getAgent("architect", task.workflow);
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 900_000 });
