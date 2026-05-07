@@ -2,6 +2,7 @@ import { onEvent, offEvent } from "./event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { listRequirements, setRequirementStatus, updateRequirement, getRequirementById } from "../core/requirements";
 import { getRepoById } from "../core/repos";
+import { listSubmodules } from "../core/submodules";
 import { startTaskFromTemplate } from "../core/task-factory";
 import { createLogger } from "../core/logger";
 
@@ -10,30 +11,45 @@ const log = createLogger("requirement-scheduler");
 let _handler: ((event: AutopilotEvent) => void) | null = null;
 
 /**
- * 单仓库 tick：检查该 repo 的活跃任务，若无则拉最老的 queued 创建 task。
+ * 单组 tick：父 repo + 所有关联子模块视为一个调度组。
  *
- * 算法（spec §6）：
- *   - active = listRequirements({ repo_id }).filter(s ∈ {running, fix_revision})
+ * 算法（spec §4.3 组级扩展）：
+ *   - groupId = repo.parent_repo_id ?? repo.id（即便传子模块 id 也归一化到父）
+ *   - groupRepoIds = [groupId, ...listSubmodules(groupId).map(r => r.id)]
+ *   - active = listRequirements({}) 中 repo_id ∈ groupRepoIds 且 status ∈ {running, fix_revision}
  *   - 若 active 非空：do nothing
- *   - 否则取最老 queued requirement，调 startTaskFromTemplate({ workflow:"req_dev", ..., requirement_id })
- *   - 写回 task_id；setRequirementStatus(id, "running")
+ *   - 否则取主仓库（父 groupId）上最老 queued requirement → startTaskFromTemplate
+ *   - 子模块上的 queued（极端情况，正常 chat 流程不会发生）忽略
  *
- * 失败时回滚 status: queued → ready（状态表已支持该转换）
+ * 失败时回滚 status: queued → ready
  */
 export async function tickRepo(repoId: string): Promise<void> {
-  const all = listRequirements({ repo_id: repoId });
-  const active = all.filter((r) => r.status === "running" || r.status === "fix_revision");
+  const repo = getRepoById(repoId);
+  if (!repo) {
+    log.error("tickRepo: repo %s 不存在", repoId);
+    return;
+  }
+  const groupId = repo.parent_repo_id ?? repo.id;
+  const submodules = listSubmodules(groupId);
+  const groupRepoIds = new Set<string>([groupId, ...submodules.map((r) => r.id)]);
+
+  // active 检测扩到整组
+  const all = listRequirements({});
+  const active = all.filter(
+    (r) => groupRepoIds.has(r.repo_id) && (r.status === "running" || r.status === "fix_revision"),
+  );
   if (active.length > 0) return;
 
+  // candidate 仅从主仓库拉（用户在 chat 提需求只会选父）
   const queued = all
-    .filter((r) => r.status === "queued")
+    .filter((r) => r.repo_id === groupId && r.status === "queued")
     .sort((a, b) => a.created_at - b.created_at);
   if (queued.length === 0) return;
 
   const candidate = queued[0];
-  const repo = getRepoById(candidate.repo_id);
-  if (!repo) {
-    log.error("tickRepo: repo %s 不存在，跳过 candidate %s", candidate.repo_id, candidate.id);
+  const candidateRepo = getRepoById(candidate.repo_id);
+  if (!candidateRepo) {
+    log.error("tickRepo: candidate repo %s 不存在", candidate.repo_id);
     return;
   }
 
@@ -43,7 +59,7 @@ export async function tickRepo(repoId: string): Promise<void> {
       workflow: "req_dev",
       title: candidate.title,
       requirement: candidate.spec_md,
-      repo_id: repo.id,
+      repo_id: candidateRepo.id,
       requirement_id: candidate.id,
     });
   } catch (e: unknown) {
@@ -59,20 +75,19 @@ export async function tickRepo(repoId: string): Promise<void> {
   try {
     updateRequirement(candidate.id, { task_id: task.id });
     setRequirementStatus(candidate.id, "running");
-    log.info("tickRepo: 启动 requirement %s → task %s on repo %s", candidate.id, task.id, repo.alias);
+    log.info(
+      "tickRepo: 启动 requirement %s → task %s on repo %s (group=%s, submodules=%d)",
+      candidate.id,
+      task.id,
+      candidateRepo.alias,
+      groupId,
+      submodules.length,
+    );
   } catch (e: unknown) {
     log.error("tickRepo: 写回 task_id 或 setStatus running 失败 %s: %s", candidate.id, (e as Error).message);
-    // 不回滚（task 已创建运行）
   }
 }
 
-/**
- * 启动调度器：订阅 event-bus 上的 requirement:status-changed 事件。
- *
- * 触发条件：
- *   - to=queued（新需求入队）
- *   - from ∈ {running, fix_revision} 且 to ∈ {awaiting_review, done, cancelled, failed}（活跃任务释放槽位）
- */
 export function initRequirementScheduler(): void {
   if (_handler) return;
 
