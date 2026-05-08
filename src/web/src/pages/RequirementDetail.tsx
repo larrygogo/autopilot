@@ -97,6 +97,7 @@ export function RequirementDetail() {
 
   const repoAlias = useMemo(() => {
     if (!req) return "";
+    if (!req.repo_id) return "";
     return repos.find((r) => r.id === req.repo_id)?.alias ?? req.repo_id;
   }, [repos, req]);
 
@@ -260,8 +261,12 @@ export function RequirementDetail() {
           <div className="min-w-0 flex-1 space-y-2">
             <h1 className="text-xl font-semibold tracking-tight break-words">{req.title}</h1>
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-muted-foreground font-mono text-xs">{repoAlias}</span>
-              <span className="text-muted-foreground">·</span>
+              {repoAlias && (
+                <>
+                  <span className="text-muted-foreground font-mono text-xs">{repoAlias}</span>
+                  <span className="text-muted-foreground">·</span>
+                </>
+              )}
               <Badge
                 variant={STATUS_VARIANT[req.status] ?? "outline"}
                 className="text-[11px] font-normal"

@@ -251,7 +251,7 @@ export function Requirements() {
                           </td>
                           <td className="px-4 py-2.5">
                             <span className="font-mono text-xs text-muted-foreground">
-                              {repoAliasMap.get(req.repo_id) ?? req.repo_id}
+                              {repoAliasMap.get(req.repo_id ?? "") ?? req.repo_id ?? "—"}
                             </span>
                           </td>
                           <td className="px-4 py-2.5">
