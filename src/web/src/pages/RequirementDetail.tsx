@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -55,6 +55,7 @@ export function RequirementDetail() {
   const [feedbacks, setFeedbacks] = useState<RequirementFeedback[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingSpec, setEditingSpec] = useState(false);
   const [specDraft, setSpecDraft] = useState("");
@@ -94,6 +95,11 @@ export function RequirementDetail() {
   useEffect(() => {
     refresh();
   }, [id]);
+
+  useEffect(() => {
+    if (!req?.project_id) { setProject(null); return; }
+    api.getProject(req.project_id).then(setProject).catch(() => setProject(null));
+  }, [req?.project_id]);
 
   const repoAlias = useMemo(() => {
     if (!req) return "";
@@ -261,6 +267,18 @@ export function RequirementDetail() {
           <div className="min-w-0 flex-1 space-y-2">
             <h1 className="text-xl font-semibold tracking-tight break-words">{req.title}</h1>
             <div className="flex flex-wrap items-center gap-2 text-sm">
+              {project && (
+                <>
+                  <Link
+                    to={`/projects/${project.id}`}
+                    className="text-xs text-primary hover:underline font-medium"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {project.name}
+                  </Link>
+                  <span className="text-muted-foreground">·</span>
+                </>
+              )}
               {repoAlias && (
                 <>
                   <span className="text-muted-foreground font-mono text-xs">{repoAlias}</span>
