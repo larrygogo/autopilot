@@ -33,8 +33,6 @@ import {
   Menu,
   Circle,
   Clock,
-  FolderGit2,
-  Inbox,
   Layers,
 } from "lucide-react";
 
@@ -48,13 +46,9 @@ const Providers = lazy(() => import("./pages/Providers").then((m) => ({ default:
 const Agents = lazy(() => import("./pages/Agents").then((m) => ({ default: m.Agents })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const Schedules = lazy(() => import("./pages/Schedules").then((m) => ({ default: m.Schedules })));
-const Repos = lazy(() => import("./pages/Repos").then((m) => ({ default: m.Repos })));
 const Projects = lazy(() => import("./pages/Projects").then((m) => ({ default: m.Projects })));
 const ProjectDetail = lazy(() =>
   import("./pages/ProjectDetail").then((m) => ({ default: m.ProjectDetail })),
-);
-const Requirements = lazy(() =>
-  import("./pages/Requirements").then((m) => ({ default: m.Requirements })),
 );
 const RequirementDetail = lazy(() =>
   import("./pages/RequirementDetail").then((m) => ({ default: m.RequirementDetail })),
@@ -74,8 +68,6 @@ const MAIN_NAV: NavItem[] = [
   { path: "/schedules", label: "定时", icon: Clock, end: true },
   { path: "/workflows", label: "工作流", icon: WorkflowIcon, end: true },
   { path: "/projects", label: "项目", icon: Layers },
-  { path: "/repos", label: "仓库", icon: FolderGit2, end: true },
-  { path: "/requirements", label: "需求", icon: Inbox, end: true },
 ];
 
 const SETTINGS_NAV: NavItem[] = [
@@ -101,9 +93,7 @@ function titleForPath(pathname: string): string {
   if (pathname.startsWith("/providers")) return "提供商";
   if (pathname.startsWith("/agents")) return "智能体";
   if (pathname.startsWith("/settings")) return "通用设置";
-  if (pathname.startsWith("/repos")) return "仓库管理";
   if (pathname.startsWith("/requirements/")) return "需求详情";
-  if (pathname.startsWith("/requirements")) return "需求池";
   return "Autopilot";
 }
 
@@ -238,8 +228,6 @@ function AppInner() {
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/projects/:id" element={<ProjectDetailRoute />} />
-                <Route path="/repos" element={<Repos />} />
-                <Route path="/requirements" element={<Requirements />} />
                 <Route path="/requirements/:id" element={<RequirementDetail />} />
                 <Route path="*" element={<Navigate to="/tasks" replace />} />
               </Routes>

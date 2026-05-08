@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw, ExternalLink, FolderOpen, Trash2,
+  ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw, ExternalLink,
+  FolderOpen, Trash2, Pencil, Activity,
 } from "lucide-react";
-import { api, type Project, type Codebase, type Requirement } from "@/hooks/useApi";
+import { api, type Project, type Codebase, type Requirement, type RepoHealthResult } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -27,10 +28,14 @@ interface ProjectDetailProps {
 
 const STATUS_LABEL: Record<string, string> = {
   drafting: "草稿",
+  clarifying: "澄清中",
+  ready: "已澄清",
   investigating: "调查中",
   awaiting_approval: "待审批",
   queued: "排队中",
   running: "执行中",
+  awaiting_review: "待 PR review",
+  fix_revision: "修复中",
   done: "已完成",
   failed: "失败",
   cancelled: "已取消",
@@ -38,10 +43,14 @@ const STATUS_LABEL: Record<string, string> = {
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   drafting: "outline",
+  clarifying: "secondary",
+  ready: "default",
   investigating: "secondary",
   awaiting_approval: "secondary",
   queued: "secondary",
   running: "default",
+  awaiting_review: "secondary",
+  fix_revision: "secondary",
   done: "default",
   failed: "destructive",
   cancelled: "outline",
@@ -51,9 +60,13 @@ interface CbForm {
   alias: string;
   path: string;
   default_branch: string;
+  github_owner: string;
+  github_repo: string;
 }
 
-const EMPTY_CB: CbForm = { alias: "", path: "", default_branch: "main" };
+const EMPTY_CB: CbForm = { alias: "", path: "", default_branch: "main", github_owner: "", github_repo: "" };
+
+type HealthState = "loading" | RepoHealthResult;
 
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const navigate = useNavigate();
@@ -70,12 +83,16 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [reqTitle, setReqTitle] = useState("");
   const [savingReq, setSavingReq] = useState(false);
 
-  // 新建代码库 dialog
+  // 新建 / 编辑代码库 dialog
   const [cbDialogOpen, setCbDialogOpen] = useState(false);
+  const [editingCb, setEditingCb] = useState<Codebase | null>(null);
   const [cbForm, setCbForm] = useState<CbForm>(EMPTY_CB);
   const [savingCb, setSavingCb] = useState(false);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [deletingCbId, setDeletingCbId] = useState<string | null>(null);
+
+  // 健康检查
+  const [healthMap, setHealthMap] = useState<Record<string, HealthState>>({});
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -131,39 +148,59 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
   // ── 代码库 ────────────────────────────────────
 
-  const openCbDialog = () => {
-    setCbForm(EMPTY_CB);
+  const openCbDialog = (cb?: Codebase) => {
+    if (cb) {
+      setEditingCb(cb);
+      setCbForm({
+        alias: cb.alias,
+        path: cb.path,
+        default_branch: cb.default_branch,
+        github_owner: cb.github_owner ?? "",
+        github_repo: cb.github_repo ?? "",
+      });
+    } else {
+      setEditingCb(null);
+      setCbForm(EMPTY_CB);
+    }
     setCbDialogOpen(true);
   };
 
   const closeCbDialog = () => {
     if (savingCb) return;
     setCbDialogOpen(false);
+    setEditingCb(null);
   };
 
-  const createCodebase = async () => {
+  const saveCb = async () => {
     const alias = cbForm.alias.trim();
     const path = cbForm.path.trim();
-    if (!alias) {
-      toast.error("验证失败", "别名不能为空");
-      return;
-    }
-    if (!path) {
-      toast.error("验证失败", "路径不能为空");
-      return;
-    }
+    if (!alias) { toast.error("验证失败", "别名不能为空"); return; }
+    if (!path) { toast.error("验证失败", "路径不能为空"); return; }
     setSavingCb(true);
     try {
-      await api.createProjectCodebase(projectId, {
-        alias,
-        path,
-        default_branch: cbForm.default_branch.trim() || "main",
-      });
-      toast.success(`已添加代码库「${alias}」`);
+      if (editingCb) {
+        await api.updateRepo(editingCb.id, {
+          path,
+          default_branch: cbForm.default_branch.trim() || "main",
+          github_owner: cbForm.github_owner.trim() || null,
+          github_repo: cbForm.github_repo.trim() || null,
+        });
+        toast.success(`已更新代码库「${alias}」`);
+      } else {
+        await api.createProjectCodebase(projectId, {
+          alias,
+          path,
+          default_branch: cbForm.default_branch.trim() || "main",
+          github_owner: cbForm.github_owner.trim() || null,
+          github_repo: cbForm.github_repo.trim() || null,
+        });
+        toast.success(`已添加代码库「${alias}」`);
+      }
       setCbDialogOpen(false);
+      setEditingCb(null);
       refresh();
     } catch (e: unknown) {
-      toast.error("创建失败", (e as Error)?.message ?? String(e));
+      toast.error(editingCb ? "更新失败" : "创建失败", (e as Error)?.message ?? String(e));
     } finally {
       setSavingCb(false);
     }
@@ -181,6 +218,30 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     } finally {
       setDeletingCbId(null);
     }
+  };
+
+  const checkHealth = async (cb: Codebase) => {
+    setHealthMap((prev) => ({ ...prev, [cb.id]: "loading" }));
+    try {
+      const result = await api.healthcheckRepo(cb.id);
+      setHealthMap((prev) => ({ ...prev, [cb.id]: result }));
+      if (result.healthy) refresh();
+    } catch (e: unknown) {
+      toast.error("健康检查失败", (e as Error)?.message ?? String(e));
+      setHealthMap((prev) => { const n = { ...prev }; delete n[cb.id]; return n; });
+    }
+  };
+
+  const renderHealth = (cb: Codebase) => {
+    const h = healthMap[cb.id];
+    if (!h) return null;
+    if (h === "loading") return <span className="text-[11px] text-muted-foreground animate-pulse">检查中…</span>;
+    if (h.healthy) return <span className="text-[11px] text-emerald-500 font-medium">✓ OK</span>;
+    return (
+      <span className="text-[11px] text-destructive" title={h.issues.join("\n")}>
+        ✗ {h.issues[0] ?? "异常"}
+      </span>
+    );
   };
 
   if (loading) {
@@ -242,7 +303,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <FolderGit2 className="h-4 w-4 text-muted-foreground" />
             <h3 className="text-sm font-semibold">代码库（{codebases.length}）</h3>
           </div>
-          <Button size="sm" variant="outline" onClick={openCbDialog}>
+          <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
             <Plus className="h-4 w-4" />
             添加代码库
           </Button>
@@ -252,7 +313,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           <Card className="p-6 text-center">
             <FolderGit2 className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
             <p className="mb-3 text-sm text-muted-foreground">暂无代码库，点「添加代码库」关联 Git 仓库。</p>
-            <Button size="sm" variant="outline" onClick={openCbDialog}>
+            <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
               <Plus className="h-4 w-4" />
               添加代码库
             </Button>
@@ -265,7 +326,8 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                   <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
                     <th className="px-4 py-2.5 font-medium">别名</th>
                     <th className="px-4 py-2.5 font-medium">路径</th>
-                    <th className="px-4 py-2.5 font-medium">默认分支</th>
+                    <th className="px-4 py-2.5 font-medium">分支</th>
+                    <th className="px-4 py-2.5 font-medium">健康</th>
                     <th className="px-4 py-2.5 font-medium text-right">操作</th>
                   </tr>
                 </thead>
@@ -279,7 +341,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                       )}
                     >
                       <td className="px-4 py-2.5 font-mono font-medium text-sm">{cb.alias}</td>
-                      <td className="px-4 py-2.5 max-w-[280px]">
+                      <td className="px-4 py-2.5 max-w-[240px]">
                         <span
                           className="font-mono text-xs text-muted-foreground truncate block"
                           title={cb.path}
@@ -292,17 +354,42 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                           {cb.default_branch}
                         </Badge>
                       </td>
+                      <td className="px-4 py-2.5">
+                        {renderHealth(cb) ?? <span className="text-muted-foreground text-[11px]">—</span>}
+                      </td>
                       <td className="px-4 py-2.5 text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => void removeCb(cb)}
-                          disabled={deletingCbId === cb.id}
-                          title="移除代码库"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => void checkHealth(cb)}
+                            disabled={healthMap[cb.id] === "loading" || deletingCbId === cb.id}
+                            title="健康检查"
+                          >
+                            <Activity className={cn("h-3.5 w-3.5", healthMap[cb.id] === "loading" && "animate-pulse")} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => openCbDialog(cb)}
+                            disabled={deletingCbId === cb.id}
+                            title="编辑"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            onClick={() => void removeCb(cb)}
+                            disabled={deletingCbId === cb.id}
+                            title="移除代码库"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -319,15 +406,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           <div className="flex items-center gap-2">
             <Inbox className="h-4 w-4 text-muted-foreground" />
             <h3 className="text-sm font-semibold">需求（{requirements.length}）</h3>
-            {requirements.length > 0 && (
-              <button
-                type="button"
-                className="text-xs text-muted-foreground hover:text-primary hover:underline"
-                onClick={() => navigate(`/requirements?project_id=${projectId}`)}
-              >
-                查看全部
-              </button>
-            )}
           </div>
           <Button size="sm" onClick={openReqDialog}>
             <Plus className="h-4 w-4" />
@@ -404,13 +482,15 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         </DialogContent>
       </Dialog>
 
-      {/* 添加代码库 Dialog */}
+      {/* 添加 / 编辑代码库 Dialog */}
       <Dialog open={cbDialogOpen} onOpenChange={(open) => { if (!open) closeCbDialog(); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>添加代码库</DialogTitle>
+            <DialogTitle>{editingCb ? "编辑代码库" : "添加代码库"}</DialogTitle>
             <DialogDescription>
-              将一个 Git 仓库目录关联到项目「{project?.name}」。
+              {editingCb
+                ? `修改代码库「${editingCb.alias}」的配置。`
+                : `将一个 Git 仓库目录关联到项目「${project?.name}」。`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -422,8 +502,10 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                 id="cb-alias"
                 placeholder="例如：frontend"
                 value={cbForm.alias}
+                disabled={!!editingCb}
                 onChange={(e) => setCbForm((f) => ({ ...f, alias: e.target.value }))}
               />
+              {editingCb && <p className="text-xs text-muted-foreground">别名创建后不可修改。</p>}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cb-path">
@@ -458,11 +540,29 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                 onChange={(e) => setCbForm((f) => ({ ...f, default_branch: e.target.value }))}
               />
             </div>
+            <div className="space-y-1.5">
+              <Label>GitHub（可选）</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="owner"
+                  value={cbForm.github_owner}
+                  onChange={(e) => setCbForm((f) => ({ ...f, github_owner: e.target.value }))}
+                  className="flex-1"
+                />
+                <span className="self-center text-muted-foreground">/</span>
+                <Input
+                  placeholder="repo"
+                  value={cbForm.github_repo}
+                  onChange={(e) => setCbForm((f) => ({ ...f, github_repo: e.target.value }))}
+                  className="flex-1"
+                />
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeCbDialog} disabled={savingCb}>取消</Button>
-            <Button onClick={() => void createCodebase()} disabled={savingCb}>
-              {savingCb ? "添加中…" : "添加"}
+            <Button onClick={() => void saveCb()} disabled={savingCb}>
+              {savingCb ? (editingCb ? "保存中…" : "添加中…") : (editingCb ? "保存" : "添加")}
             </Button>
           </DialogFooter>
         </DialogContent>

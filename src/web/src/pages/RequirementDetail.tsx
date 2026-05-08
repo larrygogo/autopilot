@@ -322,11 +322,11 @@ export function RequirementDetail() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => navigate("/requirements")}
+          onClick={() => navigate(req?.project_id ? `/projects/${req.project_id}` : "/projects")}
           className="-ml-2"
         >
           <ArrowLeft className="h-4 w-4" />
-          返回
+          {req?.project_id ? "返回项目" : "项目列表"}
         </Button>
         <div className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
           {wsState === "connected" ? (
