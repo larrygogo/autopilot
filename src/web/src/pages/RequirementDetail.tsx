@@ -39,7 +39,7 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   failed: "destructive",
 };
 
-const TERMINAL_STATUSES = new Set(["done", "cancelled", "failed"]);
+const TERMINAL_STATUSES = new Set(["done", "cancelled"]);
 
 const SOURCE_LABEL: Record<string, string> = {
   manual: "手动",
@@ -168,11 +168,67 @@ export function RequirementDetail() {
     if (!id) return;
     setActionBusy(true);
     try {
-      await api.transitionRequirement(id, "investigating");
+      await api.transitionRequirement(id, "drafting");
       await refresh();
-      toast.success("已驳回，需求返回调查阶段");
+      toast.success("已驳回，需求返回草稿");
     } catch (e: unknown) {
       toast.error("驳回失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function markDone() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      await api.transitionRequirement(id, "done");
+      await refresh();
+      toast.success("需求已标记完成");
+    } catch (e: unknown) {
+      toast.error("操作失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function requestFix() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      await api.transitionRequirement(id, "fix_revision");
+      await refresh();
+      toast.success("已标记需要修改，Agent 将继续修复");
+    } catch (e: unknown) {
+      toast.error("操作失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function retryFromFailed() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      await api.enqueueRequirement(id);
+      await refresh();
+      toast.success("已重新入队执行");
+    } catch (e: unknown) {
+      toast.error("重试失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function recallToReady() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      await api.transitionRequirement(id, "ready");
+      await refresh();
+      toast.success("已撤回至「已澄清」");
+    } catch (e: unknown) {
+      toast.error("操作失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
     }
@@ -530,9 +586,20 @@ export function RequirementDetail() {
                   {actionBusy ? "处理中…" : "入队执行"}
                 </Button>
               )}
+              {req.status === "queued" && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                  onClick={recallToReady}
+                  disabled={actionBusy}
+                >
+                  {actionBusy ? "处理中…" : "撤回（返回已澄清）"}
+                </Button>
+              )}
               {req.status === "awaiting_approval" && (
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">Agent 调查完成，请审阅后决定：</p>
+                  <p className="text-xs text-muted-foreground">请审阅规约后决定：</p>
                   <Button
                     className="w-full"
                     size="sm"
@@ -548,13 +615,15 @@ export function RequirementDetail() {
                     onClick={rejectApproval}
                     disabled={actionBusy}
                   >
-                    {actionBusy ? "处理中…" : "↩ 驳回，返回调查"}
+                    {actionBusy ? "处理中…" : "↩ 驳回，返回草稿"}
                   </Button>
                 </div>
               )}
-              {req.status === "awaiting_review" && (
+              {(req.status === "awaiting_review" || req.status === "fix_revision") && (
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">注入反馈（供 agent 参考）：</p>
+                  <p className="text-xs text-muted-foreground">
+                    {req.status === "awaiting_review" ? "PR 审查操作：" : "修复阶段反馈："}
+                  </p>
                   <Textarea
                     value={feedbackBody}
                     onChange={(e) => setFeedbackBody(e.target.value)}
@@ -562,18 +631,51 @@ export function RequirementDetail() {
                     className="min-h-[80px] text-xs"
                     disabled={submittingFeedback}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) inject();
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
                     }}
                   />
                   <Button
+                    variant="outline"
                     className="w-full"
                     size="sm"
-                    onClick={inject}
+                    onClick={() => void inject()}
                     disabled={submittingFeedback || !feedbackBody.trim()}
                   >
-                    {submittingFeedback ? "提交中…" : "提交反馈"}
+                    {submittingFeedback ? "提交中…" : "注入反馈"}
                   </Button>
+                  {req.status === "awaiting_review" && (
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1 text-xs"
+                        size="sm"
+                        onClick={() => void markDone()}
+                        disabled={actionBusy}
+                      >
+                        ✓ PR 已合并
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="flex-1 text-xs"
+                        size="sm"
+                        onClick={() => void requestFix()}
+                        disabled={actionBusy}
+                      >
+                        ↩ 要求修改
+                      </Button>
+                    </div>
+                  )}
                 </div>
+              )}
+              {req.status === "failed" && (
+                <Button
+                  className="w-full"
+                  size="sm"
+                  onClick={() => void retryFromFailed()}
+                  disabled={actionBusy}
+                >
+                  {actionBusy ? "处理中…" : "重新入队执行"}
+                </Button>
               )}
               {!isTerminal && (
                 <Button
