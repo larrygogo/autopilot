@@ -14,6 +14,7 @@ import {
   createRequirement,
   getRequirementById,
   listRequirements,
+  listRequirementsByProject,
   updateRequirement,
   setRequirementStatus,
   canTransitionStatus,
@@ -137,7 +138,7 @@ describe("requirements CRUD + 状态机", () => {
   });
 
   it("createRequirement + getById 默认 status=drafting + created_at 是 number", () => {
-    createRequirement({ id: "req-001", repo_id: "cb-001", title: "hello" });
+    createRequirement({ id: "req-001", project_id: "proj-001", codebase_id: "cb-001", title: "hello" });
     const r = getRequirementById("req-001");
     expect(r?.status).toBe("drafting");
     expect(typeof r?.created_at).toBe("number");
@@ -145,11 +146,11 @@ describe("requirements CRUD + 状态机", () => {
   });
 
   it("listRequirements 按 created_at 升序 + 过滤", () => {
-    createRequirement({ id: "req-002", repo_id: "cb-001", title: "second" });
-    const all = listRequirements({ repo_id: "cb-001" });
+    createRequirement({ id: "req-002", project_id: "proj-001", codebase_id: "cb-001", title: "second" });
+    const all = listRequirements({ codebase_id: "cb-001" });
     expect(all.length).toBeGreaterThanOrEqual(2);
     expect(all[0].id).toBe("req-001");
-    const drafts = listRequirements({ repo_id: "cb-001", status: "drafting" });
+    const drafts = listRequirements({ codebase_id: "cb-001", status: "drafting" });
     expect(drafts.every(r => r.status === "drafting")).toBe(true);
   });
 
@@ -235,5 +236,77 @@ describe("requirements CRUD + 状态机", () => {
     });
     expect(f.github_review_id).toBe("PRR_kwDOMZkX1c5sample");
     expect(f.source).toBe("github_review");
+  });
+});
+
+describe("requirements 适配 project + codebase（P1 Task 14）", () => {
+  let testDb: Database;
+
+  beforeAll(() => {
+    testDb = new Database(":memory:");
+    _setDbForTest(testDb);
+    initDb();
+    migrate001(testDb);
+    migrate002(testDb);
+    migrate004(testDb);
+    migrate005(testDb);
+    migrate006(testDb);
+    migrate007(testDb);
+    migrate008(testDb);
+  });
+
+  afterAll(() => {
+    _setDbForTest(null);
+    testDb.close();
+  });
+
+  it("Requirement 类型有 project_id 和 codebase_id（不再有 repo_id）", () => {
+    const proj = createProject({ id: "proj-rt1", name: "rt" });
+    const cb = createCodebase({ id: "cb-rt1", project_id: proj.id, alias: "rt", path: "/p" });
+    const req = createRequirement({
+      id: "req-rt1",
+      project_id: proj.id,
+      codebase_id: cb.id,
+      title: "t",
+    });
+    expect(req.project_id).toBe(proj.id);
+    expect(req.codebase_id).toBe(cb.id);
+    expect((req as unknown as { repo_id?: unknown }).repo_id).toBeUndefined();
+  });
+
+  it("listRequirementsByProject 列出项目下所有需求", () => {
+    const list = listRequirementsByProject("proj-rt1");
+    expect(list.some((r) => r.id === "req-rt1")).toBe(true);
+    expect(list.every((r) => r.project_id === "proj-rt1")).toBe(true);
+  });
+
+  it("createRequirement 自动写 requirement_codebases 关联", () => {
+    const proj = createProject({ id: "proj-rt2", name: "rt2" });
+    const cb = createCodebase({ id: "cb-rt2", project_id: proj.id, alias: "rt2", path: "/p2" });
+    createRequirement({ id: "req-rt2", project_id: proj.id, codebase_id: cb.id, title: "t2" });
+
+    const links = testDb
+      .query<{ requirement_id: string; codebase_id: string }, []>(
+        "SELECT requirement_id, codebase_id FROM requirement_codebases WHERE requirement_id = 'req-rt2'",
+      )
+      .all();
+    expect(links).toEqual([{ requirement_id: "req-rt2", codebase_id: cb.id }]);
+  });
+
+  // P1 阶段 schema 仍保留 codebase_id NOT NULL（migration 008 §7 注释说明 P4 才表重建去掉 NOT NULL）；
+  // 接口 TS 类型允许 null，但当前实际写入 null 会被 SQLite 拒绝。这里用接口校验代替 DB 写入。
+  it("CreateRequirementOpts.codebase_id 可选（spec §5.1 NULLable，schema P4 落地）", () => {
+    const opts: import("../src/core/requirements").CreateRequirementOpts = {
+      id: "req-rt3",
+      project_id: "proj-rt3",
+      title: "t3",
+    };
+    expect(opts.codebase_id).toBeUndefined();
+  });
+
+  it("listRequirements 支持按 project_id 过滤", () => {
+    const list = listRequirements({ project_id: "proj-rt2" });
+    expect(list.length).toBe(1);
+    expect(list[0].id).toBe("req-rt2");
   });
 });

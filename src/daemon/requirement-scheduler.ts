@@ -11,45 +11,52 @@ const log = createLogger("requirement-scheduler");
 let _handler: ((event: AutopilotEvent) => void) | null = null;
 
 /**
- * 单组 tick：父 repo + 所有关联子模块视为一个调度组。
+ * 单组 tick：父 codebase + 所有关联子模块视为一个调度组。
  *
  * 算法（spec §4.3 组级扩展）：
- *   - groupId = repo.parent_repo_id ?? repo.id（即便传子模块 id 也归一化到父）
- *   - groupRepoIds = [groupId, ...listSubmodules(groupId).map(r => r.id)]
- *   - active = listRequirements({}) 中 repo_id ∈ groupRepoIds 且 status ∈ {running, fix_revision}
+ *   - groupId = codebase.parent_codebase_id ?? codebase.id（即便传子模块 id 也归一化到父）
+ *   - groupCodebaseIds = [groupId, ...listSubmodules(groupId).map(r => r.id)]
+ *   - active = listRequirements({}) 中 codebase_id ∈ groupCodebaseIds 且 status ∈ {running, fix_revision}
  *   - 若 active 非空：do nothing
  *   - 否则取主仓库（父 groupId）上最老 queued requirement → startTaskFromTemplate
  *   - 子模块上的 queued（极端情况，正常 chat 流程不会发生）忽略
  *
  * 失败时回滚 status: queued → ready
  */
-export async function tickRepo(repoId: string): Promise<void> {
-  const repo = getCodebaseById(repoId);
-  if (!repo) {
-    log.error("tickRepo: codebase %s 不存在", repoId);
+export async function tickRepo(codebaseId: string): Promise<void> {
+  const codebase = getCodebaseById(codebaseId);
+  if (!codebase) {
+    log.error("tickRepo: codebase %s 不存在", codebaseId);
     return;
   }
-  const groupId = repo.parent_codebase_id ?? repo.id;
+  const groupId = codebase.parent_codebase_id ?? codebase.id;
   const submodules = listSubmodules(groupId);
-  const groupRepoIds = new Set<string>([groupId, ...submodules.map((r) => r.id)]);
+  const groupCodebaseIds = new Set<string>([groupId, ...submodules.map((r) => r.id)]);
 
   // active 检测扩到整组
   const all = listRequirements({});
   const active = all.filter(
-    (r) => groupRepoIds.has(r.repo_id) && (r.status === "running" || r.status === "fix_revision"),
+    (r) =>
+      r.codebase_id !== null &&
+      groupCodebaseIds.has(r.codebase_id) &&
+      (r.status === "running" || r.status === "fix_revision"),
   );
   if (active.length > 0) return;
 
   // candidate 仅从主仓库拉（用户在 chat 提需求只会选父）
   const queued = all
-    .filter((r) => r.repo_id === groupId && r.status === "queued")
+    .filter((r) => r.codebase_id === groupId && r.status === "queued")
     .sort((a, b) => a.created_at - b.created_at);
   if (queued.length === 0) return;
 
   const candidate = queued[0];
-  const candidateRepo = getCodebaseById(candidate.repo_id);
-  if (!candidateRepo) {
-    log.error("tickRepo: candidate codebase %s 不存在", candidate.repo_id);
+  if (!candidate.codebase_id) {
+    log.error("tickRepo: candidate %s 缺 codebase_id（不应发生）", candidate.id);
+    return;
+  }
+  const candidateCodebase = getCodebaseById(candidate.codebase_id);
+  if (!candidateCodebase) {
+    log.error("tickRepo: candidate codebase %s 不存在", candidate.codebase_id);
     return;
   }
 
@@ -59,7 +66,8 @@ export async function tickRepo(repoId: string): Promise<void> {
       workflow: "req_dev",
       title: candidate.title,
       requirement: candidate.spec_md,
-      repo_id: candidateRepo.id,
+      // setup_func 仍按 repo_id 命名传参（runtime 透传字段，保持兼容）
+      repo_id: candidateCodebase.id,
       requirement_id: candidate.id,
     });
   } catch (e: unknown) {
@@ -76,10 +84,10 @@ export async function tickRepo(repoId: string): Promise<void> {
     updateRequirement(candidate.id, { task_id: task.id });
     setRequirementStatus(candidate.id, "running");
     log.info(
-      "tickRepo: 启动 requirement %s → task %s on repo %s (group=%s, submodules=%d)",
+      "tickRepo: 启动 requirement %s → task %s on codebase %s (group=%s, submodules=%d)",
       candidate.id,
       task.id,
-      candidateRepo.alias,
+      candidateCodebase.alias,
       groupId,
       submodules.length,
     );
@@ -104,11 +112,15 @@ export function initRequirementScheduler(): void {
 
     const req = getRequirementById(id);
     if (!req) return;
+    if (!req.codebase_id) {
+      // 高层需求（无 codebase 绑定）不参与调度组逻辑
+      return;
+    }
 
     try {
-      await tickRepo(req.repo_id);
+      await tickRepo(req.codebase_id);
     } catch (e: unknown) {
-      log.error("requirement-scheduler: tickRepo 异常 repo=%s: %s", req.repo_id, (e as Error).message);
+      log.error("requirement-scheduler: tickRepo 异常 codebase=%s: %s", req.codebase_id, (e as Error).message);
     }
   };
 

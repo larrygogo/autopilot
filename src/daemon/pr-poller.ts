@@ -83,7 +83,11 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
     log.warn("requirement %s 无 pr_number，跳过", reqId);
     return;
   }
-  const repo = getCodebaseById(req.repo_id);
+  if (!req.codebase_id) {
+    log.warn("requirement %s 未绑定 codebase，跳过", reqId);
+    return;
+  }
+  const repo = getCodebaseById(req.codebase_id);
   if (!repo || !repo.github_owner || !repo.github_repo) {
     log.warn(
       "requirement %s 关联 codebase 缺 github_owner/repo，跳过（请先在 /codebases 健康检查回填）",

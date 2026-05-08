@@ -37,12 +37,14 @@ describe("requirement-sub-prs CRUD", () => {
     });
     createRequirement({
       id: "req-001",
-      repo_id: "cb-p",
+      project_id: "proj-001",
+      codebase_id: "cb-p",
       title: "test",
     });
     createRequirement({
       id: "req-002",
-      repo_id: "cb-p",
+      project_id: "proj-001",
+      codebase_id: "cb-p",
       title: "test2",
     });
   });

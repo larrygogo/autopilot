@@ -86,7 +86,7 @@ describe("submodule + sub-pr 查询 API", () => {
 
   it("GET /api/requirements/:id/sub-prs 返回该需求的所有子模块 PR", async () => {
     const reqId = nextRequirementId();
-    createRequirement({ id: reqId, repo_id: "cb-p1", title: "T" });
+    createRequirement({ id: reqId, project_id: "proj-001", codebase_id: "cb-p1", title: "T" });
     appendSubPr({
       requirement_id: reqId,
       child_repo_id: "cb-c1",

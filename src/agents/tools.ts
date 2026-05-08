@@ -479,7 +479,8 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
         try {
           const r = createRequirement({
             id,
-            repo_id: repo.id,
+            project_id: repo.project_id,
+            codebase_id: repo.id,
             title: args.title.trim(),
             spec_md: args.initial_text ?? "",
           });
@@ -556,19 +557,20 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
         status: z.string().optional(),
       },
       async (args) => {
-        let repoId: string | undefined;
+        let codebaseId: string | undefined;
         if (args.repo_alias) {
           const repo = findRepoByAliasGlobal(args.repo_alias);
           if (!repo) return err(`repo_alias 不存在：${args.repo_alias}`);
-          repoId = repo.id;
+          codebaseId = repo.id;
         }
-        const list = listRequirements({ repo_id: repoId, status: args.status });
+        const list = listRequirements({ codebase_id: codebaseId, status: args.status });
         return ok(
           list.map((r) => ({
             id: r.id,
             title: r.title,
             status: r.status,
-            repo_id: r.repo_id,
+            project_id: r.project_id,
+            codebase_id: r.codebase_id,
             pr_url: r.pr_url,
             task_id: r.task_id,
           })),

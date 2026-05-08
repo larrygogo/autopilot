@@ -65,14 +65,14 @@ describe("调度器集成（不走真实 task runner，验证状态流转）", (
 
   it("「占用槽位」语义：running ∨ fix_revision 才算占用，awaiting_review 不算", () => {
     const a = nextRequirementId();
-    createRequirement({ id: a, repo_id: "cb-A", title: "A" });
+    createRequirement({ id: a, project_id: "proj-001", codebase_id: "cb-A", title: "A" });
     pushTo(a, "awaiting_review");
 
     const b = nextRequirementId();
-    createRequirement({ id: b, repo_id: "cb-A", title: "B" });
+    createRequirement({ id: b, project_id: "proj-001", codebase_id: "cb-A", title: "B" });
     pushTo(b, "queued");
 
-    const all = listRequirements({ repo_id: "cb-A" });
+    const all = listRequirements({ codebase_id: "cb-A" });
     const active = all.filter((r) => r.status === "running" || r.status === "fix_revision");
     expect(active.length).toBe(0);
 
@@ -83,7 +83,7 @@ describe("调度器集成（不走真实 task runner，验证状态流转）", (
 
   it("inject_feedback 路径：awaiting_review + 反馈 → fix_revision", () => {
     const a = nextRequirementId();
-    createRequirement({ id: a, repo_id: "cb-A", title: "A" });
+    createRequirement({ id: a, project_id: "proj-001", codebase_id: "cb-A", title: "A" });
     pushTo(a, "awaiting_review");
 
     appendFeedback({ requirement_id: a, source: "manual", body: "请改 X" });
@@ -102,18 +102,18 @@ describe("调度器集成（不走真实 task runner，验证状态流转）", (
 
   it("跨 repo 互不阻塞", () => {
     const a = nextRequirementId();
-    createRequirement({ id: a, repo_id: "cb-A", title: "A" });
+    createRequirement({ id: a, project_id: "proj-001", codebase_id: "cb-A", title: "A" });
     pushTo(a, "running");
 
     const b = nextRequirementId();
-    createRequirement({ id: b, repo_id: "cb-B", title: "B" });
+    createRequirement({ id: b, project_id: "proj-001", codebase_id: "cb-B", title: "B" });
     pushTo(b, "queued");
 
     // repo-A 有 running，repo-B 无活跃 —— 调度器逻辑可独立处理
-    const aActive = listRequirements({ repo_id: "cb-A" }).filter(
+    const aActive = listRequirements({ codebase_id: "cb-A" }).filter(
       (r) => r.status === "running" || r.status === "fix_revision"
     );
-    const bActive = listRequirements({ repo_id: "cb-B" }).filter(
+    const bActive = listRequirements({ codebase_id: "cb-B" }).filter(
       (r) => r.status === "running" || r.status === "fix_revision"
     );
     expect(aActive.length).toBe(1);

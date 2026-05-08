@@ -61,7 +61,7 @@ describe("pr-poller pollOne", () => {
   // 辅助：把需求快速推到 awaiting_review，并设 pr_number
   function setupReqAwaitingReview(prNumber = 42, lastReviewId: string | null = null): string {
     const id = nextRequirementId();
-    createRequirement({ id, repo_id: "cb-A", title: "T" });
+    createRequirement({ id, project_id: "proj-001", codebase_id: "cb-A", title: "T" });
     setRequirementStatus(id, "clarifying");
     setRequirementStatus(id, "ready");
     setRequirementStatus(id, "queued");
@@ -165,7 +165,7 @@ describe("pr-poller pollOne", () => {
     // 创建 cb-B 不填 github
     createCodebase({ id: "cb-B", project_id: "proj-001", alias: "rB", path: "/tmp/B", default_branch: "main" });
     const id = nextRequirementId();
-    createRequirement({ id, repo_id: "cb-B", title: "T" });
+    createRequirement({ id, project_id: "proj-001", codebase_id: "cb-B", title: "T" });
     setRequirementStatus(id, "clarifying");
     setRequirementStatus(id, "ready");
     setRequirementStatus(id, "queued");
