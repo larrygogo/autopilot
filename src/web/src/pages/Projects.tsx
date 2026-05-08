@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Layers, Plus, RefreshCw } from "lucide-react";
+import { Layers, Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
 import { api, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
@@ -30,9 +30,15 @@ export function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // 新建 / 编辑 dialog
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+
+  // 删除 busy
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -49,16 +55,25 @@ export function Projects() {
   }, [refresh]);
 
   const openCreateDialog = () => {
+    setEditingProject(null);
     setForm(EMPTY_FORM);
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (p: Project, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingProject(p);
+    setForm({ name: p.name, description: p.description ?? "" });
     setDialogOpen(true);
   };
 
   const closeDialog = () => {
     if (saving) return;
     setDialogOpen(false);
+    setEditingProject(null);
   };
 
-  const create = async () => {
+  const save = async () => {
     const name = form.name.trim();
     if (!name) {
       toast.error("验证失败", "项目名称不能为空");
@@ -66,17 +81,41 @@ export function Projects() {
     }
     setSaving(true);
     try {
-      await api.createProject({
-        name,
-        description: form.description.trim() || undefined,
-      });
-      toast.success(`已创建项目「${name}」`);
+      if (editingProject) {
+        await api.updateProject(editingProject.id, {
+          name,
+          description: form.description.trim() || null,
+        });
+        toast.success(`已更新项目「${name}」`);
+      } else {
+        await api.createProject({
+          name,
+          description: form.description.trim() || undefined,
+        });
+        toast.success(`已创建项目「${name}」`);
+      }
       setDialogOpen(false);
+      setEditingProject(null);
       refresh();
     } catch (e: unknown) {
-      toast.error("创建失败", (e as Error)?.message ?? String(e));
+      toast.error(editingProject ? "更新失败" : "创建失败", (e as Error)?.message ?? String(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const remove = async (p: Project, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm(`确定删除项目「${p.name}」？\n\n注意：项目下还有代码库时无法删除，请先在项目工作台中清理。`)) return;
+    setDeletingId(p.id);
+    try {
+      await api.deleteProject(p.id);
+      toast.success(`已删除项目「${p.name}」`);
+      refresh();
+    } catch (e: unknown) {
+      toast.error("删除失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -131,15 +170,39 @@ export function Projects() {
           {projects.map((project) => (
             <Card
               key={project.id}
-              className="cursor-pointer p-5 hover:shadow-md transition-shadow"
+              className="group relative cursor-pointer p-5 hover:shadow-md transition-shadow"
               onClick={() => navigate("/projects/" + project.id)}
             >
+              {/* 操作按钮（hover 时显示） */}
+              <div className="absolute right-3 top-3 hidden items-center gap-1 group-hover:flex">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={(e) => openEditDialog(project, e)}
+                  disabled={deletingId === project.id}
+                  title="编辑"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-destructive hover:text-destructive"
+                  onClick={(e) => remove(project, e)}
+                  disabled={deletingId === project.id}
+                  title="删除"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+
               <div className="space-y-2">
                 <div className="flex items-start justify-between gap-2">
-                  <h3 className="font-semibold leading-tight tracking-tight line-clamp-2">
+                  <h3 className="font-semibold leading-tight tracking-tight line-clamp-2 pr-14">
                     {project.name}
                   </h3>
-                  <Layers className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/60" />
+                  <Layers className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/60 group-hover:invisible" />
                 </div>
                 {project.description && (
                   <p className="text-sm text-muted-foreground line-clamp-3">
@@ -158,9 +221,11 @@ export function Projects() {
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>新建项目</DialogTitle>
+            <DialogTitle>{editingProject ? "编辑项目" : "新建项目"}</DialogTitle>
             <DialogDescription>
-              填写项目名称和描述，创建后可在项目工作台中关联代码库和需求。
+              {editingProject
+                ? "修改项目名称或描述。"
+                : "填写项目名称和描述，创建后可在项目工作台中关联代码库和需求。"}
             </DialogDescription>
           </DialogHeader>
 
@@ -174,7 +239,7 @@ export function Projects() {
                 placeholder="例如：My Awesome App"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === "Enter") void create(); }}
+                onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
               />
             </div>
 
@@ -185,7 +250,7 @@ export function Projects() {
                 placeholder="简短描述项目用途"
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === "Enter") void create(); }}
+                onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
               />
             </div>
           </div>
@@ -194,8 +259,8 @@ export function Projects() {
             <Button variant="outline" onClick={closeDialog} disabled={saving}>
               取消
             </Button>
-            <Button onClick={() => void create()} disabled={saving}>
-              {saving ? "创建中…" : "创建"}
+            <Button onClick={() => void save()} disabled={saving}>
+              {saving ? (editingProject ? "保存中…" : "创建中…") : (editingProject ? "保存" : "创建")}
             </Button>
           </DialogFooter>
         </DialogContent>
