@@ -23,6 +23,46 @@ export interface RepoHealthResult {
   issues: string[];
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface Codebase {
+  id: string;
+  project_id: string;
+  alias: string;
+  path: string;
+  default_branch: string;
+  github_owner: string | null;
+  github_repo: string | null;
+  parent_codebase_id: string | null;
+  submodule_path: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface QuestionReply {
+  id: string;
+  question_id: string;
+  author_role: "agent" | "user";
+  text: string;
+  created_at: number;
+}
+
+export interface Question {
+  id: string;
+  requirement_id: string;
+  agent_text: string;
+  status: "open" | "resolved";
+  created_at: number;
+  resolved_at: number | null;
+  replies?: QuestionReply[];
+}
+
 // ──────────────────────────────────────────────
 // HTTP REST 客户端
 // ──────────────────────────────────────────────
@@ -218,6 +258,55 @@ export class HttpClient {
     return this.request(`/api/schedules/${id}/run-now`, { method: "POST" });
   }
 
+  // ── Projects ──
+
+  async listProjects(): Promise<{ projects: Project[] }> {
+    return this.request("/api/projects");
+  }
+
+  async getProject(id: string): Promise<{ project: Project }> {
+    return this.request(`/api/projects/${encodeURIComponent(id)}`);
+  }
+
+  async createProject(body: { name: string; description?: string }): Promise<{ project: Project }> {
+    return this.request("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updateProject(id: string, body: { name?: string; description?: string | null }): Promise<{ project: Project }> {
+    return this.request(`/api/projects/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteProject(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async listProjectCodebases(projectId: string): Promise<{ codebases: Codebase[] }> {
+    return this.request(`/api/projects/${encodeURIComponent(projectId)}/codebases`);
+  }
+
+  async createProjectCodebase(projectId: string, body: {
+    alias: string;
+    path: string;
+    default_branch?: string;
+    github_owner?: string | null;
+    github_repo?: string | null;
+  }): Promise<{ codebase: Codebase }> {
+    return this.request(`/api/projects/${encodeURIComponent(projectId)}/codebases`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async listProjectRequirements(projectId: string): Promise<{ requirements: unknown[] }> {
+    return this.request(`/api/projects/${encodeURIComponent(projectId)}/requirements`);
+  }
+
   // ── Repos ──
 
   async listRepos(): Promise<Repo[]> {
@@ -260,6 +349,43 @@ export class HttpClient {
 
   async healthcheckRepo(id: string): Promise<RepoHealthResult> {
     return this.request(`/api/repos/${id}/healthcheck`, { method: "POST" });
+  }
+
+  // ── Questions ──
+
+  async listQuestions(reqId: string): Promise<{ questions: Question[] }> {
+    return this.request(`/api/requirements/${encodeURIComponent(reqId)}/questions`);
+  }
+
+  async createQuestion(reqId: string, body: { agent_text: string }): Promise<{ question: Question }> {
+    return this.request(`/api/requirements/${encodeURIComponent(reqId)}/questions`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getQuestion(reqId: string, qid: string): Promise<{ question: Question }> {
+    return this.request(`/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}`);
+  }
+
+  async addQuestionReply(reqId: string, qid: string, body: {
+    author_role: "agent" | "user";
+    text: string;
+  }): Promise<{ reply: QuestionReply }> {
+    return this.request(
+      `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/replies`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  async resolveQuestion(reqId: string, qid: string): Promise<{ ok: true }> {
+    return this.request(
+      `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/resolve`,
+      { method: "POST" }
+    );
   }
 
   // ── Chat ──
