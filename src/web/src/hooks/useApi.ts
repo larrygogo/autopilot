@@ -391,6 +391,21 @@ export const api = {
 
   listRequirementSubPrs: (id: string) =>
     request<{ sub_prs: RequirementSubPr[] }>(`/api/requirements/${id}/sub-prs`).then((r) => r.sub_prs),
+
+  // Questions（评论线程）
+  listQuestions: (reqId: string) =>
+    request<{ questions: Question[] }>(`/api/requirements/${encodeURIComponent(reqId)}/questions`)
+      .then((r) => r.questions),
+  addQuestionReply: (reqId: string, qid: string, body: { author_role: "agent" | "user"; text: string }) =>
+    request<{ reply: QuestionReply }>(
+      `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/replies`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.reply),
+  resolveQuestion: (reqId: string, qid: string) =>
+    request<{ ok: true }>(
+      `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/resolve`,
+      { method: "POST" },
+    ),
 };
 
 export interface ProviderItem {
