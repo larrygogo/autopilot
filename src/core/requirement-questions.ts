@@ -126,3 +126,16 @@ export function nextQuestionId(): string {
   const n = parseInt(last, 10) + 1;
   return `qst-${String(n).padStart(3, "0")}`;
 }
+
+export function nextReplyId(): string {
+  const db = getDb();
+  const rows = db
+    .query<{ id: string }, []>(
+      "SELECT id FROM requirement_question_replies WHERE id LIKE 'qst-r%' ORDER BY id DESC LIMIT 1"
+    )
+    .all();
+  if (rows.length === 0) return "qst-r001";
+  const last = rows[0].id.replace("qst-r", "");
+  const n = parseInt(last, 10) + 1;
+  return `qst-r${String(n).padStart(3, "0")}`;
+}

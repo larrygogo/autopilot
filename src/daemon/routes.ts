@@ -56,7 +56,7 @@ import {
   nextRequirementId,
   deleteRequirement,
 } from "../core/requirements";
-import { listQuestionsByRequirement, createQuestion, getQuestionById, addReply, resolveQuestion, nextQuestionId } from "../core/requirement-questions";
+import { listQuestionsByRequirement, createQuestion, getQuestionById, addReply, resolveQuestion, nextQuestionId, nextReplyId } from "../core/requirement-questions";
 import type { Requirement } from "../core/requirements";
 
 /**
@@ -622,6 +622,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     // GET /api/projects/:id/codebases — 必须在 GET /api/projects/:id 之前
     const projectCodebasesMatch = extractParam(path, /^\/api\/projects\/([\w.\-]+)\/codebases$/);
     if (method === "GET" && projectCodebasesMatch) {
+      if (!getProjectById(projectCodebasesMatch)) return error("project not found", 404);
       return json({ codebases: listCodebases({ projectId: projectCodebasesMatch }) });
     }
 
@@ -668,6 +669,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     // GET /api/projects/:id/requirements — 必须在 GET /api/projects/:id 之前
     const projectRequirementsMatch = extractParam(path, /^\/api\/projects\/([\w.\-]+)\/requirements$/);
     if (method === "GET" && projectRequirementsMatch) {
+      if (!getProjectById(projectRequirementsMatch)) return error("project not found", 404);
       return json({ requirements: listRequirementsByProject(projectRequirementsMatch).map((r) => withRepoIdAlias(r)) });
     }
 
@@ -1021,7 +1023,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     // ─────────── Questions（评论线程） ───────────
 
     // POST /api/requirements/:reqId/questions/:qid/replies — 必须在 /:qid 之前
-    const reqQidRepliesMatch = path.match(/^\/api\/requirements\/([\w.\-]+)\/questions\/([\w.\-]+)\/replies$/);
+    const reqQidRepliesMatch = path.match(/^\/api\/requirements\/([\w-]+)\/questions\/([\w-]+)\/replies$/);
     if (method === "POST" && reqQidRepliesMatch) {
       const [, reqId, qid] = reqQidRepliesMatch;
       if (!getRequirementById(reqId)) return error("requirement not found", 404);
@@ -1032,18 +1034,23 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (body.author_role !== "agent" && body.author_role !== "user") {
         return error('author_role 必须是 "agent" 或 "user"');
       }
-      const replyId = `qst-reply-${Date.now()}`;
-      const reply = addReply({
-        id: replyId,
-        question_id: qid,
-        author_role: body.author_role as "agent" | "user",
-        text: body.text,
-      });
-      return json({ reply }, 201);
+      try {
+        const replyId = nextReplyId();
+        const reply = addReply({
+          id: replyId,
+          question_id: qid,
+          author_role: body.author_role as "agent" | "user",
+          text: body.text,
+        });
+        return json({ reply }, 201);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return error(msg, 500);
+      }
     }
 
     // POST /api/requirements/:reqId/questions/:qid/resolve — 必须在 /:qid 之前
-    const reqQidResolveMatch = path.match(/^\/api\/requirements\/([\w.\-]+)\/questions\/([\w.\-]+)\/resolve$/);
+    const reqQidResolveMatch = path.match(/^\/api\/requirements\/([\w-]+)\/questions\/([\w-]+)\/resolve$/);
     if (method === "POST" && reqQidResolveMatch) {
       const [, reqId, qid] = reqQidResolveMatch;
       if (!getRequirementById(reqId)) return error("requirement not found", 404);
@@ -1053,7 +1060,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     }
 
     // GET /api/requirements/:reqId/questions/:qid
-    const reqQidMatch = path.match(/^\/api\/requirements\/([\w.\-]+)\/questions\/([\w.\-]+)$/);
+    const reqQidMatch = path.match(/^\/api\/requirements\/([\w-]+)\/questions\/([\w-]+)$/);
     if (method === "GET" && reqQidMatch) {
       const [, reqId, qid] = reqQidMatch;
       if (!getRequirementById(reqId)) return error("requirement not found", 404);
@@ -1063,7 +1070,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     }
 
     // GET /api/requirements/:reqId/questions — 必须在 /:reqId 之前
-    const reqQuestionsMatch = extractParam(path, /^\/api\/requirements\/([\w.\-]+)\/questions$/);
+    const reqQuestionsMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/questions$/);
     if (method === "GET" && reqQuestionsMatch) {
       if (!getRequirementById(reqQuestionsMatch)) return error("requirement not found", 404);
       return json({ questions: listQuestionsByRequirement(reqQuestionsMatch) });
