@@ -157,4 +157,15 @@ export function up(db: Database): void {
     "SET project_id = (SELECT project_id FROM codebases WHERE codebases.id = requirements.codebase_id) " +
     "WHERE codebase_id IS NOT NULL"
   );
+
+  // ── 8. 自动写入 requirement_codebases 多对多关联（每个有 codebase_id 的 requirement）──
+  db.run(
+    "INSERT INTO requirement_codebases (requirement_id, codebase_id) " +
+    "SELECT id, codebase_id FROM requirements WHERE codebase_id IS NOT NULL"
+  );
+
+  // ── 9. 旧 ready/queued 状态自动转 awaiting_approval（spec §5.3：新流程没有 ready/queued） ──
+  db.run(
+    "UPDATE requirements SET status = 'awaiting_approval' WHERE status IN ('ready', 'queued')"
+  );
 }

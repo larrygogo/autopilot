@@ -282,3 +282,54 @@ describe("migration 008-projects · requirements 表升级", () => {
     expect(r?.project_id?.startsWith("proj-")).toBe(true);
   });
 });
+
+describe("migration 008-projects · 数据后处理", () => {
+  it("自动给每个有 codebase_id 的 requirement 写 requirement_codebases 关联", () => {
+    const db = freshDb();
+
+    db.run(
+      "INSERT INTO repos (id, alias, path, default_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ["repo-001", "a", "/p", "main", 1000, 1000]
+    );
+    db.run(
+      "INSERT INTO requirements (id, repo_id, title, status, spec_md, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ["req-001", "repo-001", "x", "drafting", "", 1500, 1500]
+    );
+
+    migrate008(db);
+
+    const links = db.query<{ requirement_id: string; codebase_id: string }, []>(
+      "SELECT requirement_id, codebase_id FROM requirement_codebases"
+    ).all();
+    expect(links).toEqual([{ requirement_id: "req-001", codebase_id: "cb-001" }]);
+  });
+
+  it("旧 ready / queued 状态自动转 awaiting_approval", () => {
+    const db = freshDb();
+
+    db.run(
+      "INSERT INTO repos (id, alias, path, default_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ["repo-001", "a", "/p", "main", 1000, 1000]
+    );
+    db.run(
+      "INSERT INTO requirements (id, repo_id, title, status, spec_md, created_at, updated_at) VALUES ('req-r', 'repo-001', 'r', 'ready', '', 1500, 1500)"
+    );
+    db.run(
+      "INSERT INTO requirements (id, repo_id, title, status, spec_md, created_at, updated_at) VALUES ('req-q', 'repo-001', 'q', 'queued', '', 1500, 1500)"
+    );
+    db.run(
+      "INSERT INTO requirements (id, repo_id, title, status, spec_md, created_at, updated_at) VALUES ('req-d', 'repo-001', 'd', 'done', '', 1500, 1500)"
+    );
+
+    migrate008(db);
+
+    const statuses = db.query<{ id: string; status: string }, []>(
+      "SELECT id, status FROM requirements ORDER BY id"
+    ).all();
+    expect(statuses).toEqual([
+      { id: "req-d", status: "done" },                  // 终态不动
+      { id: "req-q", status: "awaiting_approval" },     // queued → awaiting_approval
+      { id: "req-r", status: "awaiting_approval" },     // ready → awaiting_approval
+    ]);
+  });
+});
