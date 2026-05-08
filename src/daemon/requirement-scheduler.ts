@@ -1,7 +1,7 @@
 import { onEvent, offEvent } from "./event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { listRequirements, setRequirementStatus, updateRequirement, getRequirementById } from "../core/requirements";
-import { getRepoById } from "../core/repos";
+import { getCodebaseById } from "../core/codebases";
 import { listSubmodules } from "../core/submodules";
 import { startTaskFromTemplate } from "../core/task-factory";
 import { createLogger } from "../core/logger";
@@ -24,12 +24,12 @@ let _handler: ((event: AutopilotEvent) => void) | null = null;
  * 失败时回滚 status: queued → ready
  */
 export async function tickRepo(repoId: string): Promise<void> {
-  const repo = getRepoById(repoId);
+  const repo = getCodebaseById(repoId);
   if (!repo) {
-    log.error("tickRepo: repo %s 不存在", repoId);
+    log.error("tickRepo: codebase %s 不存在", repoId);
     return;
   }
-  const groupId = repo.parent_repo_id ?? repo.id;
+  const groupId = repo.parent_codebase_id ?? repo.id;
   const submodules = listSubmodules(groupId);
   const groupRepoIds = new Set<string>([groupId, ...submodules.map((r) => r.id)]);
 
@@ -47,9 +47,9 @@ export async function tickRepo(repoId: string): Promise<void> {
   if (queued.length === 0) return;
 
   const candidate = queued[0];
-  const candidateRepo = getRepoById(candidate.repo_id);
+  const candidateRepo = getCodebaseById(candidate.repo_id);
   if (!candidateRepo) {
-    log.error("tickRepo: candidate repo %s 不存在", candidate.repo_id);
+    log.error("tickRepo: candidate codebase %s 不存在", candidate.repo_id);
     return;
   }
 

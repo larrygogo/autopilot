@@ -5,8 +5,11 @@ import { up as migrate002 } from "../src/migrations/002-schedules";
 import { up as migrate004 } from "../src/migrations/004-repos";
 import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate008 } from "../src/migrations/008-projects";
 import { _setDbForTest, initDb } from "../src/core/db";
-import { createRepo } from "../src/core/repos";
+import { createCodebase } from "../src/core/codebases";
+import { createProject } from "../src/core/projects";
 import {
   createRequirement,
   getRequirementById,
@@ -22,7 +25,7 @@ import {
   latestFeedback,
 } from "../src/core/requirement-feedbacks";
 
-describe("migration 005-requirements", () => {
+describe("migration 005-requirements（pre-008 schema 验证）", () => {
   it("创建 requirements 表，含全部 spec 字段", () => {
     const db = new Database(":memory:");
     migrate001(db);
@@ -115,14 +118,17 @@ describe("requirements CRUD + 状态机", () => {
     _setDbForTest(testDb);
     // initDb 执行 PRAGMA + tasks/task_logs 表建立
     initDb();
-    // 执行各迁移，确保 repos / requirements 表存在
+    // 执行各迁移，确保 codebases / requirements 表存在
     migrate001(testDb);
     migrate002(testDb);
     migrate004(testDb);
     migrate005(testDb);
     migrate006(testDb);
-    // 准备关联的 repo 记录
-    createRepo({ id: "repo-001", alias: "test", path: "/tmp/x", default_branch: "main" });
+    migrate007(testDb);
+    migrate008(testDb);
+    // 准备关联的 project + codebase 记录
+    createProject({ id: "proj-001", name: "test-proj" });
+    createCodebase({ id: "cb-001", project_id: "proj-001", alias: "test", path: "/tmp/x", default_branch: "main" });
   });
 
   afterAll(() => {
@@ -131,7 +137,7 @@ describe("requirements CRUD + 状态机", () => {
   });
 
   it("createRequirement + getById 默认 status=drafting + created_at 是 number", () => {
-    createRequirement({ id: "req-001", repo_id: "repo-001", title: "hello" });
+    createRequirement({ id: "req-001", repo_id: "cb-001", title: "hello" });
     const r = getRequirementById("req-001");
     expect(r?.status).toBe("drafting");
     expect(typeof r?.created_at).toBe("number");
@@ -139,11 +145,11 @@ describe("requirements CRUD + 状态机", () => {
   });
 
   it("listRequirements 按 created_at 升序 + 过滤", () => {
-    createRequirement({ id: "req-002", repo_id: "repo-001", title: "second" });
-    const all = listRequirements({ repo_id: "repo-001" });
+    createRequirement({ id: "req-002", repo_id: "cb-001", title: "second" });
+    const all = listRequirements({ repo_id: "cb-001" });
     expect(all.length).toBeGreaterThanOrEqual(2);
     expect(all[0].id).toBe("req-001");
-    const drafts = listRequirements({ repo_id: "repo-001", status: "drafting" });
+    const drafts = listRequirements({ repo_id: "cb-001", status: "drafting" });
     expect(drafts.every(r => r.status === "drafting")).toBe(true);
   });
 

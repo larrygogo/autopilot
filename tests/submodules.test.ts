@@ -7,8 +7,11 @@ import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate004 } from "../src/migrations/004-repos";
 import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate008 } from "../src/migrations/008-projects";
 import { _setDbForTest } from "../src/core/db";
-import { createRepo } from "../src/core/repos";
+import { createCodebase } from "../src/core/codebases";
+import { createProject } from "../src/core/projects";
 import { discoverSubmodules, listSubmodules } from "../src/core/submodules";
 
 describe("migration 006-submodules", () => {
@@ -69,7 +72,10 @@ describe("discoverSubmodules", () => {
     testDb = new Database(":memory:");
     migrate001(testDb);
     migrate004(testDb);
+    migrate005(testDb);
     migrate006(testDb);
+    migrate007(testDb);
+    migrate008(testDb);
     _setDbForTest(testDb);
   });
 
@@ -82,14 +88,16 @@ describe("discoverSubmodules", () => {
   });
 
   beforeEach(() => {
-    testDb.run("DELETE FROM repos");
+    testDb.run("DELETE FROM codebases");
+    testDb.run("DELETE FROM projects");
+    createProject({ id: "proj-001", name: "test-proj" });
     parentDir = join(tmpdir(), `discover-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(parentDir, { recursive: true });
   });
 
   it("无 .gitmodules → added=0 existing=0", () => {
-    createRepo({ id: "repo-p", alias: "parent", path: parentDir });
-    const r = discoverSubmodules("repo-p");
+    createCodebase({ id: "cb-p", project_id: "proj-001", alias: "parent", path: parentDir });
+    const r = discoverSubmodules("cb-p");
     expect(r.added.length).toBe(0);
     expect(r.existing.length).toBe(0);
   });
@@ -105,13 +113,13 @@ describe("discoverSubmodules", () => {
     );
     mkdirSync(join(parentDir, "child"), { recursive: true });
 
-    createRepo({ id: "repo-p", alias: "parent", path: parentDir });
-    const r = discoverSubmodules("repo-p");
+    createCodebase({ id: "cb-p", project_id: "proj-001", alias: "parent", path: parentDir });
+    const r = discoverSubmodules("cb-p");
 
     expect(r.added.length).toBe(1);
     const child = r.added[0];
     expect(child.alias).toBe("child");
-    expect(child.parent_repo_id).toBe("repo-p");
+    expect(child.parent_codebase_id).toBe("cb-p");
     expect(child.submodule_path).toBe("child");
     expect(child.default_branch).toBe("master");
     expect(child.github_owner).toBe("foo");
@@ -124,9 +132,9 @@ describe("discoverSubmodules", () => {
       `[submodule "x"]\n\tpath = x\n\turl = https://github.com/o/x.git\n`,
     );
     mkdirSync(join(parentDir, "x"), { recursive: true });
-    createRepo({ id: "repo-p", alias: "parent", path: parentDir });
-    discoverSubmodules("repo-p");
-    const r = discoverSubmodules("repo-p");
+    createCodebase({ id: "cb-p", project_id: "proj-001", alias: "parent", path: parentDir });
+    discoverSubmodules("cb-p");
+    const r = discoverSubmodules("cb-p");
     expect(r.added.length).toBe(0);
     expect(r.existing.length).toBe(1);
   });
@@ -137,8 +145,8 @@ describe("discoverSubmodules", () => {
       `[submodule "lab"]\n\tpath = lab\n\turl = https://gitlab.com/o/lab.git\n`,
     );
     mkdirSync(join(parentDir, "lab"), { recursive: true });
-    createRepo({ id: "repo-p", alias: "parent", path: parentDir });
-    const r = discoverSubmodules("repo-p");
+    createCodebase({ id: "cb-p", project_id: "proj-001", alias: "parent", path: parentDir });
+    const r = discoverSubmodules("cb-p");
     expect(r.added.length).toBe(0);
     expect(r.warnings.some(w => w.includes("不是 GitHub"))).toBe(true);
   });
@@ -149,54 +157,57 @@ describe("discoverSubmodules", () => {
       `[submodule "ghost"]\n\tpath = ghost\n\turl = https://github.com/o/ghost.git\n`,
     );
     // 不创建 ghost 目录
-    createRepo({ id: "repo-p", alias: "parent", path: parentDir });
-    const r = discoverSubmodules("repo-p");
+    createCodebase({ id: "cb-p", project_id: "proj-001", alias: "parent", path: parentDir });
+    const r = discoverSubmodules("cb-p");
     expect(r.added.length).toBe(0);
     expect(r.warnings.some(w => w.includes("不存在或不是目录"))).toBe(true);
   });
 
   it("alias 冲突自动加后缀", () => {
-    createRepo({ id: "repo-existing", alias: "child", path: "/tmp/something-else" });
+    createCodebase({ id: "cb-existing", project_id: "proj-001", alias: "child", path: "/tmp/something-else" });
     writeFileSync(
       join(parentDir, ".gitmodules"),
       `[submodule "child"]\n\tpath = child\n\turl = https://github.com/foo/child.git\n`,
     );
     mkdirSync(join(parentDir, "child"), { recursive: true });
-    createRepo({ id: "repo-p", alias: "parent", path: parentDir });
-    const r = discoverSubmodules("repo-p");
+    createCodebase({ id: "cb-p", project_id: "proj-001", alias: "parent", path: parentDir });
+    const r = discoverSubmodules("cb-p");
     expect(r.added.length).toBe(1);
     expect(r.added[0].alias).toBe("child-2");
   });
 
   it("listSubmodules 返回某父的所有子", () => {
-    createRepo({ id: "repo-p", alias: "p", path: parentDir });
-    createRepo({
-      id: "repo-c1",
+    createCodebase({ id: "cb-p", project_id: "proj-001", alias: "p", path: parentDir });
+    createCodebase({
+      id: "cb-c1",
+      project_id: "proj-001",
       alias: "c1",
       path: "/tmp/c1",
-      parent_repo_id: "repo-p",
+      parent_codebase_id: "cb-p",
       submodule_path: "c1",
     });
-    createRepo({
-      id: "repo-c2",
+    createCodebase({
+      id: "cb-c2",
+      project_id: "proj-001",
       alias: "c2",
       path: "/tmp/c2",
-      parent_repo_id: "repo-p",
+      parent_codebase_id: "cb-p",
       submodule_path: "c2",
     });
-    expect(listSubmodules("repo-p").length).toBe(2);
+    expect(listSubmodules("cb-p").length).toBe(2);
     expect(listSubmodules("nonexistent").length).toBe(0);
   });
 
   it("拒绝在子模块上调 discoverSubmodules（嵌套）", () => {
-    createRepo({ id: "repo-p", alias: "p", path: parentDir });
-    createRepo({
-      id: "repo-c",
+    createCodebase({ id: "cb-p", project_id: "proj-001", alias: "p", path: parentDir });
+    createCodebase({
+      id: "cb-c",
+      project_id: "proj-001",
       alias: "c",
       path: "/tmp/c",
-      parent_repo_id: "repo-p",
+      parent_codebase_id: "cb-p",
       submodule_path: "c",
     });
-    expect(() => discoverSubmodules("repo-c")).toThrow(/不支持嵌套/);
+    expect(() => discoverSubmodules("cb-c")).toThrow(/不支持嵌套/);
   });
 });

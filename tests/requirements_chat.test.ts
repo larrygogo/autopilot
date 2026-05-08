@@ -4,8 +4,11 @@ import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate004 } from "../src/migrations/004-repos";
 import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate008 } from "../src/migrations/008-projects";
 import { _setDbForTest, initDb } from "../src/core/db";
-import { createRepo } from "../src/core/repos";
+import { createCodebase } from "../src/core/codebases";
+import { createProject } from "../src/core/projects";
 import {
   createRequirement,
   getRequirementById,
@@ -26,7 +29,10 @@ describe("chat tools 集成（直接走 core 函数验证流程）", () => {
     migrate004(db);
     migrate005(db);
     migrate006(db);
-    createRepo({ id: "repo-001", alias: "test-repo", path: "/tmp/x", default_branch: "main" });
+    migrate007(db);
+    migrate008(db);
+    createProject({ id: "proj-001", name: "test-proj" });
+    createCodebase({ id: "cb-001", project_id: "proj-001", alias: "test-repo", path: "/tmp/x", default_branch: "main" });
   });
 
   afterAll(() => {
@@ -37,7 +43,7 @@ describe("chat tools 集成（直接走 core 函数验证流程）", () => {
   it("完整链路：草稿 → 澄清 → ready → queued", () => {
     // create_requirement_draft 等价
     const id = nextRequirementId();
-    createRequirement({ id, repo_id: "repo-001", title: "新需求", spec_md: "" });
+    createRequirement({ id, repo_id: "cb-001", title: "新需求", spec_md: "" });
     expect(getRequirementById(id)?.status).toBe("drafting");
 
     // update_requirement_spec 等价：写规约 + 自动转 clarifying
@@ -57,7 +63,7 @@ describe("chat tools 集成（直接走 core 函数验证流程）", () => {
 
   it("inject_feedback 等价：追加 manual 反馈", () => {
     const id = nextRequirementId();
-    createRequirement({ id, repo_id: "repo-001", title: "x" });
+    createRequirement({ id, repo_id: "cb-001", title: "x" });
     appendFeedback({
       requirement_id: id,
       source: "manual",
@@ -70,14 +76,14 @@ describe("chat tools 集成（直接走 core 函数验证流程）", () => {
 
   it("cancel_requirement 等价：任意非终态 → cancelled", () => {
     const id = nextRequirementId();
-    createRequirement({ id, repo_id: "repo-001", title: "y" });
+    createRequirement({ id, repo_id: "cb-001", title: "y" });
     setRequirementStatus(id, "cancelled");
     expect(getRequirementById(id)?.status).toBe("cancelled");
   });
 
   it("inject_feedback 在 awaiting_review 时触发 fix_revision", () => {
     const id = nextRequirementId();
-    createRequirement({ id, repo_id: "repo-001", title: "test" });
+    createRequirement({ id, repo_id: "cb-001", title: "test" });
     // 走到 awaiting_review
     setRequirementStatus(id, "clarifying");
     setRequirementStatus(id, "ready");
@@ -97,7 +103,7 @@ describe("chat tools 集成（直接走 core 函数验证流程）", () => {
 
   it("inject_feedback 在非 awaiting_review 时仅记录不触发", () => {
     const id = nextRequirementId();
-    createRequirement({ id, repo_id: "repo-001", title: "test2" });
+    createRequirement({ id, repo_id: "cb-001", title: "test2" });
     setRequirementStatus(id, "clarifying");
     // 当前 status=clarifying
 
@@ -164,7 +170,10 @@ describe("enqueue 失败回滚", () => {
     migrate004(db);
     migrate005(db);
     migrate006(db);
-    createRepo({ id: "repo-rollback", alias: "rollback-repo", path: "/tmp/rb", default_branch: "main" });
+    migrate007(db);
+    migrate008(db);
+    createProject({ id: "proj-rb", name: "rollback-proj" });
+    createCodebase({ id: "cb-rollback", project_id: "proj-rb", alias: "rollback-repo", path: "/tmp/rb", default_branch: "main" });
   });
 
   afterAll(() => {
@@ -174,7 +183,7 @@ describe("enqueue 失败回滚", () => {
 
   it("queued 状态可以回滚到 ready（状态表支持 queued → ready 转换）", () => {
     const id = nextRequirementId();
-    createRequirement({ id, repo_id: "repo-rollback", title: "回滚测试" });
+    createRequirement({ id, repo_id: "cb-rollback", title: "回滚测试" });
     setRequirementStatus(id, "clarifying");
     setRequirementStatus(id, "ready");
     setRequirementStatus(id, "queued");

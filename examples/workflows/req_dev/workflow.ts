@@ -20,7 +20,7 @@ import { runInBackground } from "@autopilot/core/runner";
 import { getAgent } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 import { getTaskWorkspace } from "@autopilot/core/workspace";
-import { getRepoById } from "@autopilot/core/repos";
+import { getCodebaseById } from "@autopilot/core/codebases";
 import { setRequirementStatus, getRequirementById } from "@autopilot/core/requirements";
 import { forceTransition } from "@autopilot/core/state-machine";
 import { latestFeedback } from "@autopilot/core/requirement-feedbacks";
@@ -119,8 +119,8 @@ export interface SubmoduleInfo {
 
 export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknown> {
   if (!args.repo_id) throw new Error("setup_req_dev_task: repo_id 必填");
-  const repo = getRepoById(args.repo_id);
-  if (!repo) throw new Error(`setup_req_dev_task: repo not found: ${args.repo_id}`);
+  const repo = getCodebaseById(args.repo_id);
+  if (!repo) throw new Error(`setup_req_dev_task: codebase not found: ${args.repo_id}`);
 
   const title = args.title ?? "untitled";
   const requirement = args.requirement ?? "";

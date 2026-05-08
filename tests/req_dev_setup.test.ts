@@ -5,8 +5,12 @@ import { _setDbForTest, initDb } from "../src/core/db";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
 import { up as migrate004 } from "../src/migrations/004-repos";
+import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
-import { createRepo } from "../src/core/repos";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate008 } from "../src/migrations/008-projects";
+import { createCodebase } from "../src/core/codebases";
+import { createProject } from "../src/core/projects";
 
 describe("setup_req_dev_task", () => {
   let sqlite: Database;
@@ -18,9 +22,14 @@ describe("setup_req_dev_task", () => {
     migrate001(sqlite);
     migrate002(sqlite);
     migrate004(sqlite);
+    migrate005(sqlite);
     migrate006(sqlite);
-    createRepo({
-      id: "repo-001",
+    migrate007(sqlite);
+    migrate008(sqlite);
+    createProject({ id: "proj-001", name: "test-proj" });
+    createCodebase({
+      id: "cb-001",
+      project_id: "proj-001",
       alias: "autopilot",
       path: "/tmp/autopilot",
       default_branch: "main",
@@ -36,12 +45,12 @@ describe("setup_req_dev_task", () => {
 
   it("根据 repo_id 派生 task 字段", () => {
     const result = setup_req_dev_task({
-      repo_id: "repo-001",
+      repo_id: "cb-001",
       title: "GitHub 集成",
       requirement: "加 GitHub Issues 接入",
     });
     expect(result.title).toBe("GitHub 集成");
-    expect(result.repo_id).toBe("repo-001");
+    expect(result.repo_id).toBe("cb-001");
     expect(result.repo_path).toBe("/tmp/autopilot");
     expect(result.default_branch).toBe("main");
     expect(result.github_owner).toBe("larrygogo");
@@ -52,11 +61,11 @@ describe("setup_req_dev_task", () => {
 
   it("repo_id 不存在时报错", () => {
     expect(() => setup_req_dev_task({ repo_id: "no-such", title: "x", requirement: "y" }))
-      .toThrow(/repo not found/);
+      .toThrow(/codebase not found/);
   });
 
   it("title / requirement 缺省", () => {
-    const result = setup_req_dev_task({ repo_id: "repo-001" });
+    const result = setup_req_dev_task({ repo_id: "cb-001" });
     expect(result.title).toBe("untitled");
     expect(result.requirement).toBe("");
   });
@@ -72,7 +81,11 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
     migrate001(sqlite);
     migrate002(sqlite);
     migrate004(sqlite);
+    migrate005(sqlite);
     migrate006(sqlite);
+    migrate007(sqlite);
+    migrate008(sqlite);
+    createProject({ id: "proj-sub", name: "sub-proj" });
   });
 
   afterAll(() => {
@@ -81,9 +94,9 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
   });
 
   it("无子模块时 submodules 为空数组", () => {
-    createRepo({ id: "repo-no-sub", alias: "no-sub", path: "/tmp/no-sub" });
+    createCodebase({ id: "cb-no-sub", project_id: "proj-sub", alias: "no-sub", path: "/tmp/no-sub" });
     const result = setup_req_dev_task({
-      repo_id: "repo-no-sub",
+      repo_id: "cb-no-sub",
       title: "x",
       requirement: "y",
     });
@@ -91,19 +104,20 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
   });
 
   it("有子模块时注入数组", () => {
-    createRepo({ id: "repo-with-sub", alias: "parent", path: "/tmp/parent" });
-    createRepo({
-      id: "repo-child",
+    createCodebase({ id: "cb-with-sub", project_id: "proj-sub", alias: "parent", path: "/tmp/parent" });
+    createCodebase({
+      id: "cb-child",
+      project_id: "proj-sub",
       alias: "child",
       path: "/tmp/parent/child",
       default_branch: "master",
       github_owner: "foo",
       github_repo: "child",
-      parent_repo_id: "repo-with-sub",
+      parent_codebase_id: "cb-with-sub",
       submodule_path: "child",
     });
     const result = setup_req_dev_task({
-      repo_id: "repo-with-sub",
+      repo_id: "cb-with-sub",
       title: "feat",
       requirement: "x",
     });
@@ -114,6 +128,6 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
     expect(submodules[0].default_branch).toBe("master");
     expect(submodules[0].github_owner).toBe("foo");
     expect(submodules[0].github_repo).toBe("child");
-    expect(submodules[0].id).toBe("repo-child");
+    expect(submodules[0].id).toBe("cb-child");
   });
 });

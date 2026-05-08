@@ -5,6 +5,11 @@ import { emit } from "../daemon/event-bus";
 // 类型定义
 // ──────────────────────────────────────────────
 
+/**
+ * 008 迁移后表列改名 repo_id → codebase_id；TS 接口字段保留 repo_id 兼容旧调用方，
+ * SQL 用 `codebase_id AS repo_id` 让 SELECT 仍然映射到旧字段名。
+ * P2/P3/P5 重构调用方后可统一改为 codebase_id。
+ */
 export interface Requirement {
   id: string;
   repo_id: string;
@@ -76,11 +81,16 @@ function nowMs(): number {
 // CRUD
 // ──────────────────────────────────────────────
 
+// 标准 SELECT 列：把 codebase_id 映射回 TS 字段 repo_id（避免 SELECT * 缺字段）
+const REQ_COLUMNS =
+  "id, codebase_id AS repo_id, title, status, spec_md, chat_session_id, " +
+  "task_id, pr_url, pr_number, last_reviewed_event_id, created_at, updated_at";
+
 export function createRequirement(opts: CreateRequirementOpts): Requirement {
   const db = getDb();
   const ts = nowMs();
   db.run(
-    "INSERT INTO requirements (id, repo_id, title, status, spec_md, chat_session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+    "INSERT INTO requirements (id, codebase_id, title, status, spec_md, chat_session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
     [opts.id, opts.repo_id, opts.title, "drafting", opts.spec_md ?? "", opts.chat_session_id ?? null, ts, ts],
   );
   return getRequirementById(opts.id) as Requirement;
@@ -88,7 +98,7 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
 
 export function getRequirementById(id: string): Requirement | null {
   const db = getDb();
-  return db.query<Requirement, [string]>("SELECT * FROM requirements WHERE id = ?").get(id) ?? null;
+  return db.query<Requirement, [string]>(`SELECT ${REQ_COLUMNS} FROM requirements WHERE id = ?`).get(id) ?? null;
 }
 
 export function listRequirements(filters: { repo_id?: string; status?: string } = {}): Requirement[] {
@@ -96,7 +106,7 @@ export function listRequirements(filters: { repo_id?: string; status?: string } 
   const where: string[] = [];
   const vals: (string | number)[] = [];
   if (filters.repo_id) {
-    where.push("repo_id = ?");
+    where.push("codebase_id = ?");
     vals.push(filters.repo_id);
   }
   if (filters.status) {
@@ -104,7 +114,7 @@ export function listRequirements(filters: { repo_id?: string; status?: string } 
     vals.push(filters.status);
   }
   const sql =
-    "SELECT * FROM requirements" +
+    `SELECT ${REQ_COLUMNS} FROM requirements` +
     (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
     " ORDER BY created_at ASC";
   return db.query<Requirement, typeof vals>(sql).all(...vals);

@@ -35,15 +35,14 @@ import {
   type ScheduleType,
 } from "../core/schedules";
 import {
-  listRepos,
-  getRepoById,
-  getRepoByAlias,
-  createRepo,
-  updateRepo,
-  deleteRepo,
-  nextRepoId,
-} from "../core/repos";
-import { checkRepoHealth } from "../core/repo-health";
+  listCodebases,
+  getCodebaseById,
+  createCodebase,
+  updateCodebase,
+  deleteCodebase,
+  nextCodebaseId,
+} from "../core/codebases";
+import { checkCodebaseHealth } from "../core/codebase-health";
 import { discoverSubmodules, listSubmodules } from "../core/submodules";
 import { listSubPrs } from "../core/requirement-sub-prs";
 import {
@@ -395,8 +394,11 @@ export async function handleRequest(req: Request): Promise<Response> {
         [key: string]: unknown;
       };
       // 如果 caller 传了 repo_alias，解析为 repo_id（不覆盖已有 repo_id）
+      // P3 待修：alias 现在 project 内唯一，全局可能多个；目前取首个匹配。
       if (body.repo_alias && !body.repo_id) {
-        const repo = getRepoByAlias(body.repo_alias as string);
+        const repo = listCodebases({ includeSubmodules: true }).find(
+          (c) => c.alias === body.repo_alias,
+        );
         if (!repo) return error(`找不到别名为 "${body.repo_alias}" 的仓库`, 404);
         body.repo_id = repo.id;
       }
@@ -577,7 +579,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     // GET /api/repos
     if (method === "GET" && path === "/api/repos") {
-      return json({ repos: listRepos() });
+      return json({ repos: listCodebases() });
     }
 
     // POST /api/repos
@@ -588,14 +590,18 @@ export async function handleRequest(req: Request): Promise<Response> {
         default_branch?: string;
         github_owner?: string | null;
         github_repo?: string | null;
+        project_id?: string;
       };
       if (!body.alias?.trim() || !body.path?.trim()) {
         return error("alias 和 path 必填");
       }
+      // P3 待修：API 层应强制要求 project_id；当前 P1 阶段仅核心改名，project_id 默认空字符串占位（迁移后存量数据已填值）。
+      const projectId = body.project_id?.trim() ?? "";
       try {
-        const id = nextRepoId();
-        const repo = createRepo({
+        const id = nextCodebaseId();
+        const repo = createCodebase({
           id,
+          project_id: projectId,
           alias: body.alias.trim(),
           path: body.path.trim(),
           default_branch: body.default_branch?.trim() || "main",
@@ -620,14 +626,14 @@ export async function handleRequest(req: Request): Promise<Response> {
     // GET /api/repos/:id
     const repoIdMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)$/);
     if (method === "GET" && repoIdMatch) {
-      const repo = getRepoById(repoIdMatch);
+      const repo = getCodebaseById(repoIdMatch);
       if (!repo) return error("repo not found", 404);
       return json({ repo });
     }
 
     // PUT /api/repos/:id
     if (method === "PUT" && repoIdMatch) {
-      const existing = getRepoById(repoIdMatch);
+      const existing = getCodebaseById(repoIdMatch);
       if (!existing) return error("repo not found", 404);
       const body = (await req.json()) as {
         alias?: string;
@@ -652,7 +658,7 @@ export async function handleRequest(req: Request): Promise<Response> {
         else body.default_branch = trimmed;
       }
       try {
-        const repo = updateRepo(repoIdMatch, {
+        const repo = updateCodebase(repoIdMatch, {
           alias: body.alias,
           path: body.path,
           default_branch: body.default_branch,
@@ -676,27 +682,27 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     // DELETE /api/repos/:id
     if (method === "DELETE" && repoIdMatch) {
-      const existing = getRepoById(repoIdMatch);
+      const existing = getCodebaseById(repoIdMatch);
       if (!existing) return error("repo not found", 404);
-      deleteRepo(repoIdMatch);
+      deleteCodebase(repoIdMatch);
       return json({ ok: true });
     }
 
     // POST /api/repos/:id/healthcheck
     const repoHealthMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)\/healthcheck$/);
     if (method === "POST" && repoHealthMatch) {
-      const repo = getRepoById(repoHealthMatch);
+      const repo = getCodebaseById(repoHealthMatch);
       if (!repo) return error("repo not found", 404);
-      const health = await checkRepoHealth(repo.path);
+      const health = await checkCodebaseHealth(repo.path);
       // 自动回填 github_owner / github_repo（仅当 DB 里为空且检查结果有值，逐字段独立判断避免覆盖已有值）
       const patch: { github_owner?: string; github_repo?: string } = {};
       if (health.github_owner && !repo.github_owner) patch.github_owner = health.github_owner;
       if (health.github_repo && !repo.github_repo) patch.github_repo = health.github_repo;
       if (patch.github_owner !== undefined || patch.github_repo !== undefined) {
-        updateRepo(repoHealthMatch, patch);
+        updateCodebase(repoHealthMatch, patch);
       }
       // 健康检查通过 + 回填后，扫 .gitmodules 自动注册子模块（仅顶级 repo，子模块自身跳过避免递归）
-      if (health.healthy && !repo.parent_repo_id) {
+      if (health.healthy && !repo.parent_codebase_id) {
         try {
           const dr = discoverSubmodules(repo.id);
           return Response.json({
@@ -727,9 +733,9 @@ export async function handleRequest(req: Request): Promise<Response> {
     // POST /api/repos/:id/rediscover-submodules
     const repoRediscoverMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)\/rediscover-submodules$/);
     if (method === "POST" && repoRediscoverMatch) {
-      const repo = getRepoById(repoRediscoverMatch);
+      const repo = getCodebaseById(repoRediscoverMatch);
       if (!repo) return error("repo not found", 404);
-      if (repo.parent_repo_id) return error("子模块自身不能再发现子模块（不支持嵌套）");
+      if (repo.parent_codebase_id) return error("子模块自身不能再发现子模块（不支持嵌套）");
       try {
         const r = discoverSubmodules(repoRediscoverMatch);
         return json({
@@ -749,7 +755,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     // GET /api/repos/:id/submodules
     const repoSubmodulesMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)\/submodules$/);
     if (method === "GET" && repoSubmodulesMatch) {
-      const repo = getRepoById(repoSubmodulesMatch);
+      const repo = getCodebaseById(repoSubmodulesMatch);
       if (!repo) return error("repo not found", 404);
       // 子模块自身 / 普通父 repo 都按 listSubmodules 走（前者返回空数组）
       return json({ submodules: listSubmodules(repoSubmodulesMatch) });
@@ -775,7 +781,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (!body.repo_id?.trim() || !body.title?.trim()) {
         return error("repo_id 和 title 必填");
       }
-      if (!getRepoById(body.repo_id)) {
+      if (!getCodebaseById(body.repo_id)) {
         return error("repo not found", 404);
       }
       const id = nextRequirementId();
