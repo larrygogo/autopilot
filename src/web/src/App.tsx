@@ -35,6 +35,7 @@ import {
   Clock,
   FolderGit2,
   Inbox,
+  Layers,
 } from "lucide-react";
 
 const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
@@ -48,6 +49,10 @@ const Agents = lazy(() => import("./pages/Agents").then((m) => ({ default: m.Age
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const Schedules = lazy(() => import("./pages/Schedules").then((m) => ({ default: m.Schedules })));
 const Repos = lazy(() => import("./pages/Repos").then((m) => ({ default: m.Repos })));
+const Projects = lazy(() => import("./pages/Projects").then((m) => ({ default: m.Projects })));
+const ProjectDetail = lazy(() =>
+  import("./pages/ProjectDetail").then((m) => ({ default: m.ProjectDetail })),
+);
 const Requirements = lazy(() =>
   import("./pages/Requirements").then((m) => ({ default: m.Requirements })),
 );
@@ -68,6 +73,7 @@ const MAIN_NAV: NavItem[] = [
   { path: "/tasks", label: "任务", icon: ListTodo },
   { path: "/schedules", label: "定时", icon: Clock, end: true },
   { path: "/workflows", label: "工作流", icon: WorkflowIcon, end: true },
+  { path: "/projects", label: "项目", icon: Layers },
   { path: "/repos", label: "仓库", icon: FolderGit2, end: true },
   { path: "/requirements", label: "需求", icon: Inbox, end: true },
 ];
@@ -87,6 +93,11 @@ function titleForPath(pathname: string): string {
   if (pathname.startsWith("/tasks")) return "任务";
   if (pathname.startsWith("/schedules")) return "定时任务";
   if (pathname.startsWith("/workflows")) return "工作流";
+  if (pathname.startsWith("/projects/")) {
+    const id = pathname.slice("/projects/".length);
+    return id ? `项目工作台 · ${id}` : "项目";
+  }
+  if (pathname.startsWith("/projects")) return "项目";
   if (pathname.startsWith("/providers")) return "提供商";
   if (pathname.startsWith("/agents")) return "智能体";
   if (pathname.startsWith("/settings")) return "通用设置";
@@ -225,6 +236,8 @@ function AppInner() {
                 <Route path="/providers" element={<Providers />} />
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/projects" element={<Projects />} />
+                <Route path="/projects/:id" element={<ProjectDetailRoute />} />
                 <Route path="/repos" element={<Repos />} />
                 <Route path="/requirements" element={<Requirements />} />
                 <Route path="/requirements/:id" element={<RequirementDetail />} />
@@ -263,6 +276,12 @@ function TaskDetailRoute({
   const navigate = useNavigate();
   if (!id) return <Navigate to="/tasks" replace />;
   return <TaskDetail taskId={id} onBack={() => navigate("/tasks")} subscribe={subscribe} />;
+}
+
+function ProjectDetailRoute() {
+  const { id } = useParams<{ id: string }>();
+  if (!id) return <Navigate to="/projects" replace />;
+  return <ProjectDetail projectId={id} />;
 }
 
 function SidebarContent({
