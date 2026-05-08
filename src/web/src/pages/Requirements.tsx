@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Inbox, Plus, RefreshCw, ExternalLink, Layers, X } from "lucide-react";
 import { api, type Requirement, type Repo, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -82,6 +83,8 @@ export function Requirements() {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const projectFilter = searchParams.get("project_id") ?? "";
+  const { subscribe } = useWebSocket();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = useCallback(async (pid?: string) => {
     const effectivePid = pid ?? projectFilter;
@@ -108,6 +111,14 @@ export function Requirements() {
   useEffect(() => {
     void refresh();
   }, [projectFilter]); // re-fetch when filter changes
+
+  // WebSocket 订阅：需求状态变化时防抖刷新列表
+  useEffect(() => {
+    return subscribe("requirement:*", () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => { void refresh(); }, 300);
+    });
+  }, [subscribe, refresh]);
 
   const repoAliasMap = useMemo(() => {
     const m = new Map<string, string>();

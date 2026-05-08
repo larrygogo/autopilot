@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send } from "lucide-react";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +52,8 @@ export function RequirementDetail() {
   const navigate = useNavigate();
   const toast = useToast();
 
+  const { subscribe, state: wsState } = useWebSocket();
+
   const [req, setReq] = useState<Requirement | null>(null);
   const [feedbacks, setFeedbacks] = useState<RequirementFeedback[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -69,7 +72,7 @@ export function RequirementDetail() {
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async function refresh() {
     if (!id) return;
     setLoading(true);
     try {
@@ -90,11 +93,21 @@ export function RequirementDetail() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    refresh();
-  }, [id]);
+    void refresh();
+  }, [refresh]);
+
+  // WebSocket 订阅：需求状态变化时自动刷新
+  useEffect(() => {
+    if (!id) return;
+    return subscribe("requirement:*", (event: { type: string; payload?: { id?: string } }) => {
+      if (event.type === "requirement:status-changed" && event.payload?.id === id) {
+        void refresh();
+      }
+    });
+  }, [id, subscribe, refresh]);
 
   useEffect(() => {
     if (!req?.project_id) { setProject(null); return; }
@@ -305,7 +318,7 @@ export function RequirementDetail() {
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
       {/* Header */}
-      <div className="mb-5 flex flex-wrap items-start gap-3">
+      <div className="mb-5 flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
           size="sm"
@@ -315,6 +328,13 @@ export function RequirementDetail() {
           <ArrowLeft className="h-4 w-4" />
           返回
         </Button>
+        <div className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          {wsState === "connected" ? (
+            <><Wifi className="h-3 w-3 text-green-500" />实时</>
+          ) : (
+            <><WifiOff className="h-3 w-3" />离线</>
+          )}
+        </div>
       </div>
 
       {/* Meta 区 */}
