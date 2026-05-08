@@ -273,6 +273,14 @@ export const api = {
     request<{ codebases: Codebase[] }>(
       `/api/projects/${encodeURIComponent(projectId)}/codebases`,
     ).then((r) => r.codebases),
+  createProjectCodebase: (
+    projectId: string,
+    body: { alias: string; path: string; default_branch?: string; github_owner?: string | null; github_repo?: string | null },
+  ) =>
+    request<{ codebase: Codebase }>(
+      `/api/projects/${encodeURIComponent(projectId)}/codebases`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.codebase),
   listProjectRequirements: (projectId: string) =>
     request<{ requirements: Requirement[] }>(
       `/api/projects/${encodeURIComponent(projectId)}/requirements`,

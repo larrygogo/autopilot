@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw, ExternalLink,
+  ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw, ExternalLink, FolderOpen,
 } from "lucide-react";
 import { api, type Project, type Codebase, type Requirement } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
@@ -18,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FolderPicker } from "@/components/FolderPicker";
 import { cn } from "@/lib/utils";
 
 interface ProjectDetailProps {
@@ -46,6 +47,14 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   cancelled: "outline",
 };
 
+interface CbForm {
+  alias: string;
+  path: string;
+  default_branch: string;
+}
+
+const EMPTY_CB: CbForm = { alias: "", path: "", default_branch: "main" };
+
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const navigate = useNavigate();
   const toast = useToast();
@@ -56,9 +65,16 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [dialogOpen, setDialogOpen] = useState(false);
+  // 新建需求 dialog
+  const [reqDialogOpen, setReqDialogOpen] = useState(false);
   const [reqTitle, setReqTitle] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [savingReq, setSavingReq] = useState(false);
+
+  // 新建代码库 dialog
+  const [cbDialogOpen, setCbDialogOpen] = useState(false);
+  const [cbForm, setCbForm] = useState<CbForm>(EMPTY_CB);
+  const [savingCb, setSavingCb] = useState(false);
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -81,14 +97,16 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     refresh();
   }, [refresh]);
 
-  const openCreateDialog = () => {
+  // ── 需求 ──────────────────────────────────────
+
+  const openReqDialog = () => {
     setReqTitle("");
-    setDialogOpen(true);
+    setReqDialogOpen(true);
   };
 
-  const closeDialog = () => {
-    if (saving) return;
-    setDialogOpen(false);
+  const closeReqDialog = () => {
+    if (savingReq) return;
+    setReqDialogOpen(false);
   };
 
   const createRequirement = async () => {
@@ -97,19 +115,56 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       toast.error("验证失败", "需求标题不能为空");
       return;
     }
-    setSaving(true);
+    setSavingReq(true);
     try {
-      const req = await api.createRequirement({
-        project_id: projectId,
-        title,
-      });
+      const req = await api.createRequirement({ project_id: projectId, title });
       toast.success(`已创建需求「${title}」`);
-      setDialogOpen(false);
+      setReqDialogOpen(false);
       navigate(`/requirements/${req.id}`);
     } catch (e: unknown) {
       toast.error("创建失败", (e as Error)?.message ?? String(e));
     } finally {
-      setSaving(false);
+      setSavingReq(false);
+    }
+  };
+
+  // ── 代码库 ────────────────────────────────────
+
+  const openCbDialog = () => {
+    setCbForm(EMPTY_CB);
+    setCbDialogOpen(true);
+  };
+
+  const closeCbDialog = () => {
+    if (savingCb) return;
+    setCbDialogOpen(false);
+  };
+
+  const createCodebase = async () => {
+    const alias = cbForm.alias.trim();
+    const path = cbForm.path.trim();
+    if (!alias) {
+      toast.error("验证失败", "别名不能为空");
+      return;
+    }
+    if (!path) {
+      toast.error("验证失败", "路径不能为空");
+      return;
+    }
+    setSavingCb(true);
+    try {
+      await api.createProjectCodebase(projectId, {
+        alias,
+        path,
+        default_branch: cbForm.default_branch.trim() || "main",
+      });
+      toast.success(`已添加代码库「${alias}」`);
+      setCbDialogOpen(false);
+      refresh();
+    } catch (e: unknown) {
+      toast.error("创建失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setSavingCb(false);
     }
   };
 
@@ -167,17 +222,25 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
       {/* 代码库 */}
       <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <FolderGit2 className="h-4 w-4 text-muted-foreground" />
-          <h3 className="text-sm font-semibold">代码库（{codebases.length}）</h3>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FolderGit2 className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">代码库（{codebases.length}）</h3>
+          </div>
+          <Button size="sm" variant="outline" onClick={openCbDialog}>
+            <Plus className="h-4 w-4" />
+            添加代码库
+          </Button>
         </div>
 
         {codebases.length === 0 ? (
           <Card className="p-6 text-center">
             <FolderGit2 className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">
-              暂无代码库，可在「仓库管理」页关联。
-            </p>
+            <p className="mb-3 text-sm text-muted-foreground">暂无代码库，点「添加代码库」关联 Git 仓库。</p>
+            <Button size="sm" variant="outline" onClick={openCbDialog}>
+              <Plus className="h-4 w-4" />
+              添加代码库
+            </Button>
           </Card>
         ) : (
           <Card className="overflow-hidden">
@@ -229,7 +292,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <Inbox className="h-4 w-4 text-muted-foreground" />
             <h3 className="text-sm font-semibold">需求（{requirements.length}）</h3>
           </div>
-          <Button size="sm" onClick={openCreateDialog}>
+          <Button size="sm" onClick={openReqDialog}>
             <Plus className="h-4 w-4" />
             新建需求
           </Button>
@@ -239,7 +302,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           <Card className="p-6 text-center">
             <Inbox className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
             <p className="mb-3 text-sm text-muted-foreground">暂无需求，点「新建需求」开始。</p>
-            <Button size="sm" onClick={openCreateDialog}>
+            <Button size="sm" onClick={openReqDialog}>
               <Plus className="h-4 w-4" />
               新建需求
             </Button>
@@ -273,7 +336,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       </section>
 
       {/* 新建需求 Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); }}>
+      <Dialog open={reqDialogOpen} onOpenChange={(open) => { if (!open) closeReqDialog(); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>新建需求</DialogTitle>
@@ -281,7 +344,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
               在项目「{project?.name}」下创建需求，创建后进入详情页编写规格。
             </DialogDescription>
           </DialogHeader>
-
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label htmlFor="req-title">
@@ -296,17 +358,89 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
               />
             </div>
           </div>
-
           <DialogFooter>
-            <Button variant="outline" onClick={closeDialog} disabled={saving}>
-              取消
-            </Button>
-            <Button onClick={() => void createRequirement()} disabled={saving}>
-              {saving ? "创建中…" : "创建"}
+            <Button variant="outline" onClick={closeReqDialog} disabled={savingReq}>取消</Button>
+            <Button onClick={() => void createRequirement()} disabled={savingReq}>
+              {savingReq ? "创建中…" : "创建"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 添加代码库 Dialog */}
+      <Dialog open={cbDialogOpen} onOpenChange={(open) => { if (!open) closeCbDialog(); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>添加代码库</DialogTitle>
+            <DialogDescription>
+              将一个 Git 仓库目录关联到项目「{project?.name}」。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="cb-alias">
+                别名 <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="cb-alias"
+                placeholder="例如：frontend"
+                value={cbForm.alias}
+                onChange={(e) => setCbForm((f) => ({ ...f, alias: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cb-path">
+                路径 <span className="text-destructive">*</span>
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="cb-path"
+                  placeholder="例如：/home/user/projects/frontend"
+                  value={cbForm.path}
+                  onChange={(e) => setCbForm((f) => ({ ...f, path: e.target.value }))}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setFolderPickerOpen(true)}
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  浏览…
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cb-branch">默认分支</Label>
+              <Input
+                id="cb-branch"
+                placeholder="main"
+                value={cbForm.default_branch}
+                onChange={(e) => setCbForm((f) => ({ ...f, default_branch: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeCbDialog} disabled={savingCb}>取消</Button>
+            <Button onClick={() => void createCodebase()} disabled={savingCb}>
+              {savingCb ? "添加中…" : "添加"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 文件夹选择器 */}
+      <FolderPicker
+        open={folderPickerOpen}
+        initialPath={cbForm.path || undefined}
+        onSelect={(path) => {
+          setCbForm((f) => ({ ...f, path }));
+          setFolderPickerOpen(false);
+        }}
+        onCancel={() => setFolderPickerOpen(false)}
+      />
     </div>
   );
 }
