@@ -43,3 +43,26 @@ describe("migration 008-projects · projects 表", () => {
     expect(idx.some(i => i.name === "idx_projects_name")).toBe(true);
   });
 });
+
+describe("migration 008-projects · requirement_codebases 多对多表", () => {
+  it("创建 requirement_codebases 表，PK 是 (req_id, codebase_id) 组合", () => {
+    const db = freshDb();
+    migrate008(db);
+
+    const cols = db.query<{ name: string; pk: number }, []>(
+      "PRAGMA table_info(requirement_codebases)"
+    ).all();
+    const pkCols = cols.filter(c => c.pk > 0).map(c => c.name).sort();
+    expect(pkCols).toEqual(["codebase_id", "requirement_id"]);
+  });
+
+  it("有 idx_req_cb_codebase 索引", () => {
+    const db = freshDb();
+    migrate008(db);
+
+    const idx = db.query<{ name: string }, []>(
+      "PRAGMA index_list(requirement_codebases)"
+    ).all();
+    expect(idx.some(i => i.name === "idx_req_cb_codebase")).toBe(true);
+  });
+});

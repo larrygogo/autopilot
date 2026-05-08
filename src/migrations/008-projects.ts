@@ -11,9 +11,29 @@ import type { Database } from "bun:sqlite";
  *   - 旧 ready/queued 状态自动转 awaiting_approval
  *
  * 详见 docs/superpowers/specs/2026-05-08-project-workspace-redesign-design.md §5
+ *
+ * Task 2 仅落地 projects 表骨架；其余表/迁移由本迁移内的后续追加（Task 3+）接力。
  */
 export function up(db: Database): void {
   // ── 1. 新增 projects 表 ──
-  db.run("CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)");
+  db.run(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      description TEXT,
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    )
+  `);
   db.run("CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name)");
+
+  // ── 2. 新增 requirement_codebases 多对多表（一个需求可关联多个 codebase）──
+  db.run(`
+    CREATE TABLE IF NOT EXISTS requirement_codebases (
+      requirement_id TEXT NOT NULL,
+      codebase_id    TEXT NOT NULL,
+      PRIMARY KEY (requirement_id, codebase_id)
+    )
+  `);
+  db.run("CREATE INDEX IF NOT EXISTS idx_req_cb_codebase ON requirement_codebases(codebase_id)");
 }
