@@ -175,11 +175,14 @@ export function RequirementDetail() {
   }
 
   async function setCodebase(codebaseId: string | null) {
-    if (!id) return;
+    if (!id || !req) return;
+    const prev = req;
+    setReq({ ...req, codebase_id: codebaseId });
     try {
       await api.updateRequirement(id, { codebase_id: codebaseId });
-      await refresh();
+      toast.success(codebaseId ? "代码库已关联" : "已取消关联代码库");
     } catch (e: unknown) {
+      setReq(prev);
       toast.error("关联失败", (e as Error)?.message ?? String(e));
     }
   }
