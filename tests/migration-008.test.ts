@@ -223,3 +223,62 @@ describe("migration 008-projects · 旧数据迁移", () => {
     expect(sub?.project_id).toBe(parent?.project_id);
   });
 });
+
+describe("migration 008-projects · requirements 表升级", () => {
+  it("requirements 表 repo_id rename 为 codebase_id，并加 project_id", () => {
+    const db = new Database(":memory:");
+    migrate001(db);
+    migrate002(db);
+    migrate004(db);
+    migrate005(db);
+    migrate006(db);
+    migrate007(db);
+
+    // 插入 1 个 repo + 1 个 requirement 引用它
+    db.run(
+      "INSERT INTO repos (id, alias, path, default_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ["repo-001", "autopilot", "/abs/autopilot", "main", 1000, 1000]
+    );
+    db.run(
+      "INSERT INTO requirements (id, repo_id, title, status, spec_md, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ["req-001", "repo-001", "测试需求", "drafting", "...", 1500, 1500]
+    );
+
+    migrate008(db);
+
+    const cols = db.query<{ name: string }, []>(
+      "PRAGMA table_info(requirements)"
+    ).all().map(c => c.name);
+
+    expect(cols).toContain("codebase_id");
+    expect(cols).not.toContain("repo_id");
+    expect(cols).toContain("project_id");
+  });
+
+  it("旧 requirement.repo_id 值已转为 cb-NNN，project_id 已填", () => {
+    const db = new Database(":memory:");
+    migrate001(db);
+    migrate002(db);
+    migrate004(db);
+    migrate005(db);
+    migrate006(db);
+    migrate007(db);
+
+    db.run(
+      "INSERT INTO repos (id, alias, path, default_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ["repo-001", "autopilot", "/abs/autopilot", "main", 1000, 1000]
+    );
+    db.run(
+      "INSERT INTO requirements (id, repo_id, title, status, spec_md, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ["req-001", "repo-001", "测试", "drafting", "...", 1500, 1500]
+    );
+
+    migrate008(db);
+
+    const r = db.query<{ codebase_id: string; project_id: string }, []>(
+      "SELECT codebase_id, project_id FROM requirements WHERE id = 'req-001'"
+    ).get();
+    expect(r?.codebase_id).toBe("cb-001");
+    expect(r?.project_id?.startsWith("proj-")).toBe(true);
+  });
+});

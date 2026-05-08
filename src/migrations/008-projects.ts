@@ -129,4 +129,32 @@ export function up(db: Database): void {
     "UPDATE codebases SET parent_codebase_id = REPLACE(parent_codebase_id, 'repo-', 'cb-') " +
     "WHERE parent_codebase_id LIKE 'repo-%'"
   );
+
+  // ── 7. requirements 加 project_id + rename repo_id → codebase_id ──
+  // SQLite ALTER TABLE 支持 RENAME COLUMN（3.25+），bun:sqlite 远超此版本。
+  // ALTER ADD COLUMN 不支持 NOT NULL（除非有 DEFAULT），所以 project_id 先 NULLable 再 UPDATE 填值。
+  // 旧 requirements.repo_id 是 NOT NULL 字段，RENAME COLUMN 后 codebase_id 仍然 NOT NULL，
+  // 这与 spec NULLable 不一致但不影响 P1（旧数据全部有值，迁移期间无新插入），
+  // 表重建去 NOT NULL 留待 P4。
+  db.run("ALTER TABLE requirements RENAME COLUMN repo_id TO codebase_id");
+  db.run("ALTER TABLE requirements ADD COLUMN project_id TEXT");
+
+  // 旧索引同步迁移：005-requirements.ts 创建的 idx_requirements_repo / idx_requirements_repo_status
+  // RENAME COLUMN 后仍存在但引用新字段名 codebase_id；显式 DROP 后用新名 CREATE 更整洁
+  db.run("DROP INDEX IF EXISTS idx_requirements_repo");
+  db.run("DROP INDEX IF EXISTS idx_requirements_repo_status");
+  db.run("CREATE INDEX IF NOT EXISTS idx_requirements_codebase ON requirements(codebase_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_requirements_project ON requirements(project_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_requirements_codebase_status ON requirements(codebase_id, status)");
+
+  // 转 codebase_id 前缀（旧 repo-NNN → cb-NNN）+ 反查从 codebases 表填 project_id
+  db.run(
+    "UPDATE requirements SET codebase_id = REPLACE(codebase_id, 'repo-', 'cb-') " +
+    "WHERE codebase_id LIKE 'repo-%'"
+  );
+  db.run(
+    "UPDATE requirements " +
+    "SET project_id = (SELECT project_id FROM codebases WHERE codebases.id = requirements.codebase_id) " +
+    "WHERE codebase_id IS NOT NULL"
+  );
 }
