@@ -40,6 +40,7 @@ export interface CreateRequirementOpts {
 export interface UpdateRequirementOpts {
   title?: string;
   spec_md?: string;
+  codebase_id?: string | null;
   chat_session_id?: string | null;
   task_id?: string | null;
   pr_url?: string | null;
@@ -167,6 +168,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
   const updatable = [
     "title",
     "spec_md",
+    "codebase_id",
     "chat_session_id",
     "task_id",
     "pr_url",

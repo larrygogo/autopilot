@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2 } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project, type Codebase } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -68,6 +68,7 @@ export function RequirementDetail() {
   const [actionBusy, setActionBusy] = useState(false);
   const [subPrs, setSubPrs] = useState<RequirementSubPr[]>([]);
   // 回复输入状态：qid → 文本
+  const [projectCodebases, setProjectCodebases] = useState<Codebase[]>([]);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -115,8 +116,9 @@ export function RequirementDetail() {
   }, [id, subscribe, refresh]);
 
   useEffect(() => {
-    if (!req?.project_id) { setProject(null); return; }
+    if (!req?.project_id) { setProject(null); setProjectCodebases([]); return; }
     api.getProject(req.project_id).then(setProject).catch(() => setProject(null));
+    api.listProjectCodebases(req.project_id).then(setProjectCodebases).catch(() => setProjectCodebases([]));
   }, [req?.project_id]);
 
   const repoAlias = useMemo(() => {
@@ -155,7 +157,11 @@ export function RequirementDetail() {
   }
 
   async function enqueue() {
-    if (!id) return;
+    if (!id || !req) return;
+    if (!req.codebase_id) {
+      toast.error("请先关联代码库", "需要绑定代码库才能入队执行，请在下方选择代码库。");
+      return;
+    }
     setActionBusy(true);
     try {
       await api.enqueueRequirement(id);
@@ -165,6 +171,16 @@ export function RequirementDetail() {
       toast.error("入队失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
+    }
+  }
+
+  async function setCodebase(codebaseId: string | null) {
+    if (!id) return;
+    try {
+      await api.updateRequirement(id, { codebase_id: codebaseId });
+      await refresh();
+    } catch (e: unknown) {
+      toast.error("关联失败", (e as Error)?.message ?? String(e));
     }
   }
 
@@ -375,9 +391,18 @@ export function RequirementDetail() {
                   <span className="text-muted-foreground">·</span>
                 </>
               )}
-              {repoAlias && (
+              {projectCodebases.length > 0 && (
                 <>
-                  <span className="text-muted-foreground font-mono text-xs">{repoAlias}</span>
+                  <select
+                    className="h-5 rounded border border-input bg-transparent px-1.5 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={req.codebase_id ?? ""}
+                    onChange={(e) => void setCodebase(e.target.value || null)}
+                  >
+                    <option value="">选择代码库…</option>
+                    {projectCodebases.map((cb) => (
+                      <option key={cb.id} value={cb.id}>{cb.alias}</option>
+                    ))}
+                  </select>
                   <span className="text-muted-foreground">·</span>
                 </>
               )}

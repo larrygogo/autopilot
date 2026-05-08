@@ -1104,10 +1104,14 @@ export async function handleRequest(req: Request): Promise<Response> {
         const body = (await req.json()) as {
           title?: string;
           spec_md?: string;
+          codebase_id?: string | null;
           chat_session_id?: string | null;
         };
         if (body.title !== undefined && !body.title.trim()) {
           return error("title 不能为空");
+        }
+        if (body.codebase_id !== undefined && body.codebase_id !== null) {
+          if (!getCodebaseById(body.codebase_id)) return error("codebase not found", 404);
         }
         return json({ requirement: withRepoIdAlias(updateRequirement(reqDetailMatch, body)) });
       }
