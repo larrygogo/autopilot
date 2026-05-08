@@ -37,8 +37,10 @@ export function Projects() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  // 删除 busy
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // 删除确认 dialog
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [deleteInput, setDeleteInput] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -104,18 +106,31 @@ export function Projects() {
     }
   };
 
-  const remove = async (p: Project, e: React.MouseEvent) => {
+  const openDeleteDialog = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`确定删除项目「${p.name}」？\n\n此操作将同时删除项目下所有代码库和需求，且不可恢复。`)) return;
-    setDeletingId(p.id);
+    setDeleteTarget(p);
+    setDeleteInput("");
+  };
+
+  const closeDeleteDialog = () => {
+    if (deleting) return;
+    setDeleteTarget(null);
+    setDeleteInput("");
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await api.deleteProject(p.id);
-      toast.success(`已删除项目「${p.name}」`);
+      await api.deleteProject(deleteTarget.id);
+      toast.success(`已删除项目「${deleteTarget.name}」`);
+      setDeleteTarget(null);
+      setDeleteInput("");
       refresh();
     } catch (e: unknown) {
       toast.error("删除失败", (e as Error)?.message ?? String(e));
     } finally {
-      setDeletingId(null);
+      setDeleting(false);
     }
   };
 
@@ -180,7 +195,7 @@ export function Projects() {
                   size="icon"
                   className="h-7 w-7"
                   onClick={(e) => openEditDialog(project, e)}
-                  disabled={deletingId === project.id}
+                  disabled={deleteTarget?.id === project.id}
                   title="编辑"
                 >
                   <Pencil className="h-3.5 w-3.5" />
@@ -189,8 +204,8 @@ export function Projects() {
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 text-destructive hover:text-destructive"
-                  onClick={(e) => remove(project, e)}
-                  disabled={deletingId === project.id}
+                  onClick={(e) => openDeleteDialog(project, e)}
+                  disabled={deleteTarget?.id === project.id}
                   title="删除"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -218,6 +233,7 @@ export function Projects() {
         </div>
       )}
 
+      {/* 新建 / 编辑 dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -261,6 +277,50 @@ export function Projects() {
             </Button>
             <Button onClick={() => void save()} disabled={saving}>
               {saving ? (editingProject ? "保存中…" : "创建中…") : (editingProject ? "保存" : "创建")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 删除确认 dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) closeDeleteDialog(); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>删除项目</DialogTitle>
+            <DialogDescription>
+              此操作将永久删除项目及其下所有代码库和需求，且不可恢复。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              请输入项目名称{" "}
+              <span className="font-medium text-foreground">
+                {deleteTarget?.name}
+              </span>{" "}
+              以确认删除：
+            </p>
+            <Input
+              placeholder={deleteTarget?.name}
+              value={deleteInput}
+              onChange={(e) => setDeleteInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && deleteInput === deleteTarget?.name) void confirmDelete();
+              }}
+              autoFocus
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeDeleteDialog} disabled={deleting}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void confirmDelete()}
+              disabled={deleting || deleteInput !== deleteTarget?.name}
+            >
+              {deleting ? "删除中…" : "确认删除"}
             </Button>
           </DialogFooter>
         </DialogContent>
