@@ -94,6 +94,20 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   // 健康检查
   const [healthMap, setHealthMap] = useState<Record<string, HealthState>>({});
 
+  const autoCheckHealth = useCallback((cbs: Codebase[]) => {
+    if (cbs.length === 0) return;
+    setHealthMap((prev) => {
+      const next = { ...prev };
+      for (const cb of cbs) next[cb.id] = "loading";
+      return next;
+    });
+    for (const cb of cbs) {
+      api.healthcheckRepo(cb.id)
+        .then((result) => setHealthMap((prev) => ({ ...prev, [cb.id]: result })))
+        .catch(() => setHealthMap((prev) => { const n = { ...prev }; delete n[cb.id]; return n; }));
+    }
+  }, []);
+
   const refresh = useCallback(() => {
     setLoading(true);
     setLoadError(null);
@@ -106,10 +120,11 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         setProject(proj);
         setCodebases(cbs);
         setRequirements(reqs);
+        autoCheckHealth(cbs);
       })
       .catch((e: unknown) => setLoadError((e as Error)?.message ?? String(e)))
       .finally(() => setLoading(false));
-  }, [projectId]);
+  }, [projectId, autoCheckHealth]);
 
   useEffect(() => {
     refresh();
@@ -225,7 +240,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     try {
       const result = await api.healthcheckRepo(cb.id);
       setHealthMap((prev) => ({ ...prev, [cb.id]: result }));
-      if (result.healthy) refresh();
     } catch (e: unknown) {
       toast.error("健康检查失败", (e as Error)?.message ?? String(e));
       setHealthMap((prev) => { const n = { ...prev }; delete n[cb.id]; return n; });
