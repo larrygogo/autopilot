@@ -291,6 +291,15 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           <div className="flex items-center gap-2">
             <Inbox className="h-4 w-4 text-muted-foreground" />
             <h3 className="text-sm font-semibold">需求（{requirements.length}）</h3>
+            {requirements.length > 0 && (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-primary hover:underline"
+                onClick={() => navigate(`/requirements?project_id=${projectId}`)}
+              >
+                查看全部
+              </button>
+            )}
           </div>
           <Button size="sm" onClick={openReqDialog}>
             <Plus className="h-4 w-4" />

@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { Inbox, Plus, RefreshCw, ExternalLink } from "lucide-react";
-import { api, type Requirement, type Repo } from "@/hooks/useApi";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Inbox, Plus, RefreshCw, ExternalLink, Layers, X } from "lucide-react";
+import { api, type Requirement, type Repo, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -68,9 +68,11 @@ const EMPTY_FORM: FormState = { repo_id: "", title: "" };
 
 export function Requirements() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
   const [reqs, setReqs] = useState<Requirement[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<keyof typeof STATUS_GROUPS>("drafts");
@@ -79,13 +81,21 @@ export function Requirements() {
   const [saving, setSaving] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
-  async function refresh() {
+  const projectFilter = searchParams.get("project_id") ?? "";
+
+  const refresh = useCallback(async (pid?: string) => {
+    const effectivePid = pid ?? projectFilter;
     setLoading(true);
     setLoadError(null);
     try {
-      const [r, p] = await Promise.all([api.listRequirements(), api.listRepos()]);
+      const [r, p, projs] = await Promise.all([
+        api.listRequirements(effectivePid ? { project_id: effectivePid } : undefined),
+        api.listRepos(),
+        api.listProjects(),
+      ]);
       setReqs(r);
       setRepos(p);
+      setProjects(projs);
     } catch (e: unknown) {
       const msg = (e as Error)?.message ?? String(e);
       setLoadError(msg);
@@ -93,17 +103,33 @@ export function Requirements() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [projectFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    refresh();
-  }, []);
+    void refresh();
+  }, [projectFilter]); // re-fetch when filter changes
 
   const repoAliasMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const r of repos) m.set(r.id, r.alias);
     return m;
   }, [repos]);
+
+  const projectMap = useMemo(() => {
+    const m = new Map<string, Project>();
+    for (const p of projects) m.set(p.id, p);
+    return m;
+  }, [projects]);
+
+  const activeProject = projectFilter ? projectMap.get(projectFilter) : undefined;
+
+  function changeProjectFilter(pid: string) {
+    if (pid) {
+      setSearchParams({ project_id: pid });
+    } else {
+      setSearchParams({});
+    }
+  }
 
   const filtered = reqs.filter((r) =>
     (STATUS_GROUPS[tab] as readonly string[]).includes(r.status),
@@ -169,7 +195,7 @@ export function Requirements() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
+          <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             刷新
           </Button>
@@ -178,6 +204,46 @@ export function Requirements() {
             新建需求
           </Button>
         </div>
+      </div>
+
+      {/* 项目筛选栏 */}
+      <div className="flex items-center gap-2">
+        <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <select
+          value={projectFilter}
+          onChange={(e) => changeProjectFilter(e.target.value)}
+          className={cn(
+            "h-8 rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-sm",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          )}
+        >
+          <option value="">全部项目</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        {activeProject && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => changeProjectFilter("")}
+            title="清除筛选"
+          >
+            <X className="h-3.5 w-3.5" />
+            清除
+          </button>
+        )}
+        {activeProject && (
+          <button
+            type="button"
+            className="text-xs text-primary hover:underline"
+            onClick={() => navigate(`/projects/${activeProject.id}`)}
+          >
+            查看项目工作台
+          </button>
+        )}
       </div>
 
       {loadError && (
@@ -225,6 +291,9 @@ export function Requirements() {
                     <thead>
                       <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
                         <th className="px-4 py-2.5 font-medium">标题</th>
+                        {!projectFilter && (
+                          <th className="px-4 py-2.5 font-medium">项目</th>
+                        )}
                         <th className="px-4 py-2.5 font-medium">仓库</th>
                         <th className="px-4 py-2.5 font-medium">状态</th>
                         <th className="px-4 py-2.5 font-medium">PR</th>
@@ -241,7 +310,7 @@ export function Requirements() {
                             idx % 2 === 1 && "bg-muted/10",
                           )}
                         >
-                          <td className="px-4 py-2.5 max-w-[260px]">
+                          <td className="px-4 py-2.5 max-w-[240px]">
                             <span
                               className="block truncate font-medium"
                               title={req.title}
@@ -249,6 +318,22 @@ export function Requirements() {
                               {req.title}
                             </span>
                           </td>
+                          {!projectFilter && (
+                            <td className="px-4 py-2.5">
+                              {req.project_id ? (
+                                <button
+                                  type="button"
+                                  className="text-xs text-primary hover:underline truncate max-w-[120px] block"
+                                  title={projectMap.get(req.project_id)?.name}
+                                  onClick={() => changeProjectFilter(req.project_id!)}
+                                >
+                                  {projectMap.get(req.project_id)?.name ?? req.project_id}
+                                </button>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          )}
                           <td className="px-4 py-2.5">
                             <span className="font-mono text-xs text-muted-foreground">
                               {repoAliasMap.get(req.repo_id ?? "") ?? req.repo_id ?? "—"}
@@ -305,7 +390,7 @@ export function Requirements() {
                                   variant="ghost"
                                   size="sm"
                                   className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                                  onClick={() => cancelReq(req)}
+                                  onClick={() => void cancelReq(req)}
                                   disabled={cancellingId === req.id}
                                 >
                                   取消
@@ -373,7 +458,7 @@ export function Requirements() {
                 value={form.title}
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !saving) save();
+                  if (e.key === "Enter" && !saving) void save();
                 }}
               />
             </div>
@@ -383,7 +468,7 @@ export function Requirements() {
             <Button variant="outline" onClick={closeDialog} disabled={saving}>
               取消
             </Button>
-            <Button onClick={save} disabled={saving || repos.length === 0}>
+            <Button onClick={() => void save()} disabled={saving || repos.length === 0}>
               {saving ? "创建中…" : "创建"}
             </Button>
           </DialogFooter>

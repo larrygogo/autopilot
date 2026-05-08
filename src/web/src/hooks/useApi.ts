@@ -337,9 +337,10 @@ export const api = {
   },
 
   // Requirements
-  listRequirements: (filters?: { repo_id?: string; status?: string }) => {
+  listRequirements: (filters?: { repo_id?: string; project_id?: string; status?: string }) => {
     const params = new URLSearchParams();
     if (filters?.repo_id) params.set("repo_id", filters.repo_id);
+    if (filters?.project_id) params.set("project_id", filters.project_id);
     if (filters?.status) params.set("status", filters.status);
     const qs = params.toString();
     return request<{ requirements: Requirement[] }>(`/api/requirements${qs ? "?" + qs : ""}`)
