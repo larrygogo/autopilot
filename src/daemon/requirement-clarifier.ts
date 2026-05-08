@@ -2,15 +2,16 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { onEvent, offEvent, emit } from "./event-bus";
 import type { AutopilotEvent } from "./protocol";
-import { getRequirementById } from "../core/requirements";
+import { getRequirementById, updateRequirement } from "../core/requirements";
 import { getProjectById } from "../core/projects";
 import { getCodebaseById } from "../core/codebases";
-import { createQuestion, nextQuestionId } from "../core/requirement-questions";
+import { listQuestionsByRequirement, createQuestion, nextQuestionId } from "../core/requirement-questions";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("requirement-clarifier");
 
-let _handler: ((event: AutopilotEvent) => void) | null = null;
+let _statusHandler: ((event: AutopilotEvent) => void) | null = null;
+let _resolvedHandler: ((event: AutopilotEvent) => void) | null = null;
 
 function readCodebaseContext(codebasePath: string): string {
   const candidates = ["CLAUDE.md", "README.md", "README"];
@@ -25,19 +26,28 @@ function readCodebaseContext(codebasePath: string): string {
   return snippets.join("\n\n");
 }
 
-function buildPrompt(opts: {
-  title: string;
-  specMd: string;
+async function callClaude(prompt: string): Promise<string> {
+  const proc = Bun.spawn(
+    ["claude", "-p", prompt, "--output-format", "text", "--tools", ""],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  const [stdout] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  await proc.exited;
+  return stdout.trim();
+}
+
+function buildContext(opts: {
   projectName: string;
   projectDescription: string | null;
   codebaseAlias: string | null;
   codebaseContext: string | null;
+  title: string;
+  specMd: string;
 }): string {
   const lines: string[] = [];
-  lines.push("你是一位软件需求分析师。根据项目背景和需求信息，生成澄清问题。");
-  lines.push("规则：每行一个问题，最多 5 个，不要编号，不要 markdown，不要任何前言或解释，");
-  lines.push("问题必须结合项目实际情况具体有价值，如果需求已足够清晰则只输出 NO_QUESTIONS。");
-  lines.push("");
   lines.push(`项目名称：${opts.projectName}`);
   if (opts.projectDescription) lines.push(`项目描述：${opts.projectDescription}`);
   if (opts.codebaseAlias) lines.push(`关联代码库：${opts.codebaseAlias}`);
@@ -48,98 +58,159 @@ function buildPrompt(opts: {
   }
   lines.push("");
   lines.push(`需求标题：${opts.title}`);
-  lines.push(`需求规约：${opts.specMd.trim() || "(暂无)"}`);
-  lines.push("");
-  lines.push("请生成澄清问题（每行一个，最多5个，直接输出问题）：");
+  if (opts.specMd.trim()) {
+    lines.push(`需求规约：${opts.specMd.trim()}`);
+  }
   return lines.join("\n");
 }
 
-async function callClaude(prompt: string): Promise<string> {
-  const proc = Bun.spawn(
-    ["claude", "-p", prompt, "--output-format", "text", "--tools", ""],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  const [stdout, _] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  await proc.exited;
-  return stdout.trim();
-}
-
-async function clarifyRequirement(reqId: string): Promise<void> {
+/** 第一轮：需求刚进入 clarifying，生成初始问题 */
+async function runFirstRound(reqId: string): Promise<void> {
   const req = getRequirementById(reqId);
   if (!req || req.status !== "clarifying") return;
 
   const project = req.project_id ? getProjectById(req.project_id) : null;
-  if (!project) {
-    log.warn("clarifier: req=%s 找不到所属项目，跳过", reqId);
-    return;
-  }
+  if (!project) { log.warn("clarifier: req=%s 找不到项目，跳过", reqId); return; }
   const codebase = req.codebase_id ? getCodebaseById(req.codebase_id) : null;
 
-  const codebasePath = codebase?.path ?? null;
-  const codebaseContext = codebasePath ? readCodebaseContext(codebasePath) : null;
-  const prompt = buildPrompt({
-    title: req.title,
-    specMd: req.spec_md ?? "",
+  const ctx = buildContext({
     projectName: project.name,
     projectDescription: project.description,
     codebaseAlias: codebase?.alias ?? null,
-    codebaseContext,
+    codebaseContext: codebase?.path ? readCodebaseContext(codebase.path) : null,
+    title: req.title,
+    specMd: req.spec_md ?? "",
   });
 
-  let text: string;
-  try {
-    text = await callClaude(prompt);
-  } catch (e: unknown) {
-    log.warn("clarifier: claude CLI 调用失败 req=%s: %s", reqId, (e as Error).message);
-    return;
-  }
+  const prompt =
+    "你是一位软件需求分析师。根据以下项目背景和需求，生成澄清问题。\n" +
+    "规则：每行一个问题，不要编号、不要 markdown、不要前言，问题必须结合项目实际情况有价值。\n" +
+    "如果需求已足够清晰无需提问，只输出 NO_QUESTIONS。\n\n" +
+    ctx + "\n\n请生成澄清问题：";
+
+  const text = await callClaude(prompt).catch((e: unknown) => {
+    log.warn("clarifier: 第一轮调用失败 req=%s: %s", reqId, (e as Error).message);
+    return "";
+  });
 
   if (!text || text === "NO_QUESTIONS") {
-    log.info("clarifier: req=%s 无需澄清问题", reqId);
+    log.info("clarifier: req=%s 首轮无需澄清", reqId);
     return;
   }
 
-  const lines = text
-    .split("\n")
-    .map((l) => l.replace(/^[\d\.\-\*\s]+/, "").trim())
-    .filter((l) => l.length > 4 && !l.startsWith("#"));
+  const questions = parseQuestions(text);
+  createQuestions(reqId, questions);
+  if (questions.length > 0) {
+    emit({ type: "requirement:questions-updated", payload: { id: reqId } });
+    log.info("clarifier: req=%s 第一轮生成 %d 个问题", reqId, questions.length);
+  }
+}
 
-  let created = 0;
-  for (const line of lines.slice(0, 5)) {
-    const qId = nextQuestionId();
-    createQuestion({ id: qId, requirement_id: reqId, agent_text: line });
-    created++;
+/**
+ * 后续轮：所有问题都回答完后，AI 决定：
+ * - 继续追问 → 输出新问题（每行一个）
+ * - 结束 → 输出 CLARIFICATION_COMPLETE，紧跟整理好的 spec_md
+ */
+async function runFollowUpRound(reqId: string): Promise<void> {
+  const req = getRequirementById(reqId);
+  if (!req || req.status !== "clarifying") return;
+
+  const project = req.project_id ? getProjectById(req.project_id) : null;
+  if (!project) return;
+  const codebase = req.codebase_id ? getCodebaseById(req.codebase_id) : null;
+
+  const allQuestions = listQuestionsByRequirement(reqId);
+  const qaHistory = allQuestions.map((q, i) => {
+    const userReply = (q.replies ?? []).find(r => r.author_role === "user")?.text ?? "(未回复)";
+    return `问题 ${i + 1}：${q.agent_text}\n回答：${userReply}`;
+  }).join("\n\n");
+
+  const ctx = buildContext({
+    projectName: project.name,
+    projectDescription: project.description,
+    codebaseAlias: codebase?.alias ?? null,
+    codebaseContext: codebase?.path ? readCodebaseContext(codebase.path) : null,
+    title: req.title,
+    specMd: req.spec_md ?? "",
+  });
+
+  const prompt =
+    "你是一位软件需求分析师，正在与用户进行需求澄清对话。\n\n" +
+    ctx + "\n\n" +
+    "## 已完成的澄清问答\n\n" + qaHistory + "\n\n" +
+    "请根据以上回答判断：\n" +
+    "- 如果还需要进一步澄清，直接输出追加问题（每行一个，不要编号、不要 markdown）。\n" +
+    "- 如果信息已经足够，输出以下格式：\n" +
+    "CLARIFICATION_COMPLETE\n" +
+    "（然后另起一段，输出整理好的需求规约 markdown，内容要融合原始描述和所有问答信息，供开发 Agent 使用）";
+
+  const text = await callClaude(prompt).catch((e: unknown) => {
+    log.warn("clarifier: 追问调用失败 req=%s: %s", reqId, (e as Error).message);
+    return "";
+  });
+
+  if (!text) return;
+
+  if (text.includes("CLARIFICATION_COMPLETE")) {
+    // 提取 CLARIFICATION_COMPLETE 之后的 spec
+    const specMd = text.split("CLARIFICATION_COMPLETE").slice(1).join("").trim();
+    if (specMd) {
+      updateRequirement(reqId, { spec_md: specMd });
+      log.info("clarifier: req=%s 澄清完成，已写入 spec_md（%d 字符）", reqId, specMd.length);
+    }
+    emit({ type: "requirement:questions-updated", payload: { id: reqId } });
+    return;
   }
 
-  if (created > 0) {
+  // 还有追问
+  const questions = parseQuestions(text);
+  createQuestions(reqId, questions);
+  if (questions.length > 0) {
     emit({ type: "requirement:questions-updated", payload: { id: reqId } });
-    log.info("clarifier: req=%s 生成 %d 个澄清问题", reqId, created);
+    log.info("clarifier: req=%s 追问 %d 个问题", reqId, questions.length);
+  }
+}
+
+function parseQuestions(text: string): string[] {
+  return text
+    .split("\n")
+    .map(l => l.replace(/^[\d\.\-\*\s]+/, "").trim())
+    .filter(l => l.length > 4 && !l.startsWith("#") && !l.startsWith("CLARIFICATION"));
+}
+
+function createQuestions(reqId: string, questions: string[]): void {
+  for (const q of questions) {
+    const qId = nextQuestionId();
+    createQuestion({ id: qId, requirement_id: reqId, agent_text: q });
   }
 }
 
 export function initRequirementClarifier(): void {
-  if (_handler) return;
+  if (_statusHandler) return;
 
-  const handler = (event: AutopilotEvent) => {
+  _statusHandler = (event: AutopilotEvent) => {
     if (event.type !== "requirement:status-changed") return;
     const { id, to } = event.payload;
     if (to !== "clarifying") return;
-
-    clarifyRequirement(id).catch((e: unknown) => {
-      log.error("clarifier: 澄清失败 req=%s: %s", id, (e as Error).message);
+    runFirstRound(id).catch((e: unknown) => {
+      log.error("clarifier: 第一轮失败 req=%s: %s", id, (e as Error).message);
     });
   };
 
-  onEvent("requirement:status-changed", handler);
-  _handler = handler;
+  _resolvedHandler = (event: AutopilotEvent) => {
+    if (event.type !== "requirement:all-questions-resolved") return;
+    const { id } = event.payload;
+    runFollowUpRound(id).catch((e: unknown) => {
+      log.error("clarifier: 追问失败 req=%s: %s", id, (e as Error).message);
+    });
+  };
+
+  onEvent("requirement:status-changed", _statusHandler);
+  onEvent("requirement:all-questions-resolved", _resolvedHandler);
   log.info("requirement-clarifier 已启动");
 }
 
 export function disposeRequirementClarifier(): void {
-  if (!_handler) return;
-  offEvent("requirement:status-changed", _handler);
-  _handler = null;
+  if (_statusHandler) { offEvent("requirement:status-changed", _statusHandler); _statusHandler = null; }
+  if (_resolvedHandler) { offEvent("requirement:all-questions-resolved", _resolvedHandler); _resolvedHandler = null; }
 }

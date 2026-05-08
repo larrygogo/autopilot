@@ -1061,6 +1061,11 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (!getRequirementById(reqId)) return error("requirement not found", 404);
       if (!getQuestionById(qid)) return error("question not found", 404);
       resolveQuestion(qid);
+      // 全部问题解决时通知 clarifier 决定是否继续追问
+      const allQuestions = listQuestionsByRequirement(reqId);
+      if (allQuestions.length > 0 && allQuestions.every(q => q.status === "resolved")) {
+        emit({ type: "requirement:all-questions-resolved", payload: { id: reqId } });
+      }
       return json({ ok: true });
     }
 
