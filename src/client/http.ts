@@ -2,6 +2,7 @@ import type { Task, TaskLog } from "../core/db";
 import type { DaemonStatus, GraphData } from "../daemon/protocol";
 import type { SessionManifest, ChatMessage } from "../core/sessions";
 import type { Schedule, ScheduleType } from "../core/schedules";
+import type { Requirement } from "../core/requirements";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -303,7 +304,7 @@ export class HttpClient {
     });
   }
 
-  async listProjectRequirements(projectId: string): Promise<{ requirements: unknown[] }> {
+  async listProjectRequirements(projectId: string): Promise<{ requirements: Requirement[] }> {
     return this.request(`/api/projects/${encodeURIComponent(projectId)}/requirements`);
   }
 
