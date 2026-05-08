@@ -157,7 +157,7 @@ export function Requirements() {
   }
 
   async function save() {
-    if (!form.repo_id) {
+    if (!projectFilter && !form.repo_id) {
       toast.error("验证失败", "请选择仓库");
       return;
     }
@@ -167,10 +167,12 @@ export function Requirements() {
     }
     setSaving(true);
     try {
-      const r = await api.createRequirement({
-        repo_id: form.repo_id,
+      const body: Parameters<typeof api.createRequirement>[0] = {
         title: form.title.trim(),
-      });
+      };
+      if (projectFilter) body.project_id = projectFilter;
+      if (form.repo_id) body.repo_id = form.repo_id;
+      const r = await api.createRequirement(body);
       setDialogOpen(false);
       navigate(`/requirements/${r.id}`);
     } catch (e: unknown) {
@@ -425,18 +427,29 @@ export function Requirements() {
           <DialogHeader>
             <DialogTitle>新建需求</DialogTitle>
             <DialogDescription>
-              选择目标仓库并填写需求标题，创建后可继续补充详情。
+              {activeProject
+                ? `在项目「${activeProject.name}」下创建需求，仓库可选填。`
+                : "选择目标仓库并填写需求标题，创建后可继续补充详情。"}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
+            {activeProject && (
+              <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                所属项目：<span className="font-medium text-foreground">{activeProject.name}</span>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label htmlFor="req-repo">
-                仓库 <span className="text-destructive">*</span>
+                仓库{!activeProject && <span className="text-destructive"> *</span>}
+                {activeProject && <span className="text-muted-foreground text-xs ml-1">（可选）</span>}
               </Label>
               {repos.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  暂无仓库，请先在「仓库」页面添加仓库。
+                  {activeProject
+                    ? "暂无仓库，可不选仓库直接创建。"
+                    : "暂无仓库，请先在「仓库」页面添加仓库。"}
                 </p>
               ) : (
                 <select
@@ -449,7 +462,7 @@ export function Requirements() {
                     "disabled:cursor-not-allowed disabled:opacity-50",
                   )}
                 >
-                  <option value="">请选择仓库…</option>
+                  <option value="">{activeProject ? "不绑定仓库…" : "请选择仓库…"}</option>
                   {repos.map((r) => (
                     <option key={r.id} value={r.id}>
                       {r.alias}
@@ -479,7 +492,10 @@ export function Requirements() {
             <Button variant="outline" onClick={closeDialog} disabled={saving}>
               取消
             </Button>
-            <Button onClick={() => void save()} disabled={saving || repos.length === 0}>
+            <Button
+              onClick={() => void save()}
+              disabled={saving || (!activeProject && repos.length === 0)}
+            >
               {saving ? "创建中…" : "创建"}
             </Button>
           </DialogFooter>
