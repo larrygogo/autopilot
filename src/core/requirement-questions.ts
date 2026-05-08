@@ -127,6 +127,7 @@ export function nextQuestionId(): string {
   return `qst-${String(n).padStart(3, "0")}`;
 }
 
+// 超过 999 条时字典序排序出错，与 nextQuestionId 同等已知限制，P1 阶段不会触发。
 export function nextReplyId(): string {
   const db = getDb();
   const rows = db

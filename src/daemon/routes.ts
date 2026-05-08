@@ -620,7 +620,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     }
 
     // GET /api/projects/:id/codebases — 必须在 GET /api/projects/:id 之前
-    const projectCodebasesMatch = extractParam(path, /^\/api\/projects\/([\w.\-]+)\/codebases$/);
+    const projectCodebasesMatch = extractParam(path, /^\/api\/projects\/([\w-]+)\/codebases$/);
     if (method === "GET" && projectCodebasesMatch) {
       if (!getProjectById(projectCodebasesMatch)) return error("project not found", 404);
       return json({ codebases: listCodebases({ projectId: projectCodebasesMatch }) });
@@ -667,14 +667,14 @@ export async function handleRequest(req: Request): Promise<Response> {
     }
 
     // GET /api/projects/:id/requirements — 必须在 GET /api/projects/:id 之前
-    const projectRequirementsMatch = extractParam(path, /^\/api\/projects\/([\w.\-]+)\/requirements$/);
+    const projectRequirementsMatch = extractParam(path, /^\/api\/projects\/([\w-]+)\/requirements$/);
     if (method === "GET" && projectRequirementsMatch) {
       if (!getProjectById(projectRequirementsMatch)) return error("project not found", 404);
       return json({ requirements: listRequirementsByProject(projectRequirementsMatch).map((r) => withRepoIdAlias(r)) });
     }
 
     // GET /api/projects/:id
-    const projectIdMatch = extractParam(path, /^\/api\/projects\/([\w.\-]+)$/);
+    const projectIdMatch = extractParam(path, /^\/api\/projects\/([\w-]+)$/);
     if (method === "GET" && projectIdMatch) {
       const project = getProjectById(projectIdMatch);
       if (!project) return error("project not found", 404);
