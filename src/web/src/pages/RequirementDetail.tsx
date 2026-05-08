@@ -303,9 +303,10 @@ export function RequirementDetail() {
     setReplyingId(qid);
     try {
       await api.addQuestionReply(id, qid, { author_role: "user", text });
+      // 回复即视为解决，无需额外手动点击
+      await api.resolveQuestion(id, qid);
       setReplyDrafts((d) => ({ ...d, [qid]: "" }));
       await refresh();
-      toast.success("回复已提交");
     } catch (e: unknown) {
       toast.error("回复失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -478,20 +479,8 @@ export function RequirementDetail() {
                 {/* 问题文本 */}
                 <div className="mb-3 flex items-start justify-between gap-2">
                   <p className="text-sm font-medium leading-relaxed">{q.agent_text}</p>
-                  {q.status === "open" && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 shrink-0 px-2 text-xs text-muted-foreground"
-                      onClick={() => resolveQ(q.id)}
-                      disabled={resolvingId === q.id}
-                    >
-                      <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                      {resolvingId === q.id ? "处理中…" : "标记已解决"}
-                    </Button>
-                  )}
                   {q.status === "resolved" && (
-                    <Badge variant="outline" className="text-[10px] shrink-0">已解决</Badge>
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
                   )}
                 </div>
 
@@ -547,7 +536,17 @@ export function RequirementDetail() {
             ))}
           </div>
           {resolvedQuestions.length > 0 && openQuestions.length === 0 && (
-            <p className="mt-3 text-xs text-muted-foreground">所有问题已解决。</p>
+            <div className="mt-4 flex items-center justify-between rounded-md border border-green-500/30 bg-green-500/10 px-4 py-3">
+              <p className="text-sm text-green-700 dark:text-green-400">所有问题已回答，可以继续了。</p>
+              <Button
+                size="sm"
+                onClick={markReady}
+                disabled={actionBusy}
+                className="shrink-0"
+              >
+                {actionBusy ? "处理中…" : "标记为已澄清 →"}
+              </Button>
+            </div>
           )}
         </Card>
       )}
