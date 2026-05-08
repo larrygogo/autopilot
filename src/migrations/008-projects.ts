@@ -98,4 +98,35 @@ export function up(db: Database): void {
 
   db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_codebases_project_alias ON codebases(project_id, alias)");
   db.run("CREATE INDEX IF NOT EXISTS idx_codebases_project ON codebases(project_id)");
+
+  // ── 6. 旧数据迁移：每个顶级 codebase → 建 project，填 project_id；ID 前缀 repo- → cb- ──
+  // 警示：所有顶级 codebase 必须分配 project_id（避免 NULL 在 UNIQUE(project_id, alias) 下被视为 distinct
+  //       而让重复 alias 滑过）。子模块继承父的 project_id，保持父+子同组。
+  const oldTopRepos = db.query<{
+    id: string; alias: string; created_at: number; updated_at: number
+  }, []>(
+    "SELECT id, alias, created_at, updated_at FROM codebases WHERE parent_codebase_id IS NULL"
+  ).all();
+
+  let projSeq = 0;
+  for (const r of oldTopRepos) {
+    projSeq++;
+    const projId = `proj-${String(projSeq).padStart(3, "0")}`;
+    db.run(
+      "INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      [projId, r.alias, "从仓库自动迁移", r.created_at, r.updated_at]
+    );
+    // 给此 codebase 及其全部子模块填 project_id
+    db.run(
+      "UPDATE codebases SET project_id = ? WHERE id = ? OR parent_codebase_id = ?",
+      [projId, r.id, r.id]
+    );
+  }
+
+  // 转 ID 前缀 repo- → cb-（含 parent_codebase_id 自指）
+  db.run("UPDATE codebases SET id = REPLACE(id, 'repo-', 'cb-') WHERE id LIKE 'repo-%'");
+  db.run(
+    "UPDATE codebases SET parent_codebase_id = REPLACE(parent_codebase_id, 'repo-', 'cb-') " +
+    "WHERE parent_codebase_id LIKE 'repo-%'"
+  );
 }

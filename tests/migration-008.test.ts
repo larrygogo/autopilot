@@ -169,3 +169,57 @@ describe("migration 008-projects · codebases.project_id + alias 约束", () => 
     }).toThrow();
   });
 });
+
+describe("migration 008-projects · 旧数据迁移", () => {
+  it("每个旧顶级 repo 自动建一个 project 并把 id 填到 codebase.project_id", () => {
+    // 准备旧 schema 数据 — 跑到 007
+    const db = new Database(":memory:");
+    migrate001(db);
+    migrate002(db);
+    migrate004(db);
+    migrate005(db);
+    migrate006(db);
+    migrate007(db);
+
+    // 插入两个顶级 repo + 一个子模块
+    db.run(
+      "INSERT INTO repos (id, alias, path, default_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ["repo-001", "autopilot", "/abs/autopilot", "main", 1000, 1000]
+    );
+    db.run(
+      "INSERT INTO repos (id, alias, path, default_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ["repo-002", "clawmo", "/abs/clawmo", "main", 2000, 2000]
+    );
+    db.run(
+      "INSERT INTO repos (id, alias, path, default_branch, parent_repo_id, submodule_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ["repo-003", "shared-sdk", "/abs/clawmo/sdk", "main", "repo-002", "sdk", 2100, 2100]
+    );
+
+    // 跑 008
+    migrate008(db);
+
+    // 断言：建了 2 个 project
+    const projs = db.query<{ id: string; name: string }, []>(
+      "SELECT id, name FROM projects ORDER BY name"
+    ).all();
+    expect(projs.length).toBe(2);
+    expect(projs.map(p => p.name).sort()).toEqual(["autopilot", "clawmo"]);
+
+    // 断言：所有 codebase 行都有 project_id（NULL 检查）
+    const cbs = db.query<{ id: string; alias: string; project_id: string; parent_codebase_id: string | null }, []>(
+      "SELECT id, alias, project_id, parent_codebase_id FROM codebases ORDER BY id"
+    ).all();
+    expect(cbs.every(c => c.project_id !== null)).toBe(true);
+
+    // 断言：ID 前缀 repo-NNN → cb-NNN
+    expect(cbs.map(c => c.id).sort()).toEqual(["cb-001", "cb-002", "cb-003"]);
+
+    // 断言：父子模块的 parent_codebase_id 也已转前缀
+    const sub = cbs.find(c => c.alias === "shared-sdk");
+    expect(sub?.parent_codebase_id).toBe("cb-002");
+
+    // 断言：父+子模块同 project
+    const parent = cbs.find(c => c.alias === "clawmo");
+    expect(sub?.project_id).toBe(parent?.project_id);
+  });
+});
