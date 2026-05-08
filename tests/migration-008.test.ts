@@ -66,3 +66,34 @@ describe("migration 008-projects · requirement_codebases 多对多表", () => {
     expect(idx.some(i => i.name === "idx_req_cb_codebase")).toBe(true);
   });
 });
+
+describe("migration 008-projects · 评论线程表", () => {
+  it("创建 requirement_questions 表，含 status 默认 open", () => {
+    const db = freshDb();
+    migrate008(db);
+
+    const cols = db.query<{ name: string; dflt_value: string | null }, []>(
+      "PRAGMA table_info(requirement_questions)"
+    ).all();
+    const names = cols.map(c => c.name).sort();
+    expect(names).toEqual([
+      "agent_text", "created_at", "id", "requirement_id", "resolved_at", "status"
+    ]);
+
+    const status = cols.find(c => c.name === "status");
+    expect(status?.dflt_value).toContain("open");
+  });
+
+  it("创建 requirement_question_replies 表", () => {
+    const db = freshDb();
+    migrate008(db);
+
+    const cols = db.query<{ name: string }, []>(
+      "PRAGMA table_info(requirement_question_replies)"
+    ).all();
+    const names = cols.map(c => c.name).sort();
+    expect(names).toEqual([
+      "author_role", "created_at", "id", "question_id", "text"
+    ]);
+  });
+});

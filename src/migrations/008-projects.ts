@@ -36,4 +36,28 @@ export function up(db: Database): void {
     )
   `);
   db.run("CREATE INDEX IF NOT EXISTS idx_req_cb_codebase ON requirement_codebases(codebase_id)");
+
+  // ── 3. 新增评论线程表（requirement_questions + 多轮回复）──
+  db.run(`
+    CREATE TABLE IF NOT EXISTS requirement_questions (
+      id             TEXT PRIMARY KEY,
+      requirement_id TEXT NOT NULL,
+      agent_text     TEXT NOT NULL,
+      status         TEXT NOT NULL DEFAULT 'open',
+      created_at     INTEGER NOT NULL,
+      resolved_at    INTEGER
+    )
+  `);
+  db.run("CREATE INDEX IF NOT EXISTS idx_req_questions_req ON requirement_questions(requirement_id)");
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS requirement_question_replies (
+      id          TEXT PRIMARY KEY,
+      question_id TEXT NOT NULL,
+      author_role TEXT NOT NULL,
+      text        TEXT NOT NULL,
+      created_at  INTEGER NOT NULL
+    )
+  `);
+  db.run("CREATE INDEX IF NOT EXISTS idx_req_qst_replies_qst ON requirement_question_replies(question_id)");
 }
