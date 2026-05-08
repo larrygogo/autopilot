@@ -42,11 +42,13 @@ import {
   deleteCodebase,
   nextCodebaseId,
 } from "../core/codebases";
+import { listProjects, getProjectById, createProject, updateProject, deleteProject, nextProjectId } from "../core/projects";
 import { checkCodebaseHealth } from "../core/codebase-health";
 import { discoverSubmodules, listSubmodules } from "../core/submodules";
 import { listSubPrs } from "../core/requirement-sub-prs";
 import {
   listRequirements,
+  listRequirementsByProject,
   getRequirementById,
   createRequirement,
   updateRequirement,
@@ -54,6 +56,7 @@ import {
   nextRequirementId,
   deleteRequirement,
 } from "../core/requirements";
+import { listQuestionsByRequirement, createQuestion, getQuestionById, addReply, resolveQuestion, nextQuestionId } from "../core/requirement-questions";
 import type { Requirement } from "../core/requirements";
 
 /**
@@ -587,6 +590,115 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json({ current_path: targetPath, parent_path: parentPath, entries });
     }
 
+    // ─────────── Projects ───────────
+
+    // GET /api/projects
+    if (method === "GET" && path === "/api/projects") {
+      return json({ projects: listProjects() });
+    }
+
+    // POST /api/projects
+    if (method === "POST" && path === "/api/projects") {
+      const body = (await req.json()) as { name?: string; description?: string | null };
+      if (!body.name?.trim()) return error("name 必填");
+      const id = nextProjectId();
+      try {
+        const project = createProject({ id, name: body.name.trim(), description: body.description ?? null });
+        return json({ project }, 201);
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          code === "SQLITE_CONSTRAINT_UNIQUE" ||
+          code?.startsWith("SQLITE_CONSTRAINT") ||
+          msg.toLowerCase().includes("unique")
+        ) {
+          return error(msg, 409);
+        }
+        return error(msg, 500);
+      }
+    }
+
+    // GET /api/projects/:id/codebases — 必须在 GET /api/projects/:id 之前
+    const projectCodebasesMatch = extractParam(path, /^\/api\/projects\/([\w.\-]+)\/codebases$/);
+    if (method === "GET" && projectCodebasesMatch) {
+      return json({ codebases: listCodebases({ projectId: projectCodebasesMatch }) });
+    }
+
+    // POST /api/projects/:id/codebases
+    if (method === "POST" && projectCodebasesMatch) {
+      const proj = getProjectById(projectCodebasesMatch);
+      if (!proj) return error("project not found", 404);
+      const body = (await req.json()) as {
+        alias?: string;
+        path?: string;
+        default_branch?: string;
+        github_owner?: string | null;
+        github_repo?: string | null;
+      };
+      if (!body.alias?.trim() || !body.path?.trim()) {
+        return error("alias 和 path 必填");
+      }
+      const cbId = nextCodebaseId();
+      try {
+        const codebase = createCodebase({
+          id: cbId,
+          project_id: projectCodebasesMatch,
+          alias: body.alias.trim(),
+          path: body.path.trim(),
+          default_branch: body.default_branch?.trim() || "main",
+          github_owner: body.github_owner ?? null,
+          github_repo: body.github_repo ?? null,
+        });
+        return json({ codebase }, 201);
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          code === "SQLITE_CONSTRAINT_UNIQUE" ||
+          code?.startsWith("SQLITE_CONSTRAINT") ||
+          msg.toLowerCase().includes("unique")
+        ) {
+          return error(msg, 409);
+        }
+        return error(msg, 500);
+      }
+    }
+
+    // GET /api/projects/:id/requirements — 必须在 GET /api/projects/:id 之前
+    const projectRequirementsMatch = extractParam(path, /^\/api\/projects\/([\w.\-]+)\/requirements$/);
+    if (method === "GET" && projectRequirementsMatch) {
+      return json({ requirements: listRequirementsByProject(projectRequirementsMatch).map((r) => withRepoIdAlias(r)) });
+    }
+
+    // GET /api/projects/:id
+    const projectIdMatch = extractParam(path, /^\/api\/projects\/([\w.\-]+)$/);
+    if (method === "GET" && projectIdMatch) {
+      const project = getProjectById(projectIdMatch);
+      if (!project) return error("project not found", 404);
+      return json({ project });
+    }
+
+    // PUT /api/projects/:id
+    if (method === "PUT" && projectIdMatch) {
+      const body = (await req.json()) as { name?: string; description?: string | null };
+      if (body.name !== undefined && body.name.trim() === "") return error("name 不能为空", 400);
+      const project = updateProject(projectIdMatch, {
+        name: body.name?.trim(),
+        description: body.description,
+      });
+      if (!project) return error("project not found", 404);
+      return json({ project });
+    }
+
+    // DELETE /api/projects/:id
+    if (method === "DELETE" && projectIdMatch) {
+      const codebases = listCodebases({ projectId: projectIdMatch });
+      if (codebases.length > 0) return error("项目下还有 codebase，请先删除", 400);
+      deleteProject(projectIdMatch);
+      return json({ ok: true });
+    }
+
     // ─────────── Repos ───────────
 
     // GET /api/repos
@@ -904,6 +1016,67 @@ export async function handleRequest(req: Request): Promise<Response> {
       const r = getRequirementById(reqSubPrsMatch);
       if (!r) return error("requirement not found", 404);
       return json({ sub_prs: listSubPrs(reqSubPrsMatch) });
+    }
+
+    // ─────────── Questions（评论线程） ───────────
+
+    // POST /api/requirements/:reqId/questions/:qid/replies — 必须在 /:qid 之前
+    const reqQidRepliesMatch = path.match(/^\/api\/requirements\/([\w.\-]+)\/questions\/([\w.\-]+)\/replies$/);
+    if (method === "POST" && reqQidRepliesMatch) {
+      const [, reqId, qid] = reqQidRepliesMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      const q = getQuestionById(qid);
+      if (!q) return error("question not found", 404);
+      const body = (await req.json()) as { author_role?: string; text?: string };
+      if (!body.author_role || !body.text) return error("author_role 和 text 必填");
+      if (body.author_role !== "agent" && body.author_role !== "user") {
+        return error('author_role 必须是 "agent" 或 "user"');
+      }
+      const replyId = `qst-reply-${Date.now()}`;
+      const reply = addReply({
+        id: replyId,
+        question_id: qid,
+        author_role: body.author_role as "agent" | "user",
+        text: body.text,
+      });
+      return json({ reply }, 201);
+    }
+
+    // POST /api/requirements/:reqId/questions/:qid/resolve — 必须在 /:qid 之前
+    const reqQidResolveMatch = path.match(/^\/api\/requirements\/([\w.\-]+)\/questions\/([\w.\-]+)\/resolve$/);
+    if (method === "POST" && reqQidResolveMatch) {
+      const [, reqId, qid] = reqQidResolveMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      if (!getQuestionById(qid)) return error("question not found", 404);
+      resolveQuestion(qid);
+      return json({ ok: true });
+    }
+
+    // GET /api/requirements/:reqId/questions/:qid
+    const reqQidMatch = path.match(/^\/api\/requirements\/([\w.\-]+)\/questions\/([\w.\-]+)$/);
+    if (method === "GET" && reqQidMatch) {
+      const [, reqId, qid] = reqQidMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      const q = getQuestionById(qid);
+      if (!q) return error("question not found", 404);
+      return json({ question: q });
+    }
+
+    // GET /api/requirements/:reqId/questions — 必须在 /:reqId 之前
+    const reqQuestionsMatch = extractParam(path, /^\/api\/requirements\/([\w.\-]+)\/questions$/);
+    if (method === "GET" && reqQuestionsMatch) {
+      if (!getRequirementById(reqQuestionsMatch)) return error("requirement not found", 404);
+      return json({ questions: listQuestionsByRequirement(reqQuestionsMatch) });
+    }
+
+    // POST /api/requirements/:reqId/questions
+    if (method === "POST" && reqQuestionsMatch) {
+      if (!getRequirementById(reqQuestionsMatch)) return error("requirement not found", 404);
+      const body = (await req.json()) as { agent_text?: string };
+      if (!body.agent_text?.trim()) return error("agent_text 必填");
+      const qId = nextQuestionId();
+      const question = createQuestion({ id: qId, requirement_id: reqQuestionsMatch, agent_text: body.agent_text.trim() });
+      return json({ question }, 201);
     }
 
     // GET|PUT|DELETE /api/requirements/:id
