@@ -3,6 +3,7 @@ import type { AutopilotEvent } from "./protocol";
 import { listRequirements, setRequirementStatus, updateRequirement, getRequirementById } from "../core/requirements";
 import { getCodebaseById } from "../core/codebases";
 import { listSubmodules } from "../core/submodules";
+import { listQuestionsByRequirement } from "../core/requirement-questions";
 import { startTaskFromTemplate } from "../core/task-factory";
 import { createLogger } from "../core/logger";
 
@@ -60,12 +61,25 @@ export async function tickRepo(codebaseId: string): Promise<void> {
     return;
   }
 
+  // 将已解决的澄清问答拼入 requirement，让 Agent 知晓用户的补充说明
+  const questions = listQuestionsByRequirement(candidate.id).filter(q => q.status === "resolved");
+  let requirement = candidate.spec_md ?? "";
+  if (questions.length > 0) {
+    const qa = questions.map((q, i) => {
+      const userReply = (q.replies ?? []).find(r => r.author_role === "user")?.text ?? "(未回复)";
+      return `**问题 ${i + 1}：** ${q.agent_text}\n**回答：** ${userReply}`;
+    }).join("\n\n");
+    requirement = requirement
+      ? `${requirement}\n\n## 需求澄清记录\n\n${qa}`
+      : `## 需求澄清记录\n\n${qa}`;
+  }
+
   let task;
   try {
     task = await startTaskFromTemplate({
       workflow: "req_dev",
       title: candidate.title,
-      requirement: candidate.spec_md,
+      requirement,
       // setup_func 仍按 repo_id 命名传参（runtime 透传字段，保持兼容）
       repo_id: candidateCodebase.id,
       requirement_id: candidate.id,
