@@ -17,7 +17,7 @@ const ALLOWLIST = new Set([
   "src/core/migrate.ts",         // 迁移：INSERT schema_version
   "src/core/rebuild-index.ts",   // 索引重建：从 manifest INSERT/UPDATE 回 DB
   "src/core/schedules.ts",       // schedules 表：SQLite 即权威源，无 manifest 同步需求
-  "src/core/repos.ts",           // repos 表：SQLite 即权威源，无 manifest 同步需求
+  "src/core/codebases.ts",       // codebases 表（P1 由 repos 改名）：SQLite 即权威源，无 manifest 同步需求
   "src/core/projects.ts",        // projects 表：SQLite 即权威源（CRUD 模块），无 manifest 同步需求
   "src/core/requirements.ts",    // requirements 表：SQLite 即权威源，无 manifest 同步需求
   "src/core/requirement-feedbacks.ts", // requirement_feedbacks 表：SQLite 即权威源，无 manifest 同步需求
