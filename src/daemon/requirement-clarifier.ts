@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import { onEvent, offEvent, emit } from "./event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { getRequirementById } from "../core/requirements";
@@ -10,11 +12,18 @@ const log = createLogger("requirement-clarifier");
 
 let _handler: ((event: AutopilotEvent) => void) | null = null;
 
-const SYSTEM_PROMPT =
-  "你是一位软件需求分析师。根据项目背景和需求信息，生成澄清问题。" +
-  "规则：每行一个问题，最多 5 个，不要编号，不要 markdown，不要任何前言或解释，" +
-  "问题必须结合项目实际代码结构具体有价值，如果需求已足够清晰则只输出 NO_QUESTIONS。" +
-  "如果提供了代码库路径，请先阅读代码了解项目结构，再基于实际情况提问。";
+function readCodebaseContext(codebasePath: string): string {
+  const candidates = ["CLAUDE.md", "README.md", "README"];
+  const snippets: string[] = [];
+  for (const name of candidates) {
+    const file = join(codebasePath, name);
+    if (existsSync(file)) {
+      const content = readFileSync(file, "utf-8").slice(0, 4000);
+      snippets.push(`### ${name}\n${content}`);
+    }
+  }
+  return snippets.join("\n\n");
+}
 
 function buildPrompt(opts: {
   title: string;
@@ -22,23 +31,34 @@ function buildPrompt(opts: {
   projectName: string;
   projectDescription: string | null;
   codebaseAlias: string | null;
-  codebasePath: string | null;
+  codebaseContext: string | null;
 }): string {
   const lines: string[] = [];
+  lines.push("你是一位软件需求分析师。根据项目背景和需求信息，生成澄清问题。");
+  lines.push("规则：每行一个问题，最多 5 个，不要编号，不要 markdown，不要任何前言或解释，");
+  lines.push("问题必须结合项目实际情况具体有价值，如果需求已足够清晰则只输出 NO_QUESTIONS。");
+  lines.push("");
   lines.push(`项目名称：${opts.projectName}`);
   if (opts.projectDescription) lines.push(`项目描述：${opts.projectDescription}`);
   if (opts.codebaseAlias) lines.push(`关联代码库：${opts.codebaseAlias}`);
-  if (opts.codebasePath) lines.push(`代码库路径：${opts.codebasePath}`);
+  if (opts.codebaseContext) {
+    lines.push("");
+    lines.push("## 代码库文档");
+    lines.push(opts.codebaseContext);
+  }
+  lines.push("");
   lines.push(`需求标题：${opts.title}`);
   lines.push(`需求规约：${opts.specMd.trim() || "(暂无)"}`);
+  lines.push("");
   lines.push("请生成澄清问题（每行一个，最多5个，直接输出问题）：");
   return lines.join("\n");
 }
 
-async function callClaude(prompt: string, codebasePath: string | null): Promise<string> {
-  const args = ["claude", "-p", prompt, "--output-format", "text"];
-  if (codebasePath) args.push("--add-dir", codebasePath);
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+async function callClaude(prompt: string): Promise<string> {
+  const proc = Bun.spawn(
+    ["claude", "-p", prompt, "--output-format", "text", "--tools", ""],
+    { stdout: "pipe", stderr: "pipe" },
+  );
   const [stdout, _] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -59,18 +79,19 @@ async function clarifyRequirement(reqId: string): Promise<void> {
   const codebase = req.codebase_id ? getCodebaseById(req.codebase_id) : null;
 
   const codebasePath = codebase?.path ?? null;
+  const codebaseContext = codebasePath ? readCodebaseContext(codebasePath) : null;
   const prompt = buildPrompt({
     title: req.title,
     specMd: req.spec_md ?? "",
     projectName: project.name,
     projectDescription: project.description,
     codebaseAlias: codebase?.alias ?? null,
-    codebasePath,
+    codebaseContext,
   });
 
   let text: string;
   try {
-    text = await callClaude(prompt, codebasePath);
+    text = await callClaude(prompt);
   } catch (e: unknown) {
     log.warn("clarifier: claude CLI 调用失败 req=%s: %s", reqId, (e as Error).message);
     return;
