@@ -282,6 +282,20 @@ export function RequirementDetail() {
     }
   }
 
+  async function deleteReq() {
+    if (!id || !req) return;
+    if (!confirm(`确认删除需求「${req.title}」？此操作不可恢复。`)) return;
+    setActionBusy(true);
+    try {
+      await api.deleteRequirement(id);
+      toast.success("需求已删除");
+      navigate(req.project_id ? `/projects/${req.project_id}` : "/projects");
+    } catch (e: unknown) {
+      toast.error("删除失败", (e as Error)?.message ?? String(e));
+      setActionBusy(false);
+    }
+  }
+
   async function submitReply(qid: string) {
     if (!id) return;
     const text = (replyDrafts[qid] ?? "").trim();
@@ -726,6 +740,17 @@ export function RequirementDetail() {
               {isTerminal && (
                 <p className="text-xs text-muted-foreground text-center">需求已终止，无可用操作。</p>
               )}
+              {/* 删除按钮：执行中禁用，其余状态均可用 */}
+              <Button
+                variant="outline"
+                className="w-full text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+                size="sm"
+                onClick={() => void deleteReq()}
+                disabled={actionBusy || req.status === "running" || req.status === "fix_revision"}
+                title={req.status === "running" || req.status === "fix_revision" ? "需求正在执行中，请先取消" : undefined}
+              >
+                删除需求
+              </Button>
             </div>
           </Card>
 
