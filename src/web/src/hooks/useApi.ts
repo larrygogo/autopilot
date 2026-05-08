@@ -281,6 +281,8 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/codebases`,
       { method: "POST", body: JSON.stringify(body) },
     ).then((r) => r.codebase),
+  deleteCodebase: (codebaseId: string) =>
+    request<{ ok: true }>(`/api/repos/${encodeURIComponent(codebaseId)}`, { method: "DELETE" }),
   listProjectRequirements: (projectId: string) =>
     request<{ requirements: Requirement[] }>(
       `/api/projects/${encodeURIComponent(projectId)}/requirements`,

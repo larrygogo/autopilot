@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw, ExternalLink, FolderOpen,
+  ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw, ExternalLink, FolderOpen, Trash2,
 } from "lucide-react";
 import { api, type Project, type Codebase, type Requirement } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
@@ -75,6 +75,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [cbForm, setCbForm] = useState<CbForm>(EMPTY_CB);
   const [savingCb, setSavingCb] = useState(false);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+  const [deletingCbId, setDeletingCbId] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -168,6 +169,20 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     }
   };
 
+  const removeCb = async (cb: Codebase) => {
+    if (!confirm(`确定移除代码库「${cb.alias}」？\n\n注意：仍有未完成需求关联该代码库时，删除可能影响正在进行的任务。`)) return;
+    setDeletingCbId(cb.id);
+    try {
+      await api.deleteCodebase(cb.id);
+      toast.success(`已移除代码库「${cb.alias}」`);
+      refresh();
+    } catch (e: unknown) {
+      toast.error("删除失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setDeletingCbId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -251,6 +266,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                     <th className="px-4 py-2.5 font-medium">别名</th>
                     <th className="px-4 py-2.5 font-medium">路径</th>
                     <th className="px-4 py-2.5 font-medium">默认分支</th>
+                    <th className="px-4 py-2.5 font-medium text-right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -275,6 +291,18 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                         <Badge variant="secondary" className="font-mono text-[11px] font-normal">
                           {cb.default_branch}
                         </Badge>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          onClick={() => void removeCb(cb)}
+                          disabled={deletingCbId === cb.id}
+                          title="移除代码库"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </td>
                     </tr>
                   ))}
