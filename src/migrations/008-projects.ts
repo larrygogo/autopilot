@@ -60,4 +60,8 @@ export function up(db: Database): void {
     )
   `);
   db.run("CREATE INDEX IF NOT EXISTS idx_req_qst_replies_qst ON requirement_question_replies(question_id)");
+
+  // ── 4. repos 表 rename 为 codebases，parent_repo_id 字段同步 rename ──
+  db.run("ALTER TABLE repos RENAME TO codebases");
+  db.run("ALTER TABLE codebases RENAME COLUMN parent_repo_id TO parent_codebase_id");
 }

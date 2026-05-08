@@ -97,3 +97,29 @@ describe("migration 008-projects · 评论线程表", () => {
     ]);
   });
 });
+
+describe("migration 008-projects · 表/字段 rename", () => {
+  it("repos 表已 rename 为 codebases", () => {
+    const db = freshDb();
+    migrate008(db);
+
+    const tables = db.query<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('repos', 'codebases')"
+    ).all().map(t => t.name);
+
+    expect(tables).toContain("codebases");
+    expect(tables).not.toContain("repos");
+  });
+
+  it("codebases 表 parent_repo_id 字段已 rename 为 parent_codebase_id", () => {
+    const db = freshDb();
+    migrate008(db);
+
+    const cols = db.query<{ name: string }, []>(
+      "PRAGMA table_info(codebases)"
+    ).all().map(c => c.name);
+
+    expect(cols).toContain("parent_codebase_id");
+    expect(cols).not.toContain("parent_repo_id");
+  });
+});
