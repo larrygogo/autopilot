@@ -64,4 +64,38 @@ export function up(db: Database): void {
   // ── 4. repos 表 rename 为 codebases，parent_repo_id 字段同步 rename ──
   db.run("ALTER TABLE repos RENAME TO codebases");
   db.run("ALTER TABLE codebases RENAME COLUMN parent_repo_id TO parent_codebase_id");
+
+  // ── 5. codebases 加 project_id 列 + 改 alias 唯一约束（项目内唯一）──
+  // SQLite 不支持去掉列级 UNIQUE 约束（旧 alias TEXT NOT NULL UNIQUE 会残留
+  // sqlite_autoindex_codebases_2）。标准做法：表重建。
+  // 参考 https://sqlite.org/lang_altertable.html#otheralter
+  // project_id 此时为 NULL，后续 Task 7 会反查填值。
+  db.run(`
+    CREATE TABLE codebases_new (
+      id                 TEXT PRIMARY KEY,
+      project_id         TEXT,
+      alias              TEXT NOT NULL,
+      path               TEXT NOT NULL,
+      default_branch     TEXT NOT NULL DEFAULT 'main',
+      github_owner       TEXT,
+      github_repo        TEXT,
+      parent_codebase_id TEXT,
+      submodule_path     TEXT,
+      created_at         INTEGER NOT NULL,
+      updated_at         INTEGER NOT NULL
+    )
+  `);
+  db.run(`
+    INSERT INTO codebases_new
+      (id, project_id, alias, path, default_branch, github_owner, github_repo,
+       parent_codebase_id, submodule_path, created_at, updated_at)
+    SELECT id, NULL, alias, path, default_branch, github_owner, github_repo,
+           parent_codebase_id, submodule_path, created_at, updated_at
+    FROM codebases
+  `);
+  db.run("DROP TABLE codebases");
+  db.run("ALTER TABLE codebases_new RENAME TO codebases");
+
+  db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_codebases_project_alias ON codebases(project_id, alias)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_codebases_project ON codebases(project_id)");
 }

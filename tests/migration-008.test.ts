@@ -123,3 +123,49 @@ describe("migration 008-projects · 表/字段 rename", () => {
     expect(cols).not.toContain("parent_repo_id");
   });
 });
+
+describe("migration 008-projects · codebases.project_id + alias 约束", () => {
+  it("codebases 表有 project_id 列", () => {
+    const db = freshDb();
+    migrate008(db);
+
+    const cols = db.query<{ name: string }, []>(
+      "PRAGMA table_info(codebases)"
+    ).all().map(c => c.name);
+
+    expect(cols).toContain("project_id");
+  });
+
+  it("alias 不再是全局 UNIQUE，而是 (project_id, alias) 复合 UNIQUE", () => {
+    const db = freshDb();
+    migrate008(db);
+
+    const indexList = db.query<{ name: string; unique: number }, []>(
+      "PRAGMA index_list(codebases)"
+    ).all();
+    expect(indexList.some(i => i.name === "idx_codebases_project_alias" && i.unique === 1)).toBe(true);
+    // 旧的 idx_repos_alias 已被 drop
+    expect(indexList.some(i => i.name === "idx_repos_alias")).toBe(false);
+  });
+
+  it("跨 project 允许相同 alias（同 project 内 alias 仍唯一）", () => {
+    const db = freshDb();
+    migrate008(db);
+
+    // 模拟两个 project + 同名 codebase
+    db.run("INSERT INTO projects (id, name, created_at, updated_at) VALUES ('proj-A', 'A', 1, 1)");
+    db.run("INSERT INTO projects (id, name, created_at, updated_at) VALUES ('proj-B', 'B', 2, 2)");
+
+    db.run("INSERT INTO codebases (id, project_id, alias, path, default_branch, created_at, updated_at) VALUES ('cb-1', 'proj-A', 'frontend', '/a', 'main', 1, 1)");
+
+    // 不同 project 同 alias —— 必须允许
+    expect(() => {
+      db.run("INSERT INTO codebases (id, project_id, alias, path, default_branch, created_at, updated_at) VALUES ('cb-2', 'proj-B', 'frontend', '/b', 'main', 2, 2)");
+    }).not.toThrow();
+
+    // 同 project 同 alias —— 必须报错
+    expect(() => {
+      db.run("INSERT INTO codebases (id, project_id, alias, path, default_branch, created_at, updated_at) VALUES ('cb-3', 'proj-A', 'frontend', '/c', 'main', 3, 3)");
+    }).toThrow();
+  });
+});
