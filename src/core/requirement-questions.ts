@@ -114,13 +114,6 @@ export function resolveQuestion(id: string): void {
   );
 }
 
-/**
- * 生成下一个 question id，格式 "qst-NNN"。
- * 简化方案：扫现有最大编号 +1，靠 PK 兜底并发冲突。
- *
- * TODO: 当问题数 > 999 时，3 位 padding 会让 lex 排序出错（"qst-1000" < "qst-999"），
- * 需要改成更宽 padding 或用 CAST(SUBSTR(id,5) AS INTEGER) 数字排序。Phase 1 不会触发。
- */
 export function nextQuestionId(): string {
   const db = getDb();
   const rows = db
