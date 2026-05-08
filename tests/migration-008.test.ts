@@ -333,3 +333,35 @@ describe("migration 008-projects · 数据后处理", () => {
     ]);
   });
 });
+
+describe("migration 008-projects · requirement_sub_prs 升级", () => {
+  it("child_repo_id rename 为 child_codebase_id，ID 前缀转换", () => {
+    const db = freshDb();
+
+    db.run(
+      "INSERT INTO repos (id, alias, path, default_branch, created_at, updated_at) VALUES ('repo-001', 'a', '/p', 'main', 1000, 1000)"
+    );
+    db.run(
+      "INSERT INTO repos (id, alias, path, default_branch, parent_repo_id, submodule_path, created_at, updated_at) VALUES ('repo-002', 's', '/p/s', 'main', 'repo-001', 's', 1100, 1100)"
+    );
+    db.run(
+      "INSERT INTO requirements (id, repo_id, title, status, spec_md, created_at, updated_at) VALUES ('req-001', 'repo-001', 'x', 'drafting', '', 1500, 1500)"
+    );
+    db.run(
+      "INSERT INTO requirement_sub_prs (requirement_id, child_repo_id, pr_url, pr_number, created_at) VALUES ('req-001', 'repo-002', 'http://x', 42, 1600)"
+    );
+
+    migrate008(db);
+
+    const cols = db.query<{ name: string }, []>(
+      "PRAGMA table_info(requirement_sub_prs)"
+    ).all().map(c => c.name);
+    expect(cols).toContain("child_codebase_id");
+    expect(cols).not.toContain("child_repo_id");
+
+    const row = db.query<{ child_codebase_id: string }, []>(
+      "SELECT child_codebase_id FROM requirement_sub_prs WHERE requirement_id = 'req-001'"
+    ).get();
+    expect(row?.child_codebase_id).toBe("cb-002");
+  });
+});

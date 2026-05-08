@@ -168,4 +168,11 @@ export function up(db: Database): void {
   db.run(
     "UPDATE requirements SET status = 'awaiting_approval' WHERE status IN ('ready', 'queued')"
   );
+
+  // ── 10. requirement_sub_prs.child_repo_id rename + ID 前缀转换 ──
+  db.run("ALTER TABLE requirement_sub_prs RENAME COLUMN child_repo_id TO child_codebase_id");
+  db.run(
+    "UPDATE requirement_sub_prs SET child_codebase_id = REPLACE(child_codebase_id, 'repo-', 'cb-') " +
+    "WHERE child_codebase_id LIKE 'repo-%'"
+  );
 }
