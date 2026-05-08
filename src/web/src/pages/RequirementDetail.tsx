@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff } from "lucide-react";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2 } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -99,11 +99,16 @@ export function RequirementDetail() {
     void refresh();
   }, [refresh]);
 
-  // WebSocket 订阅：需求状态变化时自动刷新
+  // WebSocket 订阅：需求状态变化 / 问题更新时自动刷新
   useEffect(() => {
     if (!id) return;
     return subscribe("requirement:*", (event: { type: string; payload?: { id?: string } }) => {
-      if (event.type === "requirement:status-changed" && event.payload?.id === id) {
+      const isForThis = event.payload?.id === id;
+      if (!isForThis) return;
+      if (
+        event.type === "requirement:status-changed" ||
+        event.type === "requirement:questions-updated"
+      ) {
         void refresh();
       }
     });
@@ -431,7 +436,17 @@ export function RequirementDetail() {
         </Card>
       )}
 
-      {/* 评论线程（调查中 / 有问题时显示）*/}
+      {/* AI 正在生成澄清问题（clarifying 且暂无问题） */}
+      {req.status === "clarifying" && questions.length === 0 && (
+        <Card className="mb-6 p-5">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            AI 正在分析需求，生成澄清问题…
+          </div>
+        </Card>
+      )}
+
+      {/* 评论线程（澄清中 / 有问题时显示）*/}
       {questions.length > 0 && (
         <Card className="mb-6 p-5">
           <div className="mb-4 flex items-center gap-2">

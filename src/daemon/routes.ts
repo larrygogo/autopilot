@@ -934,7 +934,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
       const id = nextRequirementId();
       try {
-        const r = createRequirement({
+        createRequirement({
           id,
           project_id: projectId,
           codebase_id: codebaseId,
@@ -942,7 +942,9 @@ export async function handleRequest(req: Request): Promise<Response> {
           spec_md: body.spec_md ?? "",
           chat_session_id: body.chat_session_id ?? null,
         });
-        return json({ requirement: withRepoIdAlias(r) }, 201);
+        // 自动进入澄清流程（触发 requirement-clarifier 后台生成问题）
+        const clarifying = setRequirementStatus(id, "clarifying");
+        return json({ requirement: withRepoIdAlias(clarifying) }, 201);
       } catch (e: unknown) {
         return error((e as Error).message, 500);
       }

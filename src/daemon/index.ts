@@ -16,6 +16,7 @@ import { startServer } from "./server";
 import { setWebDistDir } from "./routes";
 import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo } from "./pid";
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
+import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
 import type { AutopilotEvent } from "./protocol";
 
 // ──────────────────────────────────────────────
@@ -73,6 +74,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   // 启动 requirement-scheduler（订阅 event-bus）
   initRequirementScheduler();
+  // 启动 requirement-clarifier（创建需求后自动 AI 澄清）
+  initRequirementClarifier();
 
   // 桥接：事件总线 → WebSocket 广播
   bus.on("*", (event: AutopilotEvent) => {
@@ -140,6 +143,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     clearInterval(schedulerTimer);
     clearInterval(prPollerTimer);
     disposeRequirementScheduler();
+    disposeRequirementClarifier();
     disableBus();
     server.stop();
     closeDb();

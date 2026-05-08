@@ -29,7 +29,8 @@ export type AutopilotEvent =
   | { type: "schedule:updated"; payload: { schedule: Schedule } }
   | { type: "schedule:deleted"; payload: { scheduleId: string } }
   | { type: "schedule:fired"; payload: { schedule: Schedule; taskId: string } }
-  | { type: "requirement:status-changed"; payload: { id: string; from: string; to: string } };
+  | { type: "requirement:status-changed"; payload: { id: string; from: string; to: string } }
+  | { type: "requirement:questions-updated"; payload: { id: string } };
 
 // ──────────────────────────────────────────────
 // WebSocket Protocol — Client ↔ Server 消息
