@@ -1112,8 +1112,8 @@ export async function handleRequest(req: Request): Promise<Response> {
         return json({ requirement: withRepoIdAlias(updateRequirement(reqDetailMatch, body)) });
       }
       if (method === "DELETE") {
-        if (!["cancelled", "done", "failed"].includes(r.status)) {
-          return error(`仅终态需求可删除，当前 status=${r.status}`);
+        if (["running", "fix_revision"].includes(r.status)) {
+          return error(`需求正在执行中（status=${r.status}），请先取消再删除`);
         }
         deleteRequirement(reqDetailMatch);
         return json({ ok: true });
