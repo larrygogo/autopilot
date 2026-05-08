@@ -565,6 +565,7 @@ export interface Question {
   id: string;
   requirement_id: string;
   agent_text: string;
+  suggestions: string[];
   status: "open" | "resolved";
   created_at: number;
   resolved_at: number | null;

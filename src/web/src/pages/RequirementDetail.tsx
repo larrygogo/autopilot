@@ -489,89 +489,95 @@ export function RequirementDetail() {
         </Card>
       )}
 
-      {/* 评论线程（澄清中 / 有问题时显示）*/}
+      {/* 澄清对话（chat 气泡风格）*/}
       {questions.length > 0 && (
         <Card className="mb-6 p-5">
           <div className="mb-4 flex items-center gap-2">
             <MessageSquare className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Agent 提问</h2>
+            <h2 className="text-sm font-semibold">需求澄清</h2>
             {openQuestions.length > 0 && (
-              <Badge variant="secondary" className="text-[10px]">
-                {openQuestions.length} 待回复
-              </Badge>
+              <Badge variant="secondary" className="text-[10px]">{openQuestions.length} 待回复</Badge>
             )}
           </div>
-          <div className="space-y-5">
+
+          {/* 对话气泡流 */}
+          <div className="space-y-3">
             {questions.map((q) => (
-              <div key={q.id} className={cn("rounded-lg border p-4", q.status === "resolved" && "opacity-60")}>
-                {/* 问题文本 */}
-                <div className="mb-3 flex items-start justify-between gap-2">
-                  <p className="text-sm font-medium leading-relaxed">{q.agent_text}</p>
-                  {q.status === "resolved" && (
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
-                  )}
+              <div key={q.id} className="space-y-3">
+                {/* AI 气泡 */}
+                <div className="flex items-start gap-2">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">AI</div>
+                  <div className="flex-1 space-y-2">
+                    <div className={cn(
+                      "rounded-2xl rounded-tl-sm bg-muted px-4 py-3 text-sm leading-relaxed",
+                      q.status === "resolved" && "opacity-60"
+                    )}>
+                      {q.agent_text}
+                    </div>
+                    {/* 建议 chips（仅 open 且有建议时显示） */}
+                    {q.status === "open" && q.suggestions.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pl-1">
+                        {q.suggestions.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setReplyDrafts(d => ({ ...d, [q.id]: s }))}
+                            className="rounded-full border border-input bg-background px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {/* 回复列表 */}
-                {q.replies && q.replies.length > 0 && (
-                  <div className="mb-3 space-y-2 border-l-2 border-muted pl-3">
-                    {q.replies.map((reply) => (
-                      <div key={reply.id} className="space-y-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <Badge
-                            variant={reply.author_role === "user" ? "default" : "secondary"}
-                            className="text-[10px] font-normal h-4 px-1.5"
-                          >
-                            {reply.author_role === "user" ? "你" : "Agent"}
-                          </Badge>
-                          <span className="text-[10px] text-muted-foreground">
-                            {new Date(reply.created_at).toLocaleString()}
-                          </span>
-                        </div>
-                        <p className="text-xs leading-relaxed text-foreground">{reply.text}</p>
-                      </div>
-                    ))}
+                {/* 用户回复气泡 */}
+                {(q.replies ?? []).filter(r => r.author_role === "user").map((reply) => (
+                  <div key={reply.id} className="flex items-start justify-end gap-2">
+                    <div className={cn(
+                      "max-w-[80%] rounded-2xl rounded-tr-sm bg-primary px-4 py-3 text-sm leading-relaxed text-primary-foreground",
+                      q.status === "resolved" && "opacity-70"
+                    )}>
+                      {reply.text}
+                    </div>
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">你</div>
                   </div>
-                )}
+                ))}
 
-                {/* 回复输入框（仅 open 状态） */}
+                {/* 输入框（仅 open 状态） */}
                 {q.status === "open" && (
-                  <div className="flex items-end gap-2">
+                  <div className="pl-8 space-y-2">
                     <Textarea
                       value={replyDrafts[q.id] ?? ""}
-                      onChange={(e) =>
-                        setReplyDrafts((d) => ({ ...d, [q.id]: e.target.value }))
-                      }
-                      placeholder="回复 Agent 的提问…"
-                      className="min-h-[60px] flex-1 text-xs"
+                      onChange={(e) => setReplyDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
+                      placeholder="输入回复，或点击上方建议…"
+                      className="min-h-[72px] resize-none text-sm"
                       disabled={replyingId === q.id}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submitReply(q.id);
                       }}
                     />
-                    <Button
-                      size="sm"
-                      onClick={() => void submitReply(q.id)}
-                      disabled={replyingId === q.id || !(replyDrafts[q.id] ?? "").trim()}
-                      className="shrink-0"
-                    >
-                      <Send className="h-3.5 w-3.5" />
-                      {replyingId === q.id ? "发送中…" : "回复"}
-                    </Button>
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        onClick={() => void submitReply(q.id)}
+                        disabled={replyingId === q.id || !(replyDrafts[q.id] ?? "").trim()}
+                      >
+                        <Send className="mr-1.5 h-3.5 w-3.5" />
+                        {replyingId === q.id ? "发送中…" : "发送"}
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
             ))}
           </div>
+
           {resolvedQuestions.length > 0 && openQuestions.length === 0 && (
-            <div className="mt-4 flex items-center justify-between rounded-md border border-green-500/30 bg-green-500/10 px-4 py-3">
+            <div className="mt-5 flex items-center justify-between rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3">
               <p className="text-sm text-green-700 dark:text-green-400">所有问题已回答，可以继续了。</p>
-              <Button
-                size="sm"
-                onClick={markReady}
-                disabled={actionBusy}
-                className="shrink-0"
-              >
+              <Button size="sm" onClick={markReady} disabled={actionBusy} className="shrink-0">
                 {actionBusy ? "处理中…" : "标记为已澄清 →"}
               </Button>
             </div>

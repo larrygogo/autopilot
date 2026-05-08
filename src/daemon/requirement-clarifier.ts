@@ -84,8 +84,11 @@ async function runFirstRound(reqId: string): Promise<void> {
 
   const prompt =
     "你是一位软件需求分析师。根据以下项目背景和需求，生成澄清问题。\n" +
-    "规则：每行一个问题，不要编号、不要 markdown、不要前言，问题必须结合项目实际情况有价值。\n" +
-    "如果需求已足够清晰无需提问，只输出 NO_QUESTIONS。\n\n" +
+    "规则：\n" +
+    "- 每行一个问题，不要编号、不要 markdown 标记、不要前言\n" +
+    "- 每个问题下一行可选输出建议选项，格式：「建议：选项A | 选项B | 选项C」（2-4个短选项）\n" +
+    "- 问题必须结合项目实际情况有价值\n" +
+    "- 如果需求已足够清晰无需提问，只输出 NO_QUESTIONS\n\n" +
     ctx + "\n\n请生成澄清问题：";
 
   const text = await callClaude(prompt).catch((e: unknown) => {
@@ -139,8 +142,8 @@ async function runFollowUpRound(reqId: string): Promise<void> {
     ctx + "\n\n" +
     "## 已完成的澄清问答\n\n" + qaHistory + "\n\n" +
     "请根据以上回答判断：\n" +
-    "- 如果还需要进一步澄清，直接输出追加问题（每行一个，不要编号、不要 markdown）。\n" +
-    "- 如果信息已经足够，输出以下格式（第一行必须是 CLARIFICATION_COMPLETE，之后另起段落写对需求的理解摘要，供用户确认）：\n" +
+    "- 如果还需要进一步澄清，输出追加问题（每行一个问题，问题下一行可选附「建议：选项A | 选项B」，不要编号、不要 markdown）。\n" +
+    "- 如果信息已经足够，输出以下格式（第一行必须是 CLARIFICATION_COMPLETE，之后另起段落写对需求的理解摘要）：\n" +
     "CLARIFICATION_COMPLETE\n" +
     "（摘要：用 2-4 句话概括你对需求的理解，让用户确认是否有遗漏）";
 
@@ -172,17 +175,35 @@ async function runFollowUpRound(reqId: string): Promise<void> {
   }
 }
 
-function parseQuestions(text: string): string[] {
-  return text
-    .split("\n")
-    .map(l => l.replace(/^[\d\.\-\*\s]+/, "").trim())
-    .filter(l => l.length > 4 && !l.startsWith("#") && !l.startsWith("CLARIFICATION"));
+interface ParsedQuestion {
+  text: string;
+  suggestions: string[];
 }
 
-function createQuestions(reqId: string, questions: string[]): void {
+function parseQuestions(text: string): ParsedQuestion[] {
+  const lines = text.split("\n");
+  const results: ParsedQuestion[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].replace(/^[\d\.\-\*\s]+/, "").trim();
+    if (line.length > 4 && !line.startsWith("#") && !line.startsWith("CLARIFICATION")) {
+      const next = lines[i + 1]?.trim() ?? "";
+      let suggestions: string[] = [];
+      if (next.startsWith("建议：") || next.startsWith("选项：")) {
+        suggestions = next.replace(/^(建议|选项)：/, "").split("|").map(s => s.trim()).filter(Boolean);
+        i++;
+      }
+      results.push({ text: line, suggestions });
+    }
+    i++;
+  }
+  return results;
+}
+
+function createQuestions(reqId: string, questions: ParsedQuestion[]): void {
   for (const q of questions) {
     const qId = nextQuestionId();
-    createQuestion({ id: qId, requirement_id: reqId, agent_text: q });
+    createQuestion({ id: qId, requirement_id: reqId, agent_text: q.text, suggestions: q.suggestions });
   }
 }
 
