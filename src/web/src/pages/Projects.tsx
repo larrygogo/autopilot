@@ -106,7 +106,7 @@ export function Projects() {
 
   const remove = async (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`确定删除项目「${p.name}」？\n\n注意：项目下还有代码库时无法删除，请先在项目工作台中清理。`)) return;
+    if (!confirm(`确定删除项目「${p.name}」？\n\n此操作将同时删除项目下所有代码库和需求，且不可恢复。`)) return;
     setDeletingId(p.id);
     try {
       await api.deleteProject(p.id);

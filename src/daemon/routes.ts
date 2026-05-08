@@ -693,10 +693,13 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json({ project });
     }
 
-    // DELETE /api/projects/:id
+    // DELETE /api/projects/:id — 级联删除需求、codebase（含子模块）后再删项目
     if (method === "DELETE" && projectIdMatch) {
+      if (!getProjectById(projectIdMatch)) return error("project not found", 404);
+      const reqs = listRequirementsByProject(projectIdMatch);
+      for (const r of reqs) deleteRequirement(r.id);
       const codebases = listCodebases({ projectId: projectIdMatch });
-      if (codebases.length > 0) return error("项目下还有 codebase，请先删除", 400);
+      for (const cb of codebases) deleteCodebase(cb.id);
       deleteProject(projectIdMatch);
       return json({ ok: true });
     }
