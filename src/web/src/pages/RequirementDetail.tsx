@@ -73,9 +73,9 @@ export function RequirementDetail() {
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
-  const refresh = useCallback(async function refresh() {
+  const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
-    setLoading(true);
+    if (!opts.silent) setLoading(true);
     try {
       const [data, repoList, sub, qs] = await Promise.all([
         api.getRequirement(id),
@@ -85,22 +85,24 @@ export function RequirementDetail() {
       ]);
       setReq(data.requirement);
       setFeedbacks(data.feedbacks);
-      setSpecDraft(data.requirement.spec_md);
+      // 编辑中不要覆盖用户正在编辑的草稿
+      setSpecDraft((prev) => editingSpec ? prev : data.requirement.spec_md);
       setRepos(repoList);
       setSubPrs(sub);
       setQuestions(qs);
     } catch (e: unknown) {
-      toast.error("加载失败", (e as Error)?.message ?? String(e));
+      if (!opts.silent) toast.error("加载失败", (e as Error)?.message ?? String(e));
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, editingSpec]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  // WebSocket 订阅：需求状态变化 / 问题更新时自动刷新
+  // WebSocket 订阅：需求状态变化 / 问题更新时静默刷新
+  // （不触发 loading 态，避免输入框被卸载导致 IME 输入中断）
   useEffect(() => {
     if (!id) return;
     return subscribe("requirement:*", (event: { type: string; payload?: { id?: string } }) => {
@@ -110,7 +112,7 @@ export function RequirementDetail() {
         event.type === "requirement:status-changed" ||
         event.type === "requirement:questions-updated"
       ) {
-        void refresh();
+        void refresh({ silent: true });
       }
     });
   }, [id, subscribe, refresh]);
