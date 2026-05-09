@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { onEvent, offEvent, emit } from "./event-bus";
 import type { AutopilotEvent } from "./protocol";
-import { getRequirementById } from "../core/requirements";
+import { getRequirementById, updateRequirement } from "../core/requirements";
 import { getProjectById } from "../core/projects";
 import { getCodebaseById } from "../core/codebases";
 import { listQuestionsByRequirement, createQuestion, nextQuestionId } from "../core/requirement-questions";
@@ -152,9 +152,10 @@ async function runFollowUpRound(reqId: string): Promise<void> {
     "## 已完成的澄清问答\n\n" + qaHistory + "\n\n" +
     "请根据以上回答判断：\n" +
     "- 如果还需要进一步澄清，输出追加问题（每行一个问题，问题下一行可选附「建议：选项A | 选项B」，不要编号、不要 markdown）。\n" +
-    "- 如果信息已经足够，输出以下格式（第一行必须是 CLARIFICATION_COMPLETE，之后另起段落写对需求的理解摘要）：\n" +
-    "CLARIFICATION_COMPLETE\n" +
-    "（摘要：用 2-4 句话概括你对需求的理解，让用户确认是否有遗漏）";
+    "- 如果信息已经足够，输出以下格式：\n" +
+    "  第一行必须是 CLARIFICATION_COMPLETE\n" +
+    "  之后是完整的需求规约 markdown（标题 / 背景 / 详细需求 / 验收标准 / 注意事项）\n" +
+    "  规约内容必须完整自洽，能直接交付给开发工程师使用，不要包含 \"用户说\"、\"根据回答\" 等对话痕迹";
 
   const text = await callClaude(prompt).catch((e: unknown) => {
     log.warn("clarifier: 追问调用失败 req=%s: %s", reqId, (e as Error).message);
@@ -164,14 +165,15 @@ async function runFollowUpRound(reqId: string): Promise<void> {
   if (!text) return;
 
   if (text.includes("CLARIFICATION_COMPLETE")) {
-    const summary = text.split("CLARIFICATION_COMPLETE").slice(1).join("").trim();
-    const confirmText = summary
-      ? `根据我们的讨论，我对需求的理解如下：\n\n${summary}\n\n请确认是否有遗漏或需要补充。没有的话可以点击「标记为已澄清」继续。`
-      : "我认为需求信息已足够，请问还有什么需要补充的吗？没有的话可以点击「标记为已澄清」继续。";
+    const specMd = text.split("CLARIFICATION_COMPLETE").slice(1).join("").trim();
+    if (specMd) {
+      updateRequirement(reqId, { spec_md: specMd });
+      log.info("clarifier: req=%s 已写入 spec_md（%d 字符）", reqId, specMd.length);
+    }
+    const confirmText = "我已根据我们的对话整理出完整的需求规约（见右侧「需求规约」区）。请审阅，如需调整可以直接编辑，或继续在这里补充让我重新整理。确认无误后点击「标记为已澄清」继续。";
     const qId = nextQuestionId();
     createQuestion({ id: qId, requirement_id: reqId, agent_text: confirmText });
     emit({ type: "requirement:questions-updated", payload: { id: reqId } });
-    log.info("clarifier: req=%s 已发送确认摘要，等待用户确认", reqId);
     return;
   }
 

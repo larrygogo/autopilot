@@ -592,7 +592,12 @@ export function RequirementDetail() {
         <div className="lg:col-span-2 space-y-4">
           <Card className="p-5">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold">需求规约</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold">需求规约</h2>
+                {req.spec_md && (req.status === "clarifying" || req.status === "drafting") && (
+                  <Badge variant="secondary" className="text-[10px] font-normal">AI 整理</Badge>
+                )}
+              </div>
               {!editingSpec && (
                 <Button
                   variant="outline"
@@ -788,39 +793,43 @@ export function RequirementDetail() {
             </div>
           </Card>
 
-          {/* 反馈历史时间线 */}
-          <Card className="p-5">
-            <div className="mb-3 flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">反馈历史</h2>
-              {feedbacks.length > 0 && (
-                <span className="ml-auto rounded-full bg-muted px-1.5 py-px text-[11px] font-medium text-muted-foreground">
-                  {feedbacks.length}
-                </span>
+          {/* 反馈历史时间线 — 仅在 PR review 阶段或已有反馈时显示 */}
+          {(feedbacks.length > 0 ||
+            req.status === "awaiting_review" ||
+            req.status === "fix_revision") && (
+            <Card className="p-5">
+              <div className="mb-3 flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold">反馈历史</h2>
+                {feedbacks.length > 0 && (
+                  <span className="ml-auto rounded-full bg-muted px-1.5 py-px text-[11px] font-medium text-muted-foreground">
+                    {feedbacks.length}
+                  </span>
+                )}
+              </div>
+              {feedbacks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">等待 PR review 反馈…</p>
+              ) : (
+                <ol className="space-y-3">
+                  {feedbacks.map((fb) => (
+                    <li key={fb.id} className="border-l-2 border-muted pl-3">
+                      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className="text-[10px] font-normal h-4 px-1.5">
+                          {SOURCE_LABEL[fb.source] ?? fb.source}
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground">
+                          {new Date(fb.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <pre className="whitespace-pre-wrap break-words font-mono text-xs text-foreground leading-relaxed">
+                        {fb.body}
+                      </pre>
+                    </li>
+                  ))}
+                </ol>
               )}
-            </div>
-            {feedbacks.length === 0 ? (
-              <p className="text-xs text-muted-foreground">暂无反馈记录。</p>
-            ) : (
-              <ol className="space-y-3">
-                {feedbacks.map((fb) => (
-                  <li key={fb.id} className="border-l-2 border-muted pl-3">
-                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                      <Badge variant="outline" className="text-[10px] font-normal h-4 px-1.5">
-                        {SOURCE_LABEL[fb.source] ?? fb.source}
-                      </Badge>
-                      <span className="text-[10px] text-muted-foreground">
-                        {new Date(fb.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                    <pre className="whitespace-pre-wrap break-words font-mono text-xs text-foreground leading-relaxed">
-                      {fb.body}
-                    </pre>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </Card>
+            </Card>
+          )}
         </div>
       </div>
     </div>
