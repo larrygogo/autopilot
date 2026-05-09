@@ -967,7 +967,12 @@ export async function handleRequest(req: Request): Promise<Response> {
     const reqEnqueueMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/enqueue$/);
     if (reqEnqueueMatch && method === "POST") {
       const id = reqEnqueueMatch;
-      if (!getRequirementById(id)) return error("requirement not found", 404);
+      const r = getRequirementById(id);
+      if (!r) return error("requirement not found", 404);
+      if (!r.codebase_id) return error("请先关联代码库再入队");
+      if (!(r.spec_md ?? "").trim()) {
+        return error("需求规约为空，请先完成澄清或手动填写规约");
+      }
       // 仅置 queued；调度器（src/daemon/requirement-scheduler.ts）会监听 status 变化触发创建 task
       try {
         return json({ requirement: withRepoIdAlias(setRequirementStatus(id, "queued")) });

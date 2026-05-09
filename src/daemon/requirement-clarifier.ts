@@ -5,7 +5,7 @@ import type { AutopilotEvent } from "./protocol";
 import { getRequirementById, updateRequirement } from "../core/requirements";
 import { getProjectById } from "../core/projects";
 import { getCodebaseById } from "../core/codebases";
-import { listQuestionsByRequirement, createQuestion, nextQuestionId } from "../core/requirement-questions";
+import { listQuestionsByRequirement, createQuestion, nextQuestionId, resolveQuestion } from "../core/requirement-questions";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("requirement-clarifier");
@@ -105,8 +105,12 @@ async function runFirstRound(reqId: string): Promise<void> {
     return "";
   });
 
-  if (!text || text === "NO_QUESTIONS") {
-    log.info("clarifier: req=%s 首轮无需澄清", reqId);
+  if (!text) return;
+
+  // NO_QUESTIONS：跳过追问，直接让 AI 整理 spec_md（避免需求停在 clarifying 死锁）
+  if (text === "NO_QUESTIONS" || text.includes("NO_QUESTIONS")) {
+    log.info("clarifier: req=%s 首轮无需追问，直接进入整理 spec", reqId);
+    await finalizeSpec(reqId);
     return;
   }
 
@@ -116,6 +120,61 @@ async function runFirstRound(reqId: string): Promise<void> {
     emit({ type: "requirement:questions-updated", payload: { id: reqId } });
     log.info("clarifier: req=%s 第一轮生成 %d 个问题", reqId, questions.length);
   }
+}
+
+/** 让 AI 基于已有上下文（含 spec_md / Q&A）整理出最终 spec_md，并发确认消息 */
+async function finalizeSpec(reqId: string): Promise<void> {
+  const req = getRequirementById(reqId);
+  if (!req || req.status !== "clarifying") return;
+  const project = req.project_id ? getProjectById(req.project_id) : null;
+  if (!project) return;
+  const codebase = req.codebase_id ? getCodebaseById(req.codebase_id) : null;
+
+  const allQuestions = listQuestionsByRequirement(reqId);
+  const qaHistory = allQuestions
+    .filter(q => (q.replies ?? []).some(r => r.author_role === "user"))
+    .map((q, i) => {
+      const userReply = (q.replies ?? []).find(r => r.author_role === "user")?.text ?? "";
+      return `问题 ${i + 1}：${q.agent_text}\n回答：${userReply}`;
+    }).join("\n\n");
+
+  const ctx = buildContext({
+    projectName: project.name,
+    projectDescription: project.description,
+    codebaseAlias: codebase?.alias ?? null,
+    codebaseContext: codebase?.path ? readCodebaseContext(codebase.path) : null,
+    title: req.title,
+    specMd: req.spec_md ?? "",
+  });
+
+  const existingSpec = (req.spec_md ?? "").trim();
+  const baseInstr = existingSpec
+    ? "下面是当前已有的需求规约（可能已被用户编辑）。请基于现有规约和后续对话整理新版本，尽量保留用户的修改用语，仅补充/调整必要内容。\n\n## 现有需求规约\n" + existingSpec + "\n\n"
+    : "";
+
+  const prompt =
+    "你是一位软件需求分析师，请整理出完整的需求规约 markdown。\n\n" +
+    ctx + "\n\n" +
+    (qaHistory ? "## 澄清问答记录\n\n" + qaHistory + "\n\n" : "") +
+    baseInstr +
+    "请直接输出完整 markdown 规约（标题 / 背景 / 详细需求 / 验收标准 / 注意事项），" +
+    "不要任何前言或对话痕迹（如 \"根据回答\"、\"用户说\"），不要包裹 ``` 代码块。";
+
+  const specMd = await callClaude(prompt).catch((e: unknown) => {
+    log.warn("clarifier: 整理 spec 调用失败 req=%s: %s", reqId, (e as Error).message);
+    return "";
+  });
+
+  if (specMd) {
+    updateRequirement(reqId, { spec_md: specMd.trim() });
+    log.info("clarifier: req=%s 已写入 spec_md（%d 字符）", reqId, specMd.trim().length);
+  }
+  const confirmText = "我已根据我们的对话整理出完整的需求规约（见右侧「需求规约」区）。请审阅，如需调整可以直接编辑，或继续在这里补充让我重新整理。确认无误后点击「标记为已澄清」继续。";
+  const qId = nextQuestionId();
+  createQuestion({ id: qId, requirement_id: reqId, agent_text: confirmText });
+  // 立即标记 resolved：这条只是通知，不应触发新一轮 all-questions-resolved
+  resolveQuestion(qId);
+  emit({ type: "requirement:questions-updated", payload: { id: reqId } });
 }
 
 /**
@@ -151,11 +210,8 @@ async function runFollowUpRound(reqId: string): Promise<void> {
     ctx + "\n\n" +
     "## 已完成的澄清问答\n\n" + qaHistory + "\n\n" +
     "请根据以上回答判断：\n" +
-    "- 如果还需要进一步澄清，输出追加问题（每行一个问题，问题下一行可选附「建议：选项A | 选项B」，不要编号、不要 markdown）。\n" +
-    "- 如果信息已经足够，输出以下格式：\n" +
-    "  第一行必须是 CLARIFICATION_COMPLETE\n" +
-    "  之后是完整的需求规约 markdown（标题 / 背景 / 详细需求 / 验收标准 / 注意事项）\n" +
-    "  规约内容必须完整自洽，能直接交付给开发工程师使用，不要包含 \"用户说\"、\"根据回答\" 等对话痕迹";
+    "- 如果还需要进一步澄清，输出追加问题（每行一个问题，问题下一行可选附「建议：选项A | 选项B | 选项C」，2-4 个短选项，不要编号、不要 markdown）。\n" +
+    "- 如果信息已经足够，只输出 NO_QUESTIONS（接下来由系统去整理需求规约）。";
 
   const text = await callClaude(prompt).catch((e: unknown) => {
     log.warn("clarifier: 追问调用失败 req=%s: %s", reqId, (e as Error).message);
@@ -164,16 +220,9 @@ async function runFollowUpRound(reqId: string): Promise<void> {
 
   if (!text) return;
 
-  if (text.includes("CLARIFICATION_COMPLETE")) {
-    const specMd = text.split("CLARIFICATION_COMPLETE").slice(1).join("").trim();
-    if (specMd) {
-      updateRequirement(reqId, { spec_md: specMd });
-      log.info("clarifier: req=%s 已写入 spec_md（%d 字符）", reqId, specMd.length);
-    }
-    const confirmText = "我已根据我们的对话整理出完整的需求规约（见右侧「需求规约」区）。请审阅，如需调整可以直接编辑，或继续在这里补充让我重新整理。确认无误后点击「标记为已澄清」继续。";
-    const qId = nextQuestionId();
-    createQuestion({ id: qId, requirement_id: reqId, agent_text: confirmText });
-    emit({ type: "requirement:questions-updated", payload: { id: reqId } });
+  // 信息已足够 → 整理 spec_md
+  if (text === "NO_QUESTIONS" || text.includes("NO_QUESTIONS") || text.includes("CLARIFICATION_COMPLETE")) {
+    await finalizeSpec(reqId);
     return;
   }
 
