@@ -165,19 +165,23 @@ function recoverDanglingTasks(): void {
   try {
     const tasks = listTasks({});
     let count = 0;
+    // daemon 重启时，所有 running_* 任务的内存 phase promise 都已丢失。
+    // 即便有 await_review 这种长挂起态除外，普通 running_<phase> 都视为 dangling，
+    // 让 UI 显示警告，用户决定取消还是重启（restart 会通过 runInBackground 重新执行）。
     for (const t of tasks) {
-      const pq = t["pending_question"] as string | undefined;
-      if (pq && pq.trim() && t.status.startsWith("running_") && !t["dangling"]) {
-        updateTask(t.id, { dangling: true });
-        log.warn(
-          "task %s 在 daemon 重启时仍处于 running_* + pending_question 非空 → 标记 dangling（agent 已死，UI 会提示用户）",
-          t.id,
-        );
-        count++;
-      }
+      if (!t.status.startsWith("running_")) continue;
+      // await_review 是设计上的长挂起态（外部 trigger 推进），不算 dangling
+      if (t.status === "running_await_review") continue;
+      if (t["dangling"]) continue;
+      updateTask(t.id, { dangling: true });
+      log.warn(
+        "task %s 在 daemon 重启时仍处于 %s → 标记 dangling（phase 执行已丢失，UI 会提示用户）",
+        t.id, t.status,
+      );
+      count++;
     }
     if (count > 0) {
-      log.warn("共 %d 个 task 因 daemon 重启被标 dangling，请在 UI 取消并重新创建任务", count);
+      log.warn("共 %d 个 task 因 daemon 重启被标 dangling，请在 UI 选择取消或重启", count);
     }
   } catch (e: unknown) {
     console.error("recoverDanglingTasks 异常：", e instanceof Error ? e.message : String(e));

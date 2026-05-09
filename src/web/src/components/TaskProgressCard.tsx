@@ -28,6 +28,7 @@ interface TaskInfo {
   updated_at: string;
   started_at: string | null;
   pr_url?: string | null;
+  dangling?: boolean;
 }
 
 interface LogEntry {
@@ -103,10 +104,11 @@ export function TaskProgressCard({
   const parsed = parsePhaseFromStatus(task.status);
   const phaseName = parsed.phase;
   const phaseLabel = phaseName ? (PHASE_LABEL[phaseName] ?? phaseName) : null;
+  const isDangling = !!task.dangling;
   const isFailed = task.status.startsWith("failed_") || (task.status === "cancelled" && recentError);
   const isCancelled = task.status === "cancelled" && !recentError;
   const isDone = task.status === "done";
-  const isRunning = task.status.startsWith("running_");
+  const isRunning = task.status.startsWith("running_") && !isDangling;
 
   const startedMs = task.started_at ? new Date(task.started_at).getTime() : null;
   const elapsedMs = startedMs ? now - startedMs : 0;
@@ -144,11 +146,11 @@ export function TaskProgressCard({
         <div className="flex items-center gap-2">
           {isRunning && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
           {isDone && <CheckCircle2 className="h-4 w-4 text-green-500" />}
-          {isFailed && <AlertCircle className="h-4 w-4 text-destructive" />}
+          {(isFailed || isDangling) && <AlertCircle className="h-4 w-4 text-destructive" />}
           {isCancelled && <XCircle className="h-4 w-4 text-muted-foreground" />}
           <h2 className="text-sm font-semibold">任务进度</h2>
           {phaseLabel && (
-            <Badge variant={isFailed ? "destructive" : isRunning ? "default" : "secondary"} className="text-[10px]">
+            <Badge variant={(isFailed || isDangling) ? "destructive" : isRunning ? "default" : "secondary"} className="text-[10px]">
               {phaseLabel}
             </Badge>
           )}
@@ -163,6 +165,17 @@ export function TaskProgressCard({
           </Link>
         )}
       </div>
+
+      {isDangling && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+          <div className="mb-1 font-medium">⚠ 任务已失联</div>
+          <p className="leading-relaxed opacity-90">
+            daemon 在该任务执行 <span className="font-medium">{phaseLabel ?? task.status}</span> 阶段时被重启，
+            内存中的执行流已丢失。task 的产出（如已完成的方案设计 / 部分代码）仍保留，
+            但当前阶段不会自动继续。请选择「从当前阶段重试」让任务接着跑，或「取消任务」放弃。
+          </p>
+        </div>
+      )}
 
       {isRunning && (
         <div className="text-xs text-muted-foreground">
@@ -204,11 +217,18 @@ export function TaskProgressCard({
               {cancelling ? "取消中…" : "取消任务"}
             </Button>
           )}
-          {(isFailed || isCancelled) && (
-            <Button variant="outline" size="sm" onClick={() => void restartTask()} disabled={restarting} className="h-7 text-xs">
-              <RotateCw className="mr-1 h-3 w-3" />
-              {restarting ? "重启中…" : "从当前阶段重试"}
-            </Button>
+          {(isFailed || isCancelled || isDangling) && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => void restartTask()} disabled={restarting} className="h-7 text-xs">
+                <RotateCw className="mr-1 h-3 w-3" />
+                {restarting ? "重启中…" : "从当前阶段重试"}
+              </Button>
+              {isDangling && (
+                <Button variant="outline" size="sm" onClick={() => void cancelTask()} disabled={cancelling} className="h-7 text-xs">
+                  {cancelling ? "取消中…" : "取消任务"}
+                </Button>
+              )}
+            </>
           )}
         </div>
       )}
