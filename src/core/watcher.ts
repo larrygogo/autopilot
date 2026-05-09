@@ -14,6 +14,9 @@ import { applyRetentionPolicy, loadRetentionPolicy } from "./workspace";
 
 const lastRecoveryAttempt = new Map<string, number>();
 const MIN_RECOVERY_INTERVAL_MS = 60_000; // 至少间隔 60 秒
+// 记录每个任务在每个 phase 的累计恢复次数，超过阈值直接 cancel 避免无限重试
+const recoveryCount = new Map<string, number>(); // key: `${taskId}:${phase}`
+const MAX_RECOVERIES_PER_PHASE = 3;
 
 // ──────────────────────────────────────────────
 // 辅助：构建 running_state → phase_name 映射
@@ -166,22 +169,47 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
       continue;
     }
 
+    // 累计恢复次数：超过阈值直接 cancel 任务，避免无限循环
+    const recoveryKey = `${task.id}:${phaseName}`;
+    const attempts = recoveryCount.get(recoveryKey) ?? 0;
+    if (attempts >= MAX_RECOVERIES_PER_PHASE) {
+      log.error(
+        "watcher: 任务 %s 阶段 %s 已恢复 %d 次仍卡死，标记为 cancelled",
+        task.id, phaseName, attempts
+      );
+      try {
+        forceTransition(
+          task.id,
+          "cancelled",
+          `watcher: 阶段 ${phaseName} 反复卡死，恢复 ${attempts} 次后放弃`
+        );
+        emit({ type: "watcher:recovery", payload: { taskId: task.id, phase: phaseName, fromStatus: task.status, toStatus: "cancelled" } });
+      } catch (e: unknown) {
+        log.error("watcher: 强制 cancel 失败 task=%s: %s", task.id, (e as Error).message);
+      }
+      recoveryCount.delete(recoveryKey);
+      lastRecoveryAttempt.delete(task.id);
+      continue;
+    }
+
     log.warn(
-      "watcher: 检测到卡死任务 [task=%s phase=%s status=%s elapsed=%ss]，尝试恢复",
+      "watcher: 检测到卡死任务 [task=%s phase=%s status=%s elapsed=%ss attempts=%d]，尝试恢复",
       task.id,
       phaseName,
       task.status,
-      Math.round(elapsedMs / 1000)
+      Math.round(elapsedMs / 1000),
+      attempts + 1
     );
 
     forceTransition(
       task.id,
       pendingState,
-      `watcher: 检测到卡死任务，回退到 ${pendingState}（elapsed=${Math.round(elapsedMs / 1000)}s）`
+      `watcher: 检测到卡死任务，回退到 ${pendingState}（elapsed=${Math.round(elapsedMs / 1000)}s, attempt=${attempts + 1}）`
     );
 
     emit({ type: "watcher:recovery", payload: { taskId: task.id, phase: phaseName, fromStatus: task.status, toStatus: pendingState } });
     lastRecoveryAttempt.set(task.id, nowMs);
+    recoveryCount.set(recoveryKey, attempts + 1);
     runInBackground(task.id, phaseName);
   }
 }
@@ -189,11 +217,15 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
 /** 仅供测试：清除恢复记录 */
 export function _clearRecoveryHistory(): void {
   lastRecoveryAttempt.clear();
+  recoveryCount.clear();
 }
 
 /** 任务被删除时调用：移除 watcher 内存中的恢复节流记录 */
 export function forgetTaskRecoveryState(taskId: string): void {
   lastRecoveryAttempt.delete(taskId);
+  for (const k of [...recoveryCount.keys()]) {
+    if (k.startsWith(`${taskId}:`)) recoveryCount.delete(k);
+  }
 }
 
 // ──────────────────────────────────────────────
