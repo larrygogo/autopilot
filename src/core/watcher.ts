@@ -6,7 +6,47 @@ import { forceTransition } from "./state-machine";
 import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./registry";
 import type { PhaseDefinition, ParallelDefinition } from "./registry";
 import { emit } from "../daemon/event-bus";
-import { applyRetentionPolicy, loadRetentionPolicy } from "./workspace";
+import { applyRetentionPolicy, loadRetentionPolicy, getTaskWorkspace } from "./workspace";
+import { existsSync, readdirSync, statSync } from "fs";
+import { join } from "path";
+
+/**
+ * 递归扫 task workspace 拿到最新文件 mtime（毫秒）。
+ * 用于 watcher 判断卡死：task.updated_at 只在状态切换时更新，
+ * 但 agent 长跑（develop / design 阶段）期间会持续在 workspace 写文件，
+ * 取这两者中较新的作为"实际活跃时间"。
+ */
+function getWorkspaceLatestMtime(taskId: string): number {
+  try {
+    const root = getTaskWorkspace(taskId);
+    if (!existsSync(root)) return 0;
+    let latest = 0;
+    const stack: string[] = [root];
+    while (stack.length) {
+      const dir = stack.pop()!;
+      let entries: import("fs").Dirent[];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of entries) {
+        const full = join(dir, e.name);
+        try {
+          if (e.isDirectory()) {
+            stack.push(full);
+          } else {
+            const m = statSync(full).mtimeMs;
+            if (m > latest) latest = m;
+          }
+        } catch { /* skip */ }
+      }
+    }
+    return latest;
+  } catch {
+    return 0;
+  }
+}
 
 // ──────────────────────────────────────────────
 // 洪泛防护：记录每个任务上次恢复时间
@@ -123,11 +163,15 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
     // 已持有活跃锁 → 正在执行，跳过
     if (isLocked(task.id)) continue;
 
-    // 检查超时
+    // 检查超时：task.updated_at 与 workspace 文件最新 mtime 取较新者
+    // 因为 develop / design 等长跑阶段期间 task 状态不变但 workspace 持续在写
     const updatedAt = new Date(task.updated_at).getTime();
     if (isNaN(updatedAt)) continue;
 
-    const elapsedMs = nowMs - updatedAt;
+    const workspaceMtime = getWorkspaceLatestMtime(task.id);
+    const lastActive = Math.max(updatedAt, workspaceMtime);
+
+    const elapsedMs = nowMs - lastActive;
     if (elapsedMs < thresholdMs) continue;
 
     // 洪泛防护：检查上次恢复间隔
