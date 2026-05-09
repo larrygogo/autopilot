@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import dagre from "dagre";
 import { cn } from "@/lib/utils";
+import { triggerLabel, nodeLabel } from "@/lib/workflow-labels";
 
 interface GraphNode {
   id: string;
@@ -29,17 +30,7 @@ function nodePhase(id: string): string | null {
   return m ? m[1] : null;
 }
 
-/** 把状态机里的 trigger 名缩成可读短名 */
-function shortTrigger(t: string): string {
-  // start_X / X_complete / X_fail / X_reject → 关键动词
-  if (t.startsWith("start_")) return "start";
-  if (t.endsWith("_complete")) return "✓";
-  if (t.endsWith("_fail")) return "✗";
-  if (t.endsWith("_reject")) return "reject";
-  if (t === "cancel") return "cancel";
-  if (t.startsWith("retry_")) return "retry";
-  return t;
-}
+// 中文 label 从 workflow-labels 统一来源
 
 const NODE_TONE: Record<GraphNode["type"], string> = {
   initial: "text-primary",
@@ -80,7 +71,7 @@ export function StateMachineGraph({ nodes, edges, currentState, highlightPhase, 
     }
     for (let i = 0; i < layoutEdges.length; i++) {
       const e = layoutEdges[i];
-      g.setEdge(e.from, e.to, { label: shortTrigger(e.trigger), trigger: e.trigger }, `e${i}`);
+      g.setEdge(e.from, e.to, { label: triggerLabel(e.trigger), trigger: e.trigger }, `e${i}`);
     }
 
     dagre.layout(g);
@@ -241,7 +232,7 @@ export function StateMachineGraph({ nodes, edges, currentState, highlightPhase, 
                 dominantBaseline="middle"
                 pointerEvents="none"
               >
-                {truncate(node.label, 16)}
+                {truncate(nodeLabel(node.id) || node.label, 14)}
               </text>
             </g>
           );
@@ -258,15 +249,15 @@ export function StateMachineGraph({ nodes, edges, currentState, highlightPhase, 
               : "border-warning/40 bg-warning/5 text-muted-foreground",
           )}
         >
-          <span className="rounded bg-warning/15 px-1.5 py-0.5 font-mono text-warning">cancel</span>
+          <span className="rounded bg-warning/15 px-1.5 py-0.5 font-mono text-warning">取消</span>
           <span>从任意非终态触发，转入</span>
           <span
             className={cn(
-              "rounded border bg-card px-2 py-0.5 font-mono",
+              "rounded border bg-card px-2 py-0.5",
               cancelNode.id === currentState ? "border-primary text-primary" : "text-success",
             )}
           >
-            {cancelNode.label}
+            {nodeLabel(cancelNode.id) || cancelNode.label}
           </span>
           {cancelNode.id === currentState && (
             <span className="ml-auto text-[10px] uppercase tracking-wide text-primary">当前状态</span>

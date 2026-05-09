@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useToast } from "@/components/Toast";
+import { PHASE_LABEL } from "@/lib/workflow-labels";
 
 // task.status 通常是 "running_<phase>" / "pending_<phase>" / "<phase>_complete" / "cancelled" / "done" / "failed_<phase>"
 function parsePhaseFromStatus(status: string): { kind: "running" | "pending" | "complete" | "terminal"; phase: string | null } {
@@ -18,16 +19,6 @@ function parsePhaseFromStatus(status: string): { kind: "running" | "pending" | "
   if (status.endsWith("_complete")) return { kind: "complete", phase: status.slice(0, -"_complete".length) };
   return { kind: "running", phase: null };
 }
-
-const PHASE_LABEL: Record<string, string> = {
-  design: "方案设计",
-  review: "方案评审",
-  develop: "代码开发",
-  code_review: "代码审查",
-  submit_pr: "提交 PR",
-  await_review: "等待 PR review",
-  fix_revision: "PR 修复",
-};
 
 interface TaskInfo {
   id: string;
