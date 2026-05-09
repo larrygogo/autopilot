@@ -1,4 +1,4 @@
-import { getTask } from "./db";
+import { getTask, getDb } from "./db";
 import { acquireLock, releaseLock } from "./infra";
 import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { appendTaskEvent } from "./task-logs";
@@ -116,9 +116,20 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     log.info("开始执行阶段 %s [task=%s]", phase, taskId);
     emit({ type: "phase:started", payload: { taskId, phase, label: phaseDef.label } });
     appendTaskEvent(taskId, { type: "phase-started", phase, label: phaseDef.label });
-    await runWithTaskContext({ taskId, phase }, async () => {
-      await phaseFn(taskId);
-    });
+    // 心跳：长跑阶段（如 develop 跑 30+ 分钟）期间，watcher 看 task.updated_at
+    // 会以为卡死。每 2 分钟 ping 一次让 watcher 知道任务活着。
+    const heartbeat = setInterval(() => {
+      try {
+        getDb().run("UPDATE tasks SET updated_at = ? WHERE id = ?", [new Date().toISOString(), taskId]);
+      } catch { /* 心跳失败不影响主流程 */ }
+    }, 120_000);
+    try {
+      await runWithTaskContext({ taskId, phase }, async () => {
+        await phaseFn(taskId);
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
     log.info("阶段执行完成：%s [task=%s]", phase, taskId);
     emit({ type: "phase:completed", payload: { taskId, phase } });
     appendTaskEvent(taskId, { type: "phase-completed", phase });
