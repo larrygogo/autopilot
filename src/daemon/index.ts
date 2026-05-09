@@ -12,7 +12,7 @@ import { loadDaemonConfig, loadGithubConfig } from "../core/config";
 import { enableBus, disableBus, bus } from "./event-bus";
 import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
-import { startServer } from "./server";
+import { startServerWithRetry } from "./server";
 import { setWebDistDir } from "./routes";
 import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo } from "./pid";
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
@@ -89,8 +89,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const webDistDir = join(import.meta.dir, "../../web-dist");
   setWebDistDir(webDistDir);
 
-  // 启动 HTTP + WebSocket 服务
-  const server = startServer({ host, port });
+  // 启动 HTTP + WebSocket 服务（端口被 stale socket 占用时自动重试）
+  const server = await startServerWithRetry({ host, port });
 
   // 写入 PID 和监听信息
   writePid();

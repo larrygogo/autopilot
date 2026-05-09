@@ -6,6 +6,26 @@ import { wsManager } from "./ws";
 // Bun.serve() — HTTP + WebSocket 统一服务
 // ──────────────────────────────────────────────
 
+export async function startServerWithRetry(opts: { host: string; port: number }): Promise<Server<undefined>> {
+  // Windows 上 daemon 异常退出后 TCP 表会保留 stale socket（PID 已死但 LISTENING 仍显示），
+  // 通常 30~120s 自然收敛。重试 6 次 × 5s = 30s 给一个合理的窗口。
+  const maxAttempts = 6;
+  const retryDelayMs = 5000;
+  let lastErr: unknown;
+  for (let i = 1; i <= maxAttempts; i++) {
+    try {
+      return startServer(opts);
+    } catch (e: unknown) {
+      lastErr = e;
+      const msg = (e as Error)?.message ?? String(e);
+      if (!/EADDRINUSE|in use/i.test(msg) || i === maxAttempts) throw e;
+      console.warn(`[daemon] 端口 ${opts.port} 被占用（可能是 Windows stale socket），${retryDelayMs / 1000}s 后第 ${i + 1}/${maxAttempts} 次重试…`);
+      await new Promise((r) => setTimeout(r, retryDelayMs));
+    }
+  }
+  throw lastErr;
+}
+
 export function startServer(opts: { host: string; port: number }): Server<undefined> {
   const server = Bun.serve({
     hostname: opts.host,
