@@ -31,12 +31,21 @@ async function callClaude(prompt: string): Promise<string> {
     ["claude", "-p", prompt, "--output-format", "text", "--tools", ""],
     { stdout: "pipe", stderr: "pipe" },
   );
-  const [stdout] = await Promise.all([
+  const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ]);
   await proc.exited;
-  return stdout.trim();
+  const text = stdout.trim();
+  // 检测错误响应，避免把 "Failed to authenticate" 这种当成问题写入
+  if (
+    proc.exitCode !== 0 ||
+    /^(Failed to|Error:|API Error|401|403|429)/i.test(text) ||
+    /Invalid authentication|API key|credit balance/i.test(text)
+  ) {
+    throw new Error(`claude CLI 异常 (exit=${proc.exitCode}): ${text || stderr.trim() || "no output"}`);
+  }
+  return text;
 }
 
 function buildContext(opts: {
