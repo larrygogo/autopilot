@@ -220,7 +220,7 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
   if (existsSync(tsPath)) {
     try {
       const { statSync, readFileSync, writeFileSync, mkdirSync } = await import("fs");
-      const { join: joinPath, dirname: dirnamePath, basename: basenamePath } = await import("path");
+      const { join: joinPath, dirname: dirnamePath, basename: basenamePath, relative: relativePath } = await import("path");
       const { getAutopilotSrcPath } = await import("./autopilot-resolver");
 
       const mtime = statSync(tsPath).mtimeMs;
@@ -228,16 +228,20 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
 
       const content = readFileSync(tsPath, "utf-8");
       if (/(["'])@autopilot\//.test(content)) {
-        const srcPath = getAutopilotSrcPath().replace(/\\/g, "/");
-        const resolved = content.replace(
-          /(["'])@autopilot\//g,
-          (_m, q) => `${q}${srcPath}/`,
-        );
+        const srcPath = getAutopilotSrcPath();
         const cacheDir = joinPath(getAutopilotHomeDynamic(), "runtime", "cache", "workflows");
         if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
         const wfDirName = basenamePath(dirnamePath(tsPath));
-        importPath = joinPath(cacheDir, `${wfDirName}.${mtime}.ts`);
-        writeFileSync(importPath, resolved, "utf-8");
+        const cachedPath = joinPath(cacheDir, `${wfDirName}.${mtime}.ts`);
+        // 用相对路径 import 框架代码：避免绝对路径与 daemon 主进程相对路径
+        // 解析到不同的 module instance（导致 registry 状态丢失）
+        const relSrc = relativePath(cacheDir, srcPath).replace(/\\/g, "/");
+        const resolved = content.replace(
+          /(["'])@autopilot\//g,
+          (_m, q) => `${q}${relSrc}/`,
+        );
+        writeFileSync(cachedPath, resolved, "utf-8");
+        importPath = cachedPath;
       }
 
       tsModule = await import(`${importPath}?t=${mtime}`) as Record<string, unknown>;
