@@ -55,7 +55,17 @@ function formatElapsed(ms: number): string {
   return `${hr}h ${min % 60}min`;
 }
 
-export function TaskProgressCard({ taskId }: { taskId: string }) {
+export function TaskProgressCard({
+  taskId,
+  showDetailLink = true,
+  showActions = true,
+}: {
+  taskId: string;
+  /** 是否显示「查看完整日志」链接，TaskDetail 页面内嵌时关闭 */
+  showDetailLink?: boolean;
+  /** 是否显示「取消任务」「从当前阶段重试」按钮，TaskDetail 顶部已有时关闭 */
+  showActions?: boolean;
+}) {
   const { subscribe } = useWebSocket();
   const toast = useToast();
   const [task, setTask] = useState<TaskInfo | null>(null);
@@ -152,13 +162,15 @@ export function TaskProgressCard({ taskId }: { taskId: string }) {
             </Badge>
           )}
         </div>
-        <Link
-          to={`/tasks/${taskId}`}
-          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-        >
-          查看完整日志
-          <ExternalLink className="h-3 w-3" />
-        </Link>
+        {showDetailLink && (
+          <Link
+            to={`/tasks/${taskId}`}
+            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+          >
+            查看完整日志
+            <ExternalLink className="h-3 w-3" />
+          </Link>
+        )}
       </div>
 
       {isRunning && (
@@ -194,19 +206,21 @@ export function TaskProgressCard({ taskId }: { taskId: string }) {
       )}
 
       {/* 操作按钮 */}
-      <div className="mt-3 flex flex-wrap gap-2">
-        {(isRunning || parsed.kind === "pending") && (
-          <Button variant="outline" size="sm" onClick={() => void cancelTask()} disabled={cancelling} className="h-7 text-xs">
-            {cancelling ? "取消中…" : "取消任务"}
-          </Button>
-        )}
-        {(isFailed || isCancelled) && (
-          <Button variant="outline" size="sm" onClick={() => void restartTask()} disabled={restarting} className="h-7 text-xs">
-            <RotateCw className="mr-1 h-3 w-3" />
-            {restarting ? "重启中…" : "从当前阶段重试"}
-          </Button>
-        )}
-      </div>
+      {showActions && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(isRunning || parsed.kind === "pending") && (
+            <Button variant="outline" size="sm" onClick={() => void cancelTask()} disabled={cancelling} className="h-7 text-xs">
+              {cancelling ? "取消中…" : "取消任务"}
+            </Button>
+          )}
+          {(isFailed || isCancelled) && (
+            <Button variant="outline" size="sm" onClick={() => void restartTask()} disabled={restarting} className="h-7 text-xs">
+              <RotateCw className="mr-1 h-3 w-3" />
+              {restarting ? "重启中…" : "从当前阶段重试"}
+            </Button>
+          )}
+        </div>
+      )}
     </Card>
   );
 }
