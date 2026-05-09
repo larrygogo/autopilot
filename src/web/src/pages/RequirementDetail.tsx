@@ -574,7 +574,8 @@ export function RequirementDetail() {
             ))}
           </div>
 
-          {resolvedQuestions.length > 0 && openQuestions.length === 0 && (
+          {resolvedQuestions.length > 0 && openQuestions.length === 0 &&
+           (req.status === "drafting" || req.status === "clarifying") && (
             <div className="mt-5 flex items-center justify-between rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3">
               <p className="text-sm text-green-700 dark:text-green-400">所有问题已回答，可以继续了。</p>
               <Button size="sm" onClick={markReady} disabled={actionBusy} className="shrink-0">
