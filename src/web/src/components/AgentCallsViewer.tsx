@@ -92,171 +92,186 @@ export function AgentCallsViewer({ taskId }: Props) {
   const totalErrors = calls.filter((c) => c.error).length;
 
   return (
-    <Card className="p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">Agent 调用</h3>
+    <Card>
+      <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+        <span className="bp-label">Agent 调用 · AGENT CALLS</span>
         <Button variant="ghost" size="sm" onClick={refresh} disabled={loading}>
           <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
           刷新
         </Button>
       </div>
 
-      {loading && calls.length === 0 ? (
-        <p className="text-xs text-muted-foreground">加载中…</p>
-      ) : calls.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          尚未记录 agent 调用。阶段函数里调用{" "}
-          <code className="rounded bg-muted px-1 font-mono">agent.run()</code>{" "}
-          后会自动记录 prompt / 响应 / token 用量。
-        </p>
-      ) : (
-        <>
-          {/* 统计条 */}
-          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-none border bg-muted/40 px-3 py-2 text-xs">
-            <span className="text-muted-foreground">
-              共 <strong className="font-semibold text-foreground">{total}</strong> 次调用
-            </span>
-            {totalErrors > 0 && (
-              <span className="text-destructive">
-                失败 <strong className="font-semibold">{totalErrors}</strong>
-              </span>
-            )}
-            {totalInTokens > 0 && (
-              <span className="text-muted-foreground">
-                in{" "}
-                <strong className="font-mono font-semibold text-foreground">
-                  {fmtTokens(totalInTokens)}
-                </strong>
-              </span>
-            )}
-            {totalOutTokens > 0 && (
-              <span className="text-muted-foreground">
-                out{" "}
-                <strong className="font-mono font-semibold text-foreground">
-                  {fmtTokens(totalOutTokens)}
-                </strong>
-              </span>
-            )}
-            {totalCost > 0 && (
-              <span className="text-muted-foreground">
-                <strong className="font-mono font-semibold text-foreground">
-                  {fmtUsd(totalCost)}
-                </strong>
-              </span>
-            )}
-          </div>
+      <div className="p-4">
+        {loading && calls.length === 0 ? (
+          <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            加载中…
+          </p>
+        ) : calls.length === 0 ? (
+          <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            尚未记录 agent 调用。阶段函数里调用{" "}
+            <code className="border border-foreground/20 bg-muted px-1 normal-case tracking-normal">
+              agent.run()
+            </code>{" "}
+            后会自动记录 prompt / 响应 / token 用量。
+          </p>
+        ) : (
+          <>
+            {/* 统计条：metadata 风格 */}
+            <div className="mb-3 grid grid-cols-2 gap-0 border border-foreground/25 font-mono text-[11px] sm:grid-cols-5">
+              <StatCell label="CALLS" value={total} />
+              <StatCell
+                label="ERRORS"
+                value={totalErrors}
+                tone={totalErrors > 0 ? "destructive" : "default"}
+              />
+              <StatCell label="IN" value={fmtTokens(totalInTokens) || "0"} />
+              <StatCell label="OUT" value={fmtTokens(totalOutTokens) || "0"} />
+              <StatCell label="COST" value={totalCost > 0 ? fmtUsd(totalCost) : "—"} last />
+            </div>
 
-          {/* 调用列表 */}
-          <div className="flex flex-col gap-2">
-            {calls.map((c) => {
-              const isOpen = expandedSeq === c.seq;
-              return (
-                <div
-                  key={c.seq}
-                  className={cn(
-                    "rounded-none border bg-card text-sm transition-colors",
-                    c.error && "border-destructive/40",
-                    isOpen && "ring-1 ring-primary/20",
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggle(c.seq)}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent/40"
+            {/* 调用列表 */}
+            <div className="flex flex-col gap-2">
+              {calls.map((c) => {
+                const isOpen = expandedSeq === c.seq;
+                return (
+                  <div
+                    key={c.seq}
+                    className={cn(
+                      "border-[1.5px] border-foreground/25 bg-card text-sm transition-all",
+                      c.error && "border-destructive",
+                      isOpen && "border-accent shadow-[3px_3px_0_0_var(--color-accent)]",
+                    )}
                   >
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs text-muted-foreground">#{c.seq}</span>
-                      {c.phase && (
-                        <Badge variant="info" className="font-mono text-[10px]">
-                          {c.phase}
-                        </Badge>
-                      )}
-                      <span className="font-mono text-xs text-primary">{c.agent}</span>
-                      {c.model && (
-                        <span className="font-mono text-[11px] text-muted-foreground">
-                          {c.model}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
-                      {c.error && (
-                        <span className="inline-flex items-center gap-1 text-destructive">
-                          <AlertCircle className="h-3 w-3" />
-                          失败
-                        </span>
-                      )}
-                      {c.elapsed_ms != null && <span>{fmtMs(c.elapsed_ms)}</span>}
-                      {c.usage?.input_tokens != null && (
-                        <span className="font-mono">in {fmtTokens(c.usage.input_tokens)}</span>
-                      )}
-                      {c.usage?.output_tokens != null && (
-                        <span className="font-mono">out {fmtTokens(c.usage.output_tokens)}</span>
-                      )}
-                      {c.usage?.total_cost_usd != null && (
-                        <span className="font-mono">{fmtUsd(c.usage.total_cost_usd)}</span>
-                      )}
-                      {isOpen ? (
-                        <ChevronDown className="h-3.5 w-3.5" />
-                      ) : (
-                        <ChevronRight className="h-3.5 w-3.5" />
-                      )}
-                    </div>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => toggle(c.seq)}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-secondary/50"
+                    >
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">#{c.seq}</span>
+                        {c.phase && <Badge variant="info">{c.phase}</Badge>}
+                        <span className="font-mono text-xs text-accent">{c.agent}</span>
+                        {c.model && (
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            {c.model}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2 font-mono text-[11px] text-muted-foreground">
+                        {c.error && (
+                          <span className="inline-flex items-center gap-1 text-destructive">
+                            <AlertCircle className="h-3 w-3" />
+                            失败
+                          </span>
+                        )}
+                        {c.elapsed_ms != null && <span>{fmtMs(c.elapsed_ms)}</span>}
+                        {c.usage?.input_tokens != null && (
+                          <span>in {fmtTokens(c.usage.input_tokens)}</span>
+                        )}
+                        {c.usage?.output_tokens != null && (
+                          <span>out {fmtTokens(c.usage.output_tokens)}</span>
+                        )}
+                        {c.usage?.total_cost_usd != null && (
+                          <span>{fmtUsd(c.usage.total_cost_usd)}</span>
+                        )}
+                        {isOpen ? (
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        )}
+                      </div>
+                    </button>
 
-                  <div className="border-t bg-muted/20 px-3 py-1.5 text-[11px] text-muted-foreground">
-                    <span className="line-clamp-1">→ {c.prompt_preview || "(空 prompt)"}</span>
-                  </div>
+                    <div className="border-t border-dashed border-foreground/20 bg-muted/20 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                      <span className="line-clamp-1">→ {c.prompt_preview || "(空 prompt)"}</span>
+                    </div>
 
-                  {isOpen && (
-                    <div className="space-y-3 border-t p-3">
-                      {!expanded ? (
-                        <p className="text-xs text-muted-foreground">加载详情中…</p>
-                      ) : expanded.seq === c.seq ? (
-                        <>
-                          {expanded.system_prompt && (
-                            <AgentCallBlock
-                              label="System prompt"
-                              content={expanded.system_prompt}
-                              onCopy={copy}
-                            />
-                          )}
-                          {expanded.additional_system && (
-                            <AgentCallBlock
-                              label="Additional system"
-                              content={expanded.additional_system}
-                              onCopy={copy}
-                            />
-                          )}
-                          <AgentCallBlock label="Prompt" content={expanded.prompt} onCopy={copy} />
-                          {expanded.error ? (
-                            <AgentCallBlock
-                              label="Error"
-                              content={expanded.error}
-                              errorStyle
-                              onCopy={copy}
-                            />
-                          ) : (
-                            <AgentCallBlock
-                              label="Response"
-                              content={expanded.result_text ?? "(空)"}
-                              onCopy={copy}
-                            />
-                          )}
-                          <p className="text-[11px] text-muted-foreground">
-                            {new Date(expanded.ts).toLocaleString()}
-                            {expanded.provider && ` · ${expanded.provider}`}
+                    {isOpen && (
+                      <div className="space-y-3 border-t border-dashed border-foreground/25 p-3">
+                        {!expanded ? (
+                          <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                            加载详情中…
                           </p>
-                        </>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
+                        ) : expanded.seq === c.seq ? (
+                          <>
+                            {expanded.system_prompt && (
+                              <AgentCallBlock
+                                label="System prompt"
+                                content={expanded.system_prompt}
+                                onCopy={copy}
+                              />
+                            )}
+                            {expanded.additional_system && (
+                              <AgentCallBlock
+                                label="Additional system"
+                                content={expanded.additional_system}
+                                onCopy={copy}
+                              />
+                            )}
+                            <AgentCallBlock label="Prompt" content={expanded.prompt} onCopy={copy} />
+                            {expanded.error ? (
+                              <AgentCallBlock
+                                label="Error"
+                                content={expanded.error}
+                                errorStyle
+                                onCopy={copy}
+                              />
+                            ) : (
+                              <AgentCallBlock
+                                label="Response"
+                                content={expanded.result_text ?? "(空)"}
+                                onCopy={copy}
+                              />
+                            )}
+                            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                              {new Date(expanded.ts).toLocaleString()}
+                              {expanded.provider && ` · ${expanded.provider}`}
+                            </p>
+                          </>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
     </Card>
+  );
+}
+
+function StatCell({
+  label,
+  value,
+  tone = "default",
+  last,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: "default" | "destructive";
+  last?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-0.5 px-3 py-2 border-r border-dashed border-foreground/20 last:border-r-0",
+        last && "border-r-0",
+      )}
+    >
+      <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={cn(
+          "font-display text-lg font-bold leading-none tabular-nums",
+          tone === "destructive" ? "text-destructive" : "text-foreground",
+        )}
+      >
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -272,15 +287,14 @@ function AgentCallBlock({
   onCopy: (s: string) => void;
 }) {
   return (
-    <div className="rounded-none border bg-card">
-      <div className="flex items-center justify-between border-b bg-muted/30 px-2.5 py-1.5">
-        <strong className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="border border-foreground/25 bg-card">
+      <div className="flex items-center justify-between border-b border-dashed border-foreground/25 bg-muted/30 px-2.5 py-1.5">
+        <strong className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           {label}
         </strong>
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 px-2 text-[11px]"
           onClick={() => onCopy(content)}
         >
           <CopyIcon className="h-3 w-3" />
