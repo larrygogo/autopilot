@@ -100,7 +100,7 @@ const TOK_CLASS: Record<Tok["type"], string> = {
   plain: "",
   comment: "text-muted-foreground italic",
   string: "text-success",
-  keyword: "text-primary font-medium",
+  keyword: "text-accent font-medium",
   number: "text-warning",
   fn: "text-info",
 };
@@ -114,7 +114,7 @@ function renderTokens(tokens: Tok[], highlightFn?: string): React.ReactNode[] {
         key={i}
         className={cn(
           TOK_CLASS[t.type],
-          isHl && "rounded bg-primary/15 px-0.5 text-primary font-semibold ring-1 ring-primary/30",
+          isHl && "rounded bg-accent/15 px-0.5 text-accent font-semibold ring-1 ring-accent/30",
         )}
       >
         {t.value}
@@ -156,7 +156,7 @@ export function CodeViewer({ code, highlightPhase, scrollToPhase }: Props) {
   return (
     <div
       ref={ref}
-      className="scrollbar-thin max-h-[32rem] overflow-auto rounded-md border bg-muted/40 py-2 font-mono text-xs leading-relaxed"
+      className="scrollbar-thin max-h-[32rem] overflow-auto rounded-none border bg-muted/40 py-2 font-mono text-xs leading-relaxed"
     >
       {lineTokens.map((lt, i) => (
         <div

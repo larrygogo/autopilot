@@ -117,120 +117,124 @@ export function PhaseLogsViewer({ taskId }: Props) {
   };
 
   return (
-    <Card className="p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">阶段日志</h3>
+    <Card>
+      <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+        <span className="bp-label">阶段日志 · PHASE LOGS</span>
         <Button variant="ghost" size="sm" onClick={refreshList} title="刷新阶段列表">
           <RefreshCw className="h-3.5 w-3.5" />
           刷新
         </Button>
       </div>
 
-      {phases.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          尚无阶段日志。任务开始执行阶段后会自动落盘。
-        </p>
-      ) : (
-        <>
-          {/* 阶段切换 */}
-          <div className="scrollbar-thin mb-3 flex gap-1 overflow-x-auto border-b pb-1">
-            {phases.map((p) => {
-              const active = selected === p.phase;
-              return (
-                <button
-                  key={p.phase}
-                  type="button"
-                  className={cn(
-                    "shrink-0 rounded-t-md border-b-2 px-3 py-1.5 text-xs transition-colors",
-                    active
-                      ? "border-primary text-primary"
-                      : "border-transparent text-muted-foreground hover:text-foreground",
-                  )}
-                  onClick={() => setSelected(p.phase)}
-                  title={`${formatSize(p.size)} · ${new Date(p.mtime).toLocaleString()}`}
-                >
-                  <span className="font-mono">{p.phase}</span>
-                  <span className="ml-1.5 text-[10px] text-muted-foreground">
-                    {formatSize(p.size)}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* 工具栏：搜索 + 级别筛选 */}
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <div className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="搜索当前阶段日志…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="pl-8"
-              />
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              {ALL_LEVELS.map((lvl) => {
-                const on = levels.has(lvl);
+      <div className="p-4">
+        {phases.length === 0 ? (
+          <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            尚无阶段日志。任务开始执行阶段后会自动落盘。
+          </p>
+        ) : (
+          <>
+            {/* 阶段切换 — 蓝图风方角下划线 tab */}
+            <div className="scrollbar-thin mb-3 flex gap-0 overflow-x-auto border-b border-foreground/25">
+              {phases.map((p) => {
+                const active = selected === p.phase;
                 return (
                   <button
-                    key={lvl}
+                    key={p.phase}
                     type="button"
-                    onClick={() => toggleLevel(lvl)}
                     className={cn(
-                      "inline-flex h-7 items-center rounded-full border px-2.5 text-[10px] font-mono font-medium transition-colors",
-                      on
-                        ? cn("border-current", LEVEL_TEXT[lvl])
-                        : "border-border text-muted-foreground opacity-50 hover:opacity-100",
+                      "shrink-0 -mb-px border-b-2 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] transition-colors",
+                      active
+                        ? "border-accent text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground hover:border-foreground/40",
                     )}
-                    aria-pressed={on}
+                    onClick={() => setSelected(p.phase)}
+                    title={`${formatSize(p.size)} · ${new Date(p.mtime).toLocaleString()}`}
                   >
-                    {lvl}
+                    <span>{p.phase}</span>
+                    <span className="ml-1.5 text-[10px] normal-case text-muted-foreground">
+                      {formatSize(p.size)}
+                    </span>
                   </button>
                 );
               })}
             </div>
-          </div>
 
-          {err && (
-            <p className="mb-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {err}
+            {/* 工具栏：搜索 + 级别筛选（蓝图风方角） */}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  placeholder="搜索当前阶段日志…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="pl-8"
+                />
+              </div>
+              <div className="flex shrink-0 items-center gap-0 border border-foreground/30">
+                {ALL_LEVELS.map((lvl) => {
+                  const on = levels.has(lvl);
+                  return (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => toggleLevel(lvl)}
+                      className={cn(
+                        "inline-flex h-9 items-center border-r border-foreground/20 px-2.5 font-mono text-[10px] uppercase tracking-[0.15em] font-medium transition-colors last:border-r-0",
+                        on
+                          ? cn("bg-foreground/5", LEVEL_TEXT[lvl])
+                          : "text-muted-foreground opacity-40 hover:opacity-100",
+                      )}
+                      aria-pressed={on}
+                    >
+                      {lvl}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {err && (
+              <p className="mb-2 border-[1.5px] border-destructive bg-destructive/10 px-3 py-2 font-mono text-xs text-destructive">
+                {err}
+              </p>
+            )}
+
+            {loading ? (
+              <p className="px-1 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                加载中…
+              </p>
+            ) : filtered.length === 0 ? (
+              <p className="px-1 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                {content ? "（当前过滤条件下无匹配日志）" : "（空）"}
+              </p>
+            ) : (
+              <pre className="scrollbar-thin max-h-[26rem] overflow-auto border border-foreground/25 bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
+                {filtered.map((line, i) => {
+                  const lvl = extractLevel(line);
+                  return (
+                    <div
+                      key={i}
+                      className={cn(
+                        "whitespace-pre-wrap break-words",
+                        lvl ? LEVEL_TEXT[lvl] : "text-foreground",
+                      )}
+                    >
+                      {line}
+                    </div>
+                  );
+                })}
+              </pre>
+            )}
+
+            <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              显示 {filtered.length} / 总 {totalLines} 行（最多 2000 行，更早用{" "}
+              <code className="border border-foreground/20 bg-muted px-1 normal-case tracking-normal">{`~/.autopilot/runtime/tasks/${taskId}/logs/phase-${selected}.log`}</code>
+              ）
             </p>
-          )}
-
-          {loading ? (
-            <p className="px-1 py-2 text-xs text-muted-foreground">加载中…</p>
-          ) : filtered.length === 0 ? (
-            <p className="px-1 py-2 text-xs text-muted-foreground">
-              {content ? "（当前过滤条件下无匹配日志）" : "（空）"}
-            </p>
-          ) : (
-            <pre className="scrollbar-thin max-h-[26rem] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
-              {filtered.map((line, i) => {
-                const lvl = extractLevel(line);
-                return (
-                  <div
-                    key={i}
-                    className={cn(
-                      "whitespace-pre-wrap break-words",
-                      lvl ? LEVEL_TEXT[lvl] : "text-foreground",
-                    )}
-                  >
-                    {line}
-                  </div>
-                );
-              })}
-            </pre>
-          )}
-
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            显示 {filtered.length} 行 / 总 {totalLines} 行（最多 2000 行，更早用{" "}
-            <code className="rounded bg-muted px-1 font-mono">{`~/.autopilot/runtime/tasks/${taskId}/logs/phase-${selected}.log`}</code>
-            ）
-          </p>
-        </>
-      )}
+          </>
+        )}
+      </div>
     </Card>
   );
 }

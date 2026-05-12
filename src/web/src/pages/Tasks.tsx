@@ -5,6 +5,7 @@ import { NewTaskDialog } from "@/components/NewTaskDialog";
 import { ConfirmDialog } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
 import { TasksOverview } from "@/components/TasksOverview";
+import { PageHero } from "@/components/PageHero";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
 interface Task {
@@ -151,6 +153,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
   const totalMatched = filtered.length;
   const totalAll = tasks.length;
   const allFilteredSelected = filtered.length > 0 && filtered.every((t) => selected.has(t.id));
+  const someFilteredSelected = !allFilteredSelected && filtered.some((t) => selected.has(t.id));
   const hasActiveFilter =
     search.trim().length > 0 || statusFilter !== "all" || workflowFilter !== "all";
 
@@ -162,20 +165,24 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
-      <TasksOverview tasks={tasks} onSelectTask={onSelect} />
+      <PageHero
+        eyebrow="SHEET · TASKS / 任务清单"
+        title="Tasks"
+        subtitle="任务清单 · 执行实例"
+        description="所有工作流的执行实例。卡住或失效的任务在汇总区会单独提示，可一键恢复或取消。"
+        meta={[
+          { k: "TOTAL", v: totalAll },
+          { k: "MATCHED", v: totalMatched === totalAll ? "—" : totalMatched },
+        ]}
+        actions={
+          <Button onClick={() => setNewOpen(true)} className="shrink-0">
+            <Plus className="h-4 w-4" />
+            新建任务
+          </Button>
+        }
+      />
 
-      <div className="mb-4 flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">任务列表</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {totalMatched === totalAll ? `${totalAll} 个` : `${totalMatched} / ${totalAll} 个`}
-          </p>
-        </div>
-        <Button onClick={() => setNewOpen(true)} className="shrink-0">
-          <Plus className="h-4 w-4" />
-          新建任务
-        </Button>
-      </div>
+      <TasksOverview tasks={tasks} onSelectTask={onSelect} />
 
       {totalAll > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -220,7 +227,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                 className={cn(
                   "inline-flex h-7 shrink-0 items-center rounded-full border px-3 text-xs font-medium transition-colors",
                   active
-                    ? "border-primary/30 bg-primary/10 text-primary"
+                    ? "border-accent/30 bg-accent/10 text-accent"
                     : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground",
                 )}
               >
@@ -232,7 +239,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
       )}
 
       {selected.size > 0 && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-[1.5px] border-accent bg-accent/8 px-4 py-2.5 text-sm">
           <span>
             <strong className="font-semibold">{selected.size}</strong> 个已选 · 可取消{" "}
             <strong className="font-semibold">{cancellableSelected.length}</strong> 个
@@ -285,16 +292,15 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
       ) : (
         <>
           {/* Desktop: table */}
-          <div className="hidden rounded-lg border bg-card shadow-sm md:block">
+          <div className="hidden rounded-none border bg-card shadow-sm md:block">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       aria-label="全选"
-                      className="accent-primary"
                       checked={allFilteredSelected}
+                      indeterminate={someFilteredSelected}
                       onChange={toggleSelectAll}
                     />
                   </TableHead>
@@ -309,15 +315,13 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                 {filtered.map((t) => (
                   <TableRow key={t.id} className="cursor-pointer">
                     <TableCell onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         aria-label={`选中 ${t.id}`}
-                        className="accent-primary"
                         checked={selected.has(t.id)}
                         onChange={() => toggleSelect(t.id)}
                       />
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-primary" onClick={() => onSelect(t.id)}>
+                    <TableCell className="font-mono text-xs text-accent" onClick={() => onSelect(t.id)}>
                       {t.id}
                     </TableCell>
                     <TableCell onClick={() => onSelect(t.id)}>
@@ -359,8 +363,8 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
               <div
                 key={t.id}
                 className={cn(
-                  "rounded-lg border bg-card px-3.5 py-3 shadow-sm transition-colors",
-                  selected.has(t.id) && "border-primary/40 ring-1 ring-primary/20",
+                  "rounded-none border bg-card px-3.5 py-3 shadow-sm transition-colors",
+                  selected.has(t.id) && "border-accent/40 ring-1 ring-accent/20",
                   t.dangling && t.status.startsWith("running_") && "border-destructive/40",
                 )}
               >
@@ -369,13 +373,12 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                     className="flex items-center gap-2"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <input
-                      type="checkbox"
-                      className="accent-primary"
+                    <Checkbox
+                      aria-label={`选中 ${t.id}`}
                       checked={selected.has(t.id)}
                       onChange={() => toggleSelect(t.id)}
                     />
-                    <span className="font-mono text-xs text-primary">{t.id}</span>
+                    <span className="font-mono text-xs text-accent">{t.id}</span>
                   </label>
                   <div className="flex items-center gap-1.5">
                     {t.dangling && t.status.startsWith("running_") && (
@@ -414,7 +417,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
         message={
           <div className="space-y-2">
             <p>确认取消以下 {cancellableSelected.length} 个任务？正在运行的阶段将被中止。</p>
-            <ul className="max-h-56 space-y-0.5 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs">
+            <ul className="max-h-56 space-y-0.5 overflow-auto rounded-none border bg-muted/40 p-2 font-mono text-xs">
               {cancellableSelected.map((t) => (
                 <li key={t.id}>
                   {t.id} — {t.title}
@@ -448,7 +451,7 @@ function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/50 px-6 py-12 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-none border border-dashed bg-card/50 px-6 py-12 text-center">
       <div className="text-sm font-medium">{title}</div>
       {hint && <p className="max-w-sm text-xs text-muted-foreground">{hint}</p>}
       {action}

@@ -13,6 +13,7 @@ import { api } from "@/hooks/useApi";
 import { StateMachineGraph } from "@/components/StateMachineGraph";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
 import { ConfirmDialog } from "@/components/Modal";
+import { PageHero } from "@/components/PageHero";
 import { useToast } from "@/components/Toast";
 import { PhaseEditor } from "@/components/PhaseEditor";
 import { WorkflowAgentsEditor } from "@/components/WorkflowAgentsEditor";
@@ -219,25 +220,34 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
     );
   }
 
+  const fileCount = workflows.filter((w) => (w.source ?? "file") === "file").length;
+  const dbCount = workflows.length - fileCount;
+
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
-      {/* Header */}
-      <div className="mb-4 flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">工作流</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{workflows.length} 个</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" size="sm" onClick={openDerive}>
-            <GitBranch className="h-4 w-4" />
-            派生
-          </Button>
-          <Button onClick={() => setNewOpen(true)}>
-            <Plus className="h-4 w-4" />
-            新建工作流
-          </Button>
-        </div>
-      </div>
+      <PageHero
+        eyebrow="SHEET · WORKFLOWS / 工作流"
+        title="Workflows"
+        subtitle="工作流 · 编排定义"
+        description="管理所有可用的工作流：file 工作流来自 AUTOPILOT_HOME/workflows/，db 工作流可在 UI 内派生编辑。"
+        meta={[
+          { k: "TOTAL", v: workflows.length },
+          { k: "FILE", v: fileCount },
+          { k: "DB", v: dbCount },
+        ]}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={openDerive}>
+              <GitBranch className="h-4 w-4" />
+              派生
+            </Button>
+            <Button onClick={() => setNewOpen(true)}>
+              <Plus className="h-4 w-4" />
+              新建工作流
+            </Button>
+          </>
+        }
+      />
 
       {/* 列表 / 空态 */}
       {workflows.length === 0 ? (
@@ -269,15 +279,15 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                 type="button"
                 onClick={() => toggle(wf.name)}
                 className={cn(
-                  "group flex flex-col gap-1.5 rounded-lg border bg-card px-4 py-3 text-left shadow-sm transition-colors",
+                  "group flex flex-col gap-1.5 rounded-none border bg-card px-4 py-3 text-left shadow-sm transition-colors",
                   active
-                    ? "border-primary/40 ring-1 ring-primary/20"
-                    : "hover:border-primary/30 hover:bg-accent/40",
+                    ? "border-accent/40 ring-1 ring-accent/20"
+                    : "hover:border-accent/30 hover:bg-accent/40",
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <h3 className="truncate font-mono text-sm font-semibold text-primary">
+                    <h3 className="truncate font-mono text-sm font-semibold text-accent">
                       {wf.name}
                     </h3>
                     {wf.source === "db" && (
@@ -300,7 +310,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                     )}
                   </div>
                   {active ? (
-                    <ChevronDown className="h-4 w-4 shrink-0 text-primary" />
+                    <ChevronDown className="h-4 w-4 shrink-0 text-accent" />
                   ) : (
                     <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
                   )}
@@ -327,7 +337,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
           {/* Summary card */}
           <Card className="p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="truncate font-mono text-base font-semibold text-primary">
+              <h3 className="truncate font-mono text-base font-semibold text-accent">
                 {selected.name}
               </h3>
               <div className="flex items-center gap-2">
@@ -549,7 +559,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
               确认删除工作流{" "}
               <code className="rounded bg-muted px-1 font-mono">{pendingDelete}</code>？
             </p>
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
+            <div className="rounded-none border border-destructive/30 bg-destructive/5 px-3 py-2.5">
               <p className="text-xs text-destructive">
                 ⚠ 将永久删除整个目录：
                 <br />
@@ -604,7 +614,7 @@ function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/50 px-6 py-12 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-none border border-dashed bg-card/50 px-6 py-12 text-center">
       <div className="text-sm font-medium">{title}</div>
       {hint && <p className="max-w-sm text-xs text-muted-foreground">{hint}</p>}
       {action}

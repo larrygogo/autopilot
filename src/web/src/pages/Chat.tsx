@@ -195,7 +195,7 @@ export function Chat({ subscribe }: ChatProps) {
       {/* Main */}
       <main className="flex min-w-0 flex-1 flex-col bg-background">
         {/* Header */}
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-5">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b-[1.5px] border-foreground/30 px-3 md:px-5">
           <Button
             variant="ghost"
             size="icon"
@@ -206,7 +206,7 @@ export function Chat({ subscribe }: ChatProps) {
             <Menu className="h-4 w-4" />
           </Button>
 
-          <h2 className="truncate text-sm font-semibold tracking-tight">
+          <h2 className="truncate font-display text-sm font-bold uppercase tracking-wider">
             {currentTitle}
           </h2>
 
@@ -296,7 +296,7 @@ export function Chat({ subscribe }: ChatProps) {
         </div>
 
         {/* Input */}
-        <div className="shrink-0 border-t bg-background px-4 py-3 md:px-6">
+        <div className="shrink-0 border-t-[1.5px] border-foreground/30 bg-background px-4 py-3 md:px-6">
           <div className="relative mx-auto max-w-3xl">
             <Textarea
               ref={inputRef}
@@ -335,8 +335,8 @@ export function Chat({ subscribe }: ChatProps) {
               <Send className="h-4 w-4" />
             </Button>
           </div>
-          <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
-            Enter 发送 · Shift+Enter 换行
+          <p className="mt-2 text-center font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            ENTER 发送 · SHIFT+ENTER 换行
           </p>
         </div>
       </main>
@@ -361,7 +361,7 @@ function SessionList({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b-[1.5px] border-foreground/30 px-3">
         <Button size="sm" className="w-full gap-1.5" onClick={onNew}>
           <Plus className="h-4 w-4" />
           新对话
@@ -369,12 +369,12 @@ function SessionList({
       </div>
       <div className="scrollbar-thin flex-1 overflow-y-auto p-2">
         {sessions.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 px-3 py-10 text-center text-xs text-muted-foreground">
+          <div className="flex flex-col items-center gap-2 px-3 py-10 text-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
             <MessageSquare className="h-6 w-6 opacity-40" />
             <span>暂无对话</span>
           </div>
         ) : (
-          <ul className="space-y-0.5">
+          <ul className="space-y-0">
             {sessions.map((s) => {
               const active = selected === s.id;
               return (
@@ -383,16 +383,16 @@ function SessionList({
                     type="button"
                     onClick={() => onSelect(s.id)}
                     className={cn(
-                      "flex w-full flex-col items-start gap-0.5 rounded-md border-l-2 border-transparent px-2.5 py-2 text-left transition-colors",
+                      "flex w-full flex-col items-start gap-0.5 border-l-2 border-transparent px-2.5 py-2 text-left transition-colors",
                       active
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                        ? "border-accent bg-accent/12 text-foreground"
+                        : "text-muted-foreground hover:border-foreground/40 hover:bg-secondary/50 hover:text-foreground",
                     )}
                   >
                     <span className="w-full truncate text-sm font-medium">
                       {s.title || s.id.slice(0, 8)}
                     </span>
-                    <span className="w-full truncate text-[11px] text-muted-foreground">
+                    <span className="w-full truncate font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                       {s.agent}
                       {s.workflow ? ` · ${s.workflow}` : ""} · {s.message_count} 条
                     </span>
@@ -421,33 +421,33 @@ function MessageItem({
   const isUser = message.role === "user";
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
         {isUser ? (
           <>
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" />
-            你
+            <span className="inline-block h-2 w-2 bg-accent" aria-hidden="true" />
+            <span className="text-accent">你 · USER</span>
           </>
         ) : (
           <>
-            <Bot className="h-3 w-3 text-primary" />
-            Agent
+            <Bot className="h-3 w-3 text-foreground" />
+            <span>AGENT</span>
           </>
         )}
       </div>
       <div
         className={cn(
-          "whitespace-pre-wrap break-words rounded-lg border px-3.5 py-2.5 text-sm leading-relaxed",
+          "whitespace-pre-wrap break-words border-[1.5px] px-3.5 py-2.5 text-sm leading-relaxed",
           isUser
-            ? "border-primary/20 bg-primary/10 text-foreground"
-            : "border-border bg-card text-card-foreground",
+            ? "border-accent bg-accent/10 text-foreground"
+            : "border-foreground/25 bg-card text-card-foreground",
         )}
       >
         {message.content}
         {streaming && (
-          <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-primary align-middle" />
+          <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-accent align-middle" />
         )}
         {message.usage && (
-          <div className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">
+          <div className="mt-2 border-t border-dashed border-foreground/25 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
             {message.usage.input_tokens}+{message.usage.output_tokens} tok · $
             {message.usage.total_cost_usd?.toFixed(4)}
           </div>
@@ -463,11 +463,13 @@ function MessageItem({
 
 function EmptyChat() {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/40 px-6 py-16 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+    <div className="flex flex-col items-center gap-3 border border-dashed border-foreground/30 bg-card/40 px-6 py-16 text-center">
+      <div className="flex h-12 w-12 items-center justify-center border-[1.5px] border-accent bg-accent/12 text-accent">
         <MessageSquare className="h-6 w-6" />
       </div>
-      <div className="text-sm font-medium">开始一段新对话</div>
+      <div className="font-display text-base font-bold uppercase tracking-wider">
+        开始一段新对话
+      </div>
       <p className="max-w-sm text-xs text-muted-foreground">
         发一条消息问问 autopilot 能做什么，或让 agent 帮你查看任务和工作流。
       </p>

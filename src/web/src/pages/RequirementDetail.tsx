@@ -26,22 +26,49 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "失败",
 };
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+const STATUS_VARIANT: Record<
+  string,
+  "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info" | "muted"
+> = {
   drafting: "outline",
-  clarifying: "secondary",
-  investigating: "secondary",
-  awaiting_approval: "default",
-  ready: "default",
+  clarifying: "info",
+  investigating: "info",
+  awaiting_approval: "warning",
+  ready: "success",
   queued: "secondary",
-  running: "default",
-  awaiting_review: "secondary",
-  fix_revision: "secondary",
-  done: "default",
-  cancelled: "outline",
+  running: "info",
+  awaiting_review: "warning",
+  fix_revision: "warning",
+  done: "success",
+  cancelled: "muted",
   failed: "destructive",
 };
 
 const TERMINAL_STATUSES = new Set(["done", "cancelled"]);
+
+function MetaRow({
+  k,
+  v,
+  last,
+}: {
+  k: React.ReactNode;
+  v: React.ReactNode;
+  last?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-[100px_1fr]",
+        !last && "border-b border-dashed border-foreground/25",
+      )}
+    >
+      <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 uppercase tracking-[0.18em] text-muted-foreground">
+        {k}
+      </div>
+      <div className="px-3 py-1.5 text-foreground">{v}</div>
+    </div>
+  );
+}
 
 const SOURCE_LABEL: Record<string, string> = {
   manual: "手动",
@@ -359,7 +386,7 @@ export function RequirementDetail() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
-      {/* Header */}
+      {/* 顶部导航条 */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
@@ -370,108 +397,118 @@ export function RequirementDetail() {
           <ArrowLeft className="h-4 w-4" />
           {req?.project_id ? "返回项目" : "项目列表"}
         </Button>
-        <div className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div className="ml-auto flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
           {wsState === "connected" ? (
-            <><Wifi className="h-3 w-3 text-green-500" />实时</>
+            <><Wifi className="h-3 w-3 text-success" />实时</>
           ) : (
             <><WifiOff className="h-3 w-3" />离线</>
           )}
         </div>
       </div>
 
-      {/* Meta 区 */}
-      <Card className="mb-6 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1 space-y-2">
-            <h1 className="text-xl font-semibold tracking-tight break-words">{req.title}</h1>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              {project && (
-                <>
-                  <Link
-                    to={`/projects/${project.id}`}
-                    className="text-xs text-primary hover:underline font-medium"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {project.name}
-                  </Link>
-                  <span className="text-muted-foreground">·</span>
-                </>
-              )}
-              {projectCodebases.length > 0 && (
-                <>
+      {/* Hero 区：需求标题 + metadata block */}
+      <header className="mb-6 grid gap-x-8 gap-y-4 border-b-[1.5px] border-foreground/30 pb-5 lg:grid-cols-[1.7fr_1fr]">
+        <div className="min-w-0">
+          <div className="mb-3 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.28em] text-muted-foreground">
+            <span className="h-px w-6 bg-foreground/40" aria-hidden="true" />
+            <span>REQUIREMENT · {req.id}</span>
+            <span className="h-px flex-1 bg-foreground/20" aria-hidden="true" />
+          </div>
+          <h1 className="break-words font-display text-3xl font-bold uppercase tracking-wider leading-[1.05] sm:text-4xl">
+            {req.title}
+          </h1>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+            <Badge variant={STATUS_VARIANT[req.status] ?? "outline"}>
+              {STATUS_LABEL[req.status] ?? req.status}
+            </Badge>
+            {project && (
+              <Link
+                to={`/projects/${project.id}`}
+                className="font-mono text-[11px] uppercase tracking-wider text-accent hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {project.name}
+              </Link>
+            )}
+            {req.pr_url && (
+              <a
+                href={req.pr_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:underline"
+              >
+                PR #{req.pr_number}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+            {req.task_id && (
+              <Link
+                to={`/tasks/${req.task_id}`}
+                className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:underline"
+              >
+                TASK {req.task_id.slice(0, 8)}…
+              </Link>
+            )}
+          </div>
+          <div className="mt-3 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            <span>CREATED {new Date(req.created_at).toLocaleString()}</span>
+            <span className="mx-1">·</span>
+            <span>UPDATED {new Date(req.updated_at).toLocaleString()}</span>
+          </div>
+        </div>
+
+        {/* 右侧 metadata block */}
+        <div className="flex flex-col gap-3 lg:items-end">
+          <div className="w-full border-[1.5px] border-foreground/30 bg-card/40 font-mono text-[11px]">
+            <MetaRow k="ID" v={<code className="text-accent">{req.id}</code>} />
+            {project && (
+              <MetaRow
+                k="PROJECT"
+                v={<code className="text-foreground">{project.name}</code>}
+              />
+            )}
+            <MetaRow
+              k="CODEBASE"
+              v={
+                projectCodebases.length > 0 ? (
                   <select
-                    className="h-5 rounded border border-input bg-transparent px-1.5 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    className="h-5 w-full rounded-none border border-input bg-transparent px-1 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                     value={req.codebase_id ?? ""}
                     onChange={(e) => void setCodebase(e.target.value || null)}
                   >
-                    <option value="">选择代码库…</option>
+                    <option value="">— 未关联 —</option>
                     {projectCodebases.map((cb) => (
                       <option key={cb.id} value={cb.id}>{cb.alias}</option>
                     ))}
                   </select>
-                  <span className="text-muted-foreground">·</span>
-                </>
-              )}
-              <Badge
-                variant={STATUS_VARIANT[req.status] ?? "outline"}
-                className="text-[11px] font-normal"
-              >
-                {STATUS_LABEL[req.status] ?? req.status}
-              </Badge>
-              {req.pr_url && (
-                <>
-                  <span className="text-muted-foreground">·</span>
-                  <a
-                    href={req.pr_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                  >
-                    PR #{req.pr_number}
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                </>
-              )}
-              {req.task_id && (
-                <>
-                  <span className="text-muted-foreground">·</span>
-                  <Link
-                    to={`/tasks/${req.task_id}`}
-                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline font-mono"
-                  >
-                    任务 {req.task_id.slice(0, 8)}…
-                  </Link>
-                </>
-              )}
-            </div>
-            <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-              <Clock className="h-3 w-3" />
-              <span>创建于 {new Date(req.created_at).toLocaleString()}</span>
-              <span className="mx-1">·</span>
-              <span>更新于 {new Date(req.updated_at).toLocaleString()}</span>
-            </div>
+                ) : (
+                  <span className="text-muted-foreground">{repoAlias || "—"}</span>
+                )
+              }
+            />
+            <MetaRow k="STATUS" v={STATUS_LABEL[req.status] ?? req.status} last />
           </div>
         </div>
-      </Card>
+      </header>
 
       {/* 关联子模块 PR */}
       {subPrs.length > 0 && (
-        <Card className="mb-6 p-5">
-          <h2 className="mb-3 text-sm font-semibold">
-            关联子模块 PR <span className="text-muted-foreground font-normal">（{subPrs.length}）</span>
-          </h2>
-          <ul className="space-y-2">
+        <Card className="mb-6">
+          <div className="border-b border-dashed border-foreground/25 px-4 py-2.5 flex items-center justify-between">
+            <span className="bp-label">关联子 PR · SUB-MODULE PRS</span>
+            <Badge variant="secondary">{subPrs.length}</Badge>
+          </div>
+          <ul className="divide-y divide-dashed divide-foreground/20">
             {subPrs.map((p) => (
-              <li key={p.id} className="flex items-center gap-2 text-xs">
-                <span className="font-mono font-medium text-muted-foreground">
-                  {p.child_repo_id}
-                </span>
-                <span className="text-muted-foreground">·</span>
+              <li key={p.id} className="flex items-center gap-3 px-4 py-2 font-mono text-xs">
+                <span className="text-muted-foreground">{p.child_repo_id}</span>
+                <span className="ml-auto" />
                 <a
                   href={p.pr_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-primary hover:underline font-mono"
+                  className="inline-flex items-center gap-1 text-accent hover:underline"
                 >
                   PR #{p.pr_number}
                   <ExternalLink className="h-3 w-3" />
@@ -488,47 +525,47 @@ export function RequirementDetail() {
       {/* AI 正在生成澄清问题（clarifying 且暂无问题） */}
       {req.status === "clarifying" && questions.length === 0 && (
         <Card className="mb-6 p-5">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
+          <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin text-accent" />
             AI 正在分析需求，生成澄清问题…
           </div>
         </Card>
       )}
 
-      {/* 澄清对话（chat 气泡风格）*/}
+      {/* 澄清对话（chat 气泡风格，方角蓝图）*/}
       {questions.length > 0 && (
-        <Card className="mb-6 p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <MessageSquare className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">需求澄清</h2>
+        <Card className="mb-6">
+          <div className="flex items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+            <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="bp-label">需求澄清 · CLARIFICATION</span>
             {openQuestions.length > 0 && (
-              <Badge variant="secondary" className="text-[10px]">{openQuestions.length} 待回复</Badge>
+              <Badge variant="warning" className="ml-auto">{openQuestions.length} 待回复</Badge>
             )}
           </div>
 
           {/* 对话气泡流 */}
-          <div className="space-y-3">
+          <div className="space-y-4 p-5">
             {questions.map((q) => (
               <div key={q.id} className="space-y-3">
                 {/* AI 气泡 */}
-                <div className="flex items-start gap-2">
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">AI</div>
+                <div className="flex items-start gap-2.5">
+                  <div className="bp-num-block h-7 w-7 text-[10px]">AI</div>
                   <div className="flex-1 space-y-2">
                     <div className={cn(
-                      "rounded-2xl rounded-tl-sm bg-muted px-4 py-3 text-sm leading-relaxed",
+                      "border-[1.5px] border-foreground/30 bg-muted/50 px-4 py-3 text-sm leading-relaxed",
                       q.status === "resolved" && "opacity-60"
                     )}>
                       {q.agent_text}
                     </div>
-                    {/* 建议 chips（仅 open 且有建议时显示） */}
+                    {/* 建议 chips */}
                     {q.status === "open" && q.suggestions.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 pl-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {q.suggestions.map((s) => (
                           <button
                             key={s}
                             type="button"
                             onClick={() => setReplyDrafts(d => ({ ...d, [q.id]: s }))}
-                            className="rounded-full border border-input bg-background px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                            className="border border-foreground/30 bg-background px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-accent hover:text-accent"
                           >
                             {s}
                           </button>
@@ -540,14 +577,16 @@ export function RequirementDetail() {
 
                 {/* 用户回复气泡 */}
                 {(q.replies ?? []).filter(r => r.author_role === "user").map((reply) => (
-                  <div key={reply.id} className="flex items-start justify-end gap-2">
+                  <div key={reply.id} className="flex items-start justify-end gap-2.5">
                     <div className={cn(
-                      "max-w-[80%] rounded-2xl rounded-tr-sm bg-primary px-4 py-3 text-sm leading-relaxed text-primary-foreground",
+                      "max-w-[80%] border-[1.5px] border-accent bg-accent/12 px-4 py-3 text-sm leading-relaxed text-foreground",
                       q.status === "resolved" && "opacity-70"
                     )}>
                       {reply.text}
                     </div>
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">你</div>
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center border-[1.5px] border-accent bg-accent text-[10px] font-mono font-bold text-accent-foreground">
+                      你
+                    </div>
                   </div>
                 ))}
 
@@ -582,8 +621,10 @@ export function RequirementDetail() {
 
           {resolvedQuestions.length > 0 && openQuestions.length === 0 &&
            (req.status === "drafting" || req.status === "clarifying") && (
-            <div className="mt-5 flex items-center justify-between rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3">
-              <p className="text-sm text-green-700 dark:text-green-400">所有问题已回答，可以继续了。</p>
+            <div className="mx-5 mb-5 flex items-center justify-between border-[1.5px] border-success bg-success/10 px-4 py-3">
+              <p className="font-mono text-xs uppercase tracking-wider text-success font-medium">
+                ✓ 所有问题已回答，可以继续了。
+              </p>
               <Button size="sm" onClick={markReady} disabled={actionBusy} className="shrink-0">
                 {actionBusy ? "处理中…" : "标记为已澄清 →"}
               </Button>
@@ -596,19 +637,18 @@ export function RequirementDetail() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* 左：需求规约 */}
         <div className="lg:col-span-2 space-y-4">
-          <Card className="p-5">
-            <div className="mb-3 flex items-center justify-between gap-2">
+          <Card>
+            <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold">需求规约</h2>
+                <span className="bp-label">需求规约 · SPEC</span>
                 {req.spec_md && (req.status === "clarifying" || req.status === "drafting") && (
-                  <Badge variant="secondary" className="text-[10px] font-normal">AI 整理</Badge>
+                  <Badge variant="info">AI 整理</Badge>
                 )}
               </div>
               {!editingSpec && (
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 px-2.5 text-xs"
                   onClick={() => {
                     setSpecDraft(req.spec_md);
                     setEditingSpec(true);
@@ -618,48 +658,52 @@ export function RequirementDetail() {
                 </Button>
               )}
             </div>
-            {editingSpec ? (
-              <div className="space-y-3">
-                <Textarea
-                  value={specDraft}
-                  onChange={(e) => setSpecDraft(e.target.value)}
-                  className="min-h-[240px] font-mono text-xs"
-                  disabled={savingSpec}
-                  placeholder="在这里填写需求详细规约（支持 Markdown 格式）…"
-                />
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setEditingSpec(false);
-                      setSpecDraft(req.spec_md);
-                    }}
+            <div className="p-5">
+              {editingSpec ? (
+                <div className="space-y-3">
+                  <Textarea
+                    value={specDraft}
+                    onChange={(e) => setSpecDraft(e.target.value)}
+                    className="min-h-[240px] font-mono text-xs"
                     disabled={savingSpec}
-                  >
-                    取消
-                  </Button>
-                  <Button size="sm" onClick={saveSpec} disabled={savingSpec}>
-                    {savingSpec ? "保存中…" : "保存"}
-                  </Button>
+                    placeholder="在这里填写需求详细规约（支持 Markdown 格式）…"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditingSpec(false);
+                        setSpecDraft(req.spec_md);
+                      }}
+                      disabled={savingSpec}
+                    >
+                      取消
+                    </Button>
+                    <Button size="sm" onClick={saveSpec} disabled={savingSpec}>
+                      {savingSpec ? "保存中…" : "保存"}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <pre className="scrollbar-thin max-h-[600px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
-                {req.spec_md || (
-                  <span className="text-muted-foreground italic">暂无规约内容，点「编辑」添加。</span>
-                )}
-              </pre>
-            )}
+              ) : (
+                <pre className="scrollbar-thin max-h-[600px] overflow-auto whitespace-pre-wrap break-words border border-foreground/20 bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
+                  {req.spec_md || (
+                    <span className="italic text-muted-foreground">暂无规约内容，点「编辑」添加。</span>
+                  )}
+                </pre>
+              )}
+            </div>
           </Card>
         </div>
 
         {/* 右：操作 + 反馈历史 */}
         <div className="space-y-4">
           {/* 操作按钮区 */}
-          <Card className="p-5">
-            <h2 className="mb-3 text-sm font-semibold">操作</h2>
-            <div className="space-y-3">
+          <Card>
+            <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">
+              <span className="bp-label">操作 · ACTIONS</span>
+            </div>
+            <div className="space-y-3 p-5">
               {(req.status === "drafting" || req.status === "clarifying") && (
                 <Button
                   className="w-full"
@@ -803,37 +847,41 @@ export function RequirementDetail() {
           {(feedbacks.length > 0 ||
             req.status === "awaiting_review" ||
             req.status === "fix_revision") && (
-            <Card className="p-5">
-              <div className="mb-3 flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                <h2 className="text-sm font-semibold">反馈历史</h2>
+            <Card>
+              <div className="flex items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+                <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="bp-label">反馈历史 · FEEDBACK</span>
                 {feedbacks.length > 0 && (
-                  <span className="ml-auto rounded-full bg-muted px-1.5 py-px text-[11px] font-medium text-muted-foreground">
+                  <Badge variant="muted" className="ml-auto">
                     {feedbacks.length}
-                  </span>
+                  </Badge>
                 )}
               </div>
-              {feedbacks.length === 0 ? (
-                <p className="text-xs text-muted-foreground">等待 PR review 反馈…</p>
-              ) : (
-                <ol className="space-y-3">
-                  {feedbacks.map((fb) => (
-                    <li key={fb.id} className="border-l-2 border-muted pl-3">
-                      <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                        <Badge variant="outline" className="text-[10px] font-normal h-4 px-1.5">
-                          {SOURCE_LABEL[fb.source] ?? fb.source}
-                        </Badge>
-                        <span className="text-[10px] text-muted-foreground">
-                          {new Date(fb.created_at).toLocaleString()}
-                        </span>
-                      </div>
-                      <pre className="whitespace-pre-wrap break-words font-mono text-xs text-foreground leading-relaxed">
-                        {fb.body}
-                      </pre>
-                    </li>
-                  ))}
-                </ol>
-              )}
+              <div className="p-5">
+                {feedbacks.length === 0 ? (
+                  <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    等待 PR review 反馈…
+                  </p>
+                ) : (
+                  <ol className="space-y-3">
+                    {feedbacks.map((fb) => (
+                      <li key={fb.id} className="border-l-2 border-accent/60 pl-3">
+                        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                          <Badge variant="outline">
+                            {SOURCE_LABEL[fb.source] ?? fb.source}
+                          </Badge>
+                          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {new Date(fb.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
+                          {fb.body}
+                        </pre>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
             </Card>
           )}
         </div>

@@ -130,11 +130,11 @@ export function WorkflowAgentsEditor({
               <Card key={idx} className="p-3.5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <h4 className="font-mono text-sm font-semibold text-primary">{a.name}</h4>
+                    <h4 className="font-mono text-sm font-semibold text-accent">{a.name}</h4>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-xs text-muted-foreground">
                       <span>继承自 {a.extends ?? a.name}</span>
                       {!baseExists && (
-                        <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                        <span className="inline-flex items-center gap-1 text-warning">
                           <AlertTriangle className="h-3 w-3" />
                           全局未定义
                         </span>

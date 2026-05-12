@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { PageHero } from "@/components/PageHero";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
 
 // 保留 embedded 参数签名以兼容旧调用
@@ -121,13 +122,12 @@ export function Settings(_props: { embedded?: boolean } = {}) {
 
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
-      {/* Header */}
-      <div className="mb-5">
-        <h2 className="text-xl font-semibold tracking-tight">设置</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          常规偏好与高级 YAML 直编。
-        </p>
-      </div>
+      <PageHero
+        eyebrow="SHEET · SETTINGS / 通用设置"
+        title="Settings"
+        subtitle="常规偏好 · 高级 YAML"
+        description="改后立即写入 AUTOPILOT_HOME/config.yaml；daemon 重启相关项需自行重启。"
+      />
 
       {/* 常规偏好 */}
       <Card className="mb-4 p-4">
@@ -309,7 +309,7 @@ function DaemonLogCard(): React.ReactElement {
   const levelClass = (lvl: string | null) => {
     switch (lvl) {
       case "ERROR": return "text-destructive";
-      case "WARN": return "text-amber-600 dark:text-amber-400";
+      case "WARN": return "text-warning";
       case "DEBUG": return "text-muted-foreground";
       default: return "text-foreground";
     }
@@ -348,11 +348,11 @@ function DaemonLogCard(): React.ReactElement {
       {loading && !content ? (
         <p className="text-sm text-muted-foreground">加载中…</p>
       ) : filtered.length === 0 ? (
-        <p className="rounded-md border bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
+        <p className="rounded-none border bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
           {content ? "（当前过滤下无匹配）" : "（空）"}
         </p>
       ) : (
-        <pre className="scrollbar-thin max-h-[400px] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
+        <pre className="scrollbar-thin max-h-[400px] overflow-auto rounded-none border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
           {filtered.map((line, i) => {
             const lvl = extractLevel(line);
             return (

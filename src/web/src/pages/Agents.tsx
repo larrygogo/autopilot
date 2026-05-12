@@ -4,6 +4,7 @@ import { api, type AgentItem, type ProviderModelsResult } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/Modal";
 import { AgentDryRunDialog } from "@/components/AgentDryRunDialog";
+import { PageHero } from "@/components/PageHero";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Textarea } from "@/components/ui/input";
@@ -133,17 +134,21 @@ export function Agents(_props: { embedded?: boolean } = {}) {
 
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
-      {/* Header */}
-      <div className="mb-5 flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">智能体</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{agents.length} 个</p>
-        </div>
-        <Button onClick={startCreate}>
-          <Plus className="h-4 w-4" />
-          新建
-        </Button>
-      </div>
+      <PageHero
+        eyebrow="SHEET · AGENTS / 智能体"
+        title="Agents"
+        subtitle="智能体 · LLM Provider"
+        description="命名智能体定义：provider / model / permission / 工具集，工作流通过 extends 引用。"
+        meta={[
+          { k: "TOTAL", v: agents.length },
+        ]}
+        actions={
+          <Button onClick={startCreate}>
+            <Plus className="h-4 w-4" />
+            新建
+          </Button>
+        }
+      />
 
       {loadError && (
         <Card className="mb-4 border-destructive/40 bg-destructive/5 p-4">
@@ -171,7 +176,7 @@ export function Agents(_props: { embedded?: boolean } = {}) {
             <Card key={a.name} className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h3 className="font-mono text-sm font-semibold text-primary">{a.name}</h3>
+                  <h3 className="font-mono text-sm font-semibold text-accent">{a.name}</h3>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-xs text-muted-foreground">
                     <span>{a.provider ?? "—"}</span>
                     {a.model && <span>/ {a.model}</span>}
@@ -354,8 +359,8 @@ export function Agents(_props: { embedded?: boolean } = {}) {
               确认删除智能体 <code className="rounded bg-muted px-1 font-mono">{pendingDelete}</code>？此操作不可恢复。
             </p>
             {pendingRefs.length > 0 && (
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5">
-                <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+              <div className="border-[1.5px] border-warning bg-warning/10 p-2.5">
+                <div className="flex items-center gap-1.5 text-xs text-warning">
                   <AlertTriangle className="h-3.5 w-3.5" />
                   以下 {pendingRefs.length} 个工作流引用了此智能体，删除后这些工作流将无法运行：
                 </div>

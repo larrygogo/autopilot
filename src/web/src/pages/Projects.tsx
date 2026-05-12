@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { PageHero } from "@/components/PageHero";
 
 interface FormState {
   name: string;
@@ -136,24 +137,27 @@ export function Projects() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">项目管理</h2>
-          <p className="text-sm text-muted-foreground">
-            管理工作台项目，每个项目可关联多个代码库和需求。
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            刷新
-          </Button>
-          <Button size="sm" onClick={openCreateDialog}>
-            <Plus className="h-4 w-4" />
-            新建项目
-          </Button>
-        </div>
-      </div>
+      <PageHero
+        eyebrow="SHEET · PROJECTS / 项目工作台"
+        title="Projects"
+        subtitle="项目 · 工作台"
+        description="顶层工作空间。每个项目可关联多个 Codebase 与多条 Requirement。"
+        meta={[
+          { k: "TOTAL", v: projects.length },
+        ]}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              刷新
+            </Button>
+            <Button size="sm" onClick={openCreateDialog}>
+              <Plus className="h-4 w-4" />
+              新建项目
+            </Button>
+          </>
+        }
+      />
 
       {loadError && (
         <Card className="border-destructive/50 p-4">
