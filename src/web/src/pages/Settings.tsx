@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { PageHero } from "@/components/PageHero";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
 
 // 保留 embedded 参数签名以兼容旧调用
@@ -121,13 +122,12 @@ export function Settings(_props: { embedded?: boolean } = {}) {
 
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
-      {/* Header */}
-      <div className="mb-5">
-        <h2 className="text-xl font-semibold tracking-tight">设置</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          常规偏好与高级 YAML 直编。
-        </p>
-      </div>
+      <PageHero
+        eyebrow="SHEET · SETTINGS / 通用设置"
+        title="Settings"
+        subtitle="常规偏好 · 高级 YAML"
+        description="改后立即写入 AUTOPILOT_HOME/config.yaml；daemon 重启相关项需自行重启。"
+      />
 
       {/* 常规偏好 */}
       <Card className="mb-4 p-4">

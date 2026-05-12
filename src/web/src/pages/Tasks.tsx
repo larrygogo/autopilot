@@ -5,6 +5,7 @@ import { NewTaskDialog } from "@/components/NewTaskDialog";
 import { ConfirmDialog } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
 import { TasksOverview } from "@/components/TasksOverview";
+import { PageHero } from "@/components/PageHero";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -162,20 +163,24 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
-      <TasksOverview tasks={tasks} onSelectTask={onSelect} />
+      <PageHero
+        eyebrow="SHEET · TASKS / 任务清单"
+        title="Tasks"
+        subtitle="任务清单 · 执行实例"
+        description="所有工作流的执行实例。卡住或失效的任务在汇总区会单独提示，可一键恢复或取消。"
+        meta={[
+          { k: "TOTAL", v: totalAll },
+          { k: "MATCHED", v: totalMatched === totalAll ? "—" : totalMatched },
+        ]}
+        actions={
+          <Button onClick={() => setNewOpen(true)} className="shrink-0">
+            <Plus className="h-4 w-4" />
+            新建任务
+          </Button>
+        }
+      />
 
-      <div className="mb-4 flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">任务列表</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {totalMatched === totalAll ? `${totalAll} 个` : `${totalMatched} / ${totalAll} 个`}
-          </p>
-        </div>
-        <Button onClick={() => setNewOpen(true)} className="shrink-0">
-          <Plus className="h-4 w-4" />
-          新建任务
-        </Button>
-      </div>
+      <TasksOverview tasks={tasks} onSelectTask={onSelect} />
 
       {totalAll > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">

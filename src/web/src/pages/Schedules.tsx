@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { PageHero } from "@/components/PageHero";
 
 interface Props {
   onSelectTask?: (taskId: string) => void;
@@ -115,18 +116,21 @@ export function Schedules({ onSelectTask, subscribe }: Props) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">定时任务</h2>
-          <p className="text-sm text-muted-foreground">
-            按计划自动创建任务。一次性触发后自动停用；周期性可通过开关随时暂停。
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-          刷新
-        </Button>
-      </div>
+      <PageHero
+        eyebrow="SHEET · SCHEDULES / 定时调度"
+        title="Schedules"
+        subtitle="定时任务 · CRON"
+        description="按 cron 计划自动创建任务。一次性触发后自动停用；周期性任务可通过开关随时暂停。"
+        meta={[
+          { k: "TOTAL", v: schedules.length },
+        ]}
+        actions={
+          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+            刷新
+          </Button>
+        }
+      />
 
       {loadError && (
         <Card className="border-destructive/50 p-4">

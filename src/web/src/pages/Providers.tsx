@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, HelpCircle, RefreshCw, XCircle } from "lucide-react";
 import { api, type ProviderItem, type ProviderStatus, type ProviderModelsResult } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
+import { PageHero } from "@/components/PageHero";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -86,17 +87,18 @@ export function Providers(_props: { embedded?: boolean } = {}) {
 
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
-      {/* Header */}
-      <div className="mb-5 flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">模型提供商</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">LLM 提供商全局默认</p>
-        </div>
-        <Button variant="secondary" onClick={refreshStatus} disabled={checking} size="sm">
-          <RefreshCw className={cn("h-3.5 w-3.5", checking && "animate-spin")} />
-          {checking ? "检查中…" : "重新检查"}
-        </Button>
-      </div>
+      <PageHero
+        eyebrow="SHEET · PROVIDERS / 模型提供商"
+        title="Providers"
+        subtitle="LLM 提供商 · 全局默认"
+        description="Autopilot 通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。"
+        actions={
+          <Button variant="secondary" onClick={refreshStatus} disabled={checking} size="sm">
+            <RefreshCw className={cn("h-3.5 w-3.5", checking && "animate-spin")} />
+            {checking ? "检查中…" : "重新检查"}
+          </Button>
+        }
+      />
 
       {/* 说明 */}
       <Card className="mb-4 p-4">

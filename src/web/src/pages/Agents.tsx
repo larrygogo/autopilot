@@ -4,6 +4,7 @@ import { api, type AgentItem, type ProviderModelsResult } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { ConfirmDialog } from "@/components/Modal";
 import { AgentDryRunDialog } from "@/components/AgentDryRunDialog";
+import { PageHero } from "@/components/PageHero";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Textarea } from "@/components/ui/input";
@@ -133,17 +134,21 @@ export function Agents(_props: { embedded?: boolean } = {}) {
 
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
-      {/* Header */}
-      <div className="mb-5 flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">智能体</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{agents.length} 个</p>
-        </div>
-        <Button onClick={startCreate}>
-          <Plus className="h-4 w-4" />
-          新建
-        </Button>
-      </div>
+      <PageHero
+        eyebrow="SHEET · AGENTS / 智能体"
+        title="Agents"
+        subtitle="智能体 · LLM Provider"
+        description="命名智能体定义：provider / model / permission / 工具集，工作流通过 extends 引用。"
+        meta={[
+          { k: "TOTAL", v: agents.length },
+        ]}
+        actions={
+          <Button onClick={startCreate}>
+            <Plus className="h-4 w-4" />
+            新建
+          </Button>
+        }
+      />
 
       {loadError && (
         <Card className="mb-4 border-destructive/40 bg-destructive/5 p-4">

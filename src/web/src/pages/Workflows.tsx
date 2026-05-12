@@ -13,6 +13,7 @@ import { api } from "@/hooks/useApi";
 import { StateMachineGraph } from "@/components/StateMachineGraph";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
 import { ConfirmDialog } from "@/components/Modal";
+import { PageHero } from "@/components/PageHero";
 import { useToast } from "@/components/Toast";
 import { PhaseEditor } from "@/components/PhaseEditor";
 import { WorkflowAgentsEditor } from "@/components/WorkflowAgentsEditor";
@@ -219,25 +220,34 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
     );
   }
 
+  const fileCount = workflows.filter((w) => (w.source ?? "file") === "file").length;
+  const dbCount = workflows.length - fileCount;
+
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
-      {/* Header */}
-      <div className="mb-4 flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">工作流</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{workflows.length} 个</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" size="sm" onClick={openDerive}>
-            <GitBranch className="h-4 w-4" />
-            派生
-          </Button>
-          <Button onClick={() => setNewOpen(true)}>
-            <Plus className="h-4 w-4" />
-            新建工作流
-          </Button>
-        </div>
-      </div>
+      <PageHero
+        eyebrow="SHEET · WORKFLOWS / 工作流"
+        title="Workflows"
+        subtitle="工作流 · 编排定义"
+        description="管理所有可用的工作流：file 工作流来自 AUTOPILOT_HOME/workflows/，db 工作流可在 UI 内派生编辑。"
+        meta={[
+          { k: "TOTAL", v: workflows.length },
+          { k: "FILE", v: fileCount },
+          { k: "DB", v: dbCount },
+        ]}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={openDerive}>
+              <GitBranch className="h-4 w-4" />
+              派生
+            </Button>
+            <Button onClick={() => setNewOpen(true)}>
+              <Plus className="h-4 w-4" />
+              新建工作流
+            </Button>
+          </>
+        }
+      />
 
       {/* 列表 / 空态 */}
       {workflows.length === 0 ? (
