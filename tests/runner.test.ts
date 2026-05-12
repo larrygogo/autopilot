@@ -145,6 +145,36 @@ describe("runner - executePhase", () => {
     expect(threw).toBe(false);
   });
 
+  it("阶段函数 throw 时 failure_count 累计，达 5 次后强制转 cancelled", async () => {
+    const phaseFn = async (_taskId: string) => {
+      throw new Error("deterministic failure (模拟 sygvsxmy 缺 requirement_id 场景)");
+    };
+    registryModule.register(makeTestWorkflow(phaseFn) as any);
+
+    dbModule.createTask({
+      id: "task-fail-loop-001",
+      title: "失败计数测试",
+      workflow: "test_wf",
+      initialStatus: "pending_step1",
+    });
+
+    // 连跑 4 次：failure_count 累计 1→4，但状态机不该转 cancelled
+    for (let i = 0; i < 4; i++) {
+      await runnerModule.executePhase("task-fail-loop-001", "step1");
+      // 状态留在 running_step1（runner 没主动转 failed）；重置回 pending 模拟 watcher 弹回
+      sqlite.run("UPDATE tasks SET status='pending_step1' WHERE id='task-fail-loop-001'");
+    }
+    const mid = dbModule.getTask("task-fail-loop-001");
+    expect(mid!.failure_count).toBe(4);
+    expect(mid!.status).toBe("pending_step1");
+
+    // 第 5 次：达阈值 → forceTransition cancelled
+    await runnerModule.executePhase("task-fail-loop-001", "step1");
+    const after = dbModule.getTask("task-fail-loop-001");
+    expect(after!.failure_count).toBe(5);
+    expect(after!.status).toBe("cancelled");
+  });
+
   it("executePhase 重复调用时锁保护防止双重执行", async () => {
     let callCount = 0;
     // 阶段函数引入延迟，模拟耗时操作

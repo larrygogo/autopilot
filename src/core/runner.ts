@@ -1,9 +1,9 @@
-import { getTask, touchTaskHeartbeat } from "./db";
+import { getTask, touchTaskHeartbeat, updateTask } from "./db";
 import { acquireLock, releaseLock } from "./infra";
 import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { appendTaskEvent } from "./task-logs";
 import { runWithTaskContext } from "./task-context";
-import { transition, InvalidTransitionError } from "./state-machine";
+import { transition, forceTransition, InvalidTransitionError } from "./state-machine";
 import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./registry";
 import { closeAgents } from "../agents/registry";
 import { emit } from "../daemon/event-bus";
@@ -191,6 +191,26 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
       appendTaskEvent(taskId, { type: "phase-error", phase, level: "error", message: errMsg });
       const wf = getWorkflow(getTask(taskId)?.workflow ?? "");
       if (wf) archivePhaseArtifacts(taskId, wf, phase);
+
+      // 累计连续失败计数：达阈值后强制 cancelled，避免 deterministic 崩溃死循环
+      // （配合 watcher 自动恢复机制：阶段进程崩 → status 留 running → watcher 弹回 pending
+      //   → runInBackground 重试 → 又崩 → ... watcher.recoveryCount 同样有 3 次上限，
+      //   这里 runner 自己也做计数兜底，确保任意一处都能截断死循环）
+      try {
+        const t = getTask(taskId);
+        if (t) {
+          const newCount = (t.failure_count ?? 0) + 1;
+          updateTask(taskId, { failure_count: newCount });
+          const MAX_PHASE_FAILURES = 5;
+          if (newCount >= MAX_PHASE_FAILURES) {
+            log.error("阶段 %s 已连续异常 %d 次，强制转 cancelled [task=%s]", phase, newCount, taskId);
+            forceTransition(taskId, "cancelled",
+              `阶段 ${phase} 连续异常 ${newCount} 次（最近：${errMsg.split("\n")[0].slice(0, 160)}）`);
+          }
+        }
+      } catch (cleanupErr: unknown) {
+        log.error("失败计数处理异常 [task=%s]: %s", taskId, (cleanupErr as Error).message);
+      }
     }
   } finally {
     resetPhase();
