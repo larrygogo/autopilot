@@ -57,7 +57,8 @@ export interface NowCard {
 export type CardDelta =
   | { op: "add"; card: NowCard }
   | { op: "update"; id: string; patch: Partial<NowCard> }
-  | { op: "remove"; id: string; reason: "resolved" | "dismissed" };
+  | { op: "remove"; id: string; reason: "resolved" | "dismissed" }
+  | { op: "clear-dismiss"; id: string };
 
 export interface CardSource {
   /** 唯一名，作为卡片 id 前缀，例 "completed"、"task-failed" */

@@ -41,7 +41,11 @@ export function createTaskFailedSource(): CardSource {
         return [{ op: "add", card: buildCard(task) }];
       }
       if (from === "failed") {
-        return [{ op: "remove", id: `task-failed:${taskId}`, reason: "resolved" }];
+        const cardId = `task-failed:${taskId}`;
+        return [
+          { op: "remove", id: cardId, reason: "resolved" },
+          { op: "clear-dismiss", id: cardId },
+        ];
       }
       return [];
     },

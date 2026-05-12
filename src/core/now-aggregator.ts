@@ -10,7 +10,7 @@ import { createEmptyStateSource } from "./card-sources/empty-state";
 import { createProviderErrorSource } from "./card-sources/provider-error";
 import type { AutopilotEvent } from "../daemon/protocol";
 import { onEvent as busOn, offEvent as busOff, emit as busEmit } from "../daemon/event-bus";
-import { isCardDismissed, listDismissedCardIds } from "./now-dismiss";
+import { listDismissedCardIds, clearDismissedCard } from "./now-dismiss";
 
 const PRIORITY_ORDER: Record<NowCardPriority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
 
@@ -57,6 +57,10 @@ export function createAggregator(
     } else if (delta.op === "remove") {
       if (!snapshot.delete(delta.id)) return;
       emit({ type: "now:card_removed", payload: { id: delta.id, reason: delta.reason } });
+    } else if (delta.op === "clear-dismiss") {
+      dismissedIds.delete(delta.id);
+      clearDismissedCard(delta.id);
+      // 无 WS emit：纯状态恢复，下一次 add 会通过正常路径出现
     }
   }
 

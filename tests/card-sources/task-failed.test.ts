@@ -51,12 +51,25 @@ describe("CardSource: task-failed", () => {
     expect(deltas[0].op).toBe("add");
   });
 
-  it("onEvent: 离开 failed（重试）产出 remove", async () => {
+  it("onEvent: 离开 failed（重试）产出 remove + clear-dismiss", async () => {
     const deltas = await createTaskFailedSource().onEvent({
       type: "task:transition",
       payload: { taskId: "task-1", from: "failed", to: "pending_development", trigger: "retry" },
     });
-    expect(deltas).toHaveLength(1);
+    expect(deltas).toHaveLength(2);
     expect(deltas[0].op).toBe("remove");
+    expect(deltas[1].op).toBe("clear-dismiss");
+    if (deltas[1].op === "clear-dismiss") expect(deltas[1].id).toBe("task-failed:task-1");
+  });
+
+  it("onEvent: 从 failed 转出额外产出 clear-dismiss 让未来失败重新可见", async () => {
+    const deltas = await createTaskFailedSource().onEvent({
+      type: "task:transition",
+      payload: { taskId: "task-1", from: "failed", to: "pending_development", trigger: "retry" },
+    });
+    expect(deltas).toHaveLength(2);
+    expect(deltas[0].op).toBe("remove");
+    expect(deltas[1].op).toBe("clear-dismiss");
+    if (deltas[1].op === "clear-dismiss") expect(deltas[1].id).toBe("task-failed:task-1");
   });
 });

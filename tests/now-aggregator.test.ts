@@ -7,7 +7,7 @@ import {
   type Aggregator,
   type AggregatorOptions,
 } from "../src/core/now-aggregator";
-import { dismissCard } from "../src/core/now-dismiss";
+import { dismissCard, isCardDismissed } from "../src/core/now-dismiss";
 import type { CardSource, NowCard, CardDelta } from "../src/core/now-types";
 import { enableBus, disableBus, emit } from "../src/daemon/event-bus";
 
@@ -203,6 +203,34 @@ describe("now-aggregator", () => {
     emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x" } });
     await new Promise(r => setTimeout(r, 10));
     expect(agg.getCards()).toEqual([]);
+  });
+
+  it("clear-dismiss 清掉内存 dismissedIds 与 DB 记录", async () => {
+    const src: CardSource = {
+      name: "fake",
+      subscribes: [],
+      scan: async () => [],
+      onEvent: async () => [],
+    };
+    dismissCard("fake:x");
+    agg = createAggregator([src]);
+    await agg.start();
+    // 内存 Set 已加载 fake:x，应过滤掉
+    expect(isCardDismissed("fake:x")).toBe(true);
+    // 手动触发 clear-dismiss delta（生产中由 source 返回）
+    // 通过 source 触发：
+    const src2: CardSource = {
+      name: "fake2",
+      subscribes: ["task:transition"],
+      scan: async () => [],
+      onEvent: async () => [{ op: "clear-dismiss", id: "fake:x" }],
+    };
+    agg.dispose();
+    agg = createAggregator([src, src2]);
+    await agg.start();
+    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x" } });
+    await new Promise(r => setTimeout(r, 10));
+    expect(isCardDismissed("fake:x")).toBe(false);
   });
 });
 
