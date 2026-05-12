@@ -41,19 +41,22 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: "已取消",
 };
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+const STATUS_VARIANT: Record<
+  string,
+  "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info" | "muted"
+> = {
   drafting: "outline",
-  clarifying: "secondary",
-  ready: "default",
-  investigating: "secondary",
-  awaiting_approval: "secondary",
+  clarifying: "info",
+  ready: "success",
+  investigating: "info",
+  awaiting_approval: "warning",
   queued: "secondary",
-  running: "default",
-  awaiting_review: "secondary",
-  fix_revision: "secondary",
-  done: "default",
+  running: "info",
+  awaiting_review: "warning",
+  fix_revision: "warning",
+  done: "success",
   failed: "destructive",
-  cancelled: "outline",
+  cancelled: "muted",
 };
 
 interface CbForm {
@@ -282,40 +285,63 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-      {/* 页面头部 */}
-      <div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="mb-3 -ml-2"
-          onClick={() => navigate("/projects")}
-        >
-          <ArrowLeft className="h-4 w-4" />
-          项目列表
-        </Button>
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Layers className="h-5 w-5 text-muted-foreground" />
-              <h2 className="text-xl font-semibold tracking-tight">{project?.name}</h2>
+      {/* 顶部导航 */}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="-ml-2"
+        onClick={() => navigate("/projects")}
+      >
+        <ArrowLeft className="h-4 w-4" />
+        项目列表
+      </Button>
+
+      {/* Hero 区 */}
+      <header className="grid gap-x-8 gap-y-4 border-b-[1.5px] border-foreground/30 pb-5 lg:grid-cols-[1.7fr_1fr]">
+        <div className="min-w-0">
+          <div className="mb-3 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.28em] text-muted-foreground">
+            <span className="h-px w-6 bg-foreground/40" aria-hidden="true" />
+            <span>PROJECT · {project?.id ?? "—"}</span>
+            <span className="h-px flex-1 bg-foreground/20" aria-hidden="true" />
+          </div>
+          <div className="flex items-center gap-3">
+            <Layers className="h-7 w-7 text-accent" />
+            <h1 className="font-display text-3xl font-bold uppercase tracking-wider leading-[1.05] sm:text-4xl">
+              {project?.name}
+            </h1>
+          </div>
+          {project?.description && (
+            <p className="mt-3 max-w-xl text-sm text-muted-foreground">{project.description}</p>
+          )}
+        </div>
+        <div className="flex flex-col gap-3 lg:items-end">
+          <div className="w-full border-[1.5px] border-foreground/30 bg-card/40 font-mono text-[11px]">
+            <div className="grid grid-cols-[100px_1fr] border-b border-dashed border-foreground/25">
+              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 uppercase tracking-[0.18em] text-muted-foreground">
+                CODEBASES
+              </div>
+              <div className="px-3 py-1.5 text-foreground">{codebases.length}</div>
             </div>
-            {project?.description && (
-              <p className="text-sm text-muted-foreground">{project.description}</p>
-            )}
+            <div className="grid grid-cols-[100px_1fr]">
+              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 uppercase tracking-[0.18em] text-muted-foreground">
+                REQUIREMENTS
+              </div>
+              <div className="px-3 py-1.5 text-foreground">{requirements.length}</div>
+            </div>
           </div>
           <Button variant="outline" size="sm" onClick={refresh}>
             <RefreshCw className="h-4 w-4" />
             刷新
           </Button>
         </div>
-      </div>
+      </header>
 
       {/* 代码库 */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FolderGit2 className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold">代码库（{codebases.length}）</h3>
+            <span className="bp-label">代码库 · CODEBASES（{codebases.length}）</span>
           </div>
           <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
             <Plus className="h-4 w-4" />
@@ -324,9 +350,11 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         </div>
 
         {codebases.length === 0 ? (
-          <Card className="p-6 text-center">
+          <Card className="border border-dashed border-foreground/30 p-6 text-center">
             <FolderGit2 className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
-            <p className="mb-3 text-sm text-muted-foreground">暂无代码库，点「添加代码库」关联 Git 仓库。</p>
+            <p className="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              暂无代码库，点「添加代码库」关联 Git 仓库。
+            </p>
             <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
               <Plus className="h-4 w-4" />
               添加代码库
@@ -337,46 +365,40 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-                    <th className="px-4 py-2.5 font-medium">别名</th>
-                    <th className="px-4 py-2.5 font-medium">路径</th>
-                    <th className="px-4 py-2.5 font-medium">分支</th>
-                    <th className="px-4 py-2.5 font-medium">健康</th>
-                    <th className="px-4 py-2.5 font-medium text-right">操作</th>
+                  <tr className="border-b-[1.5px] border-foreground bg-secondary/50 text-left font-mono text-[10px] uppercase tracking-[0.2em] text-foreground/70">
+                    <th className="px-4 py-2.5 font-semibold">别名</th>
+                    <th className="px-4 py-2.5 font-semibold">路径</th>
+                    <th className="px-4 py-2.5 font-semibold">分支</th>
+                    <th className="px-4 py-2.5 font-semibold">健康</th>
+                    <th className="px-4 py-2.5 font-semibold text-right">操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {codebases.map((cb, idx) => (
+                  {codebases.map((cb) => (
                     <tr
                       key={cb.id}
-                      className={cn(
-                        "border-b last:border-0",
-                        idx % 2 === 1 && "bg-muted/10",
-                      )}
+                      className="border-b border-dashed border-foreground/20 last:border-0 transition-colors hover:bg-accent/8"
                     >
-                      <td className="px-4 py-2.5 font-mono font-medium text-sm">{cb.alias}</td>
-                      <td className="px-4 py-2.5 max-w-[240px]">
+                      <td className="px-4 py-2.5 font-mono text-sm font-medium">{cb.alias}</td>
+                      <td className="max-w-[240px] px-4 py-2.5">
                         <span
-                          className="font-mono text-xs text-muted-foreground truncate block"
+                          className="block truncate font-mono text-xs text-muted-foreground"
                           title={cb.path}
                         >
                           {cb.path}
                         </span>
                       </td>
                       <td className="px-4 py-2.5">
-                        <Badge variant="secondary" className="font-mono text-[11px] font-normal">
-                          {cb.default_branch}
-                        </Badge>
+                        <Badge variant="secondary">{cb.default_branch}</Badge>
                       </td>
                       <td className="px-4 py-2.5">
-                        {renderHealth(cb) ?? <span className="text-muted-foreground text-[11px]">—</span>}
+                        {renderHealth(cb) ?? <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-0.5">
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7"
                             onClick={() => void checkHealth(cb)}
                             disabled={healthMap[cb.id] === "loading" || deletingCbId === cb.id}
                             title="健康检查"
@@ -386,7 +408,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7"
                             onClick={() => openCbDialog(cb)}
                             disabled={deletingCbId === cb.id}
                             title="编辑"
@@ -396,7 +417,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            className="text-destructive hover:text-destructive"
                             onClick={() => void removeCb(cb)}
                             disabled={deletingCbId === cb.id}
                             title="移除代码库"
@@ -419,7 +440,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Inbox className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold">需求（{requirements.length}）</h3>
+            <span className="bp-label">需求 · REQUIREMENTS（{requirements.length}）</span>
           </div>
           <Button size="sm" onClick={openReqDialog}>
             <Plus className="h-4 w-4" />
@@ -430,7 +451,9 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         {requirements.length === 0 ? (
           <Card className="p-6 text-center">
             <Inbox className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
-            <p className="mb-3 text-sm text-muted-foreground">暂无需求，点「新建需求」开始。</p>
+            <p className="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              暂无需求，点「新建需求」开始。
+            </p>
             <Button size="sm" onClick={openReqDialog}>
               <Plus className="h-4 w-4" />
               新建需求
@@ -438,24 +461,24 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           </Card>
         ) : (
           <Card className="overflow-hidden">
-            <div className="divide-y">
+            <div className="divide-y divide-dashed divide-foreground/20">
               {requirements.map((req) => (
                 <div
                   key={req.id}
-                  className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                  className="group flex cursor-pointer items-center justify-between gap-3 border-l-2 border-transparent px-4 py-3 transition-colors hover:border-accent hover:bg-accent/8"
                   onClick={() => navigate(`/requirements/${req.id}`)}
                 >
                   <div className="min-w-0 flex-1 space-y-0.5">
                     <p className="truncate text-sm font-medium">{req.title}</p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                       {new Date(req.created_at).toLocaleDateString("zh-CN")}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Badge variant={STATUS_VARIANT[req.status] ?? "outline"} className="text-xs">
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Badge variant={STATUS_VARIANT[req.status] ?? "outline"}>
                       {STATUS_LABEL[req.status] ?? req.status}
                     </Badge>
-                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground/50" />
+                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground/50 transition-colors group-hover:text-accent" />
                   </div>
                 </div>
               ))}

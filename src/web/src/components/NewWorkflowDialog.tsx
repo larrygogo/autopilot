@@ -141,23 +141,25 @@ export function NewWorkflowDialog({ open, onClose, onCreated }: Props) {
             </p>
           </div>
 
-          <div className="rounded-none border bg-muted/40 px-3 py-2.5">
-            <p className="mb-1 text-xs text-muted-foreground">将生成文件：</p>
+          <div className="border border-foreground/25 bg-muted/40 px-3 py-2.5">
+            <p className="mb-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              将生成文件：
+            </p>
             <ul className="space-y-0.5 font-mono text-xs leading-relaxed">
               <li>
                 AUTOPILOT_HOME/workflows/
-                <span className="text-primary">{name || "<name>"}</span>/workflow.yaml
+                <span className="text-accent">{name || "<name>"}</span>/workflow.yaml
               </li>
               <li>
                 AUTOPILOT_HOME/workflows/
-                <span className="text-primary">{name || "<name>"}</span>/workflow.ts
+                <span className="text-accent">{name || "<name>"}</span>/workflow.ts
               </li>
             </ul>
           </div>
 
           <p className="text-xs text-muted-foreground">
             提示：
-            <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+            <kbd className="border border-foreground/40 bg-muted px-1.5 py-0.5 font-mono text-[10px]">
               ⌘/Ctrl + Enter
             </kbd>{" "}
             快速提交。创建后可在「高级 (YAML)」中继续编辑。
