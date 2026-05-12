@@ -1,4 +1,13 @@
 import type { CardSource, CardDelta, NowCard, NowCardPriority } from "./now-types";
+import { createAwaitingApprovalSource } from "./card-sources/awaiting-approval";
+import { createOpenQuestionSource } from "./card-sources/open-question";
+import { createAwaitReviewSource } from "./card-sources/await-review";
+import { createRunningSource } from "./card-sources/running";
+import { createStuckSource } from "./card-sources/stuck";
+import { createCompletedSource } from "./card-sources/completed";
+import { createTaskFailedSource } from "./card-sources/task-failed";
+import { createEmptyStateSource } from "./card-sources/empty-state";
+import { createProviderErrorSource } from "./card-sources/provider-error";
 import type { AutopilotEvent } from "../daemon/protocol";
 import { onEvent as busOn, offEvent as busOff, emit as busEmit } from "../daemon/event-bus";
 import { isCardDismissed, listDismissedCardIds } from "./now-dismiss";
@@ -109,4 +118,22 @@ export function createAggregator(
       applyDelta({ op: "remove", id: cardId, reason: "dismissed" });
     },
   };
+}
+
+/** 装配所有内置 CardSource，返回 ready-to-start 的 aggregator 实例。 */
+export function createDefaultAggregator(opts: AggregatorOptions = {}): Aggregator {
+  return createAggregator(
+    [
+      createTaskFailedSource(),       // P0
+      createProviderErrorSource(),    // P0 stub
+      createAwaitingApprovalSource(), // P1
+      createOpenQuestionSource(),     // P1
+      createAwaitReviewSource(),      // P1
+      createStuckSource(),            // P1
+      createRunningSource(),          // P2
+      createCompletedSource(),        // P3
+      createEmptyStateSource(),       // empty
+    ],
+    opts,
+  );
 }

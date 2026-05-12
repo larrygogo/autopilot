@@ -5,6 +5,7 @@ import { _setDbForTest } from "../src/core/db";
 import {
   createAggregator,
   type Aggregator,
+  type AggregatorOptions,
 } from "../src/core/now-aggregator";
 import { dismissCard } from "../src/core/now-dismiss";
 import type { CardSource, NowCard, CardDelta } from "../src/core/now-types";
@@ -202,5 +203,36 @@ describe("now-aggregator", () => {
     emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x" } });
     await new Promise(r => setTimeout(r, 10));
     expect(agg.getCards()).toEqual([]);
+  });
+});
+
+describe("createDefaultAggregator", () => {
+  it("可以创建并启动一个含全部内置 sources 的 aggregator", async () => {
+    // 需要完整 schema（多个 sources 查多张表）
+    const db = new Database(":memory:");
+    const ms = await Promise.all([
+      import("../src/migrations/001-baseline"),
+      import("../src/migrations/002-schedules"),
+      import("../src/migrations/004-repos"),
+      import("../src/migrations/005-requirements"),
+      import("../src/migrations/006-submodules"),
+      import("../src/migrations/007-workflows"),
+      import("../src/migrations/008-projects"),
+      import("../src/migrations/009-nullable-codebase"),
+      import("../src/migrations/010-question-suggestions"),
+      import("../src/migrations/011-now-dismissed-cards"),
+    ]);
+    for (const m of ms) (m as { up: (db: Database) => void }).up(db);
+    _setDbForTest(db);
+    enableBus();
+
+    const { createDefaultAggregator } = await import("../src/core/now-aggregator");
+    const dagg = createDefaultAggregator();
+    await dagg.start();
+    // 空环境下应至少有 empty-state 卡（no-project 引导）
+    const cards = dagg.getCards();
+    expect(cards.some(c => c.id.startsWith("empty-state:"))).toBe(true);
+    dagg.dispose();
+    disableBus();
   });
 });
