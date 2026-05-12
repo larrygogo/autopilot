@@ -30,6 +30,8 @@ import {
   Bot,
   Sliders,
   Sparkles,
+  FilePlus,
+  FolderOpen,
   Moon,
   Sun,
   Search,
@@ -40,17 +42,14 @@ import {
 } from "lucide-react";
 
 const Now = lazy(() => import("./pages/Now").then((m) => ({ default: m.Now })));
+const Start = lazy(() => import("./pages/Start").then((m) => ({ default: m.Start })));
+const Library = lazy(() => import("./pages/Library").then((m) => ({ default: m.Library })));
+const SettingsHub = lazy(() => import("./pages/SettingsHub").then((m) => ({ default: m.SettingsHub })));
 const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
 const TaskDetail = lazy(() =>
   import("./pages/TaskDetail").then((m) => ({ default: m.TaskDetail })),
 );
-const Workflows = lazy(() => import("./pages/Workflows").then((m) => ({ default: m.Workflows })));
 const Chat = lazy(() => import("./pages/Chat").then((m) => ({ default: m.Chat })));
-const Providers = lazy(() => import("./pages/Providers").then((m) => ({ default: m.Providers })));
-const Agents = lazy(() => import("./pages/Agents").then((m) => ({ default: m.Agents })));
-const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
-const Schedules = lazy(() => import("./pages/Schedules").then((m) => ({ default: m.Schedules })));
-const Projects = lazy(() => import("./pages/Projects").then((m) => ({ default: m.Projects })));
 const ProjectDetail = lazy(() =>
   import("./pages/ProjectDetail").then((m) => ({ default: m.ProjectDetail })),
 );
@@ -68,21 +67,15 @@ interface NavItem {
 
 const MAIN_NAV: NavItem[] = [
   { path: "/now", label: "现在", icon: Sparkles, end: true },
-  { path: "/chat", label: "对话", icon: MessageSquare, end: true },
-  { path: "/tasks", label: "任务", icon: ListTodo },
-  { path: "/schedules", label: "定时", icon: Clock, end: true },
-  { path: "/workflows", label: "工作流", icon: WorkflowIcon, end: true },
-  { path: "/projects", label: "项目", icon: Layers },
-];
-
-const SETTINGS_NAV: NavItem[] = [
-  { path: "/providers", label: "提供商", icon: Plug, end: true },
-  { path: "/agents", label: "智能体", icon: Bot, end: true },
-  { path: "/settings", label: "通用", icon: Sliders, end: true },
+  { path: "/start", label: "开始", icon: FilePlus, end: true },
+  { path: "/library", label: "库", icon: FolderOpen },
+  { path: "/settings", label: "设置", icon: Sliders },
 ];
 
 function titleForPath(pathname: string): string {
   if (pathname.startsWith("/now")) return "现在";
+  if (pathname.startsWith("/start")) return "开始";
+  if (pathname.startsWith("/library")) return "库";
   if (pathname.startsWith("/tasks/")) {
     const id = pathname.slice("/tasks/".length);
     return id ? `任务 · ${id}` : "任务";
@@ -98,7 +91,7 @@ function titleForPath(pathname: string): string {
   if (pathname.startsWith("/projects")) return "项目";
   if (pathname.startsWith("/providers")) return "提供商";
   if (pathname.startsWith("/agents")) return "智能体";
-  if (pathname.startsWith("/settings")) return "通用设置";
+  if (pathname.startsWith("/settings")) return "设置";
   if (pathname.startsWith("/requirements/")) return "需求详情";
   return "Autopilot";
 }
@@ -198,6 +191,9 @@ function AppInner() {
               <Routes>
                 <Route path="/" element={<Navigate to="/tasks" replace />} />
                 <Route path="/now" element={<Now />} />
+                <Route path="/start" element={<Start />} />
+                <Route path="/library" element={<Library />} />
+                <Route path="/settings" element={<SettingsHub />} />
                 <Route
                   path="/tasks"
                   element={
@@ -212,19 +208,6 @@ function AppInner() {
                   element={<TaskDetailRoute subscribe={subscribe} />}
                 />
                 <Route
-                  path="/schedules"
-                  element={
-                    <Schedules
-                      onSelectTask={(id) => navigate(`/tasks/${id}`)}
-                      subscribe={subscribe}
-                    />
-                  }
-                />
-                <Route
-                  path="/workflows"
-                  element={<Workflows onJumpToAgent={() => navigate("/agents")} />}
-                />
-                <Route
                   path="/chat"
                   element={
                     <div className="h-full">
@@ -232,12 +215,13 @@ function AppInner() {
                     </div>
                   }
                 />
-                <Route path="/providers" element={<Providers />} />
-                <Route path="/agents" element={<Agents />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/projects" element={<Projects />} />
                 <Route path="/projects/:id" element={<ProjectDetailRoute />} />
                 <Route path="/requirements/:id" element={<RequirementDetail />} />
+                <Route path="/projects" element={<Navigate to="/library?tab=projects" replace />} />
+                <Route path="/workflows" element={<Navigate to="/settings?tab=workflows" replace />} />
+                <Route path="/agents" element={<Navigate to="/settings?tab=agents" replace />} />
+                <Route path="/providers" element={<Navigate to="/settings?tab=providers" replace />} />
+                <Route path="/schedules" element={<Navigate to="/settings?tab=schedules" replace />} />
                 <Route path="*" element={<Navigate to="/tasks" replace />} />
               </Routes>
             </Suspense>
@@ -313,13 +297,6 @@ function SidebarContent({
 
       <nav className="flex-1 space-y-5 overflow-y-auto scrollbar-thin p-3">
         <NavGroup items={MAIN_NAV} />
-        <div className="space-y-1.5">
-          <div className="bp-label px-2.5 flex items-center gap-2">
-            <span>设置 · CONFIG</span>
-            <span className="h-px flex-1 border-t border-dashed border-foreground/30" />
-          </div>
-          <NavGroup items={SETTINGS_NAV} />
-        </div>
       </nav>
 
       <div className="border-t border-dashed border-foreground/30" />
