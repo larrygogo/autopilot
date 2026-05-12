@@ -3,6 +3,8 @@ import type { DaemonStatus, GraphData } from "../daemon/protocol";
 import type { SessionManifest, ChatMessage } from "../core/sessions";
 import type { Schedule, ScheduleType } from "../core/schedules";
 import type { Requirement } from "../core/requirements";
+import type { NowCard } from "../core/now-types";
+export type { NowCard };
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -419,5 +421,19 @@ export class HttpClient {
   async getSessionMessages(id: string, limit?: number): Promise<ChatMessage[]> {
     const qs = limit ? `?limit=${limit}` : "";
     return this.request(`/api/sessions/${id}/messages${qs}`);
+  }
+
+  // ── /now state-derivation engine ──
+
+  async listNowCards(): Promise<NowCard[]> {
+    const { cards } = await this.request<{ cards: NowCard[] }>("/api/now/cards");
+    return cards;
+  }
+
+  async dismissNowCard(cardId: string): Promise<{ ok: true }> {
+    return this.request(
+      `/api/now/cards/${encodeURIComponent(cardId)}/dismiss`,
+      { method: "POST" },
+    );
   }
 }
