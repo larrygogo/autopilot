@@ -1,5 +1,4 @@
 import type { TransitionTable } from "./state-machine";
-import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
 import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync } from "fs";
 import { homedir } from "os";
@@ -234,7 +233,7 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
           /(["'])@autopilot\//g,
           (_m, q) => `${q}${srcPath}/`,
         );
-        const cacheDir = joinPath(AUTOPILOT_HOME, "runtime", "cache", "workflows");
+        const cacheDir = joinPath(getAutopilotHomeDynamic(), "runtime", "cache", "workflows");
         if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
         const wfDirName = basenamePath(dirnamePath(tsPath));
         importPath = joinPath(cacheDir, `${wfDirName}.${mtime}.ts`);
@@ -937,7 +936,7 @@ export function getTerminalStates(workflowName: string): string[] {
  * 读取工作流 TS 源文件原文
  */
 export function getWorkflowTs(workflowName: string): string | null {
-  const tsPath = join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.ts");
+  const tsPath = join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.ts");
   if (!existsSync(tsPath)) return null;
   return readFileSync(tsPath, "utf-8");
 }
@@ -946,7 +945,7 @@ export function getWorkflowTs(workflowName: string): string | null {
  * 读取工作流 YAML 原文
  */
 export function getWorkflowYaml(workflowName: string): string | null {
-  const yamlPath = join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.yaml");
+  const yamlPath = join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.yaml");
   if (!existsSync(yamlPath)) return null;
   return readFileSync(yamlPath, "utf-8");
 }
@@ -959,8 +958,8 @@ export function saveWorkflowYaml(workflowName: string, yamlContent: string): voi
   // 校验 YAML 语法
   parseYaml(yamlContent);
 
-  const yamlPath = join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.yaml");
-  if (!existsSync(join(AUTOPILOT_HOME, "workflows", workflowName))) {
+  const yamlPath = join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.yaml");
+  if (!existsSync(join(getAutopilotHomeDynamic(), "workflows", workflowName))) {
     throw new Error(`工作流目录不存在：${workflowName}`);
   }
   // 备份
@@ -997,7 +996,7 @@ export function createWorkflow(input: CreateWorkflowInput): { dir: string; yamlP
     throw new Error("首阶段名非法：需以小写字母开头，仅包含小写字母、数字、下划线");
   }
 
-  const wfRoot = join(AUTOPILOT_HOME, "workflows");
+  const wfRoot = join(getAutopilotHomeDynamic(), "workflows");
   const dir = join(wfRoot, name);
   if (existsSync(dir)) {
     throw new Error(`工作流目录已存在：${name}`);
@@ -1025,7 +1024,7 @@ export function deleteWorkflowDir(workflowName: string): boolean {
   if (!WORKFLOW_NAME_RE.test(workflowName)) {
     throw new Error("工作流名称非法");
   }
-  const wfRoot = join(AUTOPILOT_HOME, "workflows");
+  const wfRoot = join(getAutopilotHomeDynamic(), "workflows");
   const dir = join(wfRoot, workflowName);
   // 安全校验：最终路径必须仍在 wfRoot 下
   if (!dir.startsWith(wfRoot + "/") && dir !== wfRoot) {
@@ -1149,11 +1148,11 @@ function isParallelInput(p: PhaseEntryInput): p is ParallelPhaseInput {
 }
 
 function getWorkflowYamlPath(workflowName: string): string {
-  return join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.yaml");
+  return join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.yaml");
 }
 
 function getWorkflowTsPath(workflowName: string): string {
-  return join(AUTOPILOT_HOME, "workflows", workflowName, "workflow.ts");
+  return join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.ts");
 }
 
 /**
