@@ -17,7 +17,7 @@ proxy-tester 本地已是"半接入"状态：
   1. **imap** — proxy-core 的 websites 列表中根本不存在 imap 实现
   2. **interpark_global_queue** — proxy-core 的 `test_scenario(...)` 签名多了 `extra_params: Option<Value>` 参数，但本地调用**未透传 params**，导致需要参数（product_id）的场景跑不了
 
-- 本地 `src-tauri/src/websites/` 下 22 个文件中，只有 `imap.rs` 和 `global_interpark.rs` 被实际引用，其余 20 个是完全的死代码（且与 proxy-core 的版本重复）
+- 本地 `src-tauri/src/websites/` 下 22 个文件中，只有 `imap.rs` 被实际引用；`global_interpark.rs` 也被引用但其功能已由 proxy-core 的 `to_create_session` 提供（自动从 `extra_params["product_id"]` 提取），其余 20 个是完全的死代码（与 proxy-core 的版本重复）
 
 - 前端与后端之间的"参数传递"存在映射缺失（`sku` ↔ `product_id`），`scenario-selector` 中写死了 `SETTING_MODES = ["interpark_global_queue"]`
 
@@ -27,7 +27,7 @@ proxy-tester 本地已是"半接入"状态：
 
 1. 升级依赖到 proxy-core master HEAD（包含 `extra_params` 扩展）
 2. `test_scenario` 变成纯透传：将 `params` 直接作为 `extra_params` 传给 proxy-core
-3. 删除 21 个 dead-code 文件，保留 imap 作为单独的 Tauri 命令 `test_imap`
+3. 删除 20 个 dead-code 文件（含 `global_interpark.rs`），保留 imap 作为单独的 Tauri 命令 `test_imap`
 4. 前端 scenario-selector 动态化：根据 `get_test_scenarios()` 返回的 `extra_params_schema` 动态生成参数表单（替换硬编码的 `SETTING_MODES` 和 `interpark_global_queue` 特例）
 5. rename 前端老 key `interpark_global_queue` → `to_create_session`，参数 `sku` → `product_id`（与 proxy-core 对齐）
 6. 提供 localStorage 迁移路径，确保老用户数据不丢失
