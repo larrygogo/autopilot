@@ -1,16 +1,20 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr } from "@/hooks/useApi";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff } from "lucide-react";
+import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 const STATUS_LABEL: Record<string, string> = {
   drafting: "草稿",
   clarifying: "澄清中",
+  investigating: "调查中",
+  awaiting_approval: "待审批",
   ready: "已澄清",
   queued: "排队中",
   running: "执行中",
@@ -24,6 +28,8 @@ const STATUS_LABEL: Record<string, string> = {
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   drafting: "outline",
   clarifying: "secondary",
+  investigating: "secondary",
+  awaiting_approval: "default",
   ready: "default",
   queued: "secondary",
   running: "default",
@@ -34,7 +40,7 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   failed: "destructive",
 };
 
-const TERMINAL_STATUSES = new Set(["done", "cancelled", "failed"]);
+const TERMINAL_STATUSES = new Set(["done", "cancelled"]);
 
 const SOURCE_LABEL: Record<string, string> = {
   manual: "手动",
@@ -46,9 +52,13 @@ export function RequirementDetail() {
   const navigate = useNavigate();
   const toast = useToast();
 
+  const { subscribe, state: wsState } = useWebSocket();
+
   const [req, setReq] = useState<Requirement | null>(null);
   const [feedbacks, setFeedbacks] = useState<RequirementFeedback[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingSpec, setEditingSpec] = useState(false);
   const [specDraft, setSpecDraft] = useState("");
@@ -57,34 +67,56 @@ export function RequirementDetail() {
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [subPrs, setSubPrs] = useState<RequirementSubPr[]>([]);
+  // 回复输入状态：qid → 文本
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [replyingId, setReplyingId] = useState<string | null>(null);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async function refresh() {
     if (!id) return;
     setLoading(true);
     try {
-      const [data, repoList, sub] = await Promise.all([
+      const [data, repoList, sub, qs] = await Promise.all([
         api.getRequirement(id),
         api.listRepos(),
         api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
+        api.listQuestions(id).catch(() => [] as Question[]),
       ]);
       setReq(data.requirement);
       setFeedbacks(data.feedbacks);
       setSpecDraft(data.requirement.spec_md);
       setRepos(repoList);
       setSubPrs(sub);
+      setQuestions(qs);
     } catch (e: unknown) {
       toast.error("加载失败", (e as Error)?.message ?? String(e));
     } finally {
       setLoading(false);
     }
-  }
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    refresh();
-  }, [id]);
+    void refresh();
+  }, [refresh]);
+
+  // WebSocket 订阅：需求状态变化时自动刷新
+  useEffect(() => {
+    if (!id) return;
+    return subscribe("requirement:*", (event: { type: string; payload?: { id?: string } }) => {
+      if (event.type === "requirement:status-changed" && event.payload?.id === id) {
+        void refresh();
+      }
+    });
+  }, [id, subscribe, refresh]);
+
+  useEffect(() => {
+    if (!req?.project_id) { setProject(null); return; }
+    api.getProject(req.project_id).then(setProject).catch(() => setProject(null));
+  }, [req?.project_id]);
 
   const repoAlias = useMemo(() => {
     if (!req) return "";
+    if (!req.repo_id) return "";
     return repos.find((r) => r.id === req.repo_id)?.alias ?? req.repo_id;
   }, [repos, req]);
 
@@ -131,6 +163,90 @@ export function RequirementDetail() {
     }
   }
 
+  async function approve() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      await api.enqueueRequirement(id);
+      await refresh();
+      toast.success("已审批通过，需求进入队列");
+    } catch (e: unknown) {
+      toast.error("审批失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function rejectApproval() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      await api.transitionRequirement(id, "drafting");
+      await refresh();
+      toast.success("已驳回，需求返回草稿");
+    } catch (e: unknown) {
+      toast.error("驳回失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function markDone() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      await api.transitionRequirement(id, "done");
+      await refresh();
+      toast.success("需求已标记完成");
+    } catch (e: unknown) {
+      toast.error("操作失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function requestFix() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      await api.transitionRequirement(id, "fix_revision");
+      await refresh();
+      toast.success("已标记需要修改，Agent 将继续修复");
+    } catch (e: unknown) {
+      toast.error("操作失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function retryFromFailed() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      await api.enqueueRequirement(id);
+      await refresh();
+      toast.success("已重新入队执行");
+    } catch (e: unknown) {
+      toast.error("重试失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function recallToReady() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      await api.transitionRequirement(id, "ready");
+      await refresh();
+      toast.success("已撤回至「已澄清」");
+    } catch (e: unknown) {
+      toast.error("操作失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   async function inject() {
     if (!id || !feedbackBody.trim()) return;
     setSubmittingFeedback(true);
@@ -161,24 +277,64 @@ export function RequirementDetail() {
     }
   }
 
+  async function submitReply(qid: string) {
+    if (!id) return;
+    const text = (replyDrafts[qid] ?? "").trim();
+    if (!text) return;
+    setReplyingId(qid);
+    try {
+      await api.addQuestionReply(id, qid, { author_role: "user", text });
+      setReplyDrafts((d) => ({ ...d, [qid]: "" }));
+      await refresh();
+      toast.success("回复已提交");
+    } catch (e: unknown) {
+      toast.error("回复失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setReplyingId(null);
+    }
+  }
+
+  async function resolveQ(qid: string) {
+    if (!id) return;
+    setResolvingId(qid);
+    try {
+      await api.resolveQuestion(id, qid);
+      await refresh();
+      toast.success("问题已标记为已解决");
+    } catch (e: unknown) {
+      toast.error("操作失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setResolvingId(null);
+    }
+  }
+
   if (loading) return <div className="p-6 text-sm text-muted-foreground">加载中…</div>;
   if (!req) return <div className="p-6 text-sm text-muted-foreground">需求不存在</div>;
 
   const isTerminal = TERMINAL_STATUSES.has(req.status);
+  const openQuestions = questions.filter((q) => q.status === "open");
+  const resolvedQuestions = questions.filter((q) => q.status === "resolved");
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
       {/* Header */}
-      <div className="mb-5 flex flex-wrap items-start gap-3">
+      <div className="mb-5 flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => navigate("/requirements")}
+          onClick={() => navigate(req?.project_id ? `/projects/${req.project_id}` : "/projects")}
           className="-ml-2"
         >
           <ArrowLeft className="h-4 w-4" />
-          返回
+          {req?.project_id ? "返回项目" : "项目列表"}
         </Button>
+        <div className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          {wsState === "connected" ? (
+            <><Wifi className="h-3 w-3 text-green-500" />实时</>
+          ) : (
+            <><WifiOff className="h-3 w-3" />离线</>
+          )}
+        </div>
       </div>
 
       {/* Meta 区 */}
@@ -187,8 +343,24 @@ export function RequirementDetail() {
           <div className="min-w-0 flex-1 space-y-2">
             <h1 className="text-xl font-semibold tracking-tight break-words">{req.title}</h1>
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-muted-foreground font-mono text-xs">{repoAlias}</span>
-              <span className="text-muted-foreground">·</span>
+              {project && (
+                <>
+                  <Link
+                    to={`/projects/${project.id}`}
+                    className="text-xs text-primary hover:underline font-medium"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {project.name}
+                  </Link>
+                  <span className="text-muted-foreground">·</span>
+                </>
+              )}
+              {repoAlias && (
+                <>
+                  <span className="text-muted-foreground font-mono text-xs">{repoAlias}</span>
+                  <span className="text-muted-foreground">·</span>
+                </>
+              )}
               <Badge
                 variant={STATUS_VARIANT[req.status] ?? "outline"}
                 className="text-[11px] font-normal"
@@ -256,6 +428,98 @@ export function RequirementDetail() {
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+
+      {/* 评论线程（调查中 / 有问题时显示）*/}
+      {questions.length > 0 && (
+        <Card className="mb-6 p-5">
+          <div className="mb-4 flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">Agent 提问</h2>
+            {openQuestions.length > 0 && (
+              <Badge variant="secondary" className="text-[10px]">
+                {openQuestions.length} 待回复
+              </Badge>
+            )}
+          </div>
+          <div className="space-y-5">
+            {questions.map((q) => (
+              <div key={q.id} className={cn("rounded-lg border p-4", q.status === "resolved" && "opacity-60")}>
+                {/* 问题文本 */}
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <p className="text-sm font-medium leading-relaxed">{q.agent_text}</p>
+                  {q.status === "open" && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 shrink-0 px-2 text-xs text-muted-foreground"
+                      onClick={() => resolveQ(q.id)}
+                      disabled={resolvingId === q.id}
+                    >
+                      <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                      {resolvingId === q.id ? "处理中…" : "标记已解决"}
+                    </Button>
+                  )}
+                  {q.status === "resolved" && (
+                    <Badge variant="outline" className="text-[10px] shrink-0">已解决</Badge>
+                  )}
+                </div>
+
+                {/* 回复列表 */}
+                {q.replies && q.replies.length > 0 && (
+                  <div className="mb-3 space-y-2 border-l-2 border-muted pl-3">
+                    {q.replies.map((reply) => (
+                      <div key={reply.id} className="space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <Badge
+                            variant={reply.author_role === "user" ? "default" : "secondary"}
+                            className="text-[10px] font-normal h-4 px-1.5"
+                          >
+                            {reply.author_role === "user" ? "你" : "Agent"}
+                          </Badge>
+                          <span className="text-[10px] text-muted-foreground">
+                            {new Date(reply.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-xs leading-relaxed text-foreground">{reply.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 回复输入框（仅 open 状态） */}
+                {q.status === "open" && (
+                  <div className="flex items-end gap-2">
+                    <Textarea
+                      value={replyDrafts[q.id] ?? ""}
+                      onChange={(e) =>
+                        setReplyDrafts((d) => ({ ...d, [q.id]: e.target.value }))
+                      }
+                      placeholder="回复 Agent 的提问…"
+                      className="min-h-[60px] flex-1 text-xs"
+                      disabled={replyingId === q.id}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submitReply(q.id);
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => void submitReply(q.id)}
+                      disabled={replyingId === q.id || !(replyDrafts[q.id] ?? "").trim()}
+                      className="shrink-0"
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      {replyingId === q.id ? "发送中…" : "回复"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {resolvedQuestions.length > 0 && openQuestions.length === 0 && (
+            <p className="mt-3 text-xs text-muted-foreground">所有问题已解决。</p>
+          )}
         </Card>
       )}
 
@@ -342,9 +606,44 @@ export function RequirementDetail() {
                   {actionBusy ? "处理中…" : "入队执行"}
                 </Button>
               )}
-              {req.status === "awaiting_review" && (
+              {req.status === "queued" && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                  onClick={recallToReady}
+                  disabled={actionBusy}
+                >
+                  {actionBusy ? "处理中…" : "撤回（返回已澄清）"}
+                </Button>
+              )}
+              {req.status === "awaiting_approval" && (
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">注入反馈（供 agent 参考）：</p>
+                  <p className="text-xs text-muted-foreground">请审阅规约后决定：</p>
+                  <Button
+                    className="w-full"
+                    size="sm"
+                    onClick={approve}
+                    disabled={actionBusy}
+                  >
+                    {actionBusy ? "处理中…" : "✓ 审批通过，入队执行"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    size="sm"
+                    onClick={rejectApproval}
+                    disabled={actionBusy}
+                  >
+                    {actionBusy ? "处理中…" : "↩ 驳回，返回草稿"}
+                  </Button>
+                </div>
+              )}
+              {(req.status === "awaiting_review" || req.status === "fix_revision") && (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    {req.status === "awaiting_review" ? "PR 审查操作：" : "修复阶段反馈："}
+                  </p>
                   <Textarea
                     value={feedbackBody}
                     onChange={(e) => setFeedbackBody(e.target.value)}
@@ -352,18 +651,51 @@ export function RequirementDetail() {
                     className="min-h-[80px] text-xs"
                     disabled={submittingFeedback}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) inject();
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
                     }}
                   />
                   <Button
+                    variant="outline"
                     className="w-full"
                     size="sm"
-                    onClick={inject}
+                    onClick={() => void inject()}
                     disabled={submittingFeedback || !feedbackBody.trim()}
                   >
-                    {submittingFeedback ? "提交中…" : "提交反馈"}
+                    {submittingFeedback ? "提交中…" : "注入反馈"}
                   </Button>
+                  {req.status === "awaiting_review" && (
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1 text-xs"
+                        size="sm"
+                        onClick={() => void markDone()}
+                        disabled={actionBusy}
+                      >
+                        ✓ PR 已合并
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="flex-1 text-xs"
+                        size="sm"
+                        onClick={() => void requestFix()}
+                        disabled={actionBusy}
+                      >
+                        ↩ 要求修改
+                      </Button>
+                    </div>
+                  )}
                 </div>
+              )}
+              {req.status === "failed" && (
+                <Button
+                  className="w-full"
+                  size="sm"
+                  onClick={() => void retryFromFailed()}
+                  disabled={actionBusy}
+                >
+                  {actionBusy ? "处理中…" : "重新入队执行"}
+                </Button>
               )}
               {!isTerminal && (
                 <Button

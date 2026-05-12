@@ -15,6 +15,7 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/repos\/[\w.\-]+\/submodules$/,
   /^\/api\/repos\/[\w.\-]+\/rediscover-submodules$/,
   /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
+  /^\/api\/projects/,
 ];
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -251,6 +252,42 @@ export const api = {
       };
     }>(`/api/agents/${name}/dry-run`, { method: "POST", body: JSON.stringify(body) }),
 
+  // Projects
+  listProjects: () =>
+    request<{ projects: Project[] }>("/api/projects").then((r) => r.projects),
+  getProject: (id: string) =>
+    request<{ project: Project }>(`/api/projects/${encodeURIComponent(id)}`).then((r) => r.project),
+  createProject: (body: { name: string; description?: string }) =>
+    request<{ project: Project }>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.project),
+  updateProject: (id: string, body: { name?: string; description?: string | null }) =>
+    request<{ project: Project }>(`/api/projects/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }).then((r) => r.project),
+  deleteProject: (id: string) =>
+    request<{ ok: true }>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  listProjectCodebases: (projectId: string) =>
+    request<{ codebases: Codebase[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/codebases`,
+    ).then((r) => r.codebases),
+  createProjectCodebase: (
+    projectId: string,
+    body: { alias: string; path: string; default_branch?: string; github_owner?: string | null; github_repo?: string | null },
+  ) =>
+    request<{ codebase: Codebase }>(
+      `/api/projects/${encodeURIComponent(projectId)}/codebases`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.codebase),
+  deleteCodebase: (codebaseId: string) =>
+    request<{ ok: true }>(`/api/repos/${encodeURIComponent(codebaseId)}`, { method: "DELETE" }),
+  listProjectRequirements: (projectId: string) =>
+    request<{ requirements: Requirement[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/requirements`,
+    ).then((r) => r.requirements),
+
   // Repos —— 后端响应包了 envelope（{ repos } / { repo }），统一在此解包返回裸数据
   listRepos: () =>
     request<{ repos: Repo[] }>("/api/repos").then((r) => r.repos),
@@ -302,9 +339,10 @@ export const api = {
   },
 
   // Requirements
-  listRequirements: (filters?: { repo_id?: string; status?: string }) => {
+  listRequirements: (filters?: { repo_id?: string; project_id?: string; status?: string }) => {
     const params = new URLSearchParams();
     if (filters?.repo_id) params.set("repo_id", filters.repo_id);
+    if (filters?.project_id) params.set("project_id", filters.project_id);
     if (filters?.status) params.set("status", filters.status);
     const qs = params.toString();
     return request<{ requirements: Requirement[] }>(`/api/requirements${qs ? "?" + qs : ""}`)
@@ -315,7 +353,9 @@ export const api = {
     request<{ requirement: Requirement; feedbacks: RequirementFeedback[] }>(`/api/requirements/${id}`),
 
   createRequirement: (body: {
-    repo_id: string;
+    project_id?: string;
+    codebase_id?: string | null;
+    repo_id?: string;
     title: string;
     spec_md?: string;
     chat_session_id?: string | null;
@@ -362,6 +402,21 @@ export const api = {
 
   listRequirementSubPrs: (id: string) =>
     request<{ sub_prs: RequirementSubPr[] }>(`/api/requirements/${id}/sub-prs`).then((r) => r.sub_prs),
+
+  // Questions（评论线程）
+  listQuestions: (reqId: string) =>
+    request<{ questions: Question[] }>(`/api/requirements/${encodeURIComponent(reqId)}/questions`)
+      .then((r) => r.questions),
+  addQuestionReply: (reqId: string, qid: string, body: { author_role: "agent" | "user"; text: string }) =>
+    request<{ reply: QuestionReply }>(
+      `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/replies`,
+      { method: "POST", body: JSON.stringify(body) },
+    ).then((r) => r.reply),
+  resolveQuestion: (reqId: string, qid: string) =>
+    request<{ ok: true }>(
+      `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/resolve`,
+      { method: "POST" },
+    ),
 };
 
 export interface ProviderItem {
@@ -483,9 +538,51 @@ export interface RepoHealthResult {
   issues: string[];
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface Codebase {
+  id: string;
+  project_id: string;
+  alias: string;
+  path: string;
+  default_branch: string;
+  github_owner: string | null;
+  github_repo: string | null;
+  parent_codebase_id: string | null;
+  submodule_path: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface Question {
+  id: string;
+  requirement_id: string;
+  agent_text: string;
+  status: "open" | "resolved";
+  created_at: number;
+  resolved_at: number | null;
+  replies?: QuestionReply[];
+}
+
+export interface QuestionReply {
+  id: string;
+  question_id: string;
+  author_role: "agent" | "user";
+  text: string;
+  created_at: number;
+}
+
 export interface Requirement {
   id: string;
   repo_id: string;
+  codebase_id: string | null;
+  project_id: string;
   title: string;
   status: string;
   spec_md: string;
