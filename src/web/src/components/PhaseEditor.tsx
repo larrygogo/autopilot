@@ -961,9 +961,9 @@ function PhaseRow({
     <div
       className={cn(
         "rounded-none border bg-card px-3 py-2.5 shadow-sm transition-colors",
-        isHighlight && "border-primary/40 ring-1 ring-primary/20",
+        isHighlight && "border-accent/40 ring-1 ring-accent/20",
         dragHandlers.isDragging && "opacity-40",
-        dragHandlers.isDropTarget && "border-primary ring-2 ring-primary",
+        dragHandlers.isDropTarget && "border-accent ring-2 ring-accent",
       )}
       onMouseEnter={() => onHoverPhase?.(item.name)}
       onMouseLeave={() => onHoverPhase?.(null)}
@@ -1231,10 +1231,10 @@ function ParallelRow(props: ParallelRowProps) {
   return (
     <div
       className={cn(
-        "rounded-none border border-primary/30 bg-primary/5 px-3 py-2.5 shadow-sm transition-colors",
-        headHighlight && "border-primary/60 ring-1 ring-primary/20",
+        "rounded-none border border-accent/30 bg-accent/5 px-3 py-2.5 transition-colors",
+        headHighlight && "border-accent ring-1 ring-accent/20",
         dragHandlers.isDragging && "opacity-40",
-        dragHandlers.isDropTarget && "border-primary ring-2 ring-primary",
+        dragHandlers.isDropTarget && "border-accent ring-2 ring-accent",
       )}
       onDragOver={dragHandlers.onDragOver}
       onDragLeave={dragHandlers.onDragLeave}
@@ -1251,7 +1251,7 @@ function ParallelRow(props: ParallelRowProps) {
             <div className="flex flex-wrap items-center gap-2">
               <Badge
                 variant="default"
-                className="bg-primary/15 text-primary hover:bg-primary/20"
+                className="bg-accent/15 text-accent hover:bg-accent/20"
               >
                 <Layers className="h-3 w-3" />
                 并行
@@ -1330,7 +1330,7 @@ function ParallelRow(props: ParallelRowProps) {
         />
       </div>
 
-      <div className="mt-3 flex flex-col gap-2 border-l-2 border-primary/30 pl-3">
+      <div className="mt-3 flex flex-col gap-2 border-l-2 border-accent/30 pl-3">
         {item.phases.map((sub, j) => {
           const childDrag: DragHandlers = {
             draggable: true,
@@ -1448,9 +1448,9 @@ function ParallelChildRow({
     <div
       className={cn(
         "rounded-none border bg-card px-2.5 py-2 shadow-sm transition-colors",
-        isHighlight && "border-primary/40 ring-1 ring-primary/20",
+        isHighlight && "border-accent/40 ring-1 ring-accent/20",
         dragHandlers.isDragging && "opacity-40",
-        dragHandlers.isDropTarget && "border-primary ring-2 ring-primary",
+        dragHandlers.isDropTarget && "border-accent ring-2 ring-accent",
       )}
       onMouseEnter={() => onHoverPhase?.(sub.name)}
       onMouseLeave={() => onHoverPhase?.(null)}

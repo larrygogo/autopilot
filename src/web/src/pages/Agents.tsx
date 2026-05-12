@@ -176,7 +176,7 @@ export function Agents(_props: { embedded?: boolean } = {}) {
             <Card key={a.name} className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h3 className="font-mono text-sm font-semibold text-primary">{a.name}</h3>
+                  <h3 className="font-mono text-sm font-semibold text-accent">{a.name}</h3>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-xs text-muted-foreground">
                     <span>{a.provider ?? "—"}</span>
                     {a.model && <span>/ {a.model}</span>}

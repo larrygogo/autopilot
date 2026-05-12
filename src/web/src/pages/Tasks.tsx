@@ -225,7 +225,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                 className={cn(
                   "inline-flex h-7 shrink-0 items-center rounded-full border px-3 text-xs font-medium transition-colors",
                   active
-                    ? "border-primary/30 bg-primary/10 text-primary"
+                    ? "border-accent/30 bg-accent/10 text-accent"
                     : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground",
                 )}
               >
@@ -237,7 +237,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
       )}
 
       {selected.size > 0 && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-none border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-[1.5px] border-accent bg-accent/8 px-4 py-2.5 text-sm">
           <span>
             <strong className="font-semibold">{selected.size}</strong> 个已选 · 可取消{" "}
             <strong className="font-semibold">{cancellableSelected.length}</strong> 个
@@ -322,7 +322,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                         onChange={() => toggleSelect(t.id)}
                       />
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-primary" onClick={() => onSelect(t.id)}>
+                    <TableCell className="font-mono text-xs text-accent" onClick={() => onSelect(t.id)}>
                       {t.id}
                     </TableCell>
                     <TableCell onClick={() => onSelect(t.id)}>
@@ -365,7 +365,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                 key={t.id}
                 className={cn(
                   "rounded-none border bg-card px-3.5 py-3 shadow-sm transition-colors",
-                  selected.has(t.id) && "border-primary/40 ring-1 ring-primary/20",
+                  selected.has(t.id) && "border-accent/40 ring-1 ring-accent/20",
                   t.dangling && t.status.startsWith("running_") && "border-destructive/40",
                 )}
               >
@@ -380,7 +380,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                       checked={selected.has(t.id)}
                       onChange={() => toggleSelect(t.id)}
                     />
-                    <span className="font-mono text-xs text-primary">{t.id}</span>
+                    <span className="font-mono text-xs text-accent">{t.id}</span>
                   </label>
                   <div className="flex items-center gap-1.5">
                     {t.dangling && t.status.startsWith("running_") && (

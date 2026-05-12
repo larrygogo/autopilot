@@ -188,7 +188,7 @@ export function StateMachineGraph({ nodes, edges, currentState, highlightPhase, 
           const isHighlight = !!highlightPhase && phase === highlightPhase;
 
           const baseTone = NODE_TONE[node.type] ?? NODE_TONE.other;
-          const ringClass = isCurrent || isHighlight ? "text-primary" : baseTone;
+          const ringClass = isCurrent || isHighlight ? "text-accent" : baseTone;
           const strokeWidth = isCurrent ? 2.5 : isHighlight ? 2 : 1.25;
 
           return (

@@ -281,13 +281,13 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                 className={cn(
                   "group flex flex-col gap-1.5 rounded-none border bg-card px-4 py-3 text-left shadow-sm transition-colors",
                   active
-                    ? "border-primary/40 ring-1 ring-primary/20"
-                    : "hover:border-primary/30 hover:bg-accent/40",
+                    ? "border-accent/40 ring-1 ring-accent/20"
+                    : "hover:border-accent/30 hover:bg-accent/40",
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <h3 className="truncate font-mono text-sm font-semibold text-primary">
+                    <h3 className="truncate font-mono text-sm font-semibold text-accent">
                       {wf.name}
                     </h3>
                     {wf.source === "db" && (
@@ -310,7 +310,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                     )}
                   </div>
                   {active ? (
-                    <ChevronDown className="h-4 w-4 shrink-0 text-primary" />
+                    <ChevronDown className="h-4 w-4 shrink-0 text-accent" />
                   ) : (
                     <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
                   )}
@@ -337,7 +337,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
           {/* Summary card */}
           <Card className="p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="truncate font-mono text-base font-semibold text-primary">
+              <h3 className="truncate font-mono text-base font-semibold text-accent">
                 {selected.name}
               </h3>
               <div className="flex items-center gap-2">

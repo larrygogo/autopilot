@@ -281,10 +281,10 @@ function SidebarContent({
 }) {
   const wsColor =
     wsState === "connected"
-      ? "text-emerald-500"
+      ? "text-success"
       : wsState === "connecting"
-      ? "text-amber-500"
-      : "text-rose-500";
+      ? "text-warning"
+      : "text-destructive";
   const wsLabel =
     wsState === "connected" ? "已连接" : wsState === "connecting" ? "连接中…" : "未连接";
 
