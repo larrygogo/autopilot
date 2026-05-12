@@ -16,6 +16,7 @@ import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Separator } from "./components/ui/separator";
 import { CommandPalette } from "./components/CommandPalette";
+import { FloatingChat } from "./components/FloatingChat";
 import { NewTaskDialog } from "./components/NewTaskDialog";
 import { PageLoader } from "./components/PageLoader";
 import { useTheme } from "./lib/theme";
@@ -259,6 +260,7 @@ function AppInner() {
       />
 
       <Toaster position="top-center" closeButton />
+      <FloatingChat />
     </TooltipProvider>
   );
 }
