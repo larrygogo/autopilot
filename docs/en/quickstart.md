@@ -1,243 +1,311 @@
 [中文](../quickstart.md) | [English](quickstart.md)
 
-## Why autopilot
+## What autopilot does
 
-A single LLM agent call is impressive, but **real work is rarely a single call**: you want code written and tested, plans reviewed before execution, a pause when the path forks, and a clean rollback when something breaks. That's not an agent problem — it's an **orchestration** problem. autopilot makes agent calls first-class, wrapped in a state machine, human-in-the-loop hooks, visualization, and local persistence. Single-process daemon + SQLite + built-in Web UI — finish this guide and you'll have an agent pipeline you can edit, gate, and replay.
+Real development tasks are rarely a single prompt away: you need code written *and* tested, a plan reviewed before execution, a pause when the path forks, and a clean rollback when something breaks. autopilot wraps all the glue between agent calls into a framework: a state machine, human-approval gates, local persistence, and a built-in Web UI — single-process daemon + SQLite, zero external services required.
 
-## What you'll have in 5 minutes
+## What you get after setup
 
-You'll end up with the **built-in `dev` workflow**, fired off with a single `autopilot task start`:
+The built-in `dev` workflow fires off a complete pipeline from a single `autopilot start "your feature"`:
 
 ```
-You: add a task-tagging feature
+You: add task-tagging support
   ↓
-architect agent reads the repo + writes a plan → workspace/00-design/plan.md
+architect agent reads codebase + writes plan → workspace/00-design/plan.md
   ↓
-[Gate: you review the plan] ← Pass to continue, Reject loops back with your reason
+[Gate: you review the plan in Web UI] ← Approve to continue, Reject loops back with your reason
   ↓
-developer agent writes code + runs tests + git commits
+developer agent writes code + runs tests + git commit
   ↓
-reviewer agent inspects the diff → REVIEW_RESULT: PASS/REJECT
+reviewer agent inspects diff → REVIEW_RESULT: PASS / REJECT
   ↓
-gh pr create  ← actually opens the PR
+gh pr create ← opens a real PR on GitHub
 ```
 
-Every artifact is auto-archived to the task workspace; the Web UI shows live progress, logs, and a one-click reject button.
+Every artifact is archived to the task workspace; the Web UI shows live progress and logs.
 
 ---
 
-# 5-Minute Quickstart
+# Quickstart (10-15 minutes)
 
-This tutorial takes you from zero to running your first autopilot task in 5 minutes.
-
-**Prerequisites**: Python 3.10+, Git
+> Actual time depends on AI agent response speed and your configuration. Budget 10-15 minutes, not 5.
 
 ---
 
-## Part 1: See Results in 3 Minutes
+## Step 1: Prerequisites ⚙️
 
-### Step 1: Install (30s)
+| Dependency | Minimum | Notes |
+|-----------|---------|-------|
+| **Bun** | 1.0+ | JavaScript runtime. Install at [bun.sh](https://bun.sh) |
+| **Git** | any | Version control |
+| **AI CLI** (pick one) | logged in | [Claude Code](https://docs.anthropic.com/claude-code) (recommended), [OpenAI Codex](https://github.com/openai/openai-codex), or [Gemini CLI](https://github.com/google-gemini/gemini-cli) |
+
+Quick check:
 
 ```bash
-git clone https://github.com/larrygogo/autopilot && cd autopilot
-pip install -e ".[dev]"
+bun --version        # should print 1.x.x
+git --version        # should print git version x.x.x
+claude --version     # or: codex --version / gemini --version
 ```
 
-### Step 2: Initialize Workspace (10s)
+---
+
+## Step 2: Install 📦
+
+```bash
+git clone https://github.com/larrygogo/autopilot
+cd autopilot
+bun install
+```
+
+Expected output (last lines):
+
+```
+bun install v1.x.x
+[xxx packages] installed
+```
+
+> **Global command**: after install, `autopilot` is invoked via `bun run`. For a globally available binary, run `bun link`.
+
+---
+
+## Step 3: Initialize Workspace 🗂️
 
 ```bash
 autopilot init
 autopilot upgrade
 ```
 
-Expected output:
+`init` expected output:
 
 ```
-✓ Created ~/.autopilot/
-✓ Created ~/.autopilot/workflows/
-✓ Created ~/.autopilot/runtime/
-✓ Initialization complete
+已创建目录：/Users/you/.autopilot/workflows
+已创建目录：/Users/you/.autopilot/prompts
+已创建目录：/Users/you/.autopilot/runtime
+已初始化数据库：/Users/you/.autopilot/runtime/workflow.db
+初始化完成。
 ```
 
-### Step 3: List Available Workflows (10s)
+`upgrade` expected output (first run):
+
+```
+数据库升级完成，共执行 N 条迁移。
+```
+
+This creates `~/.autopilot/` — your user data directory for config, workflows, and runtime state, fully isolated from the framework source.
+
+---
+
+## Step 4: Configure an AI Agent ✨ (most important step)
+
+autopilot relies on AI agents to do the work. You must configure at least one provider.
+
+### Option A: Edit config file (recommended)
+
+Open `~/.autopilot/config.yaml` and add a `providers` section:
+
+```yaml
+providers:
+  anthropic:
+    default_model: claude-sonnet-4-6
+    enabled: true
+
+agents:
+  coder:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    max_turns: 10
+    permission_mode: auto
+    system_prompt: |
+      You are a general-purpose coding assistant.
+```
+
+> **Credentials**: autopilot does not store API keys. Your installed AI CLI tool (claude-code / codex / gemini-cli) manages authentication. Make sure you've run `claude login` (or equivalent) before starting.
+
+### Option B: Web UI settings
+
+Start the daemon (Step 5), then open `/settings?tab=providers` in the browser for a graphical configuration form.
+
+---
+
+## Step 5: Start the Daemon 🚀
 
 ```bash
-autopilot workflows
-```
-
-Expected output (after copying example workflows to `~/.autopilot/workflows/`):
-
-```
-Registered workflows:
-  dev          [AI] Full dev workflow (Design → Review → Develop → Code Review → PR)
-  req_review   [AI] Requirement review (Analysis → Review)
-  doc_gen      Document generation and review
-```
-
-> **Tip**: The framework auto-scans `~/.autopilot/workflows/`. If the list is empty, copy the example workflows first:
-> ```bash
-> cp -r examples/workflows/* ~/.autopilot/workflows/
-> ```
-
-### Step 4: Start a Task (10s)
-
-Use `doc_gen` (the simplest 2-phase workflow) to start a task:
-
-```bash
-autopilot start DOC-001 --workflow doc_gen
-```
-
-Expected output:
-
-```
-2026-01-15 10:30:00 [INFO] [GENERATE] Task DOC-001 created, workflow: doc_gen
-2026-01-15 10:30:00 [INFO] [GENERATE] Starting phase: generate
-```
-
-### Step 5: Check Task Status (10s)
-
-```bash
-# View single task details
-autopilot show DOC-001
-
-# List all tasks
-autopilot list
-```
-
-`show` expected output:
-
-```
-Task: DOC-001
-Workflow: doc_gen
-Status: pending_generate
-Created: 2026-01-15 10:30:00
-```
-
-`list` expected output:
-
-```
-ID        Workflow    Status             Created
-DOC-001   doc_gen    pending_generate   2026-01-15 10:30:00
-```
-
-### Step 6: Open the WebUI Dashboard (30s)
-
-Install the WebUI plugin and start it:
-
-```bash
-pip install -e examples/plugins/autopilot-webui
-autopilot webui
-```
-
-Open your browser to `http://127.0.0.1:8080` to see:
-
-- **Dashboard**: Task statistics, success rate, status distribution
-- **Task List**: Filter, view details, state transition timeline
-- **Workflow List**: Card-style display of all registered workflows
-
-<!-- TODO: Add WebUI screenshots
-![WebUI Dashboard](../screenshots/webui-dashboard.png)
--->
-
-### Step 7: View Statistics (10s)
-
-```bash
-autopilot stats
+autopilot daemon start
 ```
 
 Expected output:
 
 ```
-Task statistics:
-  Total: 1
-  Active: 1
-  Completed: 0
-  Cancelled: 0
+daemon 已启动 (pid=12345)
+  查看监听地址与状态：autopilot daemon status
+```
+
+Check the status:
+
+```bash
+autopilot daemon status
+```
+
+Expected output:
+
+```
+daemon 运行中 (pid=12345)
+  监听: 127.0.0.1:6180
+  版本: x.x.x
+  运行时间: 5s
+  任务统计: 无任务
+```
+
+> **Default port**: `6180`. To change it, add `daemon: { port: <your-port> }` to `~/.autopilot/config.yaml` and run `autopilot daemon restart`.
+
+---
+
+## Step 6: Open the Web UI 🌐
+
+```bash
+autopilot dashboard
+```
+
+Your browser opens `http://127.0.0.1:6180/now` automatically.
+
+The Web UI has four sections:
+
+| Section | Path | Description |
+|---------|------|-------------|
+| **Now** | `/now` | What needs your attention right now (priority-sorted card stream) |
+| **Start** | `/start` | Submit new requirements and start tasks |
+| **Library** | `/library` | Browse all tasks and workflows |
+| **Settings** | `/settings` | Configure providers, agents, etc. |
+
+---
+
+## Step 7: Submit Your First Requirement 📝
+
+### Option A: Web UI (recommended)
+
+1. Click **Start** (`/start`) in the top nav
+2. Fill in the title and description
+3. Submit
+
+### Option B: CLI shortcut
+
+```bash
+autopilot start "add label-filtering to the task list"
+```
+
+Expected output:
+
+```
+任务已创建 [id=task-001 workflow=dev status=pending_design]
+```
+
+### Option C: Specify a workflow
+
+```bash
+autopilot start "refactor user module" --workflow dev
+```
+
+List available workflows:
+
+```bash
+autopilot workflow list
 ```
 
 ---
 
-## Part 2: Create a Custom Workflow (2 min, Optional)
+## Step 8: Watch the AI Work, Intervene When Needed 👁️
 
-Create a minimal custom workflow to verify the entire flow.
+After the task starts, autopilot advances through phases automatically:
 
-### 1. Create the Workflow Directory
+1. **design** — architect agent analyzes the codebase and writes a technical plan
+2. **review** — ⚠️ **waits for your approval** — a card appears on the `/now` page
+3. **develop** — developer agent writes code, runs tests, commits
+4. **code_review** — reviewer agent inspects the diff
+5. **submit_pr** — runs `gh pr create` automatically
 
-```bash
-mkdir -p ~/.autopilot/workflows/hello
-```
+### Tracking progress
 
-### 2. Write workflow.yaml
+**Web UI**: Open `/now` — P0–P3 priority cards tell you what needs attention.
 
-```bash
-cat > ~/.autopilot/workflows/hello/workflow.yaml << 'EOF'
-name: hello
-description: Hello World example workflow
-
-phases:
-  - name: greet
-    timeout: 60
-
-  - name: farewell
-    timeout: 60
-EOF
-```
-
-You only need to define `name` and `timeout` — all states (`pending_greet`, `running_greet`, etc.) are **auto-derived**.
-
-### 3. Write workflow.py
+**CLI text view**:
 
 ```bash
-cat > ~/.autopilot/workflows/hello/workflow.py << 'EOF'
-from core.state_machine import transition
-from core.runner import run_in_background
-
-def run_greet(task_id: str) -> None:
-    print(f"[hello] Hello, task {task_id}! Starting...")
-    transition(task_id, "greet_complete")
-    run_in_background(task_id, "farewell")
-
-def run_farewell(task_id: str) -> None:
-    print(f"[hello] Task {task_id} done. Goodbye!")
-    transition(task_id, "farewell_complete")
-EOF
+autopilot now
 ```
 
-### 4. Validate and Run
+Expected output when there's a pending approval:
+
+```
+PRIO  TITLE                        WAIT    ACTIONS
+----  ---------------------------  ------  -------
+P0    Plan awaiting review: task-001  5min  Approve / Reject
+```
+
+**Terminal UI**:
 
 ```bash
-# Validate workflow definition
-autopilot validate hello
-
-# List workflows (should include hello)
-autopilot workflows
-
-# Start a task
-autopilot start HELLO-001 --workflow hello
-
-# Check the result
-autopilot show HELLO-001
+autopilot tui
 ```
 
-Expected output:
+**Task details and logs**:
 
-```
-Task: HELLO-001
-Workflow: hello
-Status: done
-Created: 2026-01-15 10:35:00
+```bash
+autopilot task status               # list all tasks
+autopilot task status task-001      # inspect one task
+autopilot task logs task-001 -f     # follow live logs
 ```
 
-Congratulations! You've successfully created and run a custom workflow.
+---
+
+## Quick Reference
+
+```bash
+# Daemon lifecycle
+autopilot daemon start          # start in background
+autopilot daemon stop           # stop
+autopilot daemon status         # check status
+autopilot daemon restart        # restart (after config changes)
+
+# Tasks
+autopilot start "<title>"       # quick-create a task
+autopilot task start "<title>" --workflow <name>  # specify workflow
+autopilot task status           # list all tasks
+autopilot task status <id>      # inspect one task
+autopilot task logs <id>        # view logs
+autopilot task logs <id> -f     # follow live logs
+autopilot task cancel <id>      # cancel a task
+
+# Workflows
+autopilot workflow list         # list registered workflows
+autopilot workflow show <name>  # inspect a workflow
+
+# UI
+autopilot now                   # text card stream (CLI version of /now)
+autopilot tui                   # terminal UI
+autopilot dashboard             # open Web UI in browser
+autopilot chat                  # chat with an agent (REPL)
+
+# Maintenance
+autopilot init                  # initialize workspace (first time)
+autopilot upgrade               # run database migrations (after updates)
+```
 
 ---
 
 ## Next Steps
 
-| Want to learn about... | Read |
-|------------------------|------|
+| Topic | Read |
+|-------|------|
 | Full workflow definition syntax | [Workflow Development Guide](workflow-development.md) |
 | Internal architecture and design decisions | [Architecture Overview](architecture.md) |
 | State machine and rejection mechanism | [State Machine Details](state-machine.md) |
-| Developing third-party plugins | [Plugin Development Guide](plugin-development.md) |
 | Common issues and troubleshooting | [FAQ](faq.md) |
+
+---
+
+## Troubleshooting
+
+- **`autopilot daemon start` times out**: check if port 6180 is already in use, or use `autopilot daemon run` (foreground mode with live log output)
+- **AI agent doesn't respond**: confirm you've logged in with the corresponding CLI, and that `enabled: true` is set in `~/.autopilot/config.yaml`
+- **Task stuck**: run `autopilot task logs <id>` to see errors; also check [FAQ](faq.md)
