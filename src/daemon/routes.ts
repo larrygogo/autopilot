@@ -356,6 +356,17 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   try {
+    // ── /now 路由（PR 1：状态推导引擎）──
+    if (path.startsWith("/api/now/")) {
+      const { handleNowRequest } = await import("./routes-now");
+      const nowRes = await handleNowRequest(req, url);
+      if (nowRes) {
+        const headers = new Headers(nowRes.headers);
+        for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+        return new Response(nowRes.body, { status: nowRes.status, headers });
+      }
+    }
+
     // ── API Routes ──
 
     // GET /api/status
