@@ -262,4 +262,45 @@
     justify-content: center;
     line-height: 1;
   }
+
+  /* 蓝图风 checkbox：方角 + 1.5px 描边，选中后填 accent + 白对勾 */
+  .bp-checkbox {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 1rem;
+    width: 1rem;
+    flex-shrink: 0;
+    cursor: pointer;
+    border: 1.5px solid color-mix(in oklch, var(--foreground) 40%, transparent);
+    background-color: transparent;
+    border-radius: 0;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+  .bp-checkbox:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+  .bp-checkbox:checked {
+    background-color: var(--accent);
+    border-color: var(--accent);
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'><path fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter' d='M3 8.5 L6.5 12 L13 5'/></svg>");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 90%;
+  }
+  .bp-checkbox:indeterminate {
+    background-color: var(--accent);
+    border-color: var(--accent);
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'><path stroke='%23fff' stroke-width='2.5' stroke-linecap='square' d='M3.5 8 L12.5 8'/></svg>");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 90%;
+  }
+  .bp-checkbox:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .bp-checkbox:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
 }

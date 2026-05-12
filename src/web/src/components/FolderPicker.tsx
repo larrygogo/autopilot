@@ -4,6 +4,7 @@ import { api, type FsListResult } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -144,11 +145,9 @@ export function FolderPicker({ open, initialPath, onSelect, onCancel }: FolderPi
 
         {/* 显示隐藏文件夹 checkbox */}
         <label className="flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={showHidden}
             onChange={(e) => handleShowHiddenChange(e.target.checked)}
-            className="rounded"
           />
           显示隐藏文件夹
         </label>

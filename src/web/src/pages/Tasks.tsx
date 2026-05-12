@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
 interface Task {
@@ -152,6 +153,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
   const totalMatched = filtered.length;
   const totalAll = tasks.length;
   const allFilteredSelected = filtered.length > 0 && filtered.every((t) => selected.has(t.id));
+  const someFilteredSelected = !allFilteredSelected && filtered.some((t) => selected.has(t.id));
   const hasActiveFilter =
     search.trim().length > 0 || statusFilter !== "all" || workflowFilter !== "all";
 
@@ -295,11 +297,10 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       aria-label="全选"
-                      className="accent-primary"
                       checked={allFilteredSelected}
+                      indeterminate={someFilteredSelected}
                       onChange={toggleSelectAll}
                     />
                   </TableHead>
@@ -314,10 +315,8 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                 {filtered.map((t) => (
                   <TableRow key={t.id} className="cursor-pointer">
                     <TableCell onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         aria-label={`选中 ${t.id}`}
-                        className="accent-primary"
                         checked={selected.has(t.id)}
                         onChange={() => toggleSelect(t.id)}
                       />
@@ -374,9 +373,8 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
                     className="flex items-center gap-2"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <input
-                      type="checkbox"
-                      className="accent-primary"
+                    <Checkbox
+                      aria-label={`选中 ${t.id}`}
                       checked={selected.has(t.id)}
                       onChange={() => toggleSelect(t.id)}
                     />
