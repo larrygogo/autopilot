@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
+import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { cn } from "@/lib/utils";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -480,6 +481,9 @@ export function RequirementDetail() {
           </ul>
         </Card>
       )}
+
+      {/* 任务进度卡片（关联了 task 之后显示） */}
+      {req.task_id && <TaskProgressCard taskId={req.task_id} />}
 
       {/* AI 正在生成澄清问题（clarifying 且暂无问题） */}
       {req.status === "clarifying" && questions.length === 0 && (

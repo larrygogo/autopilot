@@ -15,6 +15,7 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
+import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { cn } from "@/lib/utils";
 
 interface TaskDetailProps {
@@ -199,6 +200,9 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
           </div>
         )}
       </div>
+
+      {/* 任务状态摘要（当前阶段 / 耗时 / 失败原因） */}
+      <TaskProgressCard taskId={taskId} showDetailLink={false} showActions={false} />
 
       {task.dangling && task.status?.startsWith("running_") && (
         <DanglingBanner taskId={taskId} toast={toast} />

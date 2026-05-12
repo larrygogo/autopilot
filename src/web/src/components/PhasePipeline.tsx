@@ -2,6 +2,7 @@ import React from "react";
 import { ArrowRight, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { PHASE_LABEL } from "@/lib/workflow-labels";
 
 // ──────────────────────────────────────────────
 // 流水线视图 — 横向显示工作流阶段，并行块以分叉展示
@@ -143,15 +144,18 @@ function PhaseNode({
     >
       <div
         className={cn(
-          "max-w-[10rem] truncate font-mono text-xs font-medium",
+          "max-w-[10rem] truncate text-xs font-medium",
           current ? "text-primary" : "text-foreground",
         )}
       >
-        {phase.name}
+        {PHASE_LABEL[phase.name] ?? phase.name}
       </div>
-      {phase.timeout && (
-        <div className="text-[10px] text-muted-foreground">{fmtTimeout(phase.timeout)}</div>
-      )}
+      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+        {PHASE_LABEL[phase.name] && (
+          <code className="font-mono opacity-60">{phase.name}</code>
+        )}
+        {phase.timeout && <span>· {fmtTimeout(phase.timeout)}</span>}
+      </div>
     </div>
   );
 }
@@ -178,9 +182,9 @@ function ParallelNode({
         onMouseLeave={() => onHover?.(null)}
       >
         <Badge variant="info" className="px-1.5 py-0 text-[10px]">并行</Badge>
-        <span className="font-mono text-xs">{name}</span>
+        <span className="text-xs font-medium">{PHASE_LABEL[name] ?? name}</span>
         {failStrategy && (
-          <span className="text-[10px] text-muted-foreground">· {failStrategy}</span>
+          <span className="text-[10px] text-muted-foreground">· {failStrategy === "cancel_all" ? "失败时全部取消" : failStrategy === "continue" ? "失败时继续" : failStrategy}</span>
         )}
       </div>
       <div className="flex items-stretch gap-1.5">

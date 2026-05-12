@@ -1,13 +1,14 @@
 import { Command } from "commander";
 import { mkdirSync } from "fs";
 import { join } from "path";
-import { spawn as nodeSpawn } from "node:child_process";
+import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
 import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { rebuildIndexFromManifests, rebuildManifestsFromIndex } from "../core/rebuild-index";
 import { discover } from "../core/registry";
 import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
+import { loadDaemonConfig } from "../core/config";
 import { registerWorkflowCommands } from "./workflow";
 import {
   readPid,
@@ -211,7 +212,85 @@ async function stopDaemonProcess(): Promise<boolean> {
  *   scriptPath 是工程内路径，含空格场景未支持，提前报错让用户改用前台启动。
  * - POSIX: 标准 node:child_process.spawn + detached:true + stdio:"ignore" + unref()。
  */
+/**
+ * 检查 daemon 监听端口是否被占用，若是则尝试找出并强杀该进程。
+ * 用于 startDaemonProcess 之前清理僵尸——daemon 异常退出时可能遗留监听端口
+ * （PID 文件被清但 socket 还被占）。
+ *
+ * 用 spawnSync 不走 shell，避免命令注入风险。
+ */
+function ensurePortFree(port: number): { freed: boolean; killedPids: number[] } {
+  try {
+    if (process.platform === "win32") {
+      // 用 PowerShell Get-NetTCPConnection 拿 PID 列表，比 netstat 解析靠谱。
+      // 注意：参数走 spawnSync 数组传递，不进 shell，无注入风险。
+      const psScript = `(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue).OwningProcess | Select-Object -Unique`;
+      const r = nodeSpawnSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", psScript],
+        { encoding: "utf-8", windowsHide: true },
+      );
+      const pids = (r.stdout ?? "")
+        .split(/\r?\n/)
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (pids.length === 0) return { freed: true, killedPids: [] };
+      const killed: number[] = [];
+      for (const pid of pids) {
+        const k = nodeSpawnSync(
+          "taskkill",
+          ["/F", "/T", "/PID", String(pid)],
+          { stdio: "ignore", windowsHide: true },
+        );
+        if (k.status === 0) killed.push(pid);
+      }
+      return { freed: true, killedPids: killed };
+    }
+    // POSIX
+    const r = nodeSpawnSync("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"], { encoding: "utf-8" });
+    const pids = (r.stdout ?? "")
+      .split(/\s+/)
+      .map((s) => parseInt(s, 10))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const killed: number[] = [];
+    for (const pid of pids) {
+      try { process.kill(pid, "SIGKILL"); killed.push(pid); } catch { /* ignore */ }
+    }
+    return { freed: true, killedPids: killed };
+  } catch {
+    return { freed: true, killedPids: [] };
+  }
+}
+
 async function startDaemonProcess(supervise: boolean): Promise<number | null> {
+  // 启动前清理：
+  // 1. 杀残留 supervisor（不杀掉它会持续重新拉起 daemon → 新 daemon 起不来）
+  // 2. 端口扫描兜底：PID 文件丢失但端口还被占的情况
+  try {
+    const supPid = readSupervisorPid();
+    if (supPid && isProcessAlive(supPid)) {
+      try {
+        if (process.platform === "win32") {
+          nodeSpawnSync("taskkill", ["/F", "/T", "/PID", String(supPid)], { stdio: "ignore", windowsHide: true });
+        } else {
+          process.kill(supPid, "SIGKILL");
+        }
+        console.log(`已清理残留 supervisor (pid=${supPid})`);
+      } catch { /* ignore */ }
+    }
+    removePid();
+    removeSupervisorPid();
+    removeListenInfo();
+
+    const cfg = loadDaemonConfig();
+    const port = cfg.port ?? DEFAULT_PORT;
+    const r = ensurePortFree(port);
+    if (r.killedPids.length > 0) {
+      console.log(`已清理占用端口 ${port} 的僵尸进程 (pid=${r.killedPids.join(",")})`);
+      await Bun.sleep(800); // 给系统释放 socket
+    }
+  } catch { /* 配置加载失败时让 daemon 自己处理 */ }
+
   const scriptPath = supervise
     ? join(import.meta.dir, "../daemon/supervisor.ts")
     : join(import.meta.dir, "../daemon/index.ts");
