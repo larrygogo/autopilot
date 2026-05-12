@@ -33,7 +33,7 @@ function nodePhase(id: string): string | null {
 // 中文 label 从 workflow-labels 统一来源
 
 const NODE_TONE: Record<GraphNode["type"], string> = {
-  initial: "text-primary",
+  initial: "text-accent",
   pending: "text-info",
   running: "text-warning",
   terminal: "text-success",
@@ -87,7 +87,7 @@ export function StateMachineGraph({ nodes, edges, currentState, highlightPhase, 
 
   return (
     <div className="space-y-2">
-    <div className="scrollbar-thin overflow-auto rounded-md">
+    <div className="scrollbar-thin overflow-auto border border-dashed border-foreground/30 bg-card/40">
       <svg
         width={Math.max(width, 320)}
         height={Math.max(height, 120)}
@@ -156,10 +156,10 @@ export function StateMachineGraph({ nodes, edges, currentState, highlightPhase, 
                       y={mid.y - 7}
                       width={measureLabel(edge.label) + 6}
                       height={12}
-                      rx={3}
-                      ry={3}
+                      rx={0}
+                      ry={0}
                       className="fill-background"
-                      opacity={0.9}
+                      opacity={0.95}
                     />
                     <text
                       x={mid.x}
@@ -203,9 +203,9 @@ export function StateMachineGraph({ nodes, edges, currentState, highlightPhase, 
                 y={pos.y - NODE_H / 2}
                 width={NODE_W}
                 height={NODE_H}
-                rx={8}
-                ry={8}
-                className={cn("fill-card", isCurrent && "fill-primary/10")}
+                rx={0}
+                ry={0}
+                className={cn("fill-card", isCurrent && "fill-accent/15")}
                 stroke="currentColor"
                 strokeWidth={strokeWidth}
               />
@@ -215,8 +215,8 @@ export function StateMachineGraph({ nodes, edges, currentState, highlightPhase, 
                   y={pos.y - NODE_H / 2 - 3}
                   width={NODE_W + 6}
                   height={NODE_H + 6}
-                  rx={10}
-                  ry={10}
+                  rx={0}
+                  ry={0}
                   fill="none"
                   stroke="currentColor"
                   strokeWidth={1}
@@ -243,24 +243,26 @@ export function StateMachineGraph({ nodes, edges, currentState, highlightPhase, 
       {cancelNode && (
         <div
           className={cn(
-            "flex flex-wrap items-center gap-2 rounded-md border border-dashed px-3 py-2 text-xs",
+            "flex flex-wrap items-center gap-2 border border-dashed px-3 py-2 font-mono text-xs",
             cancelNode.id === currentState
-              ? "border-primary/60 bg-primary/10 text-foreground"
-              : "border-warning/40 bg-warning/5 text-muted-foreground",
+              ? "border-accent bg-accent/10 text-foreground"
+              : "border-warning/50 bg-warning/5 text-muted-foreground",
           )}
         >
-          <span className="rounded bg-warning/15 px-1.5 py-0.5 font-mono text-warning">取消</span>
-          <span>从任意非终态触发，转入</span>
+          <span className="border border-warning bg-warning/15 px-1.5 py-0.5 uppercase tracking-wider text-warning">
+            取消
+          </span>
+          <span className="uppercase tracking-wider">从任意非终态触发，转入</span>
           <span
             className={cn(
-              "rounded border bg-card px-2 py-0.5",
-              cancelNode.id === currentState ? "border-primary text-primary" : "text-success",
+              "border bg-card px-2 py-0.5",
+              cancelNode.id === currentState ? "border-accent text-accent" : "border-success/50 text-success",
             )}
           >
             {nodeLabel(cancelNode.id) || cancelNode.label}
           </span>
           {cancelNode.id === currentState && (
-            <span className="ml-auto text-[10px] uppercase tracking-wide text-primary">当前状态</span>
+            <span className="ml-auto text-[10px] uppercase tracking-[0.2em] text-accent">当前状态</span>
           )}
         </div>
       )}

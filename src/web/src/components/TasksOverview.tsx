@@ -81,21 +81,21 @@ export function TasksOverview({
       </div>
 
       {dangling.length > 0 && (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
-          <div className="mb-2 flex items-center gap-2 font-medium text-destructive">
+        <div className="border-[1.5px] border-destructive bg-destructive/8 p-3 text-sm">
+          <div className="mb-2 flex items-center gap-2 font-display font-bold uppercase tracking-wider text-destructive">
             <Skull className="h-4 w-4" />
             <span>{dangling.length} 个任务失效（daemon 重启时 agent 进程已死）</span>
           </div>
-          <ul className="space-y-1">
+          <ul className="space-y-0.5">
             {dangling.slice(0, 5).map((t) => (
               <li
                 key={t.id}
                 onClick={() => onSelectTask(t.id)}
-                className="flex cursor-pointer items-center gap-3 rounded px-2 py-1 text-xs hover:bg-destructive/10"
+                className="flex cursor-pointer items-center gap-3 border-l-2 border-transparent px-2 py-1 font-mono text-xs hover:border-destructive hover:bg-destructive/10"
               >
-                <span className="font-mono text-muted-foreground">{t.id}</span>
-                <span className="truncate">{t.title}</span>
-                <span className="ml-auto text-muted-foreground">点击进入并取消</span>
+                <span className="text-muted-foreground">{t.id}</span>
+                <span className="truncate font-sans">{t.title}</span>
+                <span className="ml-auto uppercase tracking-wider text-muted-foreground">点击进入并取消</span>
               </li>
             ))}
           </ul>
@@ -103,22 +103,22 @@ export function TasksOverview({
       )}
 
       {stale.length > 0 && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-          <div className="mb-2 flex items-center gap-2 font-medium text-amber-600 dark:text-amber-400">
+        <div className="border-[1.5px] border-warning bg-warning/8 p-3 text-sm">
+          <div className="mb-2 flex items-center gap-2 font-display font-bold uppercase tracking-wider text-warning">
             <AlertTriangle className="h-4 w-4" />
             <span>{stale.length} 个任务超过 30 分钟未更新</span>
           </div>
-          <ul className="space-y-1">
+          <ul className="space-y-0.5">
             {stale.slice(0, 5).map((t) => (
               <li
                 key={t.id}
                 onClick={() => onSelectTask(t.id)}
-                className="flex cursor-pointer items-center gap-3 rounded px-2 py-1 text-xs hover:bg-amber-500/10"
+                className="flex cursor-pointer items-center gap-3 border-l-2 border-transparent px-2 py-1 font-mono text-xs hover:border-warning hover:bg-warning/10"
               >
-                <span className="font-mono text-muted-foreground">{t.id}</span>
-                <span className="truncate">{t.title}</span>
-                <span className="ml-auto text-muted-foreground">
-                  {formatAgo(now - new Date(t.updated_at).getTime())}前
+                <span className="text-muted-foreground">{t.id}</span>
+                <span className="truncate font-sans">{t.title}</span>
+                <span className="ml-auto uppercase tracking-wider text-muted-foreground">
+                  {formatAgo(now - new Date(t.updated_at).getTime())} 前
                 </span>
               </li>
             ))}
@@ -127,14 +127,15 @@ export function TasksOverview({
       )}
 
       {diskTotal !== null && diskTotal > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 border border-foreground/25 bg-card px-3 py-2 font-mono text-xs text-muted-foreground">
           <Database className="h-3.5 w-3.5" />
-          <span>
-            {diskTaskCount} 个 workspace · 共 <strong className="text-foreground">{formatBytes(diskTotal)}</strong>
+          <span className="uppercase tracking-wider">
+            {diskTaskCount} 个 workspace · 共{" "}
+            <strong className="text-foreground">{formatBytes(diskTotal)}</strong>
           </span>
           <span className="ml-auto text-[11px]">
-            配置 <code className="font-mono text-foreground">config.yaml</code> 的{" "}
-            <code className="font-mono">workspace_retention</code> 自动清理
+            配置 <code className="text-foreground">config.yaml</code> 的{" "}
+            <code>workspace_retention</code> 自动清理
           </span>
         </div>
       )}
@@ -155,19 +156,21 @@ function Stat({
 }) {
   const toneClass = {
     default: "text-foreground",
-    success: "text-emerald-600 dark:text-emerald-400",
-    warning: "text-amber-600 dark:text-amber-400",
-    destructive: "text-rose-600 dark:text-rose-400",
+    success: "text-success",
+    warning: "text-warning",
+    destructive: "text-destructive",
     muted: "text-muted-foreground",
   }[tone];
 
   return (
-    <div className="rounded-lg border bg-card px-4 py-3.5 shadow-sm transition-colors hover:bg-accent/30">
-      <div className="flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+    <div className="border-[1.5px] border-foreground/30 bg-card px-4 py-3 transition-all hover:border-foreground hover:shadow-[3px_3px_0_0_var(--color-foreground)] hover:-translate-x-[2px] hover:-translate-y-[2px]">
+      <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
         <span>{label}</span>
         <Icon className={cn("h-3.5 w-3.5", toneClass)} />
       </div>
-      <div className={cn("mt-1 font-mono text-2xl font-semibold tabular-nums", toneClass)}>{value}</div>
+      <div className={cn("mt-1 font-display text-3xl font-bold leading-none tabular-nums", toneClass)}>
+        {value}
+      </div>
     </div>
   );
 }

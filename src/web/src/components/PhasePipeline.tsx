@@ -105,12 +105,12 @@ export function PhasePipeline({ phases, highlight, onHoverPhase, currentState }:
       </div>
 
       {rejects.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t pt-3">
-          <span className="text-xs text-muted-foreground">驳回规则：</span>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-dashed border-foreground/25 pt-3">
+          <span className="bp-label">驳回规则 · REJECT</span>
           {rejects.map((r, i) => (
             <span
               key={i}
-              className="inline-flex items-center gap-1.5 rounded-md border border-warning/30 bg-warning/10 px-2 py-0.5 text-xs"
+              className="inline-flex items-center gap-1.5 rounded-none border-[1.5px] border-warning bg-warning/10 px-2 py-0.5 font-mono text-[11px]"
             >
               <code className="font-mono text-foreground">{r.from}</code>
               <RotateCcw className="h-3 w-3 text-warning" aria-hidden="true" />
@@ -134,25 +134,25 @@ function PhaseNode({
   return (
     <div
       className={cn(
-        "flex min-w-[7rem] shrink-0 cursor-default flex-col items-center justify-center gap-1 rounded-md border bg-card px-3 py-2 text-center shadow-sm transition-colors",
-        "hover:border-primary/40 hover:bg-accent/40",
-        highlight && "border-primary/50 bg-accent/60 ring-1 ring-primary/30",
-        current && "border-primary bg-primary/10 ring-2 ring-primary/40",
+        "flex min-w-[7rem] shrink-0 cursor-default flex-col items-center justify-center gap-1 rounded-none border-[1.5px] border-foreground/30 bg-card px-3 py-2 text-center transition-all",
+        "hover:border-foreground hover:bg-secondary",
+        highlight && "border-foreground bg-secondary",
+        current && "border-accent bg-accent/12 shadow-[3px_3px_0_0_var(--color-accent)]",
       )}
       onMouseEnter={() => onHover?.(phase.name)}
       onMouseLeave={() => onHover?.(null)}
     >
       <div
         className={cn(
-          "max-w-[10rem] truncate text-xs font-medium",
-          current ? "text-primary" : "text-foreground",
+          "max-w-[10rem] truncate font-display text-xs font-bold uppercase tracking-wider",
+          current ? "text-accent" : "text-foreground",
         )}
       >
         {PHASE_LABEL[phase.name] ?? phase.name}
       </div>
-      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+      <div className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
         {PHASE_LABEL[phase.name] && (
-          <code className="font-mono opacity-60">{phase.name}</code>
+          <code className="font-mono opacity-70">{phase.name}</code>
         )}
         {phase.timeout && <span>· {fmtTimeout(phase.timeout)}</span>}
       </div>
@@ -172,19 +172,23 @@ function ParallelNode({
 }) {
   const headHighlight = highlight === name;
   return (
-    <div className="flex shrink-0 flex-col gap-1.5 rounded-md border border-dashed bg-muted/30 p-2">
+    <div className="flex shrink-0 flex-col gap-1.5 rounded-none border border-dashed border-foreground/40 bg-muted/30 p-2">
       <div
         className={cn(
-          "flex cursor-default items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors",
-          headHighlight && "bg-accent/60",
+          "flex cursor-default items-center gap-1.5 rounded-none px-1.5 py-0.5 transition-colors",
+          headHighlight && "bg-secondary",
         )}
         onMouseEnter={() => onHover?.(name)}
         onMouseLeave={() => onHover?.(null)}
       >
-        <Badge variant="info" className="px-1.5 py-0 text-[10px]">并行</Badge>
-        <span className="text-xs font-medium">{PHASE_LABEL[name] ?? name}</span>
+        <Badge variant="info">并行</Badge>
+        <span className="font-display text-xs font-bold uppercase tracking-wider">
+          {PHASE_LABEL[name] ?? name}
+        </span>
         {failStrategy && (
-          <span className="text-[10px] text-muted-foreground">· {failStrategy === "cancel_all" ? "失败时全部取消" : failStrategy === "continue" ? "失败时继续" : failStrategy}</span>
+          <span className="font-mono text-[10px] text-muted-foreground">
+            · {failStrategy === "cancel_all" ? "失败时全部取消" : failStrategy === "continue" ? "失败时继续" : failStrategy}
+          </span>
         )}
       </div>
       <div className="flex items-stretch gap-1.5">

@@ -141,16 +141,16 @@ export function TaskProgressCard({
   }
 
   return (
-    <Card className="mb-6 p-5">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          {isRunning && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
-          {isDone && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+    <Card className="mb-6">
+      <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-5 py-3">
+        <div className="flex items-center gap-2.5">
+          {isRunning && <Loader2 className="h-4 w-4 animate-spin text-accent" />}
+          {isDone && <CheckCircle2 className="h-4 w-4 text-success" />}
           {(isFailed || isDangling) && <AlertCircle className="h-4 w-4 text-destructive" />}
           {isCancelled && <XCircle className="h-4 w-4 text-muted-foreground" />}
-          <h2 className="text-sm font-semibold">任务进度</h2>
+          <h2 className="font-display text-sm font-bold uppercase tracking-wider">任务进度</h2>
           {phaseLabel && (
-            <Badge variant={(isFailed || isDangling) ? "destructive" : isRunning ? "default" : "secondary"} className="text-[10px]">
+            <Badge variant={(isFailed || isDangling) ? "destructive" : isRunning ? "default" : "secondary"}>
               {phaseLabel}
             </Badge>
           )}
@@ -158,7 +158,7 @@ export function TaskProgressCard({
         {showDetailLink && (
           <Link
             to={`/tasks/${taskId}`}
-            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:underline"
           >
             查看完整日志
             <ExternalLink className="h-3 w-3" />
@@ -166,72 +166,76 @@ export function TaskProgressCard({
         )}
       </div>
 
-      {isDangling && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-          <div className="mb-1 font-medium">⚠ 任务已失联</div>
-          <p className="leading-relaxed opacity-90">
-            daemon 在该任务执行 <span className="font-medium">{phaseLabel ?? task.status}</span> 阶段时被重启，
-            内存中的执行流已丢失。task 的产出（如已完成的方案设计 / 部分代码）仍保留，
-            但当前阶段不会自动继续。请选择「从当前阶段重试」让任务接着跑，或「取消任务」放弃。
-          </p>
-        </div>
-      )}
+      <div className="space-y-3 p-5">
+        {isDangling && (
+          <div className="border-[1.5px] border-destructive bg-destructive/10 p-3 text-xs text-destructive">
+            <div className="mb-1 font-display font-bold uppercase tracking-wider">⚠ 任务已失联</div>
+            <p className="leading-relaxed opacity-90">
+              daemon 在该任务执行 <span className="font-semibold">{phaseLabel ?? task.status}</span> 阶段时被重启，
+              内存中的执行流已丢失。task 的产出（如已完成的方案设计 / 部分代码）仍保留，
+              但当前阶段不会自动继续。请选择「从当前阶段重试」让任务接着跑，或「取消任务」放弃。
+            </p>
+          </div>
+        )}
 
-      {isRunning && (
-        <div className="text-xs text-muted-foreground">
-          正在执行 <span className="font-medium text-foreground">{phaseLabel}</span> 阶段
-          {startedMs && <span className="ml-1">· 已耗时 {formatElapsed(elapsedMs)}</span>}
-        </div>
-      )}
+        {isRunning && (
+          <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+            正在执行 <span className="font-semibold text-foreground">{phaseLabel}</span> 阶段
+            {startedMs && <span className="ml-1">· 已耗时 {formatElapsed(elapsedMs)}</span>}
+          </div>
+        )}
 
-      {parsed.kind === "pending" && phaseLabel && (
-        <div className="text-xs text-muted-foreground">
-          准备进入 <span className="font-medium text-foreground">{phaseLabel}</span> 阶段…
-        </div>
-      )}
+        {parsed.kind === "pending" && phaseLabel && (
+          <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+            准备进入 <span className="font-semibold text-foreground">{phaseLabel}</span> 阶段…
+          </div>
+        )}
 
-      {isDone && (
-        <div className="text-xs text-green-700 dark:text-green-400">任务已完成。</div>
-      )}
+        {isDone && (
+          <div className="font-mono text-[11px] uppercase tracking-wider text-success">
+            ✓ 任务已完成
+          </div>
+        )}
 
-      {isCancelled && (
-        <div className="rounded-md border border-muted bg-muted/30 p-3 text-xs text-muted-foreground">
-          任务已取消。
-        </div>
-      )}
+        {isCancelled && (
+          <div className="border-[1.5px] border-foreground/30 bg-muted/40 p-3 font-mono text-xs tracking-wider text-muted-foreground">
+            任务已取消
+          </div>
+        )}
 
-      {isFailed && recentError && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-          <div className="mb-1 font-medium">执行失败</div>
-          <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed opacity-90">
-            {recentError.length > 400 ? recentError.slice(0, 400) + "…" : recentError}
-          </pre>
-        </div>
-      )}
+        {isFailed && recentError && (
+          <div className="border-[1.5px] border-destructive bg-destructive/10 p-3 text-xs text-destructive">
+            <div className="mb-1 font-display font-bold uppercase tracking-wider">执行失败</div>
+            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed opacity-90">
+              {recentError.length > 400 ? recentError.slice(0, 400) + "…" : recentError}
+            </pre>
+          </div>
+        )}
 
-      {/* 操作按钮 */}
-      {showActions && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {(isRunning || parsed.kind === "pending") && (
-            <Button variant="outline" size="sm" onClick={() => void cancelTask()} disabled={cancelling} className="h-7 text-xs">
-              {cancelling ? "取消中…" : "取消任务"}
-            </Button>
-          )}
-          {(isFailed || isCancelled || isDangling) && (
-            <>
-              <Button variant="outline" size="sm" onClick={() => void restartTask()} disabled={restarting} className="h-7 text-xs">
-                <RotateCw className="mr-1 h-3 w-3" />
-                {restarting ? "重启中…" : "从当前阶段重试"}
+        {/* 操作按钮 */}
+        {showActions && (
+          <div className="flex flex-wrap gap-2 pt-1">
+            {(isRunning || parsed.kind === "pending") && (
+              <Button variant="outline" size="sm" onClick={() => void cancelTask()} disabled={cancelling}>
+                {cancelling ? "取消中…" : "取消任务"}
               </Button>
-              {isDangling && (
-                <Button variant="outline" size="sm" onClick={() => void cancelTask()} disabled={cancelling} className="h-7 text-xs">
-                  {cancelling ? "取消中…" : "取消任务"}
+            )}
+            {(isFailed || isCancelled || isDangling) && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => void restartTask()} disabled={restarting}>
+                  <RotateCw className="mr-1 h-3 w-3" />
+                  {restarting ? "重启中…" : "从当前阶段重试"}
                 </Button>
-              )}
-            </>
-          )}
-        </div>
-      )}
+                {isDangling && (
+                  <Button variant="outline" size="sm" onClick={() => void cancelTask()} disabled={cancelling}>
+                    {cancelling ? "取消中…" : "取消任务"}
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }
