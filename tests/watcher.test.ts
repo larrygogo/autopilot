@@ -112,11 +112,15 @@ describe("watcher - checkStuckTasks", () => {
     sqlite.close();
   });
 
-  it("running_await_review 状态不被判作卡死", () => {
+  it("running_await_review 超时（heartbeat 丢失）也应被恢复", () => {
     // 注册工作流
     registryModule.register(makeTestWorkflowWithAwaitReview() as any);
 
     // 创建任务，状态为 running_await_review，updated_at 为 30 分钟前
+    // 旧设计：豁免 await_review 永不恢复 —— 但 sygvsxmy 这种 deterministic 崩溃
+    //         会导致 heartbeat 停止后永久卡死（见 fix/await-review-stuck-recovery-20260512）
+    // 新设计：runner 心跳每 2 分钟更新 updated_at；正常 polling 不会被误杀，
+    //         只有阶段函数死了 + heartbeat 丢失 + 锁释放 → watcher 接管恢复
     const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     dbModule.createTask({
       id: "task-await-review-001",
@@ -125,23 +129,20 @@ describe("watcher - checkStuckTasks", () => {
       initialStatus: "running_await_review",
     });
 
-    // 手动修改 updated_at 为 30 分钟前（模拟长时间未更新）
     sqlite.run(
       "UPDATE tasks SET updated_at = ? WHERE id = ?",
       [thirtyMinutesAgo, "task-await-review-001"]
     );
 
-    // 获取初始状态
     const taskBefore = dbModule.getTask("task-await-review-001");
     expect(taskBefore?.status).toBe("running_await_review");
 
-    // 调用 checkStuckTasks（timeout = 600 秒，即 10 分钟）
-    // 由于 updated_at 距今 30 分钟，一般会被认为卡死，但由于是 await_review，应被跳过
+    // 调用 checkStuckTasks（timeout = 600 秒）；30 分钟无 heartbeat → 应被恢复
     watcherModule.checkStuckTasks(600);
 
-    // 验证任务状态未改变（没被强制转换）
+    // 验证任务被弹回 pending_await_review（等待重新 spawn）
     const taskAfter = dbModule.getTask("task-await-review-001");
-    expect(taskAfter?.status).toBe("running_await_review");
+    expect(taskAfter?.status).toBe("pending_await_review");
   });
 
   it("其他 running 状态如果超时应被判作卡死", () => {
@@ -173,5 +174,30 @@ describe("watcher - checkStuckTasks", () => {
     // 验证任务状态已改变（被强制转换回 pending）
     const taskAfter = dbModule.getTask("task-stuck-001");
     expect(taskAfter?.status).toBe("pending_step1");
+  });
+
+  it("running_await_review 在 heartbeat 内（updated_at 新）不应被误恢复", () => {
+    // 注册工作流
+    registryModule.register(makeTestWorkflowWithAwaitReview() as any);
+
+    // 创建任务，updated_at 为 1 分钟前 — 模拟 heartbeat 持续中
+    const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
+    dbModule.createTask({
+      id: "task-await-alive-001",
+      title: "正常 polling 中的任务",
+      workflow: "test_wf",
+      initialStatus: "running_await_review",
+    });
+
+    sqlite.run(
+      "UPDATE tasks SET updated_at = ? WHERE id = ?",
+      [oneMinuteAgo, "task-await-alive-001"]
+    );
+
+    // checkStuckTasks 默认阈值 600 秒；1 分钟前心跳 → 不应被恢复
+    watcherModule.checkStuckTasks(600);
+
+    const taskAfter = dbModule.getTask("task-await-alive-001");
+    expect(taskAfter?.status).toBe("running_await_review");
   });
 });

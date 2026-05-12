@@ -157,8 +157,11 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
     // 只处理 running 状态的任务
     if (!task.status.startsWith("running_")) continue;
 
-    // await_review 阶段是「等外部 trigger」设计，本来就该长期"running"，不算卡死
-    if (task.status === "running_await_review") continue;
+    // 注：await_review 是「polling DB 等外部 trigger」设计本来就该长期 running，
+    // 但 runner 的 heartbeat 每 2 分钟会更新 updated_at（runner.ts:121），
+    // 配合默认 600s stuckTimeoutSeconds，正常 polling 不会被误杀；
+    // 只有阶段函数死了（heartbeat 停止 + 锁释放）才会被这里捕获并恢复。
+    // 不再无条件豁免，否则像 sygvsxmy 那种 deterministic 崩溃会永久卡死。
 
     // 已持有活跃锁 → 正在执行，跳过
     if (isLocked(task.id)) continue;

@@ -6,6 +6,7 @@ import { initDb, closeDb, listTasks, updateTask } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/registry";
 import { checkStuckTasks, pruneWorkspacesByPolicy } from "../core/watcher";
+import { runInBackground } from "../core/runner";
 import { runScheduledTasks } from "../core/scheduler";
 import { initDaemonFileLog, log } from "../core/logger";
 import { loadDaemonConfig, loadGithubConfig } from "../core/config";
@@ -164,24 +165,43 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 function recoverDanglingTasks(): void {
   try {
     const tasks = listTasks({});
-    let count = 0;
+    let danglingCount = 0;
+    let respawnCount = 0;
     // daemon 重启时，所有 running_* 任务的内存 phase promise 都已丢失。
-    // 即便有 await_review 这种长挂起态除外，普通 running_<phase> 都视为 dangling，
-    // 让 UI 显示警告，用户决定取消还是重启（restart 会通过 runInBackground 重新执行）。
+    // 处理策略分两类：
+    //  1. await_review 是设计上的长挂起 polling 阶段，幂等可重启 →
+    //     直接 runInBackground 重新 spawn，无需用户介入
+    //  2. 其他 running_<phase>（含 agent 调用、I/O 等不可幂等的操作）→
+    //     标 dangling，让 UI 提示用户决定取消还是 restart
     for (const t of tasks) {
       if (!t.status.startsWith("running_")) continue;
-      // await_review 是设计上的长挂起态（外部 trigger 推进），不算 dangling
-      if (t.status === "running_await_review") continue;
+
+      if (t.status === "running_await_review") {
+        // 幂等阶段，daemon 启动后立即 respawn 即可恢复
+        log.info(
+          "task %s 在 daemon 重启时停留在 running_await_review → 自动重启该阶段函数",
+          t.id,
+        );
+        // 清掉历史可能残留的 dangling 标记
+        if (t["dangling"]) updateTask(t.id, { dangling: false });
+        runInBackground(t.id, "await_review");
+        respawnCount++;
+        continue;
+      }
+
       if (t["dangling"]) continue;
       updateTask(t.id, { dangling: true });
       log.warn(
         "task %s 在 daemon 重启时仍处于 %s → 标记 dangling（phase 执行已丢失，UI 会提示用户）",
         t.id, t.status,
       );
-      count++;
+      danglingCount++;
     }
-    if (count > 0) {
-      log.warn("共 %d 个 task 因 daemon 重启被标 dangling，请在 UI 选择取消或重启", count);
+    if (danglingCount > 0) {
+      log.warn("共 %d 个 task 因 daemon 重启被标 dangling，请在 UI 选择取消或重启", danglingCount);
+    }
+    if (respawnCount > 0) {
+      log.info("共 %d 个 await_review task 在 daemon 启动时被自动 respawn", respawnCount);
     }
   } catch (e: unknown) {
     console.error("recoverDanglingTasks 异常：", e instanceof Error ? e.message : String(e));
