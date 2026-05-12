@@ -311,6 +311,18 @@ export function updateTask(
 }
 
 /**
+ * 心跳：仅刷新 task.updated_at，让 watcher 知道长跑阶段还活着。
+ *
+ * 设计取舍：
+ * - 不走 updateTask（它在无字段时 early-return）
+ * - 不同步 manifest / 不发事件：心跳每 2 分钟一次，没必要产生推送噪音
+ * - 集中到 db.ts 保持 single-writer 不变式（写 tasks 表的入口唯一）
+ */
+export function touchTaskHeartbeat(taskId: string): void {
+  getDb().run("UPDATE tasks SET updated_at = ? WHERE id = ?", [now(), taskId]);
+}
+
+/**
  * 把 Task（含合并后的 extra）同步到 task-manifest.json。
  * manifest 不存在时 best-effort 跳过（老任务或 snapshot 未提供的 createTask 路径）。
  */

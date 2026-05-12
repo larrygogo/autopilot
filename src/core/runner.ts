@@ -1,4 +1,4 @@
-import { getTask, getDb } from "./db";
+import { getTask, touchTaskHeartbeat } from "./db";
 import { acquireLock, releaseLock } from "./infra";
 import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { appendTaskEvent } from "./task-logs";
@@ -120,7 +120,7 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     // 会以为卡死。每 2 分钟 ping 一次让 watcher 知道任务活着。
     const heartbeat = setInterval(() => {
       try {
-        getDb().run("UPDATE tasks SET updated_at = ? WHERE id = ?", [new Date().toISOString(), taskId]);
+        touchTaskHeartbeat(taskId);
       } catch { /* 心跳失败不影响主流程 */ }
     }, 120_000);
     try {
