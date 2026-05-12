@@ -160,14 +160,16 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
       {/* Header */}
-      <div className="mb-5 flex flex-wrap items-center gap-3">
+      <div className="mb-5 flex flex-wrap items-center gap-3 border-b border-dashed border-foreground/25 pb-4">
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
           <ArrowLeft className="h-4 w-4" />
           返回
         </Button>
-        <div className="flex min-w-0 items-center gap-2">
-          <h2 className="truncate text-xl font-semibold tracking-tight">任务</h2>
-          <code className="truncate rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-primary">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <h2 className="truncate font-display text-2xl font-bold uppercase tracking-wider">
+            TASK · 任务
+          </h2>
+          <code className="truncate border border-foreground/30 bg-muted px-2 py-0.5 font-mono text-sm text-accent">
             {task.id}
           </code>
           <StatusBadge status={task.status} />
@@ -225,11 +227,14 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
         />
       )}
 
-      {/* 基本信息 */}
-      <Card className="mb-4 p-4">
-        <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+      {/* 基本信息 — metadata block 风 */}
+      <Card className="mb-4">
+        <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">
+          <span className="bp-label">基本信息 · METADATA</span>
+        </div>
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-2">
           <Field label="ID">
-            <code className="font-mono text-primary">{task.id}</code>
+            <code className="font-mono text-accent">{task.id}</code>
           </Field>
           <Field label="标题">{task.title}</Field>
           <Field label="工作流">
@@ -242,26 +247,26 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
           <Field label="更新时间">{new Date(task.updated_at).toLocaleString()}</Field>
         </dl>
         {task.requirement && (
-          <details className="mt-3 border-t pt-3 text-sm">
-            <summary className="cursor-pointer select-none text-xs font-medium text-muted-foreground">
+          <details className="mx-4 mb-4 border-t border-dashed border-foreground/25 pt-3 text-sm">
+            <summary className="cursor-pointer select-none bp-label">
               需求详情（{task.requirement.length} 字符）
             </summary>
-            <pre className="scrollbar-thin mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 p-3 font-mono text-xs">
+            <pre className="scrollbar-thin mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words border border-foreground/20 bg-muted/40 p-3 font-mono text-xs">
               {task.requirement}
             </pre>
           </details>
         )}
         {task.workspace && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3 text-xs">
-            <span className="text-muted-foreground">Workspace：</span>
+          <div className="mx-4 mb-4 flex flex-wrap items-center gap-2 border-t border-dashed border-foreground/25 pt-3 text-xs">
+            <span className="bp-label">Workspace</span>
             <code
-              className="flex-1 cursor-pointer break-all rounded bg-muted px-2 py-1 font-mono text-foreground"
+              className="flex-1 cursor-pointer break-all border border-foreground/25 bg-muted px-2 py-1 font-mono text-foreground"
               title="点击复制"
               onClick={copyWorkspace}
             >
               {task.workspace}
             </code>
-            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={copyWorkspace} aria-label="复制路径">
+            <Button size="icon" variant="ghost" onClick={copyWorkspace} aria-label="复制路径">
               <Copy className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -270,28 +275,36 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
 
       {/* 流水线 */}
       {workflowDetail?.phases && (
-        <Card className="mb-4 p-4">
-          <h3 className="mb-3 text-sm font-semibold">流水线</h3>
-          <PhasePipeline
-            phases={workflowDetail.phases}
-            highlight={hoveredPhase}
-            onHoverPhase={setHoveredPhase}
-            currentState={task.status}
-          />
+        <Card className="mb-4">
+          <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">
+            <span className="bp-label">流水线 · PIPELINE</span>
+          </div>
+          <div className="p-4">
+            <PhasePipeline
+              phases={workflowDetail.phases}
+              highlight={hoveredPhase}
+              onHoverPhase={setHoveredPhase}
+              currentState={task.status}
+            />
+          </div>
         </Card>
       )}
 
       {/* 状态机 */}
       {graph && (
-        <Card className="mb-4 p-4">
-          <h3 className="mb-3 text-sm font-semibold">状态机</h3>
-          <StateMachineGraph
-            nodes={graph.nodes}
-            edges={graph.edges}
-            currentState={task.status}
-            highlightPhase={hoveredPhase}
-            onHoverPhase={setHoveredPhase}
-          />
+        <Card className="mb-4">
+          <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">
+            <span className="bp-label">状态机 · STATE MACHINE</span>
+          </div>
+          <div className="p-4">
+            <StateMachineGraph
+              nodes={graph.nodes}
+              edges={graph.edges}
+              currentState={task.status}
+              highlightPhase={hoveredPhase}
+              onHoverPhase={setHoveredPhase}
+            />
+          </div>
         </Card>
       )}
 
@@ -306,14 +319,18 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       />
 
       {/* 危险操作区 */}
-      <Card className="mt-4 border-destructive/40 bg-destructive/5 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      <Card className="mt-4 border-[1.5px] border-destructive bg-destructive/8">
+        <div className="border-b border-dashed border-destructive/40 px-4 py-2.5">
+          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-destructive font-semibold">
+            ⚠ 危险操作 · DANGER ZONE
+          </span>
+        </div>
+        <div className="flex flex-wrap items-start justify-between gap-3 p-4">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-destructive">危险操作</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground leading-relaxed">
               彻底删除该任务的 DB 记录、manifest、阶段日志、agent 调用记录与 workspace 文件；此操作不可撤销。
               {canCancel && (
-                <span className="ml-1 font-medium">
+                <span className="ml-1 font-semibold text-foreground">
                   任务当前非终态，请先取消后再删除。
                 </span>
               )}
@@ -373,7 +390,9 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <dt className="w-20 shrink-0 text-xs font-medium text-muted-foreground">{label}</dt>
+      <dt className="w-20 shrink-0 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </dt>
       <dd className="min-w-0 flex-1 truncate">{children}</dd>
     </div>
   );
@@ -423,17 +442,13 @@ function TaskDetailTabs({
 
   return (
     <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)}>
-      <TabsList className="scrollbar-thin mb-3 flex h-auto w-full justify-start overflow-x-auto bg-transparent p-0 border-b rounded-none">
+      <TabsList className="scrollbar-thin mb-3 flex h-auto w-full justify-start overflow-x-auto">
         {triggers.map((t) => (
-          <TabsTrigger
-            key={t.key}
-            value={t.key}
-            className="h-9 gap-1.5 rounded-none border-b-2 border-transparent bg-transparent px-3 text-sm text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
-          >
+          <TabsTrigger key={t.key} value={t.key} className="gap-1.5">
             <t.icon className="h-3.5 w-3.5" />
             {t.label}
             {t.badge != null && t.badge > 0 && (
-              <Badge variant="default" className="ml-1 h-4 px-1.5 text-[10px]">
+              <Badge variant="default" className="ml-1 px-1.5 py-0">
                 {t.badge}
               </Badge>
             )}
@@ -454,16 +469,21 @@ function TaskDetailTabs({
       </TabsContent>
 
       <TabsContent value="transitions" className="mt-0">
-        <Card className="p-4">
-          <LogTimeline logs={logs} />
+        <Card>
+          <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">
+            <span className="bp-label">状态日志 · TRANSITIONS</span>
+          </div>
+          <div className="p-4">
+            <LogTimeline logs={logs} />
+          </div>
         </Card>
       </TabsContent>
 
       <TabsContent value="live" className="mt-0">
-        <Card className="p-4">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">实时日志（新在顶）</h3>
-            <span className="text-xs text-muted-foreground">
+        <Card>
+          <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+            <span className="bp-label">实时日志 · LIVE STREAM</span>
+            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               {liveLogs.length === 0
                 ? "暂无；运行中任务会推送到此"
                 : stickToTopRef.current
@@ -471,23 +491,25 @@ function TaskDetailTabs({
                 : "手动暂停（滚回顶部恢复）"}
             </span>
           </div>
-          <div
-            ref={liveLogRef}
-            onScroll={onLogScroll}
-            className="scrollbar-thin max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed"
-          >
-            {liveLogs.length === 0 ? (
-              <p className="text-muted-foreground">等待中…</p>
-            ) : (
-              liveLogs
-                .slice()
-                .reverse()
-                .map((line, i) => (
-                  <div key={liveLogs.length - 1 - i} className="whitespace-pre text-foreground">
-                    {line}
-                  </div>
-                ))
-            )}
+          <div className="p-4">
+            <div
+              ref={liveLogRef}
+              onScroll={onLogScroll}
+              className="scrollbar-thin max-h-80 overflow-auto border border-foreground/25 bg-muted/40 p-3 font-mono text-xs leading-relaxed"
+            >
+              {liveLogs.length === 0 ? (
+                <p className="text-muted-foreground">等待中…</p>
+              ) : (
+                liveLogs
+                  .slice()
+                  .reverse()
+                  .map((line, i) => (
+                    <div key={liveLogs.length - 1 - i} className="whitespace-pre text-foreground">
+                      {line}
+                    </div>
+                  ))
+              )}
+            </div>
           </div>
         </Card>
       </TabsContent>
@@ -533,20 +555,20 @@ function DanglingBanner({
   };
 
   return (
-    <Card className="mb-4 border-destructive/40 bg-destructive/5 p-4">
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+    <Card className="mb-4 border-[1.5px] border-destructive bg-destructive/8">
+      <div className="flex flex-wrap items-start gap-3 p-4">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[1.5px] border-destructive bg-destructive/15 text-destructive">
           <AlertTriangle className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-destructive">这个任务已死（daemon 重启）</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            任务在 <code className="rounded bg-muted px-1 font-mono">ask_user</code> 等待回答时 daemon 重启了。
+          <h3 className="font-display text-sm font-bold uppercase tracking-wider text-destructive">
+            ⚠ 这个任务已死（daemon 重启）
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+            任务在 <code className="border border-foreground/20 bg-muted px-1 font-mono">ask_user</code> 等待回答时 daemon 重启了。
             agent 进程的等待 promise 在内存中丢失，即使你现在回答 agent 也收不到。
-            <br />
-            可以选择：
-            <strong>重新执行</strong>当前阶段（沿用原 workspace 历史从头跑），或
-            <strong>取消任务</strong>新建一个。
+            可以选择：<strong className="text-foreground">重新执行</strong>当前阶段（沿用原 workspace 历史从头跑），或
+            <strong className="text-foreground">取消任务</strong>新建一个。
           </p>
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
@@ -615,18 +637,20 @@ function AskBanner({
   };
 
   return (
-    <Card className="mb-4 border-info/40 bg-info/5 p-4">
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-info/15 text-info">
+    <Card className="mb-4 border-[1.5px] border-info bg-info/8">
+      <div className="flex flex-wrap items-start gap-3 p-4">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[1.5px] border-info bg-info/15 text-info">
           <MessageCircleQuestion className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1 space-y-3">
           <div>
-            <h3 className="text-sm font-semibold">Agent 在等你回答</h3>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{parsed.question}</p>
+            <h3 className="font-display text-sm font-bold uppercase tracking-wider text-info">
+              Agent 在等你回答
+            </h3>
+            <p className="mt-1.5 whitespace-pre-wrap text-sm text-foreground">{parsed.question}</p>
             {parsed.phase && (
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                来自阶段 <code className="rounded bg-muted px-1 font-mono">{parsed.phase}</code>
+              <p className="mt-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                来自阶段 <code className="border border-foreground/20 bg-muted px-1">{parsed.phase}</code>
               </p>
             )}
           </div>
@@ -640,7 +664,6 @@ function AskBanner({
                   variant="outline"
                   onClick={() => submit(opt)}
                   disabled={busy}
-                  className="border-info/40 hover:bg-info/10 hover:text-foreground"
                 >
                   {opt}
                 </Button>
@@ -712,16 +735,18 @@ function GateBanner({
   };
 
   return (
-    <Card className="mb-4 border-warning/40 bg-warning/5 p-4">
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-warning/15 text-warning">
+    <Card className="mb-4 border-[1.5px] border-warning bg-warning/8">
+      <div className="flex flex-wrap items-start gap-3 p-4">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[1.5px] border-warning bg-warning/15 text-warning">
           <Hand className="h-5 w-5" />
         </div>
-        <div className="min-w-0 flex-1 space-y-2">
+        <div className="min-w-0 flex-1 space-y-2.5">
           <div>
-            <h3 className="text-sm font-semibold">等待你的决断</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              阶段 <code className="rounded bg-muted px-1 font-mono">{phase}</code> 已完成。
+            <h3 className="font-display text-sm font-bold uppercase tracking-wider text-warning">
+              ✋ 等待你的决断
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+              阶段 <code className="border border-foreground/20 bg-muted px-1 font-mono">{phase}</code> 已完成。
               {gateMessage ? (
                 <> {gateMessage}</>
               ) : (

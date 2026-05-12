@@ -309,7 +309,7 @@ function DaemonLogCard(): React.ReactElement {
   const levelClass = (lvl: string | null) => {
     switch (lvl) {
       case "ERROR": return "text-destructive";
-      case "WARN": return "text-amber-600 dark:text-amber-400";
+      case "WARN": return "text-warning";
       case "DEBUG": return "text-muted-foreground";
       default: return "text-foreground";
     }

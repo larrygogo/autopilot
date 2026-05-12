@@ -214,14 +214,14 @@ function ProviderStatusBadge({ status }: { status?: ProviderStatus }) {
   }
   if (status.error) {
     return (
-      <Badge variant="outline" className="gap-1 border-amber-500/40 bg-amber-500/10 font-normal text-amber-600 dark:text-amber-400">
+      <Badge variant="warning" className="gap-1">
         <AlertTriangle className="h-3 w-3" />
         CLI 异常
       </Badge>
     );
   }
   return (
-    <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 font-normal text-emerald-600 dark:text-emerald-400">
+    <Badge variant="success" className="gap-1">
       <CheckCircle2 className="h-3 w-3" />
       CLI 就绪
     </Badge>
@@ -239,14 +239,14 @@ function ProviderStatusDetail({ status, loginCmd }: { status?: ProviderStatus; l
 
   if (!status.cli_installed) {
     return (
-      <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
-        <div className="flex items-center gap-1.5 font-medium text-destructive">
+      <div className="border-[1.5px] border-destructive bg-destructive/8 p-3 text-xs">
+        <div className="flex items-center gap-1.5 font-display font-bold uppercase tracking-wider text-destructive">
           <AlertTriangle className="h-3.5 w-3.5" />
           {status.error ?? "CLI 未安装"}
         </div>
         {status.install_hint && (
           <div className="mt-1.5 text-muted-foreground">
-            安装：<code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{status.install_hint}</code>
+            安装：<code className="border border-foreground/20 bg-muted px-1 py-0.5 font-mono text-foreground">{status.install_hint}</code>
           </div>
         )}
       </div>
@@ -257,16 +257,16 @@ function ProviderStatusDetail({ status, loginCmd }: { status?: ProviderStatus; l
     <div className="space-y-1 text-xs">
       <div>
         <span className="text-muted-foreground">CLI：</span>
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_path}</code>
+        <code className="border border-foreground/20 bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_path}</code>
       </div>
       {status.cli_version && (
         <div>
           <span className="text-muted-foreground">版本：</span>
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_version}</code>
+          <code className="border border-foreground/20 bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_version}</code>
         </div>
       )}
       {status.error && (
-        <div className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+        <div className="flex items-center gap-1 text-warning">
           <AlertTriangle className="h-3 w-3" />
           {status.error}
         </div>

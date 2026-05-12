@@ -372,7 +372,7 @@ export function RequirementDetail() {
         </Button>
         <div className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
           {wsState === "connected" ? (
-            <><Wifi className="h-3 w-3 text-green-500" />实时</>
+            <><Wifi className="h-3 w-3 text-success" />实时</>
           ) : (
             <><WifiOff className="h-3 w-3" />离线</>
           )}
@@ -582,8 +582,8 @@ export function RequirementDetail() {
 
           {resolvedQuestions.length > 0 && openQuestions.length === 0 &&
            (req.status === "drafting" || req.status === "clarifying") && (
-            <div className="mt-5 flex items-center justify-between rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3">
-              <p className="text-sm text-green-700 dark:text-green-400">所有问题已回答，可以继续了。</p>
+            <div className="mt-5 flex items-center justify-between border-[1.5px] border-success bg-success/10 px-4 py-3">
+              <p className="text-sm text-success font-medium">✓ 所有问题已回答，可以继续了。</p>
               <Button size="sm" onClick={markReady} disabled={actionBusy} className="shrink-0">
                 {actionBusy ? "处理中…" : "标记为已澄清 →"}
               </Button>

@@ -354,8 +354,8 @@ export function Agents(_props: { embedded?: boolean } = {}) {
               确认删除智能体 <code className="rounded bg-muted px-1 font-mono">{pendingDelete}</code>？此操作不可恢复。
             </p>
             {pendingRefs.length > 0 && (
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5">
-                <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+              <div className="border-[1.5px] border-warning bg-warning/10 p-2.5">
+                <div className="flex items-center gap-1.5 text-xs text-warning">
                   <AlertTriangle className="h-3.5 w-3.5" />
                   以下 {pendingRefs.length} 个工作流引用了此智能体，删除后这些工作流将无法运行：
                 </div>

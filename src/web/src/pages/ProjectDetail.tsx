@@ -250,7 +250,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     const h = healthMap[cb.id];
     if (!h) return null;
     if (h === "loading") return <span className="text-[11px] text-muted-foreground animate-pulse">检查中…</span>;
-    if (h.healthy) return <span className="text-[11px] text-emerald-500 font-medium">✓ OK</span>;
+    if (h.healthy) return <span className="font-mono text-[11px] text-success font-medium tracking-wider">✓ OK</span>;
     return (
       <span className="text-[11px] text-destructive" title={h.issues.join("\n")}>
         ✗ {h.issues[0] ?? "异常"}
