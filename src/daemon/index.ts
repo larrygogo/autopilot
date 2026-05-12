@@ -19,6 +19,8 @@ import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
 import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
 import { initRequirementTaskBridge, disposeRequirementTaskBridge } from "./requirement-task-bridge";
+import { createDefaultAggregator, type Aggregator } from "../core/now-aggregator";
+import { setNowAggregator } from "./routes-now";
 import type { AutopilotEvent } from "./protocol";
 
 // ──────────────────────────────────────────────
@@ -73,6 +75,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   // 激活事件总线
   enableBus();
+
+  // 启动 /now 状态推导引擎
+  const nowAggregator: Aggregator = createDefaultAggregator();
+  await nowAggregator.start();
+  setNowAggregator(nowAggregator);
+  log.info("now-aggregator 已启动，当前卡片数 %d", nowAggregator.getCards().length);
 
   // 启动 requirement-scheduler（订阅 event-bus）
   initRequirementScheduler();
@@ -149,6 +157,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     disposeRequirementScheduler();
     disposeRequirementClarifier();
     disposeRequirementTaskBridge();
+    nowAggregator.dispose();
+    setNowAggregator(null);
     disableBus();
     server.stop();
     closeDb();
