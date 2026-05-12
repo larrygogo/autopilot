@@ -8,6 +8,8 @@ import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
+import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
+import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { createProject } from "../src/core/projects";
 import { createCodebase } from "../src/core/codebases";
 import { createRequirement } from "../src/core/requirements";
@@ -26,6 +28,7 @@ describe("requirement-questions 评论线程", () => {
     initDb();
     migrate001(sqlite); migrate002(sqlite); migrate004(sqlite);
     migrate005(sqlite); migrate006(sqlite); migrate007(sqlite); migrate008(sqlite);
+    migrate009(sqlite); migrate010(sqlite);
 
     const p = createProject({ id: "proj-q", name: "q" });
     const c = createCodebase({ id: "cb-q", project_id: p.id, alias: "q", path: "/q" });

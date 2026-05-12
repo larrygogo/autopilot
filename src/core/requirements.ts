@@ -40,6 +40,7 @@ export interface CreateRequirementOpts {
 export interface UpdateRequirementOpts {
   title?: string;
   spec_md?: string;
+  codebase_id?: string | null;
   chat_session_id?: string | null;
   task_id?: string | null;
   pr_url?: string | null;
@@ -167,6 +168,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
   const updatable = [
     "title",
     "spec_md",
+    "codebase_id",
     "chat_session_id",
     "task_id",
     "pr_url",
@@ -194,6 +196,13 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
  */
 export function deleteRequirement(id: string): void {
   const db = getDb();
+  // 先删问题的回复，再删问题本身
+  db.run(
+    "DELETE FROM requirement_question_replies WHERE question_id IN " +
+    "(SELECT id FROM requirement_questions WHERE requirement_id = ?)",
+    [id],
+  );
+  db.run("DELETE FROM requirement_questions WHERE requirement_id = ?", [id]);
   db.run("DELETE FROM requirement_feedbacks WHERE requirement_id = ?", [id]);
   db.run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [id]);
   db.run("DELETE FROM requirement_codebases WHERE requirement_id = ?", [id]);
@@ -227,9 +236,12 @@ export function setRequirementStatus(id: string, to: string): Requirement {
  */
 export function nextRequirementId(): string {
   const db = getDb();
+  // 同时扫 requirements 和 requirement_questions，防止需求被删后问题残留导致 ID 复用
   const rows = db
     .query<{ id: string }, []>(
-      "SELECT id FROM requirements WHERE id LIKE 'req-%' ORDER BY id DESC LIMIT 1",
+      "SELECT id FROM requirements WHERE id LIKE 'req-%' " +
+      "UNION SELECT requirement_id AS id FROM requirement_questions WHERE requirement_id LIKE 'req-%' " +
+      "ORDER BY id DESC LIMIT 1",
     )
     .all();
   if (rows.length === 0) return "req-001";

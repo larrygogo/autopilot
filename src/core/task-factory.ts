@@ -104,8 +104,8 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
       );
     }
   }
-  if (requirement && extra["requirement"] === undefined) {
-    extra["requirement"] = requirement;
+  if (extra["requirement"] === undefined) {
+    extra["requirement"] = requirement ?? "";
   }
 
   const firstPhaseEntry = wf.phases[0];

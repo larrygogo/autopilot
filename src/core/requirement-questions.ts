@@ -16,6 +16,7 @@ export interface Question {
   id: string;
   requirement_id: string;
   agent_text: string;
+  suggestions: string[];
   status: "open" | "resolved";
   created_at: number;
   resolved_at: number | null;
@@ -26,6 +27,7 @@ export interface CreateQuestionOpts {
   id: string;
   requirement_id: string;
   agent_text: string;
+  suggestions?: string[];
 }
 
 export interface AddReplyOpts {
@@ -50,17 +52,24 @@ function nowMs(): number {
 export function createQuestion(opts: CreateQuestionOpts): Question {
   const db = getDb();
   const ts = nowMs();
+  const suggestions = JSON.stringify(opts.suggestions ?? []);
   db.run(
-    "INSERT INTO requirement_questions (id, requirement_id, agent_text, status, created_at) VALUES (?, ?, ?, 'open', ?)",
-    [opts.id, opts.requirement_id, opts.agent_text, ts]
+    "INSERT INTO requirement_questions (id, requirement_id, agent_text, suggestions, status, created_at) VALUES (?, ?, ?, ?, 'open', ?)",
+    [opts.id, opts.requirement_id, opts.agent_text, suggestions, ts]
   );
   return getQuestionById(opts.id) as Question;
+}
+
+function parseQuestion(row: Omit<Question, "replies" | "suggestions"> & { suggestions: string }, replies: QuestionReply[]): Question {
+  let suggestions: string[] = [];
+  try { suggestions = JSON.parse(row.suggestions) as string[]; } catch { /* empty */ }
+  return { ...row, suggestions, replies };
 }
 
 export function getQuestionById(id: string): Question | null {
   const db = getDb();
   const row = db
-    .query<Omit<Question, "replies">, [string]>(
+    .query<Omit<Question, "replies" | "suggestions"> & { suggestions: string }, [string]>(
       "SELECT * FROM requirement_questions WHERE id = ?"
     )
     .get(id);
@@ -70,24 +79,24 @@ export function getQuestionById(id: string): Question | null {
       "SELECT * FROM requirement_question_replies WHERE question_id = ? ORDER BY created_at ASC"
     )
     .all(id);
-  return { ...row, replies };
+  return parseQuestion(row, replies);
 }
 
 export function listQuestionsByRequirement(requirementId: string): Question[] {
   const db = getDb();
-  const questions = db
-    .query<Omit<Question, "replies">, [string]>(
+  const rows = db
+    .query<Omit<Question, "replies" | "suggestions"> & { suggestions: string }, [string]>(
       "SELECT * FROM requirement_questions WHERE requirement_id = ? ORDER BY created_at ASC"
     )
     .all(requirementId);
 
-  return questions.map(q => {
+  return rows.map(row => {
     const replies = db
       .query<QuestionReply, [string]>(
         "SELECT * FROM requirement_question_replies WHERE question_id = ? ORDER BY created_at ASC"
       )
-      .all(q.id);
-    return { ...q, replies };
+      .all(row.id);
+    return parseQuestion(row, replies);
   });
 }
 

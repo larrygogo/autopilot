@@ -368,6 +368,7 @@ export const api = {
   updateRequirement: (id: string, body: {
     title?: string;
     spec_md?: string;
+    codebase_id?: string | null;
     chat_session_id?: string | null;
   }) =>
     request<{ requirement: Requirement }>(`/api/requirements/${id}`, {
@@ -564,6 +565,7 @@ export interface Question {
   id: string;
   requirement_id: string;
   agent_text: string;
+  suggestions: string[];
   status: "open" | "resolved";
   created_at: number;
   resolved_at: number | null;

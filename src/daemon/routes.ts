@@ -934,7 +934,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
       const id = nextRequirementId();
       try {
-        const r = createRequirement({
+        createRequirement({
           id,
           project_id: projectId,
           codebase_id: codebaseId,
@@ -942,7 +942,9 @@ export async function handleRequest(req: Request): Promise<Response> {
           spec_md: body.spec_md ?? "",
           chat_session_id: body.chat_session_id ?? null,
         });
-        return json({ requirement: withRepoIdAlias(r) }, 201);
+        // 自动进入澄清流程（触发 requirement-clarifier 后台生成问题）
+        const clarifying = setRequirementStatus(id, "clarifying");
+        return json({ requirement: withRepoIdAlias(clarifying) }, 201);
       } catch (e: unknown) {
         return error((e as Error).message, 500);
       }
@@ -965,7 +967,12 @@ export async function handleRequest(req: Request): Promise<Response> {
     const reqEnqueueMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/enqueue$/);
     if (reqEnqueueMatch && method === "POST") {
       const id = reqEnqueueMatch;
-      if (!getRequirementById(id)) return error("requirement not found", 404);
+      const r = getRequirementById(id);
+      if (!r) return error("requirement not found", 404);
+      if (!r.codebase_id) return error("请先关联代码库再入队");
+      if (!(r.spec_md ?? "").trim()) {
+        return error("需求规约为空，请先完成澄清或手动填写规约");
+      }
       // 仅置 queued；调度器（src/daemon/requirement-scheduler.ts）会监听 status 变化触发创建 task
       try {
         return json({ requirement: withRepoIdAlias(setRequirementStatus(id, "queued")) });
@@ -1059,6 +1066,11 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (!getRequirementById(reqId)) return error("requirement not found", 404);
       if (!getQuestionById(qid)) return error("question not found", 404);
       resolveQuestion(qid);
+      // 全部问题解决时通知 clarifier 决定是否继续追问
+      const allQuestions = listQuestionsByRequirement(reqId);
+      if (allQuestions.length > 0 && allQuestions.every(q => q.status === "resolved")) {
+        emit({ type: "requirement:all-questions-resolved", payload: { id: reqId } });
+      }
       return json({ ok: true });
     }
 
@@ -1102,16 +1114,20 @@ export async function handleRequest(req: Request): Promise<Response> {
         const body = (await req.json()) as {
           title?: string;
           spec_md?: string;
+          codebase_id?: string | null;
           chat_session_id?: string | null;
         };
         if (body.title !== undefined && !body.title.trim()) {
           return error("title 不能为空");
         }
+        if (body.codebase_id !== undefined && body.codebase_id !== null) {
+          if (!getCodebaseById(body.codebase_id)) return error("codebase not found", 404);
+        }
         return json({ requirement: withRepoIdAlias(updateRequirement(reqDetailMatch, body)) });
       }
       if (method === "DELETE") {
-        if (!["cancelled", "done", "failed"].includes(r.status)) {
-          return error(`仅终态需求可删除，当前 status=${r.status}`);
+        if (["running", "fix_revision"].includes(r.status)) {
+          return error(`需求正在执行中（status=${r.status}），请先取消再删除`);
         }
         deleteRequirement(reqDetailMatch);
         return json({ ok: true });

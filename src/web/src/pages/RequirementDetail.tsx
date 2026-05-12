@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project } from "@/hooks/useApi";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2 } from "lucide-react";
+import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project, type Codebase } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -68,13 +68,14 @@ export function RequirementDetail() {
   const [actionBusy, setActionBusy] = useState(false);
   const [subPrs, setSubPrs] = useState<RequirementSubPr[]>([]);
   // 回复输入状态：qid → 文本
+  const [projectCodebases, setProjectCodebases] = useState<Codebase[]>([]);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
-  const refresh = useCallback(async function refresh() {
+  const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
-    setLoading(true);
+    if (!opts.silent) setLoading(true);
     try {
       const [data, repoList, sub, qs] = await Promise.all([
         api.getRequirement(id),
@@ -84,34 +85,42 @@ export function RequirementDetail() {
       ]);
       setReq(data.requirement);
       setFeedbacks(data.feedbacks);
-      setSpecDraft(data.requirement.spec_md);
+      // 编辑中不要覆盖用户正在编辑的草稿
+      setSpecDraft((prev) => editingSpec ? prev : data.requirement.spec_md);
       setRepos(repoList);
       setSubPrs(sub);
       setQuestions(qs);
     } catch (e: unknown) {
-      toast.error("加载失败", (e as Error)?.message ?? String(e));
+      if (!opts.silent) toast.error("加载失败", (e as Error)?.message ?? String(e));
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, editingSpec]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  // WebSocket 订阅：需求状态变化时自动刷新
+  // WebSocket 订阅：需求状态变化 / 问题更新时静默刷新
+  // （不触发 loading 态，避免输入框被卸载导致 IME 输入中断）
   useEffect(() => {
     if (!id) return;
     return subscribe("requirement:*", (event: { type: string; payload?: { id?: string } }) => {
-      if (event.type === "requirement:status-changed" && event.payload?.id === id) {
-        void refresh();
+      const isForThis = event.payload?.id === id;
+      if (!isForThis) return;
+      if (
+        event.type === "requirement:status-changed" ||
+        event.type === "requirement:questions-updated"
+      ) {
+        void refresh({ silent: true });
       }
     });
   }, [id, subscribe, refresh]);
 
   useEffect(() => {
-    if (!req?.project_id) { setProject(null); return; }
+    if (!req?.project_id) { setProject(null); setProjectCodebases([]); return; }
     api.getProject(req.project_id).then(setProject).catch(() => setProject(null));
+    api.listProjectCodebases(req.project_id).then(setProjectCodebases).catch(() => setProjectCodebases([]));
   }, [req?.project_id]);
 
   const repoAlias = useMemo(() => {
@@ -150,7 +159,11 @@ export function RequirementDetail() {
   }
 
   async function enqueue() {
-    if (!id) return;
+    if (!id || !req) return;
+    if (!req.codebase_id) {
+      toast.error("请先关联代码库", "需要绑定代码库才能入队执行，请在下方选择代码库。");
+      return;
+    }
     setActionBusy(true);
     try {
       await api.enqueueRequirement(id);
@@ -160,6 +173,19 @@ export function RequirementDetail() {
       toast.error("入队失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
+    }
+  }
+
+  async function setCodebase(codebaseId: string | null) {
+    if (!id || !req) return;
+    const prev = req;
+    setReq({ ...req, codebase_id: codebaseId });
+    try {
+      await api.updateRequirement(id, { codebase_id: codebaseId });
+      toast.success(codebaseId ? "代码库已关联" : "已取消关联代码库");
+    } catch (e: unknown) {
+      setReq(prev);
+      toast.error("关联失败", (e as Error)?.message ?? String(e));
     }
   }
 
@@ -277,6 +303,20 @@ export function RequirementDetail() {
     }
   }
 
+  async function deleteReq() {
+    if (!id || !req) return;
+    if (!confirm(`确认删除需求「${req.title}」？此操作不可恢复。`)) return;
+    setActionBusy(true);
+    try {
+      await api.deleteRequirement(id);
+      toast.success("需求已删除");
+      navigate(req.project_id ? `/projects/${req.project_id}` : "/projects");
+    } catch (e: unknown) {
+      toast.error("删除失败", (e as Error)?.message ?? String(e));
+      setActionBusy(false);
+    }
+  }
+
   async function submitReply(qid: string) {
     if (!id) return;
     const text = (replyDrafts[qid] ?? "").trim();
@@ -284,9 +324,10 @@ export function RequirementDetail() {
     setReplyingId(qid);
     try {
       await api.addQuestionReply(id, qid, { author_role: "user", text });
+      // 回复即视为解决，无需额外手动点击
+      await api.resolveQuestion(id, qid);
       setReplyDrafts((d) => ({ ...d, [qid]: "" }));
       await refresh();
-      toast.success("回复已提交");
     } catch (e: unknown) {
       toast.error("回复失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -355,9 +396,18 @@ export function RequirementDetail() {
                   <span className="text-muted-foreground">·</span>
                 </>
               )}
-              {repoAlias && (
+              {projectCodebases.length > 0 && (
                 <>
-                  <span className="text-muted-foreground font-mono text-xs">{repoAlias}</span>
+                  <select
+                    className="h-5 rounded border border-input bg-transparent px-1.5 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    value={req.codebase_id ?? ""}
+                    onChange={(e) => void setCodebase(e.target.value || null)}
+                  >
+                    <option value="">选择代码库…</option>
+                    {projectCodebases.map((cb) => (
+                      <option key={cb.id} value={cb.id}>{cb.alias}</option>
+                    ))}
+                  </select>
                   <span className="text-muted-foreground">·</span>
                 </>
               )}
@@ -431,94 +481,109 @@ export function RequirementDetail() {
         </Card>
       )}
 
-      {/* 评论线程（调查中 / 有问题时显示）*/}
+      {/* AI 正在生成澄清问题（clarifying 且暂无问题） */}
+      {req.status === "clarifying" && questions.length === 0 && (
+        <Card className="mb-6 p-5">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            AI 正在分析需求，生成澄清问题…
+          </div>
+        </Card>
+      )}
+
+      {/* 澄清对话（chat 气泡风格）*/}
       {questions.length > 0 && (
         <Card className="mb-6 p-5">
           <div className="mb-4 flex items-center gap-2">
             <MessageSquare className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Agent 提问</h2>
+            <h2 className="text-sm font-semibold">需求澄清</h2>
             {openQuestions.length > 0 && (
-              <Badge variant="secondary" className="text-[10px]">
-                {openQuestions.length} 待回复
-              </Badge>
+              <Badge variant="secondary" className="text-[10px]">{openQuestions.length} 待回复</Badge>
             )}
           </div>
-          <div className="space-y-5">
+
+          {/* 对话气泡流 */}
+          <div className="space-y-3">
             {questions.map((q) => (
-              <div key={q.id} className={cn("rounded-lg border p-4", q.status === "resolved" && "opacity-60")}>
-                {/* 问题文本 */}
-                <div className="mb-3 flex items-start justify-between gap-2">
-                  <p className="text-sm font-medium leading-relaxed">{q.agent_text}</p>
-                  {q.status === "open" && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 shrink-0 px-2 text-xs text-muted-foreground"
-                      onClick={() => resolveQ(q.id)}
-                      disabled={resolvingId === q.id}
-                    >
-                      <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                      {resolvingId === q.id ? "处理中…" : "标记已解决"}
-                    </Button>
-                  )}
-                  {q.status === "resolved" && (
-                    <Badge variant="outline" className="text-[10px] shrink-0">已解决</Badge>
-                  )}
+              <div key={q.id} className="space-y-3">
+                {/* AI 气泡 */}
+                <div className="flex items-start gap-2">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">AI</div>
+                  <div className="flex-1 space-y-2">
+                    <div className={cn(
+                      "rounded-2xl rounded-tl-sm bg-muted px-4 py-3 text-sm leading-relaxed",
+                      q.status === "resolved" && "opacity-60"
+                    )}>
+                      {q.agent_text}
+                    </div>
+                    {/* 建议 chips（仅 open 且有建议时显示） */}
+                    {q.status === "open" && q.suggestions.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pl-1">
+                        {q.suggestions.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setReplyDrafts(d => ({ ...d, [q.id]: s }))}
+                            className="rounded-full border border-input bg-background px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {/* 回复列表 */}
-                {q.replies && q.replies.length > 0 && (
-                  <div className="mb-3 space-y-2 border-l-2 border-muted pl-3">
-                    {q.replies.map((reply) => (
-                      <div key={reply.id} className="space-y-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <Badge
-                            variant={reply.author_role === "user" ? "default" : "secondary"}
-                            className="text-[10px] font-normal h-4 px-1.5"
-                          >
-                            {reply.author_role === "user" ? "你" : "Agent"}
-                          </Badge>
-                          <span className="text-[10px] text-muted-foreground">
-                            {new Date(reply.created_at).toLocaleString()}
-                          </span>
-                        </div>
-                        <p className="text-xs leading-relaxed text-foreground">{reply.text}</p>
-                      </div>
-                    ))}
+                {/* 用户回复气泡 */}
+                {(q.replies ?? []).filter(r => r.author_role === "user").map((reply) => (
+                  <div key={reply.id} className="flex items-start justify-end gap-2">
+                    <div className={cn(
+                      "max-w-[80%] rounded-2xl rounded-tr-sm bg-primary px-4 py-3 text-sm leading-relaxed text-primary-foreground",
+                      q.status === "resolved" && "opacity-70"
+                    )}>
+                      {reply.text}
+                    </div>
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">你</div>
                   </div>
-                )}
+                ))}
 
-                {/* 回复输入框（仅 open 状态） */}
+                {/* 输入框（仅 open 状态） */}
                 {q.status === "open" && (
-                  <div className="flex items-end gap-2">
+                  <div className="pl-8 space-y-2">
                     <Textarea
                       value={replyDrafts[q.id] ?? ""}
-                      onChange={(e) =>
-                        setReplyDrafts((d) => ({ ...d, [q.id]: e.target.value }))
-                      }
-                      placeholder="回复 Agent 的提问…"
-                      className="min-h-[60px] flex-1 text-xs"
+                      onChange={(e) => setReplyDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
+                      placeholder="输入回复，或点击上方建议…"
+                      className="min-h-[72px] resize-none text-sm"
                       disabled={replyingId === q.id}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submitReply(q.id);
                       }}
                     />
-                    <Button
-                      size="sm"
-                      onClick={() => void submitReply(q.id)}
-                      disabled={replyingId === q.id || !(replyDrafts[q.id] ?? "").trim()}
-                      className="shrink-0"
-                    >
-                      <Send className="h-3.5 w-3.5" />
-                      {replyingId === q.id ? "发送中…" : "回复"}
-                    </Button>
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        onClick={() => void submitReply(q.id)}
+                        disabled={replyingId === q.id || !(replyDrafts[q.id] ?? "").trim()}
+                      >
+                        <Send className="mr-1.5 h-3.5 w-3.5" />
+                        {replyingId === q.id ? "发送中…" : "发送"}
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
             ))}
           </div>
-          {resolvedQuestions.length > 0 && openQuestions.length === 0 && (
-            <p className="mt-3 text-xs text-muted-foreground">所有问题已解决。</p>
+
+          {resolvedQuestions.length > 0 && openQuestions.length === 0 &&
+           (req.status === "drafting" || req.status === "clarifying") && (
+            <div className="mt-5 flex items-center justify-between rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3">
+              <p className="text-sm text-green-700 dark:text-green-400">所有问题已回答，可以继续了。</p>
+              <Button size="sm" onClick={markReady} disabled={actionBusy} className="shrink-0">
+                {actionBusy ? "处理中…" : "标记为已澄清 →"}
+              </Button>
+            </div>
           )}
         </Card>
       )}
@@ -529,7 +594,12 @@ export function RequirementDetail() {
         <div className="lg:col-span-2 space-y-4">
           <Card className="p-5">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold">需求规约</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold">需求规约</h2>
+                {req.spec_md && (req.status === "clarifying" || req.status === "drafting") && (
+                  <Badge variant="secondary" className="text-[10px] font-normal">AI 整理</Badge>
+                )}
+              </div>
               {!editingSpec && (
                 <Button
                   variant="outline"
@@ -711,42 +781,57 @@ export function RequirementDetail() {
               {isTerminal && (
                 <p className="text-xs text-muted-foreground text-center">需求已终止，无可用操作。</p>
               )}
+              {/* 删除按钮：执行中禁用，其余状态均可用 */}
+              <Button
+                variant="outline"
+                className="w-full text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+                size="sm"
+                onClick={() => void deleteReq()}
+                disabled={actionBusy || req.status === "running" || req.status === "fix_revision"}
+                title={req.status === "running" || req.status === "fix_revision" ? "需求正在执行中，请先取消" : undefined}
+              >
+                删除需求
+              </Button>
             </div>
           </Card>
 
-          {/* 反馈历史时间线 */}
-          <Card className="p-5">
-            <div className="mb-3 flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">反馈历史</h2>
-              {feedbacks.length > 0 && (
-                <span className="ml-auto rounded-full bg-muted px-1.5 py-px text-[11px] font-medium text-muted-foreground">
-                  {feedbacks.length}
-                </span>
+          {/* 反馈历史时间线 — 仅在 PR review 阶段或已有反馈时显示 */}
+          {(feedbacks.length > 0 ||
+            req.status === "awaiting_review" ||
+            req.status === "fix_revision") && (
+            <Card className="p-5">
+              <div className="mb-3 flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold">反馈历史</h2>
+                {feedbacks.length > 0 && (
+                  <span className="ml-auto rounded-full bg-muted px-1.5 py-px text-[11px] font-medium text-muted-foreground">
+                    {feedbacks.length}
+                  </span>
+                )}
+              </div>
+              {feedbacks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">等待 PR review 反馈…</p>
+              ) : (
+                <ol className="space-y-3">
+                  {feedbacks.map((fb) => (
+                    <li key={fb.id} className="border-l-2 border-muted pl-3">
+                      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className="text-[10px] font-normal h-4 px-1.5">
+                          {SOURCE_LABEL[fb.source] ?? fb.source}
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground">
+                          {new Date(fb.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <pre className="whitespace-pre-wrap break-words font-mono text-xs text-foreground leading-relaxed">
+                        {fb.body}
+                      </pre>
+                    </li>
+                  ))}
+                </ol>
               )}
-            </div>
-            {feedbacks.length === 0 ? (
-              <p className="text-xs text-muted-foreground">暂无反馈记录。</p>
-            ) : (
-              <ol className="space-y-3">
-                {feedbacks.map((fb) => (
-                  <li key={fb.id} className="border-l-2 border-muted pl-3">
-                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                      <Badge variant="outline" className="text-[10px] font-normal h-4 px-1.5">
-                        {SOURCE_LABEL[fb.source] ?? fb.source}
-                      </Badge>
-                      <span className="text-[10px] text-muted-foreground">
-                        {new Date(fb.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                    <pre className="whitespace-pre-wrap break-words font-mono text-xs text-foreground leading-relaxed">
-                      {fb.body}
-                    </pre>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </Card>
+            </Card>
+          )}
         </div>
       </div>
     </div>
