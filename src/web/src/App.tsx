@@ -28,6 +28,7 @@ import {
   Plug,
   Bot,
   Sliders,
+  Sparkles,
   Moon,
   Sun,
   Search,
@@ -37,6 +38,7 @@ import {
   Layers,
 } from "lucide-react";
 
+const Now = lazy(() => import("./pages/Now").then((m) => ({ default: m.Now })));
 const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
 const TaskDetail = lazy(() =>
   import("./pages/TaskDetail").then((m) => ({ default: m.TaskDetail })),
@@ -64,6 +66,7 @@ interface NavItem {
 }
 
 const MAIN_NAV: NavItem[] = [
+  { path: "/now", label: "现在", icon: Sparkles, end: true },
   { path: "/chat", label: "对话", icon: MessageSquare, end: true },
   { path: "/tasks", label: "任务", icon: ListTodo },
   { path: "/schedules", label: "定时", icon: Clock, end: true },
@@ -78,6 +81,7 @@ const SETTINGS_NAV: NavItem[] = [
 ];
 
 function titleForPath(pathname: string): string {
+  if (pathname.startsWith("/now")) return "现在";
   if (pathname.startsWith("/tasks/")) {
     const id = pathname.slice("/tasks/".length);
     return id ? `任务 · ${id}` : "任务";
@@ -192,6 +196,7 @@ function AppInner() {
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route path="/" element={<Navigate to="/tasks" replace />} />
+                <Route path="/now" element={<Now />} />
                 <Route
                   path="/tasks"
                   element={
