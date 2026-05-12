@@ -1,0 +1,61 @@
+<h2>"项目" 这个抽象的粒度 / 边界是什么？</h2>
+<p class="subtitle">点你心里最贴近的那一个。这决定后面 UI、DB、调度逻辑全部走向</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="single-repo" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+          <div style="width:80px;height:80px;border-radius:50%;background:#3b82f6;display:flex;align-items:center;justify-content:center;color:white;font-weight:600;font-size:13px;">my-app</div>
+          <div style="font-size:11px;color:#888;">= 1 个 git 工作目录</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · 单个 git 工作目录</h3>
+      <p>一个项目 = 一个 git repo。子模块在项目内部作为附加信息展示，不算独立项目。跟现在 <code>repos</code> 表 1:1，最直接。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="parent-with-submodules" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+          <div style="position:relative;width:140px;height:90px;border:2px dashed #10b981;border-radius:14px;display:flex;align-items:center;justify-content:center;gap:6px;padding:6px;">
+            <div style="width:50px;height:50px;border-radius:50%;background:#10b981;color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;">父</div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <div style="width:30px;height:30px;border-radius:50%;background:#a7f3d0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#065f46;">子1</div>
+              <div style="width:30px;height:30px;border-radius:50%;background:#a7f3d0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#065f46;">子2</div>
+            </div>
+          </div>
+          <div style="font-size:11px;color:#888;">父 + 全部子模块 = 1 个项目</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · 父仓库 + 子模块组</h3>
+      <p>一个项目 = 父 repo + 全部 git 子模块。子模块不是独立项目，是项目内部的"模块"。跟现有调度组语义对齐（已实现的组级锁就是这个含义）。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="aggregate" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:8px;">
+          <div style="position:relative;width:160px;height:90px;border:2px dashed #f59e0b;border-radius:14px;display:flex;align-items:center;justify-content:space-around;padding:6px;">
+            <div style="width:42px;height:42px;border-radius:50%;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;">前端</div>
+            <div style="width:42px;height:42px;border-radius:50%;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;">后端</div>
+            <div style="width:42px;height:42px;border-radius:50%;background:#f59e0b;color:white;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;">SDK</div>
+          </div>
+          <div style="font-size:11px;color:#888;">N 个独立 repo 由用户挂到同一项目下</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C · 用户自定义聚合</h3>
+      <p>一个项目 = 用户挑选 N 个不相关 git repo 组成的工作集合（比如 ClawMo 项目下挂 iOS 端 + Gateway 后端 + 共用 SDK 三个独立仓库）。最灵活，但要新加一层 project 表，并改 requirement → project 的归属关系。</p>
+    </div>
+  </div>
+
+</div>

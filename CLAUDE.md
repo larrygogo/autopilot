@@ -24,6 +24,8 @@
 - **Agent 系统**：内置 Anthropic / OpenAI / Google 三大 Agent 提供商（凭证由对应 CLI 自身管理）
 - **Agent 三层配置**：全局 `config.yaml.agents` → 工作流 `agents[]` 覆盖 → 运行时 `RunOptions` 覆盖
 - **Web UI 工作流编辑器**：阶段 CRUD / 并行块 / 驳回 / 智能体覆盖全图形化，`workflow.ts` 自动同步（改名重命名函数、追加缺失、孤儿清理）
+- **项目工作台**：两层数据模型 `Project ⊃ Codebase`，需求挂项目维度，支持 AI 调查 + 评论线程 + 用户审批流
+- **评论线程**：`requirement_questions` + `requirement_question_replies`，Agent 调查期主动提问，用户回复后继续
 - **框架零业务知识**：核心模块不含任何工作流专属常量或逻辑
 - **用户空间分离**：`AUTOPILOT_HOME`（默认 `~/.autopilot/`）存放用户配置、工作流和运行时数据
 
@@ -67,7 +69,12 @@ autopilot/
 │   │   ├── logger.ts              # 阶段标签日志 + emit log:entry
 │   │   ├── watcher.ts             # 卡死任务检测 + emit watcher:recovery
 │   │   ├── migrate.ts             # 数据库迁移引擎
-│   │   └── config.ts              # 配置加载 & 校验
+│   │   ├── config.ts              # 配置加载 & 校验
+│   │   ├── projects.ts            # Project CRUD（id: proj-NNN）
+│   │   ├── codebases.ts           # Codebase CRUD（id: cb-NNN，原 repos.ts）
+│   │   ├── codebase-health.ts     # Codebase 健康检查（原 repo-health.ts）
+│   │   ├── requirements.ts        # Requirement CRUD（含 project_id + codebase_id）
+│   │   └── requirement-questions.ts # 评论线程 CRUD（id: qst-NNN）
 │   ├── daemon/                    # Daemon 进程
 │   │   ├── index.ts               # Daemon 入口（init→server→watcher→signal）
 │   │   ├── server.ts              # Bun.serve() HTTP+WS 统一服务
@@ -107,6 +114,21 @@ autopilot/
 └── tests/                         # 单元测试（bun:test）
 ```
 
+## 数据模型（P1+）
+
+两层结构：`Project ⊃ Codebase ⊃ Submodule`
+
+| 实体 | 表 | ID 前缀 | 说明 |
+|------|-----|---------|------|
+| Project | `projects` | `proj-NNN` | 顶层工作空间 |
+| Codebase | `codebases` | `cb-NNN` | 物理 Git 目录，归属某 Project |
+| Requirement | `requirements` | — | 挂 project_id + codebase_id（多对多 via requirement_codebases） |
+| Question | `requirement_questions` | `qst-NNN` | Agent 调查期提问，含多轮回复 |
+
+状态流：`draft` → `investigating` → `awaiting_approval` → `queued` → `running` → `done`/`failed`
+
+向后兼容：`/api/repos` 路由别名保留至 P6 清理（≈90 天）；`Requirement.repo_id` 已于 P1 正式改名 `codebase_id`。
+
 ## 开发规范
 
 - TypeScript strict 模式，Bun 运行时
@@ -115,6 +137,7 @@ autopilot/
 - 工作流模块必须自包含：业务常量、辅助函数、通知实现均在模块内部
 - `TABLE_COLUMNS` 和 `PROTECTED_COLUMNS` 统一从 `src/core/db.ts` 导出，其他模块导入使用
 - catch 块使用 `catch (e: unknown)` 而非 `catch (e: any)`
+- 迁移中涉及 DROP TABLE / 表重建时，`migrate.ts` 已自动在事务外切 `PRAGMA foreign_keys=OFF`，无需在迁移文件内处理
 
 ## 新增工作流
 

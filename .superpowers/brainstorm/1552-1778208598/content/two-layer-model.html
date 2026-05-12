@@ -1,0 +1,98 @@
+<h2>统一抽象：项目 ⊃ 代码资产 ⊃ 子模块</h2>
+<p class="subtitle">两层数据模型同时容纳 A/B/C — 你看这样行不行</p>
+
+<div class="section">
+  <div style="background: var(--bg-mockup, #fafafa); border: 1px solid var(--border, #e5e5e5); border-radius: 14px; padding: 20px;">
+    <div style="font-size: 12px; color: #888; margin-bottom: 14px; font-family: monospace;">
+      Project（项目）= 用户的工作单位 · 提需求 / 跑任务 / 看审核 都以此为入口
+      <br>
+      Codebase（代码资产）= 物理 git 工作目录 · 是 submit_pr 和 调度锁 的真实承载
+      <br>
+      Submodule（子模块）= git submodule · 只在 codebase 内部展示，不独立成"项目"
+    </div>
+
+    <!-- Three side-by-side examples -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+
+      <!-- Example A: simple -->
+      <div style="background: white; border: 1px solid #ddd; border-radius: 10px; padding: 12px;">
+        <div style="font-size: 11px; color: #888; margin-bottom: 8px; text-align: center;">A 场景：autopilot 自身</div>
+        <div style="border: 2px solid #3b82f6; border-radius: 8px; padding: 10px; background: #eff6ff;">
+          <div style="font-size: 10px; color: #1e40af; font-weight: 600; margin-bottom: 6px;">📁 Project: autopilot</div>
+          <div style="background: white; border: 1px dashed #3b82f6; border-radius: 6px; padding: 6px; font-size: 11px;">
+            <div>📦 codebase: autopilot</div>
+            <div style="font-size: 10px; color: #888; margin-top: 2px;">└─ 无子模块</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Example B: parent + submodules -->
+      <div style="background: white; border: 1px solid #ddd; border-radius: 10px; padding: 12px;">
+        <div style="font-size: 11px; color: #888; margin-bottom: 8px; text-align: center;">B 场景：含子模块</div>
+        <div style="border: 2px solid #10b981; border-radius: 8px; padding: 10px; background: #ecfdf5;">
+          <div style="font-size: 10px; color: #065f46; font-weight: 600; margin-bottom: 6px;">📁 Project: web-app</div>
+          <div style="background: white; border: 1px dashed #10b981; border-radius: 6px; padding: 6px; font-size: 11px;">
+            <div>📦 codebase: web-app</div>
+            <div style="font-size: 10px; color: #555; margin-top: 2px; padding-left: 10px;">├─ 🔗 sub: ui-kit</div>
+            <div style="font-size: 10px; color: #555; padding-left: 10px;">└─ 🔗 sub: shared</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Example C: aggregate -->
+      <div style="background: white; border: 1px solid #ddd; border-radius: 10px; padding: 12px;">
+        <div style="font-size: 11px; color: #888; margin-bottom: 8px; text-align: center;">C 场景：ClawMo 全栈</div>
+        <div style="border: 2px solid #f59e0b; border-radius: 8px; padding: 10px; background: #fffbeb;">
+          <div style="font-size: 10px; color: #92400e; font-weight: 600; margin-bottom: 6px;">📁 Project: ClawMo</div>
+          <div style="background: white; border: 1px dashed #f59e0b; border-radius: 6px; padding: 6px; font-size: 11px; margin-bottom: 4px;">
+            <div>📦 codebase: ClawMo-iOS</div>
+          </div>
+          <div style="background: white; border: 1px dashed #f59e0b; border-radius: 6px; padding: 6px; font-size: 11px; margin-bottom: 4px;">
+            <div>📦 codebase: gateway</div>
+            <div style="font-size: 10px; color: #555; padding-left: 10px;">└─ 🔗 sub: relay-sdk</div>
+          </div>
+          <div style="background: white; border: 1px dashed #f59e0b; border-radius: 6px; padding: 6px; font-size: 11px;">
+            <div>📦 codebase: shared-types</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>这意味着的几个具体决定</h3>
+  <ul style="font-size:13px; line-height:1.7;">
+    <li><strong>提需求</strong>：归到 <code>project</code>。需求里若涉及多 codebase 协同改动（C 场景），workflow 里跨 codebase 走流程</li>
+    <li><strong>UI 入口</strong>：侧栏只有「项目」一个入口，进项目主页后看到所属 codebase / 需求 / 任务 / 待审核</li>
+    <li><strong>调度锁</strong>：仍然在 <code>codebase</code> 维度（避免同 git 仓库被多 task 改坏）。但 project 内多 codebase 可以并行</li>
+    <li><strong>submit_pr</strong>：每个被改的 codebase 各自走 PR；project 维度汇总 PR 状态</li>
+    <li><strong>从 A 升到 C</strong>：随时可以给已有 project 多挂一个 codebase，无需迁移</li>
+    <li><strong>"现在的 repos 表"</strong>：约等于现在的 codebase 表（保留父子模块自指），只是多了 <code>project_id</code> 外键</li>
+  </ul>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>对，就是这个意思</h3>
+      <p>两层模型 + codebase 内带子模块树，A/B/C 都能用</p>
+    </div>
+  </div>
+  <div class="option" data-choice="too-complex" onclick="toggleSelect(this)">
+    <div class="letter">×</div>
+    <div class="content">
+      <h3>太复杂了，我其实只想要 A 或 B</h3>
+      <p>多 codebase 聚合的场景目前用不上，先不做</p>
+    </div>
+  </div>
+  <div class="option" data-choice="different" onclick="toggleSelect(this)">
+    <div class="letter">?</div>
+    <div class="content">
+      <h3>方向有点偏，我心里其实是另一个东西</h3>
+      <p>回终端我详细说</p>
+    </div>
+  </div>
+</div>

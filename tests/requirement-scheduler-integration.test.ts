@@ -4,8 +4,11 @@ import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate004 } from "../src/migrations/004-repos";
 import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate008 } from "../src/migrations/008-projects";
 import { _setDbForTest } from "../src/core/db";
-import { createRepo } from "../src/core/repos";
+import { createCodebase } from "../src/core/codebases";
+import { createProject } from "../src/core/projects";
 import {
   createRequirement,
   getRequirementById,
@@ -24,9 +27,12 @@ describe("调度器集成（不走真实 task runner，验证状态流转）", (
     migrate004(db);
     migrate005(db);
     migrate006(db);
+    migrate007(db);
+    migrate008(db);
     _setDbForTest(db);
-    createRepo({ id: "repo-A", alias: "rA", path: "/tmp/A", default_branch: "main" });
-    createRepo({ id: "repo-B", alias: "rB", path: "/tmp/B", default_branch: "main" });
+    createProject({ id: "proj-001", name: "test-proj" });
+    createCodebase({ id: "cb-A", project_id: "proj-001", alias: "rA", path: "/tmp/A", default_branch: "main" });
+    createCodebase({ id: "cb-B", project_id: "proj-001", alias: "rB", path: "/tmp/B", default_branch: "main" });
   });
 
   afterAll(() => {
@@ -59,14 +65,14 @@ describe("调度器集成（不走真实 task runner，验证状态流转）", (
 
   it("「占用槽位」语义：running ∨ fix_revision 才算占用，awaiting_review 不算", () => {
     const a = nextRequirementId();
-    createRequirement({ id: a, repo_id: "repo-A", title: "A" });
+    createRequirement({ id: a, project_id: "proj-001", codebase_id: "cb-A", title: "A" });
     pushTo(a, "awaiting_review");
 
     const b = nextRequirementId();
-    createRequirement({ id: b, repo_id: "repo-A", title: "B" });
+    createRequirement({ id: b, project_id: "proj-001", codebase_id: "cb-A", title: "B" });
     pushTo(b, "queued");
 
-    const all = listRequirements({ repo_id: "repo-A" });
+    const all = listRequirements({ codebase_id: "cb-A" });
     const active = all.filter((r) => r.status === "running" || r.status === "fix_revision");
     expect(active.length).toBe(0);
 
@@ -77,7 +83,7 @@ describe("调度器集成（不走真实 task runner，验证状态流转）", (
 
   it("inject_feedback 路径：awaiting_review + 反馈 → fix_revision", () => {
     const a = nextRequirementId();
-    createRequirement({ id: a, repo_id: "repo-A", title: "A" });
+    createRequirement({ id: a, project_id: "proj-001", codebase_id: "cb-A", title: "A" });
     pushTo(a, "awaiting_review");
 
     appendFeedback({ requirement_id: a, source: "manual", body: "请改 X" });
@@ -96,18 +102,18 @@ describe("调度器集成（不走真实 task runner，验证状态流转）", (
 
   it("跨 repo 互不阻塞", () => {
     const a = nextRequirementId();
-    createRequirement({ id: a, repo_id: "repo-A", title: "A" });
+    createRequirement({ id: a, project_id: "proj-001", codebase_id: "cb-A", title: "A" });
     pushTo(a, "running");
 
     const b = nextRequirementId();
-    createRequirement({ id: b, repo_id: "repo-B", title: "B" });
+    createRequirement({ id: b, project_id: "proj-001", codebase_id: "cb-B", title: "B" });
     pushTo(b, "queued");
 
     // repo-A 有 running，repo-B 无活跃 —— 调度器逻辑可独立处理
-    const aActive = listRequirements({ repo_id: "repo-A" }).filter(
+    const aActive = listRequirements({ codebase_id: "cb-A" }).filter(
       (r) => r.status === "running" || r.status === "fix_revision"
     );
-    const bActive = listRequirements({ repo_id: "repo-B" }).filter(
+    const bActive = listRequirements({ codebase_id: "cb-B" }).filter(
       (r) => r.status === "running" || r.status === "fix_revision"
     );
     expect(aActive.length).toBe(1);

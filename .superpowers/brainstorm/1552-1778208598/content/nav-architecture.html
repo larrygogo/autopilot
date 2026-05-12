@@ -1,0 +1,87 @@
+<h2>侧栏导航：三种信息架构</h2>
+<p class="subtitle">这决定你日常打开 autopilot 后的"主语"是任务、需求、还是项目</p>
+
+<div class="cards">
+
+  <!-- Option 1: 现状 -->
+  <div class="card" data-choice="status-quo" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="display:flex;flex-direction:column;height:100%;background:#1f2937;color:#e5e7eb;padding:14px;font-size:11px;font-family:system-ui;">
+        <div style="font-weight:600;margin-bottom:8px;font-size:12px;">Autopilot</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <div style="padding:5px 8px;background:#374151;border-radius:5px;">💬 对话</div>
+          <div style="padding:5px 8px;">✅ 任务</div>
+          <div style="padding:5px 8px;">⏰ 定时</div>
+          <div style="padding:5px 8px;">📋 工作流</div>
+          <div style="padding:5px 8px;background:#fbbf24;color:#1f2937;border-radius:5px;">📁 仓库</div>
+          <div style="padding:5px 8px;background:#fbbf24;color:#1f2937;border-radius:5px;">📥 需求</div>
+        </div>
+        <div style="font-size:9px;color:#888;margin-top:auto;">⚠️ 需求 / 任务 是全局视图，要心里记着"我现在在看哪个仓库的"</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>① 现状（不变）</h3>
+      <p>仓库、需求、任务都是侧栏并列入口。改动最小，但用户必须自己跨页面切换。<strong>就是你说"不满意"的现状</strong>。</p>
+    </div>
+  </div>
+
+  <!-- Option 2: 项目为中心（彻底） -->
+  <div class="card" data-choice="project-centric" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="display:flex;flex-direction:column;height:100%;background:#1f2937;color:#e5e7eb;padding:14px;font-size:11px;font-family:system-ui;">
+        <div style="font-weight:600;margin-bottom:8px;font-size:12px;">Autopilot</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <div style="padding:5px 8px;background:#10b981;color:#1f2937;border-radius:5px;font-weight:600;">🏠 项目</div>
+          <div style="padding:5px 8px;">💬 对话</div>
+          <div style="padding:5px 8px;">⏰ 定时</div>
+          <div style="padding:5px 8px;">📋 工作流</div>
+        </div>
+        <div style="margin-top:8px;border-top:1px dashed #4b5563;padding-top:8px;font-size:10px;color:#9ca3af;">进项目后：</div>
+        <div style="margin-left:8px;border-left:2px solid #10b981;padding-left:6px;display:flex;flex-direction:column;gap:2px;font-size:10px;color:#a7f3d0;">
+          <div>· 总览</div>
+          <div>· 需求</div>
+          <div>· 任务</div>
+          <div>· 审核 (3)</div>
+          <div>· codebases</div>
+          <div>· 设置</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>② 项目为中心（彻底重构）</h3>
+      <p>侧栏只剩「项目」一个主入口 + 全局工具（对话 / 定时 / 工作流）。需求 / 任务 / 审核全部下沉到项目子路由。每次都先选项目再做事。<strong>最贴合"项目工作台"心智</strong>。</p>
+    </div>
+  </div>
+
+  <!-- Option 3: 混合 -->
+  <div class="card" data-choice="hybrid" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="display:flex;flex-direction:column;height:100%;background:#1f2937;color:#e5e7eb;padding:14px;font-size:11px;font-family:system-ui;">
+        <div style="font-weight:600;margin-bottom:8px;font-size:12px;">Autopilot</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <div style="padding:5px 8px;background:#10b981;color:#1f2937;border-radius:5px;font-weight:600;">🏠 项目</div>
+          <div style="padding:5px 8px;">💬 对话</div>
+          <div style="padding:5px 8px;">✅ 任务（全部）</div>
+          <div style="padding:5px 8px;">📥 需求（全部）</div>
+          <div style="padding:5px 8px;">⏰ 定时</div>
+          <div style="padding:5px 8px;">📋 工作流</div>
+        </div>
+        <div style="margin-top:8px;border-top:1px dashed #4b5563;padding-top:8px;font-size:10px;color:#9ca3af;">项目主页内同样有：</div>
+        <div style="margin-left:8px;font-size:10px;color:#a7f3d0;">本项目需求 / 本项目任务 / 待审核</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>③ 混合（项目 + 全局视图共存）</h3>
+      <p>项目主页有完整工作台体验；同时保留全局「需求」「任务」入口（跨项目筛选）。改动适中，迁移期友好。<strong>缺点：信息重复，用户得选择从哪个入口进</strong>。</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="section">
+  <h3>额外想问</h3>
+  <p style="font-size:13px;color:#666;">
+    选 ② 的话，意味着你日后看「最近所有任务」「跨项目排队的需求」等"全局视角"会失去专属入口（要进项目才能看）。<br>
+    但 ② 是真正贴近"我打开 autopilot 就是为了管某个项目"这个心智的。
+  </p>
+</div>

@@ -33,7 +33,7 @@ import { snapshotWorkflow } from "../core/manifest";
 import { executePhase } from "../core/runner";
 import { randomUUID } from "crypto";
 import { log } from "../core/logger";
-import { listRepos, getRepoByAlias, getRepoById } from "../core/repos";
+import { listCodebases, getCodebaseById } from "../core/codebases";
 import {
   listRequirements,
   getRequirementById,
@@ -53,6 +53,16 @@ function ok(data: unknown): ToolContent {
 
 function err(msg: string): ToolContent {
   return { content: [{ type: "text", text: `错误：${msg}` }] };
+}
+
+/**
+ * 临时全局 alias 查找：旧 chat tool API 没有 projectId 上下文，
+ * 008 迁移后 alias 仅在 project 内唯一，全局可能多个匹配。
+ * 此处取首个命中。P3/P5 改造 chat tool 强制 projectId 后可移除此 hack。
+ */
+function findRepoByAliasGlobal(alias: string) {
+  const all = listCodebases({ includeSubmodules: true });
+  return all.find((c) => c.alias === alias) ?? null;
 }
 
 /**
@@ -436,7 +446,7 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
       {},
       async () => {
         return ok(
-          listRepos().map((r) => ({
+          listCodebases().map((r) => ({
             alias: r.alias,
             id: r.id,
             path: r.path,
@@ -456,10 +466,10 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
         initial_text: z.string().optional().describe("可选：用户初始描述，写入 spec_md"),
       },
       async (args) => {
-        const repo = getRepoByAlias(args.repo_alias);
-        if (!repo) return err(`repo_alias 不存在：${args.repo_alias}（先在 /repos 注册）`);
-        if (repo.parent_repo_id) {
-          const parent = getRepoById(repo.parent_repo_id);
+        const repo = findRepoByAliasGlobal(args.repo_alias);
+        if (!repo) return err(`repo_alias 不存在：${args.repo_alias}（先在 /codebases 注册）`);
+        if (repo.parent_codebase_id) {
+          const parent = getCodebaseById(repo.parent_codebase_id);
           const parentHint = parent ? `请改用父 repo 别名 "${parent.alias}"` : "请用父 repo 别名";
           return err(
             `"${args.repo_alias}" 是子模块，不能直接提需求。${parentHint}（autopilot 会在执行时自动跨父子操作）`,
@@ -469,7 +479,8 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
         try {
           const r = createRequirement({
             id,
-            repo_id: repo.id,
+            project_id: repo.project_id,
+            codebase_id: repo.id,
             title: args.title.trim(),
             spec_md: args.initial_text ?? "",
           });
@@ -546,19 +557,20 @@ export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]
         status: z.string().optional(),
       },
       async (args) => {
-        let repoId: string | undefined;
+        let codebaseId: string | undefined;
         if (args.repo_alias) {
-          const repo = getRepoByAlias(args.repo_alias);
+          const repo = findRepoByAliasGlobal(args.repo_alias);
           if (!repo) return err(`repo_alias 不存在：${args.repo_alias}`);
-          repoId = repo.id;
+          codebaseId = repo.id;
         }
-        const list = listRequirements({ repo_id: repoId, status: args.status });
+        const list = listRequirements({ codebase_id: codebaseId, status: args.status });
         return ok(
           list.map((r) => ({
             id: r.id,
             title: r.title,
             status: r.status,
-            repo_id: r.repo_id,
+            project_id: r.project_id,
+            codebase_id: r.codebase_id,
             pr_url: r.pr_url,
             task_id: r.task_id,
           })),

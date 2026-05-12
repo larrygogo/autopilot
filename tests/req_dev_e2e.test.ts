@@ -5,8 +5,12 @@ import { _clearRegistry, register } from "../src/core/registry";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
 import { up as migrate004 } from "../src/migrations/004-repos";
+import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
-import { createRepo } from "../src/core/repos";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate008 } from "../src/migrations/008-projects";
+import { createCodebase } from "../src/core/codebases";
+import { createProject } from "../src/core/projects";
 import { startTaskFromTemplate } from "../src/core/task-factory";
 import { setup_req_dev_task } from "../examples/workflows/req_dev/workflow";
 import type { WorkflowDefinition } from "../src/core/registry";
@@ -22,11 +26,16 @@ describe("req_dev e2e smoke", () => {
     migrate001(sqlite);
     migrate002(sqlite);
     migrate004(sqlite);
+    migrate005(sqlite);
     migrate006(sqlite);
+    migrate007(sqlite);
+    migrate008(sqlite);
 
-    // 创建测试 repo
-    createRepo({
-      id: "repo-001",
+    // 创建测试 project + codebase
+    createProject({ id: "proj-001", name: "test-proj" });
+    createCodebase({
+      id: "cb-001",
+      project_id: "proj-001",
       alias: "autopilot",
       path: process.cwd(),
       default_branch: "main",
@@ -136,7 +145,7 @@ describe("req_dev e2e smoke", () => {
       workflow: "req_dev",
       title: "smoke test requirement",
       requirement: "test requirement content",
-      repo_id: "repo-001", // 额外工作流参数，转发给 setup_func
+      repo_id: "cb-001", // 额外工作流参数，转发给 setup_func
     });
 
     // 验证 task 本体
@@ -147,7 +156,7 @@ describe("req_dev e2e smoke", () => {
 
     // 验证派生字段（扁平化在 task 对象上，不在单独的 extra 属性）
     // 派生自 repo_id 的字段
-    expect(task["repo_id"]).toBe("repo-001");
+    expect(task["repo_id"]).toBe("cb-001");
     expect(task["repo_path"]).toBe(process.cwd());
     expect(task["default_branch"]).toBe("main");
     expect(task["github_owner"]).toBe("larrygogo");
@@ -164,7 +173,7 @@ describe("req_dev e2e smoke", () => {
     const storedTask = getTask(task.id);
     expect(storedTask).not.toBeNull();
     expect(storedTask!.workflow).toBe("req_dev");
-    expect(storedTask!["repo_id"]).toBe("repo-001");
+    expect(storedTask!["repo_id"]).toBe("cb-001");
     expect(storedTask!["github_owner"]).toBe("larrygogo");
   });
 
@@ -172,7 +181,7 @@ describe("req_dev e2e smoke", () => {
     const task = await startTaskFromTemplate({
       workflow: "req_dev",
       title: "no requirement",
-      repo_id: "repo-001", // 额外工作流参数
+      repo_id: "cb-001", // 额外工作流参数
       // requirement 未传
     });
 

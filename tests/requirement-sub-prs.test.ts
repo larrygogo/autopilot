@@ -4,8 +4,11 @@ import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate004 } from "../src/migrations/004-repos";
 import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate008 } from "../src/migrations/008-projects";
 import { _setDbForTest } from "../src/core/db";
-import { createRepo } from "../src/core/repos";
+import { createCodebase } from "../src/core/codebases";
+import { createProject } from "../src/core/projects";
 import { createRequirement, deleteRequirement } from "../src/core/requirements";
 import { appendSubPr, listSubPrs } from "../src/core/requirement-sub-prs";
 
@@ -18,24 +21,30 @@ describe("requirement-sub-prs CRUD", () => {
     migrate004(db);
     migrate005(db);
     migrate006(db);
+    migrate007(db);
+    migrate008(db);
     _setDbForTest(db);
     // FK 满足
-    createRepo({ id: "repo-p", alias: "p", path: "/tmp/p" });
-    createRepo({
-      id: "repo-c",
+    createProject({ id: "proj-001", name: "test-proj" });
+    createCodebase({ id: "cb-p", project_id: "proj-001", alias: "p", path: "/tmp/p" });
+    createCodebase({
+      id: "cb-c",
+      project_id: "proj-001",
       alias: "c",
       path: "/tmp/p/c",
-      parent_repo_id: "repo-p",
+      parent_codebase_id: "cb-p",
       submodule_path: "c",
     });
     createRequirement({
       id: "req-001",
-      repo_id: "repo-p",
+      project_id: "proj-001",
+      codebase_id: "cb-p",
       title: "test",
     });
     createRequirement({
       id: "req-002",
-      repo_id: "repo-p",
+      project_id: "proj-001",
+      codebase_id: "cb-p",
       title: "test2",
     });
   });
@@ -52,7 +61,7 @@ describe("requirement-sub-prs CRUD", () => {
   it("appendSubPr + listSubPrs", () => {
     appendSubPr({
       requirement_id: "req-001",
-      child_repo_id: "repo-c",
+      child_repo_id: "cb-c",
       pr_url: "https://github.com/x/y/pull/1",
       pr_number: 1,
     });
@@ -65,13 +74,13 @@ describe("requirement-sub-prs CRUD", () => {
   it("UPSERT 已存在时更新 pr_url/pr_number", () => {
     appendSubPr({
       requirement_id: "req-001",
-      child_repo_id: "repo-c",
+      child_repo_id: "cb-c",
       pr_url: "https://github.com/x/y/pull/1",
       pr_number: 1,
     });
     appendSubPr({
       requirement_id: "req-001",
-      child_repo_id: "repo-c",
+      child_repo_id: "cb-c",
       pr_url: "https://github.com/x/y/pull/2",
       pr_number: 2,
     });
@@ -83,13 +92,13 @@ describe("requirement-sub-prs CRUD", () => {
   it("不同需求隔离", () => {
     appendSubPr({
       requirement_id: "req-001",
-      child_repo_id: "repo-c",
+      child_repo_id: "cb-c",
       pr_url: "https://github.com/x/y/pull/1",
       pr_number: 1,
     });
     appendSubPr({
       requirement_id: "req-002",
-      child_repo_id: "repo-c",
+      child_repo_id: "cb-c",
       pr_url: "https://github.com/x/y/pull/2",
       pr_number: 2,
     });
@@ -104,13 +113,13 @@ describe("requirement-sub-prs CRUD", () => {
   it("deleteRequirement 级联删 sub_prs", () => {
     appendSubPr({
       requirement_id: "req-001",
-      child_repo_id: "repo-c",
+      child_repo_id: "cb-c",
       pr_url: "https://github.com/x/y/pull/1",
       pr_number: 1,
     });
     appendSubPr({
       requirement_id: "req-002",
-      child_repo_id: "repo-c",
+      child_repo_id: "cb-c",
       pr_url: "https://github.com/x/y/pull/2",
       pr_number: 2,
     });

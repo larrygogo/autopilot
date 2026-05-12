@@ -5,7 +5,7 @@ import {
   updateRequirement,
 } from "../core/requirements";
 import { appendFeedback } from "../core/requirement-feedbacks";
-import { getRepoById } from "../core/repos";
+import { getCodebaseById } from "../core/codebases";
 import { loadGithubConfig } from "../core/config";
 import { createLogger } from "../core/logger";
 
@@ -83,10 +83,14 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
     log.warn("requirement %s 无 pr_number，跳过", reqId);
     return;
   }
-  const repo = getRepoById(req.repo_id);
+  if (!req.codebase_id) {
+    log.warn("requirement %s 未绑定 codebase，跳过", reqId);
+    return;
+  }
+  const repo = getCodebaseById(req.codebase_id);
   if (!repo || !repo.github_owner || !repo.github_repo) {
     log.warn(
-      "requirement %s 关联 repo 缺 github_owner/repo，跳过（请先在 /repos 健康检查回填）",
+      "requirement %s 关联 codebase 缺 github_owner/repo，跳过（请先在 /codebases 健康检查回填）",
       reqId,
     );
     return;

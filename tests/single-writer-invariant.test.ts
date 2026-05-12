@@ -17,12 +17,15 @@ const ALLOWLIST = new Set([
   "src/core/migrate.ts",         // 迁移：INSERT schema_version
   "src/core/rebuild-index.ts",   // 索引重建：从 manifest INSERT/UPDATE 回 DB
   "src/core/schedules.ts",       // schedules 表：SQLite 即权威源，无 manifest 同步需求
-  "src/core/repos.ts",           // repos 表：SQLite 即权威源，无 manifest 同步需求
+  "src/core/codebases.ts",       // codebases 表（P1 由 repos 改名）：SQLite 即权威源，无 manifest 同步需求
+  "src/core/projects.ts",        // projects 表：SQLite 即权威源（CRUD 模块），无 manifest 同步需求
   "src/core/requirements.ts",    // requirements 表：SQLite 即权威源，无 manifest 同步需求
   "src/core/requirement-feedbacks.ts", // requirement_feedbacks 表：SQLite 即权威源，无 manifest 同步需求
+  "src/core/requirement-questions.ts", // 评论线程：SQLite 即权威源（CRUD 模块），无 manifest 同步需求
   "src/core/requirement-sub-prs.ts", // requirement_sub_prs 表：SQLite 即权威源，无 manifest 同步需求
   "src/core/submodules.ts",      // submodules：通过 createRepo 写 repos 表，SQLite 即权威源
   "src/core/workflows.ts",       // workflows 表：SQLite 即权威源（file 工作流由 daemon 同步），无 manifest 同步需求
+  "src/migrations/008-projects.ts", // P1 项目工作台改造：codebases 表重建需 INSERT 数据 copy（DDL+一次性数据迁移，无 manifest 同步需求）
 ]);
 
 const WRITE_SQL_RE = /\b(INSERT\s+(OR\s+\w+\s+)?INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|REPLACE\s+INTO)\b/i;

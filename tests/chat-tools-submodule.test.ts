@@ -4,8 +4,11 @@ import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate004 } from "../src/migrations/004-repos";
 import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate008 } from "../src/migrations/008-projects";
 import { _setDbForTest } from "../src/core/db";
-import { createRepo } from "../src/core/repos";
+import { createCodebase } from "../src/core/codebases";
+import { createProject } from "../src/core/projects";
 import { buildAutopilotTools } from "../src/agents/tools";
 
 describe("chat tool create_requirement_draft 子模块校验", () => {
@@ -17,15 +20,19 @@ describe("chat tool create_requirement_draft 子模块校验", () => {
     migrate004(db);
     migrate005(db);
     migrate006(db);
+    migrate007(db);
+    migrate008(db);
     _setDbForTest(db);
 
-    createRepo({ id: "repo-p1", alias: "parent1", path: "/tmp/p1", default_branch: "main" });
-    createRepo({
-      id: "repo-c1",
+    createProject({ id: "proj-001", name: "test-proj" });
+    createCodebase({ id: "cb-p1", project_id: "proj-001", alias: "parent1", path: "/tmp/p1", default_branch: "main" });
+    createCodebase({
+      id: "cb-c1",
+      project_id: "proj-001",
       alias: "child1",
       path: "/tmp/p1/child1",
       default_branch: "main",
-      parent_repo_id: "repo-p1",
+      parent_codebase_id: "cb-p1",
       submodule_path: "child1",
     });
   });

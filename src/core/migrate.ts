@@ -72,13 +72,20 @@ export async function runPendingMigrations(): Promise<number> {
       }
 
       const db = getDb();
-      db.transaction(() => {
-        mod.up(db);
-        db.run(
-          "INSERT INTO schema_version (version, name) VALUES (?, ?)",
-          [version, file.replace(/\.ts$/, "")]
-        );
-      })();
+      // SQLite 不允许在事务内修改 foreign_keys PRAGMA，表重建（DROP+RENAME）
+      // 模式必须在 FK 关闭时执行，迁移结束后立即恢复。
+      db.run("PRAGMA foreign_keys=OFF");
+      try {
+        db.transaction(() => {
+          mod.up(db);
+          db.run(
+            "INSERT INTO schema_version (version, name) VALUES (?, ?)",
+            [version, file.replace(/\.ts$/, "")]
+          );
+        })();
+      } finally {
+        db.run("PRAGMA foreign_keys=ON");
+      }
 
       log.info("迁移 v%s 应用成功：%s", version, file);
       count++;

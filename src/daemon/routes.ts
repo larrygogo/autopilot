@@ -35,19 +35,20 @@ import {
   type ScheduleType,
 } from "../core/schedules";
 import {
-  listRepos,
-  getRepoById,
-  getRepoByAlias,
-  createRepo,
-  updateRepo,
-  deleteRepo,
-  nextRepoId,
-} from "../core/repos";
-import { checkRepoHealth } from "../core/repo-health";
+  listCodebases,
+  getCodebaseById,
+  createCodebase,
+  updateCodebase,
+  deleteCodebase,
+  nextCodebaseId,
+} from "../core/codebases";
+import { listProjects, getProjectById, createProject, updateProject, deleteProject, nextProjectId } from "../core/projects";
+import { checkCodebaseHealth } from "../core/codebase-health";
 import { discoverSubmodules, listSubmodules } from "../core/submodules";
 import { listSubPrs } from "../core/requirement-sub-prs";
 import {
   listRequirements,
+  listRequirementsByProject,
   getRequirementById,
   createRequirement,
   updateRequirement,
@@ -55,6 +56,19 @@ import {
   nextRequirementId,
   deleteRequirement,
 } from "../core/requirements";
+import { listQuestionsByRequirement, createQuestion, getQuestionById, addReply, resolveQuestion, nextQuestionId, nextReplyId } from "../core/requirement-questions";
+import type { Requirement } from "../core/requirements";
+
+/**
+ * 向后兼容别名：T14 把 Requirement.repo_id 改名为 codebase_id 后，
+ * web UI 与既有外部脚本仍可能引用 repo_id。daemon 在序列化时把 codebase_id 同步映射到 repo_id 字段，
+ * 直到调用方都升级（P4 / P5 后可移除）。
+ */
+function withRepoIdAlias<T extends Requirement | null>(req: T): T extends null ? null : Requirement & { repo_id: string | null };
+function withRepoIdAlias(req: Requirement | null): (Requirement & { repo_id: string | null }) | null {
+  if (!req) return null;
+  return { ...req, repo_id: req.codebase_id };
+}
 import { appendFeedback, listFeedbacks } from "../core/requirement-feedbacks";
 import {
   discover,
@@ -395,8 +409,11 @@ export async function handleRequest(req: Request): Promise<Response> {
         [key: string]: unknown;
       };
       // 如果 caller 传了 repo_alias，解析为 repo_id（不覆盖已有 repo_id）
+      // P3 待修：alias 现在 project 内唯一，全局可能多个；目前取首个匹配。
       if (body.repo_alias && !body.repo_id) {
-        const repo = getRepoByAlias(body.repo_alias as string);
+        const repo = listCodebases({ includeSubmodules: true }).find(
+          (c) => c.alias === body.repo_alias,
+        );
         if (!repo) return error(`找不到别名为 "${body.repo_alias}" 的仓库`, 404);
         body.repo_id = repo.id;
       }
@@ -573,15 +590,46 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json({ current_path: targetPath, parent_path: parentPath, entries });
     }
 
-    // ─────────── Repos ───────────
+    // ─────────── Projects ───────────
 
-    // GET /api/repos
-    if (method === "GET" && path === "/api/repos") {
-      return json({ repos: listRepos() });
+    // GET /api/projects
+    if (method === "GET" && path === "/api/projects") {
+      return json({ projects: listProjects() });
     }
 
-    // POST /api/repos
-    if (method === "POST" && path === "/api/repos") {
+    // POST /api/projects
+    if (method === "POST" && path === "/api/projects") {
+      const body = (await req.json()) as { name?: string; description?: string | null };
+      if (!body.name?.trim()) return error("name 必填");
+      const id = nextProjectId();
+      try {
+        const project = createProject({ id, name: body.name.trim(), description: body.description ?? null });
+        return json({ project }, 201);
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          code === "SQLITE_CONSTRAINT_UNIQUE" ||
+          code?.startsWith("SQLITE_CONSTRAINT") ||
+          msg.toLowerCase().includes("unique")
+        ) {
+          return error(msg, 409);
+        }
+        return error(msg, 500);
+      }
+    }
+
+    // GET /api/projects/:id/codebases — 必须在 GET /api/projects/:id 之前
+    const projectCodebasesMatch = extractParam(path, /^\/api\/projects\/([\w-]+)\/codebases$/);
+    if (method === "GET" && projectCodebasesMatch) {
+      if (!getProjectById(projectCodebasesMatch)) return error("project not found", 404);
+      return json({ codebases: listCodebases({ projectId: projectCodebasesMatch }) });
+    }
+
+    // POST /api/projects/:id/codebases
+    if (method === "POST" && projectCodebasesMatch) {
+      const proj = getProjectById(projectCodebasesMatch);
+      if (!proj) return error("project not found", 404);
       const body = (await req.json()) as {
         alias?: string;
         path?: string;
@@ -592,10 +640,94 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (!body.alias?.trim() || !body.path?.trim()) {
         return error("alias 和 path 必填");
       }
+      const cbId = nextCodebaseId();
       try {
-        const id = nextRepoId();
-        const repo = createRepo({
+        const codebase = createCodebase({
+          id: cbId,
+          project_id: projectCodebasesMatch,
+          alias: body.alias.trim(),
+          path: body.path.trim(),
+          default_branch: body.default_branch?.trim() || "main",
+          github_owner: body.github_owner ?? null,
+          github_repo: body.github_repo ?? null,
+        });
+        return json({ codebase }, 201);
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          code === "SQLITE_CONSTRAINT_UNIQUE" ||
+          code?.startsWith("SQLITE_CONSTRAINT") ||
+          msg.toLowerCase().includes("unique")
+        ) {
+          return error(msg, 409);
+        }
+        return error(msg, 500);
+      }
+    }
+
+    // GET /api/projects/:id/requirements — 必须在 GET /api/projects/:id 之前
+    const projectRequirementsMatch = extractParam(path, /^\/api\/projects\/([\w-]+)\/requirements$/);
+    if (method === "GET" && projectRequirementsMatch) {
+      if (!getProjectById(projectRequirementsMatch)) return error("project not found", 404);
+      return json({ requirements: listRequirementsByProject(projectRequirementsMatch).map((r) => withRepoIdAlias(r)) });
+    }
+
+    // GET /api/projects/:id
+    const projectIdMatch = extractParam(path, /^\/api\/projects\/([\w-]+)$/);
+    if (method === "GET" && projectIdMatch) {
+      const project = getProjectById(projectIdMatch);
+      if (!project) return error("project not found", 404);
+      return json({ project });
+    }
+
+    // PUT /api/projects/:id
+    if (method === "PUT" && projectIdMatch) {
+      const body = (await req.json()) as { name?: string; description?: string | null };
+      if (body.name !== undefined && body.name.trim() === "") return error("name 不能为空", 400);
+      const project = updateProject(projectIdMatch, {
+        name: body.name?.trim(),
+        description: body.description,
+      });
+      if (!project) return error("project not found", 404);
+      return json({ project });
+    }
+
+    // DELETE /api/projects/:id
+    if (method === "DELETE" && projectIdMatch) {
+      const codebases = listCodebases({ projectId: projectIdMatch });
+      if (codebases.length > 0) return error("项目下还有 codebase，请先删除", 400);
+      deleteProject(projectIdMatch);
+      return json({ ok: true });
+    }
+
+    // ─────────── Repos ───────────
+
+    // GET /api/repos
+    if (method === "GET" && path === "/api/repos") {
+      return json({ repos: listCodebases() });
+    }
+
+    // POST /api/repos
+    if (method === "POST" && path === "/api/repos") {
+      const body = (await req.json()) as {
+        alias?: string;
+        path?: string;
+        default_branch?: string;
+        github_owner?: string | null;
+        github_repo?: string | null;
+        project_id?: string;
+      };
+      if (!body.alias?.trim() || !body.path?.trim()) {
+        return error("alias 和 path 必填");
+      }
+      // P3 待修：API 层应强制要求 project_id；当前 P1 阶段仅核心改名，project_id 默认空字符串占位（迁移后存量数据已填值）。
+      const projectId = body.project_id?.trim() ?? "";
+      try {
+        const id = nextCodebaseId();
+        const repo = createCodebase({
           id,
+          project_id: projectId,
           alias: body.alias.trim(),
           path: body.path.trim(),
           default_branch: body.default_branch?.trim() || "main",
@@ -620,14 +752,14 @@ export async function handleRequest(req: Request): Promise<Response> {
     // GET /api/repos/:id
     const repoIdMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)$/);
     if (method === "GET" && repoIdMatch) {
-      const repo = getRepoById(repoIdMatch);
+      const repo = getCodebaseById(repoIdMatch);
       if (!repo) return error("repo not found", 404);
       return json({ repo });
     }
 
     // PUT /api/repos/:id
     if (method === "PUT" && repoIdMatch) {
-      const existing = getRepoById(repoIdMatch);
+      const existing = getCodebaseById(repoIdMatch);
       if (!existing) return error("repo not found", 404);
       const body = (await req.json()) as {
         alias?: string;
@@ -652,7 +784,7 @@ export async function handleRequest(req: Request): Promise<Response> {
         else body.default_branch = trimmed;
       }
       try {
-        const repo = updateRepo(repoIdMatch, {
+        const repo = updateCodebase(repoIdMatch, {
           alias: body.alias,
           path: body.path,
           default_branch: body.default_branch,
@@ -676,27 +808,27 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     // DELETE /api/repos/:id
     if (method === "DELETE" && repoIdMatch) {
-      const existing = getRepoById(repoIdMatch);
+      const existing = getCodebaseById(repoIdMatch);
       if (!existing) return error("repo not found", 404);
-      deleteRepo(repoIdMatch);
+      deleteCodebase(repoIdMatch);
       return json({ ok: true });
     }
 
     // POST /api/repos/:id/healthcheck
     const repoHealthMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)\/healthcheck$/);
     if (method === "POST" && repoHealthMatch) {
-      const repo = getRepoById(repoHealthMatch);
+      const repo = getCodebaseById(repoHealthMatch);
       if (!repo) return error("repo not found", 404);
-      const health = await checkRepoHealth(repo.path);
+      const health = await checkCodebaseHealth(repo.path);
       // 自动回填 github_owner / github_repo（仅当 DB 里为空且检查结果有值，逐字段独立判断避免覆盖已有值）
       const patch: { github_owner?: string; github_repo?: string } = {};
       if (health.github_owner && !repo.github_owner) patch.github_owner = health.github_owner;
       if (health.github_repo && !repo.github_repo) patch.github_repo = health.github_repo;
       if (patch.github_owner !== undefined || patch.github_repo !== undefined) {
-        updateRepo(repoHealthMatch, patch);
+        updateCodebase(repoHealthMatch, patch);
       }
       // 健康检查通过 + 回填后，扫 .gitmodules 自动注册子模块（仅顶级 repo，子模块自身跳过避免递归）
-      if (health.healthy && !repo.parent_repo_id) {
+      if (health.healthy && !repo.parent_codebase_id) {
         try {
           const dr = discoverSubmodules(repo.id);
           return Response.json({
@@ -727,9 +859,9 @@ export async function handleRequest(req: Request): Promise<Response> {
     // POST /api/repos/:id/rediscover-submodules
     const repoRediscoverMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)\/rediscover-submodules$/);
     if (method === "POST" && repoRediscoverMatch) {
-      const repo = getRepoById(repoRediscoverMatch);
+      const repo = getCodebaseById(repoRediscoverMatch);
       if (!repo) return error("repo not found", 404);
-      if (repo.parent_repo_id) return error("子模块自身不能再发现子模块（不支持嵌套）");
+      if (repo.parent_codebase_id) return error("子模块自身不能再发现子模块（不支持嵌套）");
       try {
         const r = discoverSubmodules(repoRediscoverMatch);
         return json({
@@ -749,7 +881,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     // GET /api/repos/:id/submodules
     const repoSubmodulesMatch = extractParam(path, /^\/api\/repos\/([\w.\-]+)\/submodules$/);
     if (method === "GET" && repoSubmodulesMatch) {
-      const repo = getRepoById(repoSubmodulesMatch);
+      const repo = getCodebaseById(repoSubmodulesMatch);
       if (!repo) return error("repo not found", 404);
       // 子模块自身 / 普通父 repo 都按 listSubmodules 走（前者返回空数组）
       return json({ submodules: listSubmodules(repoSubmodulesMatch) });
@@ -759,35 +891,55 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     // GET /api/requirements
     if (method === "GET" && path === "/api/requirements") {
-      const repoId = url.searchParams.get("repo_id") ?? undefined;
+      // codebase_id 是新字段名；repo_id 旧名继续兼容（web UI 还没迁移）
+      const codebaseId =
+        url.searchParams.get("codebase_id") ??
+        url.searchParams.get("repo_id") ??
+        undefined;
+      const projectId = url.searchParams.get("project_id") ?? undefined;
       const status = url.searchParams.get("status") ?? undefined;
-      return json({ requirements: listRequirements({ repo_id: repoId, status }) });
+      return json({
+        requirements: listRequirements({ codebase_id: codebaseId, project_id: projectId, status })
+          .map((r) => withRepoIdAlias(r)),
+      });
     }
 
     // POST /api/requirements
     if (method === "POST" && path === "/api/requirements") {
       const body = (await req.json()) as {
-        repo_id?: string;
+        project_id?: string;
+        codebase_id?: string | null;
+        repo_id?: string;       // 旧字段名兼容
         title?: string;
         spec_md?: string;
         chat_session_id?: string | null;
       };
-      if (!body.repo_id?.trim() || !body.title?.trim()) {
-        return error("repo_id 和 title 必填");
+      // 兼容旧字段名：repo_id 等价于 codebase_id（web UI 还没迁移）
+      const codebaseId = body.codebase_id ?? body.repo_id ?? null;
+      if (!body.title?.trim()) {
+        return error("title 必填");
       }
-      if (!getRepoById(body.repo_id)) {
-        return error("repo not found", 404);
+      // 必须能确定 project_id：要么调用方直接传，要么从 codebase 反查
+      let projectId = body.project_id?.trim();
+      if (codebaseId) {
+        const cb = getCodebaseById(codebaseId);
+        if (!cb) return error("codebase not found", 404);
+        projectId = projectId ?? cb.project_id;
+      }
+      if (!projectId) {
+        return error("project_id 必填（或提供 codebase_id 由 daemon 反查）");
       }
       const id = nextRequirementId();
       try {
         const r = createRequirement({
           id,
-          repo_id: body.repo_id,
+          project_id: projectId,
+          codebase_id: codebaseId,
           title: body.title.trim(),
           spec_md: body.spec_md ?? "",
           chat_session_id: body.chat_session_id ?? null,
         });
-        return json({ requirement: r }, 201);
+        return json({ requirement: withRepoIdAlias(r) }, 201);
       } catch (e: unknown) {
         return error((e as Error).message, 500);
       }
@@ -800,7 +952,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (!body.to?.trim()) return error("to 必填");
       if (!getRequirementById(reqTransitionMatch)) return error("requirement not found", 404);
       try {
-        return json({ requirement: setRequirementStatus(reqTransitionMatch, body.to.trim()) });
+        return json({ requirement: withRepoIdAlias(setRequirementStatus(reqTransitionMatch, body.to.trim())) });
       } catch (e: unknown) {
         return error((e as Error).message);
       }
@@ -813,7 +965,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (!getRequirementById(id)) return error("requirement not found", 404);
       // 仅置 queued；调度器（src/daemon/requirement-scheduler.ts）会监听 status 变化触发创建 task
       try {
-        return json({ requirement: setRequirementStatus(id, "queued") });
+        return json({ requirement: withRepoIdAlias(setRequirementStatus(id, "queued")) });
       } catch (e: unknown) {
         return error((e as Error).message);
       }
@@ -854,7 +1006,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     if (reqCancelMatch && method === "POST") {
       if (!getRequirementById(reqCancelMatch)) return error("requirement not found", 404);
       try {
-        return json({ requirement: setRequirementStatus(reqCancelMatch, "cancelled") });
+        return json({ requirement: withRepoIdAlias(setRequirementStatus(reqCancelMatch, "cancelled")) });
       } catch (e: unknown) {
         return error((e as Error).message);
       }
@@ -868,6 +1020,72 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json({ sub_prs: listSubPrs(reqSubPrsMatch) });
     }
 
+    // ─────────── Questions（评论线程） ───────────
+
+    // POST /api/requirements/:reqId/questions/:qid/replies — 必须在 /:qid 之前
+    const reqQidRepliesMatch = path.match(/^\/api\/requirements\/([\w-]+)\/questions\/([\w-]+)\/replies$/);
+    if (method === "POST" && reqQidRepliesMatch) {
+      const [, reqId, qid] = reqQidRepliesMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      const q = getQuestionById(qid);
+      if (!q) return error("question not found", 404);
+      const body = (await req.json()) as { author_role?: string; text?: string };
+      if (!body.author_role || !body.text) return error("author_role 和 text 必填");
+      if (body.author_role !== "agent" && body.author_role !== "user") {
+        return error('author_role 必须是 "agent" 或 "user"');
+      }
+      try {
+        const replyId = nextReplyId();
+        const reply = addReply({
+          id: replyId,
+          question_id: qid,
+          author_role: body.author_role as "agent" | "user",
+          text: body.text,
+        });
+        return json({ reply }, 201);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return error(msg, 500);
+      }
+    }
+
+    // POST /api/requirements/:reqId/questions/:qid/resolve — 必须在 /:qid 之前
+    const reqQidResolveMatch = path.match(/^\/api\/requirements\/([\w-]+)\/questions\/([\w-]+)\/resolve$/);
+    if (method === "POST" && reqQidResolveMatch) {
+      const [, reqId, qid] = reqQidResolveMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      if (!getQuestionById(qid)) return error("question not found", 404);
+      resolveQuestion(qid);
+      return json({ ok: true });
+    }
+
+    // GET /api/requirements/:reqId/questions/:qid
+    const reqQidMatch = path.match(/^\/api\/requirements\/([\w-]+)\/questions\/([\w-]+)$/);
+    if (method === "GET" && reqQidMatch) {
+      const [, reqId, qid] = reqQidMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      const q = getQuestionById(qid);
+      if (!q) return error("question not found", 404);
+      return json({ question: q });
+    }
+
+    // GET /api/requirements/:reqId/questions — 必须在 /:reqId 之前
+    const reqQuestionsMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/questions$/);
+    if (method === "GET" && reqQuestionsMatch) {
+      if (!getRequirementById(reqQuestionsMatch)) return error("requirement not found", 404);
+      return json({ questions: listQuestionsByRequirement(reqQuestionsMatch) });
+    }
+
+    // POST /api/requirements/:reqId/questions
+    if (method === "POST" && reqQuestionsMatch) {
+      if (!getRequirementById(reqQuestionsMatch)) return error("requirement not found", 404);
+      const body = (await req.json()) as { agent_text?: string };
+      if (!body.agent_text?.trim()) return error("agent_text 必填");
+      const qId = nextQuestionId();
+      const question = createQuestion({ id: qId, requirement_id: reqQuestionsMatch, agent_text: body.agent_text.trim() });
+      return json({ question }, 201);
+    }
+
     // GET|PUT|DELETE /api/requirements/:id
     const reqDetailMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)$/);
     if (reqDetailMatch) {
@@ -875,7 +1093,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (!r) return error("requirement not found", 404);
 
       if (method === "GET") {
-        return json({ requirement: r, feedbacks: listFeedbacks(reqDetailMatch) });
+        return json({ requirement: withRepoIdAlias(r), feedbacks: listFeedbacks(reqDetailMatch) });
       }
       if (method === "PUT") {
         const body = (await req.json()) as {
@@ -886,7 +1104,7 @@ export async function handleRequest(req: Request): Promise<Response> {
         if (body.title !== undefined && !body.title.trim()) {
           return error("title 不能为空");
         }
-        return json({ requirement: updateRequirement(reqDetailMatch, body) });
+        return json({ requirement: withRepoIdAlias(updateRequirement(reqDetailMatch, body)) });
       }
       if (method === "DELETE") {
         if (!["cancelled", "done", "failed"].includes(r.status)) {

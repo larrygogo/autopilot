@@ -5,9 +5,17 @@ import { emit } from "../daemon/event-bus";
 // 类型定义
 // ──────────────────────────────────────────────
 
+/**
+ * P1 Task 14：requirements 字段适配 project + codebase 模型。
+ *  - project_id：必填，requirement 归属的 project
+ *  - codebase_id：可选（spec §5.1：高层需求可以不绑定具体 codebase），rename 自旧字段 repo_id
+ *
+ * 创建时如果带了 codebase_id，会自动写一条 requirement_codebases 关联。
+ */
 export interface Requirement {
   id: string;
-  repo_id: string;
+  project_id: string;
+  codebase_id: string | null;
   title: string;
   status: string;
   spec_md: string;
@@ -22,7 +30,8 @@ export interface Requirement {
 
 export interface CreateRequirementOpts {
   id: string;
-  repo_id: string;
+  project_id: string;
+  codebase_id?: string | null;
   title: string;
   spec_md?: string;
   chat_session_id?: string | null;
@@ -43,21 +52,25 @@ export interface UpdateRequirementOpts {
 // ──────────────────────────────────────────────
 
 /**
- * 状态转换表（spec §3.2）
+ * 状态转换表（spec §3.2 + P1 Task 14 临时兼容）。
  *
- * 注意：queued → ready 也是合法的（P2 enqueue 失败时回滚需要）。
+ * 注：
+ *   - queued → ready 也是合法的（P2 enqueue 失败时回滚需要）。
+ *   - 新流程引入 awaiting_approval（spec §5.3）；P4 才完全重写状态机，
+ *     T14 阶段先把 drafting/clarifying/ready/queued/failed → awaiting_approval 这条临时通路打开。
  */
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
-  drafting: ["clarifying", "ready", "cancelled"],
-  clarifying: ["drafting", "ready", "cancelled"],
-  ready: ["queued", "drafting", "cancelled"],
-  queued: ["running", "ready", "cancelled"],
+  drafting: ["clarifying", "ready", "awaiting_approval", "cancelled"],
+  clarifying: ["drafting", "ready", "awaiting_approval", "cancelled"],
+  ready: ["queued", "awaiting_approval", "drafting", "cancelled"],
+  queued: ["running", "awaiting_approval", "ready", "cancelled"],
+  awaiting_approval: ["running", "drafting", "cancelled"],
   running: ["awaiting_review", "failed", "cancelled"],
   awaiting_review: ["fix_revision", "done", "cancelled"],
   fix_revision: ["awaiting_review", "failed", "cancelled"],
   done: [],
   cancelled: [],
-  failed: ["queued"],
+  failed: ["queued", "awaiting_approval"],
 };
 
 export function canTransitionStatus(from: string, to: string): boolean {
@@ -80,24 +93,49 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
   const db = getDb();
   const ts = nowMs();
   db.run(
-    "INSERT INTO requirements (id, repo_id, title, status, spec_md, chat_session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
-    [opts.id, opts.repo_id, opts.title, "drafting", opts.spec_md ?? "", opts.chat_session_id ?? null, ts, ts],
+    "INSERT INTO requirements (id, project_id, codebase_id, title, status, spec_md, chat_session_id, created_at, updated_at) " +
+      "VALUES (?, ?, ?, ?, 'drafting', ?, ?, ?, ?)",
+    [
+      opts.id,
+      opts.project_id,
+      opts.codebase_id ?? null,
+      opts.title,
+      opts.spec_md ?? "",
+      opts.chat_session_id ?? null,
+      ts,
+      ts,
+    ],
   );
+  // 有 codebase_id 时自动写多对多关联（spec §5.1）
+  if (opts.codebase_id) {
+    db.run(
+      "INSERT OR IGNORE INTO requirement_codebases (requirement_id, codebase_id) VALUES (?, ?)",
+      [opts.id, opts.codebase_id],
+    );
+  }
   return getRequirementById(opts.id) as Requirement;
 }
 
 export function getRequirementById(id: string): Requirement | null {
   const db = getDb();
-  return db.query<Requirement, [string]>("SELECT * FROM requirements WHERE id = ?").get(id) ?? null;
+  return db
+    .query<Requirement, [string]>("SELECT * FROM requirements WHERE id = ?")
+    .get(id) ?? null;
 }
 
-export function listRequirements(filters: { repo_id?: string; status?: string } = {}): Requirement[] {
+export function listRequirements(
+  filters: { codebase_id?: string; project_id?: string; status?: string } = {},
+): Requirement[] {
   const db = getDb();
   const where: string[] = [];
   const vals: (string | number)[] = [];
-  if (filters.repo_id) {
-    where.push("repo_id = ?");
-    vals.push(filters.repo_id);
+  if (filters.codebase_id) {
+    where.push("codebase_id = ?");
+    vals.push(filters.codebase_id);
+  }
+  if (filters.project_id) {
+    where.push("project_id = ?");
+    vals.push(filters.project_id);
   }
   if (filters.status) {
     where.push("status = ?");
@@ -108,6 +146,18 @@ export function listRequirements(filters: { repo_id?: string; status?: string } 
     (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
     " ORDER BY created_at ASC";
   return db.query<Requirement, typeof vals>(sql).all(...vals);
+}
+
+/**
+ * 列出某 project 下所有 requirement（spec §5.1 一个 project 多 codebase 共享需求池）。
+ */
+export function listRequirementsByProject(projectId: string): Requirement[] {
+  const db = getDb();
+  return db
+    .query<Requirement, [string]>(
+      "SELECT * FROM requirements WHERE project_id = ? ORDER BY created_at ASC",
+    )
+    .all(projectId);
 }
 
 export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requirement | null {
@@ -138,7 +188,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
 }
 
 /**
- * 删除需求 + 级联删反馈和 sub_prs。仅供调用方自己保证 id 处于终态（cancelled / done / failed）。
+ * 删除需求 + 级联删反馈、sub_prs 和 requirement_codebases 关联。仅供调用方自己保证 id 处于终态（cancelled / done / failed）。
  *
  * 抽出此函数是为了让 REST handler / chat tools 不直接写 SQL，集中数据库写入到 core 层。
  */
@@ -146,6 +196,7 @@ export function deleteRequirement(id: string): void {
   const db = getDb();
   db.run("DELETE FROM requirement_feedbacks WHERE requirement_id = ?", [id]);
   db.run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [id]);
+  db.run("DELETE FROM requirement_codebases WHERE requirement_id = ?", [id]);
   db.run("DELETE FROM requirements WHERE id = ?", [id]);
 }
 

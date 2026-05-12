@@ -4,8 +4,11 @@ import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate004 } from "../src/migrations/004-repos";
 import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate008 } from "../src/migrations/008-projects";
 import { _setDbForTest } from "../src/core/db";
-import { createRepo } from "../src/core/repos";
+import { createCodebase } from "../src/core/codebases";
+import { createProject } from "../src/core/projects";
 import {
   createRequirement,
   getRequirementById,
@@ -25,9 +28,13 @@ describe("pr-poller pollOne", () => {
     migrate004(db);
     migrate005(db);
     migrate006(db);
+    migrate007(db);
+    migrate008(db);
     _setDbForTest(db);
-    createRepo({
-      id: "repo-A",
+    createProject({ id: "proj-001", name: "test-proj" });
+    createCodebase({
+      id: "cb-A",
+      project_id: "proj-001",
       alias: "rA",
       path: "/tmp/A",
       default_branch: "main",
@@ -54,7 +61,7 @@ describe("pr-poller pollOne", () => {
   // 辅助：把需求快速推到 awaiting_review，并设 pr_number
   function setupReqAwaitingReview(prNumber = 42, lastReviewId: string | null = null): string {
     const id = nextRequirementId();
-    createRequirement({ id, repo_id: "repo-A", title: "T" });
+    createRequirement({ id, project_id: "proj-001", codebase_id: "cb-A", title: "T" });
     setRequirementStatus(id, "clarifying");
     setRequirementStatus(id, "ready");
     setRequirementStatus(id, "queued");
@@ -155,10 +162,10 @@ describe("pr-poller pollOne", () => {
   });
 
   it("repo 缺 github_owner/repo → 跳过 + 状态不变", async () => {
-    // 创建 repo-B 不填 github
-    createRepo({ id: "repo-B", alias: "rB", path: "/tmp/B", default_branch: "main" });
+    // 创建 cb-B 不填 github
+    createCodebase({ id: "cb-B", project_id: "proj-001", alias: "rB", path: "/tmp/B", default_branch: "main" });
     const id = nextRequirementId();
-    createRequirement({ id, repo_id: "repo-B", title: "T" });
+    createRequirement({ id, project_id: "proj-001", codebase_id: "cb-B", title: "T" });
     setRequirementStatus(id, "clarifying");
     setRequirementStatus(id, "ready");
     setRequirementStatus(id, "queued");

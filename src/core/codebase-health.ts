@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "fs";
 
-export interface RepoHealth {
+export interface CodebaseHealth {
   healthy: boolean;
   issues: string[];
   github_owner: string | null;
@@ -8,7 +8,7 @@ export interface RepoHealth {
 }
 
 /**
- * 检查仓库健康度：
+ * 检查 codebase 健康度：
  *  1. path 存在且是目录
  *  2. 是 git 仓库（git rev-parse --is-inside-work-tree）
  *  3. origin 远端已配置（git remote get-url origin）
@@ -20,7 +20,7 @@ export interface RepoHealth {
  * 注：当前用 spawnSync 同步实现；async 签名预留未来切真异步空间，
  * 单次健康检查耗时 ms 级，不阻塞 daemon 其他处理。
  */
-export async function checkRepoHealth(path: string): Promise<RepoHealth> {
+export async function checkCodebaseHealth(path: string): Promise<CodebaseHealth> {
   const issues: string[] = [];
   let owner: string | null = null;
   let repo: string | null = null;
