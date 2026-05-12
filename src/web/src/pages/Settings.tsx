@@ -123,10 +123,10 @@ export function Settings(_props: { embedded?: boolean } = {}) {
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
       <PageHero
-        eyebrow="SHEET · SETTINGS / 通用设置"
-        title="Settings"
+        eyebrow="SHEET · SETTINGS · GLOBAL"
+        title="通用设置"
         subtitle="常规偏好 · 高级 YAML"
-        description="改后立即写入 AUTOPILOT_HOME/config.yaml；daemon 重启相关项需自行重启。"
+        description="改后立即写入 AUTOPILOT_HOME/config.yaml；涉及 daemon 重启的项需自行重启。"
       />
 
       {/* 常规偏好 */}

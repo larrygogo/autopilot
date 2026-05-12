@@ -117,12 +117,12 @@ export function Schedules({ onSelectTask, subscribe }: Props) {
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <PageHero
-        eyebrow="SHEET · SCHEDULES / 定时调度"
-        title="Schedules"
-        subtitle="定时任务 · CRON"
+        eyebrow="SHEET · SCHEDULES · CRON"
+        title="定时任务"
+        subtitle="周期调度 · 自动派发"
         description="按 cron 计划自动创建任务。一次性触发后自动停用；周期性任务可通过开关随时暂停。"
         meta={[
-          { k: "TOTAL", v: schedules.length },
+          { k: "总数", v: schedules.length },
         ]}
         actions={
           <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>

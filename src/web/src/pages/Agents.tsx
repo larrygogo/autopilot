@@ -135,12 +135,12 @@ export function Agents(_props: { embedded?: boolean } = {}) {
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
       <PageHero
-        eyebrow="SHEET · AGENTS / 智能体"
-        title="Agents"
-        subtitle="智能体 · LLM Provider"
-        description="命名智能体定义：provider / model / permission / 工具集，工作流通过 extends 引用。"
+        eyebrow="SHEET · AGENTS · NAMED"
+        title="智能体"
+        subtitle="命名智能体 · 全局模板"
+        description="命名智能体定义：提供商 / 模型 / 权限 / 工具集，工作流通过 extends 引用。"
         meta={[
-          { k: "TOTAL", v: agents.length },
+          { k: "总数", v: agents.length },
         ]}
         actions={
           <Button onClick={startCreate}>
@@ -180,7 +180,7 @@ export function Agents(_props: { embedded?: boolean } = {}) {
                   <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-xs text-muted-foreground">
                     <span>{a.provider ?? "—"}</span>
                     {a.model && <span>/ {a.model}</span>}
-                    {a.max_turns !== undefined && <span>· {a.max_turns} turns</span>}
+                    {a.max_turns !== undefined && <span>· {a.max_turns} 轮</span>}
                     {a.permission_mode && <span>· {a.permission_mode}</span>}
                   </div>
                 </div>

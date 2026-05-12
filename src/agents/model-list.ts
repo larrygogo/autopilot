@@ -24,30 +24,24 @@ export interface ModelListResult {
 // 内置 catalog —— 随 autopilot 版本维护
 // ──────────────────────────────────────────────
 
+// 只内置当代主力机型。legacy/上一代型号删除，需要时让用户在输入框手填。
+// 用户配置了 *_API_KEY 时会优先走官方 REST API 取实时列表，此 catalog 仅作 fallback。
 const CATALOG: Record<ProviderName, string[]> = {
   anthropic: [
     "claude-opus-4-7",
     "claude-sonnet-4-6",
     "claude-haiku-4-5-20251001",
-    // legacy（用户可能还想用）
-    "claude-3-7-sonnet-latest",
-    "claude-3-5-sonnet-latest",
-    "claude-3-5-haiku-latest",
   ],
   openai: [
-    "o4-mini",
-    "o3",
-    "o3-mini",
     "gpt-5",
     "gpt-5-mini",
-    "gpt-4.1",
-    "gpt-4o",
+    "o3",
+    "o4-mini",
   ],
   google: [
     "gemini-2.5-pro",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
   ],
 };
 

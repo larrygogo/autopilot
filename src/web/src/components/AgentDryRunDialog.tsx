@@ -122,7 +122,7 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
               {agent.provider ?? "—"}
               {agent.model ? ` / ${agent.model}` : ""}
               {agent.max_turns !== undefined && (
-                <span className="text-muted-foreground"> · {agent.max_turns} turns</span>
+                <span className="text-muted-foreground"> · {agent.max_turns} 轮</span>
               )}
             </div>
             {agent.system_prompt && (
@@ -137,12 +137,12 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
           <div className="space-y-4" onKeyDown={onKeyDown}>
             <div className="space-y-1.5">
               <Label htmlFor="dry-run-prompt">
-                Prompt <span className="text-destructive">*</span>
+                提示词 <span className="text-destructive">*</span>
               </Label>
               <Textarea
                 id="dry-run-prompt"
                 className="min-h-[140px] font-mono text-xs"
-                placeholder="输入要测试的 prompt；Ctrl/Cmd + Enter 快速运行"
+                placeholder="输入要测试的提示词；Ctrl/Cmd + Enter 快速运行"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 autoFocus
@@ -183,7 +183,7 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="dry-run-system">追加 system prompt（可选）</Label>
+              <Label htmlFor="dry-run-system">追加系统提示词（可选）</Label>
               <Textarea
                 id="dry-run-system"
                 className="min-h-[80px] font-mono text-xs"
@@ -208,7 +208,7 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
           {result && (
             <Card className="overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
-                <span className="bp-label">结果 · RESULT</span>
+                <span className="bp-label">结果</span>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                     耗时 {Math.round(result.elapsed_ms / 100) / 10}s

@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { modShortcut } from "@/lib/platform";
 
 interface ChatProps {
   subscribe: (channel: string, handler: (event: any) => void) => () => void;
@@ -319,7 +320,7 @@ export function Chat({ subscribe }: ChatProps) {
                   send();
                 }
               }}
-              placeholder="输入消息，Enter 发送（Shift+Enter 换行，⌘/Ctrl+Enter 也可发送）"
+              placeholder={`输入消息，Enter 发送（Shift+Enter 换行，${modShortcut("Enter")} 也可发送）`}
               rows={1}
               disabled={sending}
               className="min-h-[52px] resize-none pr-14 text-sm leading-relaxed"
@@ -425,12 +426,12 @@ function MessageItem({
         {isUser ? (
           <>
             <span className="inline-block h-2 w-2 bg-accent" aria-hidden="true" />
-            <span className="text-accent">你 · USER</span>
+            <span className="text-accent">你 · 用户</span>
           </>
         ) : (
           <>
             <Bot className="h-3 w-3 text-foreground" />
-            <span>AGENT</span>
+            <span>智能体</span>
           </>
         )}
       </div>

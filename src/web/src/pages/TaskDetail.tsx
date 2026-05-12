@@ -10,6 +10,7 @@ import { PhaseLogsViewer } from "@/components/PhaseLogsViewer";
 import { AgentCallsViewer } from "@/components/AgentCallsViewer";
 import { ConfirmDialog } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
+import { modShortcut } from "@/lib/platform";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -433,7 +434,7 @@ function TaskDetailTabs({
   }, [liveLogs.length, tab]);
 
   const triggers: Array<{ key: DetailTab; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }> = [
-    { key: "workspace", label: "Workspace", icon: FolderTree },
+    { key: "workspace", label: "工作区", icon: FolderTree },
     { key: "phase-logs", label: "阶段日志", icon: FileText },
     { key: "agent-calls", label: "Agent 调用", icon: Bot },
     { key: "transitions", label: "状态日志", icon: History, badge: logs.length || undefined },
@@ -674,7 +675,7 @@ function AskBanner({
               <Textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="在这里写你的回答…（⌘/Ctrl + Enter 提交）"
+                placeholder={`在这里写你的回答…（${modShortcut("Enter")} 提交）`}
                 className="min-h-[60px] flex-1 text-xs font-mono"
                 disabled={busy}
                 onKeyDown={(e) => {

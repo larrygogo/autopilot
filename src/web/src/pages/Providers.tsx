@@ -5,11 +5,11 @@ import { useToast } from "@/components/Toast";
 import { PageHero } from "@/components/PageHero";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { ModelCombobox } from "@/components/ModelCombobox";
 import { cn } from "@/lib/utils";
 
 const PROVIDER_META: Record<string, { label: string; defaultModel: string; loginCmd: string }> = {
@@ -88,10 +88,10 @@ export function Providers(_props: { embedded?: boolean } = {}) {
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
       <PageHero
-        eyebrow="SHEET · PROVIDERS / 模型提供商"
-        title="Providers"
-        subtitle="LLM 提供商 · 全局默认"
-        description="Autopilot 通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。"
+        eyebrow="SHEET · PROVIDERS · LLM"
+        title="模型提供商"
+        subtitle="全局默认 · CLI 凭证"
+        description="通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。"
         actions={
           <Button variant="secondary" onClick={refreshStatus} disabled={checking} size="sm">
             <RefreshCw className={cn("h-3.5 w-3.5", checking && "animate-spin")} />
@@ -165,19 +165,13 @@ export function Providers(_props: { embedded?: boolean } = {}) {
                       </span>
                     )}
                   </Label>
-                  <Input
+                  <ModelCombobox
                     id={`model-${p.name}`}
-                    className="font-mono"
+                    value={p.default_model || undefined}
+                    onChange={(v) => updateField(p.name, "default_model", v ?? "")}
+                    options={modelInfo?.models ?? []}
                     placeholder={meta.defaultModel}
-                    value={p.default_model ?? ""}
-                    list={`models-${p.name}`}
-                    onChange={(e) => updateField(p.name, "default_model", e.target.value)}
                   />
-                  {modelInfo && (
-                    <datalist id={`models-${p.name}`}>
-                      {modelInfo.models.map((m) => <option key={m} value={m} />)}
-                    </datalist>
-                  )}
                 </div>
 
                 <div className="mt-4 flex justify-end">

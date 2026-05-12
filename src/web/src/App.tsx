@@ -20,6 +20,7 @@ import { NewTaskDialog } from "./components/NewTaskDialog";
 import { PageLoader } from "./components/PageLoader";
 import { useTheme } from "./lib/theme";
 import { cn } from "./lib/utils";
+import { modShortcut } from "./lib/platform";
 import {
   MessageSquare,
   ListTodo,
@@ -162,7 +163,7 @@ function AppInner() {
                 <Search className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline tracking-wider">搜索 / 命令</span>
                 <kbd className="ml-2 hidden items-center rounded-none border border-foreground/40 bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground sm:inline-flex">
-                  ⌘K
+                  {modShortcut("K")}
                 </kbd>
               </Button>
               <Tooltip>
@@ -252,7 +253,7 @@ function AppInner() {
         onCreated={(id) => navigate(`/tasks/${id}`)}
       />
 
-      <Toaster position="top-center" richColors closeButton />
+      <Toaster position="top-center" closeButton />
     </TooltipProvider>
   );
 }

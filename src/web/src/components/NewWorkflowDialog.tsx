@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { api } from "@/hooks/useApi";
 import { useToast } from "./Toast";
+import { modShortcut } from "@/lib/platform";
 import {
   Dialog,
   DialogContent,
@@ -160,7 +161,7 @@ export function NewWorkflowDialog({ open, onClose, onCreated }: Props) {
           <p className="text-xs text-muted-foreground">
             提示：
             <kbd className="border border-foreground/40 bg-muted px-1.5 py-0.5 font-mono text-[10px]">
-              ⌘/Ctrl + Enter
+              {modShortcut("Enter")}
             </kbd>{" "}
             快速提交。创建后可在「高级 (YAML)」中继续编辑。
           </p>

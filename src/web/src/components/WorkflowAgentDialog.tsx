@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ModelCombobox } from "@/components/ModelCombobox";
 
 export interface WorkflowAgentDraft {
   name: string;
@@ -211,21 +212,17 @@ export function WorkflowAgentDialog({
 
             <div className="space-y-1.5">
               <Label htmlFor="wfa-model">模型（留空继承）</Label>
-              <Input
+              <ModelCombobox
                 id="wfa-model"
-                className="font-mono"
-                placeholder="claude-sonnet-4-6"
-                list={draft.provider ? `wf-agent-models-${draft.provider}` : undefined}
-                value={draft.model ?? ""}
-                onChange={(e) => update("model", e.target.value || undefined)}
+                value={draft.model}
+                onChange={(v) => update("model", v)}
+                options={draft.provider ? models[draft.provider]?.models ?? [] : []}
+                placeholder={
+                  draft.provider ? "claude-sonnet-4-6" : "先选择 provider"
+                }
+                clearable
+                disabled={!draft.provider}
               />
-              {draft.provider && models[draft.provider] && (
-                <datalist id={`wf-agent-models-${draft.provider}`}>
-                  {models[draft.provider].models.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
-              )}
             </div>
 
             <div className="space-y-1.5">

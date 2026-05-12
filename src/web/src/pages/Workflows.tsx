@@ -226,14 +226,14 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
       <PageHero
-        eyebrow="SHEET · WORKFLOWS / 工作流"
-        title="Workflows"
-        subtitle="工作流 · 编排定义"
-        description="管理所有可用的工作流：file 工作流来自 AUTOPILOT_HOME/workflows/，db 工作流可在 UI 内派生编辑。"
+        eyebrow="SHEET · WORKFLOWS · DEF"
+        title="工作流"
+        subtitle="编排定义 · 阶段图谱"
+        description="管理所有可用的工作流：文件型来自 AUTOPILOT_HOME/workflows/，数据库型可在 UI 内派生编辑。"
         meta={[
-          { k: "TOTAL", v: workflows.length },
-          { k: "FILE", v: fileCount },
-          { k: "DB", v: dbCount },
+          { k: "总数", v: workflows.length },
+          { k: "文件型", v: fileCount },
+          { k: "数据库型", v: dbCount },
         ]}
         actions={
           <>

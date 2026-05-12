@@ -68,9 +68,11 @@ export async function detectProviderCli(name: ProviderName): Promise<ProviderCli
     return { name, cli_installed: false, error: `未知 provider：${name}` };
   }
 
-  // 1. 用 which（或 command -v）找二进制
-  const which = await runShort(["which", spec.bin]);
-  if (!which.ok || !which.stdout) {
+  // 1. 用 Bun.which 跨平台查找二进制（Windows 自动识别 .exe / .cmd）。
+  //    不要外挂 `which` —— Windows 无此命令；也不要用 `where` —— 它返回多行 \r\n
+  //    结果，且 PowerShell 别名会干扰判断。
+  const cliPath = Bun.which(spec.bin);
+  if (!cliPath) {
     return {
       name,
       cli_installed: false,
@@ -78,7 +80,6 @@ export async function detectProviderCli(name: ProviderName): Promise<ProviderCli
       install_hint: spec.install,
     };
   }
-  const cliPath = which.stdout;
 
   // 2. 跑 --version 取版本号
   const ver = await runShort([spec.bin, "--version"]);

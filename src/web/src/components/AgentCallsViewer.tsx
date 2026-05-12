@@ -183,7 +183,7 @@ export function AgentCallsViewer({ taskId }: Props) {
                     </button>
 
                     <div className="border-t border-dashed border-foreground/20 bg-muted/20 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
-                      <span className="line-clamp-1">→ {c.prompt_preview || "(空 prompt)"}</span>
+                      <span className="line-clamp-1">→ {c.prompt_preview || "（空提示词）"}</span>
                     </div>
 
                     {isOpen && (
@@ -196,29 +196,29 @@ export function AgentCallsViewer({ taskId }: Props) {
                           <>
                             {expanded.system_prompt && (
                               <AgentCallBlock
-                                label="System prompt"
+                                label="系统提示词"
                                 content={expanded.system_prompt}
                                 onCopy={copy}
                               />
                             )}
                             {expanded.additional_system && (
                               <AgentCallBlock
-                                label="Additional system"
+                                label="追加系统提示词"
                                 content={expanded.additional_system}
                                 onCopy={copy}
                               />
                             )}
-                            <AgentCallBlock label="Prompt" content={expanded.prompt} onCopy={copy} />
+                            <AgentCallBlock label="提示词" content={expanded.prompt} onCopy={copy} />
                             {expanded.error ? (
                               <AgentCallBlock
-                                label="Error"
+                                label="错误"
                                 content={expanded.error}
                                 errorStyle
                                 onCopy={copy}
                               />
                             ) : (
                               <AgentCallBlock
-                                label="Response"
+                                label="响应"
                                 content={expanded.result_text ?? "(空)"}
                                 onCopy={copy}
                               />

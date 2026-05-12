@@ -138,12 +138,12 @@ export function Projects() {
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <PageHero
-        eyebrow="SHEET · PROJECTS / 项目工作台"
-        title="Projects"
-        subtitle="项目 · 工作台"
-        description="顶层工作空间。每个项目可关联多个 Codebase 与多条 Requirement。"
+        eyebrow="SHEET · PROJECTS · ALL"
+        title="项目"
+        subtitle="顶层工作空间 · 需求集合"
+        description="顶层工作空间。每个项目可关联多个代码库与多条需求。"
         meta={[
-          { k: "TOTAL", v: projects.length },
+          { k: "总数", v: projects.length },
         ]}
         actions={
           <>

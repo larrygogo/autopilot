@@ -166,13 +166,13 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
       <PageHero
-        eyebrow="SHEET · TASKS / 任务清单"
-        title="Tasks"
-        subtitle="任务清单 · 执行实例"
+        eyebrow="SHEET · TASKS · ALL"
+        title="任务清单"
+        subtitle="执行实例 · 状态汇总"
         description="所有工作流的执行实例。卡住或失效的任务在汇总区会单独提示，可一键恢复或取消。"
         meta={[
-          { k: "TOTAL", v: totalAll },
-          { k: "MATCHED", v: totalMatched === totalAll ? "—" : totalMatched },
+          { k: "总数", v: totalAll },
+          { k: "匹配", v: totalMatched === totalAll ? "—" : totalMatched },
         ]}
         actions={
           <Button onClick={() => setNewOpen(true)} className="shrink-0">
