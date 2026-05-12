@@ -1,3 +1,5 @@
+import type { NowCard } from "../lib/now-types";
+
 const BASE = "";
 
 /** 标记新添加的 API 路径（daemon 须是最新代码才有）。收到 404 时提示重启 daemon。 */
@@ -16,6 +18,7 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/repos\/[\w.\-]+\/rediscover-submodules$/,
   /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
   /^\/api\/projects/,
+  /^\/api\/now\//,
 ];
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -416,6 +419,14 @@ export const api = {
   resolveQuestion: (reqId: string, qid: string) =>
     request<{ ok: true }>(
       `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/resolve`,
+      { method: "POST" },
+    ),
+
+  // /now state-derivation engine (PR 1 backend)
+  listNowCards: () => request<{ cards: NowCard[] }>("/api/now/cards").then((r) => r.cards),
+  dismissNowCard: (cardId: string) =>
+    request<{ ok: true }>(
+      `/api/now/cards/${encodeURIComponent(cardId)}/dismiss`,
       { method: "POST" },
     ),
 };
