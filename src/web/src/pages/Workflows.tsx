@@ -269,7 +269,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                 type="button"
                 onClick={() => toggle(wf.name)}
                 className={cn(
-                  "group flex flex-col gap-1.5 rounded-lg border bg-card px-4 py-3 text-left shadow-sm transition-colors",
+                  "group flex flex-col gap-1.5 rounded-none border bg-card px-4 py-3 text-left shadow-sm transition-colors",
                   active
                     ? "border-primary/40 ring-1 ring-primary/20"
                     : "hover:border-primary/30 hover:bg-accent/40",
@@ -549,7 +549,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
               确认删除工作流{" "}
               <code className="rounded bg-muted px-1 font-mono">{pendingDelete}</code>？
             </p>
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
+            <div className="rounded-none border border-destructive/30 bg-destructive/5 px-3 py-2.5">
               <p className="text-xs text-destructive">
                 ⚠ 将永久删除整个目录：
                 <br />
@@ -604,7 +604,7 @@ function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/50 px-6 py-12 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-none border border-dashed bg-card/50 px-6 py-12 text-center">
       <div className="text-sm font-medium">{title}</div>
       {hint && <p className="max-w-sm text-xs text-muted-foreground">{hint}</p>}
       {action}

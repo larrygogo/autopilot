@@ -194,7 +194,7 @@ export function PhaseLogsViewer({ taskId }: Props) {
           </div>
 
           {err && (
-            <p className="mb-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <p className="mb-2 rounded-none border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {err}
             </p>
           )}
@@ -206,7 +206,7 @@ export function PhaseLogsViewer({ taskId }: Props) {
               {content ? "（当前过滤条件下无匹配日志）" : "（空）"}
             </p>
           ) : (
-            <pre className="scrollbar-thin max-h-[26rem] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
+            <pre className="scrollbar-thin max-h-[26rem] overflow-auto rounded-none border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
               {filtered.map((line, i) => {
                 const lvl = extractLevel(line);
                 return (

@@ -645,7 +645,7 @@ export function RequirementDetail() {
                 </div>
               </div>
             ) : (
-              <pre className="scrollbar-thin max-h-[600px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
+              <pre className="scrollbar-thin max-h-[600px] overflow-auto whitespace-pre-wrap break-words rounded-none bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
                 {req.spec_md || (
                   <span className="text-muted-foreground italic">暂无规约内容，点「编辑」添加。</span>
                 )}

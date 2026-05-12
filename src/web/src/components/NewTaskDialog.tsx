@@ -224,7 +224,7 @@ export function NewTaskDialog({ open, onClose, onCreated, onScheduled }: Props) 
           </div>
 
           {/* 定时任务区块 */}
-          <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+          <div className="rounded-none border bg-muted/30 p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-muted-foreground" />

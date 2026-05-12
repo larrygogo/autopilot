@@ -112,7 +112,7 @@ export function AgentCallsViewer({ taskId }: Props) {
       ) : (
         <>
           {/* 统计条 */}
-          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-none border bg-muted/40 px-3 py-2 text-xs">
             <span className="text-muted-foreground">
               共 <strong className="font-semibold text-foreground">{total}</strong> 次调用
             </span>
@@ -154,7 +154,7 @@ export function AgentCallsViewer({ taskId }: Props) {
                 <div
                   key={c.seq}
                   className={cn(
-                    "rounded-md border bg-card text-sm transition-colors",
+                    "rounded-none border bg-card text-sm transition-colors",
                     c.error && "border-destructive/40",
                     isOpen && "ring-1 ring-primary/20",
                   )}
@@ -272,7 +272,7 @@ function AgentCallBlock({
   onCopy: (s: string) => void;
 }) {
   return (
-    <div className="rounded-md border bg-card">
+    <div className="rounded-none border bg-card">
       <div className="flex items-center justify-between border-b bg-muted/30 px-2.5 py-1.5">
         <strong className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           {label}

@@ -764,7 +764,7 @@ export function PhaseEditor({
             )}
           </div>
           {hasErrors && (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3.5 py-2.5 text-sm">
+            <div className="rounded-none border border-destructive/40 bg-destructive/5 px-3.5 py-2.5 text-sm">
               <div className="flex items-center gap-1.5 text-destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <strong className="font-semibold">
@@ -810,7 +810,7 @@ export function PhaseEditor({
         message={
           <div className="space-y-2">
             <p>将从 workflow.ts 中删除以下 {orphans.length} 个函数：</p>
-            <ul className="space-y-0.5 rounded-md border bg-muted/40 p-2 pl-5 font-mono text-xs">
+            <ul className="space-y-0.5 rounded-none border bg-muted/40 p-2 pl-5 font-mono text-xs">
               {orphans.map((n) => (
                 <li key={n} className="list-disc">
                   run_{n}
@@ -960,7 +960,7 @@ function PhaseRow({
   return (
     <div
       className={cn(
-        "rounded-lg border bg-card px-3 py-2.5 shadow-sm transition-colors",
+        "rounded-none border bg-card px-3 py-2.5 shadow-sm transition-colors",
         isHighlight && "border-primary/40 ring-1 ring-primary/20",
         dragHandlers.isDragging && "opacity-40",
         dragHandlers.isDropTarget && "border-primary ring-2 ring-primary",
@@ -1231,7 +1231,7 @@ function ParallelRow(props: ParallelRowProps) {
   return (
     <div
       className={cn(
-        "rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 shadow-sm transition-colors",
+        "rounded-none border border-primary/30 bg-primary/5 px-3 py-2.5 shadow-sm transition-colors",
         headHighlight && "border-primary/60 ring-1 ring-primary/20",
         dragHandlers.isDragging && "opacity-40",
         dragHandlers.isDropTarget && "border-primary ring-2 ring-primary",
@@ -1447,7 +1447,7 @@ function ParallelChildRow({
   return (
     <div
       className={cn(
-        "rounded-md border bg-card px-2.5 py-2 shadow-sm transition-colors",
+        "rounded-none border bg-card px-2.5 py-2 shadow-sm transition-colors",
         isHighlight && "border-primary/40 ring-1 ring-primary/20",
         dragHandlers.isDragging && "opacity-40",
         dragHandlers.isDropTarget && "border-primary ring-2 ring-primary",

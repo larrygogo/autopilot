@@ -348,11 +348,11 @@ function DaemonLogCard(): React.ReactElement {
       {loading && !content ? (
         <p className="text-sm text-muted-foreground">加载中…</p>
       ) : filtered.length === 0 ? (
-        <p className="rounded-md border bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
+        <p className="rounded-none border bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
           {content ? "（当前过滤下无匹配）" : "（空）"}
         </p>
       ) : (
-        <pre className="scrollbar-thin max-h-[400px] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
+        <pre className="scrollbar-thin max-h-[400px] overflow-auto rounded-none border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
           {filtered.map((line, i) => {
             const lvl = extractLevel(line);
             return (

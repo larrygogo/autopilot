@@ -232,7 +232,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
       )}
 
       {selected.size > 0 && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-none border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
           <span>
             <strong className="font-semibold">{selected.size}</strong> 个已选 · 可取消{" "}
             <strong className="font-semibold">{cancellableSelected.length}</strong> 个
@@ -285,7 +285,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
       ) : (
         <>
           {/* Desktop: table */}
-          <div className="hidden rounded-lg border bg-card shadow-sm md:block">
+          <div className="hidden rounded-none border bg-card shadow-sm md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -359,7 +359,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
               <div
                 key={t.id}
                 className={cn(
-                  "rounded-lg border bg-card px-3.5 py-3 shadow-sm transition-colors",
+                  "rounded-none border bg-card px-3.5 py-3 shadow-sm transition-colors",
                   selected.has(t.id) && "border-primary/40 ring-1 ring-primary/20",
                   t.dangling && t.status.startsWith("running_") && "border-destructive/40",
                 )}
@@ -414,7 +414,7 @@ export function Tasks({ onSelect, subscribe }: TasksProps) {
         message={
           <div className="space-y-2">
             <p>确认取消以下 {cancellableSelected.length} 个任务？正在运行的阶段将被中止。</p>
-            <ul className="max-h-56 space-y-0.5 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs">
+            <ul className="max-h-56 space-y-0.5 overflow-auto rounded-none border bg-muted/40 p-2 font-mono text-xs">
               {cancellableSelected.map((t) => (
                 <li key={t.id}>
                   {t.id} — {t.title}
@@ -448,7 +448,7 @@ function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/50 px-6 py-12 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-none border border-dashed bg-card/50 px-6 py-12 text-center">
       <div className="text-sm font-medium">{title}</div>
       {hint && <p className="max-w-sm text-xs text-muted-foreground">{hint}</p>}
       {action}

@@ -156,7 +156,7 @@ export function CodeViewer({ code, highlightPhase, scrollToPhase }: Props) {
   return (
     <div
       ref={ref}
-      className="scrollbar-thin max-h-[32rem] overflow-auto rounded-md border bg-muted/40 py-2 font-mono text-xs leading-relaxed"
+      className="scrollbar-thin max-h-[32rem] overflow-auto rounded-none border bg-muted/40 py-2 font-mono text-xs leading-relaxed"
     >
       {lineTokens.map((lt, i) => (
         <div

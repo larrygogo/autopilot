@@ -141,7 +141,7 @@ export function NewWorkflowDialog({ open, onClose, onCreated }: Props) {
             </p>
           </div>
 
-          <div className="rounded-md border bg-muted/40 px-3 py-2.5">
+          <div className="rounded-none border bg-muted/40 px-3 py-2.5">
             <p className="mb-1 text-xs text-muted-foreground">将生成文件：</p>
             <ul className="space-y-0.5 font-mono text-xs leading-relaxed">
               <li>

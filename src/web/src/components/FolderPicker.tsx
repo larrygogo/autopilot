@@ -111,7 +111,7 @@ export function FolderPicker({ open, initialPath, onSelect, onCancel }: FolderPi
         </div>
 
         {/* 文件夹列表 */}
-        <div className="relative min-h-[220px] max-h-[340px] overflow-y-auto rounded-md border bg-muted/20">
+        <div className="relative min-h-[220px] max-h-[340px] overflow-y-auto rounded-none border bg-muted/20">
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center bg-background/60 z-10">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

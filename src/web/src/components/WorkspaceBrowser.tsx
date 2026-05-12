@@ -137,7 +137,7 @@ export function WorkspaceBrowser({ taskId }: Props) {
       </div>
 
       {/* 面包屑 */}
-      <div className="scrollbar-thin mb-3 flex flex-nowrap items-center gap-1 overflow-x-auto rounded-md border bg-muted/40 px-2 py-1.5 text-xs">
+      <div className="scrollbar-thin mb-3 flex flex-nowrap items-center gap-1 overflow-x-auto rounded-none border bg-muted/40 px-2 py-1.5 text-xs">
         <button
           type="button"
           className="shrink-0 rounded px-1.5 py-0.5 font-mono text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -169,14 +169,14 @@ export function WorkspaceBrowser({ taskId }: Props) {
       </div>
 
       {err && (
-        <p className="mb-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <p className="mb-2 rounded-none border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {err}
         </p>
       )}
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
         {/* 左：列表 */}
-        <div className="scrollbar-thin max-h-[28rem] overflow-auto rounded-md border bg-card">
+        <div className="scrollbar-thin max-h-[28rem] overflow-auto rounded-none border bg-card">
           {loading ? (
             <p className="p-3 text-xs text-muted-foreground">加载中…</p>
           ) : entries.length === 0 && !err ? (
@@ -229,7 +229,7 @@ export function WorkspaceBrowser({ taskId }: Props) {
         </div>
 
         {/* 右：文件预览 */}
-        <div className="min-w-0 rounded-md border bg-card">
+        <div className="min-w-0 rounded-none border bg-card">
           {loadingFile && (
             <p className="p-3 text-xs text-muted-foreground">加载文件…</p>
           )}
@@ -284,7 +284,7 @@ export function WorkspaceBrowser({ taskId }: Props) {
         message={
           <div className="space-y-2">
             <p>将删除此任务的 workspace 目录：</p>
-            <pre className="overflow-x-auto rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-[11px]">
+            <pre className="overflow-x-auto rounded-none border bg-muted/40 px-2 py-1.5 font-mono text-[11px]">
               {`~/.autopilot/runtime/tasks/${taskId}/workspace`}
             </pre>
             <p className="text-xs text-muted-foreground">

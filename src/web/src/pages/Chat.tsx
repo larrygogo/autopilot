@@ -383,7 +383,7 @@ function SessionList({
                     type="button"
                     onClick={() => onSelect(s.id)}
                     className={cn(
-                      "flex w-full flex-col items-start gap-0.5 rounded-md border-l-2 border-transparent px-2.5 py-2 text-left transition-colors",
+                      "flex w-full flex-col items-start gap-0.5 rounded-none border-l-2 border-transparent px-2.5 py-2 text-left transition-colors",
                       active
                         ? "border-primary bg-primary/10 text-foreground"
                         : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -436,7 +436,7 @@ function MessageItem({
       </div>
       <div
         className={cn(
-          "whitespace-pre-wrap break-words rounded-lg border px-3.5 py-2.5 text-sm leading-relaxed",
+          "whitespace-pre-wrap break-words rounded-none border px-3.5 py-2.5 text-sm leading-relaxed",
           isUser
             ? "border-primary/20 bg-primary/10 text-foreground"
             : "border-border bg-card text-card-foreground",
@@ -463,7 +463,7 @@ function MessageItem({
 
 function EmptyChat() {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/40 px-6 py-16 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-none border border-dashed bg-card/40 px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
         <MessageSquare className="h-6 w-6" />
       </div>
