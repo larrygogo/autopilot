@@ -12,6 +12,7 @@ import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { SpecRevisionsSheet } from "@/components/SpecRevisionsSheet";
+import { MarkdownView } from "@/components/MarkdownView";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
@@ -1022,11 +1023,13 @@ export function RequirementDetail() {
                   </div>
                 </div>
               ) : (
-                <pre className="scrollbar-thin max-h-[600px] overflow-auto whitespace-pre-wrap break-words border border-foreground/20 bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
-                  {req.spec_md || (
-                    <span className="italic text-muted-foreground">暂无规约内容，点「编辑」添加。</span>
+                <div className="scrollbar-thin max-h-[600px] overflow-auto border border-foreground/20 bg-muted/30 p-4">
+                  {req.spec_md ? (
+                    <MarkdownView content={req.spec_md} />
+                  ) : (
+                    <span className="italic text-muted-foreground text-sm">暂无规约内容，点「编辑」添加。</span>
                   )}
-                </pre>
+                </div>
               )}
             </div>
           </Card>
