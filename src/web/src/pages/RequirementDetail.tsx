@@ -144,7 +144,10 @@ export function RequirementDetail() {
       if (!isForThis) return;
       if (
         event.type === "requirement:status-changed" ||
-        event.type === "requirement:questions-updated"
+        event.type === "requirement:questions-updated" ||
+        event.type === "requirement:question-resolved" ||
+        event.type === "requirement:active-question-changed" ||
+        event.type === "requirement:spec-revised"
       ) {
         void refresh({ silent: true });
       }
