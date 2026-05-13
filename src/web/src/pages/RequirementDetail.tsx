@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project, type Codebase } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -76,6 +76,92 @@ const SOURCE_LABEL: Record<string, string> = {
   manual: "手动",
   github_review: "GitHub Review",
 };
+
+interface RenderQuestionDeps {
+  replyDrafts: Record<string, string>;
+  setReplyDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  replyingId: string | null;
+  submitReply: (qid: string) => Promise<void>;
+}
+
+/**
+ * 渲染单个 question 的 chat 气泡块（AI 提问 + 用户回复 + 回复输入框）。
+ * 抽成独立函数以便 active question 区和历史折叠区共用。
+ */
+function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode {
+  const { replyDrafts, setReplyDrafts, replyingId, submitReply } = deps;
+  return (
+    <div key={q.id} className="space-y-3">
+      {/* AI 气泡 */}
+      <div className="flex items-start gap-2.5">
+        <div className="bp-num-block h-7 w-7 text-[10px]">AI</div>
+        <div className="flex-1 space-y-2">
+          <div className={cn(
+            "border-[1.5px] border-foreground/30 bg-muted/50 px-4 py-3 text-sm leading-relaxed",
+            q.status === "resolved" && "opacity-60"
+          )}>
+            {q.agent_text}
+          </div>
+          {q.status === "open" && q.suggestions.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {q.suggestions.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setReplyDrafts(d => ({ ...d, [q.id]: s }))}
+                  className="border border-foreground/30 bg-background px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-accent hover:text-accent"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 用户回复气泡 */}
+      {(q.replies ?? []).filter(r => r.author_role === "user").map((reply) => (
+        <div key={reply.id} className="flex items-start justify-end gap-2.5">
+          <div className={cn(
+            "max-w-[80%] border-[1.5px] border-accent bg-accent/12 px-4 py-3 text-sm leading-relaxed text-foreground",
+            q.status === "resolved" && "opacity-70"
+          )}>
+            {reply.text}
+          </div>
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center border-[1.5px] border-accent bg-accent text-[10px] font-mono font-bold text-accent-foreground">
+            你
+          </div>
+        </div>
+      ))}
+
+      {/* 输入框（仅 open 状态） */}
+      {q.status === "open" && (
+        <div className="pl-8 space-y-2">
+          <Textarea
+            value={replyDrafts[q.id] ?? ""}
+            onChange={(e) => setReplyDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
+            placeholder="输入回复，或点击上方建议…"
+            className="min-h-[72px] resize-none text-sm"
+            disabled={replyingId === q.id}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submitReply(q.id);
+            }}
+          />
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              onClick={() => void submitReply(q.id)}
+              disabled={replyingId === q.id || !(replyDrafts[q.id] ?? "").trim()}
+            >
+              <Send className="mr-1.5 h-3.5 w-3.5" />
+              {replyingId === q.id ? "发送中…" : "发送"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function RequirementDetail() {
   const { id } = useParams<{ id: string }>();
@@ -584,81 +670,35 @@ export function RequirementDetail() {
             )}
           </div>
 
-          {/* 对话气泡流 */}
-          <div className="space-y-4 p-5">
-            {questions.map((q) => (
-              <div key={q.id} className="space-y-3">
-                {/* AI 气泡 */}
-                <div className="flex items-start gap-2.5">
-                  <div className="bp-num-block h-7 w-7 text-[10px]">AI</div>
-                  <div className="flex-1 space-y-2">
-                    <div className={cn(
-                      "border-[1.5px] border-foreground/30 bg-muted/50 px-4 py-3 text-sm leading-relaxed",
-                      q.status === "resolved" && "opacity-60"
-                    )}>
-                      {q.agent_text}
-                    </div>
-                    {/* 建议 chips */}
-                    {q.status === "open" && q.suggestions.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {q.suggestions.map((s) => (
-                          <button
-                            key={s}
-                            type="button"
-                            onClick={() => setReplyDrafts(d => ({ ...d, [q.id]: s }))}
-                            className="border border-foreground/30 bg-background px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-accent hover:text-accent"
-                          >
-                            {s}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+          {/* 当前活跃问题（open）— 永远显示，含回复框 */}
+          {openQuestions.length > 0 && (
+            <div className="space-y-4 p-5">
+              {openQuestions.map((q) => renderQuestion(q, {
+                replyDrafts,
+                setReplyDrafts,
+                replyingId,
+                submitReply,
+              }))}
+            </div>
+          )}
 
-                {/* 用户回复气泡 */}
-                {(q.replies ?? []).filter(r => r.author_role === "user").map((reply) => (
-                  <div key={reply.id} className="flex items-start justify-end gap-2.5">
-                    <div className={cn(
-                      "max-w-[80%] border-[1.5px] border-accent bg-accent/12 px-4 py-3 text-sm leading-relaxed text-foreground",
-                      q.status === "resolved" && "opacity-70"
-                    )}>
-                      {reply.text}
-                    </div>
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center border-[1.5px] border-accent bg-accent text-[10px] font-mono font-bold text-accent-foreground">
-                      你
-                    </div>
-                  </div>
-                ))}
-
-                {/* 输入框（仅 open 状态） */}
-                {q.status === "open" && (
-                  <div className="pl-8 space-y-2">
-                    <Textarea
-                      value={replyDrafts[q.id] ?? ""}
-                      onChange={(e) => setReplyDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
-                      placeholder="输入回复，或点击上方建议…"
-                      className="min-h-[72px] resize-none text-sm"
-                      disabled={replyingId === q.id}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submitReply(q.id);
-                      }}
-                    />
-                    <div className="flex justify-end">
-                      <Button
-                        size="sm"
-                        onClick={() => void submitReply(q.id)}
-                        disabled={replyingId === q.id || !(replyDrafts[q.id] ?? "").trim()}
-                      >
-                        <Send className="mr-1.5 h-3.5 w-3.5" />
-                        {replyingId === q.id ? "发送中…" : "发送"}
-                      </Button>
-                    </div>
-                  </div>
-                )}
+          {/* 历史问答折叠区 — 默认折叠，点击展开 */}
+          {resolvedQuestions.length > 0 && (
+            <details className="group border-t border-dashed border-foreground/25">
+              <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground [&::-webkit-details-marker]:hidden">
+                <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+                <span>历史问答 · {resolvedQuestions.length} 条</span>
+              </summary>
+              <div className="space-y-4 p-5 pt-3">
+                {resolvedQuestions.map((q) => renderQuestion(q, {
+                  replyDrafts,
+                  setReplyDrafts,
+                  replyingId,
+                  submitReply,
+                }))}
               </div>
-            ))}
-          </div>
+            </details>
+          )}
 
           {/*
             AI 思考中 spinner：clarifying 期没有 open question 但已经有 resolved 时显示。
