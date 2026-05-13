@@ -180,7 +180,27 @@ function parseClarifyResult(raw: string): ClarifyResult {
   };
 }
 
+/**
+ * 同一 requirement 同时只跑一个 clarifier round。
+ * 必要：question-resolved handler、retry-clarify API、watchdog 三处都可能并发触发；
+ * 不加锁会导致重复 createQuestion + setActiveQuestionId 留下多个 open question / 覆盖。
+ */
+const _inflightRounds = new Set<string>();
+
 export async function runClarifierRound(reqId: string): Promise<void> {
+  if (_inflightRounds.has(reqId)) {
+    log.info("clarifier: req=%s 已在跑，跳过重复 trigger", reqId);
+    return;
+  }
+  _inflightRounds.add(reqId);
+  try {
+    await _runClarifierRoundInner(reqId);
+  } finally {
+    _inflightRounds.delete(reqId);
+  }
+}
+
+async function _runClarifierRoundInner(reqId: string): Promise<void> {
   const req = getRequirementById(reqId);
   if (!req || req.status !== "clarifying") return;
 
