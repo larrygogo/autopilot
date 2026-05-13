@@ -212,6 +212,14 @@ export async function runClarifierRound(reqId: string): Promise<void> {
     return;
   }
 
+  // Race protection: status may have changed (e.g. user called finish-clarification)
+  // between the initial check and the AI response. Re-fetch and abort if no longer clarifying.
+  const reqAfter = getRequirementById(reqId);
+  if (!reqAfter || reqAfter.status !== "clarifying") {
+    log.info("clarifier: req=%s 状态已变（%s），AI 结果丢弃", reqId, reqAfter?.status ?? "deleted");
+    return;
+  }
+
   const oldSpec = req.spec_md ?? "";
   if (result.new_spec_md !== oldSpec) {
     const revId = createSpecRevision({

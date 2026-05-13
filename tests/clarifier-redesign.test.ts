@@ -151,4 +151,30 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     await runClarifierRound("non-existent-req");
     expect(calls).toBe(0);
   });
+
+  it("AI 返回时状态已变（race）→ 丢弃结果，不写 spec/不创建 question", async () => {
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "原稿" });
+    setRequirementStatus("r1", "clarifying");
+    const originalQuestionCount = listQuestionsByRequirement("r1").length;
+
+    // AI 返回前模拟状态切换（mock 内 setRequirementStatus）
+    _setClarifyFnForTest(async () => {
+      // 在 AI "回复"前把 status 改了
+      setRequirementStatus("r1", "awaiting_approval");
+      return JSON.stringify({
+        new_spec_md: "AI 想改",
+        summary: "想加章节",
+        next_question: { agent_text: "?", suggestions: [] },
+        done: false,
+      });
+    });
+
+    await runClarifierRound("r1");
+
+    const req = getRequirementById("r1");
+    expect(req?.spec_md).toBe("原稿");
+    expect(req?.active_question_id).toBeNull();
+    expect(req?.status).toBe("awaiting_approval");
+    expect(listQuestionsByRequirement("r1").length).toBe(originalQuestionCount);
+  });
 });
