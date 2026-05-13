@@ -196,17 +196,19 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
  */
 export function deleteRequirement(id: string): void {
   const db = getDb();
-  // 先删问题的回复，再删问题本身
-  db.run(
-    "DELETE FROM requirement_question_replies WHERE question_id IN " +
-    "(SELECT id FROM requirement_questions WHERE requirement_id = ?)",
-    [id],
-  );
-  db.run("DELETE FROM requirement_questions WHERE requirement_id = ?", [id]);
-  db.run("DELETE FROM requirement_feedbacks WHERE requirement_id = ?", [id]);
-  db.run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [id]);
-  db.run("DELETE FROM requirement_codebases WHERE requirement_id = ?", [id]);
-  db.run("DELETE FROM requirements WHERE id = ?", [id]);
+  db.transaction(() => {
+    // 先删问题的回复，再删问题本身
+    db.run(
+      "DELETE FROM requirement_question_replies WHERE question_id IN " +
+      "(SELECT id FROM requirement_questions WHERE requirement_id = ?)",
+      [id],
+    );
+    db.run("DELETE FROM requirement_questions WHERE requirement_id = ?", [id]);
+    db.run("DELETE FROM requirement_feedbacks WHERE requirement_id = ?", [id]);
+    db.run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [id]);
+    db.run("DELETE FROM requirement_codebases WHERE requirement_id = ?", [id]);
+    db.run("DELETE FROM requirements WHERE id = ?", [id]);
+  })();
 }
 
 /**
