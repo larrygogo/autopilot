@@ -1,5 +1,6 @@
-import type { CardSource, CardDelta, NowCard } from "../now-types";
-import type { AutopilotEvent } from "../../daemon/protocol";
+import type { CardSource, CardDelta } from "./types";
+import type { NowCard } from "../now-types";
+import type { AutopilotEvent } from "../events";
 import { listUnhealthy, getProviderHealth } from "../provider-health";
 
 /**

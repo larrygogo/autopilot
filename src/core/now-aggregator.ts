@@ -1,4 +1,5 @@
-import type { CardSource, CardDelta, NowCard, NowCardPriority } from "./now-types";
+import type { NowCard, NowCardPriority } from "./now-types";
+import type { CardSource, CardDelta } from "./card-sources/types";
 import { createAwaitingApprovalSource } from "./card-sources/awaiting-approval";
 import { createOpenQuestionSource } from "./card-sources/open-question";
 import { createAwaitReviewSource } from "./card-sources/await-review";
@@ -9,7 +10,7 @@ import { createTaskFailedSource } from "./card-sources/task-failed";
 import { createEmptyStateSource } from "./card-sources/empty-state";
 import { createProviderErrorSource } from "./card-sources/provider-error";
 import { createClarifierErrorSource } from "./card-sources/clarifier-error";
-import type { AutopilotEvent } from "../daemon/protocol";
+import type { AutopilotEvent } from "./events";
 import { onEvent as busOn, offEvent as busOff, emit as busEmit } from "../daemon/event-bus";
 import { listDismissedCardIds, clearDismissedCard } from "./now-dismiss";
 
