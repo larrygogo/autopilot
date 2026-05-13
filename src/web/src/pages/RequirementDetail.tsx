@@ -695,12 +695,41 @@ export function RequirementDetail() {
         </Card>
       )}
 
-      {/* AI 正在生成澄清问题（clarifying 且暂无问题、且没出错时显示）*/}
+      {/* AI 正在生成澄清问题（clarifying 且暂无问题、且没出错时显示）。
+          加 [重试] 按钮兜底：daemon 重启 / WS 断连导致 clarifier-error 事件丢失时，
+          用户能主动触发 retry-clarify 而不是干等 spinner。 */}
       {!clarifierError && req.status === "clarifying" && questions.length === 0 && (
         <Card className="mb-6 p-5">
-          <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin text-accent" />
-            AI 正在分析需求，生成澄清问题…
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
+            <span className="flex-1 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              AI 正在分析需求，生成澄清问题…
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={retryingClarify}
+              onClick={async () => {
+                if (!id) return;
+                setRetryingClarify(true);
+                try {
+                  const res = await fetch(`/api/requirements/${encodeURIComponent(id)}/retry-clarify`, { method: "POST" });
+                  if (!res.ok) {
+                    const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
+                    throw new Error(body.error ?? `HTTP ${res.status}`);
+                  }
+                  toast.success("已重新触发 AI 澄清");
+                  void refresh({ silent: true });
+                } catch (e: unknown) {
+                  toast.error("重试失败", (e as Error)?.message ?? String(e));
+                } finally {
+                  setRetryingClarify(false);
+                }
+              }}
+              className="shrink-0"
+            >
+              {retryingClarify ? "重试中…" : "↻ 重试"}
+            </Button>
           </div>
         </Card>
       )}
