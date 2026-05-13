@@ -35,6 +35,11 @@ export type AutopilotEvent =
   | { type: "requirement:status-changed"; payload: { id: string; from: string; to: string } }
   | { type: "requirement:questions-updated"; payload: { id: string } }
   | { type: "requirement:all-questions-resolved"; payload: { id: string } }
+  // ── Clarifier 重设计（PR-A）新增事件 ──
+  | { type: "requirement:question-resolved"; payload: { id: string; question_id: string } }
+  | { type: "requirement:active-question-changed"; payload: { id: string; question_id: string | null } }
+  | { type: "requirement:spec-revised"; payload: { id: string; revision_id: number } }
+  | { type: "requirement:clarifier-error"; payload: { id: string; reason: string } }
   // /now 推送事件
   | { type: "now:card_added"; payload: { card: _NowCardRef } }
   | { type: "now:card_updated"; payload: { id: string; patch: Partial<_NowCardRef> } }
