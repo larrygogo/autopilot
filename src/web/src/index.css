@@ -175,7 +175,42 @@
   }
 }
 
+/* ──────────── 全局滚动条样式（蓝图风） ──────────── */
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+/* WebKit (Chrome / Safari / Edge) */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 0;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.15s;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:active {
+  background: var(--accent);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 @layer utilities {
+  /* 保留 .scrollbar-thin 作为兼容 alias（现有 16 个文件还在用）；
+     全局样式已经统一，此 class 现在只是显式表意 */
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
