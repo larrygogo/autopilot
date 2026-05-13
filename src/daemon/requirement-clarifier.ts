@@ -27,7 +27,7 @@ const log = createLogger("requirement-clarifier");
 // AI 调用层（可测试注入）
 // ──────────────────────────────────────────────
 
-type ClarifyFn = (prompt: string) => Promise<string>;
+type ClarifyFn = (prompt: string, reqId: string) => Promise<string>;
 
 let _clarifyFn: ClarifyFn = callClaude;
 
@@ -35,17 +35,22 @@ export function _setClarifyFnForTest(fn: ClarifyFn | null): void {
   _clarifyFn = fn ?? callClaude;
 }
 
-async function callClaude(prompt: string): Promise<string> {
-  // 通过 agent 系统调用。agent name 固定为 'clarifier'；
-  // 用户在 config.yaml.agents.clarifier 配 provider/model/system_prompt。
-  // 没配 clarifier 也能跑 — registry 会用全局默认（anthropic + default model）。
+async function callClaude(prompt: string, reqId: string): Promise<string> {
+  // 通过 agent 系统调用。merge 顺序：req-level override > 全局 agents.clarifier > 默认 (anthropic + provider 默认 model)
   let agent;
   try {
     const globalAgents = loadGlobalAgents();
     const providers = loadProviders();
-    // 若用户没有配置 clarifier，使用 anthropic 作为默认 provider
-    const base = globalAgents["clarifier"] ?? { provider: "anthropic" };
-    const resolved = resolveAgentConfig("clarifier", undefined, { clarifier: base }, providers);
+    const globalClarifier = globalAgents["clarifier"] ?? { provider: "anthropic" };
+
+    // 拉本 req 的 override
+    const req = getRequirementById(reqId);
+    const override: { provider?: "anthropic" | "openai" | "google"; model?: string } = {};
+    if (req?.clarifier_provider) override.provider = req.clarifier_provider as "anthropic" | "openai" | "google";
+    if (req?.clarifier_model) override.model = req.clarifier_model;
+
+    const merged = { ...globalClarifier, ...override };
+    const resolved = resolveAgentConfig("clarifier", undefined, { clarifier: merged }, providers);
     agent = createAgent(resolved);
   } catch (e: unknown) {
     throw new Error(`无法初始化 clarifier agent：${e instanceof Error ? e.message : String(e)}`);
@@ -243,7 +248,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const raw = await _clarifyFn(prompt);
+      const raw = await _clarifyFn(prompt, reqId);
       result = parseClarifyResult(raw);
       break;
     } catch (e: unknown) {

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2 } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project, type Codebase } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project, type Codebase, type ProviderItem } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 
 const STATUS_LABEL: Record<string, string> = {
   drafting: "草稿",
@@ -82,6 +83,149 @@ interface RenderQuestionDeps {
   setReplyDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   replyingId: string | null;
   submitReply: (qid: string) => Promise<void>;
+}
+
+function ClarifierOverrideDialog({
+  open,
+  onOpenChange,
+  requirementId,
+  currentProvider,
+  currentModel,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  requirementId: string;
+  currentProvider: string | null;
+  currentModel: string | null;
+  onSaved: () => void;
+}): React.ReactNode {
+  const toast = useToast();
+  const [mode, setMode] = useState<"inherit" | "override">(currentProvider || currentModel ? "override" : "inherit");
+  const [provider, setProvider] = useState<string>(currentProvider ?? "");
+  const [model, setModel] = useState<string>(currentModel ?? "");
+  const [providers, setProviders] = useState<ProviderItem[]>([]);
+  const [models, setModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // 每次打开时 sync state to props
+  useEffect(() => {
+    if (!open) return;
+    setMode(currentProvider || currentModel ? "override" : "inherit");
+    setProvider(currentProvider ?? "");
+    setModel(currentModel ?? "");
+    api.listProviders().then(setProviders).catch(() => {});
+  }, [open, currentProvider, currentModel]);
+
+  // provider 改变时拉 model 列表
+  useEffect(() => {
+    if (!provider) { setModels([]); return; }
+    setLoadingModels(true);
+    api.getProviderModels(provider)
+      .then((r) => setModels(r.models ?? []))
+      .catch(() => setModels([]))
+      .finally(() => setLoadingModels(false));
+  }, [provider]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const body = mode === "inherit"
+        ? { clarifier_provider: null, clarifier_model: null }
+        : { clarifier_provider: provider || null, clarifier_model: model || null };
+      await api.updateRequirement(requirementId, body);
+      toast.success("已保存");
+      onSaved();
+      onOpenChange(false);
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="rounded-none sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>此需求的澄清模型</DialogTitle>
+          <DialogDescription>
+            仅作用于本需求。继承全局表示用 /settings?tab=clarifier 的默认。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          {/* mode toggle */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setMode("inherit")}
+              className={cn(
+                "flex-1 border-[1.5px] px-3 py-2 font-mono text-xs uppercase tracking-[0.12em]",
+                mode === "inherit"
+                  ? "border-accent bg-accent/10 text-foreground"
+                  : "border-foreground/30 text-muted-foreground hover:border-foreground/60",
+              )}
+            >
+              继承全局默认
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("override")}
+              className={cn(
+                "flex-1 border-[1.5px] px-3 py-2 font-mono text-xs uppercase tracking-[0.12em]",
+                mode === "override"
+                  ? "border-accent bg-accent/10 text-foreground"
+                  : "border-foreground/30 text-muted-foreground hover:border-foreground/60",
+              )}
+            >
+              为此需求 override
+            </button>
+          </div>
+
+          {mode === "override" && (
+            <>
+              <div className="space-y-1.5">
+                <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">供应商</Label>
+                <Select value={provider} onValueChange={(v) => { setProvider(v); setModel(""); }}>
+                  <SelectTrigger className="rounded-none">
+                    <SelectValue placeholder="选择供应商" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providers.map((p) => (
+                      <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">模型（可选）</Label>
+                <Select value={model} onValueChange={setModel} disabled={!provider || loadingModels}>
+                  <SelectTrigger className="rounded-none">
+                    <SelectValue placeholder={
+                      !provider ? "先选供应商" :
+                      loadingModels ? "加载中…" :
+                      models.length === 0 ? "无可用模型（走默认）" :
+                      "选择模型"
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {models.map((m) => (<SelectItem key={m} value={m}>{m}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>取消</Button>
+          <Button onClick={() => void handleSave()} disabled={saving}>
+            {saving ? "保存中…" : "保存"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 /**
@@ -186,6 +330,7 @@ export function RequirementDetail() {
   // 回复输入状态：qid → 文本
   const [projectCodebases, setProjectCodebases] = useState<Codebase[]>([]);
   const [codebaseDialogOpen, setCodebaseDialogOpen] = useState(false);
+  const [clarifierDialogOpen, setClarifierDialogOpen] = useState(false);
   // Radix Select 不允许 value=""（空串保留给清空 placeholder），用 sentinel 表示"未关联"
   const NONE_VALUE = "__none__";
   const [codebaseDraft, setCodebaseDraft] = useState<string>(NONE_VALUE);
@@ -734,14 +879,15 @@ export function RequirementDetail() {
           <div className="flex items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="bp-label">需求澄清 · CLARIFICATION</span>
-            <Link
-              to="/settings?tab=clarifier"
+            <button
+              type="button"
+              onClick={() => setClarifierDialogOpen(true)}
               className="ml-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground hover:text-accent inline-flex items-center gap-1"
-              title="配置 clarifier 模型 / 供应商"
+              title="为此需求配置 clarifier 模型"
             >
               <Settings2 className="h-3 w-3" />
-              模型设置
-            </Link>
+              模型：{req.clarifier_model ?? req.clarifier_provider ?? "全局默认"}
+            </button>
             {openQuestions.length > 0 && (
               <Badge variant="warning" className="ml-auto">{openQuestions.length} 待回复</Badge>
             )}
@@ -1064,6 +1210,16 @@ export function RequirementDetail() {
           )}
         </div>
       </div>
+
+      {/* 当前需求的 clarifier 模型 dialog */}
+      <ClarifierOverrideDialog
+        open={clarifierDialogOpen}
+        onOpenChange={setClarifierDialogOpen}
+        requirementId={req.id}
+        currentProvider={req.clarifier_provider}
+        currentModel={req.clarifier_model}
+        onSaved={() => void refresh({ silent: true })}
+      />
 
       {/* 修改代码库关联 dialog */}
       <Dialog open={codebaseDialogOpen} onOpenChange={setCodebaseDialogOpen}>

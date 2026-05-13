@@ -382,6 +382,8 @@ export const api = {
     spec_md?: string;
     codebase_id?: string | null;
     chat_session_id?: string | null;
+    clarifier_provider?: string | null;
+    clarifier_model?: string | null;
   }) =>
     request<{ requirement: Requirement }>(`/api/requirements/${id}`, {
       method: "PUT",
@@ -617,6 +619,8 @@ export interface Requirement {
   active_question_id: string | null;
   /** clarifier 失败时 set 错误原因，成功时 clear；持久化到 DB，跨重启/navigation 可见 */
   clarifier_error: string | null;
+  clarifier_provider: string | null;
+  clarifier_model: string | null;
   created_at: number;
   updated_at: number;
 }

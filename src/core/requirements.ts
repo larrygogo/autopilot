@@ -28,6 +28,8 @@ export interface Requirement {
   last_reviewed_event_id: string | null;
   active_question_id: string | null;
   clarifier_error: string | null;
+  clarifier_provider: string | null;
+  clarifier_model: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -51,6 +53,8 @@ export interface UpdateRequirementOpts {
   pr_number?: number | null;
   last_reviewed_event_id?: string | null;
   clarifier_error?: string | null;
+  clarifier_provider?: string | null;
+  clarifier_model?: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -189,6 +193,8 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
     "pr_number",
     "last_reviewed_event_id",
     "clarifier_error",
+    "clarifier_provider",
+    "clarifier_model",
   ] as const;
   for (const k of updatable) {
     if (opts[k] !== undefined) {
