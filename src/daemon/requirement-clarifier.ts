@@ -98,13 +98,15 @@ function buildPrompt(opts: {
     '    "agent_text": "...",        // 下一个问题',
     '    "suggestions": ["A","B"]   // 2-4 个短选项，可空数组',
     '  } | null,                     // null 表示不再追问',
-    '  "done": true|false            // true=信息已足够、可入队',
+    '  "done": true|false,           // true=信息已足够、可入队',
+    '  "new_title": "..." | null      // 改进后的需求标题（10-20 字），null 表示当前标题已足够好',
     '}',
     "",
     "# 关键规则",
     "- 如果 spec_md 没变化，new_spec_md 仍要原样输出，但 summary 可为 null。",
     "- 下一个问题必须**基于最新 spec_md 和已有 Q&A**，不要重复问已澄清的事。",
     "- 如果信息已足够实现需求，输出 done=true 且 next_question=null。",
+    "- 标题（title）应该一句话概括需求；如果当前 title 看起来是用户直接从描述粗截的（如带省略号、半句话、过长），用 new_title 给出更好的版本。如果当前 title 已经准确，new_title 为 null。",
     "- 输出**只有 JSON**，前后没有任何 markdown / 解释 / 代码块。",
     "",
     "# 上下文",
@@ -131,6 +133,7 @@ interface ClarifyResult {
   summary: string | null;
   next_question: { agent_text: string; suggestions: string[] } | null;
   done: boolean;
+  new_title: string | null;
 }
 
 function parseClarifyResult(raw: string): ClarifyResult {
@@ -142,6 +145,10 @@ function parseClarifyResult(raw: string): ClarifyResult {
   if (typeof parsed.new_spec_md !== "string") throw new Error("missing/invalid new_spec_md");
   if (typeof parsed.done !== "boolean") throw new Error("missing/invalid done");
   const summary = parsed.summary === null || typeof parsed.summary === "string" ? parsed.summary : null;
+  // new_title 是 PR-A 之后的扩展，可选字段；不存在或非字符串都视为 null
+  const new_title = typeof parsed.new_title === "string" && parsed.new_title.trim() !== ""
+    ? parsed.new_title.trim()
+    : null;
   const next_question = parsed.next_question === null ? null
     : (parsed.next_question && typeof parsed.next_question === "object"
         ? {
@@ -159,6 +166,7 @@ function parseClarifyResult(raw: string): ClarifyResult {
     summary,
     next_question,
     done: parsed.done,
+    new_title,
   };
 }
 
@@ -232,6 +240,12 @@ export async function runClarifierRound(reqId: string): Promise<void> {
     });
     updateRequirement(reqId, { spec_md: result.new_spec_md });
     emit({ type: "requirement:spec-revised", payload: { id: reqId, revision_id: revId } });
+  }
+
+  // AI 建议新 title（如果与当前不同）
+  if (result.new_title && result.new_title !== req.title) {
+    updateRequirement(reqId, { title: result.new_title });
+    log.info("clarifier: req=%s title 改为 '%s'", reqId, result.new_title);
   }
 
   if (result.done) {
