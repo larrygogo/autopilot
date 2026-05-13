@@ -8,10 +8,16 @@ import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
+import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
+import { up as migrate010 } from "../src/migrations/010-question-suggestions";
+import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
 import {
   createProject, getProjectById, listProjects,
   updateProject, deleteProject, nextProjectId,
 } from "../src/core/projects";
+import { createCodebase } from "../src/core/codebases";
+import { createRequirement } from "../src/core/requirements";
+import { createQuestion } from "../src/core/requirement-questions";
 
 describe("projects CRUD", () => {
   let sqlite: Database;
@@ -27,6 +33,9 @@ describe("projects CRUD", () => {
     migrate006(sqlite);
     migrate007(sqlite);
     migrate008(sqlite);
+    migrate009(sqlite);
+    migrate010(sqlite);
+    migrate011(sqlite);
   });
 
   afterAll(() => {
@@ -74,5 +83,21 @@ describe("projects CRUD", () => {
     expect(id1.startsWith("proj-")).toBe(true);
     expect(id2.startsWith("proj-")).toBe(true);
     expect(id2).not.toBe(id1);
+  });
+
+  it("deleteProject 级联删 codebases / requirements / questions / replies / feedbacks", async () => {
+    const db = (await import("../src/core/db")).getDb();
+
+    createProject({ id: "proj-cascade", name: "Cascade Project" });
+    createCodebase({ id: "cb-c1", project_id: "proj-cascade", alias: "main", path: "/tmp/c1" });
+    createRequirement({ id: "REQ-CP1", project_id: "proj-cascade", title: "X", spec_md: "" });
+    createQuestion({ id: "QST-CP1", requirement_id: "REQ-CP1", agent_text: "Q?" });
+
+    deleteProject("proj-cascade");
+
+    expect(db.query("SELECT COUNT(*) AS n FROM projects WHERE id = 'proj-cascade'").get()).toEqual({ n: 0 });
+    expect(db.query("SELECT COUNT(*) AS n FROM codebases WHERE project_id = 'proj-cascade'").get()).toEqual({ n: 0 });
+    expect(db.query("SELECT COUNT(*) AS n FROM requirements WHERE project_id = 'proj-cascade'").get()).toEqual({ n: 0 });
+    expect(db.query("SELECT COUNT(*) AS n FROM requirement_questions WHERE requirement_id = 'REQ-CP1'").get()).toEqual({ n: 0 });
   });
 });
