@@ -9,6 +9,7 @@ const Agents = lazy(() => import("./Agents").then((m) => ({ default: m.Agents })
 const Providers = lazy(() => import("./Providers").then((m) => ({ default: m.Providers })));
 const Schedules = lazy(() => import("./Schedules").then((m) => ({ default: m.Schedules })));
 const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
+const ClarifierSettings = lazy(() => import("./ClarifierSettings").then((m) => ({ default: m.ClarifierSettings })));
 
 const TABS = [
   { key: "workflows", label: "工作流" },
@@ -16,6 +17,7 @@ const TABS = [
   { key: "providers", label: "提供商" },
   { key: "schedules", label: "定时任务" },
   { key: "general", label: "通用" },
+  { key: "clarifier", label: "需求澄清" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -74,6 +76,9 @@ export function SettingsHub() {
           </TabsContent>
           <TabsContent value="general">
             <Settings embedded />
+          </TabsContent>
+          <TabsContent value="clarifier">
+            <ClarifierSettings />
           </TabsContent>
         </Suspense>
       </Tabs>

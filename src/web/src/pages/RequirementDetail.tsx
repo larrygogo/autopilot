@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight } from "lucide-react";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2 } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project, type Codebase } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -734,6 +734,14 @@ export function RequirementDetail() {
           <div className="flex items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="bp-label">需求澄清 · CLARIFICATION</span>
+            <Link
+              to="/settings?tab=clarifier"
+              className="ml-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground hover:text-accent inline-flex items-center gap-1"
+              title="配置 clarifier 模型 / 供应商"
+            >
+              <Settings2 className="h-3 w-3" />
+              模型设置
+            </Link>
             {openQuestions.length > 0 && (
               <Badge variant="warning" className="ml-auto">{openQuestions.length} 待回复</Badge>
             )}
