@@ -18,6 +18,7 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/repos\/[\w.\-]+\/submodules$/,
   /^\/api\/repos\/[\w.\-]+\/rediscover-submodules$/,
   /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
+  /^\/api\/requirements\/[\w.\-]+\/spec-revisions$/,
   // 顶层 collection endpoint（list/create，不匹配 /:id 详情）
   /^\/api\/providers(\?.*)?$/,
   /^\/api\/agents(\?.*)?$/,
@@ -418,6 +419,9 @@ export const api = {
   listRequirementSubPrs: (id: string) =>
     request<{ sub_prs: RequirementSubPr[] }>(`/api/requirements/${id}/sub-prs`).then((r) => r.sub_prs),
 
+  listSpecRevisions: (id: string) =>
+    request<{ revisions: SpecRevision[] }>(`/api/requirements/${id}/spec-revisions`).then((r) => r.revisions),
+
   // Questions（评论线程）
   listQuestions: (reqId: string) =>
     request<{ questions: Question[] }>(`/api/requirements/${encodeURIComponent(reqId)}/questions`)
@@ -640,6 +644,17 @@ export interface RequirementSubPr {
   child_repo_id: string;
   pr_url: string;
   pr_number: number;
+  created_at: number;
+}
+
+export interface SpecRevision {
+  id: number;
+  requirement_id: string;
+  before_md: string;
+  after_md: string;
+  summary: string | null;
+  source: "clarifier" | "user-edit" | "system";
+  triggered_by_question_id: string | null;
   created_at: number;
 }
 
