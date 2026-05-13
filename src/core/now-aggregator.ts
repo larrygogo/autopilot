@@ -8,6 +8,7 @@ import { createCompletedSource } from "./card-sources/completed";
 import { createTaskFailedSource } from "./card-sources/task-failed";
 import { createEmptyStateSource } from "./card-sources/empty-state";
 import { createProviderErrorSource } from "./card-sources/provider-error";
+import { createClarifierErrorSource } from "./card-sources/clarifier-error";
 import type { AutopilotEvent } from "../daemon/protocol";
 import { onEvent as busOn, offEvent as busOff, emit as busEmit } from "../daemon/event-bus";
 import { listDismissedCardIds, clearDismissedCard } from "./now-dismiss";
@@ -130,6 +131,7 @@ export function createDefaultAggregator(opts: AggregatorOptions = {}): Aggregato
     [
       createTaskFailedSource(),       // P0
       createProviderErrorSource(),    // P0 stub
+      createClarifierErrorSource(),   // P0
       createAwaitingApprovalSource(), // P1
       createOpenQuestionSource(),     // P1
       createAwaitReviewSource(),      // P1
