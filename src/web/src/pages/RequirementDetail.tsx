@@ -634,15 +634,19 @@ export function RequirementDetail() {
             ))}
           </div>
 
-          {resolvedQuestions.length > 0 && openQuestions.length === 0 &&
-           (req.status === "drafting" || req.status === "clarifying") && (
-            <div className="mx-5 mb-5 flex items-center justify-between border-[1.5px] border-success bg-success/10 px-4 py-3">
-              <p className="font-mono text-xs uppercase tracking-wider text-success font-medium">
-                ✓ 所有问题已回答，可以继续了。
+          {/*
+            新 B 模式下 AI 决定 done=true 时会自动把 status 切到 awaiting_approval，
+            不需要用户在 banner 上手动 [标记为已澄清]。所以删掉旧 banner；
+            clarifying 期 active===null 一般是 AI 跑下一轮的间隙，显示 spinner。
+            如果用户想强制结束澄清，用右侧 ACTIONS 区的按钮（已存在）。
+          */}
+          {req.status === "clarifying" && req.active_question_id === null &&
+           resolvedQuestions.length > 0 && (
+            <div className="mx-5 mb-5 flex items-center gap-3 border-[1.5px] border-dashed border-foreground/30 bg-card/40 px-4 py-3">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
+              <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                AI 正在思考下一个问题…
               </p>
-              <Button size="sm" onClick={markReady} disabled={actionBusy} className="shrink-0">
-                {actionBusy ? "处理中…" : "标记为已澄清 →"}
-              </Button>
             </div>
           )}
         </Card>

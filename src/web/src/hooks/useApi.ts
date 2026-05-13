@@ -613,6 +613,8 @@ export interface Requirement {
   pr_url: string | null;
   pr_number: number | null;
   last_reviewed_event_id: string | null;
+  /** PR-A 新加：当前等用户回答的 question id（clarifying 期 AI 决定下一题时 set） */
+  active_question_id: string | null;
   created_at: number;
   updated_at: number;
 }
