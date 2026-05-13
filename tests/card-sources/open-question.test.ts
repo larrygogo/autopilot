@@ -77,4 +77,28 @@ describe("CardSource: open-question", () => {
     });
     expect(deltas.some(d => d.op === "remove" && d.id === "open-question:QST-001")).toBe(true);
   });
+
+  it("scan 过滤孤儿 question（指向已被删的需求）", async () => {
+    // 直接 INSERT 一条孤儿 question（不通过 createRequirement，模拟历史孤儿数据）
+    const db = (await import("../../src/core/db")).getDb();
+    db.run("INSERT INTO requirement_questions (id, requirement_id, agent_text, suggestions, status, created_at) VALUES (?, ?, ?, '[]', 'open', ?)",
+      ["QST-ORPHAN", "REQ-NONEXISTENT", "ghost question?", Date.now()]);
+
+    // 同时插一条合法 question
+    createQuestion({ id: "QST-VALID", requirement_id: "REQ-001", agent_text: "real question?" });
+
+    const cards = await createOpenQuestionSource().scan();
+    // 只应返回合法 question，不返回孤儿
+    expect(cards.map(c => c.id)).toEqual(["open-question:QST-VALID"]);
+  });
+
+  it("onEvent: requirement 已被删时返回空（防御孤儿）", async () => {
+    const src = createOpenQuestionSource();
+    // 不创建 REQ-DELETED，模拟 requirement 已被删
+    const deltas = await src.onEvent({
+      type: "requirement:questions-updated",
+      payload: { id: "REQ-DELETED" },
+    });
+    expect(deltas).toEqual([]);
+  });
 });

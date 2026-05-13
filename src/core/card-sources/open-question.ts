@@ -1,6 +1,7 @@
 import type { CardSource, CardDelta, NowCard } from "../now-types";
 import type { AutopilotEvent } from "../../daemon/protocol";
 import { listQuestionsByRequirement } from "../requirement-questions";
+import { getRequirementById } from "../requirements";
 import { getDb } from "../db";
 
 function buildCard(q: { id: string; requirement_id: string; agent_text: string; created_at: number }): NowCard {
@@ -22,12 +23,16 @@ function buildCard(q: { id: string; requirement_id: string; agent_text: string; 
 
 /** 跨需求拉所有 open 问题 — requirement-questions.ts 没有 listAll 接口，直接 SQL 查 */
 function listAllOpenQuestions(): Array<{ id: string; requirement_id: string; agent_text: string; created_at: number }> {
+  // INNER JOIN 过滤孤儿（requirement 已被删但 question 残留的情况）
   return getDb().query<
     { id: string; requirement_id: string; agent_text: string; created_at: number },
     []
-  >(
-    "SELECT id, requirement_id, agent_text, created_at FROM requirement_questions WHERE status = 'open'"
-  ).all();
+  >(`
+    SELECT q.id, q.requirement_id, q.agent_text, q.created_at
+    FROM requirement_questions q
+    INNER JOIN requirements r ON r.id = q.requirement_id
+    WHERE q.status = 'open'
+  `).all();
 }
 
 export function createOpenQuestionSource(): CardSource {
@@ -51,6 +56,13 @@ export function createOpenQuestionSource(): CardSource {
         return [];
       }
       const reqId = event.payload.id;
+      // 防御：如果 requirement 已被删（孤儿），不产出任何 delta
+      if (!getRequirementById(reqId)) {
+        // 但要清理可能在 known set 里的该需求相关 ids（虽然此时无法精确知道哪些属于这个 reqId，
+        // 因为 known 只存 question id 不存 requirement id；
+        // 现实路径：requirement 一旦被删，scan 也不会再加它们；这里靠 known 自然衰减即可）
+        return [];
+      }
       const all = listQuestionsByRequirement(reqId);
       const deltas: CardDelta[] = [];
 
