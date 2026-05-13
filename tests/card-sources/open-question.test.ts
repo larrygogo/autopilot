@@ -10,95 +10,89 @@ import { up as m008 } from "../../src/migrations/008-projects";
 import { up as m009 } from "../../src/migrations/009-nullable-codebase";
 import { up as m010 } from "../../src/migrations/010-question-suggestions";
 import { up as m011 } from "../../src/migrations/011-now-dismissed-cards";
+import { up as m012 } from "../../src/migrations/012-spec-revisions";
+import { up as m013 } from "../../src/migrations/013-active-question-id";
+import { up as m014 } from "../../src/migrations/014-resolve-orphan-open-questions";
 import { _setDbForTest } from "../../src/core/db";
 import { createProject } from "../../src/core/projects";
-import { createRequirement } from "../../src/core/requirements";
-import { createQuestion, resolveQuestion } from "../../src/core/requirement-questions";
+import { createRequirement, setRequirementStatus, setActiveQuestionId } from "../../src/core/requirements";
+import { createQuestion } from "../../src/core/requirement-questions";
 import { createOpenQuestionSource } from "../../src/core/card-sources/open-question";
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014].forEach(fn => fn(db));
   _setDbForTest(db);
+  createProject({ id: "p1", name: "P" });
 }
 
-describe("CardSource: open-question", () => {
-  beforeEach(() => {
-    initSchema();
-    createProject({ id: "proj-001", name: "P" });
-    createRequirement({ id: "REQ-001", project_id: "proj-001", title: "Req", spec_md: "" });
+describe("CardSource: open-question (按 req_id 出卡)", () => {
+  beforeEach(() => initSchema());
+
+  it("name='open-question'，订阅 active-question-changed / status-changed", () => {
+    const src = createOpenQuestionSource();
+    expect(src.name).toBe("open-question");
+    expect(src.subscribes).toContain("requirement:active-question-changed");
+    expect(src.subscribes).toContain("requirement:status-changed");
   });
 
-  it("name = 'open-question'", () => {
-    expect(createOpenQuestionSource().name).toBe("open-question");
-  });
+  it("scan 只返回 status=clarifying && active_question_id 非空的 req，每 req 1 卡", async () => {
+    createRequirement({ id: "r1", project_id: "p1", title: "需求一", spec_md: "" });
+    setRequirementStatus("r1", "clarifying");
+    createQuestion({ id: "q1", requirement_id: "r1", agent_text: "目标用户是谁？" });
+    setActiveQuestionId("r1", "q1");
 
-  it("scan 返回所有 open 状态的问题为 P1 决策卡，每问一张", async () => {
-    createQuestion({ id: "QST-001", requirement_id: "REQ-001", agent_text: "邮件还是短信?" });
-    createQuestion({ id: "QST-002", requirement_id: "REQ-001", agent_text: "5 分钟过期对吗?" });
+    createRequirement({ id: "r2", project_id: "p1", title: "需求二", spec_md: "" });
+    createQuestion({ id: "q2", requirement_id: "r2", agent_text: "x?" });
+    // r2 不在 clarifying
+
+    createRequirement({ id: "r3", project_id: "p1", title: "需求三", spec_md: "" });
+    setRequirementStatus("r3", "clarifying");
+    // r3 在 clarifying 但没 active
 
     const cards = await createOpenQuestionSource().scan();
-    expect(cards.map(c => c.id).sort()).toEqual([
-      "open-question:QST-001",
-      "open-question:QST-002",
-    ]);
+    expect(cards.map(c => c.id)).toEqual(["open-question:r1"]);
     expect(cards[0].priority).toBe("P1");
     expect(cards[0].category).toBe("decision");
-    expect(cards[0].related).toEqual({ type: "requirement", id: "REQ-001" });
-    expect(cards[0].actions.some(a => a.kind === "primary")).toBe(true);
+    expect(cards[0].subtitle).toContain("目标用户是谁");
+    expect(cards[0].related).toEqual({ type: "requirement", id: "r1" });
+    expect(cards[0].actions.find(a => a.kind === "primary")?.href).toBe("/requirements/r1");
   });
 
-  it("scan 跳过 resolved 状态的问题", async () => {
-    createQuestion({ id: "QST-001", requirement_id: "REQ-001", agent_text: "Q1?" });
-    resolveQuestion("QST-001");
-    const cards = await createOpenQuestionSource().scan();
-    expect(cards).toEqual([]);
-  });
+  it("onEvent: active-question-changed 到非 null → add", async () => {
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "" });
+    setRequirementStatus("r1", "clarifying");
+    createQuestion({ id: "q1", requirement_id: "r1", agent_text: "?" });
+    setActiveQuestionId("r1", "q1");
 
-  it("onEvent 收到 questions-updated 重扫该 requirement 的 open questions（输出 add）", async () => {
-    createQuestion({ id: "QST-001", requirement_id: "REQ-001", agent_text: "Q1?" });
     const src = createOpenQuestionSource();
     const deltas = await src.onEvent({
-      type: "requirement:questions-updated",
-      payload: { id: "REQ-001" },
+      type: "requirement:active-question-changed",
+      payload: { id: "r1", question_id: "q1" },
     });
-    expect(deltas.some(d => d.op === "add" && d.card.id === "open-question:QST-001")).toBe(true);
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0].op).toBe("add");
+    if (deltas[0].op === "add") expect(deltas[0].card.id).toBe("open-question:r1");
   });
 
-  it("onEvent 收到 all-questions-resolved 输出 remove 该 requirement 的卡", async () => {
-    createQuestion({ id: "QST-001", requirement_id: "REQ-001", agent_text: "Q1?" });
+  it("onEvent: active-question-changed 到 null → remove", async () => {
     const src = createOpenQuestionSource();
-    // 先让 source 知道 QST-001
-    await src.onEvent({ type: "requirement:questions-updated", payload: { id: "REQ-001" } });
-    resolveQuestion("QST-001");
     const deltas = await src.onEvent({
-      type: "requirement:all-questions-resolved",
-      payload: { id: "REQ-001" },
+      type: "requirement:active-question-changed",
+      payload: { id: "r1", question_id: null },
     });
-    expect(deltas.some(d => d.op === "remove" && d.id === "open-question:QST-001")).toBe(true);
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0].op).toBe("remove");
+    if (deltas[0].op === "remove") expect(deltas[0].id).toBe("open-question:r1");
   });
 
-  it("scan 过滤孤儿 question（指向已被删的需求）", async () => {
-    // 直接 INSERT 一条孤儿 question（不通过 createRequirement，模拟历史孤儿数据）
-    const db = (await import("../../src/core/db")).getDb();
-    db.run("INSERT INTO requirement_questions (id, requirement_id, agent_text, suggestions, status, created_at) VALUES (?, ?, ?, '[]', 'open', ?)",
-      ["QST-ORPHAN", "REQ-NONEXISTENT", "ghost question?", Date.now()]);
-
-    // 同时插一条合法 question
-    createQuestion({ id: "QST-VALID", requirement_id: "REQ-001", agent_text: "real question?" });
-
-    const cards = await createOpenQuestionSource().scan();
-    // 只应返回合法 question，不返回孤儿
-    expect(cards.map(c => c.id)).toEqual(["open-question:QST-VALID"]);
-  });
-
-  it("onEvent: requirement 已被删时返回空（防御孤儿）", async () => {
+  it("onEvent: status-changed 离开 clarifying → remove", async () => {
     const src = createOpenQuestionSource();
-    // 不创建 REQ-DELETED，模拟 requirement 已被删
     const deltas = await src.onEvent({
-      type: "requirement:questions-updated",
-      payload: { id: "REQ-DELETED" },
+      type: "requirement:status-changed",
+      payload: { id: "r1", from: "clarifying", to: "awaiting_approval" },
     });
-    expect(deltas).toEqual([]);
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0].op).toBe("remove");
   });
 });
