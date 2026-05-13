@@ -189,7 +189,7 @@ function AppInner() {
           >
             <Suspense fallback={<PageLoader />}>
               <Routes>
-                <Route path="/" element={<Navigate to="/tasks" replace />} />
+                <Route path="/" element={<Navigate to="/now" replace />} />
                 <Route path="/now" element={<Now />} />
                 <Route path="/start" element={<Start />} />
                 <Route path="/library" element={<Library />} />
@@ -222,7 +222,7 @@ function AppInner() {
                 <Route path="/agents" element={<Navigate to="/settings?tab=agents" replace />} />
                 <Route path="/providers" element={<Navigate to="/settings?tab=providers" replace />} />
                 <Route path="/schedules" element={<Navigate to="/settings?tab=schedules" replace />} />
-                <Route path="*" element={<Navigate to="/tasks" replace />} />
+                <Route path="*" element={<Navigate to="/now" replace />} />
               </Routes>
             </Suspense>
           </main>

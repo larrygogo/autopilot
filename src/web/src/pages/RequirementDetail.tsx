@@ -11,6 +11,8 @@ import { Textarea } from "@/components/ui/input";
 import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { SpecRevisionsSheet } from "@/components/SpecRevisionsSheet";
+import { MarkdownView } from "@/components/MarkdownView";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
@@ -331,6 +333,7 @@ export function RequirementDetail() {
   const [projectCodebases, setProjectCodebases] = useState<Codebase[]>([]);
   const [codebaseDialogOpen, setCodebaseDialogOpen] = useState(false);
   const [clarifierDialogOpen, setClarifierDialogOpen] = useState(false);
+  const [revisionsOpen, setRevisionsOpen] = useState(false);
   // Radix Select 不允许 value=""（空串保留给清空 placeholder），用 sentinel 表示"未关联"
   const NONE_VALUE = "__none__";
   const [codebaseDraft, setCodebaseDraft] = useState<string>(NONE_VALUE);
@@ -969,18 +972,28 @@ export function RequirementDetail() {
                   <Badge variant="info">AI 整理</Badge>
                 )}
               </div>
-              {!editingSpec && (
+              <div className="flex items-center gap-2">
                 <Button
-                  variant="outline"
                   size="sm"
-                  onClick={() => {
-                    setSpecDraft(req.spec_md);
-                    setEditingSpec(true);
-                  }}
+                  variant="ghost"
+                  onClick={() => setRevisionsOpen(true)}
+                  className="font-mono text-[10px] uppercase tracking-[0.18em] gap-1.5"
                 >
-                  编辑
+                  📜 修订历史
                 </Button>
-              )}
+                {!editingSpec && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSpecDraft(req.spec_md);
+                      setEditingSpec(true);
+                    }}
+                  >
+                    编辑
+                  </Button>
+                )}
+              </div>
             </div>
             <div className="p-5">
               {editingSpec ? (
@@ -1010,11 +1023,13 @@ export function RequirementDetail() {
                   </div>
                 </div>
               ) : (
-                <pre className="scrollbar-thin max-h-[600px] overflow-auto whitespace-pre-wrap break-words border border-foreground/20 bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
-                  {req.spec_md || (
-                    <span className="italic text-muted-foreground">暂无规约内容，点「编辑」添加。</span>
+                <div className="scrollbar-thin max-h-[600px] overflow-auto border border-foreground/20 bg-muted/30 p-4">
+                  {req.spec_md ? (
+                    <MarkdownView content={req.spec_md} />
+                  ) : (
+                    <span className="italic text-muted-foreground text-sm">暂无规约内容，点「编辑」添加。</span>
                   )}
-                </pre>
+                </div>
               )}
             </div>
           </Card>
@@ -1210,6 +1225,13 @@ export function RequirementDetail() {
           )}
         </div>
       </div>
+
+      {/* spec_md 修订历史 Sheet */}
+      <SpecRevisionsSheet
+        open={revisionsOpen}
+        onOpenChange={setRevisionsOpen}
+        requirementId={req.id}
+      />
 
       {/* 当前需求的 clarifier 模型 dialog */}
       <ClarifierOverrideDialog
