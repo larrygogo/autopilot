@@ -1,5 +1,6 @@
 import { getDb } from "./db";
 import { emit } from "../daemon/event-bus";
+import { resolveQuestion } from "./requirement-questions";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -24,6 +25,7 @@ export interface Requirement {
   pr_url: string | null;
   pr_number: number | null;
   last_reviewed_event_id: string | null;
+  active_question_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -227,6 +229,50 @@ export function setRequirementStatus(id: string, to: string): Requirement {
   db.run("UPDATE requirements SET status = ?, updated_at = ? WHERE id = ?", [to, nowMs(), id]);
   emit({ type: "requirement:status-changed", payload: { id, from: cur.status, to } });
   return getRequirementById(id) as Requirement;
+}
+
+/**
+ * 设置 active_question_id 字段，并 emit requirement:active-question-changed 事件。
+ * 传入 null 表示清空（没有等回答的问题）。
+ */
+export function setActiveQuestionId(requirementId: string, questionId: string | null): void {
+  const db = getDb();
+  db.run(
+    "UPDATE requirements SET active_question_id = ?, updated_at = ? WHERE id = ?",
+    [questionId, nowMs(), requirementId],
+  );
+  emit({
+    type: "requirement:active-question-changed",
+    payload: { id: requirementId, question_id: questionId },
+  });
+}
+
+/**
+ * 用户强制结束澄清（"够了，直接审批"），或 clarifier 决定 done=true 时调用。
+ *
+ * 流程：
+ * 1. 若 active_question_id 非空 → resolveQuestion 该 question
+ * 2. active_question_id = NULL
+ * 3. status = awaiting_approval（走 setRequirementStatus 保证校验 + emit）
+ */
+export function finishClarification(requirementId: string): void {
+  const db = getDb();
+  db.transaction(() => {
+    const req = getRequirementById(requirementId);
+    if (!req) return;
+    if (req.active_question_id) {
+      resolveQuestion(req.active_question_id);
+    }
+    db.run(
+      "UPDATE requirements SET active_question_id = NULL, updated_at = ? WHERE id = ?",
+      [nowMs(), requirementId],
+    );
+    emit({
+      type: "requirement:active-question-changed",
+      payload: { id: requirementId, question_id: null },
+    });
+  })();
+  setRequirementStatus(requirementId, "awaiting_approval");
 }
 
 /**
