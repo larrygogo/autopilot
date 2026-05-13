@@ -3,7 +3,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { api, type SpecRevision } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
-import { Loader2, X, ChevronRight } from "lucide-react";
+import { Loader2, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const SOURCE_LABEL: Record<SpecRevision["source"], string> = {
@@ -43,20 +43,11 @@ export function SpecRevisionsSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-[640px] max-w-full p-0 flex flex-col">
-        <header className="flex items-center justify-between border-b-[1.5px] border-foreground/30 px-5 py-3.5 shrink-0">
-          <div>
-            <h2 className="font-display text-base font-bold uppercase tracking-wider">修订历史</h2>
-            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mt-0.5">
-              共 {revisions.length} 条 · 最新在上
-            </p>
-          </div>
-          <button
-            onClick={() => onOpenChange(false)}
-            aria-label="关闭"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
+        <header className="border-b-[1.5px] border-foreground/30 px-5 py-3.5 pr-12 shrink-0">
+          <h2 className="font-display text-base font-bold uppercase tracking-wider">修订历史</h2>
+          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mt-0.5">
+            共 {revisions.length} 条 · 最新在上
+          </p>
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
