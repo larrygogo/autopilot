@@ -185,7 +185,16 @@ export function RequirementDetail() {
     if (!id) return;
     setActionBusy(true);
     try {
-      await api.transitionRequirement(id, "ready");
+      // 新 B 模式：走 finish-clarification endpoint（一并清 active_question_id + 进 awaiting_approval）
+      // 而不是旧的 transitionRequirement(id, "ready") — 后者不清 active，会留下"已澄清"但 chat 还在的矛盾态。
+      const res = await fetch(`/api/requirements/${encodeURIComponent(id)}/finish-clarification`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
       await refresh();
       toast.success("已标记为「已澄清」");
     } catch (e: unknown) {
@@ -547,8 +556,10 @@ export function RequirementDetail() {
         </Card>
       )}
 
-      {/* 澄清对话（chat 气泡风格，方角蓝图）*/}
-      {questions.length > 0 && (
+      {/* 澄清对话（chat 气泡风格，方角蓝图）只在 drafting/clarifying 期显示。
+          其他状态（ready / awaiting_approval / running / done 等）chat 区隐藏，
+          PR-B 会重做：把历史问答折叠到 spec 区附近。*/}
+      {questions.length > 0 && (req.status === "drafting" || req.status === "clarifying") && (
         <Card className="mb-6">
           <div className="flex items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
