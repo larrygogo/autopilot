@@ -317,14 +317,14 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         <div className="flex flex-col gap-3 lg:items-end">
           <div className="w-full border-[1.5px] border-foreground/30 bg-card/40 font-mono text-[11px]">
             <div className="grid grid-cols-[100px_1fr] border-b border-dashed border-foreground/25">
-              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 uppercase tracking-[0.18em] text-muted-foreground">
-                CODEBASES
+              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 tracking-[0.18em] text-muted-foreground">
+                代码库
               </div>
               <div className="px-3 py-1.5 text-foreground">{codebases.length}</div>
             </div>
             <div className="grid grid-cols-[100px_1fr]">
-              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 uppercase tracking-[0.18em] text-muted-foreground">
-                REQUIREMENTS
+              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 tracking-[0.18em] text-muted-foreground">
+                需求
               </div>
               <div className="px-3 py-1.5 text-foreground">{requirements.length}</div>
             </div>
