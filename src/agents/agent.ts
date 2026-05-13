@@ -2,6 +2,10 @@ import type { BaseProvider } from "./providers/base";
 import type { AgentConfig, AgentResult, RunOptions, ChatOptions, ChatResult } from "./types";
 import { getTaskContext } from "../core/task-context";
 import { appendAgentCall } from "../core/task-logs";
+import {
+  recordProviderSuccess,
+  recordProviderFailure,
+} from "../core/provider-health";
 
 export class Agent {
   constructor(
@@ -17,9 +21,14 @@ export class Agent {
     let error: string | undefined;
     try {
       result = await this.provider.run(prompt, options);
+      recordProviderSuccess(this.config.provider ?? "unknown");
       return result;
     } catch (e: unknown) {
       error = e instanceof Error ? (e.stack ?? e.message) : String(e);
+      recordProviderFailure(
+        this.config.provider ?? "unknown",
+        e instanceof Error ? e.message : String(e),
+      );
       throw e;
     } finally {
       if (ctx) {
@@ -45,7 +54,17 @@ export class Agent {
    * Session 状态（历史、provider_session_id）由调用方维护。
    */
   async chat(message: string, options?: ChatOptions): Promise<ChatResult> {
-    return this.provider.chat(message, options);
+    try {
+      const result = await this.provider.chat(message, options);
+      recordProviderSuccess(this.config.provider ?? "unknown");
+      return result;
+    } catch (e: unknown) {
+      recordProviderFailure(
+        this.config.provider ?? "unknown",
+        e instanceof Error ? e.message : String(e),
+      );
+      throw e;
+    }
   }
 
   async close(): Promise<void> {

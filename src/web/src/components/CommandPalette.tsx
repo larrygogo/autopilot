@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { MessageSquare, ListTodo, Workflow, Plug, Bot, Sliders, Moon, Sun, Plus, FileText, Clock } from "lucide-react";
+import { MessageSquare, Workflow, Plug, Bot, Sliders, Moon, Sun, Plus, FileText, Clock } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -27,7 +27,7 @@ interface Workflow {
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 传入目标路径（如 "/tasks"、"/settings"） */
+  /** 传入目标路径（如 "/library"、"/settings"） */
   onNavigate: (path: string) => void;
   onSelectTask: (id: string) => void;
   onNewTask: () => void;
@@ -52,7 +52,6 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
   const pages = useMemo(
     () => [
       { path: "/chat", label: "对话", icon: MessageSquare },
-      { path: "/tasks", label: "任务", icon: ListTodo },
       { path: "/schedules", label: "定时任务", icon: Clock },
       { path: "/workflows", label: "工作流", icon: Workflow },
       { path: "/providers", label: "提供商", icon: Plug },

@@ -1,7 +1,11 @@
-import type { AutopilotEvent } from "../daemon/protocol";
-
 // ──────────────────────────────────────────────
-// NowCard 协议
+// NowCard 协议（纯数据类型，不依赖事件总线）
+//
+// CardSource / CardDelta 接口在 `./card-sources/types.ts`，
+// 事件类型 AutopilotEvent 在 `./events.ts`。这样保证：
+//   now-types ← card-sources/types ← card-sources/*
+//   now-types ← events ← card-sources/types
+// 不形成循环。
 // ──────────────────────────────────────────────
 
 export type NowCardPriority = "P0" | "P1" | "P2" | "P3";
@@ -50,23 +54,5 @@ export interface NowCard {
   created_at: number;
 }
 
-// ──────────────────────────────────────────────
-// CardSource 抽象
-// ──────────────────────────────────────────────
-
-export type CardDelta =
-  | { op: "add"; card: NowCard }
-  | { op: "update"; id: string; patch: Partial<NowCard> }
-  | { op: "remove"; id: string; reason: "resolved" | "dismissed" }
-  | { op: "clear-dismiss"; id: string };
-
-export interface CardSource {
-  /** 唯一名，作为卡片 id 前缀，例 "completed"、"task-failed" */
-  name: string;
-  /** 订阅的 event-bus 事件类型；空数组表示纯 scan-only */
-  subscribes: string[];
-  /** 启动时全扫，返回当前应该展示的所有卡 */
-  scan(): Promise<NowCard[]>;
-  /** 事件来时计算增量。若与本 source 无关返回 [] */
-  onEvent(event: AutopilotEvent): Promise<CardDelta[]>;
-}
+// CardSource / CardDelta 历史 re-export（保持外部 import 路径不破）
+export type { CardSource, CardDelta } from "./card-sources/types";
