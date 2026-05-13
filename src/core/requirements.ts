@@ -27,6 +27,7 @@ export interface Requirement {
   pr_number: number | null;
   last_reviewed_event_id: string | null;
   active_question_id: string | null;
+  clarifier_error: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -49,6 +50,7 @@ export interface UpdateRequirementOpts {
   pr_url?: string | null;
   pr_number?: number | null;
   last_reviewed_event_id?: string | null;
+  clarifier_error?: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -186,6 +188,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
     "pr_url",
     "pr_number",
     "last_reviewed_event_id",
+    "clarifier_error",
   ] as const;
   for (const k of updatable) {
     if (opts[k] !== undefined) {

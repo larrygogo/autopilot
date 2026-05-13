@@ -615,6 +615,8 @@ export interface Requirement {
   last_reviewed_event_id: string | null;
   /** PR-A 新加：当前等用户回答的 question id（clarifying 期 AI 决定下一题时 set） */
   active_question_id: string | null;
+  /** clarifier 失败时 set 错误原因，成功时 clear；持久化到 DB，跨重启/navigation 可见 */
+  clarifier_error: string | null;
   created_at: number;
   updated_at: number;
 }

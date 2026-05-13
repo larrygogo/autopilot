@@ -192,9 +192,6 @@ export function RequirementDetail() {
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
-  // clarifier 出错的最近一次原因（来自 requirement:clarifier-error WS 事件）。
-  // 收到 spec-revised / active-question-changed / status-changed 会清空。
-  const [clarifierError, setClarifierError] = useState<string | null>(null);
   const [retryingClarify, setRetryingClarify] = useState(false);
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
@@ -237,14 +234,10 @@ export function RequirementDetail() {
         event.type === "requirement:questions-updated" ||
         event.type === "requirement:question-resolved" ||
         event.type === "requirement:active-question-changed" ||
-        event.type === "requirement:spec-revised"
+        event.type === "requirement:spec-revised" ||
+        event.type === "requirement:clarifier-error"
       ) {
-        // 有任何进展就清掉错误状态
-        setClarifierError(null);
         void refresh({ silent: true });
-      } else if (event.type === "requirement:clarifier-error") {
-        const reason = (event as { payload?: { reason?: string } }).payload?.reason ?? "未知错误";
-        setClarifierError(reason);
       }
     });
   }, [id, subscribe, refresh]);
@@ -657,14 +650,14 @@ export function RequirementDetail() {
       {req.task_id && <TaskProgressCard taskId={req.task_id} />}
 
       {/* clarifier 出错（任何阶段都可能发生）— 覆盖 spinner 优先显示 */}
-      {clarifierError && req.status === "clarifying" && (
+      {req.clarifier_error && req.status === "clarifying" && (
         <Card className="mb-6 p-5 border-l-4 border-l-destructive">
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-1 min-w-0">
               <div className="font-mono text-xs uppercase tracking-wider text-destructive font-medium">
                 ⚠ 澄清出错
               </div>
-              <p className="text-sm text-muted-foreground break-words">{clarifierError}</p>
+              <p className="text-sm text-muted-foreground break-words">{req.clarifier_error}</p>
             </div>
             <Button
               size="sm"
@@ -679,7 +672,6 @@ export function RequirementDetail() {
                     const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
                     throw new Error(body.error ?? `HTTP ${res.status}`);
                   }
-                  setClarifierError(null);
                   toast.success("已重新触发 AI 澄清");
                 } catch (e: unknown) {
                   toast.error("重试失败", (e as Error)?.message ?? String(e));
@@ -698,7 +690,7 @@ export function RequirementDetail() {
       {/* AI 正在生成澄清问题（clarifying 且暂无问题、且没出错时显示）。
           加 [重试] 按钮兜底：daemon 重启 / WS 断连导致 clarifier-error 事件丢失时，
           用户能主动触发 retry-clarify 而不是干等 spinner。 */}
-      {!clarifierError && req.status === "clarifying" && questions.length === 0 && (
+      {!req.clarifier_error && req.status === "clarifying" && questions.length === 0 && (
         <Card className="mb-6 p-5">
           <div className="flex items-center gap-3">
             <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />

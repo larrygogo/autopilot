@@ -191,6 +191,11 @@ export async function runClarifierRound(reqId: string): Promise<void> {
   }
   const codebase = req.codebase_id ? getCodebaseById(req.codebase_id) : null;
 
+  // 开始新一轮：清除上次的错误（如果有）
+  if (req.clarifier_error) {
+    updateRequirement(reqId, { clarifier_error: null });
+  }
+
   const allQuestions = listQuestionsByRequirement(reqId);
   const qaHistory = allQuestions
     .filter(q => q.status === "resolved")
@@ -223,9 +228,11 @@ export async function runClarifierRound(reqId: string): Promise<void> {
   }
 
   if (!result) {
+    const reason = lastError?.message ?? "unknown error";
+    updateRequirement(reqId, { clarifier_error: reason });
     emit({
       type: "requirement:clarifier-error",
-      payload: { id: reqId, reason: lastError?.message ?? "unknown error" },
+      payload: { id: reqId, reason },
     });
     return;
   }
