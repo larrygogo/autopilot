@@ -8,8 +8,20 @@ import { getCodebaseById } from "../core/codebases";
 import { createQuestion, nextQuestionId, listQuestionsByRequirement } from "../core/requirement-questions";
 import { createSpecRevision } from "../core/spec-revisions";
 import { createLogger } from "../core/logger";
+import { resolveAgentConfig, createAgent } from "../agents/registry";
+import { loadGlobalAgents, loadProviders } from "../core/config";
 
 const log = createLogger("requirement-clarifier");
+
+// 默认 agent name: "clarifier"
+// 用户配置示例（写在 ~/.autopilot/config.yaml）：
+//   agents:
+//     clarifier:
+//       provider: anthropic
+//       model: claude-sonnet-4-6
+//       system_prompt: |
+//         （可选）覆盖默认的"需求分析师"system prompt
+// 没配 clarifier 也能跑：registry 会用全局默认 provider/model。
 
 // ──────────────────────────────────────────────
 // AI 调用层（可测试注入）
@@ -24,32 +36,25 @@ export function _setClarifyFnForTest(fn: ClarifyFn | null): void {
 }
 
 async function callClaude(prompt: string): Promise<string> {
-  const proc = Bun.spawn(
-    ["claude", "-p", prompt, "--output-format", "text", "--tools", ""],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  await proc.exited;
-  const text = stdout.trim();
-
-  // 真错误：exitCode 非 0
-  if (proc.exitCode !== 0) {
-    throw new Error(`claude CLI 异常 (exit=${proc.exitCode}): ${text || stderr.trim() || "no output"}`);
+  // 通过 agent 系统调用。agent name 固定为 'clarifier'；
+  // 用户在 config.yaml.agents.clarifier 配 provider/model/system_prompt。
+  // 没配 clarifier 也能跑 — registry 会用全局默认（anthropic + default model）。
+  let agent;
+  try {
+    const globalAgents = loadGlobalAgents();
+    const providers = loadProviders();
+    // 若用户没有配置 clarifier，使用 anthropic 作为默认 provider
+    const base = globalAgents["clarifier"] ?? { provider: "anthropic" };
+    const resolved = resolveAgentConfig("clarifier", undefined, { clarifier: base }, providers);
+    agent = createAgent(resolved);
+  } catch (e: unknown) {
+    throw new Error(`无法初始化 clarifier agent：${e instanceof Error ? e.message : String(e)}`);
   }
 
-  // exit=0 但 stdout 是简短错误信息（如 "Failed to authenticate"）的兜底识别。
-  // 限制：只匹配 stdout 较短（< 200 字符）且全文都像错误的情况；不在 AI 合法长输出里做关键词扫描
-  // （避免 spec_md 中合法出现 "API key" / "Error:" 等词被误判为认证错误）。
-  if (text.length > 0 && text.length < 200) {
-    if (
-      /^(Failed to authenticate|Error:|API Error|401|403|429)/i.test(text) ||
-      /Invalid authentication|credit balance/i.test(text)
-    ) {
-      throw new Error(`claude CLI 返回错误（exit=0）：${text}`);
-    }
+  const result = await agent.run(prompt);
+  const text = result.text.trim();
+  if (!text) {
+    throw new Error("clarifier agent 返回空");
   }
   return text;
 }
