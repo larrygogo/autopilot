@@ -130,7 +130,7 @@ export function createDefaultAggregator(opts: AggregatorOptions = {}): Aggregato
   return createAggregator(
     [
       createTaskFailedSource(),       // P0
-      createProviderErrorSource(),    // P0 stub
+      createProviderErrorSource(),    // P0
       createClarifierErrorSource(),   // P0
       createAwaitingApprovalSource(), // P1
       createOpenQuestionSource(),     // P1

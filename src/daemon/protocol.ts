@@ -40,6 +40,8 @@ export type AutopilotEvent =
   | { type: "requirement:active-question-changed"; payload: { id: string; question_id: string | null } }
   | { type: "requirement:spec-revised"; payload: { id: string; revision_id: number } }
   | { type: "requirement:clarifier-error"; payload: { id: string; reason: string } }
+  // Provider 健康度（反应式）
+  | { type: "provider:health-changed"; payload: { provider: string; healthy: boolean; reason?: string; ts: number } }
   // /now 推送事件
   | { type: "now:card_added"; payload: { card: _NowCardRef } }
   | { type: "now:card_updated"; payload: { id: string; patch: Partial<_NowCardRef> } }
@@ -149,6 +151,10 @@ export function getChannelsForEvent(event: AutopilotEvent): string[] {
     }
     case "requirement": {
       channels.push("requirement:*");
+      break;
+    }
+    case "provider": {
+      channels.push("provider:*");
       break;
     }
     case "now": {
