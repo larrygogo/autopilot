@@ -23,11 +23,6 @@ import { useTheme } from "./lib/theme";
 import { cn } from "./lib/utils";
 import { modShortcut } from "./lib/platform";
 import {
-  MessageSquare,
-  ListTodo,
-  Workflow as WorkflowIcon,
-  Plug,
-  Bot,
   Sliders,
   Sparkles,
   FilePlus,
@@ -37,15 +32,12 @@ import {
   Search,
   Menu,
   Circle,
-  Clock,
-  Layers,
 } from "lucide-react";
 
 const Now = lazy(() => import("./pages/Now").then((m) => ({ default: m.Now })));
 const Start = lazy(() => import("./pages/Start").then((m) => ({ default: m.Start })));
 const Library = lazy(() => import("./pages/Library").then((m) => ({ default: m.Library })));
 const SettingsHub = lazy(() => import("./pages/SettingsHub").then((m) => ({ default: m.SettingsHub })));
-const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
 const TaskDetail = lazy(() =>
   import("./pages/TaskDetail").then((m) => ({ default: m.TaskDetail })),
 );
@@ -81,7 +73,6 @@ function titleForPath(pathname: string): string {
     return id ? `任务 · ${id}` : "任务";
   }
   if (pathname.startsWith("/chat")) return "对话";
-  if (pathname.startsWith("/tasks")) return "任务";
   if (pathname.startsWith("/schedules")) return "定时任务";
   if (pathname.startsWith("/workflows")) return "工作流";
   if (pathname.startsWith("/projects/")) {
@@ -195,15 +186,6 @@ function AppInner() {
                 <Route path="/library" element={<Library />} />
                 <Route path="/settings" element={<SettingsHub />} />
                 <Route
-                  path="/tasks"
-                  element={
-                    <Tasks
-                      onSelect={(id) => navigate(`/tasks/${id}`)}
-                      subscribe={subscribe}
-                    />
-                  }
-                />
-                <Route
                   path="/tasks/:id"
                   element={<TaskDetailRoute subscribe={subscribe} />}
                 />
@@ -256,8 +238,8 @@ function TaskDetailRoute({
 }) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  if (!id) return <Navigate to="/tasks" replace />;
-  return <TaskDetail taskId={id} onBack={() => navigate("/tasks")} subscribe={subscribe} />;
+  if (!id) return <Navigate to="/library?tab=history" replace />;
+  return <TaskDetail taskId={id} onBack={() => navigate("/library?tab=history")} subscribe={subscribe} />;
 }
 
 function ProjectDetailRoute() {
