@@ -718,7 +718,188 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json({ ok: true });
     }
 
-    // ─────────── Repos ───────────
+    // ─────────── Codebases（新主路由，响应字段统一 codebase / codebases） ───────────
+
+    // GET /api/codebases
+    if (method === "GET" && path === "/api/codebases") {
+      return json({ codebases: listCodebases() });
+    }
+
+    // POST /api/codebases
+    if (method === "POST" && path === "/api/codebases") {
+      const body = (await req.json()) as {
+        alias?: string;
+        path?: string;
+        default_branch?: string;
+        github_owner?: string | null;
+        github_repo?: string | null;
+        project_id?: string;
+      };
+      if (!body.alias?.trim() || !body.path?.trim()) {
+        return error("alias 和 path 必填");
+      }
+      const projectId = body.project_id?.trim() ?? "";
+      try {
+        const id = nextCodebaseId();
+        const codebase = createCodebase({
+          id,
+          project_id: projectId,
+          alias: body.alias.trim(),
+          path: body.path.trim(),
+          default_branch: body.default_branch?.trim() || "main",
+          github_owner: body.github_owner ?? null,
+          github_repo: body.github_repo ?? null,
+        });
+        return json({ codebase }, 201);
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          code === "SQLITE_CONSTRAINT_UNIQUE" ||
+          code?.startsWith("SQLITE_CONSTRAINT") ||
+          msg.toLowerCase().includes("unique")
+        ) {
+          return error(msg, 409);
+        }
+        return error(msg, 500);
+      }
+    }
+
+    // GET /api/codebases/:id
+    const codebaseIdMatch = extractParam(path, /^\/api\/codebases\/([\w.\-]+)$/);
+    if (method === "GET" && codebaseIdMatch) {
+      const codebase = getCodebaseById(codebaseIdMatch);
+      if (!codebase) return error("codebase not found", 404);
+      return json({ codebase });
+    }
+
+    // PUT /api/codebases/:id
+    if (method === "PUT" && codebaseIdMatch) {
+      const existing = getCodebaseById(codebaseIdMatch);
+      if (!existing) return error("codebase not found", 404);
+      const body = (await req.json()) as {
+        alias?: string;
+        path?: string;
+        default_branch?: string;
+        github_owner?: string | null;
+        github_repo?: string | null;
+      };
+      if (body.alias !== undefined) {
+        const trimmed = body.alias.trim();
+        if (!trimmed) return error("alias 不能为空", 400);
+        body.alias = trimmed;
+      }
+      if (body.path !== undefined) {
+        const trimmed = body.path.trim();
+        if (!trimmed) return error("path 不能为空", 400);
+        body.path = trimmed;
+      }
+      if (body.default_branch !== undefined) {
+        const trimmed = body.default_branch.trim();
+        if (!trimmed) delete body.default_branch;
+        else body.default_branch = trimmed;
+      }
+      try {
+        const codebase = updateCodebase(codebaseIdMatch, {
+          alias: body.alias,
+          path: body.path,
+          default_branch: body.default_branch,
+          github_owner: body.github_owner,
+          github_repo: body.github_repo,
+        });
+        return json({ codebase });
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          code === "SQLITE_CONSTRAINT_UNIQUE" ||
+          code?.startsWith("SQLITE_CONSTRAINT") ||
+          msg.toLowerCase().includes("unique")
+        ) {
+          return error(msg, 409);
+        }
+        return error(msg, 500);
+      }
+    }
+
+    // DELETE /api/codebases/:id
+    if (method === "DELETE" && codebaseIdMatch) {
+      const existing = getCodebaseById(codebaseIdMatch);
+      if (!existing) return error("codebase not found", 404);
+      deleteCodebase(codebaseIdMatch);
+      return json({ ok: true });
+    }
+
+    // POST /api/codebases/:id/healthcheck
+    const codebaseHealthMatch = extractParam(path, /^\/api\/codebases\/([\w.\-]+)\/healthcheck$/);
+    if (method === "POST" && codebaseHealthMatch) {
+      const codebase = getCodebaseById(codebaseHealthMatch);
+      if (!codebase) return error("codebase not found", 404);
+      const health = await checkCodebaseHealth(codebase.path);
+      const patch: { github_owner?: string; github_repo?: string } = {};
+      if (health.github_owner && !codebase.github_owner) patch.github_owner = health.github_owner;
+      if (health.github_repo && !codebase.github_repo) patch.github_repo = health.github_repo;
+      if (patch.github_owner !== undefined || patch.github_repo !== undefined) {
+        updateCodebase(codebaseHealthMatch, patch);
+      }
+      if (health.healthy && !codebase.parent_codebase_id) {
+        try {
+          const dr = discoverSubmodules(codebase.id);
+          return Response.json({
+            healthy: true,
+            issues: health.issues,
+            submodules: {
+              added: dr.added.map(r => ({
+                id: r.id,
+                alias: r.alias,
+                path: r.submodule_path,
+              })),
+              existing: dr.existing.length,
+              warnings: dr.warnings,
+            },
+          });
+        } catch (e: unknown) {
+          return Response.json({
+            healthy: true,
+            issues: health.issues,
+            submodules: { error: (e as Error).message },
+          });
+        }
+      }
+      return json({ healthy: health.healthy, issues: health.issues });
+    }
+
+    // POST /api/codebases/:id/rediscover-submodules
+    const codebaseRediscoverMatch = extractParam(path, /^\/api\/codebases\/([\w.\-]+)\/rediscover-submodules$/);
+    if (method === "POST" && codebaseRediscoverMatch) {
+      const codebase = getCodebaseById(codebaseRediscoverMatch);
+      if (!codebase) return error("codebase not found", 404);
+      if (codebase.parent_codebase_id) return error("子模块自身不能再发现子模块（不支持嵌套）");
+      try {
+        const r = discoverSubmodules(codebaseRediscoverMatch);
+        return json({
+          added: r.added.map(x => ({
+            id: x.id,
+            alias: x.alias,
+            submodule_path: x.submodule_path,
+          })),
+          existing_count: r.existing.length,
+          warnings: r.warnings,
+        });
+      } catch (e: unknown) {
+        return error((e as Error).message);
+      }
+    }
+
+    // GET /api/codebases/:id/submodules
+    const codebaseSubmodulesMatch = extractParam(path, /^\/api\/codebases\/([\w.\-]+)\/submodules$/);
+    if (method === "GET" && codebaseSubmodulesMatch) {
+      const codebase = getCodebaseById(codebaseSubmodulesMatch);
+      if (!codebase) return error("codebase not found", 404);
+      return json({ submodules: listSubmodules(codebaseSubmodulesMatch) });
+    }
+
+    // ─────────── Repos（旧路由别名，响应字段保留 repo / repos；P6 清理） ───────────
 
     // GET /api/repos
     if (method === "GET" && path === "/api/repos") {

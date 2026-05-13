@@ -15,8 +15,8 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/workflows\/[\w.\-]+\/phases$/,
   /^\/api\/workflows\/[\w.\-]+\/sync-ts$/,
   /^\/api\/workflows\/[\w.\-]+\/agents$/,
-  /^\/api\/repos\/[\w.\-]+\/submodules$/,
-  /^\/api\/repos\/[\w.\-]+\/rediscover-submodules$/,
+  /^\/api\/codebases\/[\w.\-]+\/submodules$/,
+  /^\/api\/codebases\/[\w.\-]+\/rediscover-submodules$/,
   /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
   /^\/api\/requirements\/[\w.\-]+\/spec-revisions$/,
   // 顶层 collection endpoint（list/create，不匹配 /:id 详情）
@@ -24,7 +24,7 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/agents(\?.*)?$/,
   /^\/api\/schedules(\?.*)?$/,
   /^\/api\/defaults(\?.*)?$/,
-  /^\/api\/repos(\?.*)?$/,
+  /^\/api\/codebases(\?.*)?$/,
   /^\/api\/fs\//,
   /^\/api\/requirements(\?.*)?$/,
   /^\/api\/projects(\?.*)?$/,
@@ -295,50 +295,49 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) },
     ).then((r) => r.codebase),
   deleteCodebase: (codebaseId: string) =>
-    request<{ ok: true }>(`/api/repos/${encodeURIComponent(codebaseId)}`, { method: "DELETE" }),
+    request<{ ok: true }>(`/api/codebases/${encodeURIComponent(codebaseId)}`, { method: "DELETE" }),
   listProjectRequirements: (projectId: string) =>
     request<{ requirements: Requirement[] }>(
       `/api/projects/${encodeURIComponent(projectId)}/requirements`,
     ).then((r) => r.requirements),
 
-  // Repos —— 后端响应包了 envelope（{ repos } / { repo }），统一在此解包返回裸数据
-  listRepos: () =>
-    request<{ repos: Repo[] }>("/api/repos").then((r) => r.repos),
-  getRepo: (id: string) =>
-    request<{ repo: Repo }>(`/api/repos/${id}`).then((r) => r.repo),
-  createRepo: (body: {
+  // Codebases —— 后端响应包了 envelope（{ codebases } / { codebase }），统一在此解包返回裸数据
+  listCodebases: () =>
+    request<{ codebases: Codebase[] }>("/api/codebases").then((r) => r.codebases),
+  getCodebase: (id: string) =>
+    request<{ codebase: Codebase }>(`/api/codebases/${id}`).then((r) => r.codebase),
+  createCodebase: (body: {
     alias: string;
     path: string;
     default_branch?: string;
     github_owner?: string | null;
     github_repo?: string | null;
+    project_id?: string;
   }) =>
-    request<{ repo: Repo }>("/api/repos", {
+    request<{ codebase: Codebase }>("/api/codebases", {
       method: "POST",
       body: JSON.stringify(body),
-    }).then((r) => r.repo),
-  updateRepo: (id: string, body: Partial<{
+    }).then((r) => r.codebase),
+  updateCodebase: (id: string, body: Partial<{
     alias: string;
     path: string;
     default_branch: string;
     github_owner: string | null;
     github_repo: string | null;
   }>) =>
-    request<{ repo: Repo }>(`/api/repos/${id}`, {
+    request<{ codebase: Codebase }>(`/api/codebases/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    }).then((r) => r.repo),
-  deleteRepo: (id: string) =>
-    request<{ ok: true }>(`/api/repos/${id}`, { method: "DELETE" }),
-  healthcheckRepo: (id: string) =>
-    request<RepoHealthResult>(`/api/repos/${id}/healthcheck`, { method: "POST" }),
+    }).then((r) => r.codebase),
+  healthcheckCodebase: (id: string) =>
+    request<CodebaseHealthResult>(`/api/codebases/${id}/healthcheck`, { method: "POST" }),
 
   // Submodules（仅查询；自动发现写在 healthcheck 里）
   listSubmodules: (parentId: string) =>
-    request<{ submodules: Repo[] }>(`/api/repos/${parentId}/submodules`).then((r) => r.submodules),
+    request<{ submodules: Codebase[] }>(`/api/codebases/${parentId}/submodules`).then((r) => r.submodules),
   rediscoverSubmodules: (parentId: string) =>
     request<RediscoverSubmodulesResult>(
-      `/api/repos/${parentId}/rediscover-submodules`,
+      `/api/codebases/${parentId}/rediscover-submodules`,
       { method: "POST" },
     ),
 
@@ -547,20 +546,7 @@ export interface ChatSessionManifest {
   message_count: number;
 }
 
-export interface Repo {
-  id: string;
-  alias: string;
-  path: string;
-  default_branch: string;
-  github_owner: string | null;
-  github_repo: string | null;
-  parent_repo_id: string | null;  // 非空表示此 repo 是子模块
-  submodule_path: string | null;  // 父 repo 内相对路径
-  created_at: number;
-  updated_at: number;
-}
-
-export interface RepoHealthResult {
+export interface CodebaseHealthResult {
   healthy: boolean;
   issues: string[];
 }
