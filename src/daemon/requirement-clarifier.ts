@@ -34,12 +34,22 @@ async function callClaude(prompt: string): Promise<string> {
   ]);
   await proc.exited;
   const text = stdout.trim();
-  if (
-    proc.exitCode !== 0 ||
-    /^(Failed to|Error:|API Error|401|403|429)/i.test(text) ||
-    /Invalid authentication|API key|credit balance/i.test(text)
-  ) {
+
+  // 真错误：exitCode 非 0
+  if (proc.exitCode !== 0) {
     throw new Error(`claude CLI 异常 (exit=${proc.exitCode}): ${text || stderr.trim() || "no output"}`);
+  }
+
+  // exit=0 但 stdout 是简短错误信息（如 "Failed to authenticate"）的兜底识别。
+  // 限制：只匹配 stdout 较短（< 200 字符）且全文都像错误的情况；不在 AI 合法长输出里做关键词扫描
+  // （避免 spec_md 中合法出现 "API key" / "Error:" 等词被误判为认证错误）。
+  if (text.length > 0 && text.length < 200) {
+    if (
+      /^(Failed to authenticate|Error:|API Error|401|403|429)/i.test(text) ||
+      /Invalid authentication|credit balance/i.test(text)
+    ) {
+      throw new Error(`claude CLI 返回错误（exit=0）：${text}`);
+    }
   }
   return text;
 }
