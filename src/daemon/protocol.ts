@@ -6,6 +6,9 @@ import type { Schedule } from "../core/schedules";
 // Event Types — 核心模块发射的事件
 // ──────────────────────────────────────────────
 
+// 用内联 import("...") 引入 NowCard 类型，避免与 core/now-types.ts 形成顶层循环依赖
+type _NowCardRef = import("../core/now-types").NowCard;
+
 export type AutopilotEvent =
   | { type: "task:created"; payload: { task: Task } }
   | { type: "task:updated"; payload: { task: Task; fields: string[] } }
@@ -31,7 +34,17 @@ export type AutopilotEvent =
   | { type: "schedule:fired"; payload: { schedule: Schedule; taskId: string } }
   | { type: "requirement:status-changed"; payload: { id: string; from: string; to: string } }
   | { type: "requirement:questions-updated"; payload: { id: string } }
-  | { type: "requirement:all-questions-resolved"; payload: { id: string } };
+  | { type: "requirement:all-questions-resolved"; payload: { id: string } }
+  // ── Clarifier 重设计（PR-A）新增事件 ──
+  | { type: "requirement:question-resolved"; payload: { id: string; question_id: string } }
+  | { type: "requirement:active-question-changed"; payload: { id: string; question_id: string | null } }
+  | { type: "requirement:spec-revised"; payload: { id: string; revision_id: number } }
+  | { type: "requirement:clarifier-error"; payload: { id: string; reason: string } }
+  // /now 推送事件
+  | { type: "now:card_added"; payload: { card: _NowCardRef } }
+  | { type: "now:card_updated"; payload: { id: string; patch: Partial<_NowCardRef> } }
+  | { type: "now:card_removed"; payload: { id: string; reason: "resolved" | "dismissed" } }
+  | { type: "now:snapshot"; payload: { cards: _NowCardRef[] } };
 
 // ──────────────────────────────────────────────
 // WebSocket Protocol — Client ↔ Server 消息
@@ -136,6 +149,10 @@ export function getChannelsForEvent(event: AutopilotEvent): string[] {
     }
     case "requirement": {
       channels.push("requirement:*");
+      break;
+    }
+    case "now": {
+      channels.push("now:*");
       break;
     }
   }

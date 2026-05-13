@@ -7,6 +7,8 @@ import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
+import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
+import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { createCodebase } from "../src/core/codebases";
 import { createProject } from "../src/core/projects";
@@ -19,12 +21,17 @@ import {
   setRequirementStatus,
   canTransitionStatus,
   nextRequirementId,
+  deleteRequirement,
 } from "../src/core/requirements";
 import {
   appendFeedback,
   listFeedbacks,
   latestFeedback,
 } from "../src/core/requirement-feedbacks";
+import {
+  createQuestion,
+  addReply,
+} from "../src/core/requirement-questions";
 
 describe("migration 005-requirements（pre-008 schema 验证）", () => {
   it("创建 requirements 表，含全部 spec 字段", () => {
@@ -308,5 +315,44 @@ describe("requirements 适配 project + codebase（P1 Task 14）", () => {
     const list = listRequirements({ project_id: "proj-rt2" });
     expect(list.length).toBe(1);
     expect(list[0].id).toBe("req-rt2");
+  });
+});
+
+describe("deleteRequirement 级联删除", () => {
+  let testDb: Database;
+
+  beforeAll(() => {
+    testDb = new Database(":memory:");
+    _setDbForTest(testDb);
+    initDb();
+    migrate001(testDb);
+    migrate002(testDb);
+    migrate004(testDb);
+    migrate005(testDb);
+    migrate006(testDb);
+    migrate007(testDb);
+    migrate008(testDb);
+    migrate009(testDb);
+    migrate010(testDb);
+  });
+
+  afterAll(() => {
+    _setDbForTest(null);
+    testDb.close();
+  });
+
+  it("deleteRequirement 级联删 questions / replies / feedbacks", () => {
+    createProject({ id: "proj-cascade", name: "P" });
+    createRequirement({ id: "REQ-CASCADE", project_id: "proj-cascade", title: "X", spec_md: "" });
+    createQuestion({ id: "QST-C1", requirement_id: "REQ-CASCADE", agent_text: "Q?" });
+    addReply({ id: "RPL-C1", question_id: "QST-C1", author_role: "agent", text: "ans" });
+    appendFeedback({ requirement_id: "REQ-CASCADE", source: "manual", body: "some feedback" });
+
+    deleteRequirement("REQ-CASCADE");
+
+    expect(testDb.query("SELECT COUNT(*) AS n FROM requirements WHERE id = 'REQ-CASCADE'").get()).toEqual({ n: 0 });
+    expect(testDb.query("SELECT COUNT(*) AS n FROM requirement_questions WHERE requirement_id = 'REQ-CASCADE'").get()).toEqual({ n: 0 });
+    expect(testDb.query("SELECT COUNT(*) AS n FROM requirement_question_replies WHERE question_id = 'QST-C1'").get()).toEqual({ n: 0 });
+    expect(testDb.query("SELECT COUNT(*) AS n FROM requirement_feedbacks WHERE requirement_id = 'REQ-CASCADE'").get()).toEqual({ n: 0 });
   });
 });

@@ -1,21 +1,33 @@
+import type { NowCard } from "../lib/now-types";
+
 const BASE = "";
 
-/** 标记新添加的 API 路径（daemon 须是最新代码才有）。收到 404 时提示重启 daemon。 */
+/**
+ * 标记新添加的 API endpoint（daemon 须是最新代码才有）。404 时提示重启 daemon。
+ *
+ * 严格 endpoint 匹配，不用 prefix 模糊匹配 —— 否则 `/api/requirements/<不存在的 id>` 这种
+ * "endpoint 在但 resource 不存在"的 404 也会被误判为"daemon 旧版"，让用户看到误导提示。
+ *
+ * 顶层 collection endpoint 用 `(\?.*)?$` 允许 query string，但不匹配 `/:id` 子路径。
+ */
 const NEW_API_PATTERNS: RegExp[] = [
+  // 带固定后缀的子路径 endpoint
   /^\/api\/workflows\/[\w.\-]+\/phases$/,
   /^\/api\/workflows\/[\w.\-]+\/sync-ts$/,
   /^\/api\/workflows\/[\w.\-]+\/agents$/,
-  /^\/api\/providers/,
-  /^\/api\/agents/,
-  /^\/api\/schedules/,
-  /^\/api\/defaults/,
-  /^\/api\/repos/, // repos CRUD + healthcheck（Phase 1 新加）
-  /^\/api\/fs\//, // 文件系统浏览（Phase 1 新加）
-  /^\/api\/requirements/, // requirements CRUD（Phase 2）
   /^\/api\/repos\/[\w.\-]+\/submodules$/,
   /^\/api\/repos\/[\w.\-]+\/rediscover-submodules$/,
   /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
-  /^\/api\/projects/,
+  // 顶层 collection endpoint（list/create，不匹配 /:id 详情）
+  /^\/api\/providers(\?.*)?$/,
+  /^\/api\/agents(\?.*)?$/,
+  /^\/api\/schedules(\?.*)?$/,
+  /^\/api\/defaults(\?.*)?$/,
+  /^\/api\/repos(\?.*)?$/,
+  /^\/api\/fs\//,
+  /^\/api\/requirements(\?.*)?$/,
+  /^\/api\/projects(\?.*)?$/,
+  /^\/api\/now\/cards(\?.*)?$/,
 ];
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -370,6 +382,8 @@ export const api = {
     spec_md?: string;
     codebase_id?: string | null;
     chat_session_id?: string | null;
+    clarifier_provider?: string | null;
+    clarifier_model?: string | null;
   }) =>
     request<{ requirement: Requirement }>(`/api/requirements/${id}`, {
       method: "PUT",
@@ -416,6 +430,14 @@ export const api = {
   resolveQuestion: (reqId: string, qid: string) =>
     request<{ ok: true }>(
       `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/resolve`,
+      { method: "POST" },
+    ),
+
+  // /now state-derivation engine (PR 1 backend)
+  listNowCards: () => request<{ cards: NowCard[] }>("/api/now/cards").then((r) => r.cards),
+  dismissNowCard: (cardId: string) =>
+    request<{ ok: true }>(
+      `/api/now/cards/${encodeURIComponent(cardId)}/dismiss`,
       { method: "POST" },
     ),
 };
@@ -593,6 +615,12 @@ export interface Requirement {
   pr_url: string | null;
   pr_number: number | null;
   last_reviewed_event_id: string | null;
+  /** PR-A 新加：当前等用户回答的 question id（clarifying 期 AI 决定下一题时 set） */
+  active_question_id: string | null;
+  /** clarifier 失败时 set 错误原因，成功时 clear；持久化到 DB，跨重启/navigation 可见 */
+  clarifier_error: string | null;
+  clarifier_provider: string | null;
+  clarifier_model: string | null;
   created_at: number;
   updated_at: number;
 }

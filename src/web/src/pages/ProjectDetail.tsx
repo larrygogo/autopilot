@@ -8,7 +8,7 @@ import { api, type Project, type Codebase, type Requirement, type RepoHealthResu
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -83,7 +83,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
   // 新建需求 dialog
   const [reqDialogOpen, setReqDialogOpen] = useState(false);
-  const [reqTitle, setReqTitle] = useState("");
+  const [reqDesc, setReqDesc] = useState("");
   const [savingReq, setSavingReq] = useState(false);
 
   // 新建 / 编辑代码库 dialog
@@ -136,7 +136,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   // ── 需求 ──────────────────────────────────────
 
   const openReqDialog = () => {
-    setReqTitle("");
+    setReqDesc("");
     setReqDialogOpen(true);
   };
 
@@ -146,14 +146,17 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   };
 
   const createRequirement = async () => {
-    const title = reqTitle.trim();
-    if (!title) {
-      toast.error("验证失败", "需求标题不能为空");
+    const desc = reqDesc.trim();
+    if (!desc) {
+      toast.error("验证失败", "需求描述不能为空");
       return;
     }
+    // 从描述截取临时 title（取首行；若过长则截 30 字 + "…"）；clarifier 后续会基于内容优化 title。
+    const firstLine = desc.split("\n")[0].trim();
+    const title = firstLine.length > 30 ? firstLine.slice(0, 30) + "…" : firstLine;
     setSavingReq(true);
     try {
-      const req = await api.createRequirement({ project_id: projectId, title });
+      const req = await api.createRequirement({ project_id: projectId, title, spec_md: desc });
       toast.success(`已创建需求「${title}」`);
       setReqDialogOpen(false);
       navigate(`/requirements/${req.id}`);
@@ -317,14 +320,14 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         <div className="flex flex-col gap-3 lg:items-end">
           <div className="w-full border-[1.5px] border-foreground/30 bg-card/40 font-mono text-[11px]">
             <div className="grid grid-cols-[100px_1fr] border-b border-dashed border-foreground/25">
-              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 uppercase tracking-[0.18em] text-muted-foreground">
-                CODEBASES
+              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 tracking-[0.18em] text-muted-foreground">
+                代码库
               </div>
               <div className="px-3 py-1.5 text-foreground">{codebases.length}</div>
             </div>
             <div className="grid grid-cols-[100px_1fr]">
-              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 uppercase tracking-[0.18em] text-muted-foreground">
-                REQUIREMENTS
+              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 tracking-[0.18em] text-muted-foreground">
+                需求
               </div>
               <div className="px-3 py-1.5 text-foreground">{requirements.length}</div>
             </div>
@@ -493,21 +496,28 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           <DialogHeader>
             <DialogTitle>新建需求</DialogTitle>
             <DialogDescription>
-              在项目「{project?.name}」下创建需求，创建后进入详情页编写规格。
+              直接写下你想做什么，AI 会帮你总结标题、补充结构、逐个澄清细节。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="req-title">
-                标题 <span className="text-destructive">*</span>
+              <Label htmlFor="req-desc">
+                需求描述 <span className="text-destructive">*</span>
               </Label>
-              <Input
-                id="req-title"
-                placeholder="例如：用户登录功能"
-                value={reqTitle}
-                onChange={(e) => setReqTitle(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void createRequirement(); }}
+              <Textarea
+                id="req-desc"
+                placeholder="例如：希望在 /now 主屏增加一个『今日重点』区域，把所有 P0/P1 的卡片合并展示，方便一眼看到要紧的事…"
+                value={reqDesc}
+                onChange={(e) => setReqDesc(e.target.value)}
+                rows={6}
+                className="resize-none"
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void createRequirement();
+                }}
               />
+              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                Ctrl/⌘+Enter 提交 · 标题会自动从首行截取，AI 后续会优化
+              </p>
             </div>
           </div>
           <DialogFooter>

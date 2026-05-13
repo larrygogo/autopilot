@@ -1,249 +1,303 @@
 [中文](quickstart.md) | [English](en/quickstart.md)
 
-## 为什么用 autopilot
+## autopilot 能帮你做什么
 
-LLM agent 单次调用很厉害，但**真实工作很少是单次的**：要写完代码自己跑测试、出方案先给你看再开干、中途遇到岔路停下来问你、出错回到上一步重做。这不是 agent 能力问题，是**编排层**问题。autopilot 把"agent 调用"作为一等公民，配上状态机、人在中间、可视化和本地持久化——单进程 daemon + SQLite + 自带 Web，照着下面跑完，你就有了一个能改、能审、能复盘的 agent 流水线。
+真实的开发任务很少是"一次 prompt 就搞定"的：要写完代码再跑测试、要先出方案给你审、中间遇到问题要停下来问你、出错还能回到上一步重做。autopilot 把这些"agent 调用之间的胶水"做成一个框架：状态机 + 人工审批门 + 本地持久化 + Web UI，单进程 daemon + SQLite，开箱即用。
 
-## 5 分钟你能跑出什么
+## 跑通后你会得到什么
 
-跑通后你会得到一个**自带的 `dev` 工作流**，下次提需求只要 `autopilot task start` 一句话：
+内置 `dev` 工作流，下次只需一句 `autopilot start "你的需求"` 就能触发完整流程：
 
 ```
-你：给我加个任务标签功能
+你：加个任务标签功能
   ↓
-architect agent 读 repo + 写技术方案 → workspace/00-design/plan.md
+architect agent 读代码库 + 写技术方案 → workspace/00-design/plan.md
   ↓
-[Gate: 你审方案] ← 通过则继续，驳回带理由回上一步
+[Gate: 你在 Web UI 审方案] ← 通过继续，驳回带理由回到设计阶段
   ↓
 developer agent 写代码 + 跑测试 + git commit
   ↓
-reviewer agent 看 diff 评审 → REVIEW_RESULT: PASS/REJECT
+reviewer agent 看 diff 评审 → REVIEW_RESULT: PASS / REJECT
   ↓
-gh pr create  ← 真的提 PR
+gh pr create ← 真的提 PR 到 GitHub
 ```
 
-每步产物自动归档到 task workspace，Web UI 实时看进度、看日志、按驳回。
+每步产物自动归档到 task workspace，Web UI 实时看进度、看日志。
 
 ---
 
-# 5 分钟快速入门
+# 快速入门（10-15 分钟）
 
-本教程带你从零开始，5 分钟内跑通第一个 autopilot 任务。
-
-**前置条件**：Python 3.10+、Git
+> 实际耗时取决于 AI agent 的响应速度和你的配置情况，请预留 10-15 分钟而不是 5 分钟。
 
 ---
 
-## 第一部分：3 分钟看到结果
+## 第一步：确认前置条件 ⚙️
 
-### 步骤 1：安装（30s）
+| 依赖 | 最低版本 | 说明 |
+|------|---------|------|
+| **Bun** | 1.0+ | JavaScript 运行时。安装：[bun.sh](https://bun.sh) |
+| **Git** | 任意 | 版本控制 |
+| **AI CLI**（任选一） | 已登录 | [Claude Code](https://docs.anthropic.com/claude-code)（推荐）、[OpenAI Codex](https://github.com/openai/openai-codex) 或 [Gemini CLI](https://github.com/google-gemini/gemini-cli) |
+
+快速检查：
 
 ```bash
-git clone https://github.com/larrygogo/autopilot && cd autopilot
-pip install -e ".[dev]"
+bun --version        # 应输出 1.x.x
+git --version        # 应输出 git version x.x.x
+claude --version     # 或 codex --version / gemini --version
 ```
 
-### 步骤 2：初始化工作空间（10s）
+---
+
+## 第二步：安装 📦
+
+```bash
+git clone https://github.com/larrygogo/autopilot
+cd autopilot
+bun install
+```
+
+预期输出（最后几行）：
+
+```
+bun install v1.x.x
+[xxx packages] installed
+```
+
+> **全局命令**：安装完成后 `autopilot` 命令通过 `bun run` 调用。如需全局可用，运行：
+> ```bash
+> bun link
+> ```
+
+---
+
+## 第三步：初始化工作空间 🗂️
 
 ```bash
 autopilot init
 autopilot upgrade
 ```
 
-预期输出：
+`init` 预期输出：
 
 ```
-✓ 已创建 ~/.autopilot/
-✓ 已创建 ~/.autopilot/workflows/
-✓ 已创建 ~/.autopilot/runtime/
-✓ 初始化完成
+已创建目录：/Users/you/.autopilot/workflows
+已创建目录：/Users/you/.autopilot/prompts
+已创建目录：/Users/you/.autopilot/runtime
+已初始化数据库：/Users/you/.autopilot/runtime/workflow.db
+初始化完成。
 ```
 
-### 步骤 3：查看可用工作流（10s）
+`upgrade` 预期输出（首次）：
+
+```
+数据库升级完成，共执行 N 条迁移。
+```
+
+这会在 `~/.autopilot/` 创建你的用户数据目录——配置文件、工作流、运行时数据都放在这里，与框架代码完全隔离。
+
+---
+
+## 第四步：配置 AI Agent ✨（最重要的一步）
+
+autopilot 靠 AI agent 来干活，必须配置至少一个 provider。
+
+### 方式 A：编辑配置文件（推荐）
+
+打开 `~/.autopilot/config.yaml`，加上 providers 段：
+
+```yaml
+providers:
+  anthropic:
+    default_model: claude-sonnet-4-6
+    enabled: true
+
+agents:
+  coder:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    max_turns: 10
+    permission_mode: auto
+    system_prompt: |
+      你是通用编码助手。
+```
+
+> **凭证**：autopilot 不存储 API key，由你已登录的 CLI 工具（claude-code / codex / gemini-cli）负责管理。确保已在对应 CLI 里 `claude login` / `codex login` 登录过。
+
+### 方式 B：Web UI 配置
+
+先启动 daemon（见第五步），然后在浏览器打开 `/settings?tab=providers` 图形化配置。
+
+---
+
+## 第五步：启动 Daemon 🚀
 
 ```bash
-autopilot workflows
-```
-
-预期输出（如果已将示例工作流复制到 `~/.autopilot/workflows/`）：
-
-```
-已注册工作流：
-  dev          [AI] 完整开发流程（设计 → 评审 → 开发 → 代码审查 → PR）
-  req_review   [AI] 需求评审流程（需求分析 → 需求评审）
-  doc_gen      文档生成与评审
-```
-
-> **提示**：框架自动扫描 `~/.autopilot/workflows/` 目录。如果列表为空，先将示例工作流复制过去：
-> ```bash
-> cp -r examples/workflows/* ~/.autopilot/workflows/
-> ```
-
-### 步骤 4：启动一个任务（10s）
-
-使用 `doc_gen`（最简单的 2 阶段工作流）启动任务：
-
-```bash
-autopilot start DOC-001 --workflow doc_gen
-```
-
-预期输出：
-
-```
-2026-01-15 10:30:00 [INFO] [GENERATE] 任务 DOC-001 已创建，工作流: doc_gen
-2026-01-15 10:30:00 [INFO] [GENERATE] 开始执行阶段: generate
-```
-
-### 步骤 5：查看任务状态（10s）
-
-```bash
-# 查看单个任务详情
-autopilot show DOC-001
-
-# 查看所有任务
-autopilot list
-```
-
-`show` 预期输出：
-
-```
-任务: DOC-001
-工作流: doc_gen
-状态: pending_generate
-创建时间: 2026-01-15 10:30:00
-```
-
-`list` 预期输出：
-
-```
-ID        工作流      状态               创建时间
-DOC-001   doc_gen    pending_generate   2026-01-15 10:30:00
-```
-
-### 步骤 6：打开 WebUI 管理界面（30s）
-
-安装 WebUI 插件并启动：
-
-```bash
-pip install -e examples/plugins/autopilot-webui
-autopilot webui
-```
-
-打开浏览器访问 `http://127.0.0.1:8080`，你将看到：
-
-- **仪表盘**：任务统计、成功率、状态分布图
-- **任务列表**：筛选、查看详情、流转日志时间线
-- **工作流列表**：卡片式展示所有已注册工作流
-
-<!-- TODO: 补充 WebUI 截图
-![WebUI 仪表盘](screenshots/webui-dashboard.png)
--->
-
-### 步骤 7：查看统计（10s）
-
-```bash
-autopilot stats
+autopilot daemon start
 ```
 
 预期输出：
 
 ```
-任务统计：
-  总数: 1
-  活跃: 1
-  完成: 0
-  取消: 0
+daemon 已启动 (pid=12345)
+  查看监听地址与状态：autopilot daemon status
+```
+
+检查状态：
+
+```bash
+autopilot daemon status
+```
+
+预期输出：
+
+```
+daemon 运行中 (pid=12345)
+  监听: 127.0.0.1:6180
+  版本: x.x.x
+  运行时间: 5s
+  任务统计: 无任务
+```
+
+> **默认端口**：`6180`。如需修改，在 `~/.autopilot/config.yaml` 加 `daemon: { port: 你的端口 }` 后 `autopilot daemon restart`。
+
+---
+
+## 第六步：打开 Web UI 🌐
+
+```bash
+autopilot dashboard
+```
+
+浏览器会自动打开 `http://127.0.0.1:6180/now`。
+
+Web UI 有四个区域：
+
+| 区域 | 路径 | 说明 |
+|------|------|------|
+| **现在** | `/now` | 当前需要你关注的事（按优先级排序的卡片流） |
+| **开始** | `/start` | 提交新需求、启动任务 |
+| **库** | `/library` | 查看所有任务和工作流 |
+| **设置** | `/settings` | 配置 providers、agents 等 |
+
+---
+
+## 第七步：提交第一个需求 📝
+
+### 方式 A：Web UI（推荐）
+
+1. 点击顶部导航 **开始**（`/start`）
+2. 填写需求标题和描述
+3. 点击提交
+
+### 方式 B：CLI 快捷命令
+
+```bash
+autopilot start "给任务列表加标签筛选功能"
+```
+
+预期输出：
+
+```
+任务已创建 [id=task-001 workflow=dev status=pending_design]
+```
+
+### 方式 C：指定工作流
+
+```bash
+autopilot start "重构用户模块" --workflow dev
+```
+
+查看当前可用工作流：
+
+```bash
+autopilot workflow list
 ```
 
 ---
 
-## 第二部分：2 分钟自定义工作流（可选）
+## 第八步：等待 AI 干活，在需要时介入 👁️
 
-创建一个最简单的自定义工作流，验证整个流程。
+任务启动后，autopilot 自动推进各阶段：
 
-### 1. 创建工作流目录
+1. **design（设计）**：architect agent 分析代码库、生成技术方案
+2. **review（方案评审）**：⚠️ **等待你的审批** — 在 Web UI `/now` 页面会出现一张卡片
+3. **develop（开发）**：developer agent 写代码、跑测试、提交
+4. **code_review（代码评审）**：reviewer agent 评审 diff
+5. **submit_pr（提 PR）**：自动运行 `gh pr create`
 
-```bash
-mkdir -p ~/.autopilot/workflows/hello
-```
+### 查看进度
 
-### 2. 编写 workflow.yaml
+**Web UI**：打开 `/now` 主屏，优先级 P0-P3 的卡片会告诉你现在该做什么。
 
-```bash
-cat > ~/.autopilot/workflows/hello/workflow.yaml << 'EOF'
-name: hello
-description: Hello World 示例工作流
-
-phases:
-  - name: greet
-    timeout: 60
-
-  - name: farewell
-    timeout: 60
-EOF
-```
-
-只需定义 `name` 和 `timeout`，其余状态（`pending_greet`、`running_greet` 等）全部**自动推导**。
-
-### 3. 编写 workflow.py
+**CLI 文本视图**：
 
 ```bash
-cat > ~/.autopilot/workflows/hello/workflow.py << 'EOF'
-from core.state_machine import transition
-from core.runner import run_in_background
-
-def run_greet(task_id: str) -> None:
-    print(f"[hello] 你好，任务 {task_id}！开始处理...")
-    transition(task_id, "greet_complete")
-    run_in_background(task_id, "farewell")
-
-def run_farewell(task_id: str) -> None:
-    print(f"[hello] 任务 {task_id} 处理完毕，再见！")
-    transition(task_id, "farewell_complete")
-EOF
+autopilot now
 ```
 
-### 4. 验证并运行
+预期输出（有待审批任务时）：
+
+```
+PRIO  TITLE                        WAIT    ACTIONS
+----  ---------------------------  ------  -------
+P0    任务方案待审批: task-001      5min    审批 / 驳回
+```
+
+**终端 UI**：
 
 ```bash
-# 校验工作流定义
-autopilot validate hello
-
-# 查看已注册工作流（应包含 hello）
-autopilot workflows
-
-# 启动任务
-autopilot start HELLO-001 --workflow hello
-
-# 查看结果
-autopilot show HELLO-001
+autopilot tui
 ```
 
-预期输出：
+**查看详情和日志**：
 
-```
-任务: HELLO-001
-工作流: hello
-状态: done
-创建时间: 2026-01-15 10:35:00
-```
+```bash
+# 列出所有任务
+autopilot task status
 
-恭喜！你已经成功创建并运行了自定义工作流。
+# 查看单个任务
+autopilot task status task-001
+
+# 跟踪实时日志
+autopilot task logs task-001 --follow
+```
 
 ---
 
-## 5 分钟跑通需求队列
+## 常用操作速查
 
-需求队列是 autopilot 替代旧 dev workflow 的新工作模式（详见 [需求队列指南](./requirement-queue.md)）。
+```bash
+# daemon 管理
+autopilot daemon start          # 后台启动
+autopilot daemon stop           # 停止
+autopilot daemon status         # 查看状态
+autopilot daemon restart        # 重启（重载配置后用）
 
-1. 启动 daemon：`autopilot daemon start`
-2. 打开 Web UI：`autopilot dashboard`
-3. 在 `/repos` 注册一个仓库 + 健康检查（必须有 GitHub origin，submit_pr 阶段会用 gh CLI 提 PR）
-4. **方式一（chat 推荐）**：在 `/chat` 跟 agent 说「我有个新需求 — ...」
-5. **方式二（手动）**：在 `/requirements` 点「新建需求」→ 编辑 spec → 标记为已澄清 → 入队执行
-6. 在 `/tasks` 看 task 跑到 submit_pr → GitHub 上看 PR 已创建
+# 任务
+autopilot start "<标题>"        # 快捷创建任务
+autopilot task start "<标题>" --workflow <name>  # 指定工作流
+autopilot task status           # 列出所有任务
+autopilot task status <id>      # 查看单个任务
+autopilot task logs <id>        # 查看日志
+autopilot task logs <id> -f     # 实时跟踪日志
+autopilot task cancel <id>      # 取消任务
 
-P2 当前限制和后续 Phase 路线图见 [需求队列指南](./requirement-queue.md)。
+# 工作流
+autopilot workflow list         # 列出已注册工作流
+autopilot workflow show <name>  # 查看工作流详情
+
+# 界面
+autopilot now                   # 文本卡片流（/now 的 CLI 版）
+autopilot tui                   # 终端 UI
+autopilot dashboard             # 打开浏览器 Web UI
+autopilot chat                  # 与 agent 对话（REPL）
+
+# 维护
+autopilot init                  # 初始化工作空间（首次）
+autopilot upgrade               # 运行数据库迁移（升级后）
+```
 
 ---
 
@@ -254,5 +308,12 @@ P2 当前限制和后续 Phase 路线图见 [需求队列指南](./requirement-q
 | 工作流的完整定义语法 | [工作流开发指南](workflow-development.md) |
 | 框架内部架构和设计决策 | [架构总览](architecture.md) |
 | 状态机和驳回机制 | [状态机详解](state-machine.md) |
-| 如何开发第三方插件 | [插件开发指南](plugin-development.md) |
 | 常见问题和故障排查 | [FAQ](faq.md) |
+
+---
+
+## 遇到问题？
+
+- **`autopilot daemon start` 超时**：检查端口 6180 是否被占用，或改用 `autopilot daemon run`（前台模式，日志直接输出）
+- **AI agent 不工作**：确认已用对应 CLI 登录，`~/.autopilot/config.yaml` 中 `enabled: true`
+- **任务卡住不动**：运行 `autopilot task logs <id>` 看报错；或查看 [FAQ](faq.md)

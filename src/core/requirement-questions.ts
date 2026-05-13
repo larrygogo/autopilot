@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { emit } from "../daemon/event-bus";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -117,10 +118,21 @@ export function addReply(opts: AddReplyOpts): QuestionReply {
 
 export function resolveQuestion(id: string): void {
   const db = getDb();
+  const row = db
+    .query<{ requirement_id: string; status: string }, [string]>(
+      "SELECT requirement_id, status FROM requirement_questions WHERE id = ?"
+    )
+    .get(id);
+  if (!row || row.status === "resolved") return;
+
   db.run(
     "UPDATE requirement_questions SET status = 'resolved', resolved_at = ? WHERE id = ?",
-    [nowMs(), id]
+    [nowMs(), id],
   );
+  emit({
+    type: "requirement:question-resolved",
+    payload: { id: row.requirement_id, question_id: id },
+  });
 }
 
 export function nextQuestionId(): string {

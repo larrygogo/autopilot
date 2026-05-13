@@ -771,6 +771,119 @@ program
   });
 
 // ──────────────────────────────────────────────
+// now — 文本卡片流（替代浏览器查看 /now）
+// ──────────────────────────────────────────────
+
+program
+  .command("now")
+  .description("查看当前需要关注的事（卡片流文本视图）")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (opts: { port: string }) => {
+    const client = getClient(opts);
+    await ensureDaemon(client);
+
+    try {
+      const cards = await client.listNowCards();
+      if (cards.length === 0) {
+        console.log("🎉 没有需要关注的事。");
+        return;
+      }
+
+      // 按优先级 + created_at 排序（与后端一致）
+      const PRIORITY_ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+      cards.sort((a, b) => {
+        const dp = (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9);
+        if (dp !== 0) return dp;
+        return a.created_at - b.created_at;
+      });
+
+      // 计算列宽
+      const nowSec = Math.floor(Date.now() / 1000);
+      const rows = cards.map((c) => {
+        const waitedSec = Math.max(0, nowSec - c.created_at);
+        const wait = waitedSec < 60 ? `${waitedSec}s`
+          : waitedSec < 3600 ? `${Math.floor(waitedSec / 60)}min`
+          : `${Math.floor(waitedSec / 3600)}h`;
+        const actionsLine = c.actions.map((a) => a.label).join(" / ");
+        return {
+          prio: c.priority,
+          title: c.title,
+          subtitle: c.subtitle,
+          wait,
+          actions: actionsLine,
+        };
+      });
+
+      const widths = {
+        prio: 4,
+        title: Math.max(8, ...rows.map((r) => r.title.length)),
+        wait: Math.max(6, ...rows.map((r) => r.wait.length)),
+      };
+      // 截断 title 防过宽
+      const maxTitle = Math.min(widths.title, 60);
+
+      console.log(
+        `${"PRIO".padEnd(widths.prio)}  ${"TITLE".padEnd(maxTitle)}  ${"WAIT".padEnd(widths.wait)}  ACTIONS`,
+      );
+      console.log(
+        `${"-".repeat(widths.prio)}  ${"-".repeat(maxTitle)}  ${"-".repeat(widths.wait)}  -------`,
+      );
+      for (const r of rows) {
+        const title = r.title.length > maxTitle ? r.title.slice(0, maxTitle - 1) + "…" : r.title;
+        console.log(
+          `${r.prio.padEnd(widths.prio)}  ${title.padEnd(maxTitle)}  ${r.wait.padEnd(widths.wait)}  ${r.actions}`,
+        );
+      }
+      console.log(`\n共 ${cards.length} 项。`);
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+// ──────────────────────────────────────────────
+// start — 快捷创建任务（task start 的顶层别名）
+// ──────────────────────────────────────────────
+
+program
+  .command("start <title>")
+  .description("快捷创建并启动任务（task start 的顶层别名）")
+  .option("-w, --workflow <name>", "工作流名称")
+  .option("-r, --requirement <text>", "需求详情；以 @ 开头则从文件读")
+  .option("--repo <alias>", "绑定仓库别名")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
+    const client = getClient(opts);
+    await ensureDaemon(client);
+
+    let requirement = opts.requirement;
+    if (requirement?.startsWith("@")) {
+      const path = requirement.slice(1);
+      try {
+        requirement = await Bun.file(path).text();
+      } catch (e: unknown) {
+        console.error(`读取需求文件失败：${path} - ${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      }
+    }
+
+    try {
+      const startOpts: {
+        title?: string;
+        requirement?: string;
+        workflow?: string;
+        repo_alias?: string;
+      } = { title, requirement, workflow: opts.workflow };
+      if (opts.repo) startOpts.repo_alias = opts.repo;
+      const t = await client.startTask(startOpts);
+      console.log(`任务已创建 [id=${t.id} workflow=${t.workflow} status=${t.status}]`);
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+// ──────────────────────────────────────────────
 // init — 初始化（本地，不需要 daemon）
 // ──────────────────────────────────────────────
 

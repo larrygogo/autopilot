@@ -11,3 +11,4 @@ feature-list.json
 web-dist/
 node_modules/
 .claude/scheduled_tasks.lock
+.superpowers/

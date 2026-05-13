@@ -18,7 +18,10 @@ import { setWebDistDir } from "./routes";
 import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo } from "./pid";
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
 import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
+import { runClarifierWatchdog } from "./clarifier-watchdog";
 import { initRequirementTaskBridge, disposeRequirementTaskBridge } from "./requirement-task-bridge";
+import { createDefaultAggregator, type Aggregator } from "../core/now-aggregator";
+import { setNowAggregator } from "./routes-now";
 import type { AutopilotEvent } from "./protocol";
 
 // ──────────────────────────────────────────────
@@ -28,6 +31,7 @@ import type { AutopilotEvent } from "./protocol";
 const DEFAULT_PORT = 6180;
 const DEFAULT_HOST = "127.0.0.1";
 const WATCHER_INTERVAL_MS = 60_000;
+const CLARIFIER_WATCHDOG_INTERVAL_MS = 60_000;
 const RETENTION_INTERVAL_MS = 3600_000;  // 每小时扫一次 workspace 保留策略
 const SCHEDULER_INTERVAL_MS = 30_000;    // 每 30 秒扫一次定时任务（精度到分钟）
 // PR_POLL_INTERVAL_MS 由 config.yaml.github.poll_interval_seconds 决定
@@ -74,6 +78,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 激活事件总线
   enableBus();
 
+  // 启动 /now 状态推导引擎
+  const nowAggregator: Aggregator = createDefaultAggregator();
+  await nowAggregator.start();
+  setNowAggregator(nowAggregator);
+  log.info("now-aggregator 已启动，当前卡片数 %d", nowAggregator.getCards().length);
+
   // 启动 requirement-scheduler（订阅 event-bus）
   initRequirementScheduler();
   // 启动 requirement-clarifier（创建需求后自动 AI 澄清）
@@ -111,6 +121,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     }
   }, WATCHER_INTERVAL_MS);
 
+  const clarifierWatchdogTimer = setInterval(() => {
+    runClarifierWatchdog().catch((e: unknown) => {
+      console.error("clarifier-watchdog 异常：", e instanceof Error ? e.message : String(e));
+    });
+  }, CLARIFIER_WATCHDOG_INTERVAL_MS);
+
   // workspace 保留策略定时器（配置为空时函数内部会提前返回）
   const retentionTimer = setInterval(() => {
     try {
@@ -143,12 +159,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const shutdown = () => {
     console.log("\ndaemon 正在关闭...");
     clearInterval(watcherTimer);
+    clearInterval(clarifierWatchdogTimer);
     clearInterval(retentionTimer);
     clearInterval(schedulerTimer);
     clearInterval(prPollerTimer);
     disposeRequirementScheduler();
     disposeRequirementClarifier();
     disposeRequirementTaskBridge();
+    nowAggregator.dispose();
+    setNowAggregator(null);
     disableBus();
     server.stop();
     closeDb();

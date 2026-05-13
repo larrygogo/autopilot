@@ -10,6 +10,7 @@ import {
   nextCodebaseId,
 } from "../src/core/codebases";
 import { createProject } from "../src/core/projects";
+import { createRequirement, getRequirementById } from "../src/core/requirements";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
@@ -18,6 +19,9 @@ import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
+import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
+import { up as migrate010 } from "../src/migrations/010-question-suggestions";
+import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
 import { checkCodebaseHealth, parseGithubFromRemote } from "../src/core/codebase-health";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -34,6 +38,9 @@ function runAllMigrations(db: Database): void {
   migrate006(db);
   migrate007(db);
   migrate008(db);
+  migrate009(db);
+  migrate010(db);
+  migrate011(db);
 }
 
 describe("migration produces codebases table", () => {
@@ -344,5 +351,27 @@ describe("codebases submodule 字段（P5.1 → P1 改名后）", () => {
     deleteCodebase("cb-parent");
     expect(getCodebaseById("cb-parent")).toBeNull();
     expect(getCodebaseById("cb-child")).toBeNull();
+  });
+
+  it("deleteCodebase 把指向它的 requirement.codebase_id 置 NULL + 清 join", async () => {
+    const db = (await import("../src/core/db")).getDb();
+
+    createCodebase({ id: "cb-del", project_id: projId, alias: "del-main", path: "/tmp/del" });
+    createRequirement({ id: "REQ-CB1", project_id: projId, codebase_id: "cb-del", title: "X", spec_md: "" });
+
+    // 验证 requirement 持有 codebase_id 引用
+    let req = getRequirementById("REQ-CB1");
+    expect(req?.codebase_id).toBe("cb-del");
+
+    deleteCodebase("cb-del");
+
+    // codebase 已删
+    expect(db.query("SELECT COUNT(*) AS n FROM codebases WHERE id = 'cb-del'").get()).toEqual({ n: 0 });
+    // requirement 还在，但 codebase_id 已置 NULL
+    req = getRequirementById("REQ-CB1");
+    expect(req).not.toBeNull();
+    expect(req?.codebase_id).toBeNull();
+    // requirement_codebases 关联也清
+    expect(db.query("SELECT COUNT(*) AS n FROM requirement_codebases WHERE codebase_id = 'cb-del'").get()).toEqual({ n: 0 });
   });
 });

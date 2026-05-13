@@ -141,10 +141,27 @@ export function updateCodebase(id: string, opts: UpdateCodebaseOpts): Codebase |
 
 export function deleteCodebase(id: string): void {
   const db = getDb();
-  // 先删此 codebase 下所有子模块
-  db.run("DELETE FROM codebases WHERE parent_codebase_id = ?", [id]);
-  // 再删自身
-  db.run("DELETE FROM codebases WHERE id = ?", [id]);
+  db.transaction(() => {
+    // 1. 把所有 requirement.codebase_id == id 的引用置 NULL（保留 requirement，不删）
+    db.run("UPDATE requirements SET codebase_id = NULL, updated_at = ? WHERE codebase_id = ?", [Date.now(), id]);
+
+    // 2. 删 requirement_codebases 关联表中以此 codebase 为目标的所有条目
+    db.run("DELETE FROM requirement_codebases WHERE codebase_id = ?", [id]);
+
+    // 3. 删此 codebase 的所有子 codebase（一级递归，匹配现有行为）
+    //    子 codebase 也可能被 requirements 引用 → 先把它们的引用清掉
+    const children = db.query<{ id: string }, [string]>(
+      "SELECT id FROM codebases WHERE parent_codebase_id = ?"
+    ).all(id);
+    for (const child of children) {
+      db.run("UPDATE requirements SET codebase_id = NULL, updated_at = ? WHERE codebase_id = ?", [Date.now(), child.id]);
+      db.run("DELETE FROM requirement_codebases WHERE codebase_id = ?", [child.id]);
+    }
+    db.run("DELETE FROM codebases WHERE parent_codebase_id = ?", [id]);
+
+    // 4. 删自身
+    db.run("DELETE FROM codebases WHERE id = ?", [id]);
+  })();
 }
 
 /**

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2 } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project, type Codebase } from "@/hooks/useApi";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2 } from "lucide-react";
+import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project, type Codebase, type ProviderItem } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
 import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 
 const STATUS_LABEL: Record<string, string> = {
   drafting: "草稿",
@@ -75,6 +78,235 @@ const SOURCE_LABEL: Record<string, string> = {
   github_review: "GitHub Review",
 };
 
+interface RenderQuestionDeps {
+  replyDrafts: Record<string, string>;
+  setReplyDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  replyingId: string | null;
+  submitReply: (qid: string) => Promise<void>;
+}
+
+function ClarifierOverrideDialog({
+  open,
+  onOpenChange,
+  requirementId,
+  currentProvider,
+  currentModel,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  requirementId: string;
+  currentProvider: string | null;
+  currentModel: string | null;
+  onSaved: () => void;
+}): React.ReactNode {
+  const toast = useToast();
+  const [mode, setMode] = useState<"inherit" | "override">(currentProvider || currentModel ? "override" : "inherit");
+  const [provider, setProvider] = useState<string>(currentProvider ?? "");
+  const [model, setModel] = useState<string>(currentModel ?? "");
+  const [providers, setProviders] = useState<ProviderItem[]>([]);
+  const [models, setModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // 每次打开时 sync state to props
+  useEffect(() => {
+    if (!open) return;
+    setMode(currentProvider || currentModel ? "override" : "inherit");
+    setProvider(currentProvider ?? "");
+    setModel(currentModel ?? "");
+    api.listProviders().then(setProviders).catch(() => {});
+  }, [open, currentProvider, currentModel]);
+
+  // provider 改变时拉 model 列表
+  useEffect(() => {
+    if (!provider) { setModels([]); return; }
+    setLoadingModels(true);
+    api.getProviderModels(provider)
+      .then((r) => setModels(r.models ?? []))
+      .catch(() => setModels([]))
+      .finally(() => setLoadingModels(false));
+  }, [provider]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const body = mode === "inherit"
+        ? { clarifier_provider: null, clarifier_model: null }
+        : { clarifier_provider: provider || null, clarifier_model: model || null };
+      await api.updateRequirement(requirementId, body);
+      toast.success("已保存");
+      onSaved();
+      onOpenChange(false);
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="rounded-none sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>此需求的澄清模型</DialogTitle>
+          <DialogDescription>
+            仅作用于本需求。继承全局表示用 /settings?tab=clarifier 的默认。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          {/* mode toggle */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setMode("inherit")}
+              className={cn(
+                "flex-1 border-[1.5px] px-3 py-2 font-mono text-xs uppercase tracking-[0.12em]",
+                mode === "inherit"
+                  ? "border-accent bg-accent/10 text-foreground"
+                  : "border-foreground/30 text-muted-foreground hover:border-foreground/60",
+              )}
+            >
+              继承全局默认
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("override")}
+              className={cn(
+                "flex-1 border-[1.5px] px-3 py-2 font-mono text-xs uppercase tracking-[0.12em]",
+                mode === "override"
+                  ? "border-accent bg-accent/10 text-foreground"
+                  : "border-foreground/30 text-muted-foreground hover:border-foreground/60",
+              )}
+            >
+              为此需求 override
+            </button>
+          </div>
+
+          {mode === "override" && (
+            <>
+              <div className="space-y-1.5">
+                <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">供应商</Label>
+                <Select value={provider} onValueChange={(v) => { setProvider(v); setModel(""); }}>
+                  <SelectTrigger className="rounded-none">
+                    <SelectValue placeholder="选择供应商" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providers.map((p) => (
+                      <SelectItem key={p.name} value={p.name}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">模型（可选）</Label>
+                <Select value={model} onValueChange={setModel} disabled={!provider || loadingModels}>
+                  <SelectTrigger className="rounded-none">
+                    <SelectValue placeholder={
+                      !provider ? "先选供应商" :
+                      loadingModels ? "加载中…" :
+                      models.length === 0 ? "无可用模型（走默认）" :
+                      "选择模型"
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {models.map((m) => (<SelectItem key={m} value={m}>{m}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>取消</Button>
+          <Button onClick={() => void handleSave()} disabled={saving}>
+            {saving ? "保存中…" : "保存"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * 渲染单个 question 的 chat 气泡块（AI 提问 + 用户回复 + 回复输入框）。
+ * 抽成独立函数以便 active question 区和历史折叠区共用。
+ */
+function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode {
+  const { replyDrafts, setReplyDrafts, replyingId, submitReply } = deps;
+  return (
+    <div key={q.id} className="space-y-3">
+      {/* AI 气泡 */}
+      <div className="flex items-start gap-2.5">
+        <div className="bp-num-block h-7 w-7 text-[10px]">AI</div>
+        <div className="flex-1 space-y-2">
+          <div className={cn(
+            "border-[1.5px] border-foreground/30 bg-muted/50 px-4 py-3 text-sm leading-relaxed",
+            q.status === "resolved" && "opacity-60"
+          )}>
+            {q.agent_text}
+          </div>
+          {q.status === "open" && q.suggestions.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {q.suggestions.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setReplyDrafts(d => ({ ...d, [q.id]: s }))}
+                  className="border border-foreground/30 bg-background px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-accent hover:text-accent"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 用户回复气泡 */}
+      {(q.replies ?? []).filter(r => r.author_role === "user").map((reply) => (
+        <div key={reply.id} className="flex items-start justify-end gap-2.5">
+          <div className={cn(
+            "max-w-[80%] border-[1.5px] border-accent bg-accent/12 px-4 py-3 text-sm leading-relaxed text-foreground",
+            q.status === "resolved" && "opacity-70"
+          )}>
+            {reply.text}
+          </div>
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center border-[1.5px] border-accent bg-accent text-[10px] font-mono font-bold text-accent-foreground">
+            你
+          </div>
+        </div>
+      ))}
+
+      {/* 输入框（仅 open 状态） */}
+      {q.status === "open" && (
+        <div className="pl-8 space-y-2">
+          <Textarea
+            value={replyDrafts[q.id] ?? ""}
+            onChange={(e) => setReplyDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
+            placeholder="输入回复，或点击上方建议…"
+            className="min-h-[72px] resize-none text-sm"
+            disabled={replyingId === q.id}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submitReply(q.id);
+            }}
+          />
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              onClick={() => void submitReply(q.id)}
+              disabled={replyingId === q.id || !(replyDrafts[q.id] ?? "").trim()}
+            >
+              <Send className="mr-1.5 h-3.5 w-3.5" />
+              {replyingId === q.id ? "发送中…" : "发送"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RequirementDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -97,9 +329,15 @@ export function RequirementDetail() {
   const [subPrs, setSubPrs] = useState<RequirementSubPr[]>([]);
   // 回复输入状态：qid → 文本
   const [projectCodebases, setProjectCodebases] = useState<Codebase[]>([]);
+  const [codebaseDialogOpen, setCodebaseDialogOpen] = useState(false);
+  const [clarifierDialogOpen, setClarifierDialogOpen] = useState(false);
+  // Radix Select 不允许 value=""（空串保留给清空 placeholder），用 sentinel 表示"未关联"
+  const NONE_VALUE = "__none__";
+  const [codebaseDraft, setCodebaseDraft] = useState<string>(NONE_VALUE);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [retryingClarify, setRetryingClarify] = useState(false);
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
@@ -138,7 +376,11 @@ export function RequirementDetail() {
       if (!isForThis) return;
       if (
         event.type === "requirement:status-changed" ||
-        event.type === "requirement:questions-updated"
+        event.type === "requirement:questions-updated" ||
+        event.type === "requirement:question-resolved" ||
+        event.type === "requirement:active-question-changed" ||
+        event.type === "requirement:spec-revised" ||
+        event.type === "requirement:clarifier-error"
       ) {
         void refresh({ silent: true });
       }
@@ -176,7 +418,16 @@ export function RequirementDetail() {
     if (!id) return;
     setActionBusy(true);
     try {
-      await api.transitionRequirement(id, "ready");
+      // 新 B 模式：走 finish-clarification endpoint（一并清 active_question_id + 进 awaiting_approval）
+      // 而不是旧的 transitionRequirement(id, "ready") — 后者不清 active，会留下"已澄清"但 chat 还在的矛盾态。
+      const res = await fetch(`/api/requirements/${encodeURIComponent(id)}/finish-clarification`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
       await refresh();
       toast.success("已标记为「已澄清」");
     } catch (e: unknown) {
@@ -240,6 +491,21 @@ export function RequirementDetail() {
       toast.success("已驳回，需求返回草稿");
     } catch (e: unknown) {
       toast.error("驳回失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function resumeClarify() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      // drafting → clarifying；clarifier 自动跑一轮，基于历史 spec_md + Q&A 决定下一题或 done=true
+      await api.transitionRequirement(id, "clarifying");
+      await refresh();
+      toast.success("已重新进入澄清，AI 正在思考下一个问题");
+    } catch (e: unknown) {
+      toast.error("操作失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
     }
@@ -464,30 +730,36 @@ export function RequirementDetail() {
             <MetaRow k="ID" v={<code className="text-accent">{req.id}</code>} />
             {project && (
               <MetaRow
-                k="PROJECT"
+                k="项目"
                 v={<code className="text-foreground">{project.name}</code>}
               />
             )}
             <MetaRow
-              k="CODEBASE"
+              k="代码库"
               v={
-                projectCodebases.length > 0 ? (
-                  <select
-                    className="h-5 w-full rounded-none border border-input bg-transparent px-1 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={req.codebase_id ?? ""}
-                    onChange={(e) => void setCodebase(e.target.value || null)}
-                  >
-                    <option value="">— 未关联 —</option>
-                    {projectCodebases.map((cb) => (
-                      <option key={cb.id} value={cb.id}>{cb.alias}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className="text-muted-foreground">{repoAlias || "—"}</span>
-                )
+                <div className="flex items-center gap-2">
+                  <span className="text-foreground">
+                    {req.codebase_id
+                      ? (projectCodebases.find(cb => cb.id === req.codebase_id)?.alias ?? req.codebase_id)
+                      : <span className="text-muted-foreground">未关联</span>
+                    }
+                  </span>
+                  {projectCodebases.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCodebaseDraft(req.codebase_id ?? NONE_VALUE);
+                        setCodebaseDialogOpen(true);
+                      }}
+                      className="text-[10px] uppercase tracking-[0.18em] text-accent hover:underline"
+                    >
+                      修改
+                    </button>
+                  )}
+                </div>
               }
             />
-            <MetaRow k="STATUS" v={STATUS_LABEL[req.status] ?? req.status} last />
+            <MetaRow k="状态" v={STATUS_LABEL[req.status] ?? req.status} last />
           </div>
         </div>
       </header>
@@ -522,111 +794,163 @@ export function RequirementDetail() {
       {/* 任务进度卡片（关联了 task 之后显示） */}
       {req.task_id && <TaskProgressCard taskId={req.task_id} />}
 
-      {/* AI 正在生成澄清问题（clarifying 且暂无问题） */}
-      {req.status === "clarifying" && questions.length === 0 && (
-        <Card className="mb-6 p-5">
-          <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin text-accent" />
-            AI 正在分析需求，生成澄清问题…
+      {/* clarifier 出错（任何阶段都可能发生）— 覆盖 spinner 优先显示 */}
+      {req.clarifier_error && req.status === "clarifying" && (
+        <Card className="mb-6 p-5 border-l-4 border-l-destructive">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1 min-w-0">
+              <div className="font-mono text-xs uppercase tracking-wider text-destructive font-medium">
+                ⚠ 澄清出错
+              </div>
+              <p className="text-sm text-muted-foreground break-words">{req.clarifier_error}</p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={retryingClarify}
+              onClick={async () => {
+                if (!id) return;
+                setRetryingClarify(true);
+                try {
+                  const res = await fetch(`/api/requirements/${encodeURIComponent(id)}/retry-clarify`, { method: "POST" });
+                  if (!res.ok) {
+                    const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
+                    throw new Error(body.error ?? `HTTP ${res.status}`);
+                  }
+                  toast.success("已重新触发 AI 澄清");
+                } catch (e: unknown) {
+                  toast.error("重试失败", (e as Error)?.message ?? String(e));
+                } finally {
+                  setRetryingClarify(false);
+                }
+              }}
+              className="shrink-0"
+            >
+              {retryingClarify ? "重试中…" : "↻ 重试"}
+            </Button>
           </div>
         </Card>
       )}
 
-      {/* 澄清对话（chat 气泡风格，方角蓝图）*/}
-      {questions.length > 0 && (
+      {/* AI 正在生成澄清问题（clarifying 且暂无问题、且没出错时显示）。
+          加 [重试] 按钮兜底：daemon 重启 / WS 断连导致 clarifier-error 事件丢失时，
+          用户能主动触发 retry-clarify 而不是干等 spinner。 */}
+      {!req.clarifier_error && req.status === "clarifying" && questions.length === 0 && (
+        <Card className="mb-6 p-5">
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
+            <span className="flex-1 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              AI 正在分析需求，生成澄清问题…
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={retryingClarify}
+              onClick={async () => {
+                if (!id) return;
+                setRetryingClarify(true);
+                try {
+                  const res = await fetch(`/api/requirements/${encodeURIComponent(id)}/retry-clarify`, { method: "POST" });
+                  if (!res.ok) {
+                    const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
+                    throw new Error(body.error ?? `HTTP ${res.status}`);
+                  }
+                  toast.success("已重新触发 AI 澄清");
+                  void refresh({ silent: true });
+                } catch (e: unknown) {
+                  toast.error("重试失败", (e as Error)?.message ?? String(e));
+                } finally {
+                  setRetryingClarify(false);
+                }
+              }}
+              className="shrink-0"
+            >
+              {retryingClarify ? "重试中…" : "↻ 重试"}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* 澄清对话（chat 气泡风格，方角蓝图）只在 drafting/clarifying 期显示。
+          其他状态（ready / awaiting_approval / running / done 等）chat 区隐藏，
+          PR-B 会重做：把历史问答折叠到 spec 区附近。*/}
+      {questions.length > 0 && (req.status === "drafting" || req.status === "clarifying") && (
         <Card className="mb-6">
           <div className="flex items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="bp-label">需求澄清 · CLARIFICATION</span>
+            <button
+              type="button"
+              onClick={() => setClarifierDialogOpen(true)}
+              className="ml-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground hover:text-accent inline-flex items-center gap-1"
+              title="为此需求配置 clarifier 模型"
+            >
+              <Settings2 className="h-3 w-3" />
+              模型：{req.clarifier_model ?? req.clarifier_provider ?? "全局默认"}
+            </button>
             {openQuestions.length > 0 && (
               <Badge variant="warning" className="ml-auto">{openQuestions.length} 待回复</Badge>
             )}
           </div>
 
-          {/* 对话气泡流 */}
-          <div className="space-y-4 p-5">
-            {questions.map((q) => (
-              <div key={q.id} className="space-y-3">
-                {/* AI 气泡 */}
-                <div className="flex items-start gap-2.5">
-                  <div className="bp-num-block h-7 w-7 text-[10px]">AI</div>
-                  <div className="flex-1 space-y-2">
-                    <div className={cn(
-                      "border-[1.5px] border-foreground/30 bg-muted/50 px-4 py-3 text-sm leading-relaxed",
-                      q.status === "resolved" && "opacity-60"
-                    )}>
-                      {q.agent_text}
-                    </div>
-                    {/* 建议 chips */}
-                    {q.status === "open" && q.suggestions.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {q.suggestions.map((s) => (
-                          <button
-                            key={s}
-                            type="button"
-                            onClick={() => setReplyDrafts(d => ({ ...d, [q.id]: s }))}
-                            className="border border-foreground/30 bg-background px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-accent hover:text-accent"
-                          >
-                            {s}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+          {/* 当前活跃问题（open）— 永远显示，含回复框 */}
+          {openQuestions.length > 0 && (
+            <div className="space-y-4 p-5">
+              {openQuestions.map((q) => renderQuestion(q, {
+                replyDrafts,
+                setReplyDrafts,
+                replyingId,
+                submitReply,
+              }))}
+            </div>
+          )}
 
-                {/* 用户回复气泡 */}
-                {(q.replies ?? []).filter(r => r.author_role === "user").map((reply) => (
-                  <div key={reply.id} className="flex items-start justify-end gap-2.5">
-                    <div className={cn(
-                      "max-w-[80%] border-[1.5px] border-accent bg-accent/12 px-4 py-3 text-sm leading-relaxed text-foreground",
-                      q.status === "resolved" && "opacity-70"
-                    )}>
-                      {reply.text}
-                    </div>
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center border-[1.5px] border-accent bg-accent text-[10px] font-mono font-bold text-accent-foreground">
-                      你
-                    </div>
-                  </div>
-                ))}
-
-                {/* 输入框（仅 open 状态） */}
-                {q.status === "open" && (
-                  <div className="pl-8 space-y-2">
-                    <Textarea
-                      value={replyDrafts[q.id] ?? ""}
-                      onChange={(e) => setReplyDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
-                      placeholder="输入回复，或点击上方建议…"
-                      className="min-h-[72px] resize-none text-sm"
-                      disabled={replyingId === q.id}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submitReply(q.id);
-                      }}
-                    />
-                    <div className="flex justify-end">
-                      <Button
-                        size="sm"
-                        onClick={() => void submitReply(q.id)}
-                        disabled={replyingId === q.id || !(replyDrafts[q.id] ?? "").trim()}
-                      >
-                        <Send className="mr-1.5 h-3.5 w-3.5" />
-                        {replyingId === q.id ? "发送中…" : "发送"}
-                      </Button>
-                    </div>
-                  </div>
-                )}
+          {/* 历史问答折叠区 — 默认折叠，点击展开 */}
+          {resolvedQuestions.length > 0 && (
+            <details className="group border-t border-dashed border-foreground/25">
+              <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground [&::-webkit-details-marker]:hidden">
+                <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+                <span>历史问答 · {resolvedQuestions.length} 条</span>
+              </summary>
+              <div className="space-y-4 p-5 pt-3">
+                {resolvedQuestions.map((q) => renderQuestion(q, {
+                  replyDrafts,
+                  setReplyDrafts,
+                  replyingId,
+                  submitReply,
+                }))}
               </div>
-            ))}
-          </div>
+            </details>
+          )}
 
-          {resolvedQuestions.length > 0 && openQuestions.length === 0 &&
-           (req.status === "drafting" || req.status === "clarifying") && (
-            <div className="mx-5 mb-5 flex items-center justify-between border-[1.5px] border-success bg-success/10 px-4 py-3">
-              <p className="font-mono text-xs uppercase tracking-wider text-success font-medium">
-                ✓ 所有问题已回答，可以继续了。
+          {/*
+            AI 思考中 spinner：clarifying 期没有 open question 但已经有 resolved 时显示。
+            注意不能用 active_question_id===null 判断 — resolveQuestion 后 active 字段
+            仍指向已 resolved 的旧问题，要等 clarifier 跑完 setActiveQuestionId 才会切到
+            新 qid 或被 finishClarification 清空。openQuestions.length===0 是更准的"等下一题"信号。
+            AI 创建新 question 后 openQuestions=1，spinner 消失，显示新问题。
+          */}
+          {req.status === "clarifying" && openQuestions.length === 0 &&
+           resolvedQuestions.length > 0 && (
+            <div className="mx-5 mb-5 flex items-center gap-3 border-[1.5px] border-dashed border-foreground/30 bg-card/40 px-4 py-3">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
+              <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                AI 正在思考下一个问题…
               </p>
-              <Button size="sm" onClick={markReady} disabled={actionBusy} className="shrink-0">
-                {actionBusy ? "处理中…" : "标记为已澄清 →"}
+            </div>
+          )}
+
+          {/*
+            草稿状态 + 有历史问答：用户从审批驳回回来。drafting 不触发 clarifier，
+            提示用户主动点 [继续澄清] 切到 clarifying，AI 才会基于历史提下一题。
+          */}
+          {req.status === "drafting" && resolvedQuestions.length > 0 && (
+            <div className="mx-5 mb-5 flex items-center justify-between gap-3 border-[1.5px] border-dashed border-foreground/30 bg-card/40 px-4 py-3">
+              <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                草稿状态。点击右侧让 AI 基于以上对话和当前 SPEC 继续澄清。
+              </p>
+              <Button size="sm" onClick={resumeClarify} disabled={actionBusy} className="shrink-0">
+                {actionBusy ? "处理中…" : "↻ 继续澄清"}
               </Button>
             </div>
           )}
@@ -886,6 +1210,52 @@ export function RequirementDetail() {
           )}
         </div>
       </div>
+
+      {/* 当前需求的 clarifier 模型 dialog */}
+      <ClarifierOverrideDialog
+        open={clarifierDialogOpen}
+        onOpenChange={setClarifierDialogOpen}
+        requirementId={req.id}
+        currentProvider={req.clarifier_provider}
+        currentModel={req.clarifier_model}
+        onSaved={() => void refresh({ silent: true })}
+      />
+
+      {/* 修改代码库关联 dialog */}
+      <Dialog open={codebaseDialogOpen} onOpenChange={setCodebaseDialogOpen}>
+        <DialogContent className="rounded-none">
+          <DialogHeader>
+            <DialogTitle>修改代码库关联</DialogTitle>
+            <DialogDescription>
+              切换此需求关联的代码库。提交后不可立即撤销，请确认。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Select value={codebaseDraft} onValueChange={setCodebaseDraft}>
+              <SelectTrigger className="rounded-none">
+                <SelectValue placeholder="选择代码库" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE_VALUE}>— 未关联 —</SelectItem>
+                {projectCodebases.map((cb) => (
+                  <SelectItem key={cb.id} value={cb.id}>{cb.alias}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCodebaseDialogOpen(false)}>取消</Button>
+            <Button
+              onClick={async () => {
+                await setCodebase(codebaseDraft === NONE_VALUE ? null : codebaseDraft);
+                setCodebaseDialogOpen(false);
+              }}
+            >
+              确认
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

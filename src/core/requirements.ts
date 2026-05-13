@@ -1,5 +1,7 @@
 import { getDb } from "./db";
 import { emit } from "../daemon/event-bus";
+import { resolveQuestion } from "./requirement-questions";
+import { listCodebases } from "./codebases";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -24,6 +26,10 @@ export interface Requirement {
   pr_url: string | null;
   pr_number: number | null;
   last_reviewed_event_id: string | null;
+  active_question_id: string | null;
+  clarifier_error: string | null;
+  clarifier_provider: string | null;
+  clarifier_model: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -46,6 +52,9 @@ export interface UpdateRequirementOpts {
   pr_url?: string | null;
   pr_number?: number | null;
   last_reviewed_event_id?: string | null;
+  clarifier_error?: string | null;
+  clarifier_provider?: string | null;
+  clarifier_model?: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -91,6 +100,15 @@ function nowMs(): number {
 // ──────────────────────────────────────────────
 
 export function createRequirement(opts: CreateRequirementOpts): Requirement {
+  // 自动关联：若未指定 codebase_id 且 project 下只有 1 个 codebase，自动选它
+  let resolvedCodebaseId: string | null = opts.codebase_id ?? null;
+  if (resolvedCodebaseId === null && opts.project_id) {
+    const cbs = listCodebases({ projectId: opts.project_id, includeSubmodules: false });
+    if (cbs.length === 1) {
+      resolvedCodebaseId = cbs[0].id;
+    }
+  }
+
   const db = getDb();
   const ts = nowMs();
   db.run(
@@ -99,7 +117,7 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
     [
       opts.id,
       opts.project_id,
-      opts.codebase_id ?? null,
+      resolvedCodebaseId,
       opts.title,
       opts.spec_md ?? "",
       opts.chat_session_id ?? null,
@@ -108,10 +126,10 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
     ],
   );
   // 有 codebase_id 时自动写多对多关联（spec §5.1）
-  if (opts.codebase_id) {
+  if (resolvedCodebaseId) {
     db.run(
       "INSERT OR IGNORE INTO requirement_codebases (requirement_id, codebase_id) VALUES (?, ?)",
-      [opts.id, opts.codebase_id],
+      [opts.id, resolvedCodebaseId],
     );
   }
   return getRequirementById(opts.id) as Requirement;
@@ -174,6 +192,9 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
     "pr_url",
     "pr_number",
     "last_reviewed_event_id",
+    "clarifier_error",
+    "clarifier_provider",
+    "clarifier_model",
   ] as const;
   for (const k of updatable) {
     if (opts[k] !== undefined) {
@@ -196,17 +217,19 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
  */
 export function deleteRequirement(id: string): void {
   const db = getDb();
-  // 先删问题的回复，再删问题本身
-  db.run(
-    "DELETE FROM requirement_question_replies WHERE question_id IN " +
-    "(SELECT id FROM requirement_questions WHERE requirement_id = ?)",
-    [id],
-  );
-  db.run("DELETE FROM requirement_questions WHERE requirement_id = ?", [id]);
-  db.run("DELETE FROM requirement_feedbacks WHERE requirement_id = ?", [id]);
-  db.run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [id]);
-  db.run("DELETE FROM requirement_codebases WHERE requirement_id = ?", [id]);
-  db.run("DELETE FROM requirements WHERE id = ?", [id]);
+  db.transaction(() => {
+    // 先删问题的回复，再删问题本身
+    db.run(
+      "DELETE FROM requirement_question_replies WHERE question_id IN " +
+      "(SELECT id FROM requirement_questions WHERE requirement_id = ?)",
+      [id],
+    );
+    db.run("DELETE FROM requirement_questions WHERE requirement_id = ?", [id]);
+    db.run("DELETE FROM requirement_feedbacks WHERE requirement_id = ?", [id]);
+    db.run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [id]);
+    db.run("DELETE FROM requirement_codebases WHERE requirement_id = ?", [id]);
+    db.run("DELETE FROM requirements WHERE id = ?", [id]);
+  })();
 }
 
 /**
@@ -225,6 +248,50 @@ export function setRequirementStatus(id: string, to: string): Requirement {
   db.run("UPDATE requirements SET status = ?, updated_at = ? WHERE id = ?", [to, nowMs(), id]);
   emit({ type: "requirement:status-changed", payload: { id, from: cur.status, to } });
   return getRequirementById(id) as Requirement;
+}
+
+/**
+ * 设置 active_question_id 字段，并 emit requirement:active-question-changed 事件。
+ * 传入 null 表示清空（没有等回答的问题）。
+ */
+export function setActiveQuestionId(requirementId: string, questionId: string | null): void {
+  const db = getDb();
+  db.run(
+    "UPDATE requirements SET active_question_id = ?, updated_at = ? WHERE id = ?",
+    [questionId, nowMs(), requirementId],
+  );
+  emit({
+    type: "requirement:active-question-changed",
+    payload: { id: requirementId, question_id: questionId },
+  });
+}
+
+/**
+ * 用户强制结束澄清（"够了，直接审批"），或 clarifier 决定 done=true 时调用。
+ *
+ * 流程：
+ * 1. 若 active_question_id 非空 → resolveQuestion 该 question
+ * 2. active_question_id = NULL
+ * 3. status = awaiting_approval（走 setRequirementStatus 保证校验 + emit）
+ */
+export function finishClarification(requirementId: string): void {
+  const db = getDb();
+  db.transaction(() => {
+    const req = getRequirementById(requirementId);
+    if (!req) return;
+    if (req.active_question_id) {
+      resolveQuestion(req.active_question_id);
+    }
+    db.run(
+      "UPDATE requirements SET active_question_id = NULL, updated_at = ? WHERE id = ?",
+      [nowMs(), requirementId],
+    );
+    emit({
+      type: "requirement:active-question-changed",
+      payload: { id: requirementId, question_id: null },
+    });
+  })();
+  setRequirementStatus(requirementId, "awaiting_approval");
 }
 
 /**

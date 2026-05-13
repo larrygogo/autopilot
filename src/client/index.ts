@@ -48,6 +48,8 @@ export class AutopilotClient {
   get getSession() { return this.http.getSession.bind(this.http); }
   get deleteSession() { return this.http.deleteSession.bind(this.http); }
   get getSessionMessages() { return this.http.getSessionMessages.bind(this.http); }
+  get listNowCards() { return this.http.listNowCards.bind(this.http); }
+  get dismissNowCard() { return this.http.dismissNowCard.bind(this.http); }
 
   // ── 便捷方法：代理 WebSocket ──
 
