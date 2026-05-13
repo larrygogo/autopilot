@@ -55,9 +55,12 @@ import {
   setRequirementStatus,
   nextRequirementId,
   deleteRequirement,
+  finishClarification,
 } from "../core/requirements";
 import { listQuestionsByRequirement, createQuestion, getQuestionById, addReply, resolveQuestion, nextQuestionId, nextReplyId } from "../core/requirement-questions";
 import type { Requirement } from "../core/requirements";
+import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
+import { runClarifierRound } from "./requirement-clarifier";
 
 /**
  * 向后兼容别名：T14 把 Requirement.repo_id 改名为 codebase_id 后，
@@ -1039,6 +1042,36 @@ export async function handleRequest(req: Request): Promise<Response> {
       const r = getRequirementById(reqSubPrsMatch);
       if (!r) return error("requirement not found", 404);
       return json({ sub_prs: listSubPrs(reqSubPrsMatch) });
+    }
+
+    // POST /api/requirements/:id/finish-clarification
+    const finishMatch = path.match(/^\/api\/requirements\/([\w.\-]+)\/finish-clarification$/);
+    if (method === "POST" && finishMatch) {
+      const id = decodeURIComponent(finishMatch[1]);
+      const req2 = getRequirementById(id);
+      if (!req2) return error("requirement not found", 404);
+      finishClarification(id);
+      const updated = getRequirementById(id);
+      return json({ requirement: withRepoIdAlias(updated) });
+    }
+
+    // POST /api/requirements/:id/retry-clarify
+    const retryMatch = path.match(/^\/api\/requirements\/([\w.\-]+)\/retry-clarify$/);
+    if (method === "POST" && retryMatch) {
+      const id = decodeURIComponent(retryMatch[1]);
+      const req2 = getRequirementById(id);
+      if (!req2) return error("requirement not found", 404);
+      await runClarifierRound(id);
+      return json({ ok: true });
+    }
+
+    // GET /api/requirements/:id/spec-revisions
+    const revsMatch = path.match(/^\/api\/requirements\/([\w.\-]+)\/spec-revisions$/);
+    if (method === "GET" && revsMatch) {
+      const id = decodeURIComponent(revsMatch[1]);
+      const req2 = getRequirementById(id);
+      if (!req2) return error("requirement not found", 404);
+      return json({ revisions: listSpecRevisionsByRequirement(id) });
     }
 
     // ─────────── Questions（评论线程） ───────────
