@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
 import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 const STATUS_LABEL: Record<string, string> = {
   drafting: "草稿",
@@ -97,6 +99,8 @@ export function RequirementDetail() {
   const [subPrs, setSubPrs] = useState<RequirementSubPr[]>([]);
   // 回复输入状态：qid → 文本
   const [projectCodebases, setProjectCodebases] = useState<Codebase[]>([]);
+  const [codebaseDialogOpen, setCodebaseDialogOpen] = useState(false);
+  const [codebaseDraft, setCodebaseDraft] = useState<string>("");
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -464,30 +468,36 @@ export function RequirementDetail() {
             <MetaRow k="ID" v={<code className="text-accent">{req.id}</code>} />
             {project && (
               <MetaRow
-                k="PROJECT"
+                k="项目"
                 v={<code className="text-foreground">{project.name}</code>}
               />
             )}
             <MetaRow
-              k="CODEBASE"
+              k="代码库"
               v={
-                projectCodebases.length > 0 ? (
-                  <select
-                    className="h-5 w-full rounded-none border border-input bg-transparent px-1 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                    value={req.codebase_id ?? ""}
-                    onChange={(e) => void setCodebase(e.target.value || null)}
-                  >
-                    <option value="">— 未关联 —</option>
-                    {projectCodebases.map((cb) => (
-                      <option key={cb.id} value={cb.id}>{cb.alias}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <span className="text-muted-foreground">{repoAlias || "—"}</span>
-                )
+                <div className="flex items-center gap-2">
+                  <span className="text-foreground">
+                    {req.codebase_id
+                      ? (projectCodebases.find(cb => cb.id === req.codebase_id)?.alias ?? req.codebase_id)
+                      : <span className="text-muted-foreground">未关联</span>
+                    }
+                  </span>
+                  {projectCodebases.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCodebaseDraft(req.codebase_id ?? "");
+                        setCodebaseDialogOpen(true);
+                      }}
+                      className="text-[10px] uppercase tracking-[0.18em] text-accent hover:underline"
+                    >
+                      修改
+                    </button>
+                  )}
+                </div>
               }
             />
-            <MetaRow k="STATUS" v={STATUS_LABEL[req.status] ?? req.status} last />
+            <MetaRow k="状态" v={STATUS_LABEL[req.status] ?? req.status} last />
           </div>
         </div>
       </header>
@@ -886,6 +896,42 @@ export function RequirementDetail() {
           )}
         </div>
       </div>
+
+      {/* 修改代码库关联 dialog */}
+      <Dialog open={codebaseDialogOpen} onOpenChange={setCodebaseDialogOpen}>
+        <DialogContent className="rounded-none">
+          <DialogHeader>
+            <DialogTitle>修改代码库关联</DialogTitle>
+            <DialogDescription>
+              切换此需求关联的代码库。提交后不可立即撤销，请确认。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Select value={codebaseDraft} onValueChange={setCodebaseDraft}>
+              <SelectTrigger className="rounded-none">
+                <SelectValue placeholder="选择代码库" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">— 未关联 —</SelectItem>
+                {projectCodebases.map((cb) => (
+                  <SelectItem key={cb.id} value={cb.id}>{cb.alias}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCodebaseDialogOpen(false)}>取消</Button>
+            <Button
+              onClick={async () => {
+                await setCodebase(codebaseDraft || null);
+                setCodebaseDialogOpen(false);
+              }}
+            >
+              确认
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

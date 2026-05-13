@@ -1,6 +1,7 @@
 import { getDb } from "./db";
 import { emit } from "../daemon/event-bus";
 import { resolveQuestion } from "./requirement-questions";
+import { listCodebases } from "./codebases";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -93,6 +94,15 @@ function nowMs(): number {
 // ──────────────────────────────────────────────
 
 export function createRequirement(opts: CreateRequirementOpts): Requirement {
+  // 自动关联：若未指定 codebase_id 且 project 下只有 1 个 codebase，自动选它
+  let resolvedCodebaseId: string | null = opts.codebase_id ?? null;
+  if (resolvedCodebaseId === null && opts.project_id) {
+    const cbs = listCodebases({ projectId: opts.project_id, includeSubmodules: false });
+    if (cbs.length === 1) {
+      resolvedCodebaseId = cbs[0].id;
+    }
+  }
+
   const db = getDb();
   const ts = nowMs();
   db.run(
@@ -101,7 +111,7 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
     [
       opts.id,
       opts.project_id,
-      opts.codebase_id ?? null,
+      resolvedCodebaseId,
       opts.title,
       opts.spec_md ?? "",
       opts.chat_session_id ?? null,
@@ -110,10 +120,10 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
     ],
   );
   // 有 codebase_id 时自动写多对多关联（spec §5.1）
-  if (opts.codebase_id) {
+  if (resolvedCodebaseId) {
     db.run(
       "INSERT OR IGNORE INTO requirement_codebases (requirement_id, codebase_id) VALUES (?, ?)",
-      [opts.id, opts.codebase_id],
+      [opts.id, resolvedCodebaseId],
     );
   }
   return getRequirementById(opts.id) as Requirement;
