@@ -263,6 +263,21 @@ export function RequirementDetail() {
     }
   }
 
+  async function resumeClarify() {
+    if (!id) return;
+    setActionBusy(true);
+    try {
+      // drafting → clarifying；clarifier 自动跑一轮，基于历史 spec_md + Q&A 决定下一题或 done=true
+      await api.transitionRequirement(id, "clarifying");
+      await refresh();
+      toast.success("已重新进入澄清，AI 正在思考下一个问题");
+    } catch (e: unknown) {
+      toast.error("操作失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   async function markDone() {
     if (!id) return;
     setActionBusy(true);
@@ -659,6 +674,21 @@ export function RequirementDetail() {
               <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
                 AI 正在思考下一个问题…
               </p>
+            </div>
+          )}
+
+          {/*
+            草稿状态 + 有历史问答：用户从审批驳回回来。drafting 不触发 clarifier，
+            提示用户主动点 [继续澄清] 切到 clarifying，AI 才会基于历史提下一题。
+          */}
+          {req.status === "drafting" && resolvedQuestions.length > 0 && (
+            <div className="mx-5 mb-5 flex items-center justify-between gap-3 border-[1.5px] border-dashed border-foreground/30 bg-card/40 px-4 py-3">
+              <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                草稿状态。点击右侧让 AI 基于以上对话和当前 SPEC 继续澄清。
+              </p>
+              <Button size="sm" onClick={resumeClarify} disabled={actionBusy} className="shrink-0">
+                {actionBusy ? "处理中…" : "↻ 继续澄清"}
+              </Button>
             </div>
           )}
         </Card>
