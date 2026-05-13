@@ -1,5 +1,5 @@
 import { getDb, getTask, now, TABLE_COLUMNS, PROTECTED_COLUMNS } from "./db";
-import { emit } from "../daemon/event-bus";
+import { emit } from "./event-bus";
 import { appendTaskEvent } from "./task-logs";
 import { appendTransition as appendManifestTransition } from "./manifest";
 

@@ -23,7 +23,7 @@ import {
   setRequirementStatus,
 } from "../src/core/requirements";
 import { createQuestion, getQuestionById } from "../src/core/requirement-questions";
-import { enableBus, disableBus, onEvent, offEvent } from "../src/daemon/event-bus";
+import { enableBus, disableBus, onEvent, offEvent } from "../src/core/event-bus";
 import type { AutopilotEvent } from "../src/daemon/protocol";
 
 function initSchema(): void {

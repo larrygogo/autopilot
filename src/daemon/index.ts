@@ -10,7 +10,7 @@ import { runInBackground } from "../core/runner";
 import { runScheduledTasks } from "../core/scheduler";
 import { initDaemonFileLog, log } from "../core/logger";
 import { loadDaemonConfig, loadGithubConfig } from "../core/config";
-import { enableBus, disableBus, bus } from "./event-bus";
+import { enableBus, disableBus, bus } from "../core/event-bus";
 import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
 import { startServerWithRetry } from "./server";

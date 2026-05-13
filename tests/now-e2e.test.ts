@@ -13,7 +13,7 @@ import { up as m011 } from "../src/migrations/011-now-dismissed-cards";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createRequirement, setRequirementStatus } from "../src/core/requirements";
-import { enableBus, disableBus } from "../src/daemon/event-bus";
+import { enableBus, disableBus } from "../src/core/event-bus";
 import { createDefaultAggregator, type Aggregator } from "../src/core/now-aggregator";
 import { setNowAggregator } from "../src/daemon/routes-now";
 import { handleRequest } from "../src/daemon/routes";

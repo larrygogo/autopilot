@@ -1,4 +1,4 @@
-import { onEvent, offEvent } from "./event-bus";
+import { onEvent, offEvent } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { listRequirements, setRequirementStatus, updateRequirement, getRequirementById } from "../core/requirements";
 import { getCodebaseById } from "../core/codebases";

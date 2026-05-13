@@ -5,7 +5,7 @@ import { runInBackground } from "./runner";
 import { forceTransition } from "./state-machine";
 import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./registry";
 import type { PhaseDefinition, ParallelDefinition } from "./registry";
-import { emit } from "../daemon/event-bus";
+import { emit } from "./event-bus";
 import { applyRetentionPolicy, loadRetentionPolicy, getTaskWorkspace } from "./workspace";
 import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";

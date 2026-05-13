@@ -19,7 +19,7 @@ import { createRequirement, setRequirementStatus, getRequirementById, setActiveQ
 import { createQuestion } from "../src/core/requirement-questions";
 import { createSpecRevision } from "../src/core/spec-revisions";
 import { handleRequest } from "../src/daemon/routes";
-import { enableBus, disableBus } from "../src/daemon/event-bus";
+import { enableBus, disableBus } from "../src/core/event-bus";
 import { _setClarifyFnForTest } from "../src/daemon/requirement-clarifier";
 
 function initSchema(): void {

@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import type { AutopilotEvent } from "./protocol";
+import type { AutopilotEvent } from "./events";
 
 // ──────────────────────────────────────────────
 // 事件总线 — 懒激活模式

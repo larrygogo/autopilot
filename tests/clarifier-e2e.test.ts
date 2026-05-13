@@ -18,7 +18,7 @@ import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createRequirement, setRequirementStatus, getRequirementById } from "../src/core/requirements";
 import { handleRequest } from "../src/daemon/routes";
-import { enableBus, disableBus } from "../src/daemon/event-bus";
+import { enableBus, disableBus } from "../src/core/event-bus";
 import { createDefaultAggregator, type Aggregator } from "../src/core/now-aggregator";
 import { setNowAggregator } from "../src/daemon/routes-now";
 import { _setClarifyFnForTest, initRequirementClarifier, disposeRequirementClarifier } from "../src/daemon/requirement-clarifier";

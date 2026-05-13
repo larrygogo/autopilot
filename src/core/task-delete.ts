@@ -4,7 +4,7 @@ import { deleteTaskRuntimeDir } from "./workspace";
 import { releaseLock } from "./infra";
 import { forgetTaskRecoveryState } from "./watcher";
 import { clearScheduleTaskRefs } from "./schedules";
-import { emit } from "../daemon/event-bus";
+import { emit } from "./event-bus";
 import { log } from "./logger";
 
 export class DeleteTaskError extends Error {

@@ -1,5 +1,5 @@
 import { getDb, now } from "./db";
-import { emit } from "../daemon/event-bus";
+import { emit } from "./event-bus";
 
 // ──────────────────────────────────────────────
 // 类型

@@ -9,7 +9,7 @@ import {
 } from "../src/core/now-aggregator";
 import { dismissCard, isCardDismissed } from "../src/core/now-dismiss";
 import type { CardSource, NowCard, CardDelta } from "../src/core/now-types";
-import { enableBus, disableBus, emit } from "../src/daemon/event-bus";
+import { enableBus, disableBus, emit } from "../src/core/event-bus";
 
 function card(id: string, priority: NowCard["priority"], createdAt = 1000): NowCard {
   return {

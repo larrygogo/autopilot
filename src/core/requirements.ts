@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { emit } from "../daemon/event-bus";
+import { emit } from "./event-bus";
 import { resolveQuestion } from "./requirement-questions";
 import { listCodebases } from "./codebases";
 

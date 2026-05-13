@@ -130,7 +130,7 @@ import {
 } from "../core/workspace";
 import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task-logs";
 import { readDaemonFileLog, getDaemonFileLogPath } from "../core/logger";
-import { emit } from "./event-bus";
+import { emit } from "../core/event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
 // ──────────────────────────────────────────────

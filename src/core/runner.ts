@@ -6,7 +6,7 @@ import { runWithTaskContext } from "./task-context";
 import { transition, forceTransition, InvalidTransitionError } from "./state-machine";
 import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./registry";
 import { closeAgents } from "../agents/registry";
-import { emit } from "../daemon/event-bus";
+import { emit } from "./event-bus";
 import { archivePhaseArtifacts } from "./artifacts";
 
 // ──────────────────────────────────────────────

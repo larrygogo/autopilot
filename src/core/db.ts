@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../index";
-import { emit } from "../daemon/event-bus";
+import { emit } from "./event-bus";
 import {
   writeManifest,
   updateManifest,
