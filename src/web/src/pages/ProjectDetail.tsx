@@ -4,7 +4,7 @@ import {
   ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw, ExternalLink,
   FolderOpen, Trash2, Pencil, Activity,
 } from "lucide-react";
-import { api, type Project, type Codebase, type Requirement, type RepoHealthResult } from "@/hooks/useApi";
+import { api, type Project, type Codebase, type Requirement, type CodebaseHealthResult } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -69,7 +69,7 @@ interface CbForm {
 
 const EMPTY_CB: CbForm = { alias: "", path: "", default_branch: "main", github_owner: "", github_repo: "" };
 
-type HealthState = "loading" | RepoHealthResult;
+type HealthState = "loading" | CodebaseHealthResult;
 
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const navigate = useNavigate();
@@ -105,7 +105,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       return next;
     });
     for (const cb of cbs) {
-      api.healthcheckRepo(cb.id)
+      api.healthcheckCodebase(cb.id)
         .then((result) => setHealthMap((prev) => ({ ...prev, [cb.id]: result })))
         .catch(() => setHealthMap((prev) => { const n = { ...prev }; delete n[cb.id]; return n; }));
     }
@@ -200,7 +200,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     setSavingCb(true);
     try {
       if (editingCb) {
-        await api.updateRepo(editingCb.id, {
+        await api.updateCodebase(editingCb.id, {
           path,
           default_branch: cbForm.default_branch.trim() || "main",
           github_owner: cbForm.github_owner.trim() || null,
@@ -244,7 +244,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const checkHealth = async (cb: Codebase) => {
     setHealthMap((prev) => ({ ...prev, [cb.id]: "loading" }));
     try {
-      const result = await api.healthcheckRepo(cb.id);
+      const result = await api.healthcheckCodebase(cb.id);
       setHealthMap((prev) => ({ ...prev, [cb.id]: result }));
     } catch (e: unknown) {
       toast.error("健康检查失败", (e as Error)?.message ?? String(e));

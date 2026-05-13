@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2 } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type Repo, type RequirementSubPr, type Question, type Project, type Codebase, type ProviderItem } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Codebase, type ProviderItem } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -318,7 +318,7 @@ export function RequirementDetail() {
 
   const [req, setReq] = useState<Requirement | null>(null);
   const [feedbacks, setFeedbacks] = useState<RequirementFeedback[]>([]);
-  const [repos, setRepos] = useState<Repo[]>([]);
+  const [repos, setRepos] = useState<Codebase[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
@@ -348,7 +348,7 @@ export function RequirementDetail() {
     try {
       const [data, repoList, sub, qs] = await Promise.all([
         api.getRequirement(id),
-        api.listRepos(),
+        api.listCodebases(),
         api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
         api.listQuestions(id).catch(() => [] as Question[]),
       ]);

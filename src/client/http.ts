@@ -10,18 +10,7 @@ export type { NowCard };
 // 类型定义
 // ──────────────────────────────────────────────
 
-export interface Repo {
-  id: string;
-  alias: string;
-  path: string;
-  default_branch: string;
-  github_owner: string | null;
-  github_repo: string | null;
-  created_at: number;
-  updated_at: number;
-}
-
-export interface RepoHealthResult {
+export interface CodebaseHealthResult {
   healthy: boolean;
   issues: string[];
 }
@@ -310,48 +299,49 @@ export class HttpClient {
     return this.request(`/api/projects/${encodeURIComponent(projectId)}/requirements`);
   }
 
-  // ── Repos ──
+  // ── Codebases ──
 
-  async listRepos(): Promise<Repo[]> {
-    return this.request("/api/repos");
+  async listCodebases(): Promise<{ codebases: Codebase[] }> {
+    return this.request("/api/codebases");
   }
 
-  async getRepo(id: string): Promise<Repo> {
-    return this.request(`/api/repos/${id}`);
+  async getCodebase(id: string): Promise<{ codebase: Codebase }> {
+    return this.request(`/api/codebases/${id}`);
   }
 
-  async createRepo(body: {
+  async createCodebase(body: {
     alias: string;
     path: string;
     default_branch?: string;
     github_owner?: string | null;
     github_repo?: string | null;
-  }): Promise<Repo> {
-    return this.request("/api/repos", {
+    project_id?: string;
+  }): Promise<{ codebase: Codebase }> {
+    return this.request("/api/codebases", {
       method: "POST",
       body: JSON.stringify(body),
     });
   }
 
-  async updateRepo(id: string, body: Partial<{
+  async updateCodebase(id: string, body: Partial<{
     alias: string;
     path: string;
     default_branch: string;
     github_owner: string | null;
     github_repo: string | null;
-  }>): Promise<Repo> {
-    return this.request(`/api/repos/${id}`, {
+  }>): Promise<{ codebase: Codebase }> {
+    return this.request(`/api/codebases/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
     });
   }
 
-  async deleteRepo(id: string): Promise<{ ok: true }> {
-    return this.request(`/api/repos/${id}`, { method: "DELETE" });
+  async deleteCodebase(id: string): Promise<{ ok: true }> {
+    return this.request(`/api/codebases/${id}`, { method: "DELETE" });
   }
 
-  async healthcheckRepo(id: string): Promise<RepoHealthResult> {
-    return this.request(`/api/repos/${id}/healthcheck`, { method: "POST" });
+  async healthcheckCodebase(id: string): Promise<CodebaseHealthResult> {
+    return this.request(`/api/codebases/${id}/healthcheck`, { method: "POST" });
   }
 
   // ── Questions ──
