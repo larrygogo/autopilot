@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync, readFileSync } from "fs";
 import { dirname } from "path";
-import { emit } from "../daemon/event-bus";
+import { emit } from "./event-bus";
 import { appendPhaseLog } from "./task-logs";
 
 let currentPhaseTag = "SYSTEM";

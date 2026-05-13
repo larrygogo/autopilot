@@ -667,7 +667,7 @@ export async function buildWorkflowAgentTools(): Promise<SdkMcpToolDefinition<an
   const { getTaskContext } = await import("../core/task-context");
   const { updateTask } = await import("../core/db");
   const { registerPending } = await import("./pending-questions");
-  const { emit } = await import("../daemon/event-bus");
+  const { emit } = await import("../core/event-bus");
 
   return [
     tool(

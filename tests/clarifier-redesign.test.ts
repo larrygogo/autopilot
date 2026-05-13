@@ -19,7 +19,7 @@ import { createProject } from "../src/core/projects";
 import { createRequirement, getRequirementById, setRequirementStatus } from "../src/core/requirements";
 import { listSpecRevisionsByRequirement } from "../src/core/spec-revisions";
 import { listQuestionsByRequirement } from "../src/core/requirement-questions";
-import { enableBus, disableBus } from "../src/daemon/event-bus";
+import { enableBus, disableBus } from "../src/core/event-bus";
 import { runClarifierRound, _setClarifyFnForTest } from "../src/daemon/requirement-clarifier";
 
 function initSchema(): void {
@@ -117,7 +117,7 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     });
 
     const errors: Array<{ id: string; reason: string }> = [];
-    const { onEvent, offEvent } = await import("../src/daemon/event-bus");
+    const { onEvent, offEvent } = await import("../src/core/event-bus");
     const handler = (e: { type: string; payload: { id: string; reason: string } }) => {
       if (e.type === "requirement:clarifier-error") errors.push(e.payload);
     };

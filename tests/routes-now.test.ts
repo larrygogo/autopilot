@@ -15,7 +15,7 @@ import { createProject } from "../src/core/projects";
 import { createRequirement, setRequirementStatus } from "../src/core/requirements";
 import { handleNowRequest, setNowAggregator } from "../src/daemon/routes-now";
 import { createDefaultAggregator, type Aggregator } from "../src/core/now-aggregator";
-import { enableBus, disableBus } from "../src/daemon/event-bus";
+import { enableBus, disableBus } from "../src/core/event-bus";
 import { isCardDismissed } from "../src/core/now-dismiss";
 
 function initSchema(): void {

@@ -10,7 +10,7 @@
  * 内存态，daemon 重启即清。重启后若问题仍在，下一次失败会再次推出卡片。
  */
 
-import { emit } from "../daemon/event-bus";
+import { emit } from "./event-bus";
 
 export interface ProviderHealthState {
   provider: string;

@@ -11,7 +11,7 @@ import { createEmptyStateSource } from "./card-sources/empty-state";
 import { createProviderErrorSource } from "./card-sources/provider-error";
 import { createClarifierErrorSource } from "./card-sources/clarifier-error";
 import type { AutopilotEvent } from "./events";
-import { onEvent as busOn, offEvent as busOff, emit as busEmit } from "../daemon/event-bus";
+import { onEvent as busOn, offEvent as busOff, emit as busEmit } from "./event-bus";
 import { listDismissedCardIds, clearDismissedCard } from "./now-dismiss";
 
 const PRIORITY_ORDER: Record<NowCardPriority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };

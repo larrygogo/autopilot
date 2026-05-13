@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { onEvent, offEvent, emit } from "./event-bus";
+import { onEvent, offEvent, emit } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { getRequirementById, updateRequirement, setActiveQuestionId, setRequirementStatus } from "../core/requirements";
 import { getProjectById } from "../core/projects";
