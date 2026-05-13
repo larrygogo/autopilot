@@ -153,6 +153,44 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     expect(calls).toBe(0);
   });
 
+  it("AI 返回时 active_question_id 已被并发 round 改动 → 放弃本轮，不重复写 question", async () => {
+    // 模拟用户答了 qst-pre，触发 question-resolved handler 跑 round A；
+    // 与此同时 watchdog 也触发 round B。round A 完成更快，已写入 qst-new + setActive(qst-new)。
+    // 此时 round B 的 LLM 也回来，本测试模拟 round B：active 已从 qst-pre 变成 qst-new，应放弃。
+
+    const { createQuestion } = await import("../src/core/requirement-questions");
+    const { setActiveQuestionId } = await import("../src/core/requirements");
+
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "原稿" });
+    setRequirementStatus("r1", "clarifying");
+    createQuestion({ id: "qst-pre", requirement_id: "r1", agent_text: "Q0?", suggestions: [] });
+    setActiveQuestionId("r1", "qst-pre");
+
+    // 准备一份 mock，在 AI "返回"前先模拟"另一并发 round"已完成
+    _setClarifyFnForTest(async () => {
+      // 模拟并发 round A 的写入
+      createQuestion({ id: "qst-concurrent", requirement_id: "r1", agent_text: "A 写入的", suggestions: [] });
+      setActiveQuestionId("r1", "qst-concurrent");
+      return JSON.stringify({
+        new_spec_md: "B round 的 spec（应被丢弃）",
+        summary: "B 改了 spec",
+        next_question: { agent_text: "B 的问题", suggestions: [] },
+        done: false,
+      });
+    });
+
+    await runClarifierRound("r1");
+
+    const req = getRequirementById("r1");
+    // active 应保持为 round A 写入的 qst-concurrent
+    expect(req?.active_question_id).toBe("qst-concurrent");
+    // spec 不被 B 覆盖
+    expect(req?.spec_md).toBe("原稿");
+    // questions 只有 qst-pre 与 qst-concurrent，没有第三个
+    const qs = listQuestionsByRequirement("r1");
+    expect(qs.map((q) => q.id).sort()).toEqual(["qst-concurrent", "qst-pre"]);
+  });
+
   it("AI 返回时状态已变（race）→ 丢弃结果，不写 spec/不创建 question", async () => {
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "原稿" });
     setRequirementStatus("r1", "clarifying");

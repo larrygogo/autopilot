@@ -214,6 +214,13 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   const req = getRequirementById(reqId);
   if (!req || req.status !== "clarifying") return;
 
+  // ── DB 层乐观锁基线 ────────────────────────────────────────
+  // 记录本轮开始时的 active_question_id。LLM 调用结束、要写入新 question 时
+  // 再 re-fetch 验证；若已被并发 round 改动（如 watchdog + question-resolved
+  // handler 同时触发，进程内锁未拦下），放弃本轮结果，避免出现多个 active
+  // question 或把开放问题误覆盖。
+  const initialActiveQid = req.active_question_id;
+
   const project = req.project_id ? getProjectById(req.project_id) : null;
   if (!project) {
     log.warn("clarifier: req=%s 找不到项目，跳过", reqId);
@@ -272,6 +279,16 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   const reqAfter = getRequirementById(reqId);
   if (!reqAfter || reqAfter.status !== "clarifying") {
     log.info("clarifier: req=%s 状态已变（%s），AI 结果丢弃", reqId, reqAfter?.status ?? "deleted");
+    return;
+  }
+  // Race protection: 另一并发 round 已经写过新 question / 关闭澄清，本轮放弃。
+  if (reqAfter.active_question_id !== initialActiveQid) {
+    log.info(
+      "clarifier: req=%s active_question_id 已被并发 round 改动（%s → %s），放弃本轮结果",
+      reqId,
+      initialActiveQid ?? "null",
+      reqAfter.active_question_id ?? "null",
+    );
     return;
   }
 
