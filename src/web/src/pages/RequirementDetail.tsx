@@ -635,12 +635,13 @@ export function RequirementDetail() {
           </div>
 
           {/*
-            新 B 模式下 AI 决定 done=true 时会自动把 status 切到 awaiting_approval，
-            不需要用户在 banner 上手动 [标记为已澄清]。所以删掉旧 banner；
-            clarifying 期 active===null 一般是 AI 跑下一轮的间隙，显示 spinner。
-            如果用户想强制结束澄清，用右侧 ACTIONS 区的按钮（已存在）。
+            AI 思考中 spinner：clarifying 期没有 open question 但已经有 resolved 时显示。
+            注意不能用 active_question_id===null 判断 — resolveQuestion 后 active 字段
+            仍指向已 resolved 的旧问题，要等 clarifier 跑完 setActiveQuestionId 才会切到
+            新 qid 或被 finishClarification 清空。openQuestions.length===0 是更准的"等下一题"信号。
+            AI 创建新 question 后 openQuestions=1，spinner 消失，显示新问题。
           */}
-          {req.status === "clarifying" && req.active_question_id === null &&
+          {req.status === "clarifying" && openQuestions.length === 0 &&
            resolvedQuestions.length > 0 && (
             <div className="mx-5 mb-5 flex items-center gap-3 border-[1.5px] border-dashed border-foreground/30 bg-card/40 px-4 py-3">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
