@@ -100,7 +100,9 @@ export function RequirementDetail() {
   // 回复输入状态：qid → 文本
   const [projectCodebases, setProjectCodebases] = useState<Codebase[]>([]);
   const [codebaseDialogOpen, setCodebaseDialogOpen] = useState(false);
-  const [codebaseDraft, setCodebaseDraft] = useState<string>("");
+  // Radix Select 不允许 value=""（空串保留给清空 placeholder），用 sentinel 表示"未关联"
+  const NONE_VALUE = "__none__";
+  const [codebaseDraft, setCodebaseDraft] = useState<string>(NONE_VALUE);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -486,7 +488,7 @@ export function RequirementDetail() {
                     <button
                       type="button"
                       onClick={() => {
-                        setCodebaseDraft(req.codebase_id ?? "");
+                        setCodebaseDraft(req.codebase_id ?? NONE_VALUE);
                         setCodebaseDialogOpen(true);
                       }}
                       className="text-[10px] uppercase tracking-[0.18em] text-accent hover:underline"
@@ -912,7 +914,7 @@ export function RequirementDetail() {
                 <SelectValue placeholder="选择代码库" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">— 未关联 —</SelectItem>
+                <SelectItem value={NONE_VALUE}>— 未关联 —</SelectItem>
                 {projectCodebases.map((cb) => (
                   <SelectItem key={cb.id} value={cb.id}>{cb.alias}</SelectItem>
                 ))}
@@ -923,7 +925,7 @@ export function RequirementDetail() {
             <Button variant="outline" onClick={() => setCodebaseDialogOpen(false)}>取消</Button>
             <Button
               onClick={async () => {
-                await setCodebase(codebaseDraft || null);
+                await setCodebase(codebaseDraft === NONE_VALUE ? null : codebaseDraft);
                 setCodebaseDialogOpen(false);
               }}
             >
