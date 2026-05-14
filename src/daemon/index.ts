@@ -20,6 +20,7 @@ import { initRequirementScheduler, disposeRequirementScheduler } from "./require
 import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
 import { runClarifierWatchdog } from "./clarifier-watchdog";
 import { initRequirementTaskBridge, disposeRequirementTaskBridge } from "./requirement-task-bridge";
+import { initMcpRuntime, disposeMcpRuntime } from "./mcp-runtime";
 import { createDefaultAggregator, type Aggregator } from "../core/now-aggregator";
 import { setNowAggregator } from "./routes-now";
 import type { AutopilotEvent } from "./protocol";
@@ -107,6 +108,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   writePid();
   writeListenInfo({ host, port });
 
+  // 生成 MCP token + 写 mcp-config.json（供 AnthropicProvider 的 --mcp-config 使用）
+  initMcpRuntime(host, port);
+
   // 重启检测：把所有 status=running_* 且 pending_question 非空的 task 标 dangling
   // —— ask_user 的 in-memory promise 在 daemon 重启时丢失，agent 永远收不到 tool result，
   // 这些 task 实际已死，UI 看到 dangling=true 时会提示用户取消重启。
@@ -171,6 +175,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     disableBus();
     server.stop();
     closeDb();
+    disposeMcpRuntime();
     removePid();
     removeListenInfo();
     console.log("daemon 已关闭。");
