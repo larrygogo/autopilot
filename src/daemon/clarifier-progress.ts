@@ -54,6 +54,7 @@ export function setPhase(
 ): void {
   const prev = _rounds.get(reqId);
   if (!prev) return;
+  // 条件展开：未传的字段保留旧值（"未传 = 不覆盖"语义），传入的字符串字段经 truncate 截断
   const next: ClarifierRoundState = {
     ...prev,
     phase,
@@ -82,6 +83,7 @@ export function listAllActive(): ClarifierRoundState[] {
   return [..._rounds.values()];
 }
 
+/** 测试专用：清空全部状态 */
 export function _resetForTest(): void {
   _rounds.clear();
 }

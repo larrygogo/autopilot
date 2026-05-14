@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { enableBus, disableBus, onEvent, offEvent } from "../src/core/event-bus";
 import type { AutopilotEvent } from "../src/core/events";
 import {
@@ -95,6 +95,10 @@ describe("clarifier-progress: 事件发射", () => {
     enableBus();
   });
 
+  afterEach(() => {
+    disableBus();
+  });
+
   it("startRound / setPhase / endRound 各 emit 一次 requirement:clarifier-round-update", () => {
     const events: AutopilotEvent[] = [];
     const handler = (e: AutopilotEvent) => events.push(e);
@@ -105,7 +109,6 @@ describe("clarifier-progress: 事件发射", () => {
     endRound("r1", "done");
 
     offEvent("requirement:clarifier-round-update", handler);
-    disableBus();
 
     expect(events).toHaveLength(3);
     expect(events[0].type).toBe("requirement:clarifier-round-update");
