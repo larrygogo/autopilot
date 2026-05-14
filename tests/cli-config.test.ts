@@ -62,3 +62,24 @@ describe("config path / show", () => {
     expect(r.stdout).toContain("default_model: claude-sonnet-4-6");
   });
 });
+
+describe("config doctor --fix 交互式", () => {
+  it("空 config + 输入选 anthropic + 默认 model + agent name=coder", () => {
+    runCli("init");
+    writeFileSync(join(tmpHome, "config.yaml"), "providers: {}\nagents: {}\n", "utf-8");
+    const stdin = ["anthropic", "claude-sonnet-4-6", "coder", "anthropic", ""].join("\n") + "\n";
+
+    const r = Bun.spawnSync({
+      cmd: ["bun", "run", join(REPO, "bin/autopilot.ts"), "config", "doctor", "--fix"],
+      env: { ...process.env, AUTOPILOT_HOME: tmpHome },
+      stdin: new TextEncoder().encode(stdin),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(r.exitCode).toBe(0);
+
+    const yaml = readFileSync(join(tmpHome, "config.yaml"), "utf-8");
+    expect(yaml).toContain("default_model: claude-sonnet-4-6");
+    expect(yaml).toMatch(/agents:[\s\S]*coder:[\s\S]*provider:\s*anthropic/);
+  });
+});
