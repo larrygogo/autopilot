@@ -1,6 +1,7 @@
 import { Command } from "commander";
-import { mkdirSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { buildConfigTemplate } from "./config-template";
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
 import { initDb, closeDb } from "../core/db";
@@ -902,7 +903,19 @@ program
     }
     initDb();
     console.log(`已初始化数据库：${join(AUTOPILOT_HOME, "runtime", "workflow.db")}`);
-    console.log("初始化完成。");
+
+    const cfgPath = join(AUTOPILOT_HOME, "config.yaml");
+    if (!existsSync(cfgPath)) {
+      writeFileSync(cfgPath, buildConfigTemplate(), "utf-8");
+      console.log(`已生成配置模板：${cfgPath}`);
+    } else {
+      console.log(`配置文件已存在，保留：${cfgPath}`);
+    }
+
+    console.log("\n初始化完成。下一步（三选一）：");
+    console.log("  » bun run dev config doctor       检查配置");
+    console.log("  » bun run dev config doctor --fix 交互式配置");
+    console.log("  » bun run dev dashboard           浏览器配置");
   });
 
 // ──────────────────────────────────────────────
