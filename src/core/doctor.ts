@@ -95,14 +95,17 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
     });
   }
 
-  // C5：agent 一致性
+  // C5 / C6：agent 校验（用 effective agents：内置默认 + 用户 yaml override）
+  //
+  // 内置默认 (AGENT_DEFAULTS) 总是包含 coder / reviewer / clarifier，所以
+  // "至少有一个 agent" 在零配置下也成立。只检查用户 yaml 写了的 agent 字段一致性。
   const agentsSection = (raw["agents"] ?? {}) as Record<string, unknown>;
   const enabledNames = new Set(validEnabled.map((p) => p.name));
   for (const [agentName, cfg] of Object.entries(agentsSection)) {
     if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
     const provider = (cfg as Record<string, unknown>).provider as string | undefined;
     if (!provider) {
-      checks.push({ id: `agents.${agentName}.provider-bound`, category: "agent", status: "error", title: `agent ${agentName} 未指定 provider`, fix: { cli: "bun run dev config doctor --fix" } });
+      // 用户 yaml 写了 agent 但没指定 provider——会回退到内置默认的 provider，不算错
       continue;
     }
     if (!enabledNames.has(provider)) {
@@ -116,16 +119,14 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
     }
   }
 
-  // C6
-  if (Object.keys(agentsSection).length === 0) {
-    checks.push({
-      id: "agents.has-any", category: "agent", status: "error",
-      title: "至少需要定义一个 agent",
-      fix: { cli: "bun run dev config doctor --fix", url: "/setup", auto: "init.agents" },
-    });
-  } else {
-    checks.push({ id: "agents.has-any", category: "agent", status: "ok", title: `已定义 ${Object.keys(agentsSection).length} 个 agent` });
-  }
+  // C6：保留作为"内置默认存在"的正向提示——不再可能 error
+  const userAgentCount = Object.keys(agentsSection).length;
+  checks.push({
+    id: "agents.has-any", category: "agent", status: "ok",
+    title: userAgentCount > 0
+      ? `已定义 ${userAgentCount} 个 agent（含内置默认 coder / reviewer / clarifier）`
+      : "使用内置默认 agent（coder / reviewer / clarifier）",
+  });
 
   // C7：projects
   try {

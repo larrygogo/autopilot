@@ -27,6 +27,13 @@ function runCli(...args: string[]) {
 describe("config doctor 退出码", () => {
   it("配置完整 → 0", () => {
     runCli("init");
+    // 零配置模板下 providers 段缺失，C4 底线仍要求至少一个 enabled provider。
+    // 这里手写完整 yaml 以满足 L1 全部检查。
+    writeFileSync(
+      join(tmpHome, "config.yaml"),
+      "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n",
+      "utf-8",
+    );
     const r = runCli("config", "doctor");
     expect(r.exitCode).toBe(0);
   });
@@ -40,6 +47,11 @@ describe("config doctor 退出码", () => {
 
   it("--json 可解析", () => {
     runCli("init");
+    writeFileSync(
+      join(tmpHome, "config.yaml"),
+      "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n",
+      "utf-8",
+    );
     const r = runCli("config", "doctor", "--json");
     const parsed = JSON.parse(r.stdout);
     expect(parsed.level).toBe(1);
@@ -56,10 +68,10 @@ describe("config path / show", () => {
     expect(r.stdout.trim()).toBe(join(tmpHome, "config.yaml"));
   });
 
-  it("config show 打印 yaml 原文", () => {
+  it("config show 打印 yaml 原文（零配置模板含 doctor 引导注释）", () => {
     runCli("init");
     const r = runCli("config", "show");
-    expect(r.stdout).toContain("default_model: claude-sonnet-4-6");
+    expect(r.stdout).toContain("bun run dev config doctor");
   });
 });
 

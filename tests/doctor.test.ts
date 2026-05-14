@@ -87,10 +87,12 @@ describe("L1 C3-C7", () => {
     expect(c5?.fix?.auto).toBe("fix.agent.unbind-disabled-provider");
   });
 
-  it("C6 无 agent → error", async () => {
+  it("C6 用户 yaml 无 agent → 仍 ok（内置默认兜底）", async () => {
     writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents: {}\n", "utf-8");
     const report = await runChecks({ level: 1 });
-    expect(report.checks.find((c) => c.id === "agents.has-any")?.status).toBe("error");
+    const c6 = report.checks.find((c) => c.id === "agents.has-any");
+    expect(c6?.status).toBe("ok");
+    expect(c6?.title).toContain("内置默认");
   });
 
   it("全部合规 → ok", async () => {
