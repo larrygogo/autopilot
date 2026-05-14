@@ -381,6 +381,13 @@ export const api = {
   setupDismiss: () =>
     request<{ ok: boolean }>("/api/setup/dismiss", { method: "POST" }),
 
+  extractRequirement: (input: { raw_text: string; project_id: string; codebase_id?: string | null }) =>
+    request<{ title: string; spec_md: string }>("/api/requirements/extract", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+
   // Requirements
   listRequirements: (filters?: { repo_id?: string; project_id?: string; status?: string }) => {
     const params = new URLSearchParams();
