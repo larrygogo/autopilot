@@ -142,6 +142,12 @@ export const api = {
     request<{ ok: boolean; name: string; source?: string; dir?: string }>("/api/workflows", {
       method: "POST", body: JSON.stringify(body),
     }),
+  listWorkflowTemplates: () =>
+    request<{ templates: WorkflowTemplate[] }>("/api/workflows/templates").then((r) => r.templates),
+  createWorkflowFromTemplate: (body: { template: string; name: string }) =>
+    request<{ ok: boolean; name: string }>("/api/workflows/from-template", {
+      method: "POST", body: JSON.stringify(body),
+    }),
   deleteWorkflow: (name: string) =>
     request<{ ok: boolean }>(`/api/workflows/${name}`, { method: "DELETE" }),
   setWorkflowPhases: (
@@ -486,6 +492,13 @@ export const api = {
       { method: "POST" },
     ),
 };
+
+export interface WorkflowTemplate {
+  name: string;
+  description: string;
+  phase_count: number;
+  agent_count: number;
+}
 
 export interface DoctorCheck {
   id: string;
