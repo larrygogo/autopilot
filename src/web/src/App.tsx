@@ -38,6 +38,7 @@ const Now = lazy(() => import("./pages/Now").then((m) => ({ default: m.Now })));
 const Start = lazy(() => import("./pages/Start").then((m) => ({ default: m.Start })));
 const Library = lazy(() => import("./pages/Library").then((m) => ({ default: m.Library })));
 const SettingsHub = lazy(() => import("./pages/SettingsHub").then((m) => ({ default: m.SettingsHub })));
+const Setup = lazy(() => import("./pages/Setup").then((m) => ({ default: m.Setup })));
 const TaskDetail = lazy(() =>
   import("./pages/TaskDetail").then((m) => ({ default: m.TaskDetail })),
 );
@@ -204,6 +205,7 @@ function AppInner() {
                 <Route path="/agents" element={<Navigate to="/settings?tab=agents" replace />} />
                 <Route path="/providers" element={<Navigate to="/settings?tab=providers" replace />} />
                 <Route path="/schedules" element={<Navigate to="/settings?tab=schedules" replace />} />
+                <Route path="/setup" element={<Setup />} />
                 <Route path="*" element={<Navigate to="/now" replace />} />
               </Routes>
             </Suspense>
