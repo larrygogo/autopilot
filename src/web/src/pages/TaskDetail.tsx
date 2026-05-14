@@ -17,6 +17,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
 import { TaskProgressCard } from "@/components/TaskProgressCard";
+import { TaskPhaseTimeline } from "@/components/TaskPhaseTimeline";
+import { useTaskPhaseEvents } from "@/hooks/useTaskPhaseEvents";
 import { cn } from "@/lib/utils";
 
 interface TaskDetailProps {
@@ -83,6 +85,17 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
     api.getWorkflowGraph(task.workflow).then(setGraph).catch(() => {});
     api.getWorkflow(task.workflow).then(setWorkflowDetail).catch(() => {});
   }, [task?.workflow]);
+
+  const { events: phaseEvents, refresh: refreshPhaseEvents } = useTaskPhaseEvents(taskId);
+  const workflowPhasesList = useMemo<string[]>(() => {
+    const list = (workflowDetail?.phases as Array<{ name?: string }> | undefined) ?? [];
+    return list.map((p) => p?.name ?? "").filter(Boolean);
+  }, [workflowDetail]);
+
+  useEffect(() => {
+    if (!task?.status) return;
+    refreshPhaseEvents().catch(() => {});
+  }, [task?.status, refreshPhaseEvents]);
 
   useEffect(() => {
     const unsub1 = subscribe(`task:${taskId}`, () => {
@@ -265,6 +278,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
 
       {/* 任务状态摘要（当前阶段 / 耗时 / 失败原因） */}
       <TaskProgressCard taskId={taskId} showDetailLink={false} showActions={false} />
+
+      <TaskPhaseTimeline workflowPhases={workflowPhasesList} events={phaseEvents} />
 
       {task.dangling && task.status?.startsWith("running_") && (
         <DanglingBanner taskId={taskId} toast={toast} />
