@@ -579,6 +579,22 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
     }
 
+    // ─────────── 首跑配置（setup） ───────────
+
+    if (method === "GET" && path === "/api/setup/status") {
+      const { runChecks } = await import("../core/doctor");
+      const { getDb } = await import("../core/db");
+      const report = await runChecks({ level: 1 });
+      let dismissed = false;
+      try {
+        const row = getDb().prepare("SELECT value FROM kv WHERE key = ?").get("setup.dismissed") as { value: string } | undefined;
+        dismissed = row?.value === "1";
+      } catch {
+        // kv 表未建（迁移未跑）时跳过 dismissed 读取
+      }
+      return json({ ...report, setupDismissed: dismissed });
+    }
+
     // ─────────── 文件系统浏览 ───────────
 
     // GET /api/fs/list?path=<absolute>&show_hidden=1
