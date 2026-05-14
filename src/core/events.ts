@@ -48,6 +48,8 @@ export type AutopilotEvent =
   | { type: "requirement:clarifier-error"; payload: { id: string; reason: string } }
   // Provider 健康度（反应式）
   | { type: "provider:health-changed"; payload: { provider: string; healthy: boolean; reason?: string; ts: number } }
+  // Clarifier 进度反馈（内存态，daemon 重启即清）
+  | { type: "requirement:clarifier-round-update"; payload: import("../daemon/clarifier-progress").ClarifierRoundState }
   // /now 推送事件
   | { type: "now:card_added"; payload: { card: NowCard } }
   | { type: "now:card_updated"; payload: { id: string; patch: Partial<NowCard> } }
