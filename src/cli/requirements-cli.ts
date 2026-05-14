@@ -1,7 +1,43 @@
 import type { Command } from "commander";
 import { readFileSync, existsSync } from "fs";
+import { createInterface } from "node:readline";
 import { AutopilotClient, DEFAULT_PORT } from "../client/index";
 import { readListenInfo } from "../daemon/pid";
+import type { Codebase } from "../core/codebases";
+
+/**
+ * 交互式读多行描述。
+ * - Pipe（非 TTY）：一次性读完整 stdin，按 line 切分
+ * - TTY：readline 收集，空行结束（参考 src/cli/config-fix.ts 双模式）
+ */
+async function readRawTextInteractive(): Promise<string> {
+  const isTTY = process.stdin.isTTY === true;
+  if (!isTTY) {
+    return await new Response(process.stdin as unknown as ReadableStream).text();
+  }
+  console.log("请描述你要做什么（多行；空行 + 回车结束）：");
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  const lines: string[] = [];
+  return new Promise((resolve) => {
+    rl.on("line", (line) => {
+      if (line === "" && lines.length > 0) {
+        rl.close();
+        return;
+      }
+      lines.push(line);
+    });
+    rl.on("close", () => resolve(lines.join("\n")));
+  });
+}
+
+/** cwd 命中 codebase 时返回最长 match 的 id；否则 null。 */
+export function inferCodebaseFromCwd(codebases: Codebase[], cwd: string = process.cwd()): string | null {
+  const normalize = (p: string) => p.replace(/[\\/]+$/, "");
+  const ncwd = normalize(cwd);
+  const matches = codebases.filter((c) => ncwd.startsWith(normalize(c.path)));
+  if (matches.length === 0) return null;
+  return matches.sort((a, b) => b.path.length - a.path.length)[0]!.id;
+}
 
 interface ReqNewOpts {
   fromPrompt?: string;
@@ -55,8 +91,7 @@ export function registerRequirementCommands(program: Command): void {
         }
         rawText = readFileSync(opts.file, "utf-8");
       } else {
-        console.error("交互模式尚未实现，请用 --from-prompt 或 -f");
-        process.exit(1);
+        rawText = await readRawTextInteractive();
       }
       if (!rawText.trim()) {
         console.error("错误：描述不能为空");
@@ -83,7 +118,20 @@ export function registerRequirementCommands(program: Command): void {
           process.exit(3);
         }
       }
-      const codebaseId = opts.codebase;
+      let codebaseId = opts.codebase;
+      if (!codebaseId && projectId) {
+        try {
+          const { codebases } = await client.listCodebases();
+          const inProject = codebases.filter((c) => c.project_id === projectId);
+          const inferred = inferCodebaseFromCwd(inProject);
+          if (inferred) {
+            codebaseId = inferred;
+            console.log(`✓ 默认 codebase: ${codebaseId}（从 cwd 推断）`);
+          }
+        } catch {
+          // codebase 推断失败不阻塞流程，让 codebaseId 为 undefined
+        }
+      }
 
       // 4) 抽取或兜底
       let title: string, specMd: string;

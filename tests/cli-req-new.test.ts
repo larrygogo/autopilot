@@ -42,3 +42,29 @@ describe("autopilot req new", () => {
     expect(r.stdout).toContain("--no-extract");
   });
 });
+
+import { inferCodebaseFromCwd } from "../src/cli/requirements-cli";
+import type { Codebase } from "../src/core/codebases";
+
+const mkCb = (id: string, path: string): Codebase => ({
+  id, path, project_id: "p", alias: "a",
+  default_branch: "main", github_owner: null, github_repo: null,
+  parent_codebase_id: null, submodule_path: null,
+  created_at: 0, updated_at: 0,
+});
+
+describe("inferCodebaseFromCwd", () => {
+  it("cwd 在嵌套 codebase 里选最长 match", () => {
+    const cbs = [mkCb("cb-1", "/home/u/proj"), mkCb("cb-2", "/home/u/proj/sub")];
+    expect(inferCodebaseFromCwd(cbs, "/home/u/proj/sub/x")).toBe("cb-2");
+  });
+
+  it("cwd 不匹配任何 codebase 返回 null", () => {
+    const cbs = [mkCb("cb-1", "/home/u/proj")];
+    expect(inferCodebaseFromCwd(cbs, "/var/other")).toBeNull();
+  });
+
+  it("无 codebase 返回 null", () => {
+    expect(inferCodebaseFromCwd([], "/anywhere")).toBeNull();
+  });
+});
