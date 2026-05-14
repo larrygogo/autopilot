@@ -2,6 +2,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, CheckCircle2, AlertCircle, Clock, XCircle, Circle, Pencil } from "lucide-react";
+import { pickPhaseLabel } from "@/lib/workflow-labels";
 import { cn } from "@/lib/utils";
 
 // ──────────────────────────────────────────────
@@ -56,7 +57,7 @@ export function PhaseDetailDrawer(props: PhaseDetailDrawerProps) {
   const { open, onOpenChange, phase } = props;
   if (!phase) return null;
 
-  const title = phase.label || phase.name;
+  const title = pickPhaseLabel(phase);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -64,7 +65,7 @@ export function PhaseDetailDrawer(props: PhaseDetailDrawerProps) {
         <SheetHeader>
           <SheetTitle className="flex items-baseline gap-2">
             <span className="truncate">{title}</span>
-            {phase.label && phase.label !== phase.name && (
+            {title !== phase.name && (
               <code className="font-mono text-[11px] text-muted-foreground">{phase.name}</code>
             )}
           </SheetTitle>

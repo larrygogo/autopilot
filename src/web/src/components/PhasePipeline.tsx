@@ -2,7 +2,7 @@ import React from "react";
 import { ArrowRight, RotateCcw, Loader2, CheckCircle2, AlertCircle, Clock, Hand } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { PHASE_LABEL } from "@/lib/workflow-labels";
+import { pickPhaseLabel } from "@/lib/workflow-labels";
 
 // ──────────────────────────────────────────────
 // 流水线视图 — 横向显示工作流阶段，并行块以分叉展示
@@ -63,18 +63,6 @@ function normalize(raw: any[]): Entry[] {
       },
     };
   });
-}
-
-/**
- * 选取阶段显示名：yaml 里写的 label 优先（中文/任意语言）；
- * 没写但命中静态 PHASE_LABEL 映射时回退；都没有就显示原始 name。
- *
- * 注意 registry 在 expandPhaseDefaults 会把缺省 label 填成 name.toUpperCase()，
- * 所以这里要把"全大写形态的 name"识别为"无 label"，不要把它当成用户写的中文。
- */
-function pickPhaseLabel(item: { name: string; label?: string }): string {
-  const userLabel = item.label && item.label !== item.name.toUpperCase() ? item.label : undefined;
-  return userLabel ?? PHASE_LABEL[item.name] ?? item.name;
 }
 
 // 从 current state 猜对应的 phase name：pending_x / running_x / complete_x → x

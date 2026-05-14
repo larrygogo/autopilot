@@ -3,7 +3,29 @@
  *
  * 阶段名（phase name）和状态机 trigger 名一般是约定的英文 snake_case，
  * 这里把常见的几类翻译成中文，命中即用，未命中保持原文。
+ *
+ * 显示优先级（pickPhaseLabel）：用户在 yaml 写的 label > PHASE_LABEL 静态兜底 > 原 name。
+ * 注意：registry 在 expandPhaseDefaults 会把缺省 label 填成 name.toUpperCase()——
+ * 这种值不算"用户真填的 label"，要识别出来回退到下一级。
  */
+
+/**
+ * 选取阶段显示名 — 所有 UI 显示阶段名的位置都应通过这个函数获取，避免
+ * 节点 / drawer / breadcrumb 等显示不一致。
+ */
+export function pickPhaseLabel(item: { name: string; label?: string | null }): string {
+  return userPhaseLabel(item) ?? PHASE_LABEL[item.name] ?? item.name;
+}
+
+/**
+ * 仅返回"用户在 yaml 写的"label。yaml 没写时 registry 兜底 label = name.toUpperCase()，
+ * 该函数会识别这种兜底并返回 undefined，让调用方能区分"真有中文名"vs"只是英文 fallback"。
+ */
+export function userPhaseLabel(item: { name: string; label?: string | null }): string | undefined {
+  if (typeof item.label !== "string" || item.label === "") return undefined;
+  if (item.label === item.name.toUpperCase()) return undefined;
+  return item.label;
+}
 
 /** Phase 名 → 中文 */
 export const PHASE_LABEL: Record<string, string> = {

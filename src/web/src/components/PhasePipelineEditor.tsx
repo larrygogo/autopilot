@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { extractPhaseFunction } from "@/lib/ts-extract";
-import { cn } from "@/lib/utils";
+import { pickPhaseLabel, userPhaseLabel } from "@/lib/workflow-labels";
 
 // ──────────────────────────────────────────────
 // 流水线编辑器：流水线图 + 点击节点弹编辑 drawer + 新增/删除/保存
@@ -239,15 +239,16 @@ export function PhasePipelineEditor({
         <SheetContent side="right" className="w-full max-w-md overflow-y-auto sm:max-w-md">
           {drawerPhaseLocation && (() => {
             const phaseName = String(drawerPhaseLocation.raw.name ?? "");
-            const phaseLabel = typeof drawerPhaseLocation.raw.label === "string"
+            const rawLabel = typeof drawerPhaseLocation.raw.label === "string"
               ? drawerPhaseLocation.raw.label
               : null;
+            const displayName = pickPhaseLabel({ name: phaseName, label: rawLabel });
             return (
             <>
               <SheetHeader>
                 <SheetTitle className="flex items-baseline gap-2">
-                  <span className="truncate">{phaseLabel || phaseName}</span>
-                  {phaseLabel && phaseLabel !== phaseName && (
+                  <span className="truncate">{displayName}</span>
+                  {displayName !== phaseName && (
                     <code className="font-mono text-[11px] text-muted-foreground">{phaseName}</code>
                   )}
                 </SheetTitle>
@@ -351,16 +352,24 @@ function PhaseEditForm({
   // 排除自己
   const rejectCandidates = allPhaseNames.filter((n) => n !== raw.name);
 
+  // raw.label 可能是 registry 兜底填的 name.toUpperCase()，那不是用户真填的，
+  // 输入框要显示空让用户感知"还没设中文名"
+  const rawLabel = typeof raw.label === "string" ? raw.label : null;
+  const realLabel = userPhaseLabel({ name: String(raw.name ?? ""), label: rawLabel }) ?? "";
+
   return (
     <div className="space-y-3 pt-3">
       <div className="grid grid-cols-1 gap-2">
         <FormRow label="显示名 (label)">
           <Input
-            value={(raw.label as string | undefined) ?? ""}
-            placeholder="留空则显示标识符"
+            value={realLabel}
+            placeholder={`留空则显示 ${String(raw.name ?? "")}`}
             onChange={(e) => onChange({ label: e.target.value || undefined })}
             className="h-8 text-sm"
           />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            填中文显示名（如"数据入库"）；不填则节点显示标识符
+          </p>
         </FormRow>
 
         <FormRow label="标识符 (name)">
