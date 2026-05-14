@@ -1901,6 +1901,15 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json({ events });
     }
 
+    // GET /api/tasks/:id/outcome
+    const outcomeMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/outcome$/);
+    if (method === "GET" && outcomeMatch) {
+      const { computeTaskOutcome } = await import("./task-outcome");
+      const outcome = await computeTaskOutcome(outcomeMatch);
+      if (!outcome) return error("task not in terminal state", 404);
+      return json(outcome);
+    }
+
     // ──────────────────────────────────────────────
     // 对话（chat）API
     // ──────────────────────────────────────────────

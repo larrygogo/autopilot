@@ -55,3 +55,27 @@ describe("GET /api/tasks/:id/phase-events", () => {
     expect(body.events).toEqual([]);
   });
 });
+
+import { updateTask } from "../src/core/db";
+
+describe("GET /api/tasks/:id/outcome", () => {
+  it("非终态 → 404", async () => {
+    const res = await handleRequest(new Request("http://127.0.0.1:6180/api/tasks/task-001/outcome"));
+    expect(res.status).toBe(404);
+  });
+
+  it("终态 → 200 + outcome 结构完整", async () => {
+    const a = startTaskPhase("task-001", "design");
+    endTaskPhase(a, "done");
+    updateTask("task-001", { status: "done" });
+
+    const res = await handleRequest(new Request("http://127.0.0.1:6180/api/tasks/task-001/outcome"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe("done");
+    expect(typeof body.total_duration_ms).toBe("number");
+    expect(Array.isArray(body.top_phases)).toBe(true);
+    expect(body.diff_stat).toBeNull();
+    expect(body.pr_url).toBeNull();
+  });
+});
