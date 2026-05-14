@@ -10,6 +10,11 @@ import { createSpecRevision } from "../core/spec-revisions";
 import { createLogger } from "../core/logger";
 import { resolveAgentConfig, createAgent } from "../agents/registry";
 import { loadGlobalAgents, loadProviders } from "../core/config";
+import {
+  startRound,
+  setPhase,
+  endRound,
+} from "./clarifier-progress";
 
 const log = createLogger("requirement-clarifier");
 
@@ -219,6 +224,8 @@ export async function runClarifierRound(reqId: string): Promise<void> {
     await _runClarifierRoundInner(reqId);
   } finally {
     _inflightRounds.delete(reqId);
+    // 兜底：inner 抛错跳过 endRound 时清理。Map 里没 entry 时是 no-op。
+    endRound(reqId, "errored");
     log.info("clarifier: req=%s 释放锁，inflight=[%s]", reqId, [..._inflightRounds].join(","));
   }
 }
@@ -226,6 +233,8 @@ export async function runClarifierRound(reqId: string): Promise<void> {
 async function _runClarifierRoundInner(reqId: string): Promise<void> {
   const req = getRequirementById(reqId);
   if (!req || req.status !== "clarifying") return;
+
+  startRound(reqId, "");
 
   // ── DB 层乐观锁基线 ────────────────────────────────────────
   // 记录本轮开始时的 active_question_id。LLM 调用结束、要写入新 question 时
@@ -237,6 +246,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   const project = req.project_id ? getProjectById(req.project_id) : null;
   if (!project) {
     log.warn("clarifier: req=%s 找不到项目，跳过", reqId);
+    endRound(reqId, "aborted");
     return;
   }
   const codebase = req.codebase_id ? getCodebaseById(req.codebase_id) : null;
@@ -264,16 +274,24 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     qaHistory,
   });
 
+  setPhase(reqId, "calling-llm", { attempt: 0, prompt });
+
   let result: ClarifyResult | null = null;
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
+      if (attempt > 0) {
+        setPhase(reqId, "calling-llm", { attempt: 1 });
+      }
       const raw = await _clarifyFn(prompt, reqId);
       result = parseClarifyResult(raw);
       break;
     } catch (e: unknown) {
       lastError = e instanceof Error ? e : new Error(String(e));
       log.warn("clarifier: req=%s 第 %d 次解析失败: %s", reqId, attempt + 1, lastError.message);
+      if (attempt === 0) {
+        setPhase(reqId, "parsing", { attempt: 1, last_parse_error: lastError.message });
+      }
     }
   }
 
@@ -284,6 +302,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
       type: "requirement:clarifier-error",
       payload: { id: reqId, reason },
     });
+    endRound(reqId, "errored");
     return;
   }
 
@@ -292,6 +311,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   const reqAfter = getRequirementById(reqId);
   if (!reqAfter || reqAfter.status !== "clarifying") {
     log.info("clarifier: req=%s 状态已变（%s），AI 结果丢弃", reqId, reqAfter?.status ?? "deleted");
+    endRound(reqId, "aborted");
     return;
   }
   // Race protection: 另一并发 round 已经写过新 question / 关闭澄清，本轮放弃。
@@ -302,8 +322,11 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
       initialActiveQid ?? "null",
       reqAfter.active_question_id ?? "null",
     );
+    endRound(reqId, "aborted");
     return;
   }
+
+  setPhase(reqId, "writing");
 
   const oldSpec = req.spec_md ?? "";
   if (result.new_spec_md !== oldSpec) {
@@ -329,11 +352,13 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     setActiveQuestionId(reqId, null);
     setRequirementStatus(reqId, "awaiting_approval");
     log.info("clarifier: req=%s 澄清完成，进入 awaiting_approval", reqId);
+    endRound(reqId, "done");
     return;
   }
 
   if (!result.next_question) {
     log.warn("clarifier: req=%s done=false 但 next_question 为空，跳过", reqId);
+    endRound(reqId, "aborted");
     return;
   }
   const qId = nextQuestionId();
@@ -346,6 +371,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   setActiveQuestionId(reqId, qId);
   emit({ type: "requirement:questions-updated", payload: { id: reqId } });
   log.info("clarifier: req=%s 提出下一个问题 qid=%s", reqId, qId);
+  endRound(reqId, "done");
 }
 
 // ──────────────────────────────────────────────

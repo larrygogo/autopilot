@@ -124,3 +124,186 @@ describe("clarifier-progress: 事件发射", () => {
     }
   });
 });
+
+// ─── runClarifierRound 集成测试 ─────────────────────────────────
+import { Database } from "bun:sqlite";
+import { up as m001 } from "../src/migrations/001-baseline";
+import { up as m002 } from "../src/migrations/002-schedules";
+import { up as m004 } from "../src/migrations/004-repos";
+import { up as m005 } from "../src/migrations/005-requirements";
+import { up as m006 } from "../src/migrations/006-submodules";
+import { up as m007 } from "../src/migrations/007-workflows";
+import { up as m008 } from "../src/migrations/008-projects";
+import { up as m009 } from "../src/migrations/009-nullable-codebase";
+import { up as m010 } from "../src/migrations/010-question-suggestions";
+import { up as m011 } from "../src/migrations/011-now-dismissed-cards";
+import { up as m012 } from "../src/migrations/012-spec-revisions";
+import { up as m013 } from "../src/migrations/013-active-question-id";
+import { up as m014 } from "../src/migrations/014-resolve-orphan-open-questions";
+import { up as m015 } from "../src/migrations/015-clarifier-error";
+import { _setDbForTest } from "../src/core/db";
+import { createProject } from "../src/core/projects";
+import {
+  createRequirement,
+  setRequirementStatus,
+  setActiveQuestionId,
+} from "../src/core/requirements";
+import { createQuestion } from "../src/core/requirement-questions";
+import {
+  runClarifierRound,
+  _setClarifyFnForTest,
+  _resetInflightForTest,
+} from "../src/daemon/requirement-clarifier";
+
+function initSchema(): void {
+  const db = new Database(":memory:");
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015].forEach(fn => fn(db));
+  _setDbForTest(db);
+  createProject({ id: "p1", name: "P" });
+}
+
+describe("clarifier-progress: 集成 runClarifierRound", () => {
+  beforeEach(() => {
+    initSchema();
+    _resetForTest();
+    _resetInflightForTest();
+    enableBus();
+  });
+
+  afterEach(() => {
+    _setClarifyFnForTest(null);
+    disableBus();
+  });
+
+  it("成功路径：preparing → calling-llm(att=0) → writing → done", async () => {
+    const phases: string[] = [];
+    const handler = (e: AutopilotEvent) => {
+      if (e.type === "requirement:clarifier-round-update") {
+        phases.push(e.payload.phase);
+      }
+    };
+    onEvent("requirement:clarifier-round-update", handler);
+
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "初稿" });
+    setRequirementStatus("r1", "clarifying");
+
+    _setClarifyFnForTest(async () =>
+      JSON.stringify({
+        new_spec_md: "改了",
+        summary: "x",
+        next_question: { agent_text: "Q1?", suggestions: [] },
+        done: false,
+      }),
+    );
+
+    await runClarifierRound("r1");
+
+    offEvent("requirement:clarifier-round-update", handler);
+
+    expect(phases).toEqual(["preparing", "calling-llm", "writing", "done"]);
+    expect(getRound("r1")).toBeUndefined();
+  });
+
+  it("parse 第一次失败、第二次成功：preparing → calling-llm(att=0) → parsing → calling-llm(att=1) → writing → done", async () => {
+    const updates: { phase: string; attempt: number; last_parse_error: string | null }[] = [];
+    const handler = (e: AutopilotEvent) => {
+      if (e.type === "requirement:clarifier-round-update") {
+        updates.push({
+          phase: e.payload.phase,
+          attempt: e.payload.attempt,
+          last_parse_error: e.payload.last_parse_error,
+        });
+      }
+    };
+    onEvent("requirement:clarifier-round-update", handler);
+
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "初稿" });
+    setRequirementStatus("r1", "clarifying");
+
+    let calls = 0;
+    _setClarifyFnForTest(async () => {
+      calls++;
+      return calls === 1
+        ? "不是 JSON"
+        : JSON.stringify({
+            new_spec_md: "改了",
+            summary: "x",
+            next_question: { agent_text: "Q?", suggestions: [] },
+            done: false,
+          });
+    });
+
+    await runClarifierRound("r1");
+
+    offEvent("requirement:clarifier-round-update", handler);
+
+    const seq = updates.map(u => `${u.phase}/att${u.attempt}`);
+    expect(seq).toEqual([
+      "preparing/att0",
+      "calling-llm/att0",
+      "parsing/att1",
+      "calling-llm/att1",
+      "writing/att1",
+      "done/att1",
+    ]);
+    const parsingUpdate = updates.find(u => u.phase === "parsing");
+    expect(parsingUpdate?.last_parse_error).toBeTruthy();
+  });
+
+  it("两次都失败：preparing → calling-llm(att=0) → parsing → calling-llm(att=1) → errored", async () => {
+    const phases: string[] = [];
+    const handler = (e: AutopilotEvent) => {
+      if (e.type === "requirement:clarifier-round-update") phases.push(e.payload.phase);
+    };
+    onEvent("requirement:clarifier-round-update", handler);
+
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "初稿" });
+    setRequirementStatus("r1", "clarifying");
+
+    _setClarifyFnForTest(async () => "totally not JSON");
+
+    await runClarifierRound("r1");
+
+    offEvent("requirement:clarifier-round-update", handler);
+
+    expect(phases).toEqual([
+      "preparing",
+      "calling-llm",
+      "parsing",
+      "calling-llm",
+      "errored",
+    ]);
+    expect(getRound("r1")).toBeUndefined();
+  });
+
+  it("active_question_id race 早 abort：preparing → calling-llm → aborted（不写 writing/done）", async () => {
+    const phases: string[] = [];
+    const handler = (e: AutopilotEvent) => {
+      if (e.type === "requirement:clarifier-round-update") phases.push(e.payload.phase);
+    };
+    onEvent("requirement:clarifier-round-update", handler);
+
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "初稿" });
+    setRequirementStatus("r1", "clarifying");
+    createQuestion({ id: "qst-pre", requirement_id: "r1", agent_text: "Q?", suggestions: [] });
+    setActiveQuestionId("r1", "qst-pre");
+
+    _setClarifyFnForTest(async () => {
+      createQuestion({ id: "qst-concurrent", requirement_id: "r1", agent_text: "并发的", suggestions: [] });
+      setActiveQuestionId("r1", "qst-concurrent");
+      return JSON.stringify({
+        new_spec_md: "改了",
+        summary: "x",
+        next_question: { agent_text: "Q?", suggestions: [] },
+        done: false,
+      });
+    });
+
+    await runClarifierRound("r1");
+
+    offEvent("requirement:clarifier-round-update", handler);
+
+    expect(phases).toEqual(["preparing", "calling-llm", "aborted"]);
+    expect(getRound("r1")).toBeUndefined();
+  });
+});
