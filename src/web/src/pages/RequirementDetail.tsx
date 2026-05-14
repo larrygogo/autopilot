@@ -319,6 +319,13 @@ const PHASE_LABEL: Record<ClarifierRoundState["phase"], string> = {
   errored: "出错",
 };
 
+const ACTIVE_PHASES = new Set<ClarifierRoundState["phase"]>([
+  "preparing",
+  "calling-llm",
+  "parsing",
+  "writing",
+]);
+
 function ClarifierProgressCard({
   round,
   elapsedSec,
@@ -457,12 +464,28 @@ export function RequirementDetail() {
     if (!id) return;
     return subscribe("requirement:*", (event: { type: string; payload?: { id?: string; req_id?: string; phase?: ClarifierRoundState["phase"] } & Partial<ClarifierRoundState> }) => {
       if (event.type === "requirement:clarifier-round-update") {
-        if (event.payload?.req_id !== id) return;
-        const phase = event.payload.phase;
+        const payload = event.payload as {
+          req_id?: string;
+          started_at?: number;
+          phase?: ClarifierRoundState["phase"];
+          attempt?: 0 | 1;
+          prompt?: string | null;
+          last_parse_error?: string | null;
+        } | undefined;
+        if (!payload || payload.req_id !== id) return;
+        const phase = payload.phase;
+        if (!phase || typeof payload.started_at !== "number") return; // defensive: 防 NaN / 缺字段
         if (phase === "done" || phase === "aborted" || phase === "errored") {
           setRound(null);
         } else {
-          setRound(event.payload as ClarifierRoundState);
+          setRound({
+            req_id: payload.req_id!,
+            started_at: payload.started_at,
+            phase,
+            attempt: payload.attempt ?? 0,
+            prompt: payload.prompt ?? null,
+            last_parse_error: payload.last_parse_error ?? null,
+          });
         }
         return;
       }
@@ -494,6 +517,15 @@ export function RequirementDetail() {
     }, 1000);
     return () => clearInterval(t);
   }, [round]);
+
+  // WS 重连补拉 round（spec §5 边界）：
+  // 断连期间可能丢 round-update 事件，连接恢复时主动 fetch 一次对齐。
+  // 首次挂载时 wsState 通常是 "connecting"，不会立即触发；初次 round fetch 走 refresh() 路径。
+  useEffect(() => {
+    if (wsState !== "connected") return;
+    if (!id) return;
+    api.getClarifierRound(id).catch(() => null).then(setRound);
+  }, [wsState, id]);
 
   useEffect(() => {
     if (!req?.project_id) { setProject(null); setProjectCodebases([]); return; }
@@ -942,12 +974,7 @@ export function RequirementDetail() {
 
       {/* AI 进度卡：clarifier 单轮正在跑（preparing / calling-llm / parsing / writing）。
           替换原静态 spinner，给用户实时反馈阶段 + 耗时 + 可折叠 prompt 全文。 */}
-      {!req.clarifier_error && req.status === "clarifying" && round && (
-        round.phase === "preparing" ||
-        round.phase === "calling-llm" ||
-        round.phase === "parsing" ||
-        round.phase === "writing"
-      ) && (
+      {!req.clarifier_error && req.status === "clarifying" && round && ACTIVE_PHASES.has(round.phase) && (
         <ClarifierProgressCard
           round={round}
           elapsedSec={elapsedSec}
