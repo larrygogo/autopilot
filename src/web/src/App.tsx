@@ -42,6 +42,7 @@ const Start = lazy(() => import("./pages/Start").then((m) => ({ default: m.Start
 const Library = lazy(() => import("./pages/Library").then((m) => ({ default: m.Library })));
 const SettingsHub = lazy(() => import("./pages/SettingsHub").then((m) => ({ default: m.SettingsHub })));
 const Setup = lazy(() => import("./pages/Setup").then((m) => ({ default: m.Setup })));
+const NewWorkflowWithAI = lazy(() => import("./pages/NewWorkflowWithAI").then((m) => ({ default: m.NewWorkflowWithAI })));
 const TaskDetail = lazy(() =>
   import("./pages/TaskDetail").then((m) => ({ default: m.TaskDetail })),
 );
@@ -218,6 +219,7 @@ function AppInner() {
                 <Route path="/providers" element={<Navigate to="/settings?tab=providers" replace />} />
                 <Route path="/schedules" element={<Navigate to="/settings?tab=schedules" replace />} />
                 <Route path="/setup" element={<Setup />} />
+                <Route path="/workflows/new-with-ai" element={<NewWorkflowWithAI />} />
                 <Route path="*" element={<Navigate to="/now" replace />} />
               </Routes>
             </Suspense>

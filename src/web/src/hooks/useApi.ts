@@ -148,6 +148,14 @@ export const api = {
     request<{ ok: boolean; name: string }>("/api/workflows/from-template", {
       method: "POST", body: JSON.stringify(body),
     }),
+  authorWorkflow: (body: { description: string; prior_yaml?: string; prior_ts?: string }) =>
+    request<AuthoredWorkflow>("/api/workflows/author", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+  saveAuthoredWorkflow: (body: { name: string; yaml: string; ts: string }) =>
+    request<{ ok: boolean; name: string }>("/api/workflows/author/save", {
+      method: "POST", body: JSON.stringify(body),
+    }),
   deleteWorkflow: (name: string) =>
     request<{ ok: boolean }>(`/api/workflows/${name}`, { method: "DELETE" }),
   setWorkflowPhases: (
@@ -498,6 +506,14 @@ export interface WorkflowTemplate {
   description: string;
   phase_count: number;
   agent_count: number;
+}
+
+export interface AuthoredWorkflow {
+  name: string;
+  description: string;
+  yaml: string;
+  ts: string;
+  warnings: string[];
 }
 
 export interface DoctorCheck {

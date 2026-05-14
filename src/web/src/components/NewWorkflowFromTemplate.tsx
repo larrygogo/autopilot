@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const FROM_SCRATCH = "__from_scratch__";
+const FROM_AI = "__from_ai__";
 
 interface Props {
   open: boolean;
@@ -23,9 +24,11 @@ interface Props {
   onCreated: (name: string) => void;
   /** 用户选了「从零开始」，调用方应该弹现有的 NewWorkflowDialog */
   onFromScratch: () => void;
+  /** 用户选了「✨ 用 AI 创建」，调用方应该 navigate 到 /workflows/new-with-ai */
+  onFromAI: () => void;
 }
 
-export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScratch }: Props) {
+export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScratch, onFromAI }: Props) {
   const toast = useToast();
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -53,6 +56,10 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
   }, [selected, newName]);
 
   async function handleCreate() {
+    if (selected === FROM_AI) {
+      onFromAI();
+      return;
+    }
     if (selected === FROM_SCRATCH) {
       onFromScratch();
       return;
@@ -92,6 +99,23 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
           <div className="space-y-2">
             <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">选择模板</Label>
             <div className="max-h-72 space-y-1.5 overflow-y-auto">
+              {/* AI 生成入口放最前面，最显眼 */}
+              <button
+                type="button"
+                onClick={() => setSelected(FROM_AI)}
+                className={cn(
+                  "block w-full rounded-none border-[1.5px] px-3 py-2 text-left transition-colors",
+                  selected === FROM_AI
+                    ? "border-accent bg-accent/5"
+                    : "border-foreground/30 hover:border-foreground/60",
+                )}
+              >
+                <span className="font-mono text-sm font-bold">✨ 用 AI 描述（推荐）</span>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  自然语言告诉 AI 你要的流程，AI 生成 yaml + ts
+                </p>
+              </button>
+
               {loading && <p className="text-sm text-muted-foreground">加载中…</p>}
               {!loading && templates.length === 0 && (
                 <p className="text-sm text-muted-foreground">未找到内置模板</p>
@@ -134,7 +158,7 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
             </div>
           </div>
 
-          {selected && selected !== FROM_SCRATCH && (
+          {selected && selected !== FROM_SCRATCH && selected !== FROM_AI && (
             <div className="space-y-1.5">
               <Label htmlFor="wf-name" className="font-mono text-[10px] uppercase tracking-[0.18em]">
                 新工作流名字
@@ -153,7 +177,13 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
         <DialogFooter>
           <Button variant="ghost" onClick={onCancel} disabled={submitting}>取消</Button>
           <Button onClick={handleCreate} disabled={submitting || !selected}>
-            {submitting ? "创建中..." : selected === FROM_SCRATCH ? "下一步 →" : "创建"}
+            {submitting
+              ? "创建中..."
+              : selected === FROM_AI
+              ? "✨ 用 AI 描述 →"
+              : selected === FROM_SCRATCH
+              ? "下一步 →"
+              : "创建"}
           </Button>
         </DialogFooter>
       </DialogContent>
