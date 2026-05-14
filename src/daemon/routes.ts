@@ -1962,6 +1962,35 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json(result);
     }
 
+    // GET /api/workflows/templates — 列出可用的内置模板
+    if (method === "GET" && path === "/api/workflows/templates") {
+      const { listWorkflowTemplates } = await import("../core/workflow-templates");
+      return json({ templates: listWorkflowTemplates() });
+    }
+
+    // POST /api/workflows/from-template — 从模板克隆为新工作流
+    if (method === "POST" && path === "/api/workflows/from-template") {
+      const body = await req.json().catch(() => null) as { template?: string; name?: string } | null;
+      if (!body?.template || !body?.name) {
+        return error("template and name required", 400);
+      }
+      if (!/^[\w.\-]+$/.test(body.name)) {
+        return error("name 只允许字母 / 数字 / ._- ", 400);
+      }
+      try {
+        const { cloneTemplate } = await import("../core/workflow-templates");
+        cloneTemplate(body.template, body.name);
+        // 重新发现新加入的工作流
+        const { discover } = await import("../core/registry");
+        await discover();
+        return json({ ok: true, name: body.name }, 201);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const status = msg.includes("already exists") ? 409 : msg.includes("not found") ? 404 : 500;
+        return error(msg, status);
+      }
+    }
+
     // POST /api/workflows — 创建工作流（脚手架 / DB 派生）
     if (method === "POST" && path === "/api/workflows") {
       const body = await req.json() as {

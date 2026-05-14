@@ -12,6 +12,8 @@ import {
 import { api } from "@/hooks/useApi";
 import { StateMachineGraph } from "@/components/StateMachineGraph";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
+import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
+import { WorkflowCatalog } from "@/components/WorkflowCatalog";
 import { ConfirmDialog } from "@/components/Modal";
 import { PageHero } from "@/components/PageHero";
 import { useToast } from "@/components/Toast";
@@ -69,6 +71,10 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   const [selected, setSelected] = useState<Selected | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [cloneSource, setCloneSource] = useState<string | null>(null);
+  const [cloneName, setCloneName] = useState("");
+  const [cloning, setCloning] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
   const [tsSource, setTsSource] = useState<string | null>(null);
@@ -241,7 +247,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
               <GitBranch className="h-4 w-4" />
               派生
             </Button>
-            <Button onClick={() => setNewOpen(true)}>
+            <Button onClick={() => setTemplatePickerOpen(true)}>
               <Plus className="h-4 w-4" />
               新建工作流
             </Button>
@@ -249,27 +255,21 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
         }
       />
 
-      {/* 列表 / 空态 */}
-      {workflows.length === 0 ? (
-        <EmptyState
-          title="还没有工作流"
-          hint={
-            <>
-              创建第一个工作流，或手动在{" "}
-              <code className="rounded bg-muted px-1 font-mono text-foreground">
-                AUTOPILOT_HOME/workflows/
-              </code>{" "}
-              下添加目录。
-            </>
-          }
-          action={
-            <Button onClick={() => setNewOpen(true)}>
-              <Plus className="h-4 w-4" />
-              创建第一个工作流
-            </Button>
-          }
+      {/* 用例目录视图（业务视角，PR #71 加） */}
+      {!selected && (
+        <WorkflowCatalog
+          workflows={workflows}
+          onSelect={(name) => toggle(name)}
+          onClone={(name) => {
+            setCloneSource(name);
+            setCloneName(`${name}-copy`);
+          }}
+          onNew={() => setTemplatePickerOpen(true)}
         />
-      ) : (
+      )}
+
+      {/* 旧网格保留作为 fallback——不渲染（selected 时进 detail 视图，否则走 catalog） */}
+      {false && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {workflows.map((wf) => {
             const active = selected?.name === wf.name;
@@ -469,6 +469,72 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
         onClose={() => setNewOpen(false)}
         onCreated={() => refresh()}
       />
+
+      <NewWorkflowFromTemplate
+        open={templatePickerOpen}
+        onCancel={() => setTemplatePickerOpen(false)}
+        onCreated={(_name) => {
+          setTemplatePickerOpen(false);
+          refresh();
+        }}
+        onFromScratch={() => {
+          setTemplatePickerOpen(false);
+          setNewOpen(true);
+        }}
+      />
+
+      <Dialog
+        open={cloneSource !== null}
+        onOpenChange={(v) => { if (!v && !cloning) { setCloneSource(null); setCloneName(""); } }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>克隆工作流 {cloneSource ?? ""}</DialogTitle>
+            <DialogDescription>
+              拷贝 yaml + ts 到新工作流目录；新工作流可以独立编辑、不影响原版。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="clone-name" className="font-mono text-[10px] uppercase tracking-[0.18em]">新名字</Label>
+            <Input
+              id="clone-name"
+              value={cloneName}
+              onChange={(e) => setCloneName(e.target.value)}
+              placeholder="my-dev"
+              className="font-mono"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => { setCloneSource(null); setCloneName(""); }} disabled={cloning}>
+              取消
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!cloneSource || !cloneName.trim()) return;
+                if (!/^[\w.\-]+$/.test(cloneName.trim())) {
+                  toast.error("名字只允许字母 / 数字 / . _ -", "");
+                  return;
+                }
+                setCloning(true);
+                try {
+                  await api.createWorkflowFromTemplate({ template: cloneSource, name: cloneName.trim() });
+                  toast.success(`已克隆 ${cloneSource} → ${cloneName.trim()}`);
+                  setCloneSource(null);
+                  setCloneName("");
+                  refresh();
+                } catch (e: unknown) {
+                  toast.error("克隆失败", (e as Error)?.message ?? String(e));
+                } finally {
+                  setCloning(false);
+                }
+              }}
+              disabled={cloning || !cloneName.trim()}
+            >
+              {cloning ? "克隆中..." : "克隆"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={deriveOpen}
