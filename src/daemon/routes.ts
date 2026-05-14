@@ -677,6 +677,11 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     // GET /api/fs/list?path=<absolute>&show_hidden=1
     if (method === "GET" && path === "/api/fs/list") {
+      // 防局域网泄露本机文件树：非 loopback 绑定时禁用
+      const host = CURRENT_LISTEN_HOST ?? "127.0.0.1";
+      if (!isLoopbackHost(host)) {
+        return error("fs-browser-disabled-on-public-bind", 403);
+      }
       const reqPath = url.searchParams.get("path") ?? null;
       const showHidden = url.searchParams.get("show_hidden") === "1";
       // 省略 path 时默认返回 $HOME
@@ -2538,4 +2543,13 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
   try { emit({ type: "chat:complete", payload: { sessionId: sid, message: assistantMsg } }); } catch { /* ignore */ }
 
   return { session_id: manifest.id, message: assistantMsg };
+}
+
+// loopback host 判定：用于 /api/fs/list 等本机敏感接口的来源校验
+function isLoopbackHost(host: string): boolean {
+  const h = host.toLowerCase();
+  if (h === "localhost") return true;
+  if (h === "127.0.0.1" || h.startsWith("127.")) return true;
+  if (h === "::1" || h === "[::1]") return true;
+  return false;
 }
