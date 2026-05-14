@@ -1,4 +1,5 @@
 name: data_pipeline
+label: "数据流水线"
 description: "数据处理流水线 / Data processing pipeline"
 
 # 重试策略 / Retry policy
@@ -16,19 +17,23 @@ terminal_states: [completed, completed_partial, cancelled]
 phases:
   # 数据抽取阶段 / Data extraction phase
   - name: extract
+    label: "抽取"
     timeout: 600
 
   # 数据校验阶段 / Data validation phase
   - name: validate_data
+    label: "数据校验"
     timeout: 300
 
   # 数据转换阶段 / Data transformation phase
   - name: transform
+    label: "转换"
     timeout: 900
     reject: extract
 
   # 数据加载阶段 / Data loading phase
   - name: load
+    label: "加载"
     timeout: 600
 
 # 手写转换表：支持前向跳转（validate_skip → load）和多终态

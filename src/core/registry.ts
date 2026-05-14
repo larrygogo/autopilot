@@ -56,6 +56,8 @@ export interface WorkflowWorkspaceSpec {
 
 export interface WorkflowDefinition {
   name: string;
+  /** 显示名（UI 显示），未填则回退到 name */
+  label?: string;
   description?: string;
   config?: Record<string, unknown>;
   agents?: Record<string, unknown>[];
@@ -850,9 +852,10 @@ export function getWorkflow(name: string): WorkflowDefinition | null {
   return _registry.get(name) ?? null;
 }
 
-export function listWorkflows(): { name: string; description: string }[] {
+export function listWorkflows(): { name: string; label?: string; description: string }[] {
   return [..._registry.values()].map((wf) => ({
     name: wf.name,
+    label: wf.label,
     description: wf.description ?? "",
   }));
 }

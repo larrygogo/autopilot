@@ -10,13 +10,14 @@ import { PHASE_LABEL } from "@/lib/workflow-labels";
 
 type PhaseItem = {
   name: string;
+  label?: string;
   timeout?: number;
   reject?: string | null;
 };
 
 type Entry =
   | { kind: "phase"; phase: PhaseItem }
-  | { kind: "parallel"; name: string; fail_strategy?: string; phases: PhaseItem[] };
+  | { kind: "parallel"; name: string; label?: string; fail_strategy?: string; phases: PhaseItem[] };
 
 interface Props {
   /** 工作流详情中的 phases 原始数组 */
@@ -34,15 +35,37 @@ function normalize(raw: any[]): Entry[] {
       return {
         kind: "parallel" as const,
         name: p.parallel.name,
+        label: typeof p.parallel.label === "string" ? p.parallel.label : undefined,
         fail_strategy: p.parallel.fail_strategy,
         phases: (p.parallel.phases ?? []).map((sub: any) => ({
           name: sub.name,
+          label: typeof sub.label === "string" ? sub.label : undefined,
           timeout: sub.timeout,
         })),
       };
     }
-    return { kind: "phase" as const, phase: { name: p.name, timeout: p.timeout, reject: p.reject ?? null } };
+    return {
+      kind: "phase" as const,
+      phase: {
+        name: p.name,
+        label: typeof p.label === "string" ? p.label : undefined,
+        timeout: p.timeout,
+        reject: p.reject ?? null,
+      },
+    };
   });
+}
+
+/**
+ * 选取阶段显示名：yaml 里写的 label 优先（中文/任意语言）；
+ * 没写但命中静态 PHASE_LABEL 映射时回退；都没有就显示原始 name。
+ *
+ * 注意 registry 在 expandPhaseDefaults 会把缺省 label 填成 name.toUpperCase()，
+ * 所以这里要把"全大写形态的 name"识别为"无 label"，不要把它当成用户写的中文。
+ */
+function pickPhaseLabel(item: { name: string; label?: string }): string {
+  const userLabel = item.label && item.label !== item.name.toUpperCase() ? item.label : undefined;
+  return userLabel ?? PHASE_LABEL[item.name] ?? item.name;
 }
 
 // 从 current state 猜对应的 phase name：pending_x / running_x / complete_x → x
@@ -93,6 +116,7 @@ export function PhasePipeline({ phases, highlight, onHoverPhase, currentState }:
             ) : (
               <ParallelNode
                 name={entry.name}
+                label={entry.label}
                 failStrategy={entry.fail_strategy}
                 phases={entry.phases}
                 highlight={highlight}
@@ -148,10 +172,10 @@ function PhaseNode({
           current ? "text-accent" : "text-foreground",
         )}
       >
-        {PHASE_LABEL[phase.name] ?? phase.name}
+        {pickPhaseLabel(phase)}
       </div>
       <div className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
-        {PHASE_LABEL[phase.name] && (
+        {pickPhaseLabel(phase) !== phase.name && (
           <code className="font-mono opacity-70">{phase.name}</code>
         )}
         {phase.timeout && <span>· {fmtTimeout(phase.timeout)}</span>}
@@ -161,9 +185,10 @@ function PhaseNode({
 }
 
 function ParallelNode({
-  name, failStrategy, phases, highlight, currentPhase, onHover,
+  name, label, failStrategy, phases, highlight, currentPhase, onHover,
 }: {
   name: string;
+  label?: string;
   failStrategy?: string;
   phases: PhaseItem[];
   highlight?: string | null;
@@ -183,7 +208,7 @@ function ParallelNode({
       >
         <Badge variant="info">并行</Badge>
         <span className="font-display text-xs font-bold uppercase tracking-wider">
-          {PHASE_LABEL[name] ?? name}
+          {pickPhaseLabel({ name, label })}
         </span>
         {failStrategy && (
           <span className="font-mono text-[10px] text-muted-foreground">

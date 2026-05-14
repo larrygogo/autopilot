@@ -9,6 +9,8 @@
  */
 
 export interface AgentDefault {
+  /** 显示名（UI 显示），未填则回退到 name 标识符 */
+  label?: string;
   provider: "anthropic" | "openai" | "google";
   model: string;
   max_turns?: number;
@@ -24,6 +26,7 @@ export interface AgentDefault {
  */
 export const AGENT_DEFAULTS: Record<string, AgentDefault> = {
   coder: {
+    label: "编码助手",
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     max_turns: 10,
@@ -33,6 +36,7 @@ export const AGENT_DEFAULTS: Record<string, AgentDefault> = {
       "代码注释和 commit message 用中文，代码本身用英文；遵循项目已有风格。",
   },
   reviewer: {
+    label: "评审员",
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     max_turns: 5,
@@ -42,6 +46,7 @@ export const AGENT_DEFAULTS: Record<string, AgentDefault> = {
       "找出真问题而非格式纠错；按 critical / important / minor 分级反馈。",
   },
   clarifier: {
+    label: "需求分析师",
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     max_turns: 3,
@@ -51,12 +56,14 @@ export const AGENT_DEFAULTS: Record<string, AgentDefault> = {
       "已经清晰的部分不要重复确认。每次输出严格 JSON。",
   },
   workflow_author: {
+    label: "工作流作者",
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     max_turns: 3,
     permission_mode: "default",
     system_prompt:
-      "你是 autopilot 工作流作者。读用户描述生成 workflow.yaml + workflow.ts，每次输出严格 JSON。",
+      "你是 autopilot 工作流作者。读用户描述生成 workflow.yaml + workflow.ts，每次输出严格 JSON。" +
+      "yaml 必须为工作流本身填 label（顶层），并为每个 phase 和 agent 都填 label（用户描述语言；通常是中文）。",
   },
 };
 

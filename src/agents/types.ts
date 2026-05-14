@@ -9,6 +9,8 @@ export type ProviderName = "anthropic" | "openai" | "google";
  */
 export interface AgentConfig {
   name: string;
+  /** 显示名（UI 显示），未填则回退到 name */
+  label?: string;
   /** 继承全局 agent 的 key（默认继承同名）；设为 null/false 关闭继承 */
   extends?: string | null | false;
   provider?: ProviderName;

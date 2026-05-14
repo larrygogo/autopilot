@@ -62,6 +62,26 @@ describe("runWorkflowAuthor", () => {
     expect(r.warnings.some((w) => w.includes("review"))).toBe(true);
     expect(r.yaml).toContain("review");
   });
+
+  it("AI 生成带 label 的 yaml 时，label 原样保留在文本里", async () => {
+    _setAuthorFnForTest(async () =>
+      JSON.stringify({
+        name: "labeled",
+        description: "测试 label",
+        yaml: `name: labeled
+label: 完整开发
+phases:
+  - name: design
+    label: 设计
+`,
+        ts: "export async function design(_t: string): Promise<void> {}\n",
+      }),
+    );
+    const r = await runWorkflowAuthor({ description: "测试" });
+    expect(r.yaml).toContain("label: 完整开发");
+    expect(r.yaml).toContain("label: 设计");
+    expect(r.warnings.length).toBe(0);
+  });
 });
 
 describe("saveAuthoredWorkflow", () => {

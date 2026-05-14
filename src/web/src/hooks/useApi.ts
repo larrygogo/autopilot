@@ -118,6 +118,7 @@ export const api = {
     request<
       Array<{
         name: string;
+        label?: string;
         description: string;
         source?: "db" | "file";
         derives_from?: string | null;
@@ -126,6 +127,7 @@ export const api = {
   getWorkflow: (name: string) =>
     request<{
       name: string;
+      label?: string;
       description?: string;
       source?: "db" | "file";
       derives_from?: string | null;
@@ -503,6 +505,7 @@ export const api = {
 
 export interface WorkflowTemplate {
   name: string;
+  label?: string;
   description: string;
   phase_count: number;
   agent_count: number;

@@ -147,6 +147,58 @@ phases:
     }
   });
 
+  it("yaml 顶层 label 和 phase.label 都会被原样保留（不再被 name.toUpperCase 覆盖）", async () => {
+    const dir = makeTmpDir("labels");
+    try {
+      writeFileSync(
+        join(dir, "workflow.yaml"),
+        `
+name: labels_test
+label: "完整开发"
+phases:
+  - name: design
+    label: "设计"
+  - name: review
+    label: "评审"
+`
+      );
+
+      const wf = await loadYamlWorkflow(dir);
+
+      expect(wf).not.toBeNull();
+      expect(wf!.label).toBe("完整开发");
+      const design = wf!.phases[0] as PhaseDefinition;
+      const review = wf!.phases[1] as PhaseDefinition;
+      expect(design.label).toBe("设计");
+      expect(review.label).toBe("评审");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("phase 不写 label 时 fallback 为 name.toUpperCase", async () => {
+    const dir = makeTmpDir("labels-default");
+    try {
+      writeFileSync(
+        join(dir, "workflow.yaml"),
+        `
+name: labels_default
+phases:
+  - name: foo
+`
+      );
+
+      const wf = await loadYamlWorkflow(dir);
+
+      const foo = wf!.phases[0] as PhaseDefinition;
+      expect(foo.label).toBe("FOO");
+      // workflow 顶层 label 不强填，缺省就是 undefined
+      expect(wf!.label).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("不存在 workflow.yaml 时返回 null", async () => {
     const dir = makeTmpDir("empty");
     try {

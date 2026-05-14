@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 
 interface WorkflowInfo {
   name: string;
+  label?: string;
   description: string;
   source?: "db" | "file";
 }
@@ -100,7 +101,14 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
             return (
               <Card key={wf.name} className="p-4">
                 <div className="mb-1 flex items-baseline justify-between gap-2">
-                  <h3 className="font-mono text-sm font-bold">{wf.name}</h3>
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <h3 className="font-mono text-sm font-bold truncate">{wf.label || wf.name}</h3>
+                    {wf.label && (
+                      <span className="font-mono text-[10px] text-muted-foreground truncate">
+                        {wf.name}
+                      </span>
+                    )}
+                  </div>
                   {wf.source && (
                     <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
                       {wf.source === "db" ? "DB" : "文件"}

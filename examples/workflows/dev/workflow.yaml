@@ -1,4 +1,5 @@
 name: dev
+label: "完整开发"
 description: "完整开发流程（设计 → 评审 → 开发 → 代码审查 → PR）"
 setup_func: setup_dev_task
 
@@ -8,34 +9,42 @@ config:
 
 agents:
   - name: architect
+    label: "架构师"
     provider: anthropic
     model: claude-sonnet-4-6
     permission_mode: bypassPermissions
   - name: developer
+    label: "开发者"
     provider: anthropic
     model: claude-opus-4-6
     permission_mode: bypassPermissions
   - name: reviewer
+    label: "评审员"
     provider: anthropic
     model: claude-sonnet-4-6
     permission_mode: bypassPermissions
 
 phases:
   - name: design
+    label: "设计"
     agent: architect
     timeout: 900
   - name: review
+    label: "设计评审"
     agent: reviewer
     timeout: 900
     reject: design
     max_rejections: 10
   - name: develop
+    label: "开发"
     agent: developer
     timeout: 1800
   - name: code_review
+    label: "代码评审"
     agent: reviewer
     timeout: 1200
     reject: develop
     max_rejections: 10
   - name: submit_pr
+    label: "提交 PR"
     timeout: 300
