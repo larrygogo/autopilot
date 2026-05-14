@@ -1,5 +1,5 @@
 import type { Server } from "bun";
-import { handleRequest } from "./routes";
+import { handleRequest, setListenHost } from "./routes";
 import { wsManager } from "./ws";
 
 // ──────────────────────────────────────────────
@@ -27,6 +27,7 @@ export async function startServerWithRetry(opts: { host: string; port: number })
 }
 
 export function startServer(opts: { host: string; port: number }): Server<undefined> {
+  setListenHost(opts.host);
   const server = Bun.serve({
     hostname: opts.host,
     port: opts.port,

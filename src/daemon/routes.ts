@@ -292,6 +292,17 @@ export function setWebDistDir(dir: string): void {
   webDistDir = dir;
 }
 
+// daemon 启动时注入 listen host，供 /api/fs/list 等做来源校验
+let CURRENT_LISTEN_HOST: string | null = null;
+
+export function setListenHost(host: string): void {
+  CURRENT_LISTEN_HOST = host;
+}
+
+export function getListenHost(): string | null {
+  return CURRENT_LISTEN_HOST;
+}
+
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
   ".js": "application/javascript",
