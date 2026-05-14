@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Plus,
   ChevronRight,
@@ -8,7 +8,6 @@ import {
   GitBranch,
   FileCode,
   Database,
-  MousePointerClick,
 } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
@@ -18,11 +17,8 @@ import { WorkflowCatalog } from "@/components/WorkflowCatalog";
 import { ConfirmDialog } from "@/components/Modal";
 import { PageHero } from "@/components/PageHero";
 import { useToast } from "@/components/Toast";
-import { PhaseEditor } from "@/components/PhaseEditor";
 import { WorkflowAgentsEditor } from "@/components/WorkflowAgentsEditor";
-import { PhasePipeline } from "@/components/PhasePipeline";
-import { PhaseDetailDrawer, type DrawerPhaseInfo } from "@/components/PhaseDetailDrawer";
-import { extractPhaseFunction } from "@/lib/ts-extract";
+import { PhasePipelineEditor } from "@/components/PhasePipelineEditor";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -79,10 +75,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   const [cloneName, setCloneName] = useState("");
   const [cloning, setCloning] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-  const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
   const [tsSource, setTsSource] = useState<string | null>(null);
-  const [drawerPhase, setDrawerPhase] = useState<string | null>(null);
-  const editorScrollRef = useRef<HTMLDivElement | null>(null);
 
   // 派生新工作流对话框相关 state
   const [deriveOpen, setDeriveOpen] = useState(false);
@@ -167,7 +160,6 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
     if (selected?.name === name) {
       setSelected(null);
       setTsSource(null);
-      setDrawerPhase(null);
       return;
     }
     setLoadingDetail(true);
@@ -212,43 +204,6 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
       /* ignore */
     }
   };
-
-  // ⚠️ Hooks 必须在条件 return 之前调用，否则违反 hooks 顺序规则（React error #310）
-  // 当前 drawer 选中阶段的规整数据 + 对应 ts 函数代码切片
-  const drawerPhaseDef = useMemo<DrawerPhaseInfo | null>(() => {
-    if (!drawerPhase || !selected) return null;
-    const phases = (selected.detail.phases as any[] | undefined) ?? [];
-    const find = (list: any[]): any => {
-      for (const p of list) {
-        if (p?.parallel) {
-          const sub = find((p.parallel.phases as any[] | undefined) ?? []);
-          if (sub) return sub;
-        } else if (p?.name === drawerPhase) {
-          return p;
-        }
-      }
-      return null;
-    };
-    const raw = find(phases);
-    if (!raw) return null;
-    return {
-      name: String(raw.name ?? ""),
-      label: typeof raw.label === "string" ? raw.label : undefined,
-      agent: typeof raw.agent === "string" ? raw.agent : undefined,
-      timeout: typeof raw.timeout === "number" ? raw.timeout : undefined,
-      reject: typeof raw.reject === "string" ? raw.reject : null,
-      gate: raw.gate === true,
-      gate_message: typeof raw.gate_message === "string" ? raw.gate_message : undefined,
-      max_rejections: typeof raw.max_rejections === "number" ? raw.max_rejections : undefined,
-      jump_trigger: typeof raw.jump_trigger === "string" ? raw.jump_trigger : undefined,
-      jump_target: typeof raw.jump_target === "string" ? raw.jump_target : undefined,
-    };
-  }, [drawerPhase, selected]);
-
-  const drawerTsCode = useMemo(() => {
-    if (!drawerPhase || !tsSource) return null;
-    return extractPhaseFunction(tsSource, drawerPhase);
-  }, [drawerPhase, tsSource]);
 
   if (loading) {
     return (
@@ -420,30 +375,13 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
             />
           </Card>
 
-          {/* 流水线（点击节点弹详情，包含 yaml 配置 + 对应 ts 函数代码） */}
+          {/* 流水线 + 阶段编辑器合二为一：流水线节点点击弹编辑 drawer */}
           <Card className="p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">流水线</h3>
-              <span className="inline-flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
-                <MousePointerClick className="h-3 w-3" />
-                点击节点查看配置 / 编辑入口在下方
-              </span>
-            </div>
-            <PhasePipeline
-              phases={(selected.detail.phases as any[]) ?? []}
-              highlight={hoveredPhase}
-              onHoverPhase={setHoveredPhase}
-              onPhaseClick={setDrawerPhase}
-            />
-          </Card>
-
-          {/* 阶段编辑器（CRUD：新增 / 删除 / 重排 / 并行块 / 孤儿函数同步） */}
-          <Card className="p-4" ref={editorScrollRef}>
-            <PhaseEditor
+            <PhasePipelineEditor
               workflowName={selected.name}
               initialPhases={(selected.detail.phases as any[]) ?? []}
-              hoveredPhase={hoveredPhase}
-              onHoverPhase={setHoveredPhase}
+              tsSource={tsSource}
+              workflowAgents={(selected.detail.agents as Array<{ name: string }> | undefined) ?? []}
               onSaved={async () => {
                 // 同步刷新 drawer 里用的 ts 源码
                 void loadTsSilently(selected.name);
@@ -453,17 +391,6 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
           </Card>
         </div>
       )}
-
-      <PhaseDetailDrawer
-        mode="preview"
-        open={!!drawerPhase}
-        onOpenChange={(o) => { if (!o) setDrawerPhase(null); }}
-        phase={drawerPhaseDef}
-        tsFunctionCode={drawerTsCode}
-        onLocateInEditor={() => {
-          editorScrollRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }}
-      />
 
       <NewWorkflowDialog
         open={newOpen}
