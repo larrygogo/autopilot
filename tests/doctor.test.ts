@@ -121,3 +121,17 @@ describe("L2 provider CLI 探测", () => {
     expect(report.checks.find((c) => c.id === "providers.openai.cli")).toBeUndefined();
   });
 });
+
+describe("L3 凭证 ping", () => {
+  it("L3 模式 level 字段为 3", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n", "utf-8");
+    const report = await runChecks({ level: 3 });
+    expect(report.level).toBe(3);
+  }, 15000);
+
+  it("providers 空数组 → 不跑任何 L3 ping", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n", "utf-8");
+    const report = await runChecks({ level: 3, providers: [] });
+    expect(report.checks.find((c) => c.id === "providers.anthropic.ping")).toBeUndefined();
+  });
+});

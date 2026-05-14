@@ -162,7 +162,20 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
         }),
     );
 
-    // L3 在 Task 5 补
+    if (opts.level >= 3) {
+      const targetNames = opts.providers ?? validEnabled.map((p) => p.name);
+      // 串行避免凭证 race
+      for (const name of targetNames) {
+        const cli = providerCliMap[name];
+        if (!cli) continue;
+        const result = await pingProviderAuth(cli);
+        if (result.ok) {
+          checks.push({ id: `providers.${name}.ping`, category: "provider", status: "ok", title: `${name} 凭证验证通过` });
+        } else {
+          checks.push({ id: `providers.${name}.ping`, category: "provider", status: "error", title: `${name} 凭证验证失败`, detail: result.detail, fix: { cli: result.loginHint } });
+        }
+      }
+    }
   }
 
   return finalize(opts, checks, startedAt);
@@ -223,5 +236,58 @@ function installHintFor(cli: string): string {
     case "codex":   return "npm i -g @openai/codex";
     case "gemini":  return "npm i -g @google/gemini-cli";
     default:        return `请确保 ${cli} 在 PATH 中`;
+  }
+}
+
+async function pingProviderAuth(cli: string, timeoutMs = 10000): Promise<ProbeResult> {
+  const args = cli === "claude"
+    ? ["-p", "ping", "--output-format", "json", "--max-turns", "1"]
+    : cli === "codex"
+    ? ["exec", "--json", "--skip-git-repo-check", "-"]
+    : ["-p", "ping", "--yolo"];
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const proc = Bun.spawn([cli, ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: cli === "codex" ? "pipe" : "ignore",
+      signal: controller.signal,
+    });
+    if (cli === "codex" && proc.stdin) {
+      const sink = proc.stdin as unknown as { write: (s: string) => Promise<number> | number; end: () => unknown };
+      await sink.write("ping\n");
+      sink.end();
+    }
+    const exitCode = await proc.exited;
+    clearTimeout(timer);
+    // 必须把 stdout 也消费掉，否则 CLI 输出大时（如 claude json）会塞满 pipe buffer → back-pressure 死锁
+    await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    if (exitCode === 0) return { ok: true };
+    const detail = stderr.slice(0, 400);
+    const looksLikeAuth = /auth|login|credential|unauthorized|401/i.test(detail);
+    return {
+      ok: false,
+      detail: looksLikeAuth ? `未登录或凭证失效：${detail}` : `调用失败 (exit=${exitCode}): ${detail}`,
+      loginHint: looksLikeAuth ? loginHintFor(cli) : "重试 `bun run dev config doctor --probe`",
+    };
+  } catch (e: unknown) {
+    clearTimeout(timer);
+    return {
+      ok: false,
+      detail: controller.signal.aborted ? `ping 超时（${timeoutMs}ms）` : e instanceof Error ? e.message : String(e),
+      loginHint: loginHintFor(cli),
+    };
+  }
+}
+
+function loginHintFor(cli: string): string {
+  switch (cli) {
+    case "claude":  return "claude login";
+    case "codex":   return "codex login";
+    case "gemini":  return "gemini auth login";
+    default:        return `${cli} login`;
   }
 }
