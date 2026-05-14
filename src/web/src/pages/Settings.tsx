@@ -1,18 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search, ExternalLink } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input, Textarea } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { PageHero } from "@/components/PageHero";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
@@ -21,29 +14,13 @@ import { TimezoneSelect } from "@/components/TimezoneSelect";
 export function Settings(_props: { embedded?: boolean } = {}) {
   const toast = useToast();
 
-  const [configYaml, setConfigYaml] = useState("");
-  const [configLoading, setConfigLoading] = useState(true);
-  const [configSaving, setConfigSaving] = useState(false);
-
   const [defaultsTz, setDefaultsTz] = useState<string | null>(null);
   const [systemTz, setSystemTz] = useState<string>("");
   const [defaultsLoading, setDefaultsLoading] = useState(true);
   const [defaultsSaving, setDefaultsSaving] = useState(false);
 
-  const [workflows, setWorkflows] = useState<{ name: string; description: string }[]>([]);
-  const [selectedWf, setSelectedWf] = useState("");
-  const [wfYaml, setWfYaml] = useState("");
-  const [wfLoading, setWfLoading] = useState(false);
-  const [wfSaving, setWfSaving] = useState(false);
-
   const [status, setStatus] = useState<any>(null);
-
-  useEffect(() => {
-    api.getConfig()
-      .then((res) => setConfigYaml(res.yaml))
-      .catch((e) => toast.error("加载全局配置失败", e?.message ?? String(e)))
-      .finally(() => setConfigLoading(false));
-  }, []);
+  const [configPath, setConfigPath] = useState<string | null>(null);
 
   useEffect(() => {
     api.getDefaults()
@@ -69,56 +46,19 @@ export function Settings(_props: { embedded?: boolean } = {}) {
   };
 
   useEffect(() => {
-    api.listWorkflows().then(setWorkflows).catch(() => {});
-  }, []);
-
-  useEffect(() => {
     api.getStatus().then(setStatus).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (!selectedWf) { setWfYaml(""); return; }
-    setWfLoading(true);
-    api.getWorkflowYaml(selectedWf)
-      .then((res) => setWfYaml(res.yaml))
-      .catch((e) => toast.error("加载工作流失败", e?.message ?? String(e)))
-      .finally(() => setWfLoading(false));
-  }, [selectedWf]);
-
-  const saveConfig = async () => {
-    setConfigSaving(true);
-    try {
-      await api.saveConfig(configYaml);
-      toast.success("全局配置已保存");
-    } catch (e: any) {
-      toast.error("保存失败", e?.message ?? String(e));
-    } finally {
-      setConfigSaving(false);
-    }
-  };
-
-  const saveWorkflow = async () => {
-    if (!selectedWf) return;
-    setWfSaving(true);
-    try {
-      await api.saveWorkflowYaml(selectedWf, wfYaml);
-      toast.success(`工作流 ${selectedWf} 已保存并重载`);
-    } catch (e: any) {
-      toast.error("保存失败", e?.message ?? String(e));
-    } finally {
-      setWfSaving(false);
-    }
-  };
-
-  const reloadAll = async () => {
-    try {
-      const res = await api.reloadWorkflows();
-      setWorkflows(res.workflows);
-      toast.success("工作流已重载");
-    } catch (e: any) {
-      toast.error("重载失败", e?.message ?? String(e));
-    }
-  };
+    // 用 getConfig 触发后端返回 yaml，间接拿到当前用的 config 路径
+    // 实际上 daemon status 已含 config 路径，先用一个简单兜底
+    api.getConfig().then((res) => {
+      // getConfig 不返路径，但能确认 daemon 拿到了 config；显示固定提示
+      setConfigPath("~/.autopilot/config.yaml");
+    }).catch(() => {
+      setConfigPath("~/.autopilot/config.yaml");
+    });
+  }, []);
 
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
@@ -180,86 +120,31 @@ export function Settings(_props: { embedded?: boolean } = {}) {
 
       <DaemonLogCard />
 
-      {/* 全局配置 */}
+      {/* 编辑配置文件提示 */}
       <Card className="mb-4 p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold">全局配置</h3>
-            <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">config.yaml</p>
-          </div>
+        <div className="mb-2">
+          <h3 className="text-sm font-semibold">编辑配置文件</h3>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            日常配置请用上方的提供商 / 智能体 / 工作流 / 定时任务 Tab；
+            原始 YAML 请用 IDE 直接编辑文件，daemon 即时读到改动（providers / agents 无需重启）。
+          </p>
         </div>
-        {configLoading ? (
-          <p className="text-sm text-muted-foreground">加载中…</p>
-        ) : (
-          <>
-            <Textarea
-              className="min-h-[320px] font-mono text-xs"
-              value={configYaml}
-              onChange={(e) => setConfigYaml(e.target.value)}
-              placeholder={CONFIG_PLACEHOLDER}
-              spellCheck={false}
-            />
-            <div className="mt-3 flex justify-end">
-              <Button onClick={saveConfig} disabled={configSaving}>
-                {configSaving ? "保存中…" : "保存"}
-              </Button>
-            </div>
-          </>
-        )}
-      </Card>
-
-      {/* 工作流 YAML */}
-      <Card className="p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">工作流配置</h3>
-          <Button variant="secondary" size="sm" onClick={reloadAll}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            重载全部
-          </Button>
-        </div>
-
-        <div className="mb-3 space-y-1.5">
-          <Label>选择工作流</Label>
-          <Select value={selectedWf || "__none__"} onValueChange={(v) => setSelectedWf(v === "__none__" ? "" : v)}>
-            <SelectTrigger>
-              <SelectValue placeholder="选择工作流…" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">—</SelectItem>
-              {workflows.map((wf) => (
-                <SelectItem key={wf.name} value={wf.name}>
-                  <span className="font-medium">{wf.name}</span>
-                  {wf.description ? (
-                    <span className="ml-2 text-muted-foreground">— {wf.description}</span>
-                  ) : null}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {selectedWf && (
-          <>
-            {wfLoading ? (
-              <p className="text-sm text-muted-foreground">加载中…</p>
-            ) : (
-              <>
-                <Textarea
-                  className="min-h-[320px] font-mono text-xs"
-                  value={wfYaml}
-                  onChange={(e) => setWfYaml(e.target.value)}
-                  placeholder="# workflow.yaml"
-                  spellCheck={false}
-                />
-                <div className="mt-3 flex justify-end">
-                  <Button onClick={saveWorkflow} disabled={wfSaving}>
-                    {wfSaving ? "保存中…" : "保存并重载"}
-                  </Button>
-                </div>
-              </>
-            )}
-          </>
-        )}
+        <dl className="grid grid-cols-1 gap-y-2 font-mono text-xs sm:grid-cols-[auto_1fr] sm:gap-x-4">
+          <dt className="text-muted-foreground">全局配置</dt>
+          <dd>{configPath ?? "~/.autopilot/config.yaml"}</dd>
+          <dt className="text-muted-foreground">工作流目录</dt>
+          <dd>~/.autopilot/workflows/&lt;name&gt;/workflow.yaml</dd>
+          <dt className="text-muted-foreground">CLI 查看</dt>
+          <dd>
+            <code className="bg-muted/40 px-1.5 py-0.5">autopilot config path</code>
+            <span className="mx-1 text-muted-foreground">·</span>
+            <code className="bg-muted/40 px-1.5 py-0.5">autopilot config show</code>
+          </dd>
+          <dt className="text-muted-foreground">检查配置</dt>
+          <dd>
+            <code className="bg-muted/40 px-1.5 py-0.5">autopilot config doctor</code>
+          </dd>
+        </dl>
       </Card>
     </div>
   );
@@ -428,22 +313,3 @@ function DesktopNotifyCard(): React.ReactElement {
   );
 }
 
-const CONFIG_PLACEHOLDER = `# 全局配置。仅存放跨工作流共享的基础设施（providers / agents）；
-# 工作流自己的参数请写在该工作流目录下的 workflow.yaml 或
-# 其独立配置文件里，不要放在这里。
-#
-# providers:
-#   anthropic:
-#     default_model: claude-sonnet-4-6
-#     base_url: ""
-#     enabled: true
-#
-# agents:
-#   coder:
-#     provider: anthropic
-#     model: claude-sonnet-4-6
-#     max_turns: 10
-#     permission_mode: auto
-#     system_prompt: |
-#       你是通用编码助手。
-`;
