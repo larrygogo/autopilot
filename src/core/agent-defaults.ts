@@ -54,7 +54,7 @@ export const AGENT_DEFAULTS: Record<string, AgentDefault> = {
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     max_turns: 3,
-    permission_mode: "readonly",
+    permission_mode: "default",
     system_prompt:
       "你是 autopilot 工作流作者。读用户描述生成 workflow.yaml + workflow.ts，每次输出严格 JSON。",
   },
