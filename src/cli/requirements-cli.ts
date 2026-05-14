@@ -66,11 +66,22 @@ export function registerRequirementCommands(program: Command): void {
       // 2) 连接 daemon（raw_text 校验通过后再尝试连接，报错更精准）
       await ensureDaemon(client);
 
-      // 3) project / codebase（R9 加默认推断；当前要求显式 -p）
-      const projectId = opts.project;
+      // 3) project / codebase
+      let projectId = opts.project;
       if (!projectId) {
-        console.error("错误：暂未实现默认 project 推断，请用 -p <id>");
-        process.exit(2);
+        try {
+          const { projects } = await client.listProjects();
+          if (projects.length === 0) {
+            console.error("错误：未找到任何 project。请先在 web /library 创建。");
+            process.exit(2);
+          }
+          // 简化：用第一个 project（后续可改"最近活跃"逻辑）
+          projectId = projects[0]!.id;
+          console.log(`✓ 默认 project: ${projectId}`);
+        } catch (e: unknown) {
+          console.error(`列出 project 失败：${e instanceof Error ? e.message : String(e)}`);
+          process.exit(3);
+        }
       }
       const codebaseId = opts.codebase;
 
