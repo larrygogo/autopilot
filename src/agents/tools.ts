@@ -11,7 +11,7 @@
 // SDK 约定：tool handler 返回 { content: [{ type: 'text', text }] }。
 // ──────────────────────────────────────────────
 
-import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
+import { defineTool, type RegisteredTool } from "./mcp-tools";
 import { z } from "zod";
 import { listTasks, getTask, getTaskLogs } from "../core/db";
 import { listWorkflows, getWorkflow, isParallelPhase } from "../core/registry";
@@ -66,12 +66,11 @@ function findRepoByAliasGlobal(alias: string) {
 }
 
 /**
- * 构造全部 autopilot tools。用 dynamic import 的 SDK.tool() 包装，
- * 避免 SDK 缺失时影响 autopilot 主干。
+ * 构造全部 autopilot tools。每个工具用 `defineTool` 注册（自带 zod → JSON Schema 转换），
+ * 由 mcp-server 通过 MCP `tools/list` 暴露给 agent。
  */
-export async function buildAutopilotTools(): Promise<SdkMcpToolDefinition<any>[]> {
-  const sdk = await import("@anthropic-ai/claude-agent-sdk");
-  const tool = sdk.tool;
+export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
+  const tool = defineTool;
 
   return [
     // ── 只读：任务 ──
@@ -660,9 +659,8 @@ export const TOOL_NAMES = [
 
 export const WORKFLOW_TOOL_NAMES = ["ask_user"] as const;
 
-export async function buildWorkflowAgentTools(): Promise<SdkMcpToolDefinition<any>[]> {
-  const sdk = await import("@anthropic-ai/claude-agent-sdk");
-  const tool = sdk.tool;
+export async function buildWorkflowAgentTools(): Promise<RegisteredTool[]> {
+  const tool = defineTool;
 
   const { getTaskContext } = await import("../core/task-context");
   const { updateTask } = await import("../core/db");

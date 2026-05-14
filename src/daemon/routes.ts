@@ -62,6 +62,10 @@ import type { Requirement } from "../core/requirements";
 import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
 import { runClarifierRound } from "./requirement-clarifier";
 import { getRound } from "./clarifier-progress";
+import { handleMcpHttp } from "../agents/mcp-server";
+import { getMcpToken } from "./mcp-runtime";
+import { buildAutopilotTools, buildWorkflowAgentTools } from "../agents/tools";
+import type { RegisteredTool } from "../agents/mcp-tools";
 
 /**
  * 向后兼容别名：T14 把 Requirement.repo_id 改名为 codebase_id 后，
@@ -154,6 +158,21 @@ const ALLOWED_ORIGINS = (process.env.AUTOPILOT_ALLOWED_ORIGINS ?? "")
 // 可选 token 鉴权：设置 AUTOPILOT_API_TOKEN 后，所有 /api/* 请求需带
 // `Authorization: Bearer <token>` 或 `X-Autopilot-Token: <token>`。
 const API_TOKEN = process.env.AUTOPILOT_API_TOKEN ?? "";
+
+/**
+ * 拉取所有 MCP 工具：autopilot 工具集 + workflow agent 工具集合并返回。
+ * 每次 MCP tools/list 或 tools/call 都调一次（构建很轻量，全是同步 DB 读）。
+ *
+ * 注：客户端调用名要带 `mcp__autopilot__` 前缀（如 `mcp__autopilot__list_tasks`），
+ * 前缀由 claude 根据 mcp-config 里的服务器名（"autopilot"）自动拼接，server 这边只暴露裸名字。
+ */
+async function getAllMcpTools(): Promise<RegisteredTool[]> {
+  const [autopilotTools, workflowTools] = await Promise.all([
+    buildAutopilotTools(),
+    buildWorkflowAgentTools(),
+  ]);
+  return [...autopilotTools, ...workflowTools];
+}
 
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin");
@@ -352,6 +371,22 @@ export async function handleRequest(req: Request): Promise<Response> {
       ...cors,
     };
     return new Response(null, { status: 204, headers });
+  }
+
+  // MCP HTTP server：claude CLI 通过 --mcp-config 连入，走自己的 Bearer 鉴权，
+  // 不复用 /api/* 的 AUTOPILOT_API_TOKEN，也不需要 CORS（来源是本机 claude 子进程）。
+  if (path === "/mcp") {
+    const token = getMcpToken();
+    // 防御深度：daemon 启动顺序已把 initMcpRuntime 提前到 server 之前，
+    // 但万一未来重构破坏顺序，这里也得拒绝请求 —— mcp-server.checkAuth 把空
+    // token 当成"不鉴权"，绝不能把 null token 透传过去。
+    if (!token) return error("MCP runtime not initialized", 503);
+    return handleMcpHttp(req, {
+      token,
+      getTools: getAllMcpTools,
+      serverName: "autopilot",
+      serverVersion: VERSION,
+    });
   }
 
   // Token 鉴权（仅在 /api/* 上生效，静态资源不需要）
