@@ -197,7 +197,19 @@ function parseClarifyResult(raw: string): ClarifyResult {
  */
 const _inflightRounds = new Set<string>();
 
+/** 测试用：清空进程内锁状态。 */
+export function _resetInflightForTest(): void {
+  _inflightRounds.clear();
+}
+
 export async function runClarifierRound(reqId: string): Promise<void> {
+  // 进入时 trace 锁集合状态，便于复现 race 时定位（dogfood 抓到一次 watchdog
+  // 触发后 active_question_id 被并发写，疑似锁失效，根因待复现）。
+  log.info(
+    "clarifier: req=%s 进入 runClarifierRound, inflight=[%s]",
+    reqId,
+    [..._inflightRounds].join(","),
+  );
   if (_inflightRounds.has(reqId)) {
     log.info("clarifier: req=%s 已在跑，跳过重复 trigger", reqId);
     return;
@@ -207,6 +219,7 @@ export async function runClarifierRound(reqId: string): Promise<void> {
     await _runClarifierRoundInner(reqId);
   } finally {
     _inflightRounds.delete(reqId);
+    log.info("clarifier: req=%s 释放锁，inflight=[%s]", reqId, [..._inflightRounds].join(","));
   }
 }
 
