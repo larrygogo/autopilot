@@ -140,6 +140,31 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
     // DB 不可用时跳过 C7，不影响整体检查流程
   }
 
+  // L2 / L3
+  if (opts.level >= 2) {
+    const providerCliMap: Record<string, string> = {
+      anthropic: "claude",
+      openai: "codex",
+      google: "gemini",
+    };
+
+    await Promise.all(
+      validEnabled
+        .filter((p) => providerCliMap[p.name])
+        .map(async ({ name }) => {
+          const cli = providerCliMap[name];
+          const result = await probeCliVersion(cli);
+          if (result.ok) {
+            checks.push({ id: `providers.${name}.cli`, category: "provider", status: "ok", title: `${name} CLI: ${cli} ${result.version ?? ""} ✓` });
+          } else {
+            checks.push({ id: `providers.${name}.cli`, category: "provider", status: "error", title: `${name} CLI 探测失败`, detail: result.detail, fix: { cli: result.installHint } });
+          }
+        }),
+    );
+
+    // L3 在 Task 5 补
+  }
+
   return finalize(opts, checks, startedAt);
 }
 
@@ -152,4 +177,51 @@ function finalize(opts: RunChecksOptions, checks: CheckResult[], startedAt: numb
     durationMs: Date.now() - startedAt,
     generatedAt: new Date().toISOString(),
   };
+}
+
+interface ProbeResult {
+  ok: boolean;
+  version?: string;
+  detail?: string;
+  installHint?: string;
+  loginHint?: string;
+}
+
+async function probeCliVersion(cli: string, timeoutMs = 5000): Promise<ProbeResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const proc = Bun.spawn([cli, "--version"], {
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore",
+      signal: controller.signal,
+    });
+    const exitCode = await proc.exited;
+    clearTimeout(timer);
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    if (exitCode === 0) {
+      const version = (stdout || stderr).trim().split(/\s+/).find((s) => /\d+\.\d+/.test(s));
+      return { ok: true, version };
+    }
+    return { ok: false, detail: `${cli} 退出码 ${exitCode}: ${stderr.slice(0, 300)}`, installHint: installHintFor(cli) };
+  } catch (e: unknown) {
+    clearTimeout(timer);
+    const aborted = controller.signal.aborted;
+    return {
+      ok: false,
+      detail: aborted ? `探测超时（${timeoutMs}ms）` : `${cli} 未在 PATH 中：${e instanceof Error ? e.message : String(e)}`,
+      installHint: installHintFor(cli),
+    };
+  }
+}
+
+function installHintFor(cli: string): string {
+  switch (cli) {
+    case "claude":  return "请安装 Claude Code CLI：见 https://docs.anthropic.com/en/docs/claude-code";
+    case "codex":   return "npm i -g @openai/codex";
+    case "gemini":  return "npm i -g @google/gemini-cli";
+    default:        return `请确保 ${cli} 在 PATH 中`;
+  }
 }

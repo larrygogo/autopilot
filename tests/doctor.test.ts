@@ -106,3 +106,18 @@ describe("L1 C3-C7", () => {
     expect(report.status).toBe("ok");
   });
 });
+
+describe("L2 provider CLI 探测", () => {
+  it("L2 包含 L1 全部检查", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n", "utf-8");
+    const report = await runChecks({ level: 2 });
+    expect(report.level).toBe(2);
+    expect(report.checks.find((c) => c.id === "config.exists")).toBeDefined();
+  });
+
+  it("L2 对未启用 provider 跳过 CLI 探测", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n  openai:\n    enabled: false\nagents:\n  coder:\n    provider: anthropic\n", "utf-8");
+    const report = await runChecks({ level: 2 });
+    expect(report.checks.find((c) => c.id === "providers.openai.cli")).toBeUndefined();
+  });
+});
