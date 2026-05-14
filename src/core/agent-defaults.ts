@@ -36,7 +36,7 @@ export const AGENT_DEFAULTS: Record<string, AgentDefault> = {
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     max_turns: 5,
-    permission_mode: "readonly",
+    permission_mode: "default",
     system_prompt:
       "你是代码审查员。关注正确性、可读性、边界与失败处理。" +
       "找出真问题而非格式纠错；按 critical / important / minor 分级反馈。",
@@ -45,7 +45,7 @@ export const AGENT_DEFAULTS: Record<string, AgentDefault> = {
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     max_turns: 3,
-    permission_mode: "readonly",
+    permission_mode: "default",
     system_prompt:
       "你是需求分析师。读用户的口语化描述，识别歧义和缺漏 → 用结构化提问澄清；" +
       "已经清晰的部分不要重复确认。每次输出严格 JSON。",
