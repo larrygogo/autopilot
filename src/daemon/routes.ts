@@ -61,6 +61,7 @@ import { listQuestionsByRequirement, createQuestion, getQuestionById, addReply, 
 import type { Requirement } from "../core/requirements";
 import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
 import { runClarifierRound } from "./requirement-clarifier";
+import { getRound } from "./clarifier-progress";
 
 /**
  * 向后兼容别名：T14 把 Requirement.repo_id 改名为 codebase_id 后，
@@ -1234,6 +1235,14 @@ export async function handleRequest(req: Request): Promise<Response> {
       finishClarification(id);
       const updated = getRequirementById(id);
       return json({ requirement: withRepoIdAlias(updated) });
+    }
+
+    // GET /api/requirements/:id/clarifier-round
+    const clarifierRoundMatch = path.match(/^\/api\/requirements\/([\w.\-]+)\/clarifier-round$/);
+    if (method === "GET" && clarifierRoundMatch) {
+      const id = decodeURIComponent(clarifierRoundMatch[1]);
+      if (!getRequirementById(id)) return error("requirement not found", 404);
+      return json({ round: getRound(id) ?? null });
     }
 
     // POST /api/requirements/:id/retry-clarify

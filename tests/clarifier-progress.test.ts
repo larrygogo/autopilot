@@ -307,3 +307,39 @@ describe("clarifier-progress: 集成 runClarifierRound", () => {
     expect(getRound("r1")).toBeUndefined();
   });
 });
+
+// ─── HTTP /api/requirements/:id/clarifier-round ─────────────────
+import { handleRequest } from "../src/daemon/routes";
+
+describe("HTTP GET /api/requirements/:id/clarifier-round", () => {
+  beforeEach(() => {
+    initSchema();
+    _resetForTest();
+  });
+
+  it("当前有 round → 200 { round: <state> }", async () => {
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "" });
+    startRound("r1", "P");
+
+    const res = await handleRequest(new Request("http://localhost/api/requirements/r1/clarifier-round"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { round: ClarifierRoundState | null };
+    expect(body.round?.req_id).toBe("r1");
+    expect(body.round?.phase).toBe("preparing");
+    expect(body.round?.prompt).toBe("P");
+  });
+
+  it("当前无 round → 200 { round: null }", async () => {
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "" });
+
+    const res = await handleRequest(new Request("http://localhost/api/requirements/r1/clarifier-round"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { round: ClarifierRoundState | null };
+    expect(body.round).toBeNull();
+  });
+
+  it("requirement 不存在 → 404", async () => {
+    const res = await handleRequest(new Request("http://localhost/api/requirements/nope/clarifier-round"));
+    expect(res.status).toBe(404);
+  });
+});
