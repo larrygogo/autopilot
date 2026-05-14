@@ -6,6 +6,29 @@ import { OpenAIProvider } from "./providers/openai";
 import { GoogleProvider } from "./providers/google";
 import { getWorkflow } from "../core/registry";
 import { loadGlobalAgents, loadProviders, loadConversationConfig, type ProviderConfig } from "../core/config";
+import { AGENT_DEFAULTS } from "../core/agent-defaults";
+
+/**
+ * 加载"生效"的全局 agents：内置默认 + 用户 yaml override。
+ *
+ * 用户在 config.yaml.agents.<name> 写的字段覆盖内置同名 agent 的对应字段
+ * （partial override，只覆盖写了的字段）。完全没写时使用内置默认。
+ *
+ * 解决新用户痛点：不写 yaml 也能跑——coder / reviewer / clarifier 都有合理默认。
+ */
+export function loadEffectiveGlobalAgents(): Record<string, Record<string, unknown>> {
+  const userAgents = loadGlobalAgents();
+  const result: Record<string, Record<string, unknown>> = {};
+  // 先放内置默认
+  for (const [name, def] of Object.entries(AGENT_DEFAULTS)) {
+    result[name] = { ...def };
+  }
+  // 用户字段 override（partial：保留内置中未被覆盖的字段）
+  for (const [name, cfg] of Object.entries(userAgents)) {
+    result[name] = { ...(result[name] ?? {}), ...cfg };
+  }
+  return result;
+}
 
 const PROVIDERS: Record<string, new (config: Record<string, unknown>) => BaseProvider> = {
   anthropic: AnthropicProvider,
@@ -22,7 +45,7 @@ const _cache = new Map<string, Agent>();
 export function resolveAgentConfig(
   agentName: string,
   workflowAgent: Partial<AgentConfig> | undefined,
-  globalAgents: Record<string, Record<string, unknown>> = loadGlobalAgents(),
+  globalAgents: Record<string, Record<string, unknown>> = loadEffectiveGlobalAgents(),
   providers: Record<string, ProviderConfig> = loadProviders(),
 ): AgentConfig {
   // 确定继承的全局 key：workflow 显式写 extends 则用它；
@@ -83,7 +106,7 @@ export async function runAgentOnce(
   prompt: string,
   options?: Parameters<Agent["run"]>[1],
 ): Promise<Awaited<ReturnType<Agent["run"]>>> {
-  const globalAgents = loadGlobalAgents();
+  const globalAgents = loadEffectiveGlobalAgents();
   const providers = loadProviders();
   if (!globalAgents[agentName]) {
     throw new Error(`agent "${agentName}" 未在全局 config.yaml 中定义`);
@@ -117,7 +140,7 @@ export function getAgent(agentName: string, workflowName: string): Agent {
     throw new Error(`工作流不存在：${workflowName}`);
   }
 
-  const globalAgents = loadGlobalAgents();
+  const globalAgents = loadEffectiveGlobalAgents();
   const providers = loadProviders();
   const workflowAgents = (wf.agents as Partial<AgentConfig>[] | undefined) ?? [];
   const workflowAgent = workflowAgents.find((a) => a?.name === agentName);
@@ -170,7 +193,7 @@ export function resolveChatAgentName(opts: ResolveChatAgentOpts = {}): string {
  *   - 若 workflow 提供且该工作流 agents[] 里有同名条目，则合并覆盖
  */
 export function createChatAgent(agentName: string, workflowName?: string): Agent {
-  const globalAgents = loadGlobalAgents();
+  const globalAgents = loadEffectiveGlobalAgents();
   const providers = loadProviders();
   let workflowAgent: Partial<AgentConfig> | undefined;
   if (workflowName) {

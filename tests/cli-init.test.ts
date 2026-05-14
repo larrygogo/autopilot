@@ -29,12 +29,13 @@ function runInit() {
 }
 
 describe("init 写模板", () => {
-  it("首次 init 后 config.yaml 存在且 anthropic 已启用", () => {
+  it("首次 init 后 config.yaml 存在（零配置模板）", () => {
     const r = runInit();
     expect(r.exitCode).toBe(0);
     const cfgPath = join(tmpHome, "config.yaml");
     expect(existsSync(cfgPath)).toBe(true);
-    expect(readFileSync(cfgPath, "utf-8")).toContain("default_model: claude-sonnet-4-6");
+    // 零配置模板：providers / agents 全是注释；只检查 doctor 引导
+    expect(readFileSync(cfgPath, "utf-8")).toContain("bun run dev config doctor");
   });
 
   it("二次 init 不覆盖已有 config.yaml", () => {

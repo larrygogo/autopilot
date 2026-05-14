@@ -35,6 +35,12 @@ describe("task start 前置 doctor", () => {
 
   it("顶层 doctor 别名等同 config doctor", () => {
     runCli("init");
+    // 零配置模板下 providers 段缺失；写入完整 yaml 让 L1 全过
+    writeFileSync(
+      join(tmpHome, "config.yaml"),
+      "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n",
+      "utf-8",
+    );
     const r = runCli("doctor");
     expect(r.exitCode).toBe(0);
   });

@@ -5,14 +5,12 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { PageLoader } from "@/components/PageLoader";
 
 const Workflows = lazy(() => import("./Workflows").then((m) => ({ default: m.Workflows })));
-const Agents = lazy(() => import("./Agents").then((m) => ({ default: m.Agents })));
 const Schedules = lazy(() => import("./Schedules").then((m) => ({ default: m.Schedules })));
 const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
 const ClarifierSettings = lazy(() => import("./ClarifierSettings").then((m) => ({ default: m.ClarifierSettings })));
 
 const TABS = [
   { key: "workflows", label: "工作流" },
-  { key: "agents", label: "智能体" },
   { key: "schedules", label: "定时任务" },
   { key: "general", label: "通用" },
   { key: "clarifier", label: "需求澄清" },
@@ -43,7 +41,7 @@ export function SettingsHub() {
       <header className="mb-4 border-b-[1.5px] border-foreground/30 pb-3">
         <h1 className="font-display text-2xl font-bold uppercase tracking-wider">设置 · SETTINGS</h1>
         <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground mt-1">
-          工作流 / 智能体 / 定时任务 / 通用 / 需求澄清
+          工作流 / 定时任务 / 通用 / 需求澄清
         </p>
       </header>
 
@@ -58,10 +56,9 @@ export function SettingsHub() {
 
         <Suspense fallback={<PageLoader />}>
           <TabsContent value="workflows">
-            <Workflows onJumpToAgent={() => handleChange("agents")} />
-          </TabsContent>
-          <TabsContent value="agents">
-            <Agents embedded />
+            {/* onJumpToAgent 仅在编辑器内点击 "去配置 agent" 时调；
+                agents tab 已隐藏，此处传 no-op；用户改 agent 走 yaml */}
+            <Workflows onJumpToAgent={() => { /* noop */ }} />
           </TabsContent>
           <TabsContent value="schedules">
             <Schedules
