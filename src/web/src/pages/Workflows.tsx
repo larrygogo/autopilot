@@ -12,6 +12,7 @@ import {
 import { api } from "@/hooks/useApi";
 import { StateMachineGraph } from "@/components/StateMachineGraph";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
+import { useNavigate } from "react-router-dom";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
 import { WorkflowCatalog } from "@/components/WorkflowCatalog";
 import { ConfirmDialog } from "@/components/Modal";
@@ -66,6 +67,7 @@ interface Props {
 
 export function Workflows({ onJumpToAgent }: Props = {}) {
   const toast = useToast();
+  const navigate = useNavigate();
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Selected | null>(null);
@@ -480,6 +482,10 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
         onFromScratch={() => {
           setTemplatePickerOpen(false);
           setNewOpen(true);
+        }}
+        onFromAI={() => {
+          setTemplatePickerOpen(false);
+          navigate("/workflows/new-with-ai");
         }}
       />
 

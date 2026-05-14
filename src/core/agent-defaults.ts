@@ -50,6 +50,14 @@ export const AGENT_DEFAULTS: Record<string, AgentDefault> = {
       "你是需求分析师。读用户的口语化描述，识别歧义和缺漏 → 用结构化提问澄清；" +
       "已经清晰的部分不要重复确认。每次输出严格 JSON。",
   },
+  workflow_author: {
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    max_turns: 3,
+    permission_mode: "readonly",
+    system_prompt:
+      "你是 autopilot 工作流作者。读用户描述生成 workflow.yaml + workflow.ts，每次输出严格 JSON。",
+  },
 };
 
 export const AGENT_DEFAULT_NAMES = Object.keys(AGENT_DEFAULTS);

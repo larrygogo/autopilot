@@ -1968,6 +1968,44 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json({ templates: listWorkflowTemplates() });
     }
 
+    // POST /api/workflows/author — AI 生成 workflow.yaml + ts（不落盘，返回预览）
+    if (method === "POST" && path === "/api/workflows/author") {
+      const { runWorkflowAuthor } = await import("./workflow-author");
+      const body = (await req.json().catch(() => null)) as
+        | { description?: string; prior_yaml?: string; prior_ts?: string }
+        | null;
+      if (!body || typeof body.description !== "string" || !body.description.trim()) {
+        return error("description required", 400);
+      }
+      const result = await runWorkflowAuthor({
+        description: body.description,
+        prior_yaml: typeof body.prior_yaml === "string" ? body.prior_yaml : undefined,
+        prior_ts: typeof body.prior_ts === "string" ? body.prior_ts : undefined,
+      });
+      return json(result);
+    }
+
+    // POST /api/workflows/author/save — 把 AI 生成的工作流落盘
+    if (method === "POST" && path === "/api/workflows/author/save") {
+      const body = (await req.json().catch(() => null)) as
+        | { name?: string; yaml?: string; ts?: string }
+        | null;
+      if (!body?.name || !body?.yaml || !body?.ts) {
+        return error("name / yaml / ts required", 400);
+      }
+      try {
+        const { saveAuthoredWorkflow } = await import("./workflow-author");
+        saveAuthoredWorkflow(body.name, body.yaml, body.ts);
+        const { discover } = await import("../core/registry");
+        await discover();
+        return json({ ok: true, name: body.name }, 201);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const status = msg.includes("already exists") ? 409 : msg.includes("only allows") || msg.includes("只允许") ? 400 : 500;
+        return error(msg, status);
+      }
+    }
+
     // POST /api/workflows/from-template — 从模板克隆为新工作流
     if (method === "POST" && path === "/api/workflows/from-template") {
       const body = await req.json().catch(() => null) as { template?: string; name?: string } | null;
