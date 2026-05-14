@@ -46,8 +46,9 @@ export type AutopilotEvent =
   | { type: "requirement:active-question-changed"; payload: { id: string; question_id: string | null } }
   | { type: "requirement:spec-revised"; payload: { id: string; revision_id: number } }
   | { type: "requirement:clarifier-error"; payload: { id: string; reason: string } }
-  // Provider 健康度（反应式）
+  // Provider 健康度（反应式 + 主动 CLI 探测）
   | { type: "provider:health-changed"; payload: { provider: string; healthy: boolean; reason?: string; ts: number } }
+  | { type: "provider:health-snapshot"; payload: { states: import("./provider-health").ProviderHealthState[]; ts: number } }
   // Clarifier 进度反馈（内存态，daemon 重启即清）
   | { type: "requirement:clarifier-round-update"; payload: import("../daemon/clarifier-progress").ClarifierRoundState }
   // /now 推送事件

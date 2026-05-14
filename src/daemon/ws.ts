@@ -7,6 +7,24 @@ import { getChannelsForEvent } from "./protocol";
 // WebSocket 连接管理器
 // ──────────────────────────────────────────────
 
+/**
+ * Snapshot 提供器：客户端订阅某频道时，业务模块可注册回调，
+ * 返回一条 snapshot 事件让 daemon 主动推给新订阅者。
+ *
+ * 实现 WS-only 数据流：客户端不靠 HTTP fetch 拿初始状态，
+ * 而是订阅频道 + daemon 推 snapshot + 后续推增量。
+ */
+export type SnapshotProvider = (channel: string) => AutopilotEvent | null;
+const _snapshotProviders: SnapshotProvider[] = [];
+
+export function registerSnapshotProvider(p: SnapshotProvider): void {
+  _snapshotProviders.push(p);
+}
+
+export function _resetSnapshotProvidersForTest(): void {
+  _snapshotProviders.length = 0;
+}
+
 interface WsClient {
   subscriptions: Set<string>;
 }
@@ -37,7 +55,20 @@ class WebSocketManager {
 
     switch (msg.type) {
       case "subscribe":
-        for (const ch of msg.channels) client.subscriptions.add(ch);
+        for (const ch of msg.channels) {
+          client.subscriptions.add(ch);
+          // 触发 snapshot 推送：业务模块通过 registerSnapshotProvider 注册回调
+          for (const provider of _snapshotProviders) {
+            try {
+              const snapshot = provider(ch);
+              if (snapshot) {
+                ws.send(JSON.stringify({ type: "event", event: snapshot } satisfies ServerMessage));
+              }
+            } catch {
+              // snapshot 提供器异常不应阻塞订阅
+            }
+          }
+        }
         break;
       case "unsubscribe":
         for (const ch of msg.channels) client.subscriptions.delete(ch);

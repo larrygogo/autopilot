@@ -6,7 +6,6 @@ import { PageLoader } from "@/components/PageLoader";
 
 const Workflows = lazy(() => import("./Workflows").then((m) => ({ default: m.Workflows })));
 const Agents = lazy(() => import("./Agents").then((m) => ({ default: m.Agents })));
-const Providers = lazy(() => import("./Providers").then((m) => ({ default: m.Providers })));
 const Schedules = lazy(() => import("./Schedules").then((m) => ({ default: m.Schedules })));
 const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
 const ClarifierSettings = lazy(() => import("./ClarifierSettings").then((m) => ({ default: m.ClarifierSettings })));
@@ -14,7 +13,6 @@ const ClarifierSettings = lazy(() => import("./ClarifierSettings").then((m) => (
 const TABS = [
   { key: "workflows", label: "工作流" },
   { key: "agents", label: "智能体" },
-  { key: "providers", label: "提供商" },
   { key: "schedules", label: "定时任务" },
   { key: "general", label: "通用" },
   { key: "clarifier", label: "需求澄清" },
@@ -45,7 +43,7 @@ export function SettingsHub() {
       <header className="mb-4 border-b-[1.5px] border-foreground/30 pb-3">
         <h1 className="font-display text-2xl font-bold uppercase tracking-wider">设置 · SETTINGS</h1>
         <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground mt-1">
-          工作流 / 智能体 / 提供商 / 定时任务 / 通用配置
+          工作流 / 智能体 / 定时任务 / 通用 / 需求澄清
         </p>
       </header>
 
@@ -64,9 +62,6 @@ export function SettingsHub() {
           </TabsContent>
           <TabsContent value="agents">
             <Agents embedded />
-          </TabsContent>
-          <TabsContent value="providers">
-            <Providers embedded />
           </TabsContent>
           <TabsContent value="schedules">
             <Schedules

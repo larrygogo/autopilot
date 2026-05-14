@@ -18,6 +18,7 @@ import { setWebDistDir } from "./routes";
 import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo } from "./pid";
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
 import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
+import { initProviderCliMonitor, disposeProviderCliMonitor } from "./provider-cli-monitor";
 import { runClarifierWatchdog } from "./clarifier-watchdog";
 import { initRequirementTaskBridge, disposeRequirementTaskBridge } from "./requirement-task-bridge";
 import { initMcpRuntime, disposeMcpRuntime } from "./mcp-runtime";
@@ -89,6 +90,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   initRequirementScheduler();
   // 启动 requirement-clarifier（创建需求后自动 AI 澄清）
   initRequirementClarifier();
+  // 启动 provider CLI 主动探测（5 分钟周期）
+  initProviderCliMonitor();
   // 桥接 task 状态变化 → 同步 requirement 状态
   initRequirementTaskBridge();
 
@@ -172,6 +175,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     clearInterval(prPollerTimer);
     disposeRequirementScheduler();
     disposeRequirementClarifier();
+    disposeProviderCliMonitor();
     disposeRequirementTaskBridge();
     nowAggregator.dispose();
     setNowAggregator(null);
