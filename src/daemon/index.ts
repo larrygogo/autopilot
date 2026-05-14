@@ -101,15 +101,18 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const webDistDir = join(import.meta.dir, "../../web-dist");
   setWebDistDir(webDistDir);
 
+  // 生成 MCP token + 写 mcp-config.json（必须在 startServer 之前调用：
+  // /mcp 路由用 getMcpToken() 判鉴权；如果 server 先起来、initMcpRuntime 后跑，
+  // 中间窗口 token=null → mcp-server 把空 token 当成不鉴权 → 任何本地进程
+  // 可无认证调全部 autopilot 工具，构成本地权限提升）。
+  initMcpRuntime(host, port);
+
   // 启动 HTTP + WebSocket 服务（端口被 stale socket 占用时自动重试）
   const server = await startServerWithRetry({ host, port });
 
   // 写入 PID 和监听信息
   writePid();
   writeListenInfo({ host, port });
-
-  // 生成 MCP token + 写 mcp-config.json（供 AnthropicProvider 的 --mcp-config 使用）
-  initMcpRuntime(host, port);
 
   // 重启检测：把所有 status=running_* 且 pending_question 非空的 task 标 dangling
   // —— ask_user 的 in-memory promise 在 daemon 重启时丢失，agent 永远收不到 tool result，

@@ -32,7 +32,11 @@ export interface RegisteredTool {
  * 定义一个 MCP 工具。
  *
  * 与 SDK 的 `tool(name, description, schema, handler)` 调用 shape 等价，
- * 把 zod schema 转成 JSON Schema，并暴露给 MCP server 注册。
+ * 把 zod schema 转成 JSON Schema 暴露给 MCP server。
+ *
+ * 调用 handler 前会用 zod `safeParse` 校验入参：失败时直接返回结构化错误
+ * ToolContent（而不是让 handler 拿到错 shape 抛出，被映射成 -32603 内部错误），
+ * 给 LLM 一个明确的"参数不合法 + 字段定位"提示，便于自我修正。
  */
 export function defineTool<S extends ZodRawShape>(
   name: string,
@@ -41,13 +45,28 @@ export function defineTool<S extends ZodRawShape>(
   handler: ToolHandler<z.infer<ZodObject<S>>>
 ): RegisteredTool {
   const obj = z.object(shape);
-  // zod 4 内置 toJSONSchema；剥掉顶层 $schema/additionalProperties 噪声
+  // zod 4 内置 toJSONSchema；剥掉顶层 $schema 噪声（additionalProperties: false
+  // 保留 —— 它对 LLM 是有用约束，提示不要发送 schema 外的字段）。
   const json = z.toJSONSchema(obj) as Record<string, unknown>;
   delete json["$schema"];
+
+  const wrapped: ToolHandler = async (input, extra) => {
+    const parsed = obj.safeParse(input);
+    if (!parsed.success) {
+      const detail = parsed.error.issues
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; ");
+      return {
+        content: [{ type: "text", text: `Invalid params: ${detail}` }],
+      };
+    }
+    return handler(parsed.data as z.infer<ZodObject<S>>, extra);
+  };
+
   return {
     name,
     description,
     inputSchema: json,
-    handler: handler as ToolHandler,
+    handler: wrapped,
   };
 }

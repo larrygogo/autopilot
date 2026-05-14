@@ -58,7 +58,12 @@ export function initMcpRuntime(host: string, port: number): void {
       },
     },
   };
-  writeFileSync(configPath, JSON.stringify(config, null, 2), { encoding: "utf-8" });
+  // mode 0o600：文件含 bearer token，仅 owner 可读写。Windows 上 NTFS 不强制
+  // unix mode（noop），macOS/Linux 上能有效降低本机其他用户读到 token 的风险。
+  writeFileSync(configPath, JSON.stringify(config, null, 2), {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
   currentConfigPath = configPath;
 }
 

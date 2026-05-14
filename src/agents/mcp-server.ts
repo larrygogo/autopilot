@@ -28,13 +28,6 @@ export interface McpServerOptions {
   serverVersion?: string;
 }
 
-interface JsonRpcRequest {
-  jsonrpc: "2.0";
-  id?: number | string;
-  method: string;
-  params?: Record<string, unknown>;
-}
-
 type JsonRpcResponse =
   | { jsonrpc: "2.0"; id: number | string; result: unknown }
   | { jsonrpc: "2.0"; id: number | string; error: { code: number; message: string; data?: unknown } };
@@ -53,12 +46,20 @@ function checkAuth(req: Request, token: string): boolean {
  * 处理单条 JSON-RPC 请求。
  *
  * 返回 null 表示该 RPC 是 notification（无 id），调用方应回 202。
+ * rpc 不是对象时返回 -32600 Invalid Request（id 不可知，按 spec 用 null）。
  */
 async function handleRpc(
-  rpc: JsonRpcRequest,
+  rpc: unknown,
   opts: McpServerOptions
 ): Promise<JsonRpcResponse | null> {
-  const { method, params, id } = rpc;
+  if (!rpc || typeof rpc !== "object" || Array.isArray(rpc)) {
+    // 顶层 null / 字符串 / 数字 / 数组都不是合法 JSON-RPC 对象
+    return { jsonrpc: "2.0", id: 0, error: { code: -32600, message: "Invalid Request: expected JSON-RPC object" } };
+  }
+  const r = rpc as Record<string, unknown>;
+  const method = r["method"] as string | undefined;
+  const params = r["params"] as Record<string, unknown> | undefined;
+  const id = r["id"] as number | string | undefined;
 
   // notifications：无 id，无需响应
   if (id === undefined || method?.startsWith("notifications/")) return null;
@@ -153,19 +154,25 @@ export async function handleMcpHttp(req: Request, opts: McpServerOptions): Promi
       return new Response("Invalid JSON", { status: 400 });
     }
 
-    // 支持 batch（spec 允许 array），但 claude 实测发的是单个对象
-    if (Array.isArray(body)) {
-      const responses = await Promise.all(
-        body.map((rpc) => handleRpc(rpc as JsonRpcRequest, opts))
-      );
-      const filtered = responses.filter((r): r is JsonRpcResponse => r !== null);
-      if (filtered.length === 0) return new Response(null, { status: 202 });
-      return Response.json(filtered);
-    }
+    try {
+      // 支持 batch（spec 允许 array），但 claude 实测发的是单个对象
+      if (Array.isArray(body)) {
+        const responses = await Promise.all(body.map((rpc) => handleRpc(rpc, opts)));
+        const filtered = responses.filter((r): r is JsonRpcResponse => r !== null);
+        if (filtered.length === 0) return new Response(null, { status: 202 });
+        return Response.json(filtered);
+      }
 
-    const response = await handleRpc(body as JsonRpcRequest, opts);
-    if (response === null) return new Response(null, { status: 202 });
-    return Response.json(response);
+      const response = await handleRpc(body, opts);
+      if (response === null) return new Response(null, { status: 202 });
+      return Response.json(response);
+    } catch (e: unknown) {
+      // 兜底：handleRpc 不应再抛（已加 type-guard），但万一 handler 内部捕获遗漏，
+      // 返回 -32603 而不是让 Bun.serve 兜底为 500
+      const msg = e instanceof Error ? e.message : String(e);
+      log.error("handleMcpHttp dispatch failed: %s", msg);
+      return Response.json({ jsonrpc: "2.0", id: 0, error: { code: -32603, message: msg } });
+    }
   }
 
   return new Response("Method Not Allowed", { status: 405 });

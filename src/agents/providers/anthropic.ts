@@ -222,7 +222,14 @@ async function spawnClaudeAndConsume(opts: {
   const killOnAbort = () => {
     try { proc.kill(); } catch { /* 已退出 */ }
   };
-  abort.signal.addEventListener("abort", killOnAbort);
+  // 如果在我们注册 listener 之前 abort 信号已经触发（opts.signal 进来就 aborted、
+  // 或 timeout=0 类极端情况），addEventListener 不会重放历史事件 → 子进程会跑飞
+  // 永远不被 kill。所以注册 listener 之前先同步检查一次。
+  if (abort.signal.aborted) {
+    killOnAbort();
+  } else {
+    abort.signal.addEventListener("abort", killOnAbort);
+  }
 
   try {
     // 写入 prompt（子进程可能提前退出导致写入失败，吞掉异常即可）

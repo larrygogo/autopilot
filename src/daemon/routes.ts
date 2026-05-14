@@ -376,7 +376,11 @@ export async function handleRequest(req: Request): Promise<Response> {
   // MCP HTTP server：claude CLI 通过 --mcp-config 连入，走自己的 Bearer 鉴权，
   // 不复用 /api/* 的 AUTOPILOT_API_TOKEN，也不需要 CORS（来源是本机 claude 子进程）。
   if (path === "/mcp") {
-    const token = getMcpToken() ?? "";
+    const token = getMcpToken();
+    // 防御深度：daemon 启动顺序已把 initMcpRuntime 提前到 server 之前，
+    // 但万一未来重构破坏顺序，这里也得拒绝请求 —— mcp-server.checkAuth 把空
+    // token 当成"不鉴权"，绝不能把 null token 透传过去。
+    if (!token) return error("MCP runtime not initialized", 503);
     return handleMcpHttp(req, {
       token,
       getTools: getAllMcpTools,
