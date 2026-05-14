@@ -91,6 +91,8 @@ export const api = {
     request<{ phase: string; content: string }>(
       `/api/tasks/${id}/phase-logs/${phase}${tail ? `?tail=${tail}` : ""}`,
     ),
+  listTaskPhaseEvents: (id: string) =>
+    request<{ events: TaskPhaseEvent[] }>(`/api/tasks/${id}/phase-events`).then((r) => r.events),
   getDaemonLog: (tail = 500) =>
     request<{ path: string | null; content: string }>(`/api/daemon/log?tail=${tail}`),
   listAgentCalls: (id: string) =>
@@ -540,6 +542,15 @@ export interface AuthoredWorkflow {
   yaml: string;
   ts: string;
   warnings: string[];
+}
+
+export interface TaskPhaseEvent {
+  id: number;
+  task_id: string;
+  phase: string;
+  status: "running" | "done" | "awaiting" | "failed";
+  started_at: number;
+  ended_at: number | null;
 }
 
 export interface DoctorCheck {
