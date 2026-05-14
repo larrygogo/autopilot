@@ -583,16 +583,83 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     if (method === "GET" && path === "/api/setup/status") {
       const { runChecks } = await import("../core/doctor");
-      const { getDb } = await import("../core/db");
+      const { getKv } = await import("../core/db");
       const report = await runChecks({ level: 1 });
       let dismissed = false;
       try {
-        const row = getDb().prepare("SELECT value FROM kv WHERE key = ?").get("setup.dismissed") as { value: string } | undefined;
-        dismissed = row?.value === "1";
+        dismissed = getKv("setup.dismissed") === "1";
       } catch {
         // kv 表未建（迁移未跑）时跳过 dismissed 读取
       }
       return json({ ...report, setupDismissed: dismissed });
+    }
+
+    if (method === "POST" && path === "/api/setup/providers") {
+      const { saveProvider, PROVIDER_NAMES } = await import("../core/config");
+      const { runChecks } = await import("../core/doctor");
+      const body = (await req.json().catch(() => null)) as { providers?: Record<string, unknown> } | null;
+      if (!body || typeof body.providers !== "object" || body.providers === null || Array.isArray(body.providers)) {
+        return error("providers must be an object", 400);
+      }
+      for (const [name, cfg] of Object.entries(body.providers)) {
+        if (!(PROVIDER_NAMES as readonly string[]).includes(name)) continue;
+        if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
+          saveProvider(name as typeof PROVIDER_NAMES[number], cfg as Record<string, unknown>);
+        }
+      }
+      const report = await runChecks({ level: 1 });
+      return json({ report });
+    }
+
+    if (method === "POST" && path === "/api/setup/agents") {
+      const { saveAgent } = await import("../core/config");
+      const { runChecks } = await import("../core/doctor");
+      const body = (await req.json().catch(() => null)) as { agents?: Record<string, unknown> } | null;
+      if (!body || typeof body.agents !== "object" || body.agents === null || Array.isArray(body.agents)) {
+        return error("agents must be an object", 400);
+      }
+      for (const [name, cfg] of Object.entries(body.agents)) {
+        if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
+          saveAgent(name, cfg as Record<string, unknown>);
+        }
+      }
+      const report = await runChecks({ level: 1 });
+      return json({ report });
+    }
+
+    if (method === "POST" && path === "/api/setup/codebases") {
+      const { createCodebase, nextCodebaseId } = await import("../core/codebases");
+      const { listProjects, createProject, nextProjectId } = await import("../core/projects");
+      const body = (await req.json().catch(() => null)) as
+        | { name?: string; path?: string; project_id?: string }
+        | null;
+      if (!body?.name || !body?.path) {
+        return error("name and path required", 400);
+      }
+      // 若未指定 project_id：用首个 project，没有则自动建一个 default
+      let projectId = body.project_id;
+      if (!projectId) {
+        const projects = listProjects();
+        if (projects.length > 0) {
+          projectId = projects[0]!.id;
+        } else {
+          const p = createProject({ id: nextProjectId(), name: "default" });
+          projectId = p.id;
+        }
+      }
+      const cb = createCodebase({
+        id: nextCodebaseId(),
+        project_id: projectId,
+        alias: body.name,
+        path: body.path,
+      });
+      return json({ codebase: cb });
+    }
+
+    if (method === "POST" && path === "/api/setup/dismiss") {
+      const { setKv } = await import("../core/db");
+      setKv("setup.dismissed", "1");
+      return json({ ok: true });
     }
 
     // ─────────── 文件系统浏览 ───────────
