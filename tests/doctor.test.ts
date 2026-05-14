@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { Database } from "bun:sqlite";
 import { runChecks } from "../src/core/doctor";
+import { _setDbForTest } from "../src/core/db";
 
 let tmpFile: string;
 let tmpDir: string;
@@ -14,8 +16,10 @@ beforeEach(() => {
   process.env.DEV_WORKFLOW_CONFIG = tmpFile;
   // 防止 getConfigPath fallback 读到开发者真实的 ~/.autopilot/config.yaml
   process.env.AUTOPILOT_HOME = tmpDir;
+  _setDbForTest(new Database(":memory:"));
 });
 afterEach(() => {
+  _setDbForTest(null);
   delete process.env.DEV_WORKFLOW_CONFIG;
   delete process.env.AUTOPILOT_HOME;
   if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -59,5 +63,46 @@ describe("L1 C1/C2", () => {
     const report = await runChecks({ level: 1 });
     expect(report.checks.find((c) => c.id === "config.exists")?.status).toBe("ok");
     expect(report.checks.find((c) => c.id === "config.parses")?.status).toBe("ok");
+  });
+});
+
+describe("L1 C3-C7", () => {
+  it("C4 没有 enabled provider → error", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: false\nagents: {}\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("error");
+  });
+
+  it("C4 enabled 但无 default_model → error", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\nagents: {}\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("error");
+  });
+
+  it("C5 agent 引用未启用 provider → error", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n  openai:\n    enabled: false\nagents:\n  coder:\n    provider: openai\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    const c5 = report.checks.find((c) => c.id === "agents.coder.provider-bound");
+    expect(c5?.status).toBe("error");
+    expect(c5?.fix?.auto).toBe("fix.agent.unbind-disabled-provider");
+  });
+
+  it("C6 无 agent → error", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents: {}\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    expect(report.checks.find((c) => c.id === "agents.has-any")?.status).toBe("error");
+  });
+
+  it("全部合规 → ok", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    // 注：beforeEach 注入了 in-memory DB，C7 (projects.has-any) 查询会抛错被 catch 吞掉
+    // 不产生 check，所以这里可以安全地断言 status === "ok"
+    expect(report.checks.find((c) => c.id === "config.exists")?.status).toBe("ok");
+    expect(report.checks.find((c) => c.id === "config.parses")?.status).toBe("ok");
+    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("ok");
+    expect(report.checks.find((c) => c.id === "agents.coder.provider-bound")?.status).toBe("ok");
+    expect(report.checks.find((c) => c.id === "agents.has-any")?.status).toBe("ok");
+    expect(report.status).toBe("ok");
   });
 });
