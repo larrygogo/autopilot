@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
 import { TaskProgressCard } from "@/components/TaskProgressCard";
+import { TaskOutcomeCard } from "@/components/TaskOutcomeCard";
 import { TaskPhaseTimeline } from "@/components/TaskPhaseTimeline";
 import { useTaskPhaseEvents } from "@/hooks/useTaskPhaseEvents";
 import { cn } from "@/lib/utils";
@@ -275,6 +276,15 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
           </div>
         )}
       </div>
+
+      {isTerminal(task.status, graph?.terminalStates) && (
+        <TaskOutcomeCard
+          taskId={task.id}
+          reloadKey={task.status}
+          requirementId={(task as { requirement_id?: string }).requirement_id ?? null}
+          workflow={task.workflow}
+        />
+      )}
 
       {/* 任务状态摘要（当前阶段 / 耗时 / 失败原因） */}
       <TaskProgressCard taskId={taskId} showDetailLink={false} showActions={false} />
