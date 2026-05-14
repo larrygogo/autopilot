@@ -1893,6 +1893,14 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json(getSubTasks(subtasksMatch));
     }
 
+    // GET /api/tasks/:id/phase-events
+    const phaseEventsMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/phase-events$/);
+    if (method === "GET" && phaseEventsMatch) {
+      const { listTaskPhaseEvents } = await import("../core/db");
+      const events = listTaskPhaseEvents(phaseEventsMatch);
+      return json({ events });
+    }
+
     // ──────────────────────────────────────────────
     // 对话（chat）API
     // ──────────────────────────────────────────────
