@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useToast } from "@/components/Toast";
-import { PHASE_LABEL } from "@/lib/workflow-labels";
+import { pickPhaseLabel } from "@/lib/workflow-labels";
 
 // task.status 通常是 "running_<phase>" / "pending_<phase>" / "<phase>_complete" / "cancelled" / "done" / "failed_<phase>"
 function parsePhaseFromStatus(status: string): { kind: "running" | "pending" | "complete" | "terminal"; phase: string | null } {
@@ -65,6 +65,8 @@ export function TaskProgressCard({
   const [cancelling, setCancelling] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [now, setNow] = useState(Date.now());
+  // 当前任务所属工作流的 phase 定义（按 name 索引），用于显示 phase.label
+  const [phasesByName, setPhasesByName] = useState<Map<string, { name: string; label?: string }>>(new Map());
 
   const refresh = useCallback(async () => {
     try {
@@ -99,11 +101,45 @@ export function TaskProgressCard({
     return () => clearInterval(t);
   }, [task]);
 
+  // task.workflow 拿到后拉一次工作流定义，索引 phases 给 label 显示用
+  useEffect(() => {
+    if (!task?.workflow) return;
+    let cancelled = false;
+    api.getWorkflow(task.workflow)
+      .then((wf) => {
+        if (cancelled) return;
+        const map = new Map<string, { name: string; label?: string }>();
+        const walk = (list: unknown[]): void => {
+          for (const p of list) {
+            if (!p || typeof p !== "object") continue;
+            const obj = p as Record<string, unknown>;
+            if (obj.parallel && typeof obj.parallel === "object") {
+              const par = obj.parallel as Record<string, unknown>;
+              if (Array.isArray(par.phases)) walk(par.phases);
+            } else if (typeof obj.name === "string") {
+              map.set(obj.name, {
+                name: obj.name,
+                label: typeof obj.label === "string" ? obj.label : undefined,
+              });
+            }
+          }
+        };
+        walk(Array.isArray(wf.phases) ? wf.phases : []);
+        setPhasesByName(map);
+      })
+      .catch(() => { /* 静默：fallback 到原 name 显示 */ });
+    return () => { cancelled = true; };
+  }, [task?.workflow]);
+
   if (!task) return null;
 
   const parsed = parsePhaseFromStatus(task.status);
   const phaseName = parsed.phase;
-  const phaseLabel = phaseName ? (PHASE_LABEL[phaseName] ?? phaseName) : null;
+  // 从工作流定义里查当前 phase 的 label；没拿到就显示原 name
+  const phaseDef = phaseName ? (phasesByName.get(phaseName) ?? null) : null;
+  const phaseLabel = phaseName
+    ? pickPhaseLabel({ name: phaseName, label: phaseDef?.label })
+    : null;
   const isDangling = !!task.dangling;
   const isFailed = task.status.startsWith("failed_") || (task.status === "cancelled" && recentError);
   const isCancelled = task.status === "cancelled" && !recentError;
