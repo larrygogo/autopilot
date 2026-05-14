@@ -162,6 +162,10 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         </div>
       </Card>
 
+      {/* 桌面通知 */}
+      <DesktopNotifyCard />
+
+
       {status && (
         <Card className="mb-4 p-4">
           <h3 className="mb-3 text-sm font-semibold">Daemon 信息</h3>
@@ -369,6 +373,59 @@ function formatUptime(s: number): string {
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
+/**
+ * 桌面通知开关卡。
+ * - 检测 Notification.permission 状态（granted / denied / default）
+ * - default 时按钮可点击触发 requestPermission()
+ * - denied 时提示用户去浏览器设置改
+ * - granted 时显示"已启用"
+ */
+function DesktopNotifyCard(): React.ReactElement {
+  const toast = useToast();
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
+    typeof Notification !== "undefined" ? Notification.permission : "unsupported",
+  );
+
+  async function enable() {
+    if (typeof Notification === "undefined") return;
+    try {
+      const result = await Notification.requestPermission();
+      setPermission(result);
+      if (result === "granted") toast.success("桌面通知已启用");
+      else if (result === "denied") toast.error("桌面通知被拒绝", "请在浏览器地址栏权限设置中放行");
+    } catch (e: unknown) {
+      toast.error("启用失败", (e as Error)?.message ?? String(e));
+    }
+  }
+
+  return (
+    <Card className="mb-4 p-4">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold">桌面通知</h3>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          tab 切到后台时，有新的"待你处理"事项弹桌面通知。仅本机生效。
+        </p>
+      </div>
+      {permission === "unsupported" && (
+        <p className="text-sm text-muted-foreground">当前浏览器不支持桌面通知。</p>
+      )}
+      {permission === "granted" && (
+        <p className="font-mono text-xs uppercase tracking-[0.12em] text-success">✓ 已启用</p>
+      )}
+      {permission === "denied" && (
+        <p className="text-sm text-muted-foreground">
+          通知已被浏览器拒绝。请在地址栏权限设置中放行，再刷新页面。
+        </p>
+      )}
+      {permission === "default" && (
+        <Button size="sm" onClick={enable} className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]">
+          启用桌面通知
+        </Button>
+      )}
+    </Card>
+  );
 }
 
 const CONFIG_PLACEHOLDER = `# 全局配置。仅存放跨工作流共享的基础设施（providers / agents）；

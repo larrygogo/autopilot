@@ -1,4 +1,7 @@
-import React, { lazy, Suspense, useEffect, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useNowCards } from "./hooks/useNowCards";
+import { countActiveCards } from "./lib/active-cards";
+import { useDesktopNotify } from "./hooks/useDesktopNotify";
 import {
   Routes,
   Route,
@@ -96,6 +99,9 @@ function AppInner() {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const { state: wsState, subscribe } = useWebSocket();
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
+  const { cards: nowCards } = useNowCards();
+  const activeCount = useMemo(() => countActiveCards(nowCards), [nowCards]);
+  useDesktopNotify(nowCards);
 
   // 路由切换时关闭手机抽屉
   useEffect(() => {
@@ -113,6 +119,12 @@ function AppInner() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // tab title 加未读数前缀
+  useEffect(() => {
+    const base = "autopilot";
+    document.title = activeCount > 0 ? `(${activeCount}) ${base}` : base;
+  }, [activeCount]);
+
   const headerTitle = titleForPath(location.pathname);
   const isChatRoute = location.pathname.startsWith("/chat");
 
@@ -120,12 +132,12 @@ function AppInner() {
     <TooltipProvider delayDuration={150}>
       <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
         <aside className="hidden w-60 shrink-0 flex-col border-r-[1.5px] border-foreground/30 bg-sidebar text-sidebar-foreground lg:flex">
-          <SidebarContent wsState={wsState} />
+          <SidebarContent wsState={wsState} activeCount={activeCount} />
         </aside>
 
         <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
           <SheetContent side="left" className="w-64 bg-sidebar p-0 text-sidebar-foreground">
-            <SidebarContent wsState={wsState} />
+            <SidebarContent wsState={wsState} activeCount={activeCount} />
           </SheetContent>
         </Sheet>
 
@@ -252,8 +264,10 @@ function ProjectDetailRoute() {
 
 function SidebarContent({
   wsState,
+  activeCount = 0,
 }: {
   wsState: "connected" | "connecting" | "disconnected";
+  activeCount?: number;
 }) {
   const wsColor =
     wsState === "connected"
@@ -280,7 +294,7 @@ function SidebarContent({
       </div>
 
       <nav className="flex-1 space-y-5 overflow-y-auto scrollbar-thin p-3">
-        <NavGroup items={MAIN_NAV} />
+        <NavGroup items={MAIN_NAV} badges={{ "/now": activeCount }} />
       </nav>
 
       <div className="border-t border-dashed border-foreground/30" />
@@ -293,10 +307,12 @@ function SidebarContent({
   );
 }
 
-function NavGroup({ items }: { items: NavItem[] }) {
+function NavGroup({ items, badges }: { items: NavItem[]; badges?: Record<string, number> }) {
   return (
     <ul className="space-y-0">
-      {items.map((item) => (
+      {items.map((item) => {
+        const badgeCount = badges?.[item.path] ?? 0;
+        return (
         <li key={item.path}>
           <NavLink
             to={item.path}
@@ -315,12 +331,21 @@ function NavGroup({ items }: { items: NavItem[] }) {
                 <item.icon
                   className={cn("h-4 w-4 shrink-0", isActive ? "text-accent" : "text-foreground/60")}
                 />
-                <span>{item.label}</span>
+                <span className="flex-1">{item.label}</span>
+                {badgeCount > 0 && (
+                  <span
+                    className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-600 px-1 font-mono text-[10px] font-bold leading-none text-white"
+                    aria-label={`${badgeCount} 件待处理`}
+                  >
+                    {badgeCount > 99 ? "99+" : badgeCount}
+                  </span>
+                )}
               </>
             )}
           </NavLink>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }
