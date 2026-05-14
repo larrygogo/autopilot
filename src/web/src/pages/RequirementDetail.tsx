@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2 } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Codebase, type ProviderItem } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Codebase, type ProviderItem, type ClarifierRoundState } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -309,6 +309,89 @@ function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode 
   );
 }
 
+const PHASE_LABEL: Record<ClarifierRoundState["phase"], string> = {
+  preparing: "准备 prompt",
+  "calling-llm": "调用 LLM 中",
+  parsing: "解析返回（重试中）",
+  writing: "写入 spec / 问题",
+  done: "完成",
+  aborted: "已中止",
+  errored: "出错",
+};
+
+const ACTIVE_PHASES = new Set<ClarifierRoundState["phase"]>([
+  "preparing",
+  "calling-llm",
+  "parsing",
+  "writing",
+]);
+
+function ClarifierProgressCard({
+  round,
+  elapsedSec,
+  traceOpen,
+  onToggleTrace,
+}: {
+  round: ClarifierRoundState;
+  elapsedSec: number;
+  traceOpen: boolean;
+  onToggleTrace: () => void;
+}): React.ReactNode {
+  const attemptLabel = round.attempt === 0 ? "第 1 次" : "第 2 次（重试）";
+  return (
+    <Card className="mb-6 p-5">
+      <div className="flex items-center gap-3">
+        <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            AI 正在思考…
+          </div>
+          <div className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80">
+            {attemptLabel} LLM 调用 · 阶段：{PHASE_LABEL[round.phase]}
+          </div>
+        </div>
+        <div className="font-mono text-xs tabular-nums text-muted-foreground shrink-0">
+          已用 {elapsedSec}s
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onToggleTrace}
+        className="mt-3 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground hover:text-accent"
+      >
+        <ChevronRight className={cn("h-3 w-3 transition-transform", traceOpen && "rotate-90")} />
+        技术细节
+      </button>
+
+      {traceOpen && (
+        <div className="mt-3 space-y-3">
+          {round.last_parse_error && (
+            <div className="border-[1.5px] border-l-4 border-foreground/30 border-l-destructive bg-card px-3 py-2 rounded-none">
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-destructive mb-1">
+                上次解析失败
+              </p>
+              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground">
+                {round.last_parse_error}
+              </pre>
+            </div>
+          )}
+          {round.prompt && (
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-1">
+                本轮 Prompt
+              </p>
+              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground bg-muted/20 p-2 max-h-[400px] overflow-y-auto rounded-none border border-dashed border-foreground/25">
+                {round.prompt}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function RequirementDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -341,16 +424,20 @@ export function RequirementDetail() {
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [retryingClarify, setRetryingClarify] = useState(false);
+  const [round, setRound] = useState<ClarifierRoundState | null>(null);
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [elapsedSec, setElapsedSec] = useState(0);
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
     if (!opts.silent) setLoading(true);
     try {
-      const [data, repoList, sub, qs] = await Promise.all([
+      const [data, repoList, sub, qs, rd] = await Promise.all([
         api.getRequirement(id),
         api.listCodebases(),
         api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
         api.listQuestions(id).catch(() => [] as Question[]),
+        api.getClarifierRound(id).catch(() => null),
       ]);
       setReq(data.requirement);
       setFeedbacks(data.feedbacks);
@@ -359,6 +446,7 @@ export function RequirementDetail() {
       setRepos(repoList);
       setSubPrs(sub);
       setQuestions(qs);
+      setRound(rd);
     } catch (e: unknown) {
       if (!opts.silent) toast.error("加载失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -374,7 +462,33 @@ export function RequirementDetail() {
   // （不触发 loading 态，避免输入框被卸载导致 IME 输入中断）
   useEffect(() => {
     if (!id) return;
-    return subscribe("requirement:*", (event: { type: string; payload?: { id?: string } }) => {
+    return subscribe("requirement:*", (event: { type: string; payload?: { id?: string; req_id?: string; phase?: ClarifierRoundState["phase"] } & Partial<ClarifierRoundState> }) => {
+      if (event.type === "requirement:clarifier-round-update") {
+        const payload = event.payload as {
+          req_id?: string;
+          started_at?: number;
+          phase?: ClarifierRoundState["phase"];
+          attempt?: 0 | 1;
+          prompt?: string | null;
+          last_parse_error?: string | null;
+        } | undefined;
+        if (!payload || payload.req_id !== id) return;
+        const phase = payload.phase;
+        if (!phase || typeof payload.started_at !== "number") return; // defensive: 防 NaN / 缺字段
+        if (phase === "done" || phase === "aborted" || phase === "errored") {
+          setRound(null);
+        } else {
+          setRound({
+            req_id: payload.req_id!,
+            started_at: payload.started_at,
+            phase,
+            attempt: payload.attempt ?? 0,
+            prompt: payload.prompt ?? null,
+            last_parse_error: payload.last_parse_error ?? null,
+          });
+        }
+        return;
+      }
       const isForThis = event.payload?.id === id;
       if (!isForThis) return;
       if (
@@ -389,6 +503,29 @@ export function RequirementDetail() {
       }
     });
   }, [id, subscribe, refresh]);
+
+  // 本地 1s tick 计时器：基于 round.started_at 推导已用秒数，
+  // 避免依赖 WS 高频推送 elapsed 字段。
+  useEffect(() => {
+    if (!round) {
+      setElapsedSec(0);
+      return;
+    }
+    setElapsedSec(Math.floor((Date.now() - round.started_at) / 1000));
+    const t = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - round.started_at) / 1000));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [round]);
+
+  // WS 重连补拉 round（spec §5 边界）：
+  // 断连期间可能丢 round-update 事件，连接恢复时主动 fetch 一次对齐。
+  // 首次挂载时 wsState 通常是 "connecting"，不会立即触发；初次 round fetch 走 refresh() 路径。
+  useEffect(() => {
+    if (wsState !== "connected") return;
+    if (!id) return;
+    api.getClarifierRound(id).then(setRound).catch(() => undefined);
+  }, [wsState, id]);
 
   useEffect(() => {
     if (!req?.project_id) { setProject(null); setProjectCodebases([]); return; }
@@ -835,10 +972,22 @@ export function RequirementDetail() {
         </Card>
       )}
 
-      {/* AI 正在生成澄清问题（clarifying 且暂无问题、且没出错时显示）。
-          加 [重试] 按钮兜底：daemon 重启 / WS 断连导致 clarifier-error 事件丢失时，
+      {/* AI 进度卡：clarifier 单轮正在跑（preparing / calling-llm / parsing / writing）。
+          替换原静态 spinner，给用户实时反馈阶段 + 耗时 + 可折叠 prompt 全文。 */}
+      {!req.clarifier_error && req.status === "clarifying" && round && ACTIVE_PHASES.has(round.phase) && (
+        <ClarifierProgressCard
+          round={round}
+          elapsedSec={elapsedSec}
+          traceOpen={traceOpen}
+          onToggleTrace={() => setTraceOpen((v) => !v)}
+        />
+      )}
+
+      {/* Idle 兜底（round=null 但仍 clarifying 且暂无问题、没出错时显示）。
+          覆盖场景：daemon 刚重启 / WS 断连未补拉 / 本会话首次进入但还没收到 round-update 事件。
+          [重试] 按钮兜底：daemon 重启 / WS 断连导致 clarifier-error 事件丢失时，
           用户能主动触发 retry-clarify 而不是干等 spinner。 */}
-      {!req.clarifier_error && req.status === "clarifying" && questions.length === 0 && (
+      {!req.clarifier_error && req.status === "clarifying" && !round && questions.length === 0 && (
         <Card className="mb-6 p-5">
           <div className="flex items-center gap-3">
             <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />

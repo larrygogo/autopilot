@@ -19,6 +19,7 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/codebases\/[\w.\-]+\/rediscover-submodules$/,
   /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
   /^\/api\/requirements\/[\w.\-]+\/spec-revisions$/,
+  /^\/api\/requirements\/[\w.\-]+\/clarifier-round$/,
   // 顶层 collection endpoint（list/create，不匹配 /:id 详情）
   /^\/api\/providers(\?.*)?$/,
   /^\/api\/agents(\?.*)?$/,
@@ -421,6 +422,10 @@ export const api = {
   listSpecRevisions: (id: string) =>
     request<{ revisions: SpecRevision[] }>(`/api/requirements/${id}/spec-revisions`).then((r) => r.revisions),
 
+  getClarifierRound: (id: string) =>
+    request<{ round: ClarifierRoundState | null }>(`/api/requirements/${encodeURIComponent(id)}/clarifier-round`)
+      .then((r) => r.round),
+
   // Questions（评论线程）
   listQuestions: (reqId: string) =>
     request<{ questions: Question[] }>(`/api/requirements/${encodeURIComponent(reqId)}/questions`)
@@ -642,6 +647,15 @@ export interface SpecRevision {
   source: "clarifier" | "user-edit" | "system";
   triggered_by_question_id: string | null;
   created_at: number;
+}
+
+export interface ClarifierRoundState {
+  req_id: string;
+  started_at: number;
+  phase: "preparing" | "calling-llm" | "parsing" | "writing" | "done" | "aborted" | "errored";
+  attempt: 0 | 1;
+  prompt: string | null;
+  last_parse_error: string | null;
 }
 
 export interface RediscoverSubmodulesResult {
