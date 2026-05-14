@@ -524,7 +524,7 @@ export function RequirementDetail() {
   useEffect(() => {
     if (wsState !== "connected") return;
     if (!id) return;
-    api.getClarifierRound(id).catch(() => null).then(setRound);
+    api.getClarifierRound(id).then(setRound).catch(() => undefined);
   }, [wsState, id]);
 
   useEffect(() => {
