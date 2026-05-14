@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SetupProgress } from "@/components/SetupProgress";
 import { FolderPicker } from "@/components/FolderPicker";
+import { ModelCombobox } from "@/components/ModelCombobox";
 
 type ProviderName = "anthropic" | "openai" | "google";
 const ALL_PROVIDERS: { name: ProviderName; defaultModel: string; loginHint: string }[] = [
@@ -29,6 +30,10 @@ export function Setup() {
   const [models, setModels] = useState<Record<ProviderName, string>>({
     anthropic: "claude-sonnet-4-6", openai: "gpt-5", google: "gemini-2.5-pro",
   });
+  // 每个 provider 的可选 model 列表（catalog）
+  const [modelCatalogs, setModelCatalogs] = useState<Record<ProviderName, string[]>>({
+    anthropic: [], openai: [], google: [],
+  });
 
   const [agentName, setAgentName] = useState("coder");
   const [agentProvider, setAgentProvider] = useState<ProviderName>("anthropic");
@@ -39,6 +44,12 @@ export function Setup() {
 
   useEffect(() => {
     api.setupStatus().then(setReport).catch(() => {});
+    // 并发拉 3 个 provider 的 model catalog；失败 → 空列表（用户仍可手输）
+    for (const p of ALL_PROVIDERS) {
+      api.getProviderModels(p.name)
+        .then((r) => setModelCatalogs((m) => ({ ...m, [p.name]: r.models })))
+        .catch(() => {});
+    }
   }, []);
 
   async function submitStep1() {
@@ -125,10 +136,12 @@ export function Setup() {
                 id={`pv-${p.name}`}
               />
               <Label htmlFor={`pv-${p.name}`} className="flex-1 font-mono">{p.name}</Label>
-              <Input
-                className="w-56 font-mono"
+              <ModelCombobox
+                className="w-56"
                 value={models[p.name]}
-                onChange={(e) => setModels((m) => ({ ...m, [p.name]: e.target.value }))}
+                onChange={(v) => setModels((m) => ({ ...m, [p.name]: v ?? "" }))}
+                options={modelCatalogs[p.name]}
+                placeholder={p.defaultModel}
                 disabled={!enabledProviders[p.name]}
               />
             </div>
