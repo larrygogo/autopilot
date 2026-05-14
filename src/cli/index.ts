@@ -11,7 +11,8 @@ import { discover } from "../core/registry";
 import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
 import { loadDaemonConfig } from "../core/config";
 import { registerWorkflowCommands } from "./workflow";
-import { registerConfigCommands } from "./config";
+import { registerConfigCommands, printReport as printDoctorReport } from "./config";
+import { runChecks as runDoctorChecks } from "../core/doctor";
 import {
   readPid,
   isProcessAlive,
@@ -415,6 +416,18 @@ task
   .option("--repo <alias>", "绑定仓库别名（用于 req_dev 等需要仓库的工作流）")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
   .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
+    try {
+      const preflight = await runDoctorChecks({ level: 2 });
+      if (preflight.status === "error") {
+        console.error("配置不就绪，请先修复：");
+        printDoctorReport(preflight);
+        console.error("\n或运行：bun run dev config doctor --fix");
+        process.exit(2);
+      }
+    } catch (e: unknown) {
+      console.error(`doctor 探测失败：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(3);
+    }
     const client = getClient(opts);
     await ensureDaemon(client);
 
@@ -587,6 +600,20 @@ registerWorkflowCommands(program, {
 });
 
 registerConfigCommands(program);
+
+program
+  .command("doctor")
+  .description("config doctor 的顶层别名")
+  .option("--probe", "包含 L2 + L3 探测")
+  .option("--json", "JSON 输出")
+  .option("--fix", "交互式修复")
+  .action(async (opts: { probe?: boolean; json?: boolean; fix?: boolean }) => {
+    const args = ["config", "doctor"];
+    if (opts.probe) args.push("--probe");
+    if (opts.json) args.push("--json");
+    if (opts.fix) args.push("--fix");
+    await program.parseAsync(args, { from: "user" });
+  });
 
 // ──────────────────────────────────────────────
 // chat — 对话
@@ -857,6 +884,18 @@ program
   .option("--repo <alias>", "绑定仓库别名")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
   .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
+    try {
+      const preflight = await runDoctorChecks({ level: 2 });
+      if (preflight.status === "error") {
+        console.error("配置不就绪，请先修复：");
+        printDoctorReport(preflight);
+        console.error("\n或运行：bun run dev config doctor --fix");
+        process.exit(2);
+      }
+    } catch (e: unknown) {
+      console.error(`doctor 探测失败：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(3);
+    }
     const client = getClient(opts);
     await ensureDaemon(client);
 
