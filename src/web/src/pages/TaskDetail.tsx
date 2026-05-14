@@ -1,10 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Copy, FolderTree, FileText, Bot, History, Radio, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2 } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Copy, FolderTree, FileText, Bot, History, Radio, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2, MousePointerClick } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LogTimeline } from "@/components/LogTimeline";
-import { StateMachineGraph } from "@/components/StateMachineGraph";
-import { PhasePipeline } from "@/components/PhasePipeline";
+import { PhasePipeline, type PhasePipelineRunStatus } from "@/components/PhasePipeline";
+import { PhaseDetailDrawer, type DrawerPhaseInfo, type PhaseRunStatus } from "@/components/PhaseDetailDrawer";
 import { WorkspaceBrowser } from "@/components/WorkspaceBrowser";
 import { PhaseLogsViewer } from "@/components/PhaseLogsViewer";
 import { AgentCallsViewer } from "@/components/AgentCallsViewer";
@@ -40,6 +40,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
   const [graph, setGraph] = useState<any>(null);
   const [workflowDetail, setWorkflowDetail] = useState<any>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
+  const [drawerPhase, setDrawerPhase] = useState<string | null>(null);
   const [liveLogs, setLiveLogs] = useState<string[]>([]);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -157,6 +158,62 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
   const gatePhaseDef = awaitingPhase
     ? (workflowDetail?.phases as any[] | undefined)?.find((p) => p?.name === awaitingPhase)
     : null;
+
+  // 从 transition 日志推导每个 phase 的运行状态，喂给 PhasePipeline 显示角标
+  const phaseRunStatuses = useMemo<Record<string, PhasePipelineRunStatus>>(() => {
+    const m: Record<string, PhasePipelineRunStatus> = {};
+    for (const l of logs as Array<{ to_status?: string }>) {
+      const to = l?.to_status;
+      if (!to) continue;
+      if (to.startsWith("running_")) {
+        m[to.slice("running_".length)] = "running";
+      } else if (to.startsWith("pending_")) {
+        const p = to.slice("pending_".length);
+        if (!m[p]) m[p] = "pending";
+      } else if (to.startsWith("awaiting_")) {
+        m[to.slice("awaiting_".length)] = "awaiting";
+      } else if (to.startsWith("failed_")) {
+        m[to.slice("failed_".length)] = "failed";
+      } else if (to.endsWith("_complete")) {
+        m[to.slice(0, -"_complete".length)] = "done";
+      }
+    }
+    // 当前状态覆盖（log 滞后）
+    const cur = task.status as string;
+    if (cur.startsWith("running_")) m[cur.slice("running_".length)] = "running";
+    else if (cur.startsWith("failed_")) m[cur.slice("failed_".length)] = "failed";
+    else if (cur.startsWith("awaiting_")) m[cur.slice("awaiting_".length)] = "awaiting";
+    return m;
+  }, [logs, task.status]);
+
+  // 从 workflowDetail.phases 中按名字找原始 phase 定义（含 parallel 子阶段）
+  const findPhaseDef = (name: string): DrawerPhaseInfo | null => {
+    const phases = (workflowDetail?.phases as any[] | undefined) ?? [];
+    for (const p of phases) {
+      if (p?.parallel) {
+        for (const sub of (p.parallel.phases as any[] | undefined) ?? []) {
+          if (sub?.name === name) return toDrawerPhase(sub);
+        }
+      } else if (p?.name === name) {
+        return toDrawerPhase(p);
+      }
+    }
+    return null;
+  };
+
+  const drawerPhaseDef = drawerPhase ? findPhaseDef(drawerPhase) : null;
+  const drawerStatus = drawerPhase
+    ? (phaseRunStatuses[drawerPhase] ?? "idle")
+    : "idle";
+  const drawerStartedAt = drawerPhase
+    ? findPhaseStartTime(logs as Array<{ to_status?: string; created_at?: string }>, drawerPhase)
+    : null;
+  const drawerElapsedMs = drawerStartedAt && drawerStatus === "running"
+    ? Date.now() - new Date(drawerStartedAt).getTime()
+    : undefined;
+  const drawerErrorMessage = drawerStatus === "failed"
+    ? (([...(logs ?? [])].reverse() as Array<{ note?: string }>).find((l) => l?.note)?.note ?? undefined)
+    : undefined;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
@@ -283,11 +340,15 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
         )}
       </Card>
 
-      {/* 流水线 */}
+      {/* 流水线（点击节点弹详情） */}
       {workflowDetail?.phases && (
         <Card className="mb-4">
-          <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">
+          <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
             <span className="bp-label">流水线 · PIPELINE</span>
+            <span className="inline-flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
+              <MousePointerClick className="h-3 w-3" />
+              点击节点查看阶段状态
+            </span>
           </div>
           <div className="p-4">
             <PhasePipeline
@@ -295,24 +356,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
               highlight={hoveredPhase}
               onHoverPhase={setHoveredPhase}
               currentState={task.status}
-            />
-          </div>
-        </Card>
-      )}
-
-      {/* 状态机 */}
-      {graph && (
-        <Card className="mb-4">
-          <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">
-            <span className="bp-label">状态机 · STATE MACHINE</span>
-          </div>
-          <div className="p-4">
-            <StateMachineGraph
-              nodes={graph.nodes}
-              edges={graph.edges}
-              currentState={task.status}
-              highlightPhase={hoveredPhase}
-              onHoverPhase={setHoveredPhase}
+              phaseStatuses={phaseRunStatuses}
+              onPhaseClick={setDrawerPhase}
             />
           </div>
         </Card>
@@ -393,6 +438,16 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
         onConfirm={doCancel}
         onCancel={() => setConfirmCancel(false)}
       />
+
+      <PhaseDetailDrawer
+        mode="status"
+        open={!!drawerPhase}
+        onOpenChange={(o) => { if (!o) setDrawerPhase(null); }}
+        phase={drawerPhaseDef}
+        runStatus={drawerStatus as PhaseRunStatus}
+        elapsedMs={drawerElapsedMs}
+        errorMessage={drawerErrorMessage}
+      />
     </div>
   );
 }
@@ -406,6 +461,34 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <dd className="min-w-0 flex-1 truncate">{children}</dd>
     </div>
   );
+}
+
+// 把 workflowDetail.phases 中的 raw phase 对象规整成 drawer 用的字段
+function toDrawerPhase(p: Record<string, unknown>): DrawerPhaseInfo {
+  return {
+    name: String(p.name ?? ""),
+    label: typeof p.label === "string" ? p.label : undefined,
+    agent: typeof p.agent === "string" ? p.agent : undefined,
+    timeout: typeof p.timeout === "number" ? p.timeout : undefined,
+    reject: typeof p.reject === "string" ? p.reject : null,
+    gate: p.gate === true,
+    gate_message: typeof p.gate_message === "string" ? p.gate_message : undefined,
+    max_rejections: typeof p.max_rejections === "number" ? p.max_rejections : undefined,
+    jump_trigger: typeof p.jump_trigger === "string" ? p.jump_trigger : undefined,
+    jump_target: typeof p.jump_target === "string" ? p.jump_target : undefined,
+  };
+}
+
+// 找到某 phase 最近一次进入 running 的时间戳
+function findPhaseStartTime(
+  logs: Array<{ to_status?: string; created_at?: string }>,
+  phase: string,
+): string | null {
+  for (let i = logs.length - 1; i >= 0; i -= 1) {
+    const l = logs[i];
+    if (l?.to_status === `running_${phase}` && l.created_at) return l.created_at;
+  }
+  return null;
 }
 
 // ──────────────────────────────────────────────

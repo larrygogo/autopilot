@@ -1,12 +1,16 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2, AlertTriangle } from "lucide-react";
+import { Loader2, AlertTriangle, MousePointerClick } from "lucide-react";
+import { parse as parseYaml } from "yaml";
 import { api, type AuthoredWorkflow } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
+import { PhasePipeline } from "@/components/PhasePipeline";
+import { PhaseDetailDrawer, type DrawerPhaseInfo } from "@/components/PhaseDetailDrawer";
+import { extractPhaseFunction } from "@/lib/ts-extract";
 
 export function NewWorkflowWithAI() {
   const navigate = useNavigate();
@@ -18,6 +22,57 @@ export function NewWorkflowWithAI() {
   const [followup, setFollowup] = useState("");
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [drawerPhase, setDrawerPhase] = useState<DrawerPhaseInfo | null>(null);
+
+  // 把 AI 生成的 yaml 解析成 phases 数组，喂给 PhasePipeline。
+  // 解析失败时 phases 为空，UI 会显示空态而不是崩溃。
+  const parsedPhases = useMemo<unknown[]>(() => {
+    if (!authored?.yaml) return [];
+    try {
+      const doc = parseYaml(authored.yaml) as { phases?: unknown[] } | null;
+      return Array.isArray(doc?.phases) ? doc!.phases : [];
+    } catch {
+      return [];
+    }
+  }, [authored?.yaml]);
+
+  const phasesByName = useMemo(() => {
+    const map = new Map<string, Record<string, unknown>>();
+    for (const p of parsedPhases) {
+      if (!p || typeof p !== "object") continue;
+      const obj = p as Record<string, unknown>;
+      if (obj.parallel && typeof obj.parallel === "object") {
+        const par = obj.parallel as Record<string, unknown>;
+        const subs = Array.isArray(par.phases) ? (par.phases as Array<Record<string, unknown>>) : [];
+        for (const s of subs) {
+          if (s && typeof s.name === "string") map.set(s.name, s);
+        }
+      } else if (typeof obj.name === "string") {
+        map.set(obj.name, obj);
+      }
+    }
+    return map;
+  }, [parsedPhases]);
+
+  function openDrawerFor(phaseName: string) {
+    const raw = phasesByName.get(phaseName);
+    if (!raw) return;
+    setDrawerPhase({
+      name: phaseName,
+      label: typeof raw.label === "string" ? raw.label : undefined,
+      agent: typeof raw.agent === "string" ? raw.agent : undefined,
+      timeout: typeof raw.timeout === "number" ? raw.timeout : undefined,
+      reject: typeof raw.reject === "string" ? raw.reject : null,
+      gate: raw.gate === true,
+      gate_message: typeof raw.gate_message === "string" ? raw.gate_message : undefined,
+      max_rejections: typeof raw.max_rejections === "number" ? raw.max_rejections : undefined,
+    });
+  }
+
+  const drawerTsCode = useMemo(() => {
+    if (!drawerPhase || !authored?.ts) return null;
+    return extractPhaseFunction(authored.ts, drawerPhase.name);
+  }, [drawerPhase, authored?.ts]);
 
   async function generate(prompt: string, includePrior: boolean) {
     if (!prompt.trim()) {
@@ -146,23 +201,26 @@ export function NewWorkflowWithAI() {
               )}
             </div>
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
                 <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">
-                  workflow.yaml
+                  流水线预览
                 </Label>
-                <pre className="mt-1 max-h-96 overflow-auto border-[1.5px] border-foreground/30 bg-card p-2 font-mono text-[11px]">
-                  {authored.yaml}
-                </pre>
+                <span className="inline-flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
+                  <MousePointerClick className="h-3 w-3" />
+                  点击阶段查看配置
+                </span>
               </div>
-              <div>
-                <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">
-                  workflow.ts
-                </Label>
-                <pre className="mt-1 max-h-96 overflow-auto border-[1.5px] border-foreground/30 bg-card p-2 font-mono text-[11px]">
-                  {authored.ts}
-                </pre>
-              </div>
+              {parsedPhases.length > 0 ? (
+                <PhasePipeline
+                  phases={parsedPhases}
+                  onPhaseClick={openDrawerFor}
+                />
+              ) : (
+                <p className="border-[1.5px] border-dashed border-foreground/30 bg-muted/30 p-3 text-xs text-muted-foreground">
+                  yaml 解析失败或没有 phases；请检查警告区，或追问让 AI 调整。
+                </p>
+              )}
             </div>
           </Card>
 
@@ -209,6 +267,14 @@ export function NewWorkflowWithAI() {
           </Card>
         </>
       )}
+
+      <PhaseDetailDrawer
+        mode="preview"
+        open={!!drawerPhase}
+        onOpenChange={(o) => { if (!o) setDrawerPhase(null); }}
+        phase={drawerPhase}
+        tsFunctionCode={drawerTsCode}
+      />
     </div>
   );
 }

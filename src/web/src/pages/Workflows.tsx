@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   ChevronRight,
@@ -8,9 +8,9 @@ import {
   GitBranch,
   FileCode,
   Database,
+  MousePointerClick,
 } from "lucide-react";
 import { api } from "@/hooks/useApi";
-import { StateMachineGraph } from "@/components/StateMachineGraph";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
 import { useNavigate } from "react-router-dom";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
@@ -21,7 +21,8 @@ import { useToast } from "@/components/Toast";
 import { PhaseEditor } from "@/components/PhaseEditor";
 import { WorkflowAgentsEditor } from "@/components/WorkflowAgentsEditor";
 import { PhasePipeline } from "@/components/PhasePipeline";
-import { CodeViewer } from "@/components/CodeViewer";
+import { PhaseDetailDrawer, type DrawerPhaseInfo } from "@/components/PhaseDetailDrawer";
+import { extractPhaseFunction } from "@/lib/ts-extract";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -80,8 +81,8 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
   const [tsSource, setTsSource] = useState<string | null>(null);
-  const [tsOpen, setTsOpen] = useState(false);
-  const [tsLoading, setTsLoading] = useState(false);
+  const [drawerPhase, setDrawerPhase] = useState<string | null>(null);
+  const editorScrollRef = useRef<HTMLDivElement | null>(null);
 
   // 派生新工作流对话框相关 state
   const [deriveOpen, setDeriveOpen] = useState(false);
@@ -165,12 +166,11 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   const toggle = async (name: string) => {
     if (selected?.name === name) {
       setSelected(null);
-      setTsOpen(false);
       setTsSource(null);
+      setDrawerPhase(null);
       return;
     }
     setLoadingDetail(true);
-    setTsOpen(false);
     setTsSource(null);
     try {
       const [detail, graph] = await Promise.all([
@@ -178,6 +178,8 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
         api.getWorkflowGraph(name),
       ]);
       setSelected({ name, detail, graph });
+      // 后台预载 ts 给 drawer 用
+      void loadTsSilently(name);
     } catch {
       /* ignore */
     } finally {
@@ -185,25 +187,16 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
     }
   };
 
-  const loadTs = async () => {
-    if (!selected) return;
-    setTsLoading(true);
+  /**
+   * 后台懒加载 workflow.ts 源码，仅给 drawer 抽取本阶段函数片段用。
+   * 不再展示完整 ts viewer，所以静默失败：拿不到就 drawer 里显示 stub 提示。
+   */
+  const loadTsSilently = async (name: string) => {
     try {
-      const res = await api.getWorkflowTs(selected.name);
+      const res = await api.getWorkflowTs(name);
       setTsSource(res.content);
-    } catch (e: any) {
-      toast.error("加载 workflow.ts 失败", e?.message ?? String(e));
-    } finally {
-      setTsLoading(false);
-    }
-  };
-
-  const toggleTs = async () => {
-    if (!tsOpen) {
-      if (tsSource === null) await loadTs();
-      setTsOpen(true);
-    } else {
-      setTsOpen(false);
+    } catch {
+      setTsSource(null);
     }
   };
 
@@ -230,6 +223,42 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
 
   const fileCount = workflows.filter((w) => (w.source ?? "file") === "file").length;
   const dbCount = workflows.length - fileCount;
+
+  // 当前 drawer 选中阶段的规整数据 + 对应 ts 函数代码切片
+  const drawerPhaseDef = useMemo<DrawerPhaseInfo | null>(() => {
+    if (!drawerPhase || !selected) return null;
+    const phases = (selected.detail.phases as any[] | undefined) ?? [];
+    const find = (list: any[]): any => {
+      for (const p of list) {
+        if (p?.parallel) {
+          const sub = find((p.parallel.phases as any[] | undefined) ?? []);
+          if (sub) return sub;
+        } else if (p?.name === drawerPhase) {
+          return p;
+        }
+      }
+      return null;
+    };
+    const raw = find(phases);
+    if (!raw) return null;
+    return {
+      name: String(raw.name ?? ""),
+      label: typeof raw.label === "string" ? raw.label : undefined,
+      agent: typeof raw.agent === "string" ? raw.agent : undefined,
+      timeout: typeof raw.timeout === "number" ? raw.timeout : undefined,
+      reject: typeof raw.reject === "string" ? raw.reject : null,
+      gate: raw.gate === true,
+      gate_message: typeof raw.gate_message === "string" ? raw.gate_message : undefined,
+      max_rejections: typeof raw.max_rejections === "number" ? raw.max_rejections : undefined,
+      jump_trigger: typeof raw.jump_trigger === "string" ? raw.jump_trigger : undefined,
+      jump_target: typeof raw.jump_target === "string" ? raw.jump_target : undefined,
+    };
+  }, [drawerPhase, selected]);
+
+  const drawerTsCode = useMemo(() => {
+    if (!drawerPhase || !tsSource) return null;
+    return extractPhaseFunction(tsSource, drawerPhase);
+  }, [drawerPhase, tsSource]);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
@@ -390,81 +419,50 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
             />
           </Card>
 
-          {/* Pipeline */}
+          {/* 流水线（点击节点弹详情，包含 yaml 配置 + 对应 ts 函数代码） */}
           <Card className="p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold">流水线</h3>
-              <span className="text-xs text-muted-foreground">
-                鼠标悬停以联动高亮编辑器与状态机图
+              <span className="inline-flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
+                <MousePointerClick className="h-3 w-3" />
+                点击节点查看配置 / 编辑入口在下方
               </span>
             </div>
             <PhasePipeline
               phases={(selected.detail.phases as any[]) ?? []}
               highlight={hoveredPhase}
               onHoverPhase={setHoveredPhase}
+              onPhaseClick={setDrawerPhase}
             />
           </Card>
 
-          {/* Phase editor */}
-          <Card className="p-4">
+          {/* 阶段编辑器（CRUD：新增 / 删除 / 重排 / 并行块 / 孤儿函数同步） */}
+          <Card className="p-4" ref={editorScrollRef}>
             <PhaseEditor
               workflowName={selected.name}
               initialPhases={(selected.detail.phases as any[]) ?? []}
               hoveredPhase={hoveredPhase}
               onHoverPhase={setHoveredPhase}
               onSaved={async () => {
-                if (tsSource !== null) {
-                  api
-                    .getWorkflowTs(selected.name)
-                    .then((r) => setTsSource(r.content))
-                    .catch(() => {});
-                }
+                // 同步刷新 drawer 里用的 ts 源码
+                void loadTsSilently(selected.name);
                 await reloadSelected();
               }}
             />
           </Card>
-
-          {/* State machine */}
-          <Card className="p-4">
-            <h3 className="mb-3 text-sm font-semibold">状态机</h3>
-            <StateMachineGraph
-              nodes={selected.graph.nodes}
-              edges={selected.graph.edges}
-              highlightPhase={hoveredPhase}
-              onHoverPhase={setHoveredPhase}
-            />
-          </Card>
-
-          {/* workflow.ts viewer */}
-          <Card className="p-4">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">workflow.ts 源码</h3>
-              <Button variant="secondary" size="sm" onClick={toggleTs} disabled={tsLoading}>
-                {tsLoading ? "加载中…" : tsOpen ? "收起" : "展开"}
-              </Button>
-            </div>
-            {tsOpen && tsSource !== null && (
-              <CodeViewer
-                code={tsSource}
-                highlightPhase={hoveredPhase}
-                scrollToPhase={hoveredPhase}
-              />
-            )}
-            {tsOpen && tsSource === null && !tsLoading && (
-              <p className="text-sm text-muted-foreground">加载失败</p>
-            )}
-            {!tsOpen && (
-              <p className="text-xs text-muted-foreground">
-                展开查看{" "}
-                <code className="rounded bg-muted px-1 font-mono">
-                  AUTOPILOT_HOME/workflows/{selected.name}/workflow.ts
-                </code>
-                （只读）；hover 阶段会高亮对应 run_ 函数
-              </p>
-            )}
-          </Card>
         </div>
       )}
+
+      <PhaseDetailDrawer
+        mode="preview"
+        open={!!drawerPhase}
+        onOpenChange={(o) => { if (!o) setDrawerPhase(null); }}
+        phase={drawerPhaseDef}
+        tsFunctionCode={drawerTsCode}
+        onLocateInEditor={() => {
+          editorScrollRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }}
+      />
 
       <NewWorkflowDialog
         open={newOpen}
