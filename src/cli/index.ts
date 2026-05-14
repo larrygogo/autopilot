@@ -12,6 +12,7 @@ import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
 import { loadDaemonConfig } from "../core/config";
 import { registerWorkflowCommands } from "./workflow";
 import { registerConfigCommands, printReport as printDoctorReport } from "./config";
+import { registerRequirementCommands } from "./requirements-cli";
 import { runChecks as runDoctorChecks } from "../core/doctor";
 import {
   readPid,
@@ -600,6 +601,7 @@ registerWorkflowCommands(program, {
 });
 
 registerConfigCommands(program);
+registerRequirementCommands(program);
 
 program
   .command("doctor")

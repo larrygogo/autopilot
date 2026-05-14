@@ -426,4 +426,30 @@ export class HttpClient {
       { method: "POST" },
     );
   }
+
+  // ── Requirements ──
+
+  async createRequirement(body: {
+    project_id?: string;
+    codebase_id?: string | null;
+    title: string;
+    spec_md?: string;
+    chat_session_id?: string | null;
+  }): Promise<{ requirement: { id: string; status: string; title: string } }> {
+    return this.request("/api/requirements", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async extractRequirement(input: {
+    raw_text: string;
+    project_id: string;
+    codebase_id?: string | null;
+  }): Promise<{ title: string; spec_md: string }> {
+    return this.request("/api/requirements/extract", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
 }
