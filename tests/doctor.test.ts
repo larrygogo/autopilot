@@ -135,3 +135,23 @@ describe("L3 凭证 ping", () => {
     expect(report.checks.find((c) => c.id === "providers.anthropic.ping")).toBeUndefined();
   });
 });
+
+describe("报告契约", () => {
+  it("DoctorReport JSON.stringify 安全", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    const parsed = JSON.parse(JSON.stringify(report));
+    expect(parsed.status).toBe(report.status);
+    expect(parsed.checks.length).toBe(report.checks.length);
+  });
+
+  it("所有 fix.auto 在 FixId 白名单内", async () => {
+    rmSync(tmpFile, { force: true });
+    const r1 = await runChecks({ level: 1 });
+    writeFileSync(tmpFile, "providers: {}\nagents: {}\n", "utf-8");
+    const r2 = await runChecks({ level: 1 });
+    const allFix = [...r1.checks, ...r2.checks].map((c) => c.fix?.auto).filter(Boolean);
+    const allowed = ["init.providers", "init.agents", "fix.config.create", "fix.agent.unbind-disabled-provider"];
+    for (const id of allFix) expect(allowed).toContain(id!);
+  });
+});
