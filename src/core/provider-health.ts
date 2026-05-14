@@ -23,6 +23,14 @@ export interface ProviderHealthState {
   first_failed_at?: number;
   /** 最近一次调用时间（epoch ms） */
   last_seen_at: number;
+  /** CLI 是否在 PATH 中（主动探测，由 provider-cli-monitor 写入） */
+  cli_status?: "ok" | "missing" | "unknown";
+  /** CLI 版本号（探测成功时填） */
+  cli_version?: string;
+  /** CLI 安装提示（探测失败时填，UI 用） */
+  cli_install_hint?: string;
+  /** CLI 探测时间（epoch ms） */
+  cli_checked_at?: number;
 }
 
 const UNHEALTHY_THRESHOLD = 2;
@@ -83,6 +91,52 @@ export function getProviderHealth(provider: string): ProviderHealthState | undef
 
 export function listUnhealthy(): ProviderHealthState[] {
   return Array.from(_states.values()).filter((s) => !s.healthy);
+}
+
+/** 返回所有 provider 健康状态的快照（含已知但当前无记录的）。 */
+export function listAllProviderHealth(): ProviderHealthState[] {
+  return Array.from(_states.values());
+}
+
+/**
+ * CLI 主动探测结果写入。由 provider-cli-monitor 调用。
+ * 状态发生变化（cli_status 改了或从无到有）时 emit `provider:health-changed`。
+ */
+export function recordProviderCliStatus(
+  provider: string,
+  result: {
+    cli_status: "ok" | "missing";
+    cli_version?: string;
+    cli_install_hint?: string;
+  },
+): void {
+  const prev = _states.get(provider);
+  const now = Date.now();
+  const next: ProviderHealthState = {
+    provider,
+    healthy: prev?.healthy ?? true,
+    consecutive_failures: prev?.consecutive_failures ?? 0,
+    last_reason: prev?.last_reason,
+    first_failed_at: prev?.first_failed_at,
+    last_seen_at: prev?.last_seen_at ?? now,
+    cli_status: result.cli_status,
+    cli_version: result.cli_version,
+    cli_install_hint: result.cli_install_hint,
+    cli_checked_at: now,
+  };
+  _states.set(provider, next);
+  const cliStatusChanged = prev?.cli_status !== result.cli_status;
+  if (cliStatusChanged) {
+    emit({
+      type: "provider:health-changed",
+      payload: {
+        provider,
+        healthy: next.healthy,
+        reason: result.cli_status === "missing" ? result.cli_install_hint : undefined,
+        ts: now,
+      },
+    });
+  }
 }
 
 /** 测试专用：清空全部状态 */
