@@ -1,6 +1,7 @@
 import { Command } from "commander";
-import { mkdirSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { buildConfigTemplate } from "./config-template";
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
 import { initDb, closeDb } from "../core/db";
@@ -10,6 +11,8 @@ import { discover } from "../core/registry";
 import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
 import { loadDaemonConfig } from "../core/config";
 import { registerWorkflowCommands } from "./workflow";
+import { registerConfigCommands, printReport as printDoctorReport } from "./config";
+import { runChecks as runDoctorChecks } from "../core/doctor";
 import {
   readPid,
   isProcessAlive,
@@ -413,6 +416,18 @@ task
   .option("--repo <alias>", "绑定仓库别名（用于 req_dev 等需要仓库的工作流）")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
   .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
+    try {
+      const preflight = await runDoctorChecks({ level: 2 });
+      if (preflight.status === "error") {
+        console.error("配置不就绪，请先修复：");
+        printDoctorReport(preflight);
+        console.error("\n或运行：bun run dev config doctor --fix");
+        process.exit(2);
+      }
+    } catch (e: unknown) {
+      console.error(`doctor 探测失败：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(3);
+    }
     const client = getClient(opts);
     await ensureDaemon(client);
 
@@ -583,6 +598,22 @@ registerWorkflowCommands(program, {
   ensureDaemon,
   defaultPort: DEFAULT_PORT,
 });
+
+registerConfigCommands(program);
+
+program
+  .command("doctor")
+  .description("config doctor 的顶层别名")
+  .option("--probe", "包含 L2 + L3 探测")
+  .option("--json", "JSON 输出")
+  .option("--fix", "交互式修复")
+  .action(async (opts: { probe?: boolean; json?: boolean; fix?: boolean }) => {
+    const args = ["config", "doctor"];
+    if (opts.probe) args.push("--probe");
+    if (opts.json) args.push("--json");
+    if (opts.fix) args.push("--fix");
+    await program.parseAsync(args, { from: "user" });
+  });
 
 // ──────────────────────────────────────────────
 // chat — 对话
@@ -853,6 +884,18 @@ program
   .option("--repo <alias>", "绑定仓库别名")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
   .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
+    try {
+      const preflight = await runDoctorChecks({ level: 2 });
+      if (preflight.status === "error") {
+        console.error("配置不就绪，请先修复：");
+        printDoctorReport(preflight);
+        console.error("\n或运行：bun run dev config doctor --fix");
+        process.exit(2);
+      }
+    } catch (e: unknown) {
+      console.error(`doctor 探测失败：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(3);
+    }
     const client = getClient(opts);
     await ensureDaemon(client);
 
@@ -902,7 +945,19 @@ program
     }
     initDb();
     console.log(`已初始化数据库：${join(AUTOPILOT_HOME, "runtime", "workflow.db")}`);
-    console.log("初始化完成。");
+
+    const cfgPath = join(AUTOPILOT_HOME, "config.yaml");
+    if (!existsSync(cfgPath)) {
+      writeFileSync(cfgPath, buildConfigTemplate(), "utf-8");
+      console.log(`已生成配置模板：${cfgPath}`);
+    } else {
+      console.log(`配置文件已存在，保留：${cfgPath}`);
+    }
+
+    console.log("\n初始化完成。下一步（三选一）：");
+    console.log("  » bun run dev config doctor       检查配置");
+    console.log("  » bun run dev config doctor --fix 交互式配置");
+    console.log("  » bun run dev dashboard           浏览器配置");
   });
 
 // ──────────────────────────────────────────────

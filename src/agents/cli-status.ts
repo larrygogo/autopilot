@@ -2,8 +2,8 @@ import type { ProviderName } from "../core/config";
 
 // ──────────────────────────────────────────────
 // Provider 对应的本地 CLI 二进制检测
-// Anthropic / OpenAI / Google 三家的 SDK 底层都依赖用户本地安装
-// 的对应 CLI，凭证也由 CLI 管理。
+// Anthropic / OpenAI / Google 三家 provider 均通过 Bun.spawn 调本地 CLI
+// （claude / codex / gemini）子进程，凭证由各 CLI 自身管理。
 // ──────────────────────────────────────────────
 
 export interface ProviderCliStatus {

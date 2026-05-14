@@ -24,9 +24,8 @@ const agentLog = createLogger("agent.anthropic");
  *   - stream_event  (--include-partial-messages 时)          partial delta
  *   - result.subtype = success / error_max_turns             终态
  *
- * Step 1（当前）：不接 MCP 工具（autopilot 自定义工具集）。
- *   - options.enableTools=true 时降级为告警，行为等同 false。
- *   - tools.ts 仍依赖 SDK 类型；待 Step 2 完成 HTTP MCP 改造后一并清理。
+ * MCP 工具接入：daemon 自带 HTTP MCP 路由（/mcp），通过 `--mcp-config` 传入
+ * 临时 config 文件让 claude CLI 以子进程形式访问 autopilot 工具集。
  */
 
 // ──────────────────────────────────────────────

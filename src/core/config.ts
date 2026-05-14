@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, copyFileSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 import { parse as parseYaml, parseDocument, type Document } from "yaml";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
@@ -148,20 +149,21 @@ export interface ProviderConfig {
 /**
  * 返回当前使用的 config.yaml 路径。
  * 优先级：DEV_WORKFLOW_CONFIG > AUTOPILOT_HOME/config.yaml
+ * 注意：每次调用时动态读取环境变量，以支持测试隔离。
  */
 export function getConfigPath(): string {
   if (process.env.DEV_WORKFLOW_CONFIG && existsSync(process.env.DEV_WORKFLOW_CONFIG)) {
     return process.env.DEV_WORKFLOW_CONFIG;
   }
-  return join(AUTOPILOT_HOME, "config.yaml");
+  const home = process.env.AUTOPILOT_HOME || join(homedir(), ".autopilot");
+  return join(home, "config.yaml");
 }
 
 export function loadConfig(): Record<string, unknown> {
   const paths = [
-    process.env.DEV_WORKFLOW_CONFIG,
-    join(AUTOPILOT_HOME, "config.yaml"),
-    join(process.cwd(), "config.yaml"),
-  ].filter(Boolean) as string[];
+    getConfigPath(),                     // DEV_WORKFLOW_CONFIG > AUTOPILOT_HOME/config.yaml（动态读取环境变量）
+    join(process.cwd(), "config.yaml"),  // cwd 兜底
+  ];
 
   for (const p of paths) {
     if (existsSync(p)) {

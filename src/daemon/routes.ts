@@ -292,6 +292,17 @@ export function setWebDistDir(dir: string): void {
   webDistDir = dir;
 }
 
+// daemon 启动时注入 listen host，供 /api/fs/list 等做来源校验
+let CURRENT_LISTEN_HOST: string | null = null;
+
+export function setListenHost(host: string): void {
+  CURRENT_LISTEN_HOST = host;
+}
+
+export function getListenHost(): string | null {
+  return CURRENT_LISTEN_HOST;
+}
+
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
   ".js": "application/javascript",
@@ -579,10 +590,98 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
     }
 
+    // ─────────── 首跑配置（setup） ───────────
+
+    if (method === "GET" && path === "/api/setup/status") {
+      const { runChecks } = await import("../core/doctor");
+      const { getKv } = await import("../core/db");
+      const report = await runChecks({ level: 1 });
+      let dismissed = false;
+      try {
+        dismissed = getKv("setup.dismissed") === "1";
+      } catch {
+        // kv 表未建（迁移未跑）时跳过 dismissed 读取
+      }
+      return json({ ...report, setupDismissed: dismissed });
+    }
+
+    if (method === "POST" && path === "/api/setup/providers") {
+      const { saveProvider, PROVIDER_NAMES } = await import("../core/config");
+      const { runChecks } = await import("../core/doctor");
+      const body = (await req.json().catch(() => null)) as { providers?: Record<string, unknown> } | null;
+      if (!body || typeof body.providers !== "object" || body.providers === null || Array.isArray(body.providers)) {
+        return error("providers must be an object", 400);
+      }
+      for (const [name, cfg] of Object.entries(body.providers)) {
+        if (!(PROVIDER_NAMES as readonly string[]).includes(name)) continue;
+        if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
+          saveProvider(name as typeof PROVIDER_NAMES[number], cfg as Record<string, unknown>);
+        }
+      }
+      const report = await runChecks({ level: 1 });
+      return json({ report });
+    }
+
+    if (method === "POST" && path === "/api/setup/agents") {
+      const { saveAgent } = await import("../core/config");
+      const { runChecks } = await import("../core/doctor");
+      const body = (await req.json().catch(() => null)) as { agents?: Record<string, unknown> } | null;
+      if (!body || typeof body.agents !== "object" || body.agents === null || Array.isArray(body.agents)) {
+        return error("agents must be an object", 400);
+      }
+      for (const [name, cfg] of Object.entries(body.agents)) {
+        if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
+          saveAgent(name, cfg as Record<string, unknown>);
+        }
+      }
+      const report = await runChecks({ level: 1 });
+      return json({ report });
+    }
+
+    if (method === "POST" && path === "/api/setup/codebases") {
+      const { createCodebase, nextCodebaseId } = await import("../core/codebases");
+      const { listProjects, createProject, nextProjectId } = await import("../core/projects");
+      const body = (await req.json().catch(() => null)) as
+        | { name?: string; path?: string; project_id?: string }
+        | null;
+      if (!body?.name || !body?.path) {
+        return error("name and path required", 400);
+      }
+      // 若未指定 project_id：用首个 project，没有则自动建一个 default
+      let projectId = body.project_id;
+      if (!projectId) {
+        const projects = listProjects();
+        if (projects.length > 0) {
+          projectId = projects[0]!.id;
+        } else {
+          const p = createProject({ id: nextProjectId(), name: "default" });
+          projectId = p.id;
+        }
+      }
+      const cb = createCodebase({
+        id: nextCodebaseId(),
+        project_id: projectId,
+        alias: body.name,
+        path: body.path,
+      });
+      return json({ codebase: cb });
+    }
+
+    if (method === "POST" && path === "/api/setup/dismiss") {
+      const { setKv } = await import("../core/db");
+      setKv("setup.dismissed", "1");
+      return json({ ok: true });
+    }
+
     // ─────────── 文件系统浏览 ───────────
 
     // GET /api/fs/list?path=<absolute>&show_hidden=1
     if (method === "GET" && path === "/api/fs/list") {
+      // 防局域网泄露本机文件树：非 loopback 绑定时禁用
+      const host = CURRENT_LISTEN_HOST ?? "127.0.0.1";
+      if (!isLoopbackHost(host)) {
+        return error("fs-browser-disabled-on-public-bind", 403);
+      }
       const reqPath = url.searchParams.get("path") ?? null;
       const showHidden = url.searchParams.get("show_hidden") === "1";
       // 省略 path 时默认返回 $HOME
@@ -2444,4 +2543,13 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
   try { emit({ type: "chat:complete", payload: { sessionId: sid, message: assistantMsg } }); } catch { /* ignore */ }
 
   return { session_id: manifest.id, message: assistantMsg };
+}
+
+// loopback host 判定：用于 /api/fs/list 等本机敏感接口的来源校验
+function isLoopbackHost(host: string): boolean {
+  const h = host.toLowerCase();
+  if (h === "localhost") return true;
+  if (h === "127.0.0.1" || h.startsWith("127.")) return true;
+  if (h === "::1" || h === "[::1]") return true;
+  return false;
 }

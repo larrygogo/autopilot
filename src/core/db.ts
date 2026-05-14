@@ -473,3 +473,21 @@ export function deleteTaskRecords(taskIds: string[]): void {
     db.run("DELETE FROM tasks WHERE id IN (" + placeholders + ")", taskIds);
   })();
 }
+
+// ──────────────────────────────────────────────
+// kv 简单键值存储（迁移 017）
+// ──────────────────────────────────────────────
+
+/** 写入 kv 键值；存在则覆盖并更新 updated_at。 */
+export function setKv(key: string, value: string): void {
+  getDb().run(
+    "INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+    [key, value]
+  );
+}
+
+/** 读取 kv 值；不存在返回 null。 */
+export function getKv(key: string): string | null {
+  const row = getDb().query<{ value: string }, [string]>("SELECT value FROM kv WHERE key = ?").get(key);
+  return row?.value ?? null;
+}

@@ -7,8 +7,8 @@ const agentLog = createLogger("agent.openai");
 /**
  * OpenAI provider：依赖本地 `codex` CLI（npm i -g @openai/codex）。
  * `@openai/codex` npm 包仅是 native 二进制 launcher，没有 JS SDK 入口；
- * 与 anthropic provider 的 SDK 流式调用不同，这里通过 `codex exec --json`
- * 子进程读取 JSONL 事件流（assistant_message / token_count 等）。
+ * 通过 `codex exec --json` 子进程读取 JSONL 事件流
+ * （assistant_message / token_count 等）。
  */
 export class OpenAIProvider extends BaseProvider {
   async run(prompt: string, options?: RunOptions): Promise<AgentResult> {

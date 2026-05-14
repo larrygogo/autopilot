@@ -7,8 +7,7 @@ const agentLog = createLogger("agent.google");
 /**
  * Google provider：依赖本地 `gemini` CLI（npm i -g @google/gemini-cli）。
  * `@google/gemini-cli-sdk` npm 包当前并不存在/不再发布，无可用 JS SDK 入口；
- * 与 anthropic provider 的 SDK 流式调用不同，这里通过 `gemini -p` 子进程
- * 非交互式执行 prompt 并读取 stdout。
+ * 通过 `gemini -p` 子进程非交互式执行 prompt 并读取 stdout。
  */
 export class GoogleProvider extends BaseProvider {
   async run(prompt: string, options?: RunOptions): Promise<AgentResult> {

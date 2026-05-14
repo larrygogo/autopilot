@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useNowCards } from "@/hooks/useNowCards";
 import { NowCard } from "@/components/NowCard";
 import { PageHero } from "@/components/PageHero";
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api, type DoctorReportWithDismiss } from "@/hooks/useApi";
 
 export function Now() {
   const { cards, loading, error, refresh } = useNowCards();
   const [now, setNow] = useState(Date.now());
+  const [setupReport, setSetupReport] = useState<DoctorReportWithDismiss | null>(null);
 
   // 每秒更新 now，让卡片"等候 Xs"实时滚动
   useEffect(() => {
@@ -15,8 +18,20 @@ export function Now() {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    api.setupStatus().then(setSetupReport).catch(() => {});
+  }, []);
+
+  const showSetupBanner = !!setupReport && setupReport.status === "error" && !setupReport.setupDismissed;
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8">
+      {showSetupBanner && (
+        <div className="mb-4 border-[1.5px] border-foreground/30 p-3 font-mono text-sm">
+          ⚠ 未完成首跑配置
+          <Link to="/setup" className="ml-2 underline">开始 ▸</Link>
+        </div>
+      )}
       <PageHero
         title="现在 · NOW"
         subtitle={

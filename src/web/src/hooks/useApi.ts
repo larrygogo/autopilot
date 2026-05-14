@@ -351,6 +351,36 @@ export const api = {
     return request<FsListResult>(`/api/fs/list${qs ? "?" + qs : ""}`);
   },
 
+  // 首跑配置 setup
+  setupStatus: () => request<DoctorReportWithDismiss>("/api/setup/status"),
+
+  setupProviders: (providers: Record<string, Record<string, unknown>>) =>
+    request<{ report: DoctorReportWithDismiss }>("/api/setup/providers", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ providers }),
+    }),
+
+  setupAgents: (agents: Record<string, Record<string, unknown>>) =>
+    request<{ report: DoctorReportWithDismiss }>("/api/setup/agents", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agents }),
+    }),
+
+  setupCodebase: (payload: { name: string; path: string; project_id?: string }) =>
+    request<{ codebase: { id: string; alias: string; path: string; project_id: string } }>(
+      "/api/setup/codebases",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  setupDismiss: () =>
+    request<{ ok: boolean }>("/api/setup/dismiss", { method: "POST" }),
+
   // Requirements
   listRequirements: (filters?: { repo_id?: string; project_id?: string; status?: string }) => {
     const params = new URLSearchParams();
@@ -449,6 +479,24 @@ export const api = {
       { method: "POST" },
     ),
 };
+
+export interface DoctorCheck {
+  id: string;
+  category: "config" | "provider" | "agent" | "project" | "codebase";
+  status: "ok" | "warning" | "error" | "skipped";
+  title: string;
+  detail?: string;
+  fix?: { cli?: string; url?: string; auto?: string };
+}
+
+export interface DoctorReportWithDismiss {
+  level: 1 | 2 | 3;
+  status: "ok" | "warning" | "error";
+  checks: DoctorCheck[];
+  durationMs: number;
+  generatedAt: string;
+  setupDismissed?: boolean;
+}
 
 export interface ProviderItem {
   name: string;
