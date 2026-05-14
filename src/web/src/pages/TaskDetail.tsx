@@ -147,21 +147,11 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
     }
   };
 
-  if (!task) {
-    return (
-      <div className="mx-auto w-full max-w-6xl px-5 py-8 text-sm text-muted-foreground">加载中…</div>
-    );
-  }
-
-  const canCancel = !isTerminal(task.status, graph?.terminalStates);
-  const awaitingPhase = task.status.startsWith("awaiting_") ? task.status.slice("awaiting_".length) : null;
-  const gatePhaseDef = awaitingPhase
-    ? (workflowDetail?.phases as any[] | undefined)?.find((p) => p?.name === awaitingPhase)
-    : null;
-
+  // ⚠️ Hooks 必须在条件 return 之前调用，否则违反 hooks 顺序规则（React error #310）
   // 从 transition 日志推导每个 phase 的运行状态，喂给 PhasePipeline 显示角标
   const phaseRunStatuses = useMemo<Record<string, PhasePipelineRunStatus>>(() => {
     const m: Record<string, PhasePipelineRunStatus> = {};
+    if (!task) return m;
     for (const l of logs as Array<{ to_status?: string }>) {
       const to = l?.to_status;
       if (!to) continue;
@@ -184,7 +174,19 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
     else if (cur.startsWith("failed_")) m[cur.slice("failed_".length)] = "failed";
     else if (cur.startsWith("awaiting_")) m[cur.slice("awaiting_".length)] = "awaiting";
     return m;
-  }, [logs, task.status]);
+  }, [logs, task]);
+
+  if (!task) {
+    return (
+      <div className="mx-auto w-full max-w-6xl px-5 py-8 text-sm text-muted-foreground">加载中…</div>
+    );
+  }
+
+  const canCancel = !isTerminal(task.status, graph?.terminalStates);
+  const awaitingPhase = task.status.startsWith("awaiting_") ? task.status.slice("awaiting_".length) : null;
+  const gatePhaseDef = awaitingPhase
+    ? (workflowDetail?.phases as any[] | undefined)?.find((p) => p?.name === awaitingPhase)
+    : null;
 
   // 从 workflowDetail.phases 中按名字找原始 phase 定义（含 parallel 子阶段）
   const findPhaseDef = (name: string): DrawerPhaseInfo | null => {

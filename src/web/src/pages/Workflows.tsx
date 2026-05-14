@@ -213,17 +213,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="mx-auto w-full max-w-6xl px-5 py-8 text-sm text-muted-foreground">
-        加载中…
-      </div>
-    );
-  }
-
-  const fileCount = workflows.filter((w) => (w.source ?? "file") === "file").length;
-  const dbCount = workflows.length - fileCount;
-
+  // ⚠️ Hooks 必须在条件 return 之前调用，否则违反 hooks 顺序规则（React error #310）
   // 当前 drawer 选中阶段的规整数据 + 对应 ts 函数代码切片
   const drawerPhaseDef = useMemo<DrawerPhaseInfo | null>(() => {
     if (!drawerPhase || !selected) return null;
@@ -259,6 +249,17 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
     if (!drawerPhase || !tsSource) return null;
     return extractPhaseFunction(tsSource, drawerPhase);
   }, [drawerPhase, tsSource]);
+
+  if (loading) {
+    return (
+      <div className="mx-auto w-full max-w-6xl px-5 py-8 text-sm text-muted-foreground">
+        加载中…
+      </div>
+    );
+  }
+
+  const fileCount = workflows.filter((w) => (w.source ?? "file") === "file").length;
+  const dbCount = workflows.length - fileCount;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
