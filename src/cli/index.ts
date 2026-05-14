@@ -11,6 +11,7 @@ import { discover } from "../core/registry";
 import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
 import { loadDaemonConfig } from "../core/config";
 import { registerWorkflowCommands } from "./workflow";
+import { registerConfigCommands } from "./config";
 import {
   readPid,
   isProcessAlive,
@@ -584,6 +585,8 @@ registerWorkflowCommands(program, {
   ensureDaemon,
   defaultPort: DEFAULT_PORT,
 });
+
+registerConfigCommands(program);
 
 // ──────────────────────────────────────────────
 // chat — 对话
