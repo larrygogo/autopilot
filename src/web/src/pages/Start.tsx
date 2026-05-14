@@ -1,9 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageSquare, FileText, ArrowRight, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { api, type Project, type Codebase } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -14,206 +13,146 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/Toast";
 
+const CODEBASE_NONE = "__none__";
+
 export function Start() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  // Form state
-  const [mode, setMode] = useState<"choose" | "form">("choose");
   const [projects, setProjects] = useState<Project[]>([]);
-  const [codebases, setCodebases] = useState<Codebase[]>([]);
+  const [allCodebases, setAllCodebases] = useState<Codebase[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingCodebases, setLoadingCodebases] = useState(false);
   const [projectId, setProjectId] = useState("");
-  const [codebaseId, setCodebaseId] = useState("");
-  const [title, setTitle] = useState("");
-  const [specMd, setSpecMd] = useState("");
+  const [codebaseId, setCodebaseId] = useState(CODEBASE_NONE);
+  const [rawText, setRawText] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Load projects when switching to form mode
+  // 进入页面：拉 projects + codebases
   useEffect(() => {
-    if (mode !== "form") return;
     setLoadingProjects(true);
     api.listProjects()
       .then((ps) => {
         setProjects(ps);
-        if (ps.length === 1) setProjectId(ps[0].id);
+        if (ps.length > 0) setProjectId(ps[0].id);
       })
-      .catch((e) => toast.error(`加载项目失败：${e?.message ?? e}`))
+      .catch((e: unknown) => toast.error("加载项目失败", (e as Error)?.message ?? String(e)))
       .finally(() => setLoadingProjects(false));
-  }, [mode, toast]);
 
-  // Load codebases when project changes
-  useEffect(() => {
-    if (!projectId) {
-      setCodebases([]);
-      setCodebaseId("");
-      return;
-    }
     setLoadingCodebases(true);
-    api.listProjectCodebases(projectId)
-      .then((cbs) => {
-        setCodebases(cbs);
-        if (cbs.length === 1) setCodebaseId(cbs[0].id);
-        else setCodebaseId(""); // reset on project change
-      })
-      .catch((e) => toast.error(`加载代码库失败：${e?.message ?? e}`))
+    api.listCodebases()
+      .then((cs) => setAllCodebases(cs))
+      .catch(() => setAllCodebases([]))
       .finally(() => setLoadingCodebases(false));
-  }, [projectId, toast]);
+  }, [toast]);
 
-  const canSubmit = useMemo(
-    () => !submitting && projectId !== "" && title.trim() !== "",
-    [submitting, projectId, title],
+  // project 切换时 reset codebase
+  useEffect(() => {
+    setCodebaseId(CODEBASE_NONE);
+  }, [projectId]);
+
+  // 当前 project 下的 codebases
+  const filteredCodebases = useMemo(
+    () => allCodebases.filter((c) => c.project_id === projectId),
+    [allCodebases, projectId],
   );
 
-  const handleSubmit = async () => {
+  const canSubmit = useMemo(
+    () => !submitting && !!projectId && rawText.trim().length > 0,
+    [submitting, projectId, rawText],
+  );
+
+  async function handleSubmit() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const req = await api.createRequirement({
+      const cbId = codebaseId === CODEBASE_NONE ? null : codebaseId;
+      const { title, spec_md } = await api.extractRequirement({
+        raw_text: rawText.trim(),
         project_id: projectId,
-        codebase_id: codebaseId || null,
-        title: title.trim(),
-        spec_md: specMd.trim() || undefined,
+        codebase_id: cbId,
       });
-      toast.success(`需求已创建：${req.id}`);
-      navigate(`/requirements/${req.id}`);
+      const requirement = await api.createRequirement({
+        project_id: projectId,
+        codebase_id: cbId,
+        title,
+        spec_md,
+      });
+      navigate(`/requirements/${requirement.id}`);
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
+      toast.error("创建需求失败", (e as Error)?.message ?? String(e));
       setSubmitting(false);
     }
-  };
+  }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 md:px-6 md:py-8">
-      <header className="mb-6 border-b-[1.5px] border-foreground/30 pb-3">
+    <div className="mx-auto max-w-2xl px-4 py-8">
+      <header className="mb-4 border-b-[1.5px] border-foreground/30 pb-3">
         <h1 className="font-display text-2xl font-bold uppercase tracking-wider">开始 · START</h1>
         <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground mt-1">
-          提一个新需求
+          说说你想做什么，AI 帮你整理成需求
         </p>
       </header>
 
-      {mode === "choose" && (
-        <div className="grid gap-3 md:grid-cols-2">
-          <button
-            onClick={() => navigate("/chat")}
-            className="group flex flex-col items-start gap-3 border-[1.5px] border-foreground/30 bg-card p-5 rounded-none text-left hover:border-accent transition-colors"
-          >
-            <MessageSquare className="h-6 w-6 text-accent" />
-            <div className="flex-1">
-              <h3 className="font-display text-base font-bold uppercase tracking-wide mb-1">对话式</h3>
-              <p className="text-sm text-muted-foreground">
-                "我想做 X" 自然语言描述，AI 帮你理清细节并自动建需求
-              </p>
-            </div>
-            <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground group-hover:text-accent">
-              <span>去 chat</span>
-              <ArrowRight className="h-3 w-3" />
-            </div>
-          </button>
-
-          <button
-            onClick={() => setMode("form")}
-            className="group flex flex-col items-start gap-3 border-[1.5px] border-foreground/30 bg-card p-5 rounded-none text-left hover:border-accent transition-colors"
-          >
-            <FileText className="h-6 w-6 text-accent" />
-            <div className="flex-1">
-              <h3 className="font-display text-base font-bold uppercase tracking-wide mb-1">表单式</h3>
-              <p className="text-sm text-muted-foreground">
-                选项目、选代码库、写标题和 spec，直接建需求
-              </p>
-            </div>
-            <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground group-hover:text-accent">
-              <span>填表单</span>
-              <ArrowRight className="h-3 w-3" />
-            </div>
-          </button>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="project" className="font-mono text-[10px] uppercase tracking-[0.18em]">项目 *</Label>
+          <Select value={projectId} onValueChange={setProjectId} disabled={loadingProjects || projects.length <= 1}>
+            <SelectTrigger id="project">
+              <SelectValue placeholder={loadingProjects ? "加载中..." : projects.length === 0 ? "暂无项目（请先在 /library 创建）" : "选择项目"} />
+            </SelectTrigger>
+            <SelectContent>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name} <span className="text-muted-foreground ml-2">{p.id}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      )}
 
-      {mode === "form" && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setMode("choose")}
-              className="font-mono text-[10px] uppercase tracking-[0.18em]"
-            >
-              ← 返回
-            </Button>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="project" className="font-mono text-[10px] uppercase tracking-[0.18em]">项目 *</Label>
-            <Select value={projectId} onValueChange={setProjectId} disabled={loadingProjects}>
-              <SelectTrigger id="project">
-                <SelectValue placeholder={loadingProjects ? "加载中..." : projects.length === 0 ? "暂无项目（请先在 /library 创建）" : "选择项目"} />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name} <span className="text-muted-foreground ml-2">{p.id}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="codebase" className="font-mono text-[10px] uppercase tracking-[0.18em]">代码库（可选）</Label>
-            <Select value={codebaseId} onValueChange={setCodebaseId} disabled={!projectId || loadingCodebases}>
-              <SelectTrigger id="codebase">
-                <SelectValue placeholder={!projectId ? "请先选项目" : loadingCodebases ? "加载中..." : codebases.length === 0 ? "暂无代码库（可空）" : "选择代码库"} />
-              </SelectTrigger>
-              <SelectContent>
-                {codebases.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.alias} <span className="text-muted-foreground ml-2">{c.path}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="title" className="font-mono text-[10px] uppercase tracking-[0.18em]">标题 *</Label>
-            <Input
-              id="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="例：给登录页加忘记密码功能"
-              className="rounded-none"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="spec" className="font-mono text-[10px] uppercase tracking-[0.18em]">规格说明（可选 · Markdown）</Label>
-            <textarea
-              id="spec"
-              value={specMd}
-              onChange={(e) => setSpecMd(e.target.value)}
-              rows={8}
-              placeholder="详细描述需求、约束、验收标准..."
-              className="w-full font-mono text-sm border-[1.5px] border-foreground/30 bg-background px-3 py-2 rounded-none focus:outline-none focus:border-accent"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              variant="default"
-              size="default"
-              disabled={!canSubmit}
-              onClick={handleSubmit}
-              className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
-            >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-              {submitting ? "创建中..." : "创建需求"}
-            </Button>
-          </div>
+        <div className="space-y-2">
+          <Label htmlFor="codebase" className="font-mono text-[10px] uppercase tracking-[0.18em]">代码库（可选）</Label>
+          <Select value={codebaseId} onValueChange={setCodebaseId} disabled={!projectId || loadingCodebases}>
+            <SelectTrigger id="codebase">
+              <SelectValue placeholder={!projectId ? "请先选项目" : loadingCodebases ? "加载中..." : "不绑定代码库"} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={CODEBASE_NONE}>不绑定</SelectItem>
+              {filteredCodebases.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.alias} <span className="text-muted-foreground ml-2">{c.path}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      )}
+
+        <div className="space-y-2">
+          <Label htmlFor="raw" className="font-mono text-[10px] uppercase tracking-[0.18em]">说说你想做什么</Label>
+          <textarea
+            id="raw"
+            value={rawText}
+            onChange={(e) => setRawText(e.target.value)}
+            rows={12}
+            placeholder="例如：给登录页加忘记密码功能。需要邮件重置..."
+            className="w-full font-mono text-sm border-[1.5px] border-foreground/30 bg-background px-3 py-2 rounded-none focus:outline-none focus:border-accent"
+          />
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button
+            variant="default"
+            size="default"
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+            className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+          >
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+            {submitting ? "AI 整理中..." : "生成需求 →"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
