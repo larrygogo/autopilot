@@ -50,6 +50,10 @@ export class AutopilotClient {
   get getSessionMessages() { return this.http.getSessionMessages.bind(this.http); }
   get listNowCards() { return this.http.listNowCards.bind(this.http); }
   get dismissNowCard() { return this.http.dismissNowCard.bind(this.http); }
+  get createRequirement() { return this.http.createRequirement.bind(this.http); }
+  get extractRequirement() { return this.http.extractRequirement.bind(this.http); }
+  get listProjects() { return this.http.listProjects.bind(this.http); }
+  get listCodebases() { return this.http.listCodebases.bind(this.http); }
 
   // ── 便捷方法：代理 WebSocket ──
 

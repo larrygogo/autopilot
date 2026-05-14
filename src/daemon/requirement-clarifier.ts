@@ -8,13 +8,12 @@ import { getCodebaseById } from "../core/codebases";
 import { createQuestion, nextQuestionId, listQuestionsByRequirement } from "../core/requirement-questions";
 import { createSpecRevision } from "../core/spec-revisions";
 import { createLogger } from "../core/logger";
-import { resolveAgentConfig, createAgent } from "../agents/registry";
-import { loadGlobalAgents, loadProviders } from "../core/config";
 import {
   startRound,
   setPhase,
   endRound,
 } from "./clarifier-progress";
+import { buildClarifierAgent } from "./clarifier-agent";
 
 const log = createLogger("requirement-clarifier");
 
@@ -44,19 +43,11 @@ async function callClaude(prompt: string, reqId: string): Promise<string> {
   // 通过 agent 系统调用。merge 顺序：req-level override > 全局 agents.clarifier > 默认 (anthropic + provider 默认 model)
   let agent;
   try {
-    const globalAgents = loadGlobalAgents();
-    const providers = loadProviders();
-    const globalClarifier = globalAgents["clarifier"] ?? { provider: "anthropic" };
-
-    // 拉本 req 的 override
     const req = getRequirementById(reqId);
     const override: { provider?: "anthropic" | "openai" | "google"; model?: string } = {};
     if (req?.clarifier_provider) override.provider = req.clarifier_provider as "anthropic" | "openai" | "google";
     if (req?.clarifier_model) override.model = req.clarifier_model;
-
-    const merged = { ...globalClarifier, ...override };
-    const resolved = resolveAgentConfig("clarifier", undefined, { clarifier: merged }, providers);
-    agent = createAgent(resolved);
+    agent = buildClarifierAgent(override);
   } catch (e: unknown) {
     throw new Error(`无法初始化 clarifier agent：${e instanceof Error ? e.message : String(e)}`);
   }

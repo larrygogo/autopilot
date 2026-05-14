@@ -1237,6 +1237,37 @@ export async function handleRequest(req: Request): Promise<Response> {
       });
     }
 
+    // POST /api/requirements/extract
+    if (method === "POST" && path === "/api/requirements/extract") {
+      const { runClarifierExtract } = await import("./requirement-extract");
+      const { getProjectById } = await import("../core/projects");
+      const { getCodebaseById } = await import("../core/codebases");
+      const body = (await req.json().catch(() => null)) as
+        | { raw_text?: string; project_id?: string; codebase_id?: string | null }
+        | null;
+      if (!body || typeof body.raw_text !== "string" || !body.raw_text.trim()) {
+        return error("raw_text required", 400);
+      }
+      if (typeof body.project_id !== "string" || !body.project_id.trim()) {
+        return error("project_id required", 400);
+      }
+      const proj = getProjectById(body.project_id);
+      if (!proj) return error("project not found", 404);
+      if (body.codebase_id) {
+        const cb = getCodebaseById(body.codebase_id);
+        if (!cb) return error("codebase not found", 404);
+        if (cb.project_id !== body.project_id) {
+          return error("codebase does not belong to project", 400);
+        }
+      }
+      const result = await runClarifierExtract({
+        raw_text: body.raw_text,
+        project_id: body.project_id,
+        codebase_id: body.codebase_id ?? null,
+      });
+      return json(result);
+    }
+
     // POST /api/requirements
     if (method === "POST" && path === "/api/requirements") {
       const body = (await req.json()) as {
