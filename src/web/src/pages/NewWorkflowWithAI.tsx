@@ -117,7 +117,7 @@ export function NewWorkflowWithAI() {
         ts: authored.ts,
       });
       toast.success(`已创建工作流 ${editName.trim()}`);
-      navigate("/settings?tab=workflows");
+      navigate("/workflows");
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -240,7 +240,7 @@ export function NewWorkflowWithAI() {
             <div className="mt-3 flex justify-between gap-2">
               <Button
                 variant="ghost"
-                onClick={() => navigate("/settings?tab=workflows")}
+                onClick={() => navigate("/workflows")}
                 disabled={saving || generating}
               >
                 取消
