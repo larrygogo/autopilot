@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
 import { TaskProgressCard } from "@/components/TaskProgressCard";
+import { RequirementProgressBar } from "@/components/RequirementProgressBar";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { SpecRevisionsSheet } from "@/components/SpecRevisionsSheet";
@@ -823,7 +824,8 @@ export function RequirementDetail() {
           <h1 className="break-words font-display text-3xl font-bold uppercase tracking-wider leading-[1.05] sm:text-4xl">
             {req.title}
           </h1>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <RequirementProgressBar status={req.status} />
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={STATUS_VARIANT[req.status] ?? "outline"}>
               {STATUS_LABEL[req.status] ?? req.status}
             </Badge>
