@@ -6,6 +6,8 @@ export interface TaskPhaseTimelineProps {
   /** 工作流 phase 顺序（取自 workflow.yaml） */
   workflowPhases: string[];
   events: TaskPhaseEvent[];
+  /** 同 workflow 历史 phase 耗时 P50 — 给"还要多久"参考（可选；缺失时不显示参考线） */
+  phaseStats?: Record<string, { count: number; p50_ms: number }>;
 }
 
 interface PhaseSummary {
@@ -62,7 +64,7 @@ function StatusText({ status }: { status: PhaseSummary["latestStatus"] }) {
   }
 }
 
-export function TaskPhaseTimeline({ workflowPhases, events }: TaskPhaseTimelineProps) {
+export function TaskPhaseTimeline({ workflowPhases, events, phaseStats }: TaskPhaseTimelineProps) {
   const summaries = useMemo(() => aggregate(events, workflowPhases), [events, workflowPhases]);
   const [now, setNow] = useState(Date.now());
 
@@ -74,20 +76,40 @@ export function TaskPhaseTimeline({ workflowPhases, events }: TaskPhaseTimelineP
     return () => clearInterval(t);
   }, [summaries]);
 
+  // 当前进行中 phase 在序列里的位置（1-based）；没有进行中时 = 已完成最末位 + 1
+  const currentIndex = useMemo(() => {
+    const runningIdx = summaries.findIndex((s) => s.runningStartedAt !== null);
+    if (runningIdx >= 0) return runningIdx + 1;
+    const lastDoneIdx = summaries.map((s) => s.latestStatus).lastIndexOf("done");
+    return lastDoneIdx >= 0 ? lastDoneIdx + 1 : 0;
+  }, [summaries]);
+
   if (workflowPhases.length === 0) return null;
 
   return (
     <section className="mb-4 border-[1.5px] border-foreground/30 bg-card">
-      <header className="border-b-[1.5px] border-foreground/30 px-3 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">阶段进度</span>
+      <header className="flex items-center justify-between border-b-[1.5px] border-foreground/30 px-3 py-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          阶段进度
+        </span>
+        {/* 当前 / 总数 — 让长任务能看到"还差几步" */}
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          {currentIndex > 0 ? `${currentIndex} / ${workflowPhases.length}` : `${workflowPhases.length} 步`}
+        </span>
       </header>
       <ul className="divide-y divide-foreground/10">
-        {summaries.map((s) => {
+        {summaries.map((s, idx) => {
           const runningMs = s.runningStartedAt !== null ? now - s.runningStartedAt : 0;
           const displayMs = s.totalMs + runningMs;
           const isActive = s.runningStartedAt !== null || s.latestStatus === "awaiting";
+          const ref = phaseStats?.[s.phase];
+          // 仅当历史样本 >= 2 且此 phase 已开跑（有任何事件或正在跑）时显示参考耗时
+          const showRef = ref && ref.count >= 2 && (displayMs > 0 || isActive);
           return (
             <li key={s.phase} className={cn("flex items-center gap-3 px-3 py-2 font-mono text-xs", isActive && "bg-accent/5")}>
+              <span className="w-6 shrink-0 text-right text-[10px] text-muted-foreground tabular-nums">
+                {idx + 1}.
+              </span>
               <span className="w-4 shrink-0">
                 <StatusIcon status={s.latestStatus} />
               </span>
@@ -97,7 +119,21 @@ export function TaskPhaseTimeline({ workflowPhases, events }: TaskPhaseTimelineP
                   ×{s.retryCount}
                 </span>
               )}
-              <span className="w-20 text-right tabular-nums text-muted-foreground">
+              {showRef && (
+                <span
+                  className="hidden md:inline text-[10px] tabular-nums text-muted-foreground"
+                  title={`同工作流历史 ${ref!.count} 次完成，中位耗时 ${formatDuration(ref!.p50_ms)}`}
+                >
+                  P50≈{formatDuration(ref!.p50_ms)}
+                </span>
+              )}
+              <span
+                className={cn(
+                  "w-20 text-right tabular-nums text-muted-foreground",
+                  // 当前耗时超过历史 P50 1.5 倍时高亮提示用户"比往常慢"
+                  showRef && displayMs > ref!.p50_ms * 1.5 && isActive && "text-warning",
+                )}
+              >
                 {displayMs > 0 ? formatDuration(displayMs) : "—"}
               </span>
               <span className="w-28 text-right text-[10px] uppercase tracking-[0.12em] text-muted-foreground">

@@ -82,10 +82,13 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
     })();
   }, [taskId]);
 
+  const [phaseStats, setPhaseStats] = useState<Record<string, { count: number; p50_ms: number }> | undefined>(undefined);
   useEffect(() => {
     if (!task?.workflow) return;
     api.getWorkflowGraph(task.workflow).then(setGraph).catch(() => {});
     api.getWorkflow(task.workflow).then(setWorkflowDetail).catch(() => {});
+    // 拉同 workflow 历史 phase 耗时 P50 — 给"还要多久"参考
+    api.getWorkflowPhaseStats(task.workflow).then(setPhaseStats).catch(() => setPhaseStats(undefined));
   }, [task?.workflow]);
 
   const { events: phaseEvents, refresh: refreshPhaseEvents } = useTaskPhaseEvents(taskId);
@@ -316,7 +319,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       {/* 任务状态摘要（当前阶段 / 耗时 / 失败原因） */}
       <TaskProgressCard taskId={taskId} showDetailLink={false} showActions={false} />
 
-      <TaskPhaseTimeline workflowPhases={workflowPhasesList} events={phaseEvents} />
+      <TaskPhaseTimeline workflowPhases={workflowPhasesList} events={phaseEvents} phaseStats={phaseStats} />
 
       {task.dangling && task.status?.startsWith("running_") && (
         <DanglingBanner taskId={taskId} toast={toast} />
@@ -420,6 +423,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       {/* Tabs */}
       <TaskDetailTabs
         taskId={taskId}
+        taskStatus={task.status}
         logs={logs}
         liveLogs={liveLogs}
         liveLogRef={liveLogRef}
@@ -553,6 +557,8 @@ type DetailTab = "workspace" | "phase-logs" | "agent-calls" | "transitions" | "l
 
 interface TaskDetailTabsProps {
   taskId: string;
+  /** 当前任务状态，传给 PhaseLogsViewer 用来判定选中 phase 是否还在跑 */
+  taskStatus?: string;
   logs: any[];
   liveLogs: string[];
   liveLogRef: React.RefObject<HTMLDivElement | null>;
@@ -562,6 +568,7 @@ interface TaskDetailTabsProps {
 
 function TaskDetailTabs({
   taskId,
+  taskStatus,
   logs,
   liveLogs,
   liveLogRef,
@@ -608,7 +615,7 @@ function TaskDetailTabs({
       </TabsContent>
 
       <TabsContent value="phase-logs" className="mt-0">
-        <PhaseLogsViewer taskId={taskId} />
+        <PhaseLogsViewer taskId={taskId} taskStatus={taskStatus} />
       </TabsContent>
 
       <TabsContent value="agent-calls" className="mt-0">

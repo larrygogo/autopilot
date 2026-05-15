@@ -542,3 +542,43 @@ export function listTaskPhaseEvents(taskId: string): TaskPhaseEvent[] {
     )
     .all(taskId);
 }
+
+/**
+ * 同工作流历史 phase 耗时统计 — 用作"还要多久"参考值。
+ * 只计入 status='done' 且 ended_at 非空的事件；每 phase 应用层算 P50（中位数）。
+ * 数据规模通常很小（一个 workflow phase 完成事件最多几百条），不需要 SQL window function。
+ */
+export function getWorkflowPhaseStats(workflow: string): Record<string, { count: number; p50_ms: number }> {
+  const db = getDb();
+  const rows = db
+    .query<{ phase: string; dur: number }, [string]>(
+      `SELECT e.phase AS phase, (e.ended_at - e.started_at) AS dur
+       FROM task_phase_events e
+       JOIN tasks t ON t.id = e.task_id
+       WHERE t.workflow = ?
+         AND e.status = 'done'
+         AND e.ended_at IS NOT NULL
+         AND e.ended_at > e.started_at`
+    )
+    .all(workflow);
+
+  const byPhase = new Map<string, number[]>();
+  for (const r of rows) {
+    let arr = byPhase.get(r.phase);
+    if (!arr) {
+      arr = [];
+      byPhase.set(r.phase, arr);
+    }
+    arr.push(r.dur);
+  }
+
+  const result: Record<string, { count: number; p50_ms: number }> = {};
+  for (const [phase, durs] of byPhase) {
+    durs.sort((a, b) => a - b);
+    const n = durs.length;
+    const mid = Math.floor(n / 2);
+    const p50 = n % 2 === 0 ? (durs[mid - 1]! + durs[mid]!) / 2 : durs[mid]!;
+    result[phase] = { count: n, p50_ms: Math.round(p50) };
+  }
+  return result;
+}

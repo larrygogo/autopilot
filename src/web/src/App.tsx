@@ -281,6 +281,7 @@ function AppInner() {
         onNavigate={(path) => navigate(path)}
         onSelectTask={(id) => navigate(`/tasks/${id}`)}
         onNewTask={() => setNewTaskOpen(true)}
+        pathname={location.pathname}
       />
 
       <NewTaskDialog

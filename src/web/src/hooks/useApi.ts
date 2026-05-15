@@ -93,6 +93,11 @@ export const api = {
     ),
   listTaskPhaseEvents: (id: string) =>
     request<{ events: TaskPhaseEvent[] }>(`/api/tasks/${id}/phase-events`).then((r) => r.events),
+  /** 同工作流历史 phase 耗时 P50 — 给"还要多久"参考 */
+  getWorkflowPhaseStats: (workflow: string) =>
+    request<{ stats: Record<string, { count: number; p50_ms: number }> }>(
+      `/api/workflows/${encodeURIComponent(workflow)}/phase-stats`,
+    ).then((r) => r.stats),
   getTaskOutcome: (id: string) =>
     request<TaskOutcome>(`/api/tasks/${id}/outcome`),
   getDaemonLog: (tail = 500) =>

@@ -1900,6 +1900,15 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json({ events });
     }
 
+    // GET /api/workflows/:name/phase-stats — 同 workflow 历史 phase 耗时 P50
+    // 给 TaskPhaseTimeline 显示"此阶段历史 P50 ≈ X · 当前 Y"参考值
+    const phaseStatsMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/phase-stats$/);
+    if (method === "GET" && phaseStatsMatch) {
+      const { getWorkflowPhaseStats } = await import("../core/db");
+      const stats = getWorkflowPhaseStats(phaseStatsMatch);
+      return json({ stats });
+    }
+
     // GET /api/tasks/:id/outcome
     const outcomeMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/outcome$/);
     if (method === "GET" && outcomeMatch) {

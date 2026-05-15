@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { MessageSquare, Workflow, Plug, Bot, Sliders, Moon, Sun, Plus, FileText, Clock } from "lucide-react";
+import { MessageSquare, Workflow, Plug, Bot, Sliders, Moon, Sun, Plus, FileText, Clock, Folder, MessageCircle, XCircle, RotateCw } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/command";
 import { useTheme } from "@/lib/theme";
 import { api } from "@/hooks/useApi";
+import { useToast } from "@/components/Toast";
 
 interface Task {
   id: string;
@@ -24,6 +25,17 @@ interface Workflow {
   name: string;
 }
 
+interface Requirement {
+  id: string;
+  title: string;
+  status: string;
+}
+
+interface Project {
+  id: string;
+  name: string;
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -31,23 +43,70 @@ interface Props {
   onNavigate: (path: string) => void;
   onSelectTask: (id: string) => void;
   onNewTask: () => void;
+  /** 当前页面 pathname — 用来给出上下文敏感动作（如 TaskDetail 时显示"取消此任务"） */
+  pathname?: string;
 }
 
-export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, onNewTask }: Props) {
+/** 从 pathname 提取上下文实体 id（/tasks/:id / /requirements/:id / /projects/:id） */
+function parseContext(pathname?: string): { kind: "task" | "requirement" | "project"; id: string } | null {
+  if (!pathname) return null;
+  const taskM = pathname.match(/^\/tasks\/([^/]+)/);
+  if (taskM) return { kind: "task", id: taskM[1]! };
+  const reqM = pathname.match(/^\/requirements\/([^/]+)/);
+  if (reqM) return { kind: "requirement", id: reqM[1]! };
+  const projM = pathname.match(/^\/projects\/([^/]+)/);
+  if (projM) return { kind: "project", id: projM[1]! };
+  return null;
+}
+
+export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, onNewTask, pathname }: Props) {
   const { resolved, toggle } = useTheme();
+  const toast = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [requirements, setRequirements] = useState<Requirement[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
 
   useEffect(() => {
     if (!open) return;
     api.listTasks({ limit: "30" }).then((list) => setTasks(list as Task[])).catch(() => {});
     api.listWorkflows().then((list: any) => setWorkflows((list ?? []) as Workflow[])).catch(() => {});
+    api.listRequirements().then((list: any) => setRequirements((list ?? []) as Requirement[])).catch(() => {});
+    api.listProjects().then((list) => setProjects(list as Project[])).catch(() => {});
   }, [open]);
 
-  const run = (fn: () => void) => () => {
+  const run = (fn: () => void | Promise<void>) => () => {
     onOpenChange(false);
-    fn();
+    void fn();
   };
+
+  // 上下文敏感动作 — TaskDetail 页时给"取消 / 重启"快捷动作
+  const context = useMemo(() => parseContext(pathname), [pathname]);
+  /** 当前上下文里的 task（若是 task 页） — 用 status 决定哪些动作可用 */
+  const contextTask = useMemo(() => {
+    if (context?.kind !== "task") return null;
+    return tasks.find((t) => t.id === context.id) ?? null;
+  }, [context, tasks]);
+
+  async function handleCancelContextTask() {
+    if (context?.kind !== "task") return;
+    try {
+      await api.cancelTask(context.id);
+      toast.success(`已取消任务 ${context.id}`);
+    } catch (e: unknown) {
+      toast.error("取消失败", (e as Error)?.message ?? String(e));
+    }
+  }
+
+  async function handleRestartContextTask() {
+    if (context?.kind !== "task") return;
+    try {
+      await api.restartTask(context.id);
+      toast.success(`已重启任务 ${context.id}`);
+    } catch (e: unknown) {
+      toast.error("重启失败", (e as Error)?.message ?? String(e));
+    }
+  }
 
   const pages = useMemo(
     () => [
@@ -63,9 +122,33 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput placeholder="跳转、搜索任务、执行命令…" />
+      <CommandInput placeholder="跳转、搜索任务 / 需求 / 项目、执行命令…" />
       <CommandList>
         <CommandEmpty>没有匹配结果</CommandEmpty>
+
+        {/* 上下文敏感动作 — 仅 TaskDetail 页时显示，让键盘流用户不必鼠标点 task 卡 */}
+        {context?.kind === "task" && (
+          <>
+            <CommandGroup heading={`此任务 · ${context.id}`}>
+              <CommandItem
+                value={`cancel-task ${context.id}`}
+                onSelect={run(handleCancelContextTask)}
+                disabled={contextTask?.status === "done" || contextTask?.status === "cancelled"}
+              >
+                <XCircle className="h-4 w-4" />
+                取消此任务
+              </CommandItem>
+              <CommandItem
+                value={`restart-task ${context.id}`}
+                onSelect={run(handleRestartContextTask)}
+              >
+                <RotateCw className="h-4 w-4" />
+                重启此任务（从当前阶段）
+              </CommandItem>
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
 
         <CommandGroup heading="操作">
           <CommandItem onSelect={run(onNewTask)}>
@@ -104,6 +187,45 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
                   <span className="font-mono text-xs text-muted-foreground">{t.id}</span>
                   <span className="truncate">{t.title}</span>
                   <CommandShortcut>{t.status}</CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
+        {requirements.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="最近需求">
+              {requirements.slice(0, 10).map((r) => (
+                <CommandItem
+                  key={r.id}
+                  value={`${r.id} ${r.title}`}
+                  onSelect={run(() => onNavigate(`/requirements/${r.id}`))}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  <span className="font-mono text-xs text-muted-foreground">{r.id}</span>
+                  <span className="truncate">{r.title}</span>
+                  <CommandShortcut>{r.status}</CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
+        {projects.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="项目">
+              {projects.slice(0, 10).map((p) => (
+                <CommandItem
+                  key={p.id}
+                  value={`${p.id} ${p.name}`}
+                  onSelect={run(() => onNavigate(`/projects/${p.id}`))}
+                >
+                  <Folder className="h-4 w-4" />
+                  <span className="font-mono text-xs text-muted-foreground">{p.id}</span>
+                  <span className="truncate">{p.name}</span>
                 </CommandItem>
               ))}
             </CommandGroup>
