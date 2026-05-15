@@ -26,6 +26,7 @@ import { Clock, CalendarClock, Repeat } from "lucide-react";
 
 interface Workflow {
   name: string;
+  label?: string;
   description?: string;
 }
 
@@ -189,7 +190,12 @@ export function NewTaskDialog({ open, onClose, onCreated, onScheduled }: Props) 
                 <SelectContent>
                   {workflows.map((wf) => (
                     <SelectItem key={wf.name} value={wf.name}>
-                      <span className="font-medium">{wf.name}</span>
+                      <span className="font-medium">{wf.label || wf.name}</span>
+                      {wf.label && (
+                        <span className="ml-2 font-mono text-xs text-muted-foreground">
+                          {wf.name}
+                        </span>
+                      )}
                       {wf.description ? (
                         <span className="ml-2 text-muted-foreground">— {wf.description}</span>
                       ) : null}

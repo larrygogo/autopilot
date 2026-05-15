@@ -1,44 +1,54 @@
 name: req_dev
+label: "需求开发"
 description: "需求驱动开发流程（P1：design → review → develop → code_review → submit_pr）；await_review/fix_revision 在 P3 加入"
 setup_func: setup_req_dev_task
 
 agents:
   - name: architect
+    label: "架构师"
     provider: anthropic
     model: claude-sonnet-4-6
     permission_mode: bypassPermissions
   - name: developer
+    label: "开发者"
     provider: anthropic
     model: claude-opus-4-6
     permission_mode: bypassPermissions
   - name: reviewer
+    label: "评审员"
     provider: anthropic
     model: claude-sonnet-4-6
     permission_mode: bypassPermissions
 
 phases:
   - name: design
+    label: "设计"
     agent: architect
     timeout: 900
   - name: review
+    label: "设计评审"
     agent: reviewer
     timeout: 900
     reject: design
     max_rejections: 10
   - name: develop
+    label: "开发"
     agent: developer
     timeout: 1800
   - name: code_review
+    label: "代码评审"
     agent: reviewer
     timeout: 1200
     reject: develop
     max_rejections: 10
   - name: submit_pr
+    label: "提交 PR"
     timeout: 300
   # await_review：长挂起态，靠外部 trigger 推进
   # - revision_request: reviewer 反馈到达 → 跳到 fix_revision
   # - 直接 forceTransition 到 done（gh poller 在 P4 实现）
   - name: await_review
+    label: "等待评审"
     timeout: 2592000
     jump_trigger: revision_request
     jump_target: fix_revision
@@ -46,6 +56,7 @@ phases:
   # fix_revision：独立阶段，agent 读 feedback + checkout PR 分支 + 修复 + push
   # 完成后 jump 回 await_review 等下一轮
   - name: fix_revision
+    label: "修复评审意见"
     agent: developer
     timeout: 1800
     jump_trigger: fix_done

@@ -239,7 +239,16 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
           </Field>
           <Field label="标题">{task.title}</Field>
           <Field label="工作流">
-            <code className="font-mono">{task.workflow}</code>
+            {workflowDetail?.label ? (
+              <span className="flex items-baseline gap-2 min-w-0">
+                <span className="truncate">{workflowDetail.label}</span>
+                <code className="font-mono text-[10px] text-muted-foreground truncate">
+                  {task.workflow}
+                </code>
+              </span>
+            ) : (
+              <code className="font-mono">{task.workflow}</code>
+            )}
           </Field>
           <Field label="状态">
             <StatusBadge status={task.status} />

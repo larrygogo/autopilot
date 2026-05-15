@@ -14,6 +14,8 @@ import { parse as parseYaml } from "yaml";
 export interface WorkflowTemplate {
   /** 模板名（目录名，如 "dev" / "req_dev"） */
   name: string;
+  /** 来自 workflow.yaml 的 label（显示名），未填则前端回退到 name */
+  label?: string;
   /** 来自 workflow.yaml 的 description */
   description: string;
   /** phases 数量 */
@@ -66,11 +68,15 @@ export function listWorkflowTemplates(): WorkflowTemplate[] {
     if (!existsSync(yamlPath)) continue;
     try {
       const parsed = parseYaml(readFileSync(yamlPath, "utf-8")) as Record<string, unknown>;
+      const label = typeof parsed.label === "string" && parsed.label.trim()
+        ? parsed.label.trim()
+        : undefined;
       const description = typeof parsed.description === "string" ? parsed.description : "";
       const phases = Array.isArray(parsed.phases) ? parsed.phases : [];
       const agents = Array.isArray(parsed.agents) ? parsed.agents : [];
       result.push({
         name: entry,
+        label,
         description,
         phase_count: phases.length,
         agent_count: agents.length,

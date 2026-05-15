@@ -133,8 +133,15 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
                   )}
                 >
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="font-mono text-sm font-bold">{t.name}</span>
-                    <span className="font-mono text-[10px] text-muted-foreground">
+                    <div className="flex items-baseline gap-2 min-w-0">
+                      <span className="font-mono text-sm font-bold truncate">{t.label || t.name}</span>
+                      {t.label && (
+                        <span className="font-mono text-[10px] text-muted-foreground truncate">
+                          {t.name}
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-mono text-[10px] text-muted-foreground shrink-0">
                       {t.phase_count} 阶段 · {t.agent_count} 智能体
                     </span>
                   </div>

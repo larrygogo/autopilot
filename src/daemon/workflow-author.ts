@@ -21,18 +21,26 @@ const AUTHOR_SYSTEM_PROMPT = `你是 autopilot 工作流作者。
 工作流由 workflow.yaml 和 workflow.ts 组成。yaml 结构：
 
 \`\`\`yaml
-name: <短名>
+name: <短名>             # 标识符（snake_case 英文）
+label: <显示名>          # 中文（或用户描述用的语言）显示名，UI 上替代 name
 description: <一句话用例说明>
-agents:                # 可选；不写则用全局内置 coder/reviewer
+agents:                  # 可选；不写则用全局内置 coder/reviewer
   - name: coder
+    label: 编码助手      # 可选；agent 显示名
     extends: coder
 phases:
-  - name: <phase 名>
-    agent: coder       # 引用 agents[] 里某条 .name；不写默认 coder
-    timeout: 900       # 秒
+  - name: <phase 名>     # snake_case 英文标识符
+    label: <显示名>      # 中文显示名（如 "设计"、"代码评审"）
+    agent: coder         # 引用 agents[] 里某条 .name；不写默认 coder
+    timeout: 900         # 秒
     # 可选 gate: true → 此 phase 完成后挂起等用户审批
     # 可选 reject: <某个早期 phase 名> → 用于"驳回到上游"
 \`\`\`
+
+注意：
+- name 字段必须是 snake_case 英文标识符（程序内部用）
+- label 字段是给人看的中文显示名（UI 上显示）；用户描述用什么语言就用什么语言
+- 工作流顶层、每个 phase、每个 agent 都要尽量填 label
 
 workflow.ts 必须对每个 phase 导出同名 async function：
 

@@ -1,14 +1,17 @@
 name: doc_gen
+label: "文档生成"
 description: "文档生成与评审 / Document generation and review"
 
 phases:
   # 文档生成阶段 / Document generation phase
   - name: generate
+    label: "生成文档"
     # 超时时间（秒）/ Timeout in seconds
     timeout: 600
 
   # 文档评审阶段 / Document review phase
   - name: review_doc
+    label: "文档评审"
     # 超时时间（秒）/ Timeout in seconds
     timeout: 600
     reject: generate
