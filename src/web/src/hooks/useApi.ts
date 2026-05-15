@@ -101,11 +101,10 @@ export const api = {
   // [WS-RPC] tasks.restart
   restartTask: (id: string) =>
     requestRpc<{ ok: true; phase: string; from: string }>("tasks.restart", { id }),
-  // decideTask 留 HTTP（复杂 inline handler，下一轮单独抽 helper 再切）
+  // [WS-RPC] tasks.decide
   decideTask: (id: string, decision: "pass" | "reject" | "cancel", note?: string) =>
-    request<{ from: string; to: string; decision: string; note: string }>(
-      `/api/tasks/${id}/decide`,
-      { method: "POST", body: JSON.stringify({ decision, note }) },
+    requestRpc<{ from: string; to: string; decision: string; note: string }>(
+      "tasks.decide", { id, decision, note },
     ),
   // [WS-RPC] tasks.answer
   answerTask: (id: string, text: string) =>
@@ -132,8 +131,9 @@ export const api = {
   // [WS-RPC] tasks.outcome
   getTaskOutcome: (id: string) =>
     requestRpc<TaskOutcome>("tasks.outcome", { id }),
+  // [WS-RPC] daemon.log
   getDaemonLog: (tail = 500) =>
-    request<{ path: string | null; content: string }>(`/api/daemon/log?tail=${tail}`),
+    requestRpc<{ path: string | null; content: string }>("daemon.log", { tail }),
   // [WS-RPC] tasks.agentCalls
   listAgentCalls: (id: string) =>
     requestRpc<AgentCallSummary[]>("tasks.agentCalls", { id }),
@@ -332,11 +332,14 @@ export const api = {
     request<{ session_id: string; message: ChatMessage }>("/api/chat", {
       method: "POST", body: JSON.stringify(body),
     }),
-  listSessions: () => request<ChatSessionManifest[]>("/api/sessions"),
+  // [WS-RPC] sessions.list
+  listSessions: () => requestRpc<ChatSessionManifest[]>("sessions.list"),
+  // [WS-RPC] sessions.get
   getSession: (id: string) =>
-    request<ChatSessionManifest & { messages: ChatMessage[] }>(`/api/sessions/${id}`),
+    requestRpc<ChatSessionManifest & { messages: ChatMessage[] }>("sessions.get", { id }),
+  // [WS-RPC] sessions.delete
   deleteSession: (id: string) =>
-    request<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
+    requestRpc<{ ok: true }>("sessions.delete", { id }),
 
   // Defaults（用户偏好）
   // [WS-RPC] defaults.get
@@ -398,38 +401,33 @@ export const api = {
   // [WS-RPC] projects.list — P3 第一批 PoC（RPC 直接返回数组，不再 wrap projects 字段）
   listProjects: () =>
     requestRpc<Project[]>("projects.list"),
+  // [WS-RPC] projects.get
   getProject: (id: string) =>
-    request<{ project: Project }>(`/api/projects/${encodeURIComponent(id)}`).then((r) => r.project),
+    requestRpc<{ project: Project }>("projects.get", { id }).then((r) => r.project),
+  // [WS-RPC] projects.create
   createProject: (body: { name: string; description?: string }) =>
-    request<{ project: Project }>("/api/projects", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }).then((r) => r.project),
+    requestRpc<{ project: Project }>("projects.create", body).then((r) => r.project),
+  // [WS-RPC] projects.update
   updateProject: (id: string, body: { name?: string; description?: string | null }) =>
-    request<{ project: Project }>(`/api/projects/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }).then((r) => r.project),
+    requestRpc<{ project: Project }>("projects.update", { id, ...body }).then((r) => r.project),
+  // [WS-RPC] projects.delete
   deleteProject: (id: string) =>
-    request<{ ok: true }>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    requestRpc<{ ok: true }>("projects.delete", { id }),
+  // [WS-RPC] projects.codebases
   listProjectCodebases: (projectId: string) =>
-    request<{ codebases: Codebase[] }>(
-      `/api/projects/${encodeURIComponent(projectId)}/codebases`,
-    ).then((r) => r.codebases),
+    requestRpc<{ codebases: Codebase[] }>("projects.codebases", { id: projectId }).then((r) => r.codebases),
+  // [WS-RPC] projects.addCodebase
   createProjectCodebase: (
     projectId: string,
     body: { alias: string; path: string; default_branch?: string; github_owner?: string | null; github_repo?: string | null },
   ) =>
-    request<{ codebase: Codebase }>(
-      `/api/projects/${encodeURIComponent(projectId)}/codebases`,
-      { method: "POST", body: JSON.stringify(body) },
-    ).then((r) => r.codebase),
+    requestRpc<{ codebase: Codebase }>("projects.addCodebase", { id: projectId, ...body }).then((r) => r.codebase),
+  // codebases CRUD：保留 HTTP，下一轮单独迁
   deleteCodebase: (codebaseId: string) =>
     request<{ ok: true }>(`/api/codebases/${encodeURIComponent(codebaseId)}`, { method: "DELETE" }),
+  // [WS-RPC] projects.requirements
   listProjectRequirements: (projectId: string) =>
-    request<{ requirements: Requirement[] }>(
-      `/api/projects/${encodeURIComponent(projectId)}/requirements`,
-    ).then((r) => r.requirements),
+    requestRpc<{ requirements: Requirement[] }>("projects.requirements", { id: projectId }).then((r) => r.requirements),
 
   // Codebases —— 后端响应包了 envelope（{ codebases } / { codebase }），统一在此解包返回裸数据
   listCodebases: () =>

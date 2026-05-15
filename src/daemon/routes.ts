@@ -22,7 +22,7 @@ import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
-import { cancelTaskAction, restartTaskAction, answerTaskAction, TaskActionError } from "./task-actions";
+import { cancelTaskAction, restartTaskAction, answerTaskAction, decideTaskAction, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import {
   createSchedule,
@@ -248,12 +248,12 @@ export function computeAgentUsage(agentNames: string[]): Record<string, string[]
 // gate 决断辅助
 // ──────────────────────────────────────────────
 
-function phaseIndex(wf: ReturnType<typeof getWorkflow>, phase: string): number {
+export function phaseIndex(wf: ReturnType<typeof getWorkflow>, phase: string): number {
   if (!wf) return -1;
   return getPhaseIndex(wf, phase);
 }
 
-function parseDecisionCounts(raw: unknown): Record<string, number> {
+export function parseDecisionCounts(raw: unknown): Record<string, number> {
   if (typeof raw !== "string") return {};
   try {
     return JSON.parse(raw) as Record<string, number>;
@@ -262,7 +262,7 @@ function parseDecisionCounts(raw: unknown): Record<string, number> {
   }
 }
 
-function renderDecisionMd(d: { phase: string; decision: string; note: string; ts: string; by: string }): string {
+export function renderDecisionMd(d: { phase: string; decision: string; note: string; ts: string; by: string }): string {
   return [
     `# 决断 · ${d.ts}`,
     "",
@@ -1582,87 +1582,14 @@ export async function handleRequest(req: Request): Promise<Response> {
     const decideMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/decide$/);
     if (method === "POST" && decideMatch) {
       const body = await req.json() as { decision: string; note?: string };
-      const taskId = decideMatch;
-      if (!body.decision || !["pass", "reject", "cancel"].includes(body.decision)) {
-        return error("decision must be one of: pass, reject, cancel");
-      }
-      const note = body.note?.trim() ?? "";
-      if (body.decision === "reject" && !note) {
-        return error("驳回必须填写理由（让 agent 知道改进方向）");
-      }
-
-      const task = getTask(taskId);
-      if (!task) return error("Task not found", 404);
-
-      // 必须处于 awaiting_<phase>
-      if (!task.status.startsWith("awaiting_")) {
-        return error(`Task 未处于等待状态（current=${task.status}）`);
-      }
-      const phase = task.status.slice("awaiting_".length);
-
-      const wf = getWorkflow(task.workflow);
-      if (!wf) return error("Workflow not found", 500);
-
-      const transitions = buildTransitions(wf);
-
-      let trigger: string;
-      if (body.decision === "pass") trigger = `${phase}_pass`;
-      else if (body.decision === "reject") trigger = `${phase}_reject_user`;
-      else trigger = "cancel";
-
-      // 写决断元数据：task.last_user_decision + workspace/<NN-phase>/decision.md
-      const decisionRecord = {
-        phase,
-        decision: body.decision,
-        note,
-        ts: new Date().toISOString(),
-        by: "user",
-      };
-      const extraUpdates: Record<string, unknown> = {
-        last_user_decision: JSON.stringify(decisionRecord),
-      };
-      if (body.decision === "reject") {
-        // 累加该 phase 的 user 驳回计数（独立于 reviewer 驳回）
-        const counts = parseDecisionCounts(task["user_reject_counts"]);
-        counts[phase] = (counts[phase] ?? 0) + 1;
-        extraUpdates["user_reject_counts"] = JSON.stringify(counts);
-      }
-
-      // 写 workspace/<NN-phase>/decision.md（追加历史）
       try {
-        const phaseIdx = phaseIndex(wf, phase);
-        if (phaseIdx >= 0) {
-          const dirName = `${String(phaseIdx).padStart(2, "0")}-${phase}`;
-          const phaseDir = join(getTaskWorkspace(taskId), dirName);
-          if (!existsSync(phaseDir)) mkdirSync(phaseDir, { recursive: true });
-          const decisionMd = renderDecisionMd(decisionRecord);
-          const dPath = join(phaseDir, "decision.md");
-          if (existsSync(dPath)) {
-            appendFileSync(dPath, "\n\n" + decisionMd, "utf-8");
-          } else {
-            writeFileSync(dPath, decisionMd, "utf-8");
-          }
-        }
+        return json(decideTaskAction(decideMatch, body.decision, body.note ?? "", {
+          phaseIndex, parseDecisionCounts, renderDecisionMd,
+        }));
       } catch (e: unknown) {
-        // 写文件失败不阻塞决断
-        console.warn("写 decision.md 失败：", e instanceof Error ? e.message : e);
+        if (e instanceof TaskActionError) return error(e.message, e.status);
+        return error(e instanceof Error ? e.message : String(e), 500);
       }
-
-      const [from, to] = transition(taskId, trigger, {
-        transitions,
-        note: note || `用户决断：${body.decision}`,
-        extraUpdates,
-      });
-
-      // pass / reject 后启动下一阶段（cancel 已是终态无需启动）
-      if (body.decision !== "cancel") {
-        const nextPhaseName = to.startsWith("pending_") ? to.slice("pending_".length) : null;
-        if (nextPhaseName) {
-          executePhase(taskId, nextPhaseName).catch(() => {});
-        }
-      }
-
-      return json({ from, to, decision: body.decision, note });
     }
 
     // POST /api/tasks/:id/transition

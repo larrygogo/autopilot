@@ -10,10 +10,13 @@
  * 不重新设计行为。
  */
 
+import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
+import { join } from "path";
 import { getTask, updateTask } from "../core/db";
 import { transition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { getWorkflow, buildTransitions, isParallelPhase } from "../core/registry";
+import { getTaskWorkspace } from "../core/workspace";
 import { emit } from "../core/event-bus";
 import { createLogger } from "../core/logger";
 
@@ -129,4 +132,97 @@ export async function answerTaskAction(taskId: string, text: string): Promise<{ 
     throw new TaskActionError("ALREADY_ANSWERED", "无法回答（pending 已被消费？）");
   }
   return { ok: true };
+}
+
+// ──────────────────────────────────────────────
+// decideTaskAction — gate phase 的人工决断（pass / reject / cancel）
+// ──────────────────────────────────────────────
+
+export function decideTaskAction(
+  taskId: string,
+  decision: string,
+  note: string,
+  helpers: {
+    /** 从 routes.ts re-export 复用，避免重复实现 */
+    phaseIndex: (wf: ReturnType<typeof getWorkflow>, phase: string) => number;
+    parseDecisionCounts: (raw: unknown) => Record<string, number>;
+    renderDecisionMd: (d: { phase: string; decision: string; note: string; ts: string; by: string }) => string;
+  },
+): { from: string; to: string; decision: string; note: string } {
+  if (!decision || !["pass", "reject", "cancel"].includes(decision)) {
+    throw new TaskActionError("INVALID_PARAM", "decision must be one of: pass, reject, cancel");
+  }
+  const trimmedNote = note?.trim() ?? "";
+  if (decision === "reject" && !trimmedNote) {
+    throw new TaskActionError("INVALID_PARAM", "驳回必须填写理由（让 agent 知道改进方向）");
+  }
+
+  const task = getTask(taskId);
+  if (!task) throw new TaskActionError("NOT_FOUND", "Task not found", 404);
+
+  if (!task.status.startsWith("awaiting_")) {
+    throw new TaskActionError("INVALID_STATE", `Task 未处于等待状态（current=${task.status}）`);
+  }
+  const phase = task.status.slice("awaiting_".length);
+
+  const wf = getWorkflow(task.workflow);
+  if (!wf) throw new TaskActionError("NOT_FOUND", "Workflow not found", 500);
+
+  const transitions = buildTransitions(wf);
+
+  let trigger: string;
+  if (decision === "pass") trigger = `${phase}_pass`;
+  else if (decision === "reject") trigger = `${phase}_reject_user`;
+  else trigger = "cancel";
+
+  const decisionRecord = {
+    phase,
+    decision,
+    note: trimmedNote,
+    ts: new Date().toISOString(),
+    by: "user",
+  };
+  const extraUpdates: Record<string, unknown> = {
+    last_user_decision: JSON.stringify(decisionRecord),
+  };
+  if (decision === "reject") {
+    const counts = helpers.parseDecisionCounts(task["user_reject_counts"]);
+    counts[phase] = (counts[phase] ?? 0) + 1;
+    extraUpdates["user_reject_counts"] = JSON.stringify(counts);
+  }
+
+  // 写 workspace/<NN-phase>/decision.md（追加历史）
+  try {
+    const phaseIdx = helpers.phaseIndex(wf, phase);
+    if (phaseIdx >= 0) {
+      const dirName = `${String(phaseIdx).padStart(2, "0")}-${phase}`;
+      const phaseDir = join(getTaskWorkspace(taskId), dirName);
+      if (!existsSync(phaseDir)) mkdirSync(phaseDir, { recursive: true });
+      const md = helpers.renderDecisionMd(decisionRecord);
+      const dPath = join(phaseDir, "decision.md");
+      if (existsSync(dPath)) {
+        appendFileSync(dPath, "\n\n" + md, "utf-8");
+      } else {
+        writeFileSync(dPath, md, "utf-8");
+      }
+    }
+  } catch (e: unknown) {
+    // 写文件失败不阻塞决断
+    log.warn("写 decision.md 失败：%s", e instanceof Error ? e.message : e);
+  }
+
+  const [from, to] = transition(taskId, trigger, {
+    transitions,
+    note: trimmedNote || `用户决断：${decision}`,
+    extraUpdates,
+  });
+
+  if (decision !== "cancel") {
+    const nextPhaseName = to.startsWith("pending_") ? to.slice("pending_".length) : null;
+    if (nextPhaseName) {
+      executePhase(taskId, nextPhaseName).catch(() => { /* 启动失败不影响响应 */ });
+    }
+  }
+
+  return { from, to, decision, note: trimmedNote };
 }

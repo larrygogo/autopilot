@@ -52,8 +52,23 @@ import { setKv } from "../core/db";
 import { discover as registryDiscover, getWorkflow as registryGetWorkflow } from "../core/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
-import { listProjects, getProjectById } from "../core/projects";
-import { getCodebaseById } from "../core/codebases";
+import {
+  listProjects,
+  getProjectById,
+  createProject as coreCreateProject,
+  updateProject as coreUpdateProject,
+  deleteProject as coreDeleteProject,
+  nextProjectId,
+} from "../core/projects";
+import { listRequirementsByProject } from "../core/requirements";
+import { listCodebases, getCodebaseById, createCodebase, nextCodebaseId } from "../core/codebases";
+import {
+  listSessions as listChatSessions,
+  deleteSession as deleteChatSession,
+  readManifest as readSessionManifest,
+  readMessages as readSessionMessages,
+} from "../core/sessions";
+import { readDaemonFileLog, getDaemonFileLogPath } from "../core/logger";
 import {
   listRequirements as coreListRequirements,
   getRequirementById,
@@ -100,12 +115,13 @@ import {
   getAgentCall,
 } from "../core/task-logs";
 import { getNowAggregator } from "./routes-now";
-import { computeAgentUsage } from "./routes";
+import { computeAgentUsage, phaseIndex, parseDecisionCounts, renderDecisionMd } from "./routes";
 import { computeTaskOutcome } from "./task-outcome";
 import {
   cancelTaskAction,
   restartTaskAction,
   answerTaskAction,
+  decideTaskAction,
   TaskActionError,
 } from "./task-actions";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
@@ -1323,13 +1339,206 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.yaml !== "string") throw new RpcError("INVALID_PARAM", "需要 yaml");
       try {
-        // saveConfigRaw 内部会校验 yaml 语法
         saveConfigRaw(p.yaml);
         emitBus({ type: "config:updated", payload: {} });
         return { ok: true };
       } catch (e: unknown) {
         throw new RpcError("INVALID_YAML", e instanceof Error ? e.message : String(e));
       }
+    },
+  });
+
+  // ── 第十批：收尾（decide + daemon.log + projects mutation + sessions，10 个） ──
+
+  registerRpcMethod({
+    method: "tasks.decide",
+    description: "gate phase 的人工决断（pass / reject / cancel）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (typeof p.decision !== "string") throw new RpcError("INVALID_PARAM", "需要 decision");
+      const note = typeof p.note === "string" ? p.note : "";
+      try {
+        return decideTaskAction(p.id, p.decision, note, {
+          phaseIndex, parseDecisionCounts, renderDecisionMd,
+        });
+      } catch (e: unknown) {
+        if (e instanceof TaskActionError) throw new RpcError(e.code, e.message);
+        throw e;
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "daemon.log",
+    description: "读 daemon 主日志（tail N 行）",
+    handler: (params) => {
+      const p = asObj(params);
+      const tail = typeof p.tail === "number" ? p.tail : 500;
+      return {
+        path: getDaemonFileLogPath() ?? null,
+        content: readDaemonFileLog(tail),
+      };
+    },
+  });
+
+  registerRpcMethod({
+    method: "projects.get",
+    description: "按 id 取 Project 详情",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const project = getProjectById(p.id);
+      if (!project) throw new RpcError("NOT_FOUND", "project not found");
+      return { project };
+    },
+  });
+
+  registerRpcMethod({
+    method: "projects.create",
+    description: "新建 Project",
+    handler: (params) => {
+      const p = asObj(params);
+      const name = typeof p.name === "string" ? p.name.trim() : "";
+      if (!name) throw new RpcError("INVALID_PARAM", "name 必填");
+      const id = nextProjectId();
+      try {
+        const project = coreCreateProject({ id, name, description: (p.description as string | null | undefined) ?? null });
+        return { project };
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (code?.startsWith("SQLITE_CONSTRAINT") || msg.toLowerCase().includes("unique")) {
+          throw new RpcError("ALREADY_EXISTS", msg);
+        }
+        throw new RpcError("CREATE_FAILED", msg);
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "projects.update",
+    description: "更新 Project 字段（name / description）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (p.name !== undefined && typeof p.name === "string" && p.name.trim() === "") {
+        throw new RpcError("INVALID_PARAM", "name 不能为空");
+      }
+      const project = coreUpdateProject(p.id, {
+        name: typeof p.name === "string" ? p.name.trim() : undefined,
+        description: (p.description as string | null | undefined),
+      });
+      if (!project) throw new RpcError("NOT_FOUND", "project not found");
+      return { project };
+    },
+  });
+
+  registerRpcMethod({
+    method: "projects.delete",
+    description: "级联删除 Project（含 requirements + codebases）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
+      try {
+        coreDeleteProject(p.id);
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("DELETE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "projects.codebases",
+    description: "某 project 下的 codebase 列表",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
+      return { codebases: listCodebases({ projectId: p.id }) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "projects.requirements",
+    description: "某 project 下的需求列表",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
+      return { requirements: listRequirementsByProject(p.id).map((r) => withRepoIdAlias(r)) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "projects.addCodebase",
+    description: "在 project 下新建 codebase",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const proj = getProjectById(p.id);
+      if (!proj) throw new RpcError("NOT_FOUND", "project not found");
+      const alias = typeof p.alias === "string" ? p.alias.trim() : "";
+      const pathField = typeof p.path === "string" ? p.path.trim() : "";
+      if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
+      try {
+        const codebase = createCodebase({
+          id: nextCodebaseId(),
+          project_id: p.id,
+          alias,
+          path: pathField,
+          default_branch: typeof p.default_branch === "string" && p.default_branch.trim()
+            ? p.default_branch.trim() : "main",
+          github_owner: (p.github_owner as string | null | undefined) ?? null,
+          github_repo: (p.github_repo as string | null | undefined) ?? null,
+        });
+        return { codebase };
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (code?.startsWith("SQLITE_CONSTRAINT") || msg.toLowerCase().includes("unique")) {
+          throw new RpcError("ALREADY_EXISTS", msg);
+        }
+        throw new RpcError("CREATE_FAILED", msg);
+      }
+    },
+  });
+
+  // ── sessions（chat 历史会话查询 / 删除；流式 chat 接口留 HTTP） ──
+
+  registerRpcMethod({
+    method: "sessions.list",
+    description: "列出所有 chat 会话",
+    handler: () => listChatSessions(),
+  });
+
+  registerRpcMethod({
+    method: "sessions.get",
+    description: "取单个 chat 会话详情（含 messages）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      try {
+        const manifest = readSessionManifest(p.id);
+        const messages = readSessionMessages(p.id);
+        return { ...manifest, messages };
+      } catch (e: unknown) {
+        throw new RpcError("NOT_FOUND", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "sessions.delete",
+    description: "删除 chat 会话",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const ok = deleteChatSession(p.id);
+      if (!ok) throw new RpcError("NOT_FOUND", "session not found");
+      return { ok: true };
     },
   });
 }
