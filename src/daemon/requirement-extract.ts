@@ -1,4 +1,5 @@
 import { createLogger } from "../core/logger";
+import { parseLooseJson } from "../core/llm-json";
 import { buildClarifierAgent } from "./clarifier-agent";
 
 const log = createLogger("requirement-extract");
@@ -54,9 +55,10 @@ export async function runClarifierExtract(input: ExtractInput): Promise<ExtractR
 
   let parsed: { title?: unknown; spec_md?: unknown };
   try {
-    parsed = JSON.parse(raw);
-  } catch {
-    log.warn("extract LLM 返回非法 JSON，走兜底");
+    // 用 parseLooseJson 兼容 LLM 包 markdown fence / 加前缀说明文字的情况
+    parsed = parseLooseJson(raw);
+  } catch (e: unknown) {
+    log.warn("extract LLM 返回非法 JSON，走兜底：%s", e instanceof Error ? e.message : String(e));
     return fallback;
   }
 

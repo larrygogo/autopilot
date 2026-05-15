@@ -74,6 +74,13 @@ export function NewWorkflowWithAI() {
     return extractPhaseFunction(authored.ts, drawerPhase.name);
   }, [drawerPhase, authored?.ts]);
 
+  // 识别后端 fallback（AI 调用挂了、返回非法 JSON 等）— 此时 yaml/ts 是占位 stub，
+  // 用户不应该能保存这种垃圾工作流。一律走"重新生成"或"追问"路径。
+  const isFallback = useMemo(
+    () => !!authored?.warnings?.some((w) => w.startsWith("AI 生成失败") || w.startsWith("缺 yaml")),
+    [authored?.warnings],
+  );
+
   async function generate(prompt: string, includePrior: boolean) {
     if (!prompt.trim()) {
       toast.error("请描述工作流", "");
@@ -257,10 +264,11 @@ export function NewWorkflowWithAI() {
                 </Button>
                 <Button
                   onClick={save}
-                  disabled={generating || saving || !editName.trim()}
+                  disabled={generating || saving || !editName.trim() || isFallback}
+                  title={isFallback ? "AI 生成失败，请先重新生成或追问让 AI 重出方案" : undefined}
                   className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
                 >
-                  {saving ? "保存中..." : "✓ 确认创建"}
+                  {saving ? "保存中..." : isFallback ? "✗ AI 失败，请重试" : "✓ 确认创建"}
                 </Button>
               </div>
             </div>

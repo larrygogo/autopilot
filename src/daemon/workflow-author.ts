@@ -12,6 +12,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
 import { createLogger } from "../core/logger";
+import { parseLooseJson } from "../core/llm-json";
 import { buildClarifierAgent } from "./clarifier-agent";
 
 const log = createLogger("workflow-author");
@@ -145,9 +146,10 @@ export async function runWorkflowAuthor(input: AuthorInput): Promise<AuthorResul
 
   let parsed: { name?: unknown; description?: unknown; yaml?: unknown; ts?: unknown };
   try {
-    parsed = JSON.parse(raw);
-  } catch {
-    log.warn("AI 返回非法 JSON");
+    // 用 parseLooseJson 而不是 JSON.parse — LLM 经常无视"不要 ```json 围栏"指令
+    parsed = parseLooseJson(raw);
+  } catch (e: unknown) {
+    log.warn("AI 返回非法 JSON：%s", e instanceof Error ? e.message : String(e));
     return fallback(input, "AI 返回非法 JSON");
   }
 
