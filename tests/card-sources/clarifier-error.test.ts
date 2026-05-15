@@ -10,6 +10,7 @@ import { up as m008 } from "../../src/migrations/008-projects";
 import { up as m009 } from "../../src/migrations/009-nullable-codebase";
 import { up as m010 } from "../../src/migrations/010-question-suggestions";
 import { up as m011 } from "../../src/migrations/011-now-dismissed-cards";
+import { up as m019 } from "../../src/migrations/019-task-requirement-id";
 import { up as m012 } from "../../src/migrations/012-spec-revisions";
 import { up as m013 } from "../../src/migrations/013-active-question-id";
 import { up as m014 } from "../../src/migrations/014-resolve-orphan-open-questions";
@@ -21,7 +22,7 @@ import { createClarifierErrorSource } from "../../src/core/card-sources/clarifie
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m019].forEach(fn => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "P" });
 }

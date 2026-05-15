@@ -40,6 +40,7 @@ import {
   ChevronDown,
   ChevronRight,
   Folder,
+  ListChecks,
 } from "lucide-react";
 import { api, type Project } from "./hooks/useApi";
 
@@ -51,6 +52,7 @@ const Setup = lazy(() => import("./pages/Setup").then((m) => ({ default: m.Setup
 const NewWorkflowWithAI = lazy(() => import("./pages/NewWorkflowWithAI").then((m) => ({ default: m.NewWorkflowWithAI })));
 const Workflows = lazy(() => import("./pages/Workflows").then((m) => ({ default: m.Workflows })));
 const Schedules = lazy(() => import("./pages/Schedules").then((m) => ({ default: m.Schedules })));
+const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
 const TaskDetail = lazy(() =>
   import("./pages/TaskDetail").then((m) => ({ default: m.TaskDetail })),
 );
@@ -84,6 +86,7 @@ const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { path: "/now", label: "现在", icon: Sparkles, end: true },
       { path: "/start", label: "开始", icon: FilePlus, end: true },
+      { path: "/tasks", label: "任务", icon: ListChecks, end: true },
       { path: "/library", label: "项目", icon: FolderOpen, expandable: "projects" },
     ],
   },
@@ -105,11 +108,12 @@ const NAV_GROUPS: NavGroupDef[] = [
 function titleForPath(pathname: string): string {
   if (pathname.startsWith("/now")) return "现在";
   if (pathname.startsWith("/start")) return "开始";
-  if (pathname.startsWith("/library")) return "项目";
+  if (pathname === "/tasks") return "任务看板";
   if (pathname.startsWith("/tasks/")) {
     const id = pathname.slice("/tasks/".length);
-    return id ? `任务 · ${id}` : "任务";
+    return id ? `任务 · ${id}` : "任务看板";
   }
+  if (pathname.startsWith("/library")) return "项目";
   if (pathname.startsWith("/chat")) return "对话";
   if (pathname.startsWith("/schedules")) return "定时任务";
   if (pathname.startsWith("/workflows")) return "工作流";
@@ -247,6 +251,7 @@ function AppInner() {
                 <Route path="/projects/:id" element={<ProjectDetailRoute />} />
                 <Route path="/requirements/:id" element={<RequirementDetail />} />
                 <Route path="/projects" element={<Navigate to="/library?tab=projects" replace />} />
+                <Route path="/tasks" element={<Tasks />} />
                 <Route path="/workflows/new-with-ai" element={<NewWorkflowWithAI />} />
                 <Route path="/workflows" element={<Workflows />} />
                 <Route path="/schedules" element={<SchedulesRoute subscribe={subscribe} />} />

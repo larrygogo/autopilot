@@ -120,6 +120,9 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     workflow: workflowName,
     initialStatus: wf.initial_state,
     extra,
+    // 双向关联：requirement.task_id 由 requirement-scheduler 写；task.requirement_id 在此写。
+    // 老路径 opts.reqId 可能未传（CLI 手动建 task / Workflow 测试），此时为 null。
+    requirementId: opts.reqId ?? null,
     workflowSnapshot: snapshotWorkflow(wf),
   });
 

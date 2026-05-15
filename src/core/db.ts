@@ -29,6 +29,8 @@ export interface Task {
   parent_task_id: string | null;
   parallel_index: number | null;
   parallel_group: string | null;
+  /** 关联需求 id（reqId），可空兼容历史无关联任务。migration 019 加入。 */
+  requirement_id: string | null;
   [key: string]: unknown;
 }
 
@@ -61,7 +63,8 @@ const SCHEMA = [
   "    started_at TEXT,",
   "    parent_task_id TEXT DEFAULT NULL,",
   "    parallel_index INTEGER DEFAULT NULL,",
-  "    parallel_group TEXT DEFAULT NULL",
+  "    parallel_group TEXT DEFAULT NULL,",
+  "    requirement_id TEXT DEFAULT NULL",
   ");",
   "",
   "CREATE TABLE IF NOT EXISTS task_logs (",
@@ -77,6 +80,7 @@ const SCHEMA = [
   "",
   "CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks (workflow);",
   "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);",
+  "CREATE INDEX IF NOT EXISTS idx_tasks_requirement_id ON tasks (requirement_id);",
   "CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs (task_id);",
 ].join("\n");
 
@@ -96,6 +100,7 @@ export const TABLE_COLUMNS = new Set([
   "parent_task_id",
   "parallel_index",
   "parallel_group",
+  "requirement_id",
 ]);
 
 // 受保护的列字段，不允许通过 extraUpdates/updateTask 修改
@@ -189,6 +194,8 @@ export interface CreateTaskOpts {
   channel?: string;
   notifyTarget?: string | null;
   extra?: Record<string, unknown>;
+  /** 关联需求 id；可空（命令行手动创建 task 时无 requirement） */
+  requirementId?: string | null;
   /**
    * 工作流定义快照。若提供则同步写入 task-manifest.json 作为权威源（gsd-style）。
    * 省略时只写 DB（测试 / 老路径兼容）。
@@ -201,8 +208,8 @@ export function createTask(opts: CreateTaskOpts): void {
   const ts = now();
   db.run(
     "INSERT INTO tasks" +
-    " (id, title, workflow, status, channel, notify_target, extra, created_at, updated_at)" +
-    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    " (id, title, workflow, status, channel, notify_target, extra, created_at, updated_at, requirement_id)" +
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       opts.id,
       opts.title,
@@ -213,6 +220,7 @@ export function createTask(opts: CreateTaskOpts): void {
       JSON.stringify(opts.extra ?? {}),
       ts,
       ts,
+      opts.requirementId ?? null,
     ]
   );
   if (opts.workflowSnapshot) {
