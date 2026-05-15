@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Download } from "lucide-react";
 import { api } from "@/hooks/useApi";
+import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -51,6 +52,7 @@ function formatRelativeTime(epochMs: number): string {
 }
 
 export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) {
+  const toast = useToast();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
 
   useEffect(() => {
@@ -58,6 +60,24 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
       .then((list) => setTasks(list as TaskItem[]))
       .catch(() => setTasks([]));
   }, []);
+
+  async function exportBundle(name: string) {
+    try {
+      const bundle = await api.exportWorkflowBundle(name);
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${name}.workflow.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`已导出 ${name}.workflow.json`);
+    } catch (e: unknown) {
+      toast.error("导出失败", (e as Error)?.message ?? String(e));
+    }
+  }
 
   const usage = useMemo<Map<string, UsageStat>>(() => {
     const map = new Map<string, UsageStat>();
@@ -133,6 +153,16 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
                   )}
                 </div>
                 <div className="mt-3 flex justify-end gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => exportBundle(wf.name)}
+                    title="导出 JSON 文件（包含 yaml + ts，便于分享 / 备份）"
+                    className="rounded-none font-mono text-[10px] uppercase tracking-[0.12em]"
+                  >
+                    <Download className="h-3 w-3" />
+                    导出
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
