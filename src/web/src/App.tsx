@@ -287,8 +287,8 @@ function TaskDetailRoute({
 }) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  if (!id) return <Navigate to="/library?tab=history" replace />;
-  return <TaskDetail taskId={id} onBack={() => navigate("/library?tab=history")} subscribe={subscribe} />;
+  if (!id) return <Navigate to="/now" replace />;
+  return <TaskDetail taskId={id} onBack={() => navigate("/now")} subscribe={subscribe} />;
 }
 
 function ProjectDetailRoute() {

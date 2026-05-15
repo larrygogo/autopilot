@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useNowCards } from "@/hooks/useNowCards";
 import { NowCard } from "@/components/NowCard";
 import { PageHero } from "@/components/PageHero";
+import { RecentHistoryList } from "@/components/RecentHistoryList";
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, type DoctorReportWithDismiss } from "@/hooks/useApi";
@@ -83,6 +84,19 @@ export function Now() {
           <NowCard key={card.id} card={card} now={now} />
         ))}
       </div>
+
+      {/* 已结束的任务（替代之前「库 / 历史」tab，让 Now 同时承担待办 + 回看） */}
+      <section className="mt-10">
+        <header className="mb-3 border-b border-dashed border-foreground/30 pb-2">
+          <h2 className="font-display text-base font-bold uppercase tracking-wider">
+            最近历史
+          </h2>
+          <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            已完成 / 失败的任务（最多 20 条）
+          </p>
+        </header>
+        <RecentHistoryList limit={20} />
+      </section>
     </div>
   );
 }
