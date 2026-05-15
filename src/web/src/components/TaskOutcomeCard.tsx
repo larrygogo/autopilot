@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ExternalLink, RotateCcw } from "lucide-react";
+import { ExternalLink, RotateCcw, Wrench } from "lucide-react";
 import { api, type TaskOutcome } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/Toast";
@@ -23,9 +23,18 @@ export interface TaskOutcomeCardProps {
   /** task → requirement 关系（用于"重跑"） */
   requirementId: string | null;
   workflow: string;
+  /** task.status；失败时用于解析失败 phase 名（如 failed_design → design） */
+  taskStatus?: string;
 }
 
-export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow }: TaskOutcomeCardProps) {
+/** 从 task.status 解析失败的 phase 名（failed_design → design）；非失败状态返回 null */
+function parseFailedPhase(status: string | undefined): string | null {
+  if (!status) return null;
+  if (status.startsWith("failed_")) return status.slice("failed_".length);
+  return null;
+}
+
+export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, taskStatus }: TaskOutcomeCardProps) {
   const navigate = useNavigate();
   const toast = useToast();
   const [outcome, setOutcome] = useState<TaskOutcome | null>(null);
@@ -112,10 +121,24 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow }: 
           </div>
         )}
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
           {outcome.pr_url && (
             <Button variant="outline" size="sm" onClick={() => window.open(outcome.pr_url!, "_blank")} className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]">
               <ExternalLink className="mr-1 h-3.5 w-3.5" /> 看 PR
+            </Button>
+          )}
+          {/* 失败时给"去工作流修复"出口：跳到 /workflows?wf=&phase=，自动选中并展开该 phase drawer */}
+          {outcome.status === "failed" && parseFailedPhase(taskStatus) && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const phase = parseFailedPhase(taskStatus);
+                navigate(`/workflows?wf=${encodeURIComponent(workflow)}&phase=${encodeURIComponent(phase!)}`);
+              }}
+              className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+            >
+              <Wrench className="mr-1 h-3.5 w-3.5" /> 去工作流修复
             </Button>
           )}
           {requirementId && (

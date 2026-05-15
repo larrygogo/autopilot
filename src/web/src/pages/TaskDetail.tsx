@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { ArrowLeft, Copy, FolderTree, FileText, Bot, History, Radio, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2, MousePointerClick } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -283,7 +284,33 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
           reloadKey={task.status}
           requirementId={(task as { requirement_id?: string }).requirement_id ?? null}
           workflow={task.workflow}
+          taskStatus={task.status}
         />
+      )}
+
+      {/* 来源需求卡片（task.requirement_id 存在时显示） */}
+      {task.requirement_id && (
+        <Card className="mb-3 border-l-4 border-l-accent/60 px-4 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                来自需求
+              </span>
+              <Link
+                to={`/requirements/${task.requirement_id}`}
+                className="ml-2 font-mono text-sm text-accent hover:underline"
+              >
+                {task.requirement_id}
+              </Link>
+            </div>
+            <Link
+              to={`/requirements/${task.requirement_id}`}
+              className="font-mono text-[10px] uppercase tracking-wider text-accent hover:underline"
+            >
+              看完整需求 →
+            </Link>
+          </div>
+        </Card>
       )}
 
       {/* 任务状态摘要（当前阶段 / 耗时 / 失败原因） */}

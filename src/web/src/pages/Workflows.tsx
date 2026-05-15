@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
 import { WorkflowCatalog } from "@/components/WorkflowCatalog";
 import { WorkflowHealthBanner } from "@/components/WorkflowHealthBanner";
@@ -81,6 +81,24 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   useEffect(() => {
     refresh();
   }, []);
+
+  // 接收 URL query：?wf=<name>&phase=<name>
+  // 用于 TaskOutcomeCard 失败时「去工作流修复」跳过来自动定位
+  const [searchParams] = useSearchParams();
+  const autoSelectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const wf = searchParams.get("wf");
+    if (!wf) return;
+    // 等 listWorkflows 拉完且未自动选过这个 wf
+    if (workflows.length === 0 || autoSelectedRef.current === wf) return;
+    if (!workflows.some((w) => w.name === wf)) return;
+    autoSelectedRef.current = wf;
+    void toggle(wf);
+    const phase = searchParams.get("phase");
+    if (phase) {
+      toast.info(`已选中工作流，请点击「${phase}」节点编辑 prompt 或 ts`);
+    }
+  }, [searchParams, workflows]);
 
   const toggle = async (name: string) => {
     if (selected?.name === name) {
