@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2, AlertTriangle, MousePointerClick } from "lucide-react";
+import { Loader2, AlertTriangle, MousePointerClick, ChevronDown, ChevronRight } from "lucide-react";
 import { parse as parseYaml } from "yaml";
 import { api, type AuthoredWorkflow } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
@@ -23,6 +23,10 @@ export function NewWorkflowWithAI() {
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [drawerPhase, setDrawerPhase] = useState<DrawerPhaseInfo | null>(null);
+  /** YAML/TS 直接编辑折叠区，默认收起；drawer 触发 onLocateInEditor 时自动展开 */
+  const [editorOpen, setEditorOpen] = useState(false);
+  /** 编辑器 anchor — drawer 触发跳转时滚到这里 */
+  const editorAnchorRef = useRef<HTMLDivElement | null>(null);
 
   // 把 AI 生成的 yaml 解析成 phases 数组，喂给 PhasePipeline。
   // 解析失败时 phases 为空，UI 会显示空态而不是崩溃。
@@ -66,6 +70,8 @@ export function NewWorkflowWithAI() {
       gate: raw.gate === true,
       gate_message: typeof raw.gate_message === "string" ? raw.gate_message : undefined,
       max_rejections: typeof raw.max_rejections === "number" ? raw.max_rejections : undefined,
+      // 零代码模式下这才是核心配置，drawer 需要能看到
+      prompt: typeof raw.prompt === "string" ? raw.prompt : undefined,
     });
   }
 
@@ -231,6 +237,55 @@ export function NewWorkflowWithAI() {
             </div>
           </Card>
 
+          {/* YAML/TS 直接编辑（高级）— 给"我要精确改一个字段，不想 AI 再跑一轮"的用户出口；
+              改完 PhasePipeline 会从 authored.yaml 实时 re-parse */}
+          <Card className="mb-4" ref={editorAnchorRef as unknown as React.RefObject<HTMLDivElement>}>
+            <button
+              type="button"
+              onClick={() => setEditorOpen((v) => !v)}
+              className="flex w-full items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5 text-left transition-colors hover:bg-muted/30"
+              aria-expanded={editorOpen}
+            >
+              {editorOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                直接编辑 YAML / TS · 高级
+              </span>
+              <span className="ml-2 font-mono text-[10px] text-muted-foreground/70">
+                改完实时刷新上方预览
+              </span>
+            </button>
+            {editorOpen && (
+              <div className="space-y-3 p-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-yaml" className="font-mono text-[10px] uppercase tracking-[0.18em]">
+                    workflow.yaml
+                  </Label>
+                  <Textarea
+                    id="edit-yaml"
+                    value={authored.yaml}
+                    onChange={(e) => setAuthored({ ...authored, yaml: e.target.value })}
+                    rows={Math.min(20, Math.max(8, authored.yaml.split("\n").length + 1))}
+                    className="font-mono text-xs"
+                    disabled={saving || generating}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-ts" className="font-mono text-[10px] uppercase tracking-[0.18em]">
+                    workflow.ts <span className="ml-1 text-muted-foreground">（零代码模式留空）</span>
+                  </Label>
+                  <Textarea
+                    id="edit-ts"
+                    value={authored.ts}
+                    onChange={(e) => setAuthored({ ...authored, ts: e.target.value })}
+                    rows={Math.min(20, Math.max(4, authored.ts.split("\n").length + 1))}
+                    className="font-mono text-xs"
+                    disabled={saving || generating}
+                  />
+                </div>
+              </div>
+            )}
+          </Card>
+
           <Card className="mb-4 p-4">
             <Label htmlFor="followup" className="font-mono text-[10px] uppercase tracking-[0.18em]">
               继续调整（追问）
@@ -282,6 +337,13 @@ export function NewWorkflowWithAI() {
         onOpenChange={(o) => { if (!o) setDrawerPhase(null); }}
         phase={drawerPhase}
         tsFunctionCode={drawerTsCode}
+        onLocateInEditor={() => {
+          // 展开下方 YAML/TS 编辑区 + 滚动到 anchor，让用户能直接改
+          setEditorOpen(true);
+          requestAnimationFrame(() => {
+            editorAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          });
+        }}
       />
     </div>
   );

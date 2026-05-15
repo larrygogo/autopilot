@@ -25,6 +25,8 @@ export interface DrawerPhaseInfo {
   max_rejections?: number;
   jump_trigger?: string;
   jump_target?: string;
+  /** 零代码模式（phase.prompt）下的 prompt 内容 — drawer 里直接展示，否则用户只看得到字段表 */
+  prompt?: string;
 }
 
 interface BaseProps {
@@ -116,10 +118,28 @@ function PreviewBody({
   phase: DrawerPhaseInfo;
   tsFunctionCode: string | null;
 }) {
+  /** 零代码模式（有 phase.prompt 字段）和代码模式（有 ts 函数）互斥；都没的话提示 stub */
+  const hasPrompt = typeof phase.prompt === "string" && phase.prompt.trim().length > 0;
+  const hasTs = !!tsFunctionCode;
+
   return (
     <div className="space-y-4 pt-3">
       <FieldGrid phase={phase} />
-      {tsFunctionCode ? (
+      {/* prompt 优先显示 — 零代码模式下这才是 phase 的核心配置 */}
+      {hasPrompt && (
+        <section>
+          <div className="mb-1.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            <span>提示词 · prompt</span>
+            <span className="rounded-none border border-accent/40 bg-accent/5 px-1 py-px text-[9px] text-accent">
+              零代码
+            </span>
+          </div>
+          <pre className="scrollbar-thin max-h-72 overflow-auto whitespace-pre-wrap break-words border-[1.5px] border-foreground/30 bg-card p-3 font-mono text-[11px] leading-relaxed">
+            {phase.prompt}
+          </pre>
+        </section>
+      )}
+      {hasTs && (
         <section>
           <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
             执行函数 · workflow.ts
@@ -128,7 +148,8 @@ function PreviewBody({
             {tsFunctionCode}
           </pre>
         </section>
-      ) : (
+      )}
+      {!hasPrompt && !hasTs && (
         <section>
           <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
             执行函数 · workflow.ts
