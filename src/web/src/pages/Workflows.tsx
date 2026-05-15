@@ -29,12 +29,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input, Textarea } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 interface WorkflowInfo {
   name: string;
+  label?: string;
   description: string;
   source?: "db" | "file";
   derives_from?: string | null;
@@ -125,17 +133,25 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
       toast.error("校验失败", "name 和 base 必填");
       return;
     }
+    if (!/^[\w.\-]+$/.test(deriveName.trim())) {
+      toast.error("名字只允许字母 / 数字 / . _ -", "");
+      return;
+    }
     setDeriveSaving(true);
     try {
+      // yaml_content 用从 base 拉来的 yaml 原文，创建后由用户在流水线编辑器里改
       await api.createWorkflow({
         name: deriveName.trim(),
         description: deriveDesc.trim() || undefined,
         derives_from: deriveBase,
         yaml_content: deriveYaml,
       });
-      toast.success(`已创建派生工作流 ${deriveName.trim()}`);
+      const newName = deriveName.trim();
+      toast.success(`已创建派生工作流 ${newName}，进入编辑器修改阶段`);
       setDeriveOpen(false);
+      // 创建完先刷新列表，再 toggle 切到新工作流详情，让用户立刻可视化编辑
       refresh();
+      void toggle(newName);
     } catch (e: unknown) {
       toast.error("创建失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -467,46 +483,47 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
       <Dialog
         open={deriveOpen}
-        onOpenChange={(open) => {
-          if (!open && !deriveSaving) setDeriveOpen(false);
-        }}
+        onOpenChange={(open) => { if (!open && !deriveSaving) setDeriveOpen(false); }}
       >
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>派生新工作流</DialogTitle>
             <DialogDescription>
-              基于一个 file 工作流的 phase 函数集合，新建一个 DB 工作流（仅修改 yaml 配置）。
+              基于一个文件工作流的阶段函数新建一个 DB 工作流。创建后会自动进入流水线编辑器，可视化调整阶段配置。
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-3 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="derive-base">派生自 (base)</Label>
-              <select
-                id="derive-base"
-                className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+              <Label htmlFor="derive-base">派生自</Label>
+              <Select
                 value={deriveBase}
-                onChange={(e) => {
-                  void onChangeDeriveBase(e.target.value);
-                }}
+                onValueChange={(v) => { void onChangeDeriveBase(v); }}
               >
-                <option value="">选择 file 工作流</option>
-                {fileWorkflows.map((w) => (
-                  <option key={w.name} value={w.name}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="derive-base">
+                  <SelectValue placeholder="选择文件工作流" />
+                </SelectTrigger>
+                <SelectContent>
+                  {fileWorkflows.map((w) => (
+                    <SelectItem key={w.name} value={w.name}>
+                      <span className="font-medium">{w.label || w.name}</span>
+                      {w.label && (
+                        <span className="ml-2 font-mono text-xs text-muted-foreground">{w.name}</span>
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="derive-name">新工作流名</Label>
+              <Label htmlFor="derive-name">新工作流名（标识符）</Label>
               <Input
                 id="derive-name"
                 placeholder="例如：req_dev_fast"
                 value={deriveName}
                 onChange={(e) => setDeriveName(e.target.value)}
+                className="font-mono"
               />
             </div>
             <div className="space-y-1.5">
@@ -518,31 +535,13 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                 onChange={(e) => setDeriveDesc(e.target.value)}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="derive-yaml">
-                YAML 内容（默认填了 base 的 yaml，按需修改）
-              </Label>
-              <Textarea
-                id="derive-yaml"
-                className="min-h-[260px] font-mono text-xs"
-                value={deriveYaml}
-                onChange={(e) => setDeriveYaml(e.target.value)}
-              />
-            </div>
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeriveOpen(false)}
-              disabled={deriveSaving}
-            >
+            <Button variant="outline" onClick={() => setDeriveOpen(false)} disabled={deriveSaving}>
               取消
             </Button>
-            <Button
-              onClick={saveDerive}
-              disabled={deriveSaving || !deriveName.trim() || !deriveBase}
-            >
-              {deriveSaving ? "创建中…" : "创建"}
+            <Button onClick={saveDerive} disabled={deriveSaving || !deriveName.trim() || !deriveBase}>
+              {deriveSaving ? "创建中…" : "创建并编辑"}
             </Button>
           </DialogFooter>
         </DialogContent>

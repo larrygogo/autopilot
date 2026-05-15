@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Plus, Save, Trash2, Pencil } from "lucide-react";
+import { Plus, Save, Trash2, ArrowLeft, ArrowRight } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
@@ -156,6 +156,57 @@ export function PhasePipelineEditor({
   }
 
   // ── 删除阶段 ──
+  // ── 重排：把名为 name 的阶段在顶层往左/右移一格 ──
+  // 并行块视为整体（其位置可调），并行块内子阶段不在本面板换序
+  function handleMovePhase(name: string, dir: "left" | "right") {
+    setPhases((prev) => {
+      // 先找出 name 在顶层数组中的所属位置（普通 phase 直接是顶层 index，
+      // 并行块子项不允许在此移动 — 拒绝）
+      let topIdx = -1;
+      let isParallelChild = false;
+      for (let i = 0; i < prev.length; i += 1) {
+        const p = prev[i];
+        if (!p) continue;
+        if (p.parallel) {
+          const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+          if (subs.some((s) => s?.name === name)) {
+            isParallelChild = true;
+            topIdx = i;
+            break;
+          }
+        } else if (p.name === name) {
+          topIdx = i;
+          break;
+        }
+      }
+      if (topIdx < 0 || isParallelChild) return prev; // 子项不动
+      const target = dir === "left" ? topIdx - 1 : topIdx + 1;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[topIdx], next[target]] = [next[target], next[topIdx]];
+      return next;
+    });
+    setDirty(true);
+  }
+
+  // 当前 drawer 阶段在顶层的位置；用于禁用左右移按钮
+  const drawerTopIdx = useMemo(() => {
+    if (!drawerPhase) return { idx: -1, total: phases.length, isParallelChild: false };
+    for (let i = 0; i < phases.length; i += 1) {
+      const p = phases[i];
+      if (!p) continue;
+      if (p.parallel) {
+        const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+        if (subs.some((s) => s?.name === drawerPhase)) {
+          return { idx: i, total: phases.length, isParallelChild: true };
+        }
+      } else if (p.name === drawerPhase) {
+        return { idx: i, total: phases.length, isParallelChild: false };
+      }
+    }
+    return { idx: -1, total: phases.length, isParallelChild: false };
+  }, [drawerPhase, phases]);
+
   function handleDeletePhase(name: string) {
     setPhases((prev) => {
       const next: any[] = [];
@@ -280,6 +331,45 @@ export function PhasePipelineEditor({
                   </p>
                 )}
               </section>
+
+              {/* 位置调整：仅顶层 phase 支持，并行块内子项不能在此调换 */}
+              {!drawerTopIdx.isParallelChild && (
+                <section className="mt-4">
+                  <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    位置
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleMovePhase(phaseName, "left")}
+                      disabled={drawerTopIdx.idx <= 0}
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      左移
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleMovePhase(phaseName, "right")}
+                      disabled={drawerTopIdx.idx < 0 || drawerTopIdx.idx >= drawerTopIdx.total - 1}
+                    >
+                      <ArrowRight className="h-4 w-4" />
+                      右移
+                    </Button>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      第 {drawerTopIdx.idx + 1} / {drawerTopIdx.total} 个
+                    </span>
+                  </div>
+                </section>
+              )}
+              {drawerTopIdx.isParallelChild && (
+                <section className="mt-4">
+                  <p className="text-[11px] text-muted-foreground">
+                    并行块内的子阶段顺序对执行无影响（并行执行），故不提供排序
+                  </p>
+                </section>
+              )}
 
               <SheetFooter>
                 <Button
