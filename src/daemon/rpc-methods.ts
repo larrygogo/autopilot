@@ -30,6 +30,26 @@ import {
 import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb } from "../core/workflows";
 import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow-templates";
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
+import {
+  listSchedules as coreListSchedules,
+  getSchedule as coreGetSchedule,
+  createSchedule as coreCreateSchedule,
+  updateSchedule as coreUpdateSchedule,
+  deleteSchedule as coreDeleteSchedule,
+  markScheduleFired,
+  systemTimezone,
+  isValidTimezone,
+  type ScheduleType,
+} from "../core/schedules";
+import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw } from "../core/config";
+import {
+  listWorkspaceDir,
+  readWorkspaceFile,
+  deleteTaskWorkspace,
+  scanTaskWorkspaces,
+} from "../core/workspace";
+import { setKv } from "../core/db";
+import { discover as registryDiscover, getWorkflow as registryGetWorkflow } from "../core/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
 import { listProjects, getProjectById } from "../core/projects";
@@ -58,8 +78,19 @@ import {
   resolveQuestion as coreResolveQuestion,
   nextReplyId,
 } from "../core/requirement-questions";
-import { loadProviders, loadGlobalAgents, loadConfigRaw, PROVIDER_NAMES } from "../core/config";
-import { detectAllProviders } from "../agents/cli-status";
+import {
+  loadProviders,
+  loadGlobalAgents,
+  loadConfigRaw,
+  PROVIDER_NAMES,
+  saveProvider,
+  saveAgent,
+  deleteAgent,
+  type ProviderName,
+} from "../core/config";
+import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
+import { listProviderModels } from "../agents/model-list";
+import { runAgentOnce } from "../agents/registry";
 import { runChecks } from "../core/doctor";
 import {
   listPhaseLogs,
@@ -928,6 +959,377 @@ export function registerCoreRpcMethods(): void {
         emitBus({ type: "requirement:all-questions-resolved", payload: { id: p.id } });
       }
       return { ok: true };
+    },
+  });
+
+  // ── 第七批：providers + agents CRUD（8 个） ──
+
+  registerRpcMethod({
+    method: "providers.status",
+    description: "单独检测某家 CLI 健康状态",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      if (!(PROVIDER_NAMES as readonly string[]).includes(p.name)) {
+        throw new RpcError("INVALID_PARAM", `未知 provider：${p.name}`);
+      }
+      return await detectProviderCli(p.name as ProviderName);
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.models",
+    description: "列某家的可用模型列表（API 或 catalog）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      if (!(PROVIDER_NAMES as readonly string[]).includes(p.name)) {
+        throw new RpcError("INVALID_PARAM", `未知 provider：${p.name}`);
+      }
+      return await listProviderModels(p.name as ProviderName);
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.save",
+    description: "保存 provider 配置 + emit config:updated",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      if (!(PROVIDER_NAMES as readonly string[]).includes(p.name)) {
+        throw new RpcError("INVALID_PARAM", `未知 provider：${p.name}`);
+      }
+      // 其他字段（除 name）都是 provider config，整体保存
+      const { name: _n, ...cfg } = p;
+      try {
+        saveProvider(p.name as ProviderName, cfg);
+        emitBus({ type: "config:updated", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "agents.get",
+    description: "单 agent 详情",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const agents = loadGlobalAgents();
+      const cfg = agents[p.name];
+      if (!cfg) throw new RpcError("NOT_FOUND", "Agent not found");
+      return { name: p.name, ...cfg };
+    },
+  });
+
+  registerRpcMethod({
+    method: "agents.create",
+    description: "新建 agent（name 在 params 里；重名报 ALREADY_EXISTS）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const agents = loadGlobalAgents();
+      if (agents[p.name]) {
+        throw new RpcError("ALREADY_EXISTS", `Agent "${p.name}" 已存在，请用 agents.update`);
+      }
+      const { name: _n, ...cfg } = p;
+      try {
+        saveAgent(p.name, cfg);
+        emitBus({ type: "config:updated", payload: {} });
+        return { ok: true, name: p.name };
+      } catch (e: unknown) {
+        throw new RpcError("CREATE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "agents.update",
+    description: "更新已有 agent 的配置（不存在抛 NOT_FOUND）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const agents = loadGlobalAgents();
+      if (!agents[p.name]) throw new RpcError("NOT_FOUND", "Agent not found");
+      const { name: _n, ...cfg } = p;
+      try {
+        saveAgent(p.name, cfg);
+        emitBus({ type: "config:updated", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "agents.delete",
+    description: "删除 agent",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const removed = deleteAgent(p.name);
+      if (!removed) throw new RpcError("NOT_FOUND", "Agent not found");
+      emitBus({ type: "config:updated", payload: {} });
+      return { ok: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "agents.dryRun",
+    description: "一次性调 agent（UI 调试）；prompt 必填，返回 text + usage",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      if (typeof p.prompt !== "string" || !p.prompt.trim()) {
+        throw new RpcError("INVALID_PARAM", "prompt 不能为空");
+      }
+      try {
+        const started = Date.now();
+        const result = await runAgentOnce(p.name, p.prompt, {
+          system_prompt: typeof p.system_prompt === "string" ? p.system_prompt : undefined,
+          additional_system: typeof p.additional_system === "string" ? p.additional_system : undefined,
+          model: typeof p.model === "string" ? p.model : undefined,
+          max_turns: typeof p.max_turns === "number" ? p.max_turns : undefined,
+        });
+        return { ok: true, elapsed_ms: Date.now() - started, result };
+      } catch (e: unknown) {
+        throw new RpcError("DRY_RUN_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  // ── 第八批：schedules.* 域（6 个） ──
+
+  registerRpcMethod({
+    method: "schedules.list",
+    description: "列出所有定时计划",
+    handler: () => coreListSchedules(),
+  });
+
+  registerRpcMethod({
+    method: "schedules.get",
+    description: "按 id 取定时计划详情",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const sch = coreGetSchedule(p.id);
+      if (!sch) throw new RpcError("NOT_FOUND", "Schedule not found");
+      return sch;
+    },
+  });
+
+  registerRpcMethod({
+    method: "schedules.create",
+    description: "新建定时计划（once / cron）",
+    handler: async (params) => {
+      const p = asObj(params);
+      const name = typeof p.name === "string" ? p.name.trim() : "";
+      if (!name) throw new RpcError("INVALID_PARAM", "name 不能为空");
+      if (p.type !== "once" && p.type !== "cron") {
+        throw new RpcError("INVALID_PARAM", "type 必须是 once 或 cron");
+      }
+      if (typeof p.workflow !== "string" || !p.workflow.trim()) {
+        throw new RpcError("INVALID_PARAM", "workflow 不能为空");
+      }
+      const title = typeof p.title === "string" ? p.title.trim() : "";
+      if (!title) throw new RpcError("INVALID_PARAM", "title 不能为空");
+
+      await registryDiscover();
+      if (!registryGetWorkflow(p.workflow)) {
+        throw new RpcError("NOT_FOUND", `workflow "${p.workflow}" 不存在`);
+      }
+      const timezone = (typeof p.timezone === "string" && p.timezone.trim())
+        || loadDefaultsConfig().timezone
+        || systemTimezone();
+      if (!isValidTimezone(timezone)) {
+        throw new RpcError("INVALID_PARAM", `时区无效：${timezone}`);
+      }
+      try {
+        return coreCreateSchedule({
+          name,
+          type: p.type as ScheduleType,
+          run_at: (p.run_at as string | null | undefined) ?? null,
+          cron_expr: (p.cron_expr as string | null | undefined) ?? null,
+          timezone,
+          workflow: p.workflow,
+          title,
+          requirement: (typeof p.requirement === "string" && p.requirement.trim()) ? p.requirement.trim() : null,
+          enabled: typeof p.enabled === "boolean" ? p.enabled : undefined,
+        });
+      } catch (e: unknown) {
+        throw new RpcError("CREATE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "schedules.update",
+    description: "PATCH 风格更新（仅传要改的字段）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const { id: _id, ...patch } = p;
+      try {
+        const sch = coreUpdateSchedule(p.id, patch);
+        if (!sch) throw new RpcError("NOT_FOUND", "Schedule not found");
+        return sch;
+      } catch (e: unknown) {
+        if (e instanceof RpcError) throw e;
+        throw new RpcError("UPDATE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "schedules.delete",
+    description: "删除定时计划",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const ok = coreDeleteSchedule(p.id);
+      if (!ok) throw new RpcError("NOT_FOUND", "Schedule not found");
+      return { ok: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "schedules.runNow",
+    description: "立即触发一次（不影响 next_run_at）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const sch = coreGetSchedule(p.id);
+      if (!sch) throw new RpcError("NOT_FOUND", "Schedule not found");
+      try {
+        const task = await startTaskFromTemplate({
+          workflow: sch.workflow,
+          title: sch.title,
+          requirement: sch.requirement ?? undefined,
+        });
+        markScheduleFired(sch.id, task.id, sch.next_run_at, sch.enabled === 0);
+        return { ok: true, taskId: task.id };
+      } catch (e: unknown) {
+        if (e instanceof StartTaskError) throw new RpcError("START_FAILED", e.message);
+        throw new RpcError("INTERNAL", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  // ── 第九批：workspace + defaults + setup mutation（8 个） ──
+
+  registerRpcMethod({
+    method: "workspaces.tree",
+    description: "列任务 workspace 子目录（默认根目录）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const relPath = typeof p.path === "string" ? p.path : "";
+      try {
+        return { path: relPath, entries: listWorkspaceDir(p.id, relPath) };
+      } catch (e: unknown) {
+        throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "workspaces.file",
+    description: "读 workspace 内单个文件（text）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (typeof p.path !== "string" || !p.path) throw new RpcError("INVALID_PARAM", "需要 path");
+      try {
+        return readWorkspaceFile(p.id, p.path);
+      } catch (e: unknown) {
+        throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "workspaces.delete",
+    description: "手动清理某任务 workspace 目录",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      try {
+        const removed = deleteTaskWorkspace(p.id);
+        return { ok: true, removed };
+      } catch (e: unknown) {
+        throw new RpcError("INTERNAL", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "workspaces.usage",
+    description: "扫描所有任务 workspace 占用（Dashboard 用）",
+    handler: () => {
+      const list = scanTaskWorkspaces();
+      const total = list.reduce((a, it) => a + it.size, 0);
+      return { total, tasks: list };
+    },
+  });
+
+  registerRpcMethod({
+    method: "defaults.get",
+    description: "用户偏好（含 resolved timezone）",
+    handler: () => {
+      const cfg = loadDefaultsConfig();
+      return {
+        timezone: cfg.timezone ?? null,
+        resolved_timezone: cfg.timezone ?? systemTimezone(),
+        system_timezone: systemTimezone(),
+      };
+    },
+  });
+
+  registerRpcMethod({
+    method: "defaults.save",
+    description: "保存用户偏好（目前只有 timezone）",
+    handler: (params) => {
+      const p = asObj(params);
+      const tz = typeof p.timezone === "string" ? p.timezone.trim() : "";
+      if (tz && !isValidTimezone(tz)) {
+        throw new RpcError("INVALID_PARAM", `时区无效：${tz}`);
+      }
+      try {
+        saveDefaultsConfig({ timezone: tz || undefined });
+        emitBus({ type: "config:updated", payload: {} });
+        return { ok: true, timezone: tz || null };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "setup.dismiss",
+    description: "标记 setup 横幅已被用户关闭（不再显示）",
+    handler: () => {
+      setKv("setup.dismissed", "1");
+      return { ok: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "config.save",
+    description: "保存 config.yaml 原文 + emit config:updated",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.yaml !== "string") throw new RpcError("INVALID_PARAM", "需要 yaml");
+      try {
+        // saveConfigRaw 内部会校验 yaml 语法
+        saveConfigRaw(p.yaml);
+        emitBus({ type: "config:updated", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("INVALID_YAML", e instanceof Error ? e.message : String(e));
+      }
     },
   });
 }

@@ -140,22 +140,25 @@ export const api = {
   // [WS-RPC] tasks.agentCall
   getAgentCall: (id: string, seq: number) =>
     requestRpc<AgentCallRecord>("tasks.agentCall", { id, seq }),
+  // [WS-RPC] workspaces.tree
   getWorkspaceTree: (id: string, path: string) =>
-    request<{ path: string; entries: WorkspaceEntry[] }>(
-      `/api/tasks/${id}/ws/tree?path=${encodeURIComponent(path)}`,
-    ),
+    requestRpc<{ path: string; entries: WorkspaceEntry[] }>("workspaces.tree", { id, path }),
+  // [WS-RPC] workspaces.file
   getWorkspaceFile: (id: string, path: string) =>
-    request<{ content: string; binary: boolean; size: number; truncated: boolean }>(
-      `/api/tasks/${id}/ws/file?path=${encodeURIComponent(path)}`,
+    requestRpc<{ content: string; binary: boolean; size: number; truncated: boolean }>(
+      "workspaces.file", { id, path },
     ),
+  // download / zip 走原生 HTTP 流（浏览器需要 URL 触发下载，不能走 WS）
   workspaceDownloadUrl: (id: string, path: string) =>
     `/api/tasks/${id}/ws/download?path=${encodeURIComponent(path)}`,
   workspaceZipUrl: (id: string) => `/api/tasks/${id}/ws/zip`,
+  // [WS-RPC] workspaces.delete
   deleteWorkspace: (id: string) =>
-    request<{ ok: boolean; removed: boolean }>(`/api/tasks/${id}/ws`, { method: "DELETE" }),
+    requestRpc<{ ok: boolean; removed: boolean }>("workspaces.delete", { id }),
+  // [WS-RPC] workspaces.usage
   getWorkspaceUsage: () =>
-    request<{ total: number; tasks: Array<{ taskId: string; size: number; mtime: number; exists: boolean }> }>(
-      `/api/workspaces/usage`,
+    requestRpc<{ total: number; tasks: Array<{ taskId: string; size: number; mtime: number; exists: boolean }> }>(
+      "workspaces.usage",
     ),
   // [WS-RPC] workflows.list — P3 第一批 PoC
   listWorkflows: () =>
@@ -266,8 +269,9 @@ export const api = {
   // Config
   // [WS-RPC] config.get
   getConfig: () => requestRpc<{ yaml: string }>("config.get"),
+  // [WS-RPC] config.save
   saveConfig: (yaml: string) =>
-    request<{ ok: boolean }>("/api/config", { method: "PUT", body: JSON.stringify({ yaml }) }),
+    requestRpc<{ ok: boolean }>("config.save", { yaml }),
   // [WS-RPC] workflows.getYaml
   getWorkflowYaml: (name: string) => requestRpc<{ yaml: string }>("workflows.getYaml", { name }),
   // [WS-RPC] workflows.getTs
@@ -298,24 +302,31 @@ export const api = {
   // Providers
   // [WS-RPC] providers.list
   listProviders: () => requestRpc<ProviderItem[]>("providers.list"),
+  // [WS-RPC] providers.save
   saveProviderConfig: (name: string, cfg: Record<string, unknown>) =>
-    request<{ ok: boolean }>(`/api/providers/${name}`, { method: "PUT", body: JSON.stringify(cfg) }),
+    requestRpc<{ ok: boolean }>("providers.save", { name, ...cfg }),
   // [WS-RPC] providers.statusAll
   getProvidersStatus: () => requestRpc<ProviderStatus[]>("providers.statusAll"),
-  getProviderStatus: (name: string) => request<ProviderStatus>(`/api/providers/${name}/status`),
+  // [WS-RPC] providers.status
+  getProviderStatus: (name: string) => requestRpc<ProviderStatus>("providers.status", { name }),
+  // [WS-RPC] providers.models
   getProviderModels: (name: string) =>
-    request<ProviderModelsResult>(`/api/providers/${name}/models`),
+    requestRpc<ProviderModelsResult>("providers.models", { name }),
 
   // Agents
   // [WS-RPC] agents.list
   listAgents: () => requestRpc<AgentItem[]>("agents.list"),
-  getAgent: (name: string) => request<AgentItem>(`/api/agents/${name}`),
+  // [WS-RPC] agents.get
+  getAgent: (name: string) => requestRpc<AgentItem>("agents.get", { name }),
+  // [WS-RPC] agents.create
   createAgent: (body: AgentItem) =>
-    request<{ ok: boolean; name: string }>("/api/agents", { method: "POST", body: JSON.stringify(body) }),
+    requestRpc<{ ok: boolean; name: string }>("agents.create", body),
+  // [WS-RPC] agents.update
   updateAgent: (name: string, body: Record<string, unknown>) =>
-    request<{ ok: boolean }>(`/api/agents/${name}`, { method: "PUT", body: JSON.stringify(body) }),
+    requestRpc<{ ok: boolean }>("agents.update", { name, ...body }),
+  // [WS-RPC] agents.delete
   deleteAgent: (name: string) =>
-    request<{ ok: boolean }>(`/api/agents/${name}`, { method: "DELETE" }),
+    requestRpc<{ ok: boolean }>("agents.delete", { name }),
   // Chat
   chat: (body: { message: string; session_id?: string; agent?: string; workflow?: string; title?: string }) =>
     request<{ session_id: string; message: ChatMessage }>("/api/chat", {
@@ -328,40 +339,45 @@ export const api = {
     request<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
 
   // Defaults（用户偏好）
+  // [WS-RPC] defaults.get
   getDefaults: () =>
-    request<{
+    requestRpc<{
       timezone: string | null;
       resolved_timezone: string;
       system_timezone: string;
-    }>("/api/defaults"),
+    }>("defaults.get"),
+  // [WS-RPC] defaults.save
   saveDefaults: (body: { timezone?: string | null }) =>
-    request<{ ok: true; timezone: string | null }>("/api/defaults", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
+    requestRpc<{ ok: true; timezone: string | null }>("defaults.save", body),
 
   // Schedules
-  listSchedules: () => request<Schedule[]>("/api/schedules"),
-  getSchedule: (id: string) => request<Schedule>(`/api/schedules/${id}`),
+  // [WS-RPC] schedules.list
+  listSchedules: () => requestRpc<Schedule[]>("schedules.list"),
+  // [WS-RPC] schedules.get
+  getSchedule: (id: string) => requestRpc<Schedule>("schedules.get", { id }),
+  // [WS-RPC] schedules.create
   createSchedule: (body: {
     name: string;
     type: "once" | "cron";
     run_at?: string | null;
     cron_expr?: string | null;
-    /** 省略则后端使用 defaults.timezone 或机器时区 */
     timezone?: string;
     workflow: string;
     title: string;
     requirement?: string | null;
     enabled?: boolean;
-  }) => request<Schedule>("/api/schedules", { method: "POST", body: JSON.stringify(body) }),
+  }) => requestRpc<Schedule>("schedules.create", body),
+  // [WS-RPC] schedules.update
   updateSchedule: (id: string, body: Record<string, unknown>) =>
-    request<Schedule>(`/api/schedules/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    requestRpc<Schedule>("schedules.update", { id, ...body }),
+  // [WS-RPC] schedules.delete
   deleteSchedule: (id: string) =>
-    request<{ ok: true }>(`/api/schedules/${id}`, { method: "DELETE" }),
+    requestRpc<{ ok: true }>("schedules.delete", { id }),
+  // [WS-RPC] schedules.runNow
   runScheduleNow: (id: string) =>
-    request<{ ok: true; taskId: string }>(`/api/schedules/${id}/run-now`, { method: "POST" }),
+    requestRpc<{ ok: true; taskId: string }>("schedules.runNow", { id }),
 
+  // [WS-RPC] agents.dryRun（LLM 调用，5min 超时）
   dryRunAgent: (name: string, body: {
     prompt: string;
     system_prompt?: string;
@@ -369,14 +385,14 @@ export const api = {
     model?: string;
     max_turns?: number;
   }) =>
-    request<{
+    requestRpc<{
       ok: boolean;
       elapsed_ms: number;
       result: {
         text: string;
         usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
       };
-    }>(`/api/agents/${name}/dry-run`, { method: "POST", body: JSON.stringify(body) }),
+    }>("agents.dryRun", { name, ...body }, { timeoutMs: 300_000 }),
 
   // Projects
   // [WS-RPC] projects.list — P3 第一批 PoC（RPC 直接返回数组，不再 wrap projects 字段）
@@ -492,8 +508,9 @@ export const api = {
       },
     ),
 
+  // [WS-RPC] setup.dismiss
   setupDismiss: () =>
-    request<{ ok: boolean }>("/api/setup/dismiss", { method: "POST" }),
+    requestRpc<{ ok: boolean }>("setup.dismiss"),
 
   // [WS-RPC] requirements.extract（LLM 长任务，5min 超时）
   extractRequirement: (input: { raw_text: string; project_id: string; codebase_id?: string | null }) =>
