@@ -21,6 +21,7 @@ import { Separator } from "./components/ui/separator";
 import { CommandPalette } from "./components/CommandPalette";
 import { FloatingChat } from "./components/FloatingChat";
 import { NewTaskDialog } from "./components/NewTaskDialog";
+import { QuickCreateMenu } from "./components/QuickCreateMenu";
 import { PageLoader } from "./components/PageLoader";
 import { useTheme } from "./lib/theme";
 import { cn } from "./lib/utils";
@@ -194,6 +195,7 @@ function AppInner() {
               {headerTitle}
             </h1>
             <div className="ml-auto flex items-center gap-1">
+              <QuickCreateMenu />
               <Button
                 variant="outline"
                 size="sm"
