@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Save, Trash2, ArrowLeft, ArrowRight } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useToast } from "./Toast";
@@ -57,11 +57,23 @@ export function PhasePipelineEditor({
   const [globalAgents, setGlobalAgents] = useState<string[]>([]);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
 
+  // ── rename 追踪：保存时把 oldName→newName 一起传给后端，让 workflow.ts 里
+  //   run_<old> 函数也一并 rename，避免产生孤儿 ──
+  const renamesRef = useRef<Map<string, string>>(new Map());
+  // 本次编辑会话内新建的阶段名（rename 时不必登记 renames，因为后端没有对应的 run_<old>）
+  const newlyAddedRef = useRef<Set<string>>(new Set());
+
+  const resetDraftTracking = useCallback(() => {
+    renamesRef.current = new Map();
+    newlyAddedRef.current = new Set();
+  }, []);
+
   // initialPhases 变化（保存成功后父级 reload）时重置内部状态
   useEffect(() => {
     setPhases(initialPhases);
     setDirty(false);
-  }, [initialPhases, workflowName]);
+    resetDraftTracking();
+  }, [initialPhases, workflowName, resetDraftTracking]);
 
   // 加载全局 agent 名字给 drawer 下拉用
   useEffect(() => {
@@ -150,9 +162,69 @@ export function PhasePipelineEditor({
       next.splice(insertAt, 0, newPhase);
       return next;
     });
+    // 标记为新建：之后改名不必登记 renames
+    newlyAddedRef.current.add(data.name);
     setDirty(true);
     setAddOpen(false);
     toast.success(`新增阶段 ${data.name}（未保存，点保存生效）`);
+  }
+
+  // ── 改名 ──
+  // 单条调用：oldName → newName。失败时返回 false 让表单回滚输入。
+  function handleRenamePhase(oldName: string, newName: string): boolean {
+    if (oldName === newName) return true;
+    if (!/^[a-z][a-z0-9_]*$/.test(newName)) {
+      toast.error("名字不合法", "必须以小写字母开头，只允许 a-z 0-9 _");
+      return false;
+    }
+    if (allPhaseNames.includes(newName)) {
+      toast.error("名字重复", `已存在阶段 ${newName}`);
+      return false;
+    }
+
+    // 维护 renames 映射；新建阶段直接换名不进 renames
+    const newlyAdded = newlyAddedRef.current;
+    if (newlyAdded.has(oldName)) {
+      newlyAdded.delete(oldName);
+      newlyAdded.add(newName);
+    } else {
+      const renames = renamesRef.current;
+      // 链式：source → oldName → newName 折叠成 source → newName
+      let sourceKey: string | null = null;
+      for (const [k, v] of renames.entries()) {
+        if (v === oldName) { sourceKey = k; break; }
+      }
+      if (sourceKey !== null) {
+        if (sourceKey === newName) renames.delete(sourceKey); // 反向回到原名，抵消
+        else renames.set(sourceKey, newName);
+      } else {
+        renames.set(oldName, newName);
+      }
+    }
+
+    // 更新 phases：phase.name + 所有指向旧名的 reject
+    setPhases((prev) =>
+      prev.map((p) => {
+        if (!p) return p;
+        if (p.parallel) {
+          const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+          const updated = subs.map((s) => {
+            if (s?.name === oldName) return { ...s, name: newName };
+            if (s?.reject === oldName) return { ...s, reject: newName };
+            return s;
+          });
+          return { ...p, parallel: { ...p.parallel, phases: updated } };
+        }
+        if (p.name === oldName) return { ...p, name: newName };
+        if (p.reject === oldName) return { ...p, reject: newName };
+        return p;
+      }),
+    );
+
+    // drawer 当前指向的就是被改名的 phase，更新引用
+    setDrawerPhase((cur) => (cur === oldName ? newName : cur));
+    setDirty(true);
+    return true;
   }
 
   // ── 删除阶段 ──
@@ -208,6 +280,12 @@ export function PhasePipelineEditor({
   }, [drawerPhase, phases]);
 
   function handleDeletePhase(name: string) {
+    // 清理 renames：若被删的 name 是某条改名的目标，撤销该条；新建后又删除的 name 也清掉
+    newlyAddedRef.current.delete(name);
+    const renames = renamesRef.current;
+    for (const [k, v] of Array.from(renames.entries())) {
+      if (v === name) renames.delete(k);
+    }
     setPhases((prev) => {
       const next: any[] = [];
       for (const p of prev) {
@@ -243,10 +321,22 @@ export function PhasePipelineEditor({
   async function save() {
     setSaving(true);
     try {
-      const res = await api.setWorkflowPhases(workflowName, phases, true);
+      // 只发"目标 newName 仍存在"的 rename（用户可能删过中间产物）
+      const currentNames = new Set(allPhaseNames);
+      const validRenames: Record<string, string> = {};
+      for (const [oldName, newName] of renamesRef.current.entries()) {
+        if (currentNames.has(newName)) validRenames[oldName] = newName;
+      }
+      const renamesToSend =
+        Object.keys(validRenames).length > 0 ? validRenames : undefined;
+
+      const res = await api.setWorkflowPhases(workflowName, phases, true, renamesToSend);
       setDirty(false);
+      resetDraftTracking();
       const ts = res.ts;
+      const renamed = res.renamed ?? [];
       const parts: string[] = [];
+      if (renamed.length > 0) parts.push(`已改名 ${renamed.length} 个函数：${renamed.join(", ")}`);
       if (ts?.added?.length) parts.push(`新增 ${ts.added.length} 个函数：${ts.added.join(", ")}`);
       if (ts?.orphans?.length) parts.push(`检测到 ${ts.orphans.length} 个孤儿函数（手工清理或下次保存自动同步）`);
       if (res.ts_error) parts.push(`ts 同步警告：${res.ts_error}`);
@@ -313,6 +403,7 @@ export function PhasePipelineEditor({
                 allPhaseNames={allPhaseNames}
                 agentOptions={agentOptions}
                 onChange={(patch) => updatePhaseField(phaseName, patch)}
+                onRename={(oldName, newName) => handleRenamePhase(oldName, newName)}
               />
 
               {/* ts 函数代码（只读） */}
@@ -433,19 +524,39 @@ function PhaseEditForm({
   allPhaseNames,
   agentOptions,
   onChange,
+  onRename,
 }: {
   raw: PhaseRaw;
   allPhaseNames: string[];
   agentOptions: string[];
   onChange: (patch: Record<string, unknown>) => void;
+  /** 改名提交；返回 false 则恢复输入框为原 name */
+  onRename: (oldName: string, newName: string) => boolean;
 }) {
   // 排除自己
   const rejectCandidates = allPhaseNames.filter((n) => n !== raw.name);
+  const phaseName = String(raw.name ?? "");
+
+  // 本地缓存 name 输入：用户改完 onBlur 才提交 rename
+  const [nameDraft, setNameDraft] = useState(phaseName);
+  useEffect(() => { setNameDraft(phaseName); }, [phaseName]);
 
   // raw.label 可能是 registry 兜底填的 name.toUpperCase()，那不是用户真填的，
   // 输入框要显示空让用户感知"还没设中文名"
   const rawLabel = typeof raw.label === "string" ? raw.label : null;
-  const realLabel = userPhaseLabel({ name: String(raw.name ?? ""), label: rawLabel }) ?? "";
+  const realLabel = userPhaseLabel({ name: phaseName, label: rawLabel }) ?? "";
+
+  function commitName() {
+    const trimmed = nameDraft.trim();
+    if (trimmed === phaseName) return;
+    if (trimmed === "") {
+      setNameDraft(phaseName);
+      return;
+    }
+    if (!onRename(phaseName, trimmed)) {
+      setNameDraft(phaseName); // 校验失败回滚
+    }
+  }
 
   return (
     <div className="space-y-3 pt-3">
@@ -453,7 +564,7 @@ function PhaseEditForm({
         <FormRow label="显示名 (label)">
           <Input
             value={realLabel}
-            placeholder={`留空则显示 ${String(raw.name ?? "")}`}
+            placeholder={`留空则显示 ${phaseName}`}
             onChange={(e) => onChange({ label: e.target.value || undefined })}
             className="h-8 text-sm"
           />
@@ -464,13 +575,24 @@ function PhaseEditForm({
 
         <FormRow label="标识符 (name)">
           <Input
-            value={String(raw.name ?? "")}
-            disabled
-            readOnly
-            className="h-8 font-mono text-sm bg-muted/40"
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitName();
+                (e.target as HTMLInputElement).blur();
+              } else if (e.key === "Escape") {
+                setNameDraft(phaseName);
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            placeholder="小写字母开头，a-z 0-9 _"
+            className="h-8 font-mono text-sm"
           />
           <p className="mt-1 text-[10px] text-muted-foreground">
-            name 关联 workflow.ts 中的函数名，改名涉及代码迁移，本面板不支持
+            标识符联动 workflow.ts 里的函数名；改名后保存时框架自动 rename run_xxx 函数
           </p>
         </FormRow>
 
