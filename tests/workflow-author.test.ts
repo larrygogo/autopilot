@@ -43,20 +43,27 @@ describe("runWorkflowAuthor", () => {
     expect(r.warnings.length).toBeGreaterThan(0);
   });
 
-  it("AI 返回非法 JSON 走兜底", async () => {
-    _setAuthorFnForTest(async () => "not json at all");
+  it("AI 返回非法格式走兜底", async () => {
+    // 现在顶层用 YAML 解析；"not json at all" 这种字符串 YAML 会解析成单个字符串，
+    // 不是 object，触发 wrapper 顶层校验失败 → fallback
+    _setAuthorFnForTest(async () => "not yaml object");
     const r = await runWorkflowAuthor({ description: "x" });
-    expect(r.warnings.some((w) => w.includes("JSON"))).toBe(true);
+    expect(r.warnings.some((w) => w.includes("格式") || w.includes("非法"))).toBe(true);
   });
 
-  it("AI 返回 JSON 但 ts 缺 phase 函数 → 报 warning，仍返回结果", async () => {
+  it("AI 返回 YAML 但 ts 缺 phase 函数 → 报 warning，仍返回结果", async () => {
     _setAuthorFnForTest(async () =>
-      JSON.stringify({
-        name: "x",
-        description: "x",
-        yaml: "name: x\nphases:\n  - name: design\n  - name: review\n",
-        ts: "export async function design(_t: string): Promise<void> {}\n",
-      }),
+      // 顶层 YAML，yaml/ts 走 | 多行块
+      `name: x
+description: x
+yaml: |
+  name: x
+  phases:
+    - name: design
+    - name: review
+ts: |
+  export async function design(_t: string): Promise<void> {}
+`,
     );
     const r = await runWorkflowAuthor({ description: "x" });
     expect(r.warnings.some((w) => w.includes("review"))).toBe(true);

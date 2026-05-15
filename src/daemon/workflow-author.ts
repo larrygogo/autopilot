@@ -12,7 +12,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
 import { createLogger } from "../core/logger";
-import { parseLooseJson } from "../core/llm-json";
+import { parseLlmYamlWrapper } from "../core/llm-yaml";
 import { buildClarifierAgent } from "./clarifier-agent";
 
 const log = createLogger("workflow-author");
@@ -70,13 +70,29 @@ phases:
 
 读用户描述（可能含 prior_yaml / prior_ts 表示要在原基础上增量调整）。
 
-**只输出严格 JSON**，含字段：
-  - name: string（snake_case 短名，例 "backend_dev"）
-  - description: string（一句话用例）
-  - yaml: string（完整 yaml 文本，简单场景用 prompt 字段）
-  - ts: string（complex 场景下完整 ts；零代码场景填空字符串 ""）
+**输出格式为 YAML**（不是 JSON），结构如下：
 
-不要解释、不要 \`\`\`json 围栏。`;
+\`\`\`yaml
+name: backend_dev                       # snake_case 短名
+description: 一句话用例说明
+yaml: |
+  # 这里写完整 workflow.yaml 内容
+  name: backend_dev
+  label: 后端开发
+  phases:
+    - name: design
+      label: 设计
+      prompt: |
+        ...                              # prompt 可含任意引号 / 多行，不需转义
+ts: |
+  // 零代码场景留空字符串；复杂场景写完整 ts
+\`\`\`
+
+⭐ 注意：用 **YAML** 而不是 JSON，因为 yaml 的 \`|\` 块作用域内 prompt 可以
+原样包含 双引号 / 中文 / 多行 / 反斜杠，**完全不需要转义**。这就是用 YAML
+而不是 JSON 的全部理由。
+
+直接输出 YAML 文本，不要解释、不要 \`\`\`yaml 围栏。`;
 
 export interface AuthorInput {
   description: string;
@@ -146,11 +162,10 @@ export async function runWorkflowAuthor(input: AuthorInput): Promise<AuthorResul
 
   let parsed: { name?: unknown; description?: unknown; yaml?: unknown; ts?: unknown };
   try {
-    // 用 parseLooseJson 而不是 JSON.parse — LLM 经常无视"不要 ```json 围栏"指令
-    parsed = parseLooseJson(raw);
+    parsed = parseLlmYamlWrapper(raw);
   } catch (e: unknown) {
-    log.warn("AI 返回非法 JSON：%s", e instanceof Error ? e.message : String(e));
-    return fallback(input, "AI 返回非法 JSON");
+    log.warn("AI 顶层 YAML 解析失败：%s", e instanceof Error ? e.message : String(e));
+    return fallback(input, "AI 返回非法格式");
   }
 
   if (typeof parsed.yaml !== "string" || !parsed.yaml.trim()) {

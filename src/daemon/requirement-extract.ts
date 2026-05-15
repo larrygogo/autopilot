@@ -1,15 +1,30 @@
 import { createLogger } from "../core/logger";
-import { parseLooseJson } from "../core/llm-json";
+import { parseLlmYamlWrapper } from "../core/llm-yaml";
 import { buildClarifierAgent } from "./clarifier-agent";
 
 const log = createLogger("requirement-extract");
 
 const EXTRACT_SYSTEM_PROMPT = `你是需求分析师。
-读用户的口语化描述，输出**严格 JSON** 含两个字段：
+读用户的口语化描述，输出 **YAML** 含两个字段：
 - title：≤30 字的标题
 - spec_md：Markdown 整理，含 "## 背景" "## 目标" "## 验收" 三段
 
-只输出 JSON，不要解释、不要 \`\`\`json 围栏。`;
+输出格式：
+\`\`\`yaml
+title: 用户登录优化
+spec_md: |
+  ## 背景
+  ...                       # 这里可以含任意引号 / 中文 / 多行，不需转义
+  ## 目标
+  ...
+  ## 验收
+  ...
+\`\`\`
+
+⭐ 用 YAML 而不是 JSON，因为 spec_md 是 markdown 文本经常含 \`"\` 引号，
+JSON 转义易错。YAML \`|\` 块完全不需转义。
+
+直接输出 YAML，不要解释、不要 \`\`\`yaml 围栏。`;
 
 export interface ExtractInput {
   raw_text: string;
@@ -55,10 +70,9 @@ export async function runClarifierExtract(input: ExtractInput): Promise<ExtractR
 
   let parsed: { title?: unknown; spec_md?: unknown };
   try {
-    // 用 parseLooseJson 兼容 LLM 包 markdown fence / 加前缀说明文字的情况
-    parsed = parseLooseJson(raw);
+    parsed = parseLlmYamlWrapper(raw);
   } catch (e: unknown) {
-    log.warn("extract LLM 返回非法 JSON，走兜底：%s", e instanceof Error ? e.message : String(e));
+    log.warn("extract LLM 顶层格式非法，走兜底：%s", e instanceof Error ? e.message : String(e));
     return fallback;
   }
 
