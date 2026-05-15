@@ -237,23 +237,25 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
-      {/* Header */}
+      {/* Header — task.id 是主标识（大字 mono），eyebrow 缩到 bp-label，状态推到行尾跟操作组一起 */}
       <div className="mb-5 flex flex-wrap items-center gap-3 border-b border-dashed border-foreground/25 pb-4">
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
           <ArrowLeft className="h-4 w-4" />
           返回
         </Button>
-        <div className="flex min-w-0 items-center gap-2.5">
-          <h2 className="truncate font-display text-2xl font-bold uppercase tracking-wider">
-            TASK · 任务
-          </h2>
-          <code className="truncate border border-foreground/30 bg-muted px-2 py-0.5 font-mono text-sm text-accent">
+        <div className="flex min-w-0 flex-col">
+          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+            TASK
+          </span>
+          <h2 className="truncate font-mono text-xl font-bold text-foreground sm:text-2xl">
             {task.id}
-          </code>
+          </h2>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
           <StatusBadge status={task.status} />
         </div>
         {canCancel && (
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"

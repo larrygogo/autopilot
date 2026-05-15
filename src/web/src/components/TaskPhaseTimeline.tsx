@@ -129,14 +129,15 @@ export function TaskPhaseTimeline({ workflowPhases, events, phaseStats }: TaskPh
               )}
               <span
                 className={cn(
-                  "w-20 text-right tabular-nums text-muted-foreground",
+                  "min-w-[3rem] shrink-0 text-right tabular-nums text-muted-foreground",
                   // 当前耗时超过历史 P50 1.5 倍时高亮提示用户"比往常慢"
                   showRef && displayMs > ref!.p50_ms * 1.5 && isActive && "text-warning",
                 )}
               >
                 {displayMs > 0 ? formatDuration(displayMs) : "—"}
               </span>
-              <span className="w-28 text-right text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              {/* 状态文字在窄屏隐藏（已经有 StatusIcon 一目了然），仅 lg 显示 */}
+              <span className="hidden w-28 text-right text-[10px] uppercase tracking-[0.12em] text-muted-foreground lg:inline-block">
                 <StatusText status={s.latestStatus} />
               </span>
             </li>

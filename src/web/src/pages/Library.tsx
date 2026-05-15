@@ -184,47 +184,51 @@ function ProjectsTab() {
           {projects.map((project) => (
             <Card
               key={project.id}
-              className="group relative cursor-pointer p-5 hover:shadow-md transition-shadow"
+              className="flex cursor-pointer flex-col p-4 transition-colors hover:border-accent"
               onClick={() => navigate("/projects/" + project.id)}
             >
-              <div className="absolute right-3 top-3 hidden items-center gap-1 group-hover:flex">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={(e) => openEditDialog(project, e)}
-                  disabled={deleteTarget?.id === project.id}
-                  title="编辑"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-destructive hover:text-destructive"
-                  onClick={(e) => openDeleteDialog(project, e)}
-                  disabled={deleteTarget?.id === project.id}
-                  title="删除"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+              {/* eyebrow + 项目 id（蓝图风） */}
+              <div className="mb-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                <Layers className="h-3 w-3" />
+                <span>PROJECT · {project.id}</span>
               </div>
-
-              <div className="space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <h3 className="font-semibold leading-tight tracking-tight line-clamp-2 pr-14">
-                    {project.name}
-                  </h3>
-                  <Layers className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/60 group-hover:invisible" />
-                </div>
-                {project.description && (
-                  <p className="text-sm text-muted-foreground line-clamp-3">
-                    {project.description}
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground/70">
-                  创建于 {new Date(project.created_at).toLocaleDateString("zh-CN")}
+              <h3 className="font-display text-base font-bold uppercase tracking-wider leading-tight line-clamp-2">
+                {project.name}
+              </h3>
+              {project.description && (
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground line-clamp-2">
+                  {project.description}
                 </p>
+              )}
+              {/* 底部 footer：创建时间 + 永远可见的 edit / delete（不依赖 hover，键盘 / 触屏均可达） */}
+              <div className="mt-3 flex items-center justify-between border-t border-dashed border-foreground/20 pt-2">
+                <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  创建于 {new Date(project.created_at).toLocaleDateString("zh-CN")}
+                </span>
+                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={(e) => openEditDialog(project, e)}
+                    disabled={deleteTarget?.id === project.id}
+                    title="编辑"
+                    aria-label={`编辑项目 ${project.name}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-destructive hover:text-destructive"
+                    onClick={(e) => openDeleteDialog(project, e)}
+                    disabled={deleteTarget?.id === project.id}
+                    title="删除"
+                    aria-label={`删除项目 ${project.name}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </div>
             </Card>
           ))}
