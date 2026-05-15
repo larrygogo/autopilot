@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowRight, RotateCcw, Loader2, CheckCircle2, AlertCircle, Clock, Hand } from "lucide-react";
+import { ArrowRight, RotateCcw, Loader2, CheckCircle2, AlertCircle, Clock, Hand, Bot } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { pickPhaseLabel } from "@/lib/workflow-labels";
@@ -15,6 +15,8 @@ type PhaseItem = {
   label?: string;
   timeout?: number;
   reject?: string | null;
+  agent?: string;
+  gate?: boolean;
 };
 
 type Entry =
@@ -50,6 +52,8 @@ function normalize(raw: any[]): Entry[] {
           name: sub.name,
           label: typeof sub.label === "string" ? sub.label : undefined,
           timeout: sub.timeout,
+          agent: typeof sub.agent === "string" ? sub.agent : undefined,
+          gate: sub.gate === true,
         })),
       };
     }
@@ -60,6 +64,8 @@ function normalize(raw: any[]): Entry[] {
         label: typeof p.label === "string" ? p.label : undefined,
         timeout: p.timeout,
         reject: p.reject ?? null,
+        agent: typeof p.agent === "string" ? p.agent : undefined,
+        gate: p.gate === true,
       },
     };
   });
@@ -222,6 +228,27 @@ function PhaseNode({
         )}
         {phase.timeout && <span>· {fmtTimeout(phase.timeout)}</span>}
       </div>
+      {(phase.agent || phase.gate) && (
+        <div className="flex items-center gap-1 pt-0.5">
+          {phase.agent && (
+            <span
+              title={`智能体：${phase.agent}`}
+              className="inline-flex items-center gap-0.5 rounded-none border border-foreground/20 bg-muted/50 px-1 font-mono text-[9px] text-muted-foreground"
+            >
+              <Bot className="h-2.5 w-2.5" />
+              {phase.agent}
+            </span>
+          )}
+          {phase.gate && (
+            <span
+              title="需要人工审批"
+              className="inline-flex items-center rounded-none border border-warning/40 bg-warning/10 px-1 font-mono text-[9px] text-warning"
+            >
+              <Hand className="h-2.5 w-2.5" />
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

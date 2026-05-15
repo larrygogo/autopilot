@@ -75,6 +75,32 @@ export function PhasePipelineEditor({
     resetDraftTracking();
   }, [initialPhases, workflowName, resetDraftTracking]);
 
+  // 离开页面 / 关闭窗口前提示：有未保存修改时弹原生 confirm
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // 现代浏览器忽略自定义文案，必须设置 returnValue 才会弹提示
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  // Ctrl+S / Cmd+S 保存修改
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (dirty && !saving) void saveRef.current?.();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dirty, saving]);
+  // save 函数引用 — 给 keydown 闭包用，避免依赖整个 save 函数变更触发 listener 重绑
+  const saveRef = useRef<(() => Promise<void>) | null>(null);
+
   // 加载全局 agent 名字给 drawer 下拉用
   useEffect(() => {
     api.listAgents()
@@ -319,6 +345,7 @@ export function PhasePipelineEditor({
 
   // ── 保存 ──
   async function save() {
+    if (!dirty || saving) return;
     setSaving(true);
     try {
       // 只发"目标 newName 仍存在"的 rename（用户可能删过中间产物）
@@ -348,20 +375,22 @@ export function PhasePipelineEditor({
       setSaving(false);
     }
   }
+  // 暴露 save 给键盘快捷键闭包；每次渲染都更新
+  saveRef.current = save;
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           流水线编辑 · 点击节点编辑
-          {dirty && <span className="ml-2 text-warning">· 未保存</span>}
+          {dirty && <span className="ml-2 text-warning">· 未保存（{navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl"}+S 快捷保存）</span>}
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4" />
             新增阶段
           </Button>
-          <Button size="sm" onClick={save} disabled={!dirty || saving}>
+          <Button size="sm" onClick={save} disabled={!dirty || saving} title="保存修改（Ctrl/Cmd+S）">
             <Save className="h-4 w-4" />
             {saving ? "保存中…" : "保存修改"}
           </Button>
