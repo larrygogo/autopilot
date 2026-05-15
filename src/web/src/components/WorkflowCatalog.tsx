@@ -97,15 +97,6 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-          共 {workflows.length} 个工作流
-        </div>
-        <Button onClick={onNew} className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]">
-          <Plus className="mr-1 h-3.5 w-3.5" /> 新建工作流
-        </Button>
-      </div>
-
       {workflows.length === 0 ? (
         <Card className="p-6 text-center">
           <p className="text-sm text-muted-foreground">还没有工作流</p>
