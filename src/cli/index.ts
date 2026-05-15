@@ -983,7 +983,14 @@ program
 // 启动
 // ──────────────────────────────────────────────
 
-program.parseAsync(process.argv).catch((err: unknown) => {
+// 短命令跑完后强制退出（WS RPC 连接保活 event loop 会阻塞自然 exit）。
+// long-running 命令（daemon run / daemon serve）通过 setInterval / signal 保活，不受影响。
+program.parseAsync(process.argv).then(() => {
+  // 给 ws 一个 50ms 的窗口 flush 缓冲（unref 让计时器自身不阻塞 exit）
+  const t = setTimeout(() => process.exit(0), 50);
+  // @ts-expect-error Bun Timer 兼容 Node Timer 的 unref
+  t.unref?.();
+}).catch((err: unknown) => {
   console.error("CLI 错误：", err);
   process.exit(1);
 });

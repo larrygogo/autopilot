@@ -1,13 +1,22 @@
+/**
+ * CLI / 第三方 Node 客户端 — 名字保留 HttpClient 是历史包袱，
+ * 内部已切到 WS RPC（参考 OpenClaw Gateway 协议）。
+ *
+ * 所有 method 签名跟之前 HTTP 版本一致；调用方零改动。
+ * 不再走 fetch，全部走 WS RPC method。
+ */
+
 import type { Task, TaskLog } from "../core/db";
 import type { DaemonStatus, GraphData } from "../daemon/protocol";
 import type { SessionManifest, ChatMessage } from "../core/sessions";
 import type { Schedule, ScheduleType } from "../core/schedules";
 import type { Requirement } from "../core/requirements";
 import type { NowCard } from "../core/now-types";
+import { WsRpcCaller, toWsUrl, WsRpcError } from "./ws-rpc";
 export type { NowCard };
 
 // ──────────────────────────────────────────────
-// 类型定义
+// 类型定义（保留 HttpClient 历史 shape，不破坏 CLI / 测试调用方）
 // ──────────────────────────────────────────────
 
 export interface CodebaseHealthResult {
@@ -56,157 +65,131 @@ export interface Question {
 }
 
 // ──────────────────────────────────────────────
-// HTTP REST 客户端
+// HttpClient — 名字保留兼容，内部走 WS RPC
 // ──────────────────────────────────────────────
 
 export class HttpClient {
-  constructor(private baseUrl: string) {}
+  private rpc: WsRpcCaller;
 
-  private async request<T>(path: string, opts?: RequestInit): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...opts,
-      headers: {
-        "Content-Type": "application/json",
-        ...opts?.headers,
-      },
-    });
+  constructor(baseUrl: string) {
+    this.rpc = new WsRpcCaller(toWsUrl(baseUrl));
+  }
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
-      throw new Error(body.error ?? `HTTP ${res.status}`);
+  /** 主动关闭底层 WS 连接（CLI 通常不需要调，进程退出会自动清理） */
+  close(): void {
+    this.rpc.close();
+  }
+
+  /** 内部 call wrapper：把 WsRpcError 转成普通 Error（保持跟原 fetch 失败一致的错误形状） */
+  private async call<T>(method: string, params?: unknown, opts?: { timeoutMs?: number }): Promise<T> {
+    try {
+      return await this.rpc.call<T>(method, params, opts);
+    } catch (e: unknown) {
+      if (e instanceof WsRpcError) {
+        // 跟原 HTTP 客户端一样直接抛 Error，body.error 等价于 e.message
+        throw new Error(`${e.code}: ${e.message}`);
+      }
+      throw e;
     }
-
-    return res.json() as Promise<T>;
   }
 
   // ── Daemon ──
 
   async getStatus(): Promise<DaemonStatus> {
-    return this.request("/api/status");
+    return this.call("daemon.status");
   }
 
   // ── Tasks ──
 
   async listTasks(filters?: { status?: string; workflow?: string; limit?: number }): Promise<Task[]> {
-    const params = new URLSearchParams();
-    if (filters?.status) params.set("status", filters.status);
-    if (filters?.workflow) params.set("workflow", filters.workflow);
-    if (filters?.limit) params.set("limit", String(filters.limit));
-    const qs = params.toString();
-    return this.request(`/api/tasks${qs ? `?${qs}` : ""}`);
+    return this.call("tasks.list", filters ?? {});
   }
 
   async getTask(id: string): Promise<Task> {
-    return this.request(`/api/tasks/${id}`);
+    return this.call("tasks.get", { id });
   }
 
   async startTask(opts: {
     title?: string;
     requirement?: string;
     workflow?: string;
-    /** 旧接口兼容：可选传入 reqId；不传则后端生成 task ID */
     reqId?: string;
-    /** 额外工作流参数（如 repo_id），透传给 setup_func */
     [key: string]: unknown;
   }): Promise<Task> {
-    return this.request("/api/tasks", {
-      method: "POST",
-      body: JSON.stringify(opts),
-    });
+    return this.call("tasks.start", opts, { timeoutMs: 300_000 });
   }
 
   async cancelTask(id: string): Promise<{ from: string; to: string }> {
-    return this.request(`/api/tasks/${id}/cancel`, { method: "POST" });
+    return this.call("tasks.cancel", { id });
   }
 
-  async triggerTransition(id: string, trigger: string, note?: string): Promise<{ from: string; to: string }> {
-    return this.request(`/api/tasks/${id}/transition`, {
-      method: "POST",
-      body: JSON.stringify({ trigger, note }),
-    });
+  async triggerTransition(_id: string, _trigger: string, _note?: string): Promise<{ from: string; to: string }> {
+    // tasks.transition 还没注册 RPC（CLI 用，等用到时再加）；暂留占位以保签名
+    throw new Error("triggerTransition 暂未迁到 WS RPC，请用 tasks.cancel / tasks.decide");
   }
 
   async getTaskLogs(id: string, limit?: number): Promise<TaskLog[]> {
-    const qs = limit ? `?limit=${limit}` : "";
-    return this.request(`/api/tasks/${id}/logs${qs}`);
+    return this.call("tasks.logs", { id, limit });
   }
 
   async getSubTasks(id: string): Promise<Task[]> {
-    return this.request(`/api/tasks/${id}/subtasks`);
+    return this.call("tasks.subtasks", { id });
   }
 
   // ── Workflows ──
 
   async listWorkflows(): Promise<{ name: string; description: string; source?: "db" | "file"; derives_from?: string | null }[]> {
-    return this.request("/api/workflows");
+    return this.call("workflows.list");
   }
 
   async getWorkflow(name: string): Promise<Record<string, unknown>> {
-    return this.request(`/api/workflows/${encodeURIComponent(name)}`);
+    return this.call("workflows.get", { name });
   }
 
   async getWorkflowGraph(name: string): Promise<GraphData> {
-    return this.request(`/api/workflows/${encodeURIComponent(name)}/graph`);
+    return this.call("workflows.graph", { name });
   }
 
   async getWorkflowYaml(name: string): Promise<{ yaml: string }> {
-    return this.request(`/api/workflows/${encodeURIComponent(name)}/yaml`);
+    return this.call("workflows.getYaml", { name });
   }
 
   async saveWorkflowYaml(name: string, yaml: string): Promise<{ ok: boolean }> {
-    return this.request(`/api/workflows/${encodeURIComponent(name)}/yaml`, {
-      method: "PUT",
-      body: JSON.stringify({ yaml }),
-    });
+    return this.call("workflows.saveYaml", { name, yaml });
   }
 
-  async createWorkflow(body: {
+  async createWorkflow(_body: {
     name: string;
     description?: string;
     firstPhase?: string;
     derives_from?: string;
     yaml_content?: string;
   }): Promise<{ ok: boolean; name: string; source?: string; dir?: string }> {
-    return this.request("/api/workflows", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    // workflows.create 还没注册 RPC（复杂 mutation 留到后续）
+    throw new Error("createWorkflow 暂未迁到 WS RPC，请用 workflows.saveAuthored / importBundle 路径");
   }
 
   async deleteWorkflow(name: string): Promise<{ ok: boolean }> {
-    return this.request(`/api/workflows/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    });
+    return this.call("workflows.delete", { name });
   }
 
   /**
-   * 导出工作流的 yaml 纯文本（GET /api/workflows/:name/export 返回 text/yaml）。
-   * 不走 this.request（它默认 JSON.parse 响应体），需手写 fetch + text()。
+   * 导出工作流——拿 yaml 字段。原 HTTP 版本返回 text/yaml 纯文本，
+   * WS RPC 走 workflows.exportBundle 返回结构化 JSON，这里只取 yaml 字段保签名。
    */
   async exportWorkflow(name: string): Promise<string> {
-    const res = await fetch(`${this.baseUrl}/api/workflows/${encodeURIComponent(name)}/export`);
-    if (!res.ok) {
-      // 错误响应可能是 JSON（带 error 字段），尝试解析；失败则用 statusText
-      let msg: string;
-      try {
-        const body = (await res.json()) as { error?: string };
-        msg = body.error ?? `HTTP ${res.status}`;
-      } catch {
-        msg = `HTTP ${res.status} ${res.statusText}`;
-      }
-      throw new Error(msg);
-    }
-    return res.text();
+    const bundle = await this.call<{ yaml: string }>("workflows.exportBundle", { name });
+    return bundle.yaml;
   }
 
   // ── Schedules ──
 
   async listSchedules(): Promise<Schedule[]> {
-    return this.request("/api/schedules");
+    return this.call("schedules.list");
   }
 
   async getSchedule(id: string): Promise<Schedule> {
-    return this.request(`/api/schedules/${id}`);
+    return this.call("schedules.get", { id });
   }
 
   async createSchedule(body: {
@@ -220,10 +203,7 @@ export class HttpClient {
     requirement?: string | null;
     enabled?: boolean;
   }): Promise<Schedule> {
-    return this.request("/api/schedules", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.call("schedules.create", body);
   }
 
   async updateSchedule(id: string, body: Partial<{
@@ -236,50 +216,43 @@ export class HttpClient {
     title: string;
     requirement: string | null;
   }>): Promise<Schedule> {
-    return this.request(`/api/schedules/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
+    return this.call("schedules.update", { id, ...body });
   }
 
   async deleteSchedule(id: string): Promise<{ ok: true }> {
-    return this.request(`/api/schedules/${id}`, { method: "DELETE" });
+    return this.call("schedules.delete", { id });
   }
 
   async runScheduleNow(id: string): Promise<{ ok: true; taskId: string }> {
-    return this.request(`/api/schedules/${id}/run-now`, { method: "POST" });
+    return this.call("schedules.runNow", { id });
   }
 
-  // ── Projects ──
+  // ── Projects ── (CLI 历史 wrap 风格 { projects } 保留)
 
   async listProjects(): Promise<{ projects: Project[] }> {
-    return this.request("/api/projects");
+    // RPC handler 返回数组，wrap 一下兼容 CLI 历史签名
+    const projects = await this.call<Project[]>("projects.list");
+    return { projects };
   }
 
   async getProject(id: string): Promise<{ project: Project }> {
-    return this.request(`/api/projects/${encodeURIComponent(id)}`);
+    return this.call("projects.get", { id });
   }
 
   async createProject(body: { name: string; description?: string }): Promise<{ project: Project }> {
-    return this.request("/api/projects", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.call("projects.create", body);
   }
 
   async updateProject(id: string, body: { name?: string; description?: string | null }): Promise<{ project: Project }> {
-    return this.request(`/api/projects/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+    return this.call("projects.update", { id, ...body });
   }
 
   async deleteProject(id: string): Promise<{ ok: true }> {
-    return this.request(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return this.call("projects.delete", { id });
   }
 
   async listProjectCodebases(projectId: string): Promise<{ codebases: Codebase[] }> {
-    return this.request(`/api/projects/${encodeURIComponent(projectId)}/codebases`);
+    return this.call("projects.codebases", { id: projectId });
   }
 
   async createProjectCodebase(projectId: string, body: {
@@ -289,27 +262,24 @@ export class HttpClient {
     github_owner?: string | null;
     github_repo?: string | null;
   }): Promise<{ codebase: Codebase }> {
-    return this.request(`/api/projects/${encodeURIComponent(projectId)}/codebases`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.call("projects.addCodebase", { id: projectId, ...body });
   }
 
   async listProjectRequirements(projectId: string): Promise<{ requirements: Requirement[] }> {
-    return this.request(`/api/projects/${encodeURIComponent(projectId)}/requirements`);
+    return this.call("projects.requirements", { id: projectId });
   }
 
-  // ── Codebases ──
+  // ── Codebases ── （codebases.* RPC 尚未注册，保留 placeholder 等后续）
 
   async listCodebases(): Promise<{ codebases: Codebase[] }> {
-    return this.request("/api/codebases");
+    throw new Error("listCodebases 暂未迁到 WS RPC（codebases.* 等待后续迁移）");
   }
 
-  async getCodebase(id: string): Promise<{ codebase: Codebase }> {
-    return this.request(`/api/codebases/${id}`);
+  async getCodebase(_id: string): Promise<{ codebase: Codebase }> {
+    throw new Error("getCodebase 暂未迁到 WS RPC");
   }
 
-  async createCodebase(body: {
+  async createCodebase(_body: {
     alias: string;
     path: string;
     default_branch?: string;
@@ -317,114 +287,88 @@ export class HttpClient {
     github_repo?: string | null;
     project_id?: string;
   }): Promise<{ codebase: Codebase }> {
-    return this.request("/api/codebases", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    throw new Error("createCodebase 暂未迁到 WS RPC，请用 projects.addCodebase");
   }
 
-  async updateCodebase(id: string, body: Partial<{
+  async updateCodebase(_id: string, _body: Partial<{
     alias: string;
     path: string;
     default_branch: string;
     github_owner: string | null;
     github_repo: string | null;
   }>): Promise<{ codebase: Codebase }> {
-    return this.request(`/api/codebases/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+    throw new Error("updateCodebase 暂未迁到 WS RPC");
   }
 
-  async deleteCodebase(id: string): Promise<{ ok: true }> {
-    return this.request(`/api/codebases/${id}`, { method: "DELETE" });
+  async deleteCodebase(_id: string): Promise<{ ok: true }> {
+    throw new Error("deleteCodebase 暂未迁到 WS RPC");
   }
 
-  async healthcheckCodebase(id: string): Promise<CodebaseHealthResult> {
-    return this.request(`/api/codebases/${id}/healthcheck`, { method: "POST" });
+  async healthcheckCodebase(_id: string): Promise<CodebaseHealthResult> {
+    throw new Error("healthcheckCodebase 暂未迁到 WS RPC");
   }
 
   // ── Questions ──
 
   async listQuestions(reqId: string): Promise<{ questions: Question[] }> {
-    return this.request(`/api/requirements/${encodeURIComponent(reqId)}/questions`);
+    return this.call("requirements.questions", { id: reqId });
   }
 
-  async createQuestion(reqId: string, body: { agent_text: string }): Promise<{ question: Question }> {
-    return this.request(`/api/requirements/${encodeURIComponent(reqId)}/questions`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+  async createQuestion(_reqId: string, _body: { agent_text: string }): Promise<{ question: Question }> {
+    throw new Error("createQuestion 暂未迁到 WS RPC");
   }
 
-  async getQuestion(reqId: string, qid: string): Promise<{ question: Question }> {
-    return this.request(`/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}`);
+  async getQuestion(_reqId: string, _qid: string): Promise<{ question: Question }> {
+    throw new Error("getQuestion 暂未迁到 WS RPC（用 listQuestions 过滤）");
   }
 
   async addQuestionReply(reqId: string, qid: string, body: {
     author_role: "agent" | "user";
     text: string;
   }): Promise<{ reply: QuestionReply }> {
-    return this.request(
-      `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/replies`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }
-    );
+    return this.call("requirements.addReply", { id: reqId, qid, ...body });
   }
 
   async resolveQuestion(reqId: string, qid: string): Promise<{ ok: true }> {
-    return this.request(
-      `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/resolve`,
-      { method: "POST" }
-    );
+    return this.call("requirements.resolveQuestion", { id: reqId, qid });
   }
 
-  // ── Chat ──
+  // ── Chat（流式聊天暂未迁，保留 placeholder） ──
 
-  async chat(opts: {
+  async chat(_opts: {
     message: string;
     session_id?: string;
     agent?: string;
     workflow?: string;
     title?: string;
   }): Promise<{ session_id: string; message: ChatMessage }> {
-    return this.request("/api/chat", {
-      method: "POST",
-      body: JSON.stringify(opts),
-    });
+    throw new Error("chat 流式接口暂未迁到 WS RPC（POST /api/chat 保留 HTTP）");
   }
 
   async listSessions(): Promise<SessionManifest[]> {
-    return this.request("/api/sessions");
+    return this.call("sessions.list");
   }
 
   async getSession(id: string): Promise<SessionManifest & { messages: ChatMessage[] }> {
-    return this.request(`/api/sessions/${id}`);
+    return this.call("sessions.get", { id });
   }
 
   async deleteSession(id: string): Promise<{ ok: true }> {
-    return this.request(`/api/sessions/${id}`, { method: "DELETE" });
+    return this.call("sessions.delete", { id });
   }
 
-  async getSessionMessages(id: string, limit?: number): Promise<ChatMessage[]> {
-    const qs = limit ? `?limit=${limit}` : "";
-    return this.request(`/api/sessions/${id}/messages${qs}`);
+  async getSessionMessages(_id: string, _limit?: number): Promise<ChatMessage[]> {
+    throw new Error("getSessionMessages 暂未迁到 WS RPC（用 getSession 拿全部 messages）");
   }
 
   // ── /now state-derivation engine ──
 
   async listNowCards(): Promise<NowCard[]> {
-    const { cards } = await this.request<{ cards: NowCard[] }>("/api/now/cards");
-    return cards;
+    return this.call("now.cards");
   }
 
-  async dismissNowCard(cardId: string): Promise<{ ok: true }> {
-    return this.request(
-      `/api/now/cards/${encodeURIComponent(cardId)}/dismiss`,
-      { method: "POST" },
-    );
+  async dismissNowCard(_cardId: string): Promise<{ ok: true }> {
+    throw new Error("dismissNowCard 暂未迁到 WS RPC（now.dismissCard 待注册）");
   }
 
   // ── Requirements ──
@@ -436,10 +380,7 @@ export class HttpClient {
     spec_md?: string;
     chat_session_id?: string | null;
   }): Promise<{ requirement: { id: string; status: string; title: string } }> {
-    return this.request("/api/requirements", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.call("requirements.create", body);
   }
 
   async extractRequirement(input: {
@@ -447,9 +388,6 @@ export class HttpClient {
     project_id: string;
     codebase_id?: string | null;
   }): Promise<{ title: string; spec_md: string }> {
-    return this.request("/api/requirements/extract", {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
+    return this.call("requirements.extract", input, { timeoutMs: 300_000 });
   }
 }
