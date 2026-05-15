@@ -71,7 +71,8 @@ function sendSubscriptions(): void {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const channels = [...channelHandlers.keys()];
   if (channels.length > 0) {
-    ws.send(JSON.stringify({ type: "subscribe", channels }));
+    // 用 RPC method channels.subscribe（OpenClaw 风），失败容错——握手中不期望响应阻塞
+    rpc.call("channels.subscribe", { channels }).catch(() => { /* 静默 */ });
   }
 }
 
@@ -183,7 +184,8 @@ export function subscribeChannel(channel: string, handler: EventHandler): () => 
     handlers = new Set();
     channelHandlers.set(channel, handlers);
     if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "subscribe", channels: [channel] }));
+      // P4: 用 RPC method channels.subscribe（OpenClaw 风），不阻塞调用方
+      rpc.call("channels.subscribe", { channels: [channel] }).catch(() => { /* 静默 */ });
     }
   }
   handlers.add(handler);
@@ -191,6 +193,10 @@ export function subscribeChannel(channel: string, handler: EventHandler): () => 
     handlers!.delete(handler);
     if (handlers!.size === 0) {
       channelHandlers.delete(channel);
+      // 取消订阅也走 RPC method
+      if (ws?.readyState === WebSocket.OPEN) {
+        rpc.call("channels.unsubscribe", { channels: [channel] }).catch(() => { /* 静默 */ });
+      }
     }
   };
 }

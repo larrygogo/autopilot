@@ -127,6 +127,7 @@ import {
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
 import { registerRpcMethod, RpcError } from "./rpc";
+import { wsManager } from "./ws";
 import { VERSION } from "../index";
 
 /** 业务错误 → RpcError 透传（保留 code）；其他错误让 invokeRpcMethod 包成 INTERNAL */
@@ -1539,6 +1540,46 @@ export function registerCoreRpcMethods(): void {
       const ok = deleteChatSession(p.id);
       if (!ok) throw new RpcError("NOT_FOUND", "session not found");
       return { ok: true };
+    },
+  });
+
+  // ── P4: connection-scoped 订阅走 RPC method（替代 legacy frame） ──
+  //
+  // 区别于其他 method：handler 需要 ctx.ws 操作 per-conn 订阅 set + 触发
+  // snapshot 推送。非 WS transport（HTTP）调用直接抛 NO_CONNECTION，
+  // 因为订阅是有状态长连接概念，HTTP 没意义。
+
+  registerRpcMethod({
+    method: "channels.subscribe",
+    description: "订阅 channels（per-connection state；首次订阅触发 snapshot 推送）",
+    handler: (params, ctx) => {
+      const p = asObj(params);
+      if (!Array.isArray(p.channels)) {
+        throw new RpcError("INVALID_PARAM", "channels 必须是 string[]");
+      }
+      const channels = p.channels.filter((c): c is string => typeof c === "string");
+      if (!ctx?.ws) {
+        throw new RpcError("NO_CONNECTION", "channels.subscribe 只能在 WS 连接上调用");
+      }
+      wsManager.subscribeForClient(ctx.ws, channels);
+      return { ok: true, channels };
+    },
+  });
+
+  registerRpcMethod({
+    method: "channels.unsubscribe",
+    description: "取消订阅 channels",
+    handler: (params, ctx) => {
+      const p = asObj(params);
+      if (!Array.isArray(p.channels)) {
+        throw new RpcError("INVALID_PARAM", "channels 必须是 string[]");
+      }
+      const channels = p.channels.filter((c): c is string => typeof c === "string");
+      if (!ctx?.ws) {
+        throw new RpcError("NO_CONNECTION", "channels.unsubscribe 只能在 WS 连接上调用");
+      }
+      wsManager.unsubscribeForClient(ctx.ws, channels);
+      return { ok: true, channels };
     },
   });
 }

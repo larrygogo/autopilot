@@ -13,9 +13,16 @@
  * 包成 INTERNAL；未注册的 method 报 METHOD_NOT_FOUND。
  */
 
+import type { ServerWebSocket } from "bun";
 import type { RpcError as RpcErrorShape } from "./protocol";
 
-export type RpcHandler = (params: unknown) => Promise<unknown> | unknown;
+/** RPC 调用上下文 — 让 handler 能拿到底层连接（subscribe / unsubscribe 等 connection-scoped method 用） */
+export interface RpcContext {
+  /** WS 调用走 ws transport 时填；HTTP transport 不填 */
+  ws?: ServerWebSocket<unknown>;
+}
+
+export type RpcHandler = (params: unknown, ctx?: RpcContext) => Promise<unknown> | unknown;
 
 export interface RpcRegistration {
   /** method 名，如 "tasks.list" */
@@ -59,10 +66,13 @@ export function listRpcMethods(): string[] {
 /**
  * 调用一个 RPC method。永不抛——成功返回 { ok: true, payload }，失败返回
  * { ok: false, error: { code, message } }。调用方按需把结果裹成 `res` frame 即可。
+ * ctx 是可选的；走 ws transport 时传 { ws }，handler 能拿到底层连接做
+ * connection-scoped 操作（如 channels.subscribe）。
  */
 export async function invokeRpcMethod(
   method: string,
   params: unknown,
+  ctx?: RpcContext,
 ): Promise<{ ok: true; payload: unknown } | { ok: false; error: RpcErrorShape }> {
   const reg = registry.get(method);
   if (!reg) {
@@ -72,7 +82,7 @@ export async function invokeRpcMethod(
     };
   }
   try {
-    const payload = await reg.handler(params);
+    const payload = await reg.handler(params, ctx);
     return { ok: true, payload };
   } catch (e: unknown) {
     if (e instanceof RpcError) {

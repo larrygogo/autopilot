@@ -55,24 +55,12 @@ class WebSocketManager {
     }
 
     switch (msg.type) {
+      // legacy frame：保留向后兼容；新客户端走 RPC method channels.subscribe
       case "subscribe":
-        for (const ch of msg.channels) {
-          client.subscriptions.add(ch);
-          // 触发 snapshot 推送：业务模块通过 registerSnapshotProvider 注册回调
-          for (const provider of _snapshotProviders) {
-            try {
-              const snapshot = provider(ch);
-              if (snapshot) {
-                ws.send(JSON.stringify({ type: "event", event: snapshot } satisfies ServerMessage));
-              }
-            } catch {
-              // snapshot 提供器异常不应阻塞订阅
-            }
-          }
-        }
+        this.subscribeForClient(ws, msg.channels);
         break;
       case "unsubscribe":
-        for (const ch of msg.channels) client.subscriptions.delete(ch);
+        this.unsubscribeForClient(ws, msg.channels);
         break;
       case "ping": {
         const pong: ServerMessage = { type: "pong" };
@@ -80,9 +68,8 @@ class WebSocketManager {
         break;
       }
       case "req": {
-        // RPC: 走 rpc.ts 注册表，按 method 路由，结果包成 res frame。
-        // invokeRpcMethod 永不抛——失败也返回 { ok:false, error }。
-        void invokeRpcMethod(msg.method, msg.params).then((result) => {
+        // RPC: 透传 { ws } 让 connection-scoped method（channels.subscribe）能拿到底层连接。
+        void invokeRpcMethod(msg.method, msg.params, { ws }).then((result) => {
           const res: ServerMessage = result.ok
             ? { type: "res", id: msg.id, ok: true, payload: result.payload }
             : { type: "res", id: msg.id, ok: false, error: result.error };
@@ -95,6 +82,32 @@ class WebSocketManager {
         break;
       }
     }
+  }
+
+  /** 给指定 ws 订阅 channels；同时触发 snapshot 推送。channels.subscribe RPC handler 调它。 */
+  subscribeForClient(ws: ServerWebSocket<unknown>, channels: string[]): void {
+    const client = this.clients.get(ws);
+    if (!client) return;
+    for (const ch of channels) {
+      client.subscriptions.add(ch);
+      for (const provider of _snapshotProviders) {
+        try {
+          const snapshot = provider(ch);
+          if (snapshot) {
+            ws.send(JSON.stringify({ type: "event", event: snapshot } satisfies ServerMessage));
+          }
+        } catch {
+          // snapshot 提供器异常不应阻塞订阅
+        }
+      }
+    }
+  }
+
+  /** 给指定 ws 取消订阅。channels.unsubscribe RPC handler 调它。 */
+  unsubscribeForClient(ws: ServerWebSocket<unknown>, channels: string[]): void {
+    const client = this.clients.get(ws);
+    if (!client) return;
+    for (const ch of channels) client.subscriptions.delete(ch);
   }
 
   broadcast(event: AutopilotEvent): void {
