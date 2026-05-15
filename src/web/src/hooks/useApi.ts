@@ -495,27 +495,21 @@ export const api = {
   setupDismiss: () =>
     request<{ ok: boolean }>("/api/setup/dismiss", { method: "POST" }),
 
+  // [WS-RPC] requirements.extract（LLM 长任务，5min 超时）
   extractRequirement: (input: { raw_text: string; project_id: string; codebase_id?: string | null }) =>
-    request<{ title: string; spec_md: string }>("/api/requirements/extract", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    }),
+    requestRpc<{ title: string; spec_md: string }>("requirements.extract", input, { timeoutMs: 300_000 }),
 
   // Requirements
-  listRequirements: (filters?: { repo_id?: string; project_id?: string; status?: string }) => {
-    const params = new URLSearchParams();
-    if (filters?.repo_id) params.set("repo_id", filters.repo_id);
-    if (filters?.project_id) params.set("project_id", filters.project_id);
-    if (filters?.status) params.set("status", filters.status);
-    const qs = params.toString();
-    return request<{ requirements: Requirement[] }>(`/api/requirements${qs ? "?" + qs : ""}`)
-      .then((r) => r.requirements);
-  },
+  // [WS-RPC] requirements.list
+  listRequirements: (filters?: { repo_id?: string; project_id?: string; status?: string }) =>
+    requestRpc<{ requirements: Requirement[] }>("requirements.list", filters ?? {})
+      .then((r) => r.requirements),
 
+  // [WS-RPC] requirements.get
   getRequirement: (id: string) =>
-    request<{ requirement: Requirement; feedbacks: RequirementFeedback[] }>(`/api/requirements/${id}`),
+    requestRpc<{ requirement: Requirement; feedbacks: RequirementFeedback[] }>("requirements.get", { id }),
 
+  // [WS-RPC] requirements.create
   createRequirement: (body: {
     project_id?: string;
     codebase_id?: string | null;
@@ -524,11 +518,9 @@ export const api = {
     spec_md?: string;
     chat_session_id?: string | null;
   }) =>
-    request<{ requirement: Requirement }>("/api/requirements", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }).then((r) => r.requirement),
+    requestRpc<{ requirement: Requirement }>("requirements.create", body).then((r) => r.requirement),
 
+  // [WS-RPC] requirements.update
   updateRequirement: (id: string, body: {
     title?: string;
     spec_md?: string;
@@ -537,60 +529,51 @@ export const api = {
     clarifier_provider?: string | null;
     clarifier_model?: string | null;
   }) =>
-    request<{ requirement: Requirement }>(`/api/requirements/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }).then((r) => r.requirement),
+    requestRpc<{ requirement: Requirement }>("requirements.update", { id, ...body }).then((r) => r.requirement),
 
+  // [WS-RPC] requirements.delete
   deleteRequirement: (id: string) =>
-    request<{ ok: true }>(`/api/requirements/${id}`, { method: "DELETE" }),
+    requestRpc<{ ok: true }>("requirements.delete", { id }),
 
+  // [WS-RPC] requirements.transition
   transitionRequirement: (id: string, to: string) =>
-    request<{ requirement: Requirement }>(`/api/requirements/${id}/transition`, {
-      method: "POST",
-      body: JSON.stringify({ to }),
-    }).then((r) => r.requirement),
+    requestRpc<{ requirement: Requirement }>("requirements.transition", { id, to }).then((r) => r.requirement),
 
+  // [WS-RPC] requirements.enqueue
   enqueueRequirement: (id: string) =>
-    request<{ requirement: Requirement }>(`/api/requirements/${id}/enqueue`, {
-      method: "POST",
-    }).then((r) => r.requirement),
+    requestRpc<{ requirement: Requirement }>("requirements.enqueue", { id }).then((r) => r.requirement),
 
+  // [WS-RPC] requirements.injectFeedback
   injectFeedback: (id: string, body: string, source: "manual" | "github_review" = "manual") =>
-    request<{ ok: true }>(`/api/requirements/${id}/inject_feedback`, {
-      method: "POST",
-      body: JSON.stringify({ body, source }),
-    }),
+    requestRpc<{ ok: true }>("requirements.injectFeedback", { id, body, source }),
 
+  // [WS-RPC] requirements.cancel
   cancelRequirement: (id: string) =>
-    request<{ requirement: Requirement }>(`/api/requirements/${id}/cancel`, {
-      method: "POST",
-    }).then((r) => r.requirement),
+    requestRpc<{ requirement: Requirement }>("requirements.cancel", { id }).then((r) => r.requirement),
 
+  // [WS-RPC] requirements.subPrs
   listRequirementSubPrs: (id: string) =>
-    request<{ sub_prs: RequirementSubPr[] }>(`/api/requirements/${id}/sub-prs`).then((r) => r.sub_prs),
+    requestRpc<{ sub_prs: RequirementSubPr[] }>("requirements.subPrs", { id }).then((r) => r.sub_prs),
 
+  // [WS-RPC] requirements.specRevisions
   listSpecRevisions: (id: string) =>
-    request<{ revisions: SpecRevision[] }>(`/api/requirements/${id}/spec-revisions`).then((r) => r.revisions),
+    requestRpc<{ revisions: SpecRevision[] }>("requirements.specRevisions", { id }).then((r) => r.revisions),
 
+  // [WS-RPC] requirements.clarifierRound
   getClarifierRound: (id: string) =>
-    request<{ round: ClarifierRoundState | null }>(`/api/requirements/${encodeURIComponent(id)}/clarifier-round`)
+    requestRpc<{ round: ClarifierRoundState | null }>("requirements.clarifierRound", { id })
       .then((r) => r.round),
 
   // Questions（评论线程）
+  // [WS-RPC] requirements.questions
   listQuestions: (reqId: string) =>
-    request<{ questions: Question[] }>(`/api/requirements/${encodeURIComponent(reqId)}/questions`)
-      .then((r) => r.questions),
+    requestRpc<{ questions: Question[] }>("requirements.questions", { id: reqId }).then((r) => r.questions),
+  // [WS-RPC] requirements.addReply
   addQuestionReply: (reqId: string, qid: string, body: { author_role: "agent" | "user"; text: string }) =>
-    request<{ reply: QuestionReply }>(
-      `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/replies`,
-      { method: "POST", body: JSON.stringify(body) },
-    ).then((r) => r.reply),
+    requestRpc<{ reply: QuestionReply }>("requirements.addReply", { id: reqId, qid, ...body }).then((r) => r.reply),
+  // [WS-RPC] requirements.resolveQuestion
   resolveQuestion: (reqId: string, qid: string) =>
-    request<{ ok: true }>(
-      `/api/requirements/${encodeURIComponent(reqId)}/questions/${encodeURIComponent(qid)}/resolve`,
-      { method: "POST" },
-    ),
+    requestRpc<{ ok: true }>("requirements.resolveQuestion", { id: reqId, qid }),
 
   // /now state-derivation engine (PR 1 backend)
   // [WS-RPC] now.cards（RPC handler 直接返回数组，不再 wrap cards 字段）

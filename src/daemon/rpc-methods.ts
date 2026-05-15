@@ -32,7 +32,32 @@ import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow-temp
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
-import { listProjects } from "../core/projects";
+import { listProjects, getProjectById } from "../core/projects";
+import { getCodebaseById } from "../core/codebases";
+import {
+  listRequirements as coreListRequirements,
+  getRequirementById,
+  createRequirement as coreCreateRequirement,
+  updateRequirement as coreUpdateRequirement,
+  deleteRequirement as coreDeleteRequirement,
+  setRequirementStatus,
+  nextRequirementId,
+  finishClarification,
+  type Requirement,
+} from "../core/requirements";
+import { appendFeedback, listFeedbacks } from "../core/requirement-feedbacks";
+import { listSubPrs } from "../core/requirement-sub-prs";
+import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
+import { getRound as getClarifierRound } from "./clarifier-progress";
+import { runClarifierRound } from "./requirement-clarifier";
+import { runClarifierExtract } from "./requirement-extract";
+import {
+  listQuestionsByRequirement,
+  getQuestionById,
+  addReply,
+  resolveQuestion as coreResolveQuestion,
+  nextReplyId,
+} from "../core/requirement-questions";
 import { loadProviders, loadGlobalAgents, loadConfigRaw, PROVIDER_NAMES } from "../core/config";
 import { detectAllProviders } from "../agents/cli-status";
 import { runChecks } from "../core/doctor";
@@ -63,6 +88,12 @@ function rethrowAsRpc(e: unknown): never {
   if (e instanceof StartTaskError) throw new RpcError("START_FAILED", e.message);
   if (e instanceof DeleteTaskError) throw new RpcError("DELETE_FAILED", e.message);
   throw e;
+}
+
+/** 兼容老 web UI 的 repo_id 别名（codebase_id 的旧名），跟 routes.ts withRepoIdAlias 等价 */
+function withRepoIdAlias(req: Requirement | null): (Requirement & { repo_id: string | null }) | null {
+  if (!req) return null;
+  return { ...req, repo_id: req.codebase_id };
 }
 
 /** 把 unknown params 视为对象，缺失时给 {} */
@@ -600,6 +631,303 @@ export function registerCoreRpcMethods(): void {
         if (e instanceof RpcError) throw e;
         throw new RpcError("DELETE_FAILED", e instanceof Error ? e.message : String(e));
       }
+    },
+  });
+
+  // ── 第六批：requirements.* 域（16 个） ──
+
+  registerRpcMethod({
+    method: "requirements.list",
+    description: "列出需求，可选 codebase_id / project_id / status 过滤",
+    handler: (params) => {
+      const p = asObj(params);
+      const codebase_id = typeof p.codebase_id === "string" ? p.codebase_id
+        : typeof p.repo_id === "string" ? p.repo_id : undefined;
+      const project_id = typeof p.project_id === "string" ? p.project_id : undefined;
+      const status = typeof p.status === "string" ? p.status : undefined;
+      return {
+        requirements: coreListRequirements({ codebase_id, project_id, status })
+          .map((r) => withRepoIdAlias(r)),
+      };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.get",
+    description: "需求详情 + 反馈历史",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const r = getRequirementById(p.id);
+      if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
+      return {
+        requirement: withRepoIdAlias(r),
+        feedbacks: listFeedbacks(p.id),
+      };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.extract",
+    description: "口语化需求 → AI 整理为 title + spec_md（LLM 长任务）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.raw_text !== "string" || !p.raw_text.trim()) {
+        throw new RpcError("INVALID_PARAM", "需要 raw_text");
+      }
+      if (typeof p.project_id !== "string" || !p.project_id.trim()) {
+        throw new RpcError("INVALID_PARAM", "需要 project_id");
+      }
+      const proj = getProjectById(p.project_id);
+      if (!proj) throw new RpcError("NOT_FOUND", "project not found");
+      if (p.codebase_id) {
+        const cb = getCodebaseById(p.codebase_id as string);
+        if (!cb) throw new RpcError("NOT_FOUND", "codebase not found");
+        if (cb.project_id !== p.project_id) {
+          throw new RpcError("INVALID_PARAM", "codebase does not belong to project");
+        }
+      }
+      return await runClarifierExtract({
+        raw_text: p.raw_text,
+        project_id: p.project_id,
+        codebase_id: (p.codebase_id as string | null | undefined) ?? null,
+      });
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.create",
+    description: "创建需求（自动进入 clarifying 触发澄清流程）",
+    handler: (params) => {
+      const p = asObj(params);
+      const codebaseId = (typeof p.codebase_id === "string" || p.codebase_id === null)
+        ? (p.codebase_id ?? null)
+        : (typeof p.repo_id === "string" ? p.repo_id : null);
+      const title = typeof p.title === "string" ? p.title.trim() : "";
+      if (!title) throw new RpcError("INVALID_PARAM", "title 必填");
+      let projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
+      if (codebaseId) {
+        const cb = getCodebaseById(codebaseId);
+        if (!cb) throw new RpcError("NOT_FOUND", "codebase not found");
+        if (!projectId) projectId = cb.project_id;
+      }
+      if (!projectId) {
+        throw new RpcError("INVALID_PARAM", "project_id 必填（或提供 codebase_id 由 daemon 反查）");
+      }
+      const id = nextRequirementId();
+      coreCreateRequirement({
+        id,
+        project_id: projectId,
+        codebase_id: codebaseId,
+        title,
+        spec_md: typeof p.spec_md === "string" ? p.spec_md : "",
+        chat_session_id: (p.chat_session_id as string | null | undefined) ?? null,
+      });
+      const clarifying = setRequirementStatus(id, "clarifying");
+      return { requirement: withRepoIdAlias(clarifying) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.update",
+    description: "更新需求字段（title / spec_md / codebase_id / clarifier_*）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const updated = coreUpdateRequirement(p.id, {
+        title: typeof p.title === "string" ? p.title : undefined,
+        spec_md: typeof p.spec_md === "string" ? p.spec_md : undefined,
+        codebase_id: (p.codebase_id as string | null | undefined),
+        chat_session_id: (p.chat_session_id as string | null | undefined),
+        clarifier_provider: (p.clarifier_provider as string | null | undefined),
+        clarifier_model: (p.clarifier_model as string | null | undefined),
+      });
+      if (!updated) throw new RpcError("NOT_FOUND", "requirement not found");
+      return { requirement: withRepoIdAlias(updated) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.delete",
+    description: "删除需求",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      coreDeleteRequirement(p.id);
+      return { ok: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.transition",
+    description: "手动转移状态（管理员级，绕过验证不太严格）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (typeof p.to !== "string" || !p.to.trim()) throw new RpcError("INVALID_PARAM", "to 必填");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      return { requirement: withRepoIdAlias(setRequirementStatus(p.id, p.to.trim())) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.enqueue",
+    description: "入队执行（必须已关联 codebase 且 spec_md 非空）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const r = getRequirementById(p.id);
+      if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
+      if (!r.codebase_id) throw new RpcError("PRECONDITION_FAILED", "请先关联代码库再入队");
+      if (!(r.spec_md ?? "").trim()) {
+        throw new RpcError("PRECONDITION_FAILED", "需求规约为空，请先完成澄清或手动填写规约");
+      }
+      return { requirement: withRepoIdAlias(setRequirementStatus(p.id, "queued")) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.injectFeedback",
+    description: "注入用户反馈（awaiting_review 时自动进 fix_revision）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const bodyText = typeof p.body === "string" ? p.body.trim() : "";
+      if (!bodyText) throw new RpcError("INVALID_PARAM", "body 必填");
+      const r = getRequirementById(p.id);
+      if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
+      appendFeedback({
+        requirement_id: p.id,
+        source: (p.source === "github_review" ? "github_review" : "manual"),
+        body: bodyText,
+        github_review_id: typeof p.github_review_id === "string" ? p.github_review_id : null,
+      });
+      if (r.status === "awaiting_review") {
+        try { setRequirementStatus(p.id, "fix_revision"); } catch { /* tolerated */ }
+      }
+      return { ok: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.cancel",
+    description: "取消需求",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      return { requirement: withRepoIdAlias(setRequirementStatus(p.id, "cancelled")) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.subPrs",
+    description: "需求关联的子模块 PR 列表",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      return { sub_prs: listSubPrs(p.id) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.specRevisions",
+    description: "需求 spec_md 修改历史",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      return { revisions: listSpecRevisionsByRequirement(p.id) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.clarifierRound",
+    description: "需求当前 clarifier 轮次的进度状态（无活动轮 → null）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      return { round: getClarifierRound(p.id) ?? null };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.retryClarify",
+    description: "重跑 clarifier 一轮（生成新问题）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      await runClarifierRound(p.id);
+      return { ok: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.finishClarification",
+    description: "强制结束澄清进入 ready",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      finishClarification(p.id);
+      const updated = getRequirementById(p.id);
+      return { requirement: withRepoIdAlias(updated) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.questions",
+    description: "需求关联的评论线程问题列表",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      return { questions: listQuestionsByRequirement(p.id) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.addReply",
+    description: "在问题下追加回复（author_role: agent / user）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id（requirement）");
+      if (typeof p.qid !== "string" || !p.qid) throw new RpcError("INVALID_PARAM", "需要 qid");
+      if (p.author_role !== "agent" && p.author_role !== "user") {
+        throw new RpcError("INVALID_PARAM", 'author_role 必须是 "agent" 或 "user"');
+      }
+      if (typeof p.text !== "string" || !p.text) throw new RpcError("INVALID_PARAM", "需要 text");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      if (!getQuestionById(p.qid)) throw new RpcError("NOT_FOUND", "question not found");
+      const replyId = nextReplyId();
+      const reply = addReply({
+        id: replyId,
+        question_id: p.qid,
+        author_role: p.author_role as "agent" | "user",
+        text: p.text,
+      });
+      return { reply };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.resolveQuestion",
+    description: "标记问题已解决；全部解决时 emit requirement:all-questions-resolved 触发 clarifier",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id（requirement）");
+      if (typeof p.qid !== "string" || !p.qid) throw new RpcError("INVALID_PARAM", "需要 qid");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      if (!getQuestionById(p.qid)) throw new RpcError("NOT_FOUND", "question not found");
+      coreResolveQuestion(p.qid);
+      const allQuestions = listQuestionsByRequirement(p.id);
+      if (allQuestions.length > 0 && allQuestions.every((q) => q.status === "resolved")) {
+        emitBus({ type: "requirement:all-questions-resolved", payload: { id: p.id } });
+      }
+      return { ok: true };
     },
   });
 }
