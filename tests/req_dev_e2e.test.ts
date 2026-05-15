@@ -9,6 +9,7 @@ import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
+import { up as migrate019 } from "../src/migrations/019-task-requirement-id";
 import { createCodebase } from "../src/core/codebases";
 import { createProject } from "../src/core/projects";
 import { startTaskFromTemplate } from "../src/core/task-factory";
@@ -30,6 +31,7 @@ describe("req_dev e2e smoke", () => {
     migrate006(sqlite);
     migrate007(sqlite);
     migrate008(sqlite);
+    migrate019(sqlite);
 
     // 创建测试 project + codebase
     createProject({ id: "proj-001", name: "test-proj" });
