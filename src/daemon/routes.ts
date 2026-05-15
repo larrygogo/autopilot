@@ -22,6 +22,7 @@ import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
+import { cancelTaskAction, restartTaskAction, answerTaskAction, TaskActionError } from "./task-actions";
 import {
   createSchedule,
   getSchedule,
@@ -1545,79 +1546,35 @@ export async function handleRequest(req: Request): Promise<Response> {
     // POST /api/tasks/:id/cancel
     const cancelMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/cancel$/);
     if (method === "POST" && cancelMatch) {
-      const task = getTask(cancelMatch);
-      if (!task) return error("Task not found", 404);
-
-      const wf = getWorkflow(task.workflow);
-      const terminalStates = new Set(["done", "cancelled"]);
-      if (wf) for (const s of wf.terminal_states ?? []) terminalStates.add(s);
-      if (terminalStates.has(task.status)) return error(`Task already in terminal state: ${task.status}`);
-
-      const transitions = wf
-        ? buildTransitions(wf)
-        : { [task.status]: [["cancel", "cancelled"] as [string, string]] };
-
-      const [from, to] = transition(cancelMatch, "cancel", { transitions, note: "API cancel" });
-      return json({ from, to });
+      try {
+        return json(cancelTaskAction(cancelMatch));
+      } catch (e: unknown) {
+        if (e instanceof TaskActionError) return error(e.message, e.status);
+        return error(e instanceof Error ? e.message : String(e), 500);
+      }
     }
 
     // POST /api/tasks/:id/restart — 把未完成的任务从当前阶段重新执行（dangling 救援用）
     const restartMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/restart$/);
     if (method === "POST" && restartMatch) {
-      const taskId = restartMatch;
-      const task = getTask(taskId);
-      if (!task) return error("Task not found", 404);
-
-      // 终态不允许重启（用 clone 不过这里没实现）
-      const wf = getWorkflow(task.workflow);
-      const terminalStates = new Set(["done", "cancelled"]);
-      if (wf) for (const s of wf.terminal_states ?? []) terminalStates.add(s);
-      if (terminalStates.has(task.status)) {
-        return error(`Task 已是终态（${task.status}），无法重启；请新建任务`);
+      try {
+        return json(restartTaskAction(restartMatch));
+      } catch (e: unknown) {
+        if (e instanceof TaskActionError) return error(e.message, e.status);
+        return error(e instanceof Error ? e.message : String(e), 500);
       }
-
-      // 从 status 提取 phase 名（running_X / pending_X / awaiting_X / X_rejected）
-      const m = task.status.match(/^(?:running_|pending_|awaiting_)(.+)$/);
-      const phase = m ? m[1] : null;
-      if (!phase) {
-        return error(`无法从状态 ${task.status} 推断 phase 名，重启失败`);
-      }
-
-      // 验证 phase 在 workflow 里存在
-      if (wf) {
-        const phaseDef = wf.phases.find((p) => {
-          if (isParallelPhase(p)) return p.parallel.name === phase;
-          return (p as { name: string }).name === phase;
-        });
-        if (!phaseDef) return error(`workflow 里没有阶段 ${phase}`);
-      }
-
-      // 直接改 status + 清掉 dangling/pending_question；绕过状态机，因为是用户级救援
-      updateTask(taskId, {
-        status: `pending_${phase}`,
-        dangling: false,
-        pending_question: "",
-      });
-      log.info("任务被用户手动重启 [task=%s phase=%s 原状态=%s]", taskId, phase, task.status);
-      emit({ type: "task:updated", payload: { task: getTask(taskId)!, fields: ["status"] } });
-
-      // 异步触发执行
-      executePhase(taskId, phase).catch(() => {});
-
-      return json({ ok: true, phase, from: task.status });
     }
 
     // POST /api/tasks/:id/answer — 用户回答 agent 的 ask_user 提问
     const answerMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/answer$/);
     if (method === "POST" && answerMatch) {
       const body = await req.json() as { text?: string };
-      const text = body.text?.trim() ?? "";
-      if (!text) return error("answer text is required");
-      const { answerPending, hasPending } = await import("../agents/pending-questions");
-      if (!hasPending(answerMatch)) return error("没有待回答的问题");
-      const ok = answerPending(answerMatch, text);
-      if (!ok) return error("无法回答（pending 已被消费？）");
-      return json({ ok: true });
+      try {
+        return json(await answerTaskAction(answerMatch, body.text ?? ""));
+      } catch (e: unknown) {
+        if (e instanceof TaskActionError) return error(e.message, e.status);
+        return error(e instanceof Error ? e.message : String(e), 500);
+      }
     }
 
     // POST /api/tasks/:id/decide  — gate phase 的人工决断（pass / reject / cancel）

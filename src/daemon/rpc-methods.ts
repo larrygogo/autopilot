@@ -34,8 +34,24 @@ import {
 import { getNowAggregator } from "./routes-now";
 import { computeAgentUsage } from "./routes";
 import { computeTaskOutcome } from "./task-outcome";
+import {
+  cancelTaskAction,
+  restartTaskAction,
+  answerTaskAction,
+  TaskActionError,
+} from "./task-actions";
+import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
+import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
 import { registerRpcMethod, RpcError } from "./rpc";
 import { VERSION } from "../index";
+
+/** 业务错误 → RpcError 透传（保留 code）；其他错误让 invokeRpcMethod 包成 INTERNAL */
+function rethrowAsRpc(e: unknown): never {
+  if (e instanceof TaskActionError) throw new RpcError(e.code, e.message);
+  if (e instanceof StartTaskError) throw new RpcError("START_FAILED", e.message);
+  if (e instanceof DeleteTaskError) throw new RpcError("DELETE_FAILED", e.message);
+  throw e;
+}
 
 /** 把 unknown params 视为对象，缺失时给 {} */
 function asObj(params: unknown): Record<string, unknown> {
@@ -301,6 +317,80 @@ export function registerCoreRpcMethods(): void {
       if (typeof p.workflow !== "string" || !p.workflow) throw new RpcError("INVALID_PARAM", "需要 workflow");
       // 与 HTTP /phase-stats 一致：wrap 在 { stats: {...} } 里
       return { stats: getWorkflowPhaseStats(p.workflow) };
+    },
+  });
+
+  // ── 第四批：tasks.* mutation（5 个） ──
+
+  registerRpcMethod({
+    method: "tasks.start",
+    description: "从 workflow + requirement 启动新任务（POST /api/tasks 等价）",
+    handler: async (params) => {
+      const p = asObj(params);
+      try {
+        // body 字段透传给 setup_func；body schema 由调用方负责，这里不再校验
+        return await startTaskFromTemplate(p as Parameters<typeof startTaskFromTemplate>[0]);
+      } catch (e: unknown) {
+        rethrowAsRpc(e);
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.cancel",
+    description: "取消任务（非终态才允许）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      try {
+        return cancelTaskAction(p.id);
+      } catch (e: unknown) {
+        rethrowAsRpc(e);
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.restart",
+    description: "从当前阶段重新执行（dangling 救援，绕过状态机）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      try {
+        return restartTaskAction(p.id);
+      } catch (e: unknown) {
+        rethrowAsRpc(e);
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.delete",
+    description: "彻底删除任务（DB + 文件 + 锁；仅终态）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      try {
+        const res = cascadeDeleteTask(p.id);
+        return { ok: true, deleted: res.deleted };
+      } catch (e: unknown) {
+        rethrowAsRpc(e);
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.answer",
+    description: "用户回答 agent 的 ask_user 提问",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (typeof p.text !== "string") throw new RpcError("INVALID_PARAM", "需要 text");
+      try {
+        return await answerTaskAction(p.id, p.text);
+      } catch (e: unknown) {
+        rethrowAsRpc(e);
+      }
     },
   });
 }

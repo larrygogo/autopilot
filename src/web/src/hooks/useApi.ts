@@ -90,27 +90,26 @@ export const api = {
   },
   // [WS-RPC] tasks.get — P3 第一批 PoC
   getTask: (id: string) => requestRpc<any>("tasks.get", { id }),
+  // [WS-RPC] tasks.start
   startTask: (body: { title?: string; requirement?: string; workflow?: string; reqId?: string }) =>
-    request<any>("/api/tasks", { method: "POST", body: JSON.stringify(body) }),
-  cancelTask: (id: string) =>
-    request<any>(`/api/tasks/${id}/cancel`, { method: "POST" }),
+    requestRpc<any>("tasks.start", body),
+  // [WS-RPC] tasks.cancel
+  cancelTask: (id: string) => requestRpc<any>("tasks.cancel", { id }),
+  // [WS-RPC] tasks.delete
   deleteTask: (id: string) =>
-    request<{ ok: true; deleted: string[] }>(`/api/tasks/${id}`, { method: "DELETE" }),
+    requestRpc<{ ok: true; deleted: string[] }>("tasks.delete", { id }),
+  // [WS-RPC] tasks.restart
   restartTask: (id: string) =>
-    request<{ ok: true; phase: string; from: string }>(
-      `/api/tasks/${id}/restart`,
-      { method: "POST" },
-    ),
+    requestRpc<{ ok: true; phase: string; from: string }>("tasks.restart", { id }),
+  // decideTask 留 HTTP（复杂 inline handler，下一轮单独抽 helper 再切）
   decideTask: (id: string, decision: "pass" | "reject" | "cancel", note?: string) =>
     request<{ from: string; to: string; decision: string; note: string }>(
       `/api/tasks/${id}/decide`,
       { method: "POST", body: JSON.stringify({ decision, note }) },
     ),
+  // [WS-RPC] tasks.answer
   answerTask: (id: string, text: string) =>
-    request<{ ok: true }>(
-      `/api/tasks/${id}/answer`,
-      { method: "POST", body: JSON.stringify({ text }) },
-    ),
+    requestRpc<{ ok: true }>("tasks.answer", { id, text }),
   // [WS-RPC] tasks.logs
   getTaskLogs: (id: string, limit = 100) =>
     requestRpc<any[]>("tasks.logs", { id, limit }),
