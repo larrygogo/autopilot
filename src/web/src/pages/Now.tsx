@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useNowCards } from "@/hooks/useNowCards";
 import { NowCard } from "@/components/NowCard";
+import { NowEmptyGuide } from "@/components/NowEmptyGuide";
 import { PageHero } from "@/components/PageHero";
 import { Loader2, RefreshCw, ListChecks } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -69,14 +70,7 @@ export function Now() {
         </div>
       )}
 
-      {!loading && !error && cards.length === 0 && (
-        <div className="mt-12 flex flex-col items-center text-muted-foreground">
-          <p className="font-display text-lg">🎉 全部清空</p>
-          <p className="mt-1 font-mono text-xs uppercase tracking-[0.12em]">
-            没有需要关注的事
-          </p>
-        </div>
-      )}
+      {!loading && !error && cards.length === 0 && <NowEmptyGuide />}
 
       <div className="mt-4 flex flex-col gap-2">
         {cards.map((card) => (
