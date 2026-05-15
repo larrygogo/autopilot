@@ -1,5 +1,4 @@
 import type { Aggregator } from "../core/now-aggregator";
-import { dismissCard } from "../core/now-dismiss";
 
 let _aggregator: Aggregator | null = null;
 
@@ -14,33 +13,16 @@ export function getNowAggregator(): Aggregator | null {
 }
 
 /**
- * 处理 /api/now/* 路由。返回 null 表示路径不归本模块管，让上层继续路由。
+ * Legacy HTTP /api/now/* 路由已完全移除。所有 now 域操作走 WS RPC method
+ * （now.cards / now.dismissCard）。
+ *
+ * 这个函数保留 export 用作 routes.ts 调用兼容点，让上层继续把请求往下传。
+ * 实际命中 /api/now/* 的请求会返回 410 Gone。
  */
-export async function handleNowRequest(req: Request, url: URL): Promise<Response | null> {
-  const path = url.pathname;
-  const method = req.method;
-
-  if (!path.startsWith("/api/now/")) return null;
-
-  const json = (data: unknown, status = 200) =>
-    new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
-
-  // GET /api/now/cards
-  if (method === "GET" && path === "/api/now/cards") {
-    if (!_aggregator) return json({ cards: [] });
-    return json({ cards: _aggregator.getCards() });
-  }
-
-  // POST /api/now/cards/:id/dismiss
-  const dismissMatch = path.match(/^\/api\/now\/cards\/([^/]+)\/dismiss$/);
-  if (method === "POST" && dismissMatch) {
-    const cardId = decodeURIComponent(dismissMatch[1]);
-    // 持久化 dismiss
-    dismissCard(cardId);
-    // 同步 aggregator 内存状态（也会 emit now:card_removed）
-    if (_aggregator) _aggregator.markDismissed(cardId);
-    return json({ ok: true });
-  }
-
-  return json({ error: "Not Found" }, 404);
+export async function handleNowRequest(_req: Request, url: URL): Promise<Response | null> {
+  if (!url.pathname.startsWith("/api/now/")) return null;
+  return new Response(
+    JSON.stringify({ error: "Removed: use WS RPC method `now.cards` / `now.dismissCard`" }),
+    { status: 410, headers: { "Content-Type": "application/json" } },
+  );
 }

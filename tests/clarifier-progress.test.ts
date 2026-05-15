@@ -308,38 +308,45 @@ describe("clarifier-progress: 集成 runClarifierRound", () => {
   });
 });
 
-// ─── HTTP /api/requirements/:id/clarifier-round ─────────────────
-import { handleRequest } from "../src/daemon/routes";
+// ─── requirements.clarifierRound RPC ─────────────────
+import { invokeRpcMethod } from "../src/daemon/rpc";
+import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
-describe("HTTP GET /api/requirements/:id/clarifier-round", () => {
+describe("requirements.clarifierRound RPC", () => {
   beforeEach(() => {
     initSchema();
     _resetForTest();
+    registerCoreRpcMethods();
   });
 
-  it("当前有 round → 200 { round: <state> }", async () => {
+  it("当前有 round → ok { round: <state> }", async () => {
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "" });
     startRound("r1", "P");
 
-    const res = await handleRequest(new Request("http://localhost/api/requirements/r1/clarifier-round"));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { round: ClarifierRoundState | null };
-    expect(body.round?.req_id).toBe("r1");
-    expect(body.round?.phase).toBe("preparing");
-    expect(body.round?.prompt).toBe("P");
+    const r = await invokeRpcMethod("requirements.clarifierRound", { id: "r1" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const body = r.payload as { round: ClarifierRoundState | null };
+      expect(body.round?.req_id).toBe("r1");
+      expect(body.round?.phase).toBe("preparing");
+      expect(body.round?.prompt).toBe("P");
+    }
   });
 
-  it("当前无 round → 200 { round: null }", async () => {
+  it("当前无 round → ok { round: null }", async () => {
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "" });
 
-    const res = await handleRequest(new Request("http://localhost/api/requirements/r1/clarifier-round"));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { round: ClarifierRoundState | null };
-    expect(body.round).toBeNull();
+    const r = await invokeRpcMethod("requirements.clarifierRound", { id: "r1" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const body = r.payload as { round: ClarifierRoundState | null };
+      expect(body.round).toBeNull();
+    }
   });
 
-  it("requirement 不存在 → 404", async () => {
-    const res = await handleRequest(new Request("http://localhost/api/requirements/nope/clarifier-round"));
-    expect(res.status).toBe(404);
+  it("requirement 不存在 → NOT_FOUND", async () => {
+    const r = await invokeRpcMethod("requirements.clarifierRound", { id: "nope" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe("NOT_FOUND");
   });
 });

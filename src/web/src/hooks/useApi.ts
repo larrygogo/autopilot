@@ -593,11 +593,9 @@ export const api = {
   // /now state-derivation engine (PR 1 backend)
   // [WS-RPC] now.cards（RPC handler 直接返回数组，不再 wrap cards 字段）
   listNowCards: () => requestRpc<NowCard[]>("now.cards"),
+  // [WS-RPC] now.dismissCard
   dismissNowCard: (cardId: string) =>
-    request<{ ok: true }>(
-      `/api/now/cards/${encodeURIComponent(cardId)}/dismiss`,
-      { method: "POST" },
-    ),
+    requestRpc<{ ok: true }>("now.dismissCard", { id: cardId }),
 };
 
 export interface WorkflowTemplate {

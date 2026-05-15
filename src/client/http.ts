@@ -367,8 +367,8 @@ export class HttpClient {
     return this.call("now.cards");
   }
 
-  async dismissNowCard(_cardId: string): Promise<{ ok: true }> {
-    throw new Error("dismissNowCard 暂未迁到 WS RPC（now.dismissCard 待注册）");
+  async dismissNowCard(cardId: string): Promise<{ ok: true }> {
+    return this.call("now.dismissCard", { id: cardId });
   }
 
   // ── Requirements ──

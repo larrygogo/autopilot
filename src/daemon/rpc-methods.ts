@@ -27,7 +27,7 @@ import {
   deleteWorkflowDir,
   reload as reloadRegistry,
 } from "../core/registry";
-import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb } from "../core/workflows";
+import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb } from "../core/workflows";
 import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow-templates";
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
 import {
@@ -115,6 +115,7 @@ import {
   getAgentCall,
 } from "../core/task-logs";
 import { getNowAggregator } from "./routes-now";
+import { dismissCard as coreDismissCard } from "../core/now-dismiss";
 import { computeAgentUsage, phaseIndex, parseDecisionCounts, renderDecisionMd } from "./routes";
 import { computeTaskOutcome } from "./task-outcome";
 import {
@@ -197,8 +198,16 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "workflows.list",
-    description: "列出已注册的工作流",
-    handler: () => listWorkflows(),
+    description: "列出已注册的工作流（含 source / derives_from）",
+    handler: () => {
+      const inMem = listWorkflows();
+      const dbRows = listWorkflowsInDb();
+      const sourceMap = new Map(dbRows.map((r) => [r.name, r]));
+      return inMem.map((wf) => {
+        const row = sourceMap.get(wf.name);
+        return { ...wf, source: row?.source ?? "file", derives_from: row?.derives_from ?? null };
+      });
+    },
   });
 
   registerRpcMethod({
@@ -254,6 +263,20 @@ export function registerCoreRpcMethods(): void {
     handler: () => {
       const agg = getNowAggregator();
       return agg ? agg.getCards() : [];
+    },
+  });
+
+  registerRpcMethod({
+    method: "now.dismissCard",
+    description: "标记 Now 卡片已忽略（持久化 dismiss + 同步 aggregator 内存）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      coreDismissCard(p.id);
+      // 跟原 HTTP handler 行为一致：同步内存 aggregator，让 markDismissed 触发 emit
+      const agg = getNowAggregator();
+      if (agg) agg.markDismissed(p.id);
+      return { ok: true };
     },
   });
 
@@ -516,10 +539,14 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "workflows.getYaml",
-    description: "读取 workflow.yaml 原文",
+    description: "读取 workflow.yaml 原文（db 来源直接读 yaml_content / file 读磁盘）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const row = getWorkflowFromDb(p.name);
+      if (row && row.source === "db") {
+        return { yaml: row.yaml_content };
+      }
       const yaml = registryGetWorkflowYaml(p.name);
       if (yaml === null) throw new RpcError("NOT_FOUND", "Workflow not found");
       return { yaml };

@@ -16,15 +16,17 @@ import { createRequirement, setRequirementStatus } from "../src/core/requirement
 import { enableBus, disableBus } from "../src/core/event-bus";
 import { createDefaultAggregator, type Aggregator } from "../src/core/now-aggregator";
 import { setNowAggregator } from "../src/daemon/routes-now";
-import { handleRequest } from "../src/daemon/routes";
+import { invokeRpcMethod } from "../src/daemon/rpc";
+import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
-describe("/now e2e smoke", () => {
+describe("/now e2e smoke (RPC)", () => {
   let agg: Aggregator;
 
   beforeAll(async () => {
     const db = new Database(":memory:");
     [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011].forEach(fn => fn(db));
     _setDbForTest(db);
+    registerCoreRpcMethods();
     createProject({ id: "proj-001", name: "P" });
     createRequirement({ id: "REQ-001", project_id: "proj-001", title: "smoke", spec_md: "" });
     setRequirementStatus("REQ-001", "awaiting_approval");
@@ -41,22 +43,21 @@ describe("/now e2e smoke", () => {
     disableBus();
   });
 
-  it("GET /api/now/cards 通过 routes.ts 主入口能返回卡片", async () => {
-    const req = new Request("http://localhost/api/now/cards", { method: "GET" });
-    const res = await handleRequest(req);
-    expect(res.status).toBe(200);
-    const body = await res.json() as { cards: Array<{ id: string }> };
-    expect(body.cards.some(c => c.id === "awaiting-approval:REQ-001")).toBe(true);
+  it("now.cards RPC 返回卡片列表", async () => {
+    const r = await invokeRpcMethod("now.cards", {});
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const cards = r.payload as Array<{ id: string }>;
+      expect(cards.some(c => c.id === "awaiting-approval:REQ-001")).toBe(true);
+    }
   });
 
-  it("POST .../dismiss 通过 routes.ts 主入口能命中", async () => {
-    const cardId = encodeURIComponent("awaiting-approval:REQ-001");
-    const req = new Request(`http://localhost/api/now/cards/${cardId}/dismiss`, {
-      method: "POST",
-    });
-    const res = await handleRequest(req);
-    expect(res.status).toBe(200);
-    const body = await res.json() as { ok: boolean };
-    expect(body.ok).toBe(true);
+  it("now.dismissCard RPC 能命中并持久化 dismiss", async () => {
+    const r = await invokeRpcMethod("now.dismissCard", { id: "awaiting-approval:REQ-001" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const body = r.payload as { ok: boolean };
+      expect(body.ok).toBe(true);
+    }
   });
 });

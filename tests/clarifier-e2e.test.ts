@@ -18,7 +18,8 @@ import { up as m015 } from "../src/migrations/015-clarifier-error";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createRequirement, setRequirementStatus, getRequirementById } from "../src/core/requirements";
-import { handleRequest } from "../src/daemon/routes";
+import { invokeRpcMethod } from "../src/daemon/rpc";
+import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 import { enableBus, disableBus } from "../src/core/event-bus";
 import { createDefaultAggregator, type Aggregator } from "../src/core/now-aggregator";
 import { setNowAggregator } from "../src/daemon/routes-now";
@@ -31,6 +32,7 @@ describe("clarifier e2e — 完整链路", () => {
     const db = new Database(":memory:");
     [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m019].forEach(fn => fn(db));
     _setDbForTest(db);
+    registerCoreRpcMethods();
     createProject({ id: "p1", name: "测试项目" });
     enableBus();
     initRequirementClarifier();
@@ -82,17 +84,15 @@ describe("clarifier e2e — 完整链路", () => {
       done: false,
     }));
 
-    const reply = new Request(`http://localhost/api/requirements/e2e-1/questions/${activeQid}/replies`, {
-      method: "POST",
-      body: JSON.stringify({ author_role: "user", text: "开发者" }),
-      headers: { "Content-Type": "application/json" },
+    const replyR = await invokeRpcMethod("requirements.addReply", {
+      id: "e2e-1", qid: activeQid, author_role: "user", text: "开发者",
     });
-    const replyRes = await handleRequest(reply);
-    expect(replyRes.status).toBe(201);
+    expect(replyR.ok).toBe(true);
 
-    const resolve = new Request(`http://localhost/api/requirements/e2e-1/questions/${activeQid}/resolve`, { method: "POST" });
-    const resolveRes = await handleRequest(resolve);
-    expect(resolveRes.status).toBe(200);
+    const resolveR = await invokeRpcMethod("requirements.resolveQuestion", {
+      id: "e2e-1", qid: activeQid,
+    });
+    expect(resolveR.ok).toBe(true);
 
     await new Promise(r => setTimeout(r, 100));
 
@@ -112,9 +112,8 @@ describe("clarifier e2e — 完整链路", () => {
       done: true,
     }));
 
-    const fin = new Request("http://localhost/api/requirements/e2e-1/finish-clarification", { method: "POST" });
-    const finRes = await handleRequest(fin);
-    expect(finRes.status).toBe(200);
+    const finR = await invokeRpcMethod("requirements.finishClarification", { id: "e2e-1" });
+    expect(finR.ok).toBe(true);
 
     await new Promise(r => setTimeout(r, 50));
 
@@ -126,10 +125,12 @@ describe("clarifier e2e — 完整链路", () => {
     expect(cards.find(c => c.id === "open-question:e2e-1")).toBeUndefined();
   });
 
-  it("GET /api/requirements/:id/spec-revisions 看修订历史", async () => {
-    const res = await handleRequest(new Request("http://localhost/api/requirements/e2e-1/spec-revisions"));
-    expect(res.status).toBe(200);
-    const body = await res.json() as { revisions: Array<{ summary: string | null }> };
-    expect(body.revisions.length).toBeGreaterThan(0);
+  it("requirements.specRevisions 看修订历史", async () => {
+    const r = await invokeRpcMethod("requirements.specRevisions", { id: "e2e-1" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const body = r.payload as { revisions: Array<{ summary: string | null }> };
+      expect(body.revisions.length).toBeGreaterThan(0);
+    }
   });
 });

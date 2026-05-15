@@ -9,6 +9,8 @@ import { _setDbForTest } from "../src/core/db";
 import { _clearRegistry, discover } from "../src/core/registry";
 import { createDbWorkflow } from "../src/core/workflows";
 import { handleRequest } from "../src/daemon/routes";
+import { invokeRpcMethod } from "../src/daemon/rpc";
+import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
 describe("workflows API（W2 扩展）", () => {
   let tmpHome: string;
@@ -32,6 +34,7 @@ describe("workflows API（W2 扩展）", () => {
     migrate001(db);
     migrate007(db);
     _setDbForTest(db);
+    registerCoreRpcMethods();
   });
 
   afterAll(() => {
@@ -48,14 +51,16 @@ describe("workflows API（W2 扩展）", () => {
     await discover();
   });
 
-  it("GET /api/workflows 响应包含 source / derives_from", async () => {
-    const res = await handleRequest(new Request("http://localhost/api/workflows"));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<{ name: string; source: string; derives_from: string | null }>;
-    const reqDev = body.find((w) => w.name === "req_dev");
-    expect(reqDev).toBeDefined();
-    expect(reqDev!.source).toBe("file");
-    expect(reqDev!.derives_from).toBeNull();
+  it("workflows.list 响应包含 source / derives_from", async () => {
+    const r = await invokeRpcMethod("workflows.list", {});
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const body = r.payload as Array<{ name: string; source: string; derives_from: string | null }>;
+      const reqDev = body.find((w) => w.name === "req_dev");
+      expect(reqDev).toBeDefined();
+      expect(reqDev!.source).toBe("file");
+      expect(reqDev!.derives_from).toBeNull();
+    }
   });
 
   it("POST /api/workflows 带 derives_from → 不再走派生分支，走文件脚手架（兼容历史调用）", async () => {
@@ -79,7 +84,7 @@ describe("workflows API（W2 扩展）", () => {
     expect(body.source).toBe("file");
   });
 
-  it("PUT /api/workflows/:name/yaml 修改 DB 工作流走 updateDbWorkflow", async () => {
+  it("workflows.saveYaml 修改 DB 工作流走 updateDbWorkflow", async () => {
     createDbWorkflow({
       name: "wf_db",
       description: "",
@@ -90,22 +95,19 @@ describe("workflows API（W2 扩展）", () => {
     await discover();
 
     const newYaml = "name: wf_db\nphases:\n  - name: design\n  - name: develop\n";
-    const res = await handleRequest(
-      new Request("http://localhost/api/workflows/wf_db/yaml", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ yaml: newYaml }),
-      })
-    );
-    expect(res.status).toBe(200);
+    const saveR = await invokeRpcMethod("workflows.saveYaml", { name: "wf_db", yaml: newYaml });
+    expect(saveR.ok).toBe(true);
 
     // 验证 DB 里 yaml 真的改了
-    const getRes = await handleRequest(new Request("http://localhost/api/workflows/wf_db/yaml"));
-    const body = (await getRes.json()) as { yaml: string };
-    expect(body.yaml).toBe(newYaml);
+    const getR = await invokeRpcMethod("workflows.getYaml", { name: "wf_db" });
+    expect(getR.ok).toBe(true);
+    if (getR.ok) {
+      const body = getR.payload as { yaml: string };
+      expect(body.yaml).toBe(newYaml);
+    }
   });
 
-  it("DELETE /api/workflows/:name 删 DB 工作流", async () => {
+  it("workflows.delete 删 DB 工作流", async () => {
     createDbWorkflow({
       name: "wf_to_delete",
       description: "",
@@ -115,13 +117,12 @@ describe("workflows API（W2 扩展）", () => {
     _clearRegistry();
     await discover();
 
-    const res = await handleRequest(
-      new Request("http://localhost/api/workflows/wf_to_delete", { method: "DELETE" })
-    );
-    expect(res.status).toBe(200);
+    const delR = await invokeRpcMethod("workflows.delete", { name: "wf_to_delete" });
+    expect(delR.ok).toBe(true);
 
-    const getRes = await handleRequest(new Request("http://localhost/api/workflows/wf_to_delete"));
-    expect(getRes.status).toBe(404);
+    const getR = await invokeRpcMethod("workflows.get", { name: "wf_to_delete" });
+    expect(getR.ok).toBe(false);
+    if (!getR.ok) expect(getR.error.code).toBe("NOT_FOUND");
   });
 
   it("GET /api/workflows/:name/export 返回纯 yaml 文本", async () => {
