@@ -5,6 +5,7 @@ import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { statusVisual, toneToTextClass } from "@/lib/status-style";
 
 interface WorkflowInfo {
   name: string;
@@ -34,13 +35,8 @@ interface Props {
 }
 
 function statusIcon(status: string | undefined): { icon: string; color: string } {
-  if (!status) return { icon: "·", color: "text-muted-foreground" };
-  if (status === "done") return { icon: "✓", color: "text-success" };
-  if (status === "failed") return { icon: "✗", color: "text-destructive" };
-  if (status === "cancelled" || status === "canceled") return { icon: "⊘", color: "text-muted-foreground" };
-  if (status.startsWith("running_") || status.startsWith("pending_")) return { icon: "▶", color: "text-accent" };
-  if (status.startsWith("awaiting_")) return { icon: "⊙", color: "text-warning" };
-  return { icon: "·", color: "text-muted-foreground" };
+  const vis = statusVisual(status);
+  return { icon: vis.glyph, color: toneToTextClass(vis.tone) };
 }
 
 function formatRelativeTime(epochMs: number): string {

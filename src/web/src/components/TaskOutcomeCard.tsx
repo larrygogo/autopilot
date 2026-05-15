@@ -4,6 +4,7 @@ import { ExternalLink, RotateCcw, Wrench } from "lucide-react";
 import { api, type TaskOutcome } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/Toast";
+import { statusVisual, toneToTextClass } from "@/lib/status-style";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return "0s";
@@ -51,9 +52,10 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
 
   if (loading || !outcome) return null;
 
-  const statusIcon = outcome.status === "done" ? "✓" : outcome.status === "failed" ? "✗" : "⊘";
-  const statusLabel = outcome.status === "done" ? "已完成" : outcome.status === "failed" ? "已失败" : "已取消";
-  const statusColor = outcome.status === "done" ? "text-success" : outcome.status === "failed" ? "text-destructive" : "text-muted-foreground";
+  const vis = statusVisual(outcome.status);
+  const statusIcon = vis.glyph;
+  const statusLabel = vis.label;
+  const statusColor = toneToTextClass(vis.tone);
 
   async function handleRetry() {
     if (!requirementId) {
