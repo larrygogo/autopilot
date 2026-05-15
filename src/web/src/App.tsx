@@ -37,7 +37,11 @@ import {
   Circle,
   GitBranch,
   CalendarClock,
+  ChevronDown,
+  ChevronRight,
+  Folder,
 } from "lucide-react";
+import { api, type Project } from "./hooks/useApi";
 
 const Now = lazy(() => import("./pages/Now").then((m) => ({ default: m.Now })));
 const Start = lazy(() => import("./pages/Start").then((m) => ({ default: m.Start })));
@@ -64,6 +68,8 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   /** 只在严格匹配时激活；不设则前缀匹配（子路由也激活父项） */
   end?: boolean;
+  /** 标记可折叠节点（侧栏会渲染 chevron + 子项区域，数据由 SidebarContent 注入） */
+  expandable?: "projects";
 }
 
 interface NavGroupDef {
@@ -78,7 +84,7 @@ const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { path: "/now", label: "现在", icon: Sparkles, end: true },
       { path: "/start", label: "开始", icon: FilePlus, end: true },
-      { path: "/library", label: "库", icon: FolderOpen },
+      { path: "/library", label: "项目", icon: FolderOpen, expandable: "projects" },
     ],
   },
   {
@@ -99,7 +105,7 @@ const NAV_GROUPS: NavGroupDef[] = [
 function titleForPath(pathname: string): string {
   if (pathname.startsWith("/now")) return "现在";
   if (pathname.startsWith("/start")) return "开始";
-  if (pathname.startsWith("/library")) return "库";
+  if (pathname.startsWith("/library")) return "项目";
   if (pathname.startsWith("/tasks/")) {
     const id = pathname.slice("/tasks/".length);
     return id ? `任务 · ${id}` : "任务";
@@ -316,6 +322,16 @@ function SidebarContent({
   const wsLabel =
     wsState === "connected" ? "已连接" : wsState === "connecting" ? "连接中…" : "未连接";
 
+  // 项目列表（注入到 expandable="projects" 节点）
+  const [projects, setProjects] = useState<Project[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.listProjects()
+      .then((list) => { if (!cancelled) setProjects(list); })
+      .catch(() => { /* 静默：失败时菜单二级为空 */ });
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div className="flex h-full flex-col">
       {/* 蓝图风 logo block：方块编号 + display 字体品牌名 */}
@@ -337,7 +353,7 @@ function SidebarContent({
             <div className="mb-1.5 px-2.5 font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground/70">
               {group.title}
             </div>
-            <NavGroup items={group.items} badges={{ "/now": activeCount }} />
+            <NavGroup items={group.items} badges={{ "/now": activeCount }} projects={projects} />
           </div>
         ))}
       </nav>
@@ -352,46 +368,150 @@ function SidebarContent({
   );
 }
 
-function NavGroup({ items, badges }: { items: NavItem[]; badges?: Record<string, number> }) {
+function NavGroup({
+  items,
+  badges,
+  projects,
+}: {
+  items: NavItem[];
+  badges?: Record<string, number>;
+  projects?: Project[];
+}) {
   return (
     <ul className="space-y-0">
       {items.map((item) => {
         const badgeCount = badges?.[item.path] ?? 0;
+        if (item.expandable === "projects" && projects) {
+          return (
+            <li key={item.path}>
+              <ExpandableNavItem item={item} children={projects} />
+            </li>
+          );
+        }
         return (
-        <li key={item.path}>
-          <NavLink
-            to={item.path}
-            end={item.end}
-            className={({ isActive }) =>
-              cn(
-                "group relative flex w-full items-center gap-2.5 rounded-none border-l-2 px-2.5 py-2 font-mono text-xs uppercase tracking-[0.12em] font-medium transition-all",
-                isActive
-                  ? "border-accent bg-sidebar-accent text-foreground"
-                  : "border-transparent text-muted-foreground hover:border-foreground/40 hover:bg-sidebar-accent/50 hover:text-foreground",
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <item.icon
-                  className={cn("h-4 w-4 shrink-0", isActive ? "text-accent" : "text-foreground/60")}
-                />
-                <span className="flex-1">{item.label}</span>
-                {badgeCount > 0 && (
-                  <span
-                    className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-600 px-1 font-mono text-[10px] font-bold leading-none text-white"
-                    aria-label={`${badgeCount} 件待处理`}
-                  >
-                    {badgeCount > 99 ? "99+" : badgeCount}
-                  </span>
-                )}
-              </>
-            )}
-          </NavLink>
-        </li>
+          <li key={item.path}>
+            <NavLinkItem item={item} badgeCount={badgeCount} />
+          </li>
         );
       })}
     </ul>
+  );
+}
+
+function NavLinkItem({ item, badgeCount }: { item: NavItem; badgeCount: number }) {
+  return (
+    <NavLink
+      to={item.path}
+      end={item.end}
+      className={({ isActive }) =>
+        cn(
+          "group relative flex w-full items-center gap-2.5 rounded-none border-l-2 px-2.5 py-2 font-mono text-xs uppercase tracking-[0.12em] font-medium transition-all",
+          isActive
+            ? "border-accent bg-sidebar-accent text-foreground"
+            : "border-transparent text-muted-foreground hover:border-foreground/40 hover:bg-sidebar-accent/50 hover:text-foreground",
+        )
+      }
+    >
+      {({ isActive }) => (
+        <>
+          <item.icon
+            className={cn("h-4 w-4 shrink-0", isActive ? "text-accent" : "text-foreground/60")}
+          />
+          <span className="flex-1">{item.label}</span>
+          {badgeCount > 0 && (
+            <span
+              className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-600 px-1 font-mono text-[10px] font-bold leading-none text-white"
+              aria-label={`${badgeCount} 件待处理`}
+            >
+              {badgeCount > 99 ? "99+" : badgeCount}
+            </span>
+          )}
+        </>
+      )}
+    </NavLink>
+  );
+}
+
+/**
+ * 可展开的导航节点（当前仅"项目"用）。
+ * - 整行点击 → 跳转父路径（顶层"项目"列表页 /library）
+ * - 右侧 chevron 单独控制展开 / 收起，不影响父级 navigation
+ * - 展开后列出每个项目，点击 → /projects/:id
+ * - 默认展开（首次进入想看到项目列表）；本地 storage 记忆用户上次状态
+ */
+function ExpandableNavItem({ item, children }: { item: NavItem; children: Project[] }) {
+  const location = useLocation();
+  const storageKey = `sidebar.expand.${item.path}`;
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem(storageKey);
+      return v === null ? true : v === "1";
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, expanded ? "1" : "0"); } catch { /* ignore */ }
+  }, [expanded, storageKey]);
+
+  const parentActive = location.pathname === item.path || location.pathname.startsWith(item.path + "/");
+  return (
+    <div>
+      <div
+        className={cn(
+          "relative flex w-full items-center gap-2.5 rounded-none border-l-2 pr-1 font-mono text-xs uppercase tracking-[0.12em] font-medium transition-all",
+          parentActive
+            ? "border-accent bg-sidebar-accent text-foreground"
+            : "border-transparent text-muted-foreground hover:border-foreground/40 hover:bg-sidebar-accent/50 hover:text-foreground",
+        )}
+      >
+        <NavLink
+          to={item.path}
+          end={item.end}
+          className="flex flex-1 items-center gap-2.5 px-2.5 py-2"
+        >
+          <item.icon className={cn("h-4 w-4 shrink-0", parentActive ? "text-accent" : "text-foreground/60")} />
+          <span className="flex-1">{item.label}</span>
+        </NavLink>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? "收起" : "展开"}
+          className="flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground"
+        >
+          {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+      {expanded && (
+        <ul className="mt-0.5 space-y-0.5 pl-4">
+          {children.length === 0 ? (
+            <li className="px-2 py-1 font-mono text-[10px] text-muted-foreground">
+              （空）
+            </li>
+          ) : (
+            children.map((p) => (
+              <li key={p.id}>
+                <NavLink
+                  to={`/projects/${p.id}`}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-none border-l-2 px-2 py-1.5 font-mono text-[11px] transition-colors",
+                      isActive
+                        ? "border-accent bg-sidebar-accent text-foreground"
+                        : "border-transparent text-muted-foreground hover:border-foreground/40 hover:bg-sidebar-accent/50 hover:text-foreground",
+                    )
+                  }
+                  title={p.description ?? p.name}
+                >
+                  <Folder className="h-3 w-3 shrink-0" />
+                  <span className="truncate normal-case tracking-normal">{p.name}</span>
+                </NavLink>
+              </li>
+            ))
+          )}
+        </ul>
+      )}
+    </div>
   );
 }
 
