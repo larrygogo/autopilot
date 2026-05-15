@@ -111,29 +111,36 @@ export const api = {
       `/api/tasks/${id}/answer`,
       { method: "POST", body: JSON.stringify({ text }) },
     ),
+  // [WS-RPC] tasks.logs
   getTaskLogs: (id: string, limit = 100) =>
-    request<any[]>(`/api/tasks/${id}/logs?limit=${limit}`),
+    requestRpc<any[]>("tasks.logs", { id, limit }),
+  // [WS-RPC] tasks.phaseLogs
   getPhaseLogsList: (id: string) =>
-    request<Array<{ phase: string; size: number; mtime: number }>>(`/api/tasks/${id}/phase-logs`),
+    requestRpc<Array<{ phase: string; size: number; mtime: number }>>("tasks.phaseLogs", { id }),
+  // [WS-RPC] tasks.phaseLog
   getPhaseLog: (id: string, phase: string, tail?: number) =>
-    request<{ phase: string; content: string }>(
-      `/api/tasks/${id}/phase-logs/${phase}${tail ? `?tail=${tail}` : ""}`,
-    ),
+    requestRpc<{ phase: string; content: string }>("tasks.phaseLog", { id, phase, tail }),
+  // [WS-RPC] tasks.phaseEvents
   listTaskPhaseEvents: (id: string) =>
-    request<{ events: TaskPhaseEvent[] }>(`/api/tasks/${id}/phase-events`).then((r) => r.events),
+    requestRpc<{ events: TaskPhaseEvent[] }>("tasks.phaseEvents", { id }).then((r) => r.events),
   /** 同工作流历史 phase 耗时 P50 — 给"还要多久"参考 */
+  // [WS-RPC] workflows.phaseStats
   getWorkflowPhaseStats: (workflow: string) =>
-    request<{ stats: Record<string, { count: number; p50_ms: number }> }>(
-      `/api/workflows/${encodeURIComponent(workflow)}/phase-stats`,
+    requestRpc<{ stats: Record<string, { count: number; p50_ms: number }> }>(
+      "workflows.phaseStats",
+      { workflow },
     ).then((r) => r.stats),
+  // [WS-RPC] tasks.outcome
   getTaskOutcome: (id: string) =>
-    request<TaskOutcome>(`/api/tasks/${id}/outcome`),
+    requestRpc<TaskOutcome>("tasks.outcome", { id }),
   getDaemonLog: (tail = 500) =>
     request<{ path: string | null; content: string }>(`/api/daemon/log?tail=${tail}`),
+  // [WS-RPC] tasks.agentCalls
   listAgentCalls: (id: string) =>
-    request<AgentCallSummary[]>(`/api/tasks/${id}/agent-calls`),
+    requestRpc<AgentCallSummary[]>("tasks.agentCalls", { id }),
+  // [WS-RPC] tasks.agentCall
   getAgentCall: (id: string, seq: number) =>
-    request<AgentCallRecord>(`/api/tasks/${id}/agent-calls/${seq}`),
+    requestRpc<AgentCallRecord>("tasks.agentCall", { id, seq }),
   getWorkspaceTree: (id: string, path: string) =>
     request<{ path: string; entries: WorkspaceEntry[] }>(
       `/api/tasks/${id}/ws/tree?path=${encodeURIComponent(path)}`,

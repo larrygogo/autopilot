@@ -10,14 +10,30 @@
  * 入参 / 出参用 unknown，handler 自己负责类型校验（抛 RpcError("INVALID_PARAM", …)）。
  */
 
-import { listTasks, getTask, getKv } from "../core/db";
+import {
+  listTasks,
+  getTask,
+  getKv,
+  getTaskLogs,
+  getSubTasks,
+  listTaskPhaseEvents,
+  getWorkflowPhaseStats,
+} from "../core/db";
 import { listWorkflows } from "../core/registry";
 import { listProjects } from "../core/projects";
 import { loadProviders, loadGlobalAgents, loadConfigRaw, PROVIDER_NAMES } from "../core/config";
 import { detectAllProviders } from "../agents/cli-status";
 import { runChecks } from "../core/doctor";
+import {
+  listPhaseLogs,
+  readPhaseLog,
+  readTaskEvents,
+  listAgentCalls,
+  getAgentCall,
+} from "../core/task-logs";
 import { getNowAggregator } from "./routes-now";
 import { computeAgentUsage } from "./routes";
+import { computeTaskOutcome } from "./task-outcome";
 import { registerRpcMethod, RpcError } from "./rpc";
 import { VERSION } from "../index";
 
@@ -156,6 +172,136 @@ export function registerCoreRpcMethods(): void {
     method: "config.get",
     description: "返回 config.yaml 原文（用户配置）",
     handler: () => ({ yaml: loadConfigRaw() }),
+  });
+
+  // ── 第三批：tasks.* / workflows.* 查询类（10 个） ──
+
+  registerRpcMethod({
+    method: "tasks.logs",
+    description: "任务的状态机日志（task_logs 表），可选 limit",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const limit = typeof p.limit === "number" ? p.limit : 100;
+      return getTaskLogs(p.id, limit);
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.phaseLogs",
+    description: "列出任务 workspace 下已有的阶段日志文件元信息",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      try {
+        return listPhaseLogs(p.id);
+      } catch (e: unknown) {
+        throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.phaseLog",
+    description: "读单个阶段日志原文，可选 tail 截尾",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (typeof p.phase !== "string" || !p.phase) throw new RpcError("INVALID_PARAM", "需要 phase");
+      const tail = typeof p.tail === "number" ? p.tail : undefined;
+      try {
+        const content = readPhaseLog(p.id, p.phase, tail !== undefined ? { tail } : undefined);
+        return { phase: p.phase, content };
+      } catch (e: unknown) {
+        throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.phaseEvents",
+    description: "任务的 phase 事件序列（task_phase_events 表）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      // 与 HTTP /phase-events 一致：wrap 在 { events: [...] } 里
+      return { events: listTaskPhaseEvents(p.id) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.outcome",
+    description: "终态任务的结果概览（diff_stat / pr_url / top_phases ...）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const outcome = await computeTaskOutcome(p.id);
+      if (!outcome) throw new RpcError("NOT_FOUND", "task 不在终态");
+      return outcome;
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.agentCalls",
+    description: "agent 调用 transcript 摘要列表",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      try {
+        return listAgentCalls(p.id);
+      } catch (e: unknown) {
+        throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.agentCall",
+    description: "单次 agent 调用完整记录（按 seq）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (typeof p.seq !== "number") throw new RpcError("INVALID_PARAM", "需要 seq (number)");
+      const rec = getAgentCall(p.id, p.seq);
+      if (!rec) throw new RpcError("NOT_FOUND", `agent call seq=${p.seq} 不存在`);
+      return rec;
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.events",
+    description: "任务事件流（JSONL 解析后），可选 tail",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const tail = typeof p.tail === "number" ? p.tail : undefined;
+      try {
+        return readTaskEvents(p.id, tail !== undefined ? { tail } : undefined);
+      } catch (e: unknown) {
+        throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.subtasks",
+    description: "任务下挂的子任务（仅 parent_task_id 关系）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      return getSubTasks(p.id);
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.phaseStats",
+    description: "同工作流历史 phase 耗时 P50（给 TaskPhaseTimeline 参考线用）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.workflow !== "string" || !p.workflow) throw new RpcError("INVALID_PARAM", "需要 workflow");
+      // 与 HTTP /phase-stats 一致：wrap 在 { stats: {...} } 里
+      return { stats: getWorkflowPhaseStats(p.workflow) };
+    },
   });
 }
 
