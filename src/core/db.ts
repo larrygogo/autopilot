@@ -491,3 +491,45 @@ export function getKv(key: string): string | null {
   const row = getDb().query<{ value: string }, [string]>("SELECT value FROM kv WHERE key = ?").get(key);
   return row?.value ?? null;
 }
+
+// ──────────────────────────────────────────────
+// task_phase_events（迁移 018）
+// ──────────────────────────────────────────────
+
+export interface TaskPhaseEvent {
+  id: number;
+  task_id: string;
+  phase: string;
+  status: "running" | "done" | "awaiting" | "failed";
+  started_at: number;
+  ended_at: number | null;
+}
+
+/** 在 phase 开始时插入一条 running event。返回 event id 用于后续 end。 */
+export function startTaskPhase(taskId: string, phase: string): number {
+  const db = getDb();
+  const result = db.run(
+    "INSERT INTO task_phase_events (task_id, phase, status, started_at) VALUES (?, ?, 'running', ?)",
+    [taskId, phase, Date.now()],
+  );
+  return Number(result.lastInsertRowid);
+}
+
+/** 标记 event 结束。无对应 event id 时静默忽略（防御）。 */
+export function endTaskPhase(eventId: number, status: "done" | "awaiting" | "failed"): void {
+  const db = getDb();
+  db.run(
+    "UPDATE task_phase_events SET status = ?, ended_at = ? WHERE id = ?",
+    [status, Date.now(), eventId],
+  );
+}
+
+/** 列出某 task 全部 phase event，按 started_at 升序。 */
+export function listTaskPhaseEvents(taskId: string): TaskPhaseEvent[] {
+  const db = getDb();
+  return db
+    .query<TaskPhaseEvent, [string]>(
+      "SELECT id, task_id, phase, status, started_at, ended_at FROM task_phase_events WHERE task_id = ? ORDER BY started_at ASC, id ASC"
+    )
+    .all(taskId);
+}

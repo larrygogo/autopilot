@@ -1,4 +1,4 @@
-import { getTask, touchTaskHeartbeat, updateTask } from "./db";
+import { getTask, touchTaskHeartbeat, updateTask, startTaskPhase, endTaskPhase } from "./db";
 import { acquireLock, releaseLock } from "./infra";
 import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { appendTaskEvent } from "./task-logs";
@@ -39,6 +39,8 @@ export function runInBackground(taskId: string, phase: string): void {
  * - finally：重置日志标签 + 释放锁
  */
 export async function executePhase(taskId: string, phase: string): Promise<void> {
+  let phaseEventId: number | null = null;
+
   // 尝试获取锁
   const locked = acquireLock(taskId);
   if (!locked) {
@@ -114,6 +116,7 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
 
     // 执行阶段函数
     log.info("开始执行阶段 %s [task=%s]", phase, taskId);
+    phaseEventId = startTaskPhase(taskId, phase);
     emit({ type: "phase:started", payload: { taskId, phase, label: phaseDef.label } });
     appendTaskEvent(taskId, { type: "phase-started", phase, label: phaseDef.label });
     // 心跳：长跑阶段（如 develop 跑 30+ 分钟）期间，watcher 看 task.updated_at
@@ -148,6 +151,10 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
         try {
           transition(taskId, `await_${phase}`, { transitions: transitionTable });
           log.info("阶段完成，等待人工决断 [task=%s phase=%s]", taskId, phase);
+          if (phaseEventId !== null) {
+            endTaskPhase(phaseEventId, "awaiting");
+            phaseEventId = null;
+          }
           emit({ type: "phase:awaiting", payload: { taskId, phase } });
           appendTaskEvent(taskId, { type: "phase-awaiting", phase });
         } catch (e: unknown) {
@@ -158,6 +165,10 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
           }
         }
       } else if (phaseDef.complete_trigger) {
+        if (phaseEventId !== null) {
+          endTaskPhase(phaseEventId, "done");
+          phaseEventId = null;
+        }
         try {
           transition(taskId, phaseDef.complete_trigger, { transitions: transitionTable });
         } catch (e: unknown) {
@@ -187,6 +198,10 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     } else {
       const errMsg = err instanceof Error ? err.stack ?? err.message : String(err);
       log.error("阶段执行异常 [task=%s phase=%s]: %s", taskId, phase, errMsg);
+      if (phaseEventId !== null) {
+        endTaskPhase(phaseEventId, "failed");
+        phaseEventId = null;
+      }
       emit({ type: "phase:error", payload: { taskId, phase, error: errMsg } });
       appendTaskEvent(taskId, { type: "phase-error", phase, level: "error", message: errMsg });
       const wf = getWorkflow(getTask(taskId)?.workflow ?? "");

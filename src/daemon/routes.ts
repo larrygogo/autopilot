@@ -1893,6 +1893,23 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json(getSubTasks(subtasksMatch));
     }
 
+    // GET /api/tasks/:id/phase-events
+    const phaseEventsMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/phase-events$/);
+    if (method === "GET" && phaseEventsMatch) {
+      const { listTaskPhaseEvents } = await import("../core/db");
+      const events = listTaskPhaseEvents(phaseEventsMatch);
+      return json({ events });
+    }
+
+    // GET /api/tasks/:id/outcome
+    const outcomeMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/outcome$/);
+    if (method === "GET" && outcomeMatch) {
+      const { computeTaskOutcome } = await import("./task-outcome");
+      const outcome = await computeTaskOutcome(outcomeMatch);
+      if (!outcome) return error("task not in terminal state", 404);
+      return json(outcome);
+    }
+
     // ──────────────────────────────────────────────
     // 对话（chat）API
     // ──────────────────────────────────────────────

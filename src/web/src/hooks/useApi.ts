@@ -91,6 +91,10 @@ export const api = {
     request<{ phase: string; content: string }>(
       `/api/tasks/${id}/phase-logs/${phase}${tail ? `?tail=${tail}` : ""}`,
     ),
+  listTaskPhaseEvents: (id: string) =>
+    request<{ events: TaskPhaseEvent[] }>(`/api/tasks/${id}/phase-events`).then((r) => r.events),
+  getTaskOutcome: (id: string) =>
+    request<TaskOutcome>(`/api/tasks/${id}/outcome`),
   getDaemonLog: (tail = 500) =>
     request<{ path: string | null; content: string }>(`/api/daemon/log?tail=${tail}`),
   listAgentCalls: (id: string) =>
@@ -540,6 +544,27 @@ export interface AuthoredWorkflow {
   yaml: string;
   ts: string;
   warnings: string[];
+}
+
+export interface TaskPhaseEvent {
+  id: number;
+  task_id: string;
+  phase: string;
+  status: "running" | "done" | "awaiting" | "failed";
+  started_at: number;
+  ended_at: number | null;
+}
+
+export interface TaskOutcome {
+  task_id: string;
+  status: "done" | "failed" | "cancelled";
+  pr_url: string | null;
+  pr_number: number | null;
+  diff_stat: { files: number; insertions: number; deletions: number } | null;
+  total_duration_ms: number;
+  top_phases: Array<{ phase: string; duration_ms: number }>;
+  workspace_path: string | null;
+  failure_reason: string | null;
 }
 
 export interface DoctorCheck {

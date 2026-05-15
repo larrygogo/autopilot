@@ -33,6 +33,16 @@ const SCHEMA = [
   "    created_at TEXT NOT NULL,",
   "    FOREIGN KEY (task_id) REFERENCES tasks(id)",
   ");",
+  "",
+  "CREATE TABLE IF NOT EXISTS task_phase_events (",
+  "    id INTEGER PRIMARY KEY AUTOINCREMENT,",
+  "    task_id TEXT NOT NULL,",
+  "    phase TEXT NOT NULL,",
+  "    status TEXT NOT NULL,",
+  "    started_at INTEGER NOT NULL,",
+  "    ended_at INTEGER,",
+  "    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE",
+  ");",
 ].join("\n");
 
 // ──────────────────────────────────────────────
