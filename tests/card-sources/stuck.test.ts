@@ -10,12 +10,13 @@ import { up as m008 } from "../../src/migrations/008-projects";
 import { up as m009 } from "../../src/migrations/009-nullable-codebase";
 import { up as m010 } from "../../src/migrations/010-question-suggestions";
 import { up as m011 } from "../../src/migrations/011-now-dismissed-cards";
+import { up as m019 } from "../../src/migrations/019-task-requirement-id";
 import { _setDbForTest } from "../../src/core/db";
 import { createStuckSource } from "../../src/core/card-sources/stuck";
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m019].forEach(fn => fn(db));
   _setDbForTest(db);
 }
 

@@ -129,6 +129,43 @@ autopilot/
 
 向后兼容：`/api/repos` 路由别名保留至 P6 清理（≈90 天）；`Requirement.repo_id` 已于 P1 正式改名 `codebase_id`。
 
+## Claude Code 协作角色（`.claude/agents/`）
+
+本项目为 claude code 配了 4 个项目级 subagent，按职能分工。主 agent（claude code 本体）遇到对应类型问题时，应通过 Agent 工具调用相应 subagent 而不是自己硬扛。
+
+| Subagent | 用途 | 何时调用 |
+|----------|------|---------|
+| `pm` | 产品决策、用户旅程、优先级 | 讨论"该不该做"、"用户怎么用"、信息架构问题 |
+| `designer` | UI 交互、视觉一致性、状态完整性 | 新做 UI 功能、状态覆盖不清楚、视觉决策影响可用性 |
+| `architect` | 模块边界、数据模型、API 设计、回归风险 | 改动涉及数据层、多模块重构、多个实现方案需要选 |
+| `qa` | 测试场景、回归影响、错误路径 | 合 PR 前、改动涉及 state machine、错误处理复杂 |
+
+### 防 agent rot 三原则
+
+subagent 是独立 fresh context，硬编码项目细节容易过期。三道防线：
+
+1. **subagent system prompt 只写稳定原则**（设计 token、红线、输出风格）。具体文件路径 / schema / 组件名 → 用"指针"指向 CLAUDE.md / 实际代码
+2. **subagent 强制 Step 0**：每次启动先 `Read CLAUDE.md` + 任务相关核心文件 grok 当前现状
+3. **CLAUDE.md 是单一真理来源**：项目演进时只更新这里，subagent 永远从这取最新事实
+
+### 主 agent 调用流程
+
+```
+用户提问
+  ↓
+主 agent 判断问题层次
+  ↓
+是产品决策 → 调 pm subagent
+是 UI 设计 → 调 designer subagent
+是技术架构 → 调 architect subagent
+是测试覆盖 → 调 qa subagent
+是直接写代码 → 主 agent 自己干（用 coder 风格）
+  ↓
+subagent 返回意见 → 主 agent 决策 → 执行
+```
+
+调用前在 prompt 里塞当前任务的关键上下文（哪个 PR / 改了哪些文件 / 用户问的具体问题），让 subagent 不必从零探索。
+
 ## 开发规范
 
 - TypeScript strict 模式，Bun 运行时
