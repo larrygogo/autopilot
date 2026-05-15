@@ -103,7 +103,6 @@ import {
 import {
   listWorkflowsInDb,
   getWorkflowFromDb,
-  createDbWorkflow,
   updateDbWorkflow,
   deleteDbWorkflow,
 } from "../core/workflows";
@@ -2095,38 +2094,18 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
     }
 
-    // POST /api/workflows — 创建工作流（脚手架 / DB 派生）
+    // POST /api/workflows — 创建工作流（文件脚手架）
+    // 注：曾支持 body.derives_from 创建 DB 派生工作流，已下线（派生概念被克隆 + drawer 内
+    // 编辑 ts/prompt 完全替代）；旧 DB 派生工作流仍能加载（registry composeDbWorkflow 保留），
+    // 但不再支持新建。
     if (method === "POST" && path === "/api/workflows") {
       const body = await req.json() as {
         name?: string;
         description?: string;
         firstPhase?: string;
-        derives_from?: string;
-        yaml_content?: string;
       };
       if (typeof body.name !== "string" || !body.name) return error("name is required");
 
-      // 带 derives_from → 创建 DB 工作流
-      if (body.derives_from) {
-        if (typeof body.yaml_content !== "string") {
-          return error("derives_from 模式下 yaml_content 必填");
-        }
-        try {
-          const wf = createDbWorkflow({
-            name: body.name,
-            description: body.description ?? "",
-            derives_from: body.derives_from,
-            yaml_content: body.yaml_content,
-          });
-          await reload();
-          emit({ type: "workflow:reloaded", payload: {} });
-          return json({ ok: true, name: wf.name, source: wf.source }, 201);
-        } catch (e: unknown) {
-          return error(`创建失败：${e instanceof Error ? e.message : String(e)}`, 400);
-        }
-      }
-
-      // 否则走原文件脚手架
       try {
         const result = createWorkflow({
           name: body.name,

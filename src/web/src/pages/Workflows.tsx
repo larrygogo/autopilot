@@ -1,14 +1,5 @@
 import React, { useEffect, useState } from "react";
-import {
-  Plus,
-  ChevronRight,
-  ChevronDown,
-  Trash2,
-  X,
-  GitBranch,
-  FileCode,
-  Database,
-} from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
 import { useNavigate } from "react-router-dom";
@@ -32,14 +23,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { cn } from "@/lib/utils";
 
 interface WorkflowInfo {
   name: string;
@@ -85,80 +68,6 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   const [cloning, setCloning] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [tsSource, setTsSource] = useState<string | null>(null);
-
-  // 派生新工作流对话框相关 state
-  const [deriveOpen, setDeriveOpen] = useState(false);
-  const [deriveBase, setDeriveBase] = useState("");
-  const [deriveName, setDeriveName] = useState("");
-  const [deriveDesc, setDeriveDesc] = useState("");
-  const [deriveYaml, setDeriveYaml] = useState("");
-  const [deriveSaving, setDeriveSaving] = useState(false);
-
-  // 仅 file 工作流可作为派生 base
-  const fileWorkflows = workflows.filter((w) => (w.source ?? "file") === "file");
-
-  const openDerive = async () => {
-    const base = fileWorkflows[0]?.name ?? "";
-    setDeriveBase(base);
-    setDeriveName("");
-    setDeriveDesc("");
-    if (base) {
-      try {
-        const r = await api.getWorkflowYaml(base);
-        setDeriveYaml(r.yaml);
-      } catch {
-        setDeriveYaml("");
-      }
-    } else {
-      setDeriveYaml("");
-    }
-    setDeriveOpen(true);
-  };
-
-  const onChangeDeriveBase = async (newBase: string) => {
-    setDeriveBase(newBase);
-    if (!newBase) {
-      setDeriveYaml("");
-      return;
-    }
-    try {
-      const r = await api.getWorkflowYaml(newBase);
-      setDeriveYaml(r.yaml);
-    } catch {
-      setDeriveYaml("");
-    }
-  };
-
-  const saveDerive = async () => {
-    if (!deriveName.trim() || !deriveBase) {
-      toast.error("校验失败", "name 和 base 必填");
-      return;
-    }
-    if (!/^[\w.\-]+$/.test(deriveName.trim())) {
-      toast.error("名字只允许字母 / 数字 / . _ -", "");
-      return;
-    }
-    setDeriveSaving(true);
-    try {
-      // yaml_content 用从 base 拉来的 yaml 原文，创建后由用户在流水线编辑器里改
-      await api.createWorkflow({
-        name: deriveName.trim(),
-        description: deriveDesc.trim() || undefined,
-        derives_from: deriveBase,
-        yaml_content: deriveYaml,
-      });
-      const newName = deriveName.trim();
-      toast.success(`已创建派生工作流 ${newName}，进入编辑器修改阶段`);
-      setDeriveOpen(false);
-      // 创建完先刷新列表，再 toggle 切到新工作流详情，让用户立刻可视化编辑
-      refresh();
-      void toggle(newName);
-    } catch (e: unknown) {
-      toast.error("创建失败", (e as Error)?.message ?? String(e));
-    } finally {
-      setDeriveSaving(false);
-    }
-  };
 
   const refresh = () => {
     setLoading(true);
@@ -230,32 +139,21 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
     );
   }
 
-  const fileCount = workflows.filter((w) => (w.source ?? "file") === "file").length;
-  const dbCount = workflows.length - fileCount;
-
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
       <PageHero
         eyebrow="SHEET · WORKFLOWS · DEF"
         title="工作流"
         subtitle="编排定义 · 阶段图谱"
-        description="管理所有可用的工作流：文件型来自 AUTOPILOT_HOME/workflows/，数据库型可在 UI 内派生编辑。"
+        description="管理所有可用的工作流；每个工作流都是 AUTOPILOT_HOME/workflows/ 下的独立目录。"
         meta={[
           { k: "总数", v: workflows.length },
-          { k: "文件型", v: fileCount },
-          { k: "数据库型", v: dbCount },
         ]}
         actions={
-          <>
-            <Button variant="outline" size="sm" onClick={openDerive}>
-              <GitBranch className="h-4 w-4" />
-              派生
-            </Button>
-            <Button onClick={() => setTemplatePickerOpen(true)}>
-              <Plus className="h-4 w-4" />
-              新建工作流
-            </Button>
-          </>
+          <Button onClick={() => setTemplatePickerOpen(true)}>
+            <Plus className="h-4 w-4" />
+            新建工作流
+          </Button>
         }
       />
 
@@ -273,65 +171,6 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
           }}
           onNew={() => setTemplatePickerOpen(true)}
         />
-      )}
-
-      {/* 旧网格保留作为 fallback——不渲染（selected 时进 detail 视图，否则走 catalog） */}
-      {false && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {workflows.map((wf) => {
-            const active = selected?.name === wf.name;
-            return (
-              <button
-                key={wf.name}
-                type="button"
-                onClick={() => toggle(wf.name)}
-                className={cn(
-                  "group flex flex-col gap-1.5 rounded-none border bg-card px-4 py-3 text-left shadow-sm transition-colors",
-                  active
-                    ? "border-accent/40 ring-1 ring-accent/20"
-                    : "hover:border-accent/30 hover:bg-accent/40",
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <h3 className="truncate font-mono text-sm font-semibold text-accent">
-                      {wf.name}
-                    </h3>
-                    {wf.source === "db" && (
-                      <span
-                        title={wf.derives_from ? `派生自 ${wf.derives_from}` : "DB 工作流"}
-                        className="inline-flex shrink-0 items-center text-[10px] text-muted-foreground"
-                      >
-                        <Database className="mr-0.5 h-3 w-3" />
-                        db
-                      </span>
-                    )}
-                    {(wf.source ?? "file") === "file" && (
-                      <span
-                        title="文件工作流（位于 AUTOPILOT_HOME/workflows/）"
-                        className="inline-flex shrink-0 items-center text-[10px] text-muted-foreground"
-                      >
-                        <FileCode className="mr-0.5 h-3 w-3" />
-                        file
-                      </span>
-                    )}
-                  </div>
-                  {active ? (
-                    <ChevronDown className="h-4 w-4 shrink-0 text-accent" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-                  )}
-                </div>
-                {wf.description && (
-                  <p className="line-clamp-2 text-xs text-muted-foreground">{wf.description}</p>
-                )}
-                <p className="mt-auto text-[11px] text-muted-foreground">
-                  {active ? "点击收起" : "点击查看详情"}
-                </p>
-              </button>
-            );
-          })}
-        </div>
       )}
 
       {loadingDetail && (
@@ -484,69 +323,6 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
               disabled={cloning || !cloneName.trim()}
             >
               {cloning ? "克隆中..." : "克隆"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={deriveOpen}
-        onOpenChange={(open) => { if (!open && !deriveSaving) setDeriveOpen(false); }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>派生新工作流</DialogTitle>
-            <DialogDescription>
-              基于一个文件工作流的阶段函数新建一个 DB 工作流。创建后会自动进入流水线编辑器，可视化调整阶段配置。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="derive-base">派生自</Label>
-              <Select
-                value={deriveBase}
-                onValueChange={(v) => { void onChangeDeriveBase(v); }}
-              >
-                <SelectTrigger id="derive-base">
-                  <SelectValue placeholder="选择文件工作流" />
-                </SelectTrigger>
-                <SelectContent>
-                  {fileWorkflows.map((w) => (
-                    <SelectItem key={w.name} value={w.name}>
-                      <span className="font-medium">{w.label || w.name}</span>
-                      {w.label && (
-                        <span className="ml-2 font-mono text-xs text-muted-foreground">{w.name}</span>
-                      )}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="derive-name">新工作流名（标识符）</Label>
-              <Input
-                id="derive-name"
-                placeholder="例如：req_dev_fast"
-                value={deriveName}
-                onChange={(e) => setDeriveName(e.target.value)}
-                className="font-mono"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="derive-desc">描述（可选）</Label>
-              <Input
-                id="derive-desc"
-                placeholder="一句话说明"
-                value={deriveDesc}
-                onChange={(e) => setDeriveDesc(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeriveOpen(false)} disabled={deriveSaving}>
-              取消
-            </Button>
-            <Button onClick={saveDerive} disabled={deriveSaving || !deriveName.trim() || !deriveBase}>
-              {deriveSaving ? "创建中…" : "创建并编辑"}
             </Button>
           </DialogFooter>
         </DialogContent>

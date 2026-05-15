@@ -129,11 +129,6 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
                       </span>
                     )}
                   </div>
-                  {wf.source && (
-                    <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                      {wf.source === "db" ? "DB" : "文件"}
-                    </span>
-                  )}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {wf.description || "（无描述）"}

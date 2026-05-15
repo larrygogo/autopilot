@@ -58,7 +58,9 @@ describe("workflows API（W2 扩展）", () => {
     expect(reqDev!.derives_from).toBeNull();
   });
 
-  it("POST /api/workflows 带 derives_from 创建 DB 工作流", async () => {
+  it("POST /api/workflows 带 derives_from → 不再走派生分支，走文件脚手架（兼容历史调用）", async () => {
+    // 派生功能 UI 已下线（"派生鸡肋"），POST /api/workflows 不再识别 derives_from，
+    // 改为统一走文件脚手架。旧调用方仍能创建 file 工作流，只是 derives_from 字段被忽略。
     const res = await handleRequest(
       new Request("http://localhost/api/workflows", {
         method: "POST",
@@ -66,8 +68,7 @@ describe("workflows API（W2 扩展）", () => {
         body: JSON.stringify({
           name: "req_dev_fast",
           description: "skip review",
-          derives_from: "req_dev",
-          yaml_content: "name: req_dev_fast\nphases:\n  - name: design\n",
+          derives_from: "req_dev", // 被忽略
         }),
       })
     );
@@ -75,22 +76,7 @@ describe("workflows API（W2 扩展）", () => {
     const body = (await res.json()) as { ok: boolean; name: string; source: string };
     expect(body.ok).toBe(true);
     expect(body.name).toBe("req_dev_fast");
-    expect(body.source).toBe("db");
-  });
-
-  it("POST /api/workflows derives_from 不存在的 base → 400", async () => {
-    const res = await handleRequest(
-      new Request("http://localhost/api/workflows", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "wf_x",
-          derives_from: "no_such",
-          yaml_content: "name: wf_x\nphases: []\n",
-        }),
-      })
-    );
-    expect(res.status).toBe(400);
+    expect(body.source).toBe("file");
   });
 
   it("PUT /api/workflows/:name/yaml 修改 DB 工作流走 updateDbWorkflow", async () => {
