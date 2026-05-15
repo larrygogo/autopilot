@@ -276,6 +276,51 @@ export function PhasePipelineEditor({
   }
 
   /**
+   * 在指定并行块里新增一个子阶段（drawer 编辑面板里直接添加）。
+   * 校验 name 合法 + 全表唯一 + timeout 正整数；任何不通过都 toast 提示并保持当前状态。
+   */
+  function handleAddChildToParallel(parallelName: string, childName: string, timeout: number) {
+    const trimmedName = childName.trim();
+    if (!/^[a-z][a-z0-9_]*$/.test(trimmedName)) {
+      toast.error("子阶段名非法", "需以小写字母开头，仅含 a-z 0-9 _");
+      return;
+    }
+    if (allPhaseNames.includes(trimmedName)) {
+      toast.error("名称已被占用", `${trimmedName} 在当前工作流里已存在`);
+      return;
+    }
+    if (!Number.isFinite(timeout) || timeout <= 0) {
+      toast.error("timeout 须为正整数", "");
+      return;
+    }
+    let inserted = false;
+    setPhases((prev) =>
+      prev.map((p) => {
+        if (p?.parallel?.name === parallelName) {
+          inserted = true;
+          const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+          return {
+            ...p,
+            parallel: {
+              ...p.parallel,
+              phases: [...subs, { name: trimmedName, timeout }],
+            },
+          };
+        }
+        return p;
+      }),
+    );
+    if (!inserted) {
+      toast.error("找不到并行块", parallelName);
+      return;
+    }
+    // 新建子节点登记 newlyAdded，rename 时不必登记 renames
+    newlyAddedRef.current.add(trimmedName);
+    setDirty(true);
+    toast.success(`已在并行块 ${parallelName} 新增子阶段 ${trimmedName}（未保存，点保存生效）`);
+  }
+
+  /**
    * 把顶层普通 phase 移入指定并行块（作为它的最后一个子节点）。
    * 失败原因 — 该 phase 是并行块本身 / 不在顶层 / 目标并行块不存在 —
    * 都静默返回 prev，由调用方校验后再触发。
@@ -657,6 +702,7 @@ export function PhasePipelineEditor({
                   onChange={(patch) => handleUpdateParallelField(phaseName, patch)}
                   onMoveChildIn={(name) => handleMoveIntoParallel(name, phaseName)}
                   onMoveChildOut={(name) => handleMoveOutOfParallel(name)}
+                  onAddChild={(name, timeout) => handleAddChildToParallel(phaseName, name, timeout)}
                 />
               ) : (
                 <>
@@ -839,6 +885,7 @@ function ParallelBlockEditForm({
   onChange,
   onMoveChildIn,
   onMoveChildOut,
+  onAddChild,
 }: {
   raw: PhaseRaw;
   /** 已存在的名字（用于重名检测），不含当前并行块自己 */
@@ -850,6 +897,8 @@ function ParallelBlockEditForm({
   onMoveChildIn: (phaseName: string) => void;
   /** 把子节点移出回顶层 */
   onMoveChildOut: (phaseName: string) => void;
+  /** 凭空新增一个子阶段 */
+  onAddChild: (name: string, timeout: number) => void;
 }) {
   const blockName = String(raw.name ?? "");
   const failStrategy = (raw.fail_strategy as string | undefined) || "cancel_all";
@@ -959,10 +1008,12 @@ function ParallelBlockEditForm({
         </p>
       </section>
 
+      <ParallelChildAdder onAdd={onAddChild} />
+
       {movableTopPhases.length > 0 && (
         <section>
           <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            移入子阶段
+            或：移入已有的顶层阶段
           </div>
           <Select
             value="__none__"
@@ -987,6 +1038,61 @@ function ParallelBlockEditForm({
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * 并行块 drawer 内的"新增子阶段"内联表单：name + timeout + 添加按钮。
+ * 校验失败的 toast 由调用方在 onAdd 内处理（统一在 handler 报错）。
+ */
+function ParallelChildAdder({ onAdd }: { onAdd: (name: string, timeout: number) => void }) {
+  const [name, setName] = useState("");
+  const [timeout, setTimeoutSec] = useState(900);
+
+  function commit() {
+    if (!name.trim()) return;
+    onAdd(name.trim(), timeout);
+    // 成功的话父级会触发重渲染（subs 数组变长），这里仅清表单
+    setName("");
+    setTimeoutSec(900);
+  }
+
+  return (
+    <section>
+      <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        新增子阶段
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          placeholder="子阶段名"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
+          className="h-8 flex-1 font-mono text-sm"
+        />
+        <Input
+          type="number"
+          min={1}
+          placeholder="900"
+          value={timeout}
+          onChange={(e) => setTimeoutSec(parseInt(e.target.value, 10) || 0)}
+          className="h-8 w-24 font-mono text-sm"
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={commit}
+          disabled={!name.trim()}
+          className="h-8"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          添加
+        </Button>
+      </div>
+      <p className="mt-1 text-[10px] text-muted-foreground">
+        新建空子阶段（无 ts / prompt）；添加后点击流水线节点配 prompt 或 ts 函数
+      </p>
+    </section>
   );
 }
 
