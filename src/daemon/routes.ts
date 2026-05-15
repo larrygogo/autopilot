@@ -23,6 +23,7 @@ import { executePhase } from "../core/runner";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
 import { cancelTaskAction, restartTaskAction, answerTaskAction, TaskActionError } from "./task-actions";
+import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import {
   createSchedule,
   getSchedule,
@@ -2116,86 +2117,23 @@ export async function handleRequest(req: Request): Promise<Response> {
     // GET /api/workflows/:name
     const wfMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)$/);
     if (method === "GET" && wfMatch) {
-      const wf = getWorkflow(wfMatch);
-      if (!wf) return error("Workflow not found", 404);
-      // 返回安全的序列化版本（排除函数）
-      const { setup_func, notify_func, ...safe } = wf;
-      const safePhasesArr = safe.phases.map((p: any) => {
-        if ("parallel" in p) {
-          return {
-            parallel: {
-              ...p.parallel,
-              phases: p.parallel.phases.map((sub: any) => {
-                const { func, ...rest } = sub;
-                return rest;
-              }),
-            },
-          };
-        }
-        const { func, ...rest } = p;
-        return rest;
-      });
-      const row = getWorkflowFromDb(wfMatch);
-      return json({
-        ...safe,
-        phases: safePhasesArr,
-        source: row?.source ?? "file",
-        derives_from: row?.derives_from ?? null,
-      });
+      try {
+        return json(getWorkflowView(wfMatch));
+      } catch (e: unknown) {
+        if (e instanceof WorkflowViewError) return error(e.message, e.status);
+        return error(e instanceof Error ? e.message : String(e), 500);
+      }
     }
 
     // GET /api/workflows/:name/graph
     const graphMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/graph$/);
     if (method === "GET" && graphMatch) {
-      const wf = getWorkflow(graphMatch);
-      if (!wf) return error("Workflow not found", 404);
-
-      const transitions = buildTransitions(wf);
-      const terminalStates = getTerminalStates(graphMatch);
-      const nodes = new Map<string, GraphNode>();
-      const edges: GraphEdge[] = [];
-
-      // 添加初始状态节点
-      nodes.set(wf.initial_state, {
-        id: wf.initial_state,
-        label: wf.initial_state,
-        type: "initial",
-      });
-
-      // 从转换表构建图
-      for (const [fromState, trans] of Object.entries(transitions)) {
-        if (!nodes.has(fromState)) {
-          nodes.set(fromState, {
-            id: fromState,
-            label: fromState,
-            type: fromState.startsWith("running_") ? "running"
-              : fromState.startsWith("pending_") ? "pending"
-              : terminalStates.includes(fromState) ? "terminal"
-              : "other",
-          });
-        }
-        for (const [trigger, toState] of trans) {
-          if (!nodes.has(toState)) {
-            nodes.set(toState, {
-              id: toState,
-              label: toState,
-              type: toState.startsWith("running_") ? "running"
-                : toState.startsWith("pending_") ? "pending"
-                : terminalStates.includes(toState) ? "terminal"
-                : "other",
-            });
-          }
-          edges.push({ from: fromState, to: toState, trigger });
-        }
+      try {
+        return json(computeWorkflowGraph(graphMatch));
+      } catch (e: unknown) {
+        if (e instanceof WorkflowViewError) return error(e.message, e.status);
+        return error(e instanceof Error ? e.message : String(e), 500);
       }
-
-      const graphData: GraphData = {
-        nodes: [...nodes.values()],
-        edges,
-        initialState: wf.initial_state,
-        terminalStates,
-      };
-      return json(graphData);
     }
 
     // ── Config API ──

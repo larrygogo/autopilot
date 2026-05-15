@@ -1,6 +1,6 @@
 import type { NowCard } from "../lib/now-types";
 import { rpcCall } from "../lib/ws-singleton";
-import { RpcCallError } from "../lib/ws-rpc-client";
+import { RpcCallError, type CallOptions } from "../lib/ws-rpc-client";
 
 const BASE = "";
 
@@ -10,9 +10,9 @@ const BASE = "";
  *
  * 错误归一化：RpcCallError 转成普通 Error，文案包含 code，便于现有 UI 错误展示。
  */
-async function requestRpc<T>(method: string, params?: unknown): Promise<T> {
+async function requestRpc<T>(method: string, params?: unknown, opts?: CallOptions): Promise<T> {
   try {
-    return await rpcCall<T>(method, params);
+    return await rpcCall<T>(method, params, opts);
   } catch (e: unknown) {
     if (e instanceof RpcCallError) {
       // DISCONNECTED 时给跟旧 fetch 失败一致的提示，让现有 daemon 失联横幅能复用判断
@@ -168,16 +168,18 @@ export const api = {
         derives_from?: string | null;
       }>
     >("workflows.list"),
+  // [WS-RPC] workflows.get
   getWorkflow: (name: string) =>
-    request<{
+    requestRpc<{
       name: string;
       label?: string;
       description?: string;
       source?: "db" | "file";
       derives_from?: string | null;
       [key: string]: unknown;
-    }>(`/api/workflows/${name}`),
-  getWorkflowGraph: (name: string) => request<any>(`/api/workflows/${name}/graph`),
+    }>("workflows.get", { name }),
+  // [WS-RPC] workflows.graph
+  getWorkflowGraph: (name: string) => requestRpc<any>("workflows.graph", { name }),
   createWorkflow: (body: {
     name: string;
     description?: string;
@@ -188,8 +190,9 @@ export const api = {
     request<{ ok: boolean; name: string; source?: string; dir?: string }>("/api/workflows", {
       method: "POST", body: JSON.stringify(body),
     }),
+  // [WS-RPC] workflows.templates（RPC handler 返回 wrap {templates:[]}）
   listWorkflowTemplates: () =>
-    request<{ templates: WorkflowTemplate[] }>("/api/workflows/templates").then((r) => r.templates),
+    requestRpc<{ templates: WorkflowTemplate[] }>("workflows.templates").then((r) => r.templates),
   createWorkflowFromTemplate: (body: { template: string; name: string }) =>
     request<{ ok: boolean; name: string }>("/api/workflows/from-template", {
       method: "POST", body: JSON.stringify(body),
@@ -200,36 +203,35 @@ export const api = {
       `/api/workflows/${sourceName}/clone`,
       { method: "POST", body: JSON.stringify({ name: targetName }) },
     ),
+  // [WS-RPC] workflows.exportBundle
   exportWorkflowBundle: (name: string) =>
-    request<{
+    requestRpc<{
       version: number;
       name: string;
       yaml: string;
       ts: string | null;
       exported_at: string;
-    }>(`/api/workflows/${name}/export-bundle`),
+    }>("workflows.exportBundle", { name }),
+  // [WS-RPC] workflows.importBundle
   importWorkflowBundle: (body: { name: string; yaml: string; ts: string | null }) =>
-    request<{ ok: boolean; name: string }>(`/api/workflows/import-bundle`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+    requestRpc<{ ok: boolean; name: string }>("workflows.importBundle", body),
+  // [WS-RPC] workflows.scanHealth
   scanWorkflowHealth: () =>
-    request<WorkflowHealthReport>(`/api/workflows/health`),
+    requestRpc<WorkflowHealthReport>("workflows.scanHealth"),
   fixOrphanWorkflow: (dir: string) =>
     request<{ ok: boolean; fixed: boolean; oldName: string; newName: string }>(
       `/api/workflows/health/fix-orphan`,
       { method: "POST", body: JSON.stringify({ dir }) },
     ),
+  // [WS-RPC] workflows.author（AI 长任务，给 5min 超时）
   authorWorkflow: (body: { description: string; prior_yaml?: string; prior_ts?: string }) =>
-    request<AuthoredWorkflow>("/api/workflows/author", {
-      method: "POST", body: JSON.stringify(body),
-    }),
+    requestRpc<AuthoredWorkflow>("workflows.author", body, { timeoutMs: 300_000 }),
+  // [WS-RPC] workflows.saveAuthored
   saveAuthoredWorkflow: (body: { name: string; yaml: string; ts: string }) =>
-    request<{ ok: boolean; name: string }>("/api/workflows/author/save", {
-      method: "POST", body: JSON.stringify(body),
-    }),
+    requestRpc<{ ok: boolean; name: string }>("workflows.saveAuthored", body),
+  // [WS-RPC] workflows.delete
   deleteWorkflow: (name: string) =>
-    request<{ ok: boolean }>(`/api/workflows/${name}`, { method: "DELETE" }),
+    requestRpc<{ ok: boolean }>("workflows.delete", { name }),
   setWorkflowPhases: (
     name: string,
     phases: unknown[],
@@ -266,8 +268,10 @@ export const api = {
   getConfig: () => requestRpc<{ yaml: string }>("config.get"),
   saveConfig: (yaml: string) =>
     request<{ ok: boolean }>("/api/config", { method: "PUT", body: JSON.stringify({ yaml }) }),
-  getWorkflowYaml: (name: string) => request<{ yaml: string }>(`/api/workflows/${name}/yaml`),
-  getWorkflowTs: (name: string) => request<{ content: string }>(`/api/workflows/${name}/ts`),
+  // [WS-RPC] workflows.getYaml
+  getWorkflowYaml: (name: string) => requestRpc<{ yaml: string }>("workflows.getYaml", { name }),
+  // [WS-RPC] workflows.getTs
+  getWorkflowTs: (name: string) => requestRpc<{ content: string }>("workflows.getTs", { name }),
   setWorkflowPhaseFn: (name: string, phase: string, code: string) =>
     request<{ ok: true; mode: "replaced" | "appended" }>(
       `/api/workflows/${name}/phase-fn/${phase}`,
@@ -285,8 +289,9 @@ export const api = {
       `/api/workflows/${workflowName}/dry-run`,
       { method: "POST", body: JSON.stringify(body) },
     ),
+  // [WS-RPC] workflows.saveYaml
   saveWorkflowYaml: (name: string, yaml: string) =>
-    request<{ ok: boolean }>(`/api/workflows/${name}/yaml`, { method: "PUT", body: JSON.stringify({ yaml }) }),
+    requestRpc<{ ok: boolean }>("workflows.saveYaml", { name, yaml }),
   reloadWorkflows: () =>
     request<{ ok: boolean; workflows: any[] }>("/api/reload", { method: "POST" }),
 

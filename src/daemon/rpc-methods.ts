@@ -19,7 +19,19 @@ import {
   listTaskPhaseEvents,
   getWorkflowPhaseStats,
 } from "../core/db";
-import { listWorkflows } from "../core/registry";
+import {
+  listWorkflows,
+  getWorkflowYaml as registryGetWorkflowYaml,
+  getWorkflowTs as registryGetWorkflowTs,
+  saveWorkflowYaml,
+  deleteWorkflowDir,
+  reload as reloadRegistry,
+} from "../core/registry";
+import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb } from "../core/workflows";
+import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow-templates";
+import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
+import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
+import { emit as emitBus } from "../core/event-bus";
 import { listProjects } from "../core/projects";
 import { loadProviders, loadGlobalAgents, loadConfigRaw, PROVIDER_NAMES } from "../core/config";
 import { detectAllProviders } from "../agents/cli-status";
@@ -390,6 +402,203 @@ export function registerCoreRpcMethods(): void {
         return await answerTaskAction(p.id, p.text);
       } catch (e: unknown) {
         rethrowAsRpc(e);
+      }
+    },
+  });
+
+  // ── 第五批：workflows.* 域（11 个，含查询 + 简单 mutation） ──
+
+  registerRpcMethod({
+    method: "workflows.get",
+    description: "工作流详情视图（剥 func 字段 + 加 source/derives_from）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      try {
+        return getWorkflowView(p.name);
+      } catch (e: unknown) {
+        if (e instanceof WorkflowViewError) throw new RpcError(e.code, e.message);
+        throw e;
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.graph",
+    description: "工作流状态机图数据（nodes + edges + initialState + terminalStates）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      try {
+        return computeWorkflowGraph(p.name);
+      } catch (e: unknown) {
+        if (e instanceof WorkflowViewError) throw new RpcError(e.code, e.message);
+        throw e;
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.getYaml",
+    description: "读取 workflow.yaml 原文",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const yaml = registryGetWorkflowYaml(p.name);
+      if (yaml === null) throw new RpcError("NOT_FOUND", "Workflow not found");
+      return { yaml };
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.getTs",
+    description: "读取 workflow.ts 源码（零代码工作流可能为 null）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const content = registryGetWorkflowTs(p.name);
+      if (content === null) throw new RpcError("NOT_FOUND", "workflow.ts not found");
+      return { content };
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.templates",
+    description: "列出可用的内置工作流模板",
+    handler: () => ({ templates: listWorkflowTemplates() }),
+  });
+
+  registerRpcMethod({
+    method: "workflows.scanHealth",
+    description: "扫描 yaml.name 跟目录名不一致 / 重名碰撞",
+    handler: () => scanWorkflowHealth(),
+  });
+
+  registerRpcMethod({
+    method: "workflows.exportBundle",
+    description: "导出为 JSON bundle（yaml + ts）便于分享",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const yaml = registryGetWorkflowYaml(p.name);
+      if (yaml === null) throw new RpcError("NOT_FOUND", "Workflow not found");
+      const ts = registryGetWorkflowTs(p.name);
+      return {
+        version: 1,
+        name: p.name,
+        yaml,
+        ts: ts ?? null,
+        exported_at: new Date().toISOString(),
+      };
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.author",
+    description: "AI 生成 workflow.yaml + ts（不落盘，返回预览）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.description !== "string" || !p.description.trim()) {
+        throw new RpcError("INVALID_PARAM", "需要 description");
+      }
+      return await runWorkflowAuthor({
+        description: p.description,
+        prior_yaml: typeof p.prior_yaml === "string" ? p.prior_yaml : undefined,
+        prior_ts: typeof p.prior_ts === "string" ? p.prior_ts : undefined,
+      });
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.saveAuthored",
+    description: "把 AI 生成的 workflow 落盘 + reload + emit",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name || typeof p.yaml !== "string" || typeof p.ts !== "string") {
+        throw new RpcError("INVALID_PARAM", "需要 name + yaml + ts");
+      }
+      try {
+        saveAuthoredWf(p.name, p.yaml, p.ts);
+        await reloadRegistry();
+        emitBus({ type: "workflow:reloaded", payload: {} });
+        return { ok: true, name: p.name };
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const code = msg.includes("already exists") ? "ALREADY_EXISTS"
+          : msg.includes("只允许") ? "INVALID_NAME"
+          : "SAVE_FAILED";
+        throw new RpcError(code, msg);
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.importBundle",
+    description: "从 JSON bundle 创建新工作流（复用 saveAuthored 的落盘逻辑）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || typeof p.yaml !== "string") {
+        throw new RpcError("INVALID_PARAM", "需要 name + yaml");
+      }
+      if (!/^[\w.\-]+$/.test(p.name)) {
+        throw new RpcError("INVALID_NAME", "name 只允许字母 / 数字 / . _ -");
+      }
+      try {
+        saveAuthoredWf(p.name, p.yaml, typeof p.ts === "string" ? p.ts : "");
+        await reloadRegistry();
+        emitBus({ type: "workflow:reloaded", payload: {} });
+        return { ok: true, name: p.name };
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const code = msg.includes("already exists") ? "ALREADY_EXISTS" : "SAVE_FAILED";
+        throw new RpcError(code, msg);
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.saveYaml",
+    description: "保存 workflow.yaml（db 来源走 updateDbWorkflow，file 写文件）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      if (typeof p.yaml !== "string") throw new RpcError("INVALID_PARAM", "需要 yaml");
+      const row = getWorkflowFromDb(p.name);
+      try {
+        if (row && row.source === "db") {
+          updateDbWorkflow(p.name, { yaml_content: p.yaml });
+        } else {
+          saveWorkflowYaml(p.name, p.yaml);
+        }
+        await reloadRegistry();
+        emitBus({ type: "workflow:reloaded", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.delete",
+    description: "删除工作流（区分 source）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const row = getWorkflowFromDb(p.name);
+      try {
+        if (row && row.source === "db") {
+          deleteDbWorkflow(p.name);
+        } else {
+          const ok = deleteWorkflowDir(p.name);
+          if (!ok) throw new RpcError("NOT_FOUND", "Workflow not found");
+        }
+        await reloadRegistry();
+        emitBus({ type: "workflow:reloaded", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        if (e instanceof RpcError) throw e;
+        throw new RpcError("DELETE_FAILED", e instanceof Error ? e.message : String(e));
       }
     },
   });
