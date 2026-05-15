@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
+import { WsRpcClient, type CallOptions } from "../lib/ws-rpc-client";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected";
 
@@ -11,6 +12,21 @@ export function useWebSocket() {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(1000);
   const shouldReconnectRef = useRef(true);
+
+  // RPC client — 跟 ws 同生命周期；ws 断开时 reject 所有 pending
+  const rpcRef = useRef<WsRpcClient | null>(null);
+  if (!rpcRef.current) {
+    rpcRef.current = new WsRpcClient(
+      (raw) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          throw new Error("WebSocket 未连接");
+        }
+        ws.send(raw);
+      },
+      () => wsRef.current?.readyState === WebSocket.OPEN,
+    );
+  }
 
   const getWsUrl = useCallback(() => {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -42,6 +58,11 @@ export function useWebSocket() {
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
+        // RPC 响应：分发到 pending Promise
+        if (msg.type === "res") {
+          rpcRef.current?.handleResFrame(msg);
+          return;
+        }
         if (msg.type === "event") {
           const event = msg.event;
           for (const [channel, handlers] of handlersRef.current) {
@@ -62,6 +83,8 @@ export function useWebSocket() {
     ws.onclose = () => {
       wsRef.current = null;
       setState("disconnected");
+      // pending RPC 全部 reject，避免调用方永等
+      rpcRef.current?.rejectAllPending("DISCONNECTED", "WebSocket 已断开");
       if (!shouldReconnectRef.current) return;
       reconnectTimerRef.current = setTimeout(() => {
         reconnectTimerRef.current = null;
@@ -92,6 +115,13 @@ export function useWebSocket() {
     };
   }, []);
 
+  /** 发起 RPC 请求；ws 未连接时 reject DISCONNECTED */
+  const call = useCallback(
+    <T = unknown>(method: string, params?: unknown, opts?: CallOptions): Promise<T> =>
+      rpcRef.current!.call<T>(method, params, opts),
+    [],
+  );
+
   useEffect(() => {
     shouldReconnectRef.current = true;
     connect();
@@ -107,10 +137,12 @@ export function useWebSocket() {
         ws.onclose = null;
         ws.close();
       }
+      // unmount 时也清掉 pending RPC（避免后续 setState）
+      rpcRef.current?.rejectAllPending("UNMOUNTED", "组件已卸载");
     };
   }, [connect]);
 
-  return { state, subscribe };
+  return { state, subscribe, call };
 }
 
 function getTaskId(event: any): string | undefined {
