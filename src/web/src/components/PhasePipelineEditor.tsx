@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2 } from "lucide-react";
+import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2, Layers, Ungroup } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
 import { AddPhaseDialog, type NewPhaseData } from "./AddPhaseDialog";
+import { AddParallelDialog, type NewParallelData } from "./AddParallelDialog";
 import { PhasePipeline } from "./PhasePipeline";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
@@ -53,7 +54,9 @@ export function PhasePipelineEditor({
   const [saving, setSaving] = useState(false);
   const [drawerPhase, setDrawerPhase] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [addParallelOpen, setAddParallelOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [pendingDeleteParallel, setPendingDeleteParallel] = useState<string | null>(null);
   const [globalAgents, setGlobalAgents] = useState<string[]>([]);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
 
@@ -122,6 +125,8 @@ export function PhasePipelineEditor({
       if (!p || typeof p !== "object") continue;
       if ((p as PhaseRaw).parallel) {
         const par = (p as PhaseRaw).parallel as PhaseRaw;
+        // 并行块自己也占用 name 命名空间
+        if (typeof par.name === "string") names.push(par.name);
         const subs = Array.isArray(par.phases) ? (par.phases as PhaseRaw[]) : [];
         for (const s of subs) {
           if (typeof s.name === "string") names.push(s.name);
@@ -133,17 +138,24 @@ export function PhasePipelineEditor({
     return names;
   }, [phases]);
 
-  // 当前 drawer 选中阶段的 raw 对象引用 + 在 phases 树中的"路径"
+  // 当前 drawer 选中阶段的 raw 对象引用 + 在 phases 树中的"路径"。三种情况：
+  //   - top: 顶层普通 phase（最常见）
+  //   - parallel-child: 并行块内的子 phase
+  //   - parallel-block: 并行块"容器"本身（点击并行块 header 触发）
   const drawerPhaseLocation = useMemo(() => {
     if (!drawerPhase) return null;
     for (let i = 0; i < phases.length; i += 1) {
       const p = phases[i];
       if (!p) continue;
       if (p.parallel) {
+        // 先看是不是点的并行块本身
+        if (p.parallel.name === drawerPhase) {
+          return { kind: "parallel-block" as const, idx: i, raw: p.parallel as PhaseRaw };
+        }
         const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
         for (let j = 0; j < subs.length; j += 1) {
           if (subs[j]?.name === drawerPhase) {
-            return { kind: "parallel" as const, parallelIdx: i, subIdx: j, raw: subs[j] };
+            return { kind: "parallel-child" as const, parallelIdx: i, subIdx: j, raw: subs[j] };
           }
         }
       } else if (p.name === drawerPhase) {
@@ -176,6 +188,109 @@ export function PhasePipelineEditor({
       return next;
     });
     setDirty(true);
+  }
+
+  // ── 并行块：新增 / 编辑属性 / 拆分（展开成顶层串行）/ 删除（连子节点） ──
+
+  function handleAddParallel(data: NewParallelData) {
+    setPhases((prev) => {
+      const newBlock: PhaseRaw = {
+        parallel: {
+          name: data.name,
+          fail_strategy: data.failStrategy,
+          phases: [
+            { name: data.firstChild, timeout: data.firstChildTimeout },
+          ],
+        },
+      };
+      const next = [...prev];
+      const insertAt = data.insertAfter + 1;
+      next.splice(insertAt, 0, newBlock);
+      return next;
+    });
+    // 第一个子节点是新建的，rename 时不必登记 renames
+    newlyAddedRef.current.add(data.firstChild);
+    setDirty(true);
+    setAddParallelOpen(false);
+    toast.success(`新增并行块 ${data.name}（未保存，点保存生效）`);
+  }
+
+  function handleUpdateParallelField(blockName: string, patch: Record<string, unknown>) {
+    setPhases((prev) =>
+      prev.map((p) => {
+        if (p?.parallel?.name === blockName) {
+          return { ...p, parallel: { ...p.parallel, ...patch } };
+        }
+        return p;
+      }),
+    );
+    setDirty(true);
+  }
+
+  /**
+   * 拆分并行块：把它的所有子节点平铺到原位置，并删除并行容器本身。
+   * 子节点保留 name / timeout / 其它字段，但失去"并行执行"语义（变为串行）。
+   */
+  function handleSplitParallel(blockName: string) {
+    setPhases((prev) => {
+      const next: any[] = [];
+      let split = false;
+      for (const p of prev) {
+        if (!split && p?.parallel?.name === blockName) {
+          const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+          for (const s of subs) next.push({ ...s });
+          split = true;
+        } else {
+          next.push(p);
+        }
+      }
+      return next;
+    });
+    setDrawerPhase(null);
+    setDirty(true);
+    toast.success(`已拆分并行块 ${blockName}：子节点已平铺到顶层`);
+  }
+
+  function handleDeleteParallel(blockName: string) {
+    setPhases((prev) => {
+      // 收集要被删的子节点名，顺手清掉指向它们的 reject
+      const droppedNames = new Set<string>();
+      const next: any[] = [];
+      for (const p of prev) {
+        if (p?.parallel?.name === blockName) {
+          const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+          for (const s of subs) {
+            if (typeof s?.name === "string") droppedNames.add(s.name);
+          }
+          continue; // 跳过整个并行块
+        }
+        next.push(p);
+      }
+      // 清理 reject 指向被删除的子节点
+      return next.map((p) => {
+        if (!p) return p;
+        if (p.parallel) {
+          const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+          const cleaned = subs.map((s) =>
+            typeof s?.reject === "string" && droppedNames.has(s.reject) ? { ...s, reject: undefined } : s,
+          );
+          return { ...p, parallel: { ...p.parallel, phases: cleaned } };
+        }
+        if (typeof p.reject === "string" && droppedNames.has(p.reject)) {
+          return { ...p, reject: undefined };
+        }
+        return p;
+      });
+    });
+    // 清理 renames / newlyAdded 里相关条目
+    const renames = renamesRef.current;
+    for (const [k, v] of Array.from(renames.entries())) {
+      if (v === blockName) renames.delete(k);
+    }
+    setDrawerPhase(null);
+    setDirty(true);
+    setPendingDeleteParallel(null);
+    toast.success(`已删除并行块 ${blockName} 及其所有子阶段`);
   }
 
   // ── 新增阶段 ──
@@ -255,17 +370,20 @@ export function PhasePipelineEditor({
 
   // ── 删除阶段 ──
   // ── 重排：把名为 name 的阶段在顶层往左/右移一格 ──
-  // 并行块视为整体（其位置可调），并行块内子阶段不在本面板换序
+  // 普通 phase 和并行块本身都视为顶层条目可移；并行块内子项不在此换序
   function handleMovePhase(name: string, dir: "left" | "right") {
     setPhases((prev) => {
-      // 先找出 name 在顶层数组中的所属位置（普通 phase 直接是顶层 index，
-      // 并行块子项不允许在此移动 — 拒绝）
       let topIdx = -1;
       let isParallelChild = false;
       for (let i = 0; i < prev.length; i += 1) {
         const p = prev[i];
         if (!p) continue;
         if (p.parallel) {
+          // 并行块本身
+          if (p.parallel.name === name) {
+            topIdx = i;
+            break;
+          }
           const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
           if (subs.some((s) => s?.name === name)) {
             isParallelChild = true;
@@ -288,12 +406,17 @@ export function PhasePipelineEditor({
   }
 
   // 当前 drawer 阶段在顶层的位置；用于禁用左右移按钮
+  // 三种情况：并行块容器 / 普通顶层 phase 都能移；并行子项不能在此移
   const drawerTopIdx = useMemo(() => {
     if (!drawerPhase) return { idx: -1, total: phases.length, isParallelChild: false };
     for (let i = 0; i < phases.length; i += 1) {
       const p = phases[i];
       if (!p) continue;
       if (p.parallel) {
+        if (p.parallel.name === drawerPhase) {
+          // 并行块本身 → 可作为顶层条目重排
+          return { idx: i, total: phases.length, isParallelChild: false };
+        }
         const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
         if (subs.some((s) => s?.name === drawerPhase)) {
           return { idx: i, total: phases.length, isParallelChild: true };
@@ -390,6 +513,10 @@ export function PhasePipelineEditor({
             <Plus className="h-4 w-4" />
             新增阶段
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setAddParallelOpen(true)}>
+            <Layers className="h-4 w-4" />
+            新增并行块
+          </Button>
           <Button size="sm" onClick={save} disabled={!dirty || saving} title="保存修改（Ctrl/Cmd+S）">
             <Save className="h-4 w-4" />
             {saving ? "保存中…" : "保存修改"}
@@ -427,24 +554,34 @@ export function PhasePipelineEditor({
                 </SheetDescription>
               </SheetHeader>
 
-              <PhaseEditForm
-                raw={drawerPhaseLocation.raw}
-                workflowName={workflowName}
-                allPhaseNames={allPhaseNames}
-                agentOptions={agentOptions}
-                onChange={(patch) => updatePhaseField(phaseName, patch)}
-                onRename={(oldName, newName) => handleRenamePhase(oldName, newName)}
-              />
+              {drawerPhaseLocation.kind === "parallel-block" ? (
+                <ParallelBlockEditForm
+                  raw={drawerPhaseLocation.raw}
+                  allPhaseNames={allPhaseNames.filter((n) => n !== phaseName)}
+                  onChange={(patch) => handleUpdateParallelField(phaseName, patch)}
+                />
+              ) : (
+                <>
+                  <PhaseEditForm
+                    raw={drawerPhaseLocation.raw}
+                    workflowName={workflowName}
+                    allPhaseNames={allPhaseNames}
+                    agentOptions={agentOptions}
+                    onChange={(patch) => updatePhaseField(phaseName, patch)}
+                    onRename={(oldName, newName) => handleRenamePhase(oldName, newName)}
+                  />
 
-              <PhaseTsEditor
-                workflowName={workflowName}
-                phaseName={phaseName}
-                initialCode={drawerTsCode}
-                hasPrompt={typeof drawerPhaseLocation.raw.prompt === "string" && (drawerPhaseLocation.raw.prompt as string).trim() !== ""}
-                onSaved={() => onSaved?.()}
-              />
+                  <PhaseTsEditor
+                    workflowName={workflowName}
+                    phaseName={phaseName}
+                    initialCode={drawerTsCode}
+                    hasPrompt={typeof drawerPhaseLocation.raw.prompt === "string" && (drawerPhaseLocation.raw.prompt as string).trim() !== ""}
+                    onSaved={() => onSaved?.()}
+                  />
+                </>
+              )}
 
-              {/* 位置调整：仅顶层 phase 支持，并行块内子项不能在此调换 */}
+              {/* 位置调整：顶层 phase / 并行块本身支持；并行块内子项不能在此调换 */}
               {!drawerTopIdx.isParallelChild && (
                 <section className="mt-4">
                   <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
@@ -484,14 +621,36 @@ export function PhasePipelineEditor({
               )}
 
               <SheetFooter>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setPendingDelete(phaseName)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  删除阶段
-                </Button>
+                {drawerPhaseLocation.kind === "parallel-block" ? (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleSplitParallel(phaseName)}
+                      title="把并行块的子节点平铺到顶层并删除并行容器（变为串行执行）"
+                    >
+                      <Ungroup className="h-4 w-4" />
+                      拆分（变串行）
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setPendingDeleteParallel(phaseName)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      删除并行块
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setPendingDelete(phaseName)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    删除阶段
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   onClick={() => {
@@ -518,6 +677,17 @@ export function PhasePipelineEditor({
         count={phases.length}
       />
 
+      <AddParallelDialog
+        open={addParallelOpen}
+        onClose={() => setAddParallelOpen(false)}
+        onConfirm={handleAddParallel}
+        existingNames={allPhaseNames}
+        topCount={phases.length}
+        topLabels={phases.map((p) =>
+          p?.parallel ? `[并行] ${p.parallel.name}` : String(p?.name ?? "?"),
+        )}
+      />
+
       <ConfirmDialog
         open={!!pendingDelete}
         title="删除阶段"
@@ -532,6 +702,136 @@ export function PhasePipelineEditor({
         onConfirm={() => { if (pendingDelete) handleDeletePhase(pendingDelete); }}
         onCancel={() => setPendingDelete(null)}
       />
+
+      <ConfirmDialog
+        open={!!pendingDeleteParallel}
+        title="删除并行块"
+        message={
+          <div className="space-y-2">
+            <p>
+              确认删除并行块 <code className="rounded bg-muted px-1 font-mono">{pendingDeleteParallel}</code>？
+            </p>
+            <p className="text-xs text-muted-foreground">
+              并行块内的所有子阶段会一同删除；其它阶段指向它们的 reject 也会清空。
+              如想保留子阶段、只解散并行容器，请用「拆分（变串行）」。
+            </p>
+          </div>
+        }
+        confirmText="删除并行块"
+        danger
+        onConfirm={() => { if (pendingDeleteParallel) handleDeleteParallel(pendingDeleteParallel); }}
+        onCancel={() => setPendingDeleteParallel(null)}
+      />
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// 子组件：并行块 drawer 编辑表单
+// ──────────────────────────────────────────────
+
+function ParallelBlockEditForm({
+  raw,
+  allPhaseNames,
+  onChange,
+}: {
+  raw: PhaseRaw;
+  /** 已存在的名字（用于重名检测），不含当前并行块自己 */
+  allPhaseNames: string[];
+  onChange: (patch: Record<string, unknown>) => void;
+}) {
+  const blockName = String(raw.name ?? "");
+  const failStrategy = (raw.fail_strategy as string | undefined) || "cancel_all";
+
+  // label 输入：用户填的优先；registry 兜底的 name.toUpperCase() 视作"未填"
+  const rawLabel = typeof raw.label === "string" ? raw.label : null;
+  const realLabel = userPhaseLabel({ name: blockName, label: rawLabel }) ?? "";
+
+  // name 改名：parallel 块的 name 仅作状态机分叉节点，不绑 ts 函数，简化为 onBlur 提交
+  const [nameDraft, setNameDraft] = useState(blockName);
+  useEffect(() => { setNameDraft(blockName); }, [blockName]);
+
+  function commitName() {
+    const trimmed = nameDraft.trim();
+    if (trimmed === blockName) return;
+    if (!/^[a-z][a-z0-9_]*$/.test(trimmed)) {
+      setNameDraft(blockName);
+      return;
+    }
+    if (allPhaseNames.includes(trimmed)) {
+      setNameDraft(blockName);
+      return;
+    }
+    onChange({ name: trimmed });
+  }
+
+  const subs = Array.isArray(raw.phases) ? (raw.phases as PhaseRaw[]) : [];
+
+  return (
+    <div className="space-y-3 pt-3">
+      <FormRow label="显示名 (label)">
+        <Input
+          value={realLabel}
+          placeholder={`留空则显示 ${blockName}`}
+          onChange={(e) => onChange({ label: e.target.value || undefined })}
+          className="h-8 text-sm"
+        />
+      </FormRow>
+
+      <FormRow label="标识符 (name)">
+        <Input
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commitName(); (e.target as HTMLInputElement).blur(); }
+            else if (e.key === "Escape") { setNameDraft(blockName); (e.target as HTMLInputElement).blur(); }
+          }}
+          placeholder="小写字母开头，a-z 0-9 _"
+          className="h-8 font-mono text-sm"
+        />
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          作为状态机分叉节点名；并行块不关联 ts 函数，改名无副作用
+        </p>
+      </FormRow>
+
+      <FormRow label="失败策略 (fail_strategy)">
+        <Select
+          value={failStrategy}
+          onValueChange={(v) => onChange({ fail_strategy: v })}
+        >
+          <SelectTrigger className="h-8 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="cancel_all">cancel_all · 任一子失败 → 全部取消</SelectItem>
+            <SelectItem value="continue">continue · 任一子失败 → 其它继续</SelectItem>
+          </SelectContent>
+        </Select>
+      </FormRow>
+
+      <section>
+        <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          包含的子阶段（{subs.length}）
+        </div>
+        <ul className="space-y-1 border-[1.5px] border-foreground/20 bg-muted/30 p-2">
+          {subs.length === 0 ? (
+            <li className="font-mono text-[10px] text-muted-foreground">（空）</li>
+          ) : (
+            subs.map((s, i) => (
+              <li key={i} className="font-mono text-[11px]">
+                <code>{String(s?.name ?? "?")}</code>
+                {typeof s?.timeout === "number" && (
+                  <span className="ml-2 text-muted-foreground">timeout: {s.timeout}s</span>
+                )}
+              </li>
+            ))
+          )}
+        </ul>
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          点击流水线图里的子节点可单独编辑；新增子阶段请用顶栏「+ 新增阶段」（待实现"移入并行块"操作，下个版本）
+        </p>
+      </section>
     </div>
   );
 }

@@ -288,15 +288,27 @@ function ParallelNode({
   onClick?: (name: string) => void;
 }) {
   const headHighlight = highlight === name;
+  const clickable = !!onClick;
   return (
     <div className="flex shrink-0 flex-col gap-1.5 rounded-none border border-dashed border-foreground/40 bg-muted/30 p-2">
       <div
+        role={clickable ? "button" : undefined}
+        tabIndex={clickable ? 0 : undefined}
         className={cn(
-          "flex cursor-default items-center gap-1.5 rounded-none px-1.5 py-0.5 transition-colors",
+          "flex items-center gap-1.5 rounded-none px-1.5 py-0.5 transition-colors",
+          clickable ? "cursor-pointer hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-accent" : "cursor-default",
           headHighlight && "bg-secondary",
         )}
         onMouseEnter={() => onHover?.(name)}
         onMouseLeave={() => onHover?.(null)}
+        onClick={() => onClick?.(name)}
+        onKeyDown={(e) => {
+          if (!clickable) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick?.(name);
+          }
+        }}
       >
         <Badge variant="info">并行</Badge>
         <span className="font-display text-xs font-bold uppercase tracking-wider">
