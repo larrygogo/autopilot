@@ -49,6 +49,8 @@ export interface TaskLog {
 // ──────────────────────────────────────────────
 
 const SCHEMA = [
+  // 基础 schema（裸表）—— 后续字段演进全部走 migrations/NNN-*.ts，
+  // 这里不加新列，避免老 DB（IF NOT EXISTS 跳过建表）+ 索引引用未存在列时崩。
   "CREATE TABLE IF NOT EXISTS tasks (",
   "    id TEXT PRIMARY KEY,",
   "    title TEXT NOT NULL,",
@@ -63,8 +65,7 @@ const SCHEMA = [
   "    started_at TEXT,",
   "    parent_task_id TEXT DEFAULT NULL,",
   "    parallel_index INTEGER DEFAULT NULL,",
-  "    parallel_group TEXT DEFAULT NULL,",
-  "    requirement_id TEXT DEFAULT NULL",
+  "    parallel_group TEXT DEFAULT NULL",
   ");",
   "",
   "CREATE TABLE IF NOT EXISTS task_logs (",
@@ -80,7 +81,7 @@ const SCHEMA = [
   "",
   "CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks (workflow);",
   "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);",
-  "CREATE INDEX IF NOT EXISTS idx_tasks_requirement_id ON tasks (requirement_id);",
+  // idx_tasks_requirement_id 在 migration 019 中创建（列添加后立刻建索引）
   "CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs (task_id);",
 ].join("\n");
 
