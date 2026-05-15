@@ -150,6 +150,12 @@ export const api = {
     request<{ ok: boolean; name: string }>("/api/workflows/from-template", {
       method: "POST", body: JSON.stringify(body),
     }),
+  /** 从用户已有的工作流克隆为新工作流（区别于 createWorkflowFromTemplate 只克隆 examples 模板） */
+  cloneWorkflow: (sourceName: string, targetName: string) =>
+    request<{ ok: boolean; name: string }>(
+      `/api/workflows/${sourceName}/clone`,
+      { method: "POST", body: JSON.stringify({ name: targetName }) },
+    ),
   authorWorkflow: (body: { description: string; prior_yaml?: string; prior_ts?: string }) =>
     request<AuthoredWorkflow>("/api/workflows/author", {
       method: "POST", body: JSON.stringify(body),

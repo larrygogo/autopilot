@@ -124,6 +124,43 @@ export function cloneTemplate(template: string, targetName: string): void {
 }
 
 /**
+ * 从用户已有的工作流（AUTOPILOT_HOME/workflows/<source>/）克隆为新工作流。
+ *
+ * 跟 cloneTemplate 的区别：
+ *   - cloneTemplate 的源在仓库内 `examples/workflows/`（只读、只能克隆内置模板）
+ *   - cloneWorkflow 的源在用户家目录（含用户修改过的内容、自己创建的工作流）
+ *
+ * 行为：
+ *   - 源不存在 → 抛 "source workflow not found"
+ *   - 目标已存在 → 抛 "target workflow already exists"
+ *   - 拷贝完成后重写新 yaml 顶层 name 为 targetName，避免重名碰撞
+ *
+ * 限制：仅支持 file 来源（磁盘有目录的工作流）；DB 工作流（source=db）数据
+ * 在 DB 里没有磁盘目录，不走此路径。
+ */
+export function cloneWorkflow(sourceName: string, targetName: string): void {
+  if (!/^[\w.\-]+$/.test(targetName)) {
+    throw new Error("target name 只允许字母 / 数字 / . _ -");
+  }
+  const home = autopilotHome();
+  const srcDir = join(home, "workflows", sourceName);
+  const dstDir = join(home, "workflows", targetName);
+
+  if (!existsSync(srcDir) || !statSync(srcDir).isDirectory()) {
+    throw new Error("source workflow not found");
+  }
+  if (!existsSync(join(srcDir, "workflow.yaml"))) {
+    throw new Error("source workflow has no workflow.yaml");
+  }
+  if (existsSync(dstDir)) {
+    throw new Error("target workflow already exists");
+  }
+
+  copyDirSync(srcDir, dstDir);
+  rewriteWorkflowName(join(dstDir, "workflow.yaml"), targetName);
+}
+
+/**
  * 重写 workflow.yaml 顶层 name 字段为 newName。
  * 简单做法：只替换"行首 name:" 那一行，不解析整个 yaml，避免破坏注释/格式/锚点。
  */

@@ -2007,6 +2007,31 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
     }
 
+    // POST /api/workflows/:name/clone — 从用户已有工作流克隆（区别于 from-template 只克隆 examples 模板）
+    const wfCloneMatch = path.match(/^\/api\/workflows\/([\w.\-]+)\/clone$/);
+    if (method === "POST" && wfCloneMatch) {
+      const [, srcName] = wfCloneMatch;
+      const body = await req.json().catch(() => null) as { name?: string } | null;
+      if (!body?.name) {
+        return error("name (target) required", 400);
+      }
+      try {
+        const { cloneWorkflow } = await import("../core/workflow-templates");
+        cloneWorkflow(srcName, body.name);
+        const { discover } = await import("../core/registry");
+        await discover();
+        emit({ type: "workflow:reloaded", payload: {} });
+        return json({ ok: true, name: body.name }, 201);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const status = msg.includes("already exists") ? 409
+          : msg.includes("not found") ? 404
+          : msg.includes("只允许") ? 400
+          : 500;
+        return error(msg, status);
+      }
+    }
+
     // POST /api/workflows/from-template — 从模板克隆为新工作流
     if (method === "POST" && path === "/api/workflows/from-template") {
       const body = await req.json().catch(() => null) as { template?: string; name?: string } | null;

@@ -465,7 +465,8 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                 }
                 setCloning(true);
                 try {
-                  await api.createWorkflowFromTemplate({ template: cloneSource, name: cloneName.trim() });
+                  // 用专门的"克隆已有工作流"API，而非 from-template（后者只克隆 examples 模板）
+                  await api.cloneWorkflow(cloneSource, cloneName.trim());
                   toast.success(`已克隆 ${cloneSource} → ${cloneName.trim()}`);
                   setCloneSource(null);
                   setCloneName("");
