@@ -256,7 +256,8 @@ export const api = {
     }),
 
   // Config
-  getConfig: () => request<{ yaml: string }>("/api/config"),
+  // [WS-RPC] config.get
+  getConfig: () => requestRpc<{ yaml: string }>("config.get"),
   saveConfig: (yaml: string) =>
     request<{ ok: boolean }>("/api/config", { method: "PUT", body: JSON.stringify({ yaml }) }),
   getWorkflowYaml: (name: string) => request<{ yaml: string }>(`/api/workflows/${name}/yaml`),
@@ -284,16 +285,19 @@ export const api = {
     request<{ ok: boolean; workflows: any[] }>("/api/reload", { method: "POST" }),
 
   // Providers
-  listProviders: () => request<ProviderItem[]>("/api/providers"),
+  // [WS-RPC] providers.list
+  listProviders: () => requestRpc<ProviderItem[]>("providers.list"),
   saveProviderConfig: (name: string, cfg: Record<string, unknown>) =>
     request<{ ok: boolean }>(`/api/providers/${name}`, { method: "PUT", body: JSON.stringify(cfg) }),
-  getProvidersStatus: () => request<ProviderStatus[]>("/api/providers/status"),
+  // [WS-RPC] providers.statusAll
+  getProvidersStatus: () => requestRpc<ProviderStatus[]>("providers.statusAll"),
   getProviderStatus: (name: string) => request<ProviderStatus>(`/api/providers/${name}/status`),
   getProviderModels: (name: string) =>
     request<ProviderModelsResult>(`/api/providers/${name}/models`),
 
   // Agents
-  listAgents: () => request<AgentItem[]>("/api/agents"),
+  // [WS-RPC] agents.list
+  listAgents: () => requestRpc<AgentItem[]>("agents.list"),
   getAgent: (name: string) => request<AgentItem>(`/api/agents/${name}`),
   createAgent: (body: AgentItem) =>
     request<{ ok: boolean; name: string }>("/api/agents", { method: "POST", body: JSON.stringify(body) }),
@@ -450,7 +454,8 @@ export const api = {
   },
 
   // 首跑配置 setup
-  setupStatus: () => request<DoctorReportWithDismiss>("/api/setup/status"),
+  // [WS-RPC] setup.status
+  setupStatus: () => requestRpc<DoctorReportWithDismiss>("setup.status"),
 
   setupProviders: (providers: Record<string, Record<string, unknown>>) =>
     request<{ report: DoctorReportWithDismiss }>("/api/setup/providers", {
@@ -577,7 +582,8 @@ export const api = {
     ),
 
   // /now state-derivation engine (PR 1 backend)
-  listNowCards: () => request<{ cards: NowCard[] }>("/api/now/cards").then((r) => r.cards),
+  // [WS-RPC] now.cards（RPC handler 直接返回数组，不再 wrap cards 字段）
+  listNowCards: () => requestRpc<NowCard[]>("now.cards"),
   dismissNowCard: (cardId: string) =>
     request<{ ok: true }>(
       `/api/now/cards/${encodeURIComponent(cardId)}/dismiss`,

@@ -10,9 +10,14 @@
  * 入参 / 出参用 unknown，handler 自己负责类型校验（抛 RpcError("INVALID_PARAM", …)）。
  */
 
-import { listTasks, getTask } from "../core/db";
+import { listTasks, getTask, getKv } from "../core/db";
 import { listWorkflows } from "../core/registry";
 import { listProjects } from "../core/projects";
+import { loadProviders, loadGlobalAgents, loadConfigRaw, PROVIDER_NAMES } from "../core/config";
+import { detectAllProviders } from "../agents/cli-status";
+import { runChecks } from "../core/doctor";
+import { getNowAggregator } from "./routes-now";
+import { computeAgentUsage } from "./routes";
 import { registerRpcMethod, RpcError } from "./rpc";
 import { VERSION } from "../index";
 
@@ -80,6 +85,77 @@ export function registerCoreRpcMethods(): void {
     method: "projects.list",
     description: "列出所有 Project",
     handler: () => listProjects(),
+  });
+
+  // ── 第二批 PoC（高频查询类） ──
+
+  registerRpcMethod({
+    method: "providers.list",
+    description: "返回三个内置 provider 的配置 + 各 provider 的 agent 引用计数",
+    handler: () => {
+      const providers = loadProviders();
+      const agents = loadGlobalAgents();
+      const counts: Record<string, number> = {};
+      for (const cfg of Object.values(agents)) {
+        const p = (cfg as Record<string, unknown>)["provider"];
+        if (typeof p === "string") counts[p] = (counts[p] ?? 0) + 1;
+      }
+      return PROVIDER_NAMES.map((name) => ({
+        name,
+        ...providers[name],
+        agent_count: counts[name] ?? 0,
+      }));
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.statusAll",
+    description: "三家 CLI 健康检查（并行 detect）",
+    handler: async () => Object.values(await detectAllProviders()),
+  });
+
+  registerRpcMethod({
+    method: "agents.list",
+    description: "全局 agents 列表 + 各 agent 被哪些工作流引用",
+    handler: () => {
+      const agents = loadGlobalAgents();
+      const usage = computeAgentUsage(Object.keys(agents));
+      return Object.entries(agents).map(([name, cfg]) => ({
+        name,
+        ...cfg,
+        used_by: usage[name] ?? [],
+      }));
+    },
+  });
+
+  registerRpcMethod({
+    method: "now.cards",
+    description: "Now 页卡片列表（daemon 未启动时返回空数组）",
+    handler: () => {
+      const agg = getNowAggregator();
+      return agg ? agg.getCards() : [];
+    },
+  });
+
+  registerRpcMethod({
+    method: "setup.status",
+    description: "Level-1 doctor 检查 + 用户是否 dismiss 过 setup 横幅",
+    handler: async () => {
+      const report = await runChecks({ level: 1 });
+      let dismissed = false;
+      try {
+        dismissed = getKv("setup.dismissed") === "1";
+      } catch {
+        // kv 表未建（迁移未跑）时跳过
+      }
+      return { ...report, setupDismissed: dismissed };
+    },
+  });
+
+  registerRpcMethod({
+    method: "config.get",
+    description: "返回 config.yaml 原文（用户配置）",
+    handler: () => ({ yaml: loadConfigRaw() }),
   });
 }
 

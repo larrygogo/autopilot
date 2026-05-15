@@ -220,7 +220,7 @@ function extractParam(path: string, pattern: RegExp): string | null {
  *   或 extends === agentName（别名继承）
  * 返回 { [agentName]: [workflowName, ...] }
  */
-function computeAgentUsage(agentNames: string[]): Record<string, string[]> {
+export function computeAgentUsage(agentNames: string[]): Record<string, string[]> {
   const result: Record<string, string[]> = Object.fromEntries(agentNames.map((n) => [n, []]));
   const wfs = listWorkflows();
   for (const wf of wfs) {

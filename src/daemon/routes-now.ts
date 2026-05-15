@@ -8,6 +8,11 @@ export function setNowAggregator(agg: Aggregator | null): void {
   _aggregator = agg;
 }
 
+/** 给 rpc-methods.ts 用 — daemon 未启动 / 测试未注入时返回 null */
+export function getNowAggregator(): Aggregator | null {
+  return _aggregator;
+}
+
 /**
  * 处理 /api/now/* 路由。返回 null 表示路径不归本模块管，让上层继续路由。
  */
