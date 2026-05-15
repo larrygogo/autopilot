@@ -1,6 +1,29 @@
 import type { NowCard } from "../lib/now-types";
+import { rpcCall } from "../lib/ws-singleton";
+import { RpcCallError } from "../lib/ws-rpc-client";
 
 const BASE = "";
+
+/**
+ * 走 WS RPC 的薄包装 — 当前阶段只迁了少量 PoC method（见下方注释标记），
+ * 其余 method 仍走 HTTP request()。两套并存，逐步迁移。
+ *
+ * 错误归一化：RpcCallError 转成普通 Error，文案包含 code，便于现有 UI 错误展示。
+ */
+async function requestRpc<T>(method: string, params?: unknown): Promise<T> {
+  try {
+    return await rpcCall<T>(method, params);
+  } catch (e: unknown) {
+    if (e instanceof RpcCallError) {
+      // DISCONNECTED 时给跟旧 fetch 失败一致的提示，让现有 daemon 失联横幅能复用判断
+      if (e.code === "DISCONNECTED") {
+        throw new Error("WebSocket 未连接（daemon 是否在运行？）");
+      }
+      throw new Error(`${e.code}: ${e.message}`);
+    }
+    throw e;
+  }
+}
 
 /**
  * 标记新添加的 API endpoint（daemon 须是最新代码才有）。404 时提示重启 daemon。
@@ -55,13 +78,18 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getStatus: () => request<any>("/api/status"),
+  // [WS-RPC] daemon.status — P3 第一批 PoC，已切到 WS
+  getStatus: () => requestRpc<any>("daemon.status"),
+  // [WS-RPC] tasks.list — P3 第一批 PoC
   listTasks: (filters?: Record<string, string>) => {
-    const params = new URLSearchParams(filters);
-    const qs = params.toString();
-    return request<any[]>(`/api/tasks${qs ? `?${qs}` : ""}`);
+    const params: Record<string, unknown> = {};
+    if (filters?.status) params.status = filters.status;
+    if (filters?.workflow) params.workflow = filters.workflow;
+    if (filters?.limit) params.limit = Number(filters.limit);
+    return requestRpc<any[]>("tasks.list", params);
   },
-  getTask: (id: string) => request<any>(`/api/tasks/${id}`),
+  // [WS-RPC] tasks.get — P3 第一批 PoC
+  getTask: (id: string) => requestRpc<any>("tasks.get", { id }),
   startTask: (body: { title?: string; requirement?: string; workflow?: string; reqId?: string }) =>
     request<any>("/api/tasks", { method: "POST", body: JSON.stringify(body) }),
   cancelTask: (id: string) =>
@@ -123,8 +151,9 @@ export const api = {
     request<{ total: number; tasks: Array<{ taskId: string; size: number; mtime: number; exists: boolean }> }>(
       `/api/workspaces/usage`,
     ),
+  // [WS-RPC] workflows.list — P3 第一批 PoC
   listWorkflows: () =>
-    request<
+    requestRpc<
       Array<{
         name: string;
         label?: string;
@@ -132,7 +161,7 @@ export const api = {
         source?: "db" | "file";
         derives_from?: string | null;
       }>
-    >("/api/workflows"),
+    >("workflows.list"),
   getWorkflow: (name: string) =>
     request<{
       name: string;
@@ -335,8 +364,9 @@ export const api = {
     }>(`/api/agents/${name}/dry-run`, { method: "POST", body: JSON.stringify(body) }),
 
   // Projects
+  // [WS-RPC] projects.list — P3 第一批 PoC（RPC 直接返回数组，不再 wrap projects 字段）
   listProjects: () =>
-    request<{ projects: Project[] }>("/api/projects").then((r) => r.projects),
+    requestRpc<Project[]>("projects.list"),
   getProject: (id: string) =>
     request<{ project: Project }>(`/api/projects/${encodeURIComponent(id)}`).then((r) => r.project),
   createProject: (body: { name: string; description?: string }) =>
