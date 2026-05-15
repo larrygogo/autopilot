@@ -6,7 +6,7 @@
  * - 克隆 = 递归拷贝目录（含 workflow.yaml + workflow.ts + 任意附属文件）
  */
 
-import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
@@ -94,6 +94,10 @@ export function listWorkflowTemplates(): WorkflowTemplate[] {
  * - 目标已存在：抛 Error("target workflow already exists")
  * - 模板不存在：抛 Error("template not found")
  * - 克隆完成后调用方负责重启 discover 让 registry 重新加载
+ *
+ * 关键步骤：拷贝后会**重写 workflow.yaml 顶层 name 字段为 targetName**，
+ * 否则克隆出来的 yaml 还是用模板原名，discover 时会和源工作流同名冲突，
+ * 内存 registry 用 wf.name 作 key 互相覆盖，UI 列表里只看到一个。
  */
 export function cloneTemplate(template: string, targetName: string): void {
   const root = findExamplesRoot();
@@ -114,6 +118,33 @@ export function cloneTemplate(template: string, targetName: string): void {
 
   // 递归拷贝（保守：避免引入新依赖；只拷文件 + 一层目录）
   copyDirSync(srcDir, dstDir);
+
+  // 把新 workflow.yaml 里的 name 改成 targetName
+  rewriteWorkflowName(join(dstDir, "workflow.yaml"), targetName);
+}
+
+/**
+ * 重写 workflow.yaml 顶层 name 字段为 newName。
+ * 简单做法：只替换"行首 name:" 那一行，不解析整个 yaml，避免破坏注释/格式/锚点。
+ */
+function rewriteWorkflowName(yamlPath: string, newName: string): void {
+  if (!existsSync(yamlPath)) return;
+  const content = readFileSync(yamlPath, "utf-8");
+  const lines = content.split(/\r?\n/);
+  let rewritten = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = lines[i].match(/^name:\s*.*$/);
+    if (m) {
+      lines[i] = `name: ${newName}`;
+      rewritten = true;
+      break; // 只改第一处顶层 name
+    }
+  }
+  if (!rewritten) {
+    // yaml 里没有顶层 name？补一行到开头
+    lines.unshift(`name: ${newName}`);
+  }
+  writeFileSync(yamlPath, lines.join("\n"), "utf-8");
 }
 
 function copyDirSync(src: string, dst: string): void {
