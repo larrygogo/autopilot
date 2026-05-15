@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ExternalLink, RotateCcw, Wrench } from "lucide-react";
+import { ExternalLink, RotateCcw, Wrench, ShieldAlert } from "lucide-react";
 import { api, type TaskOutcome } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/Toast";
 import { statusVisual, toneToTextClass } from "@/lib/status-style";
+import { classifyFailure, type FailureProfile } from "@/lib/failure-classifier";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return "0s";
@@ -57,6 +58,11 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
   const statusLabel = vis.label;
   const statusColor = toneToTextClass(vis.tone);
 
+  // 失败时识别失败画像，决定按钮 variant 优先级
+  const failureProfile: FailureProfile | null = outcome.status === "failed"
+    ? classifyFailure(outcome.failure_reason)
+    : null;
+
   async function handleRetry() {
     if (!requirementId) {
       toast.error("无法重跑", "任务未关联需求");
@@ -85,9 +91,22 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
           <span className="text-muted-foreground">总耗时 {formatDuration(outcome.total_duration_ms)}</span>
         </div>
 
-        {outcome.status === "failed" && (
-          <div className="border-[1.5px] border-destructive/40 bg-destructive/5 px-2 py-1.5 font-mono text-xs text-destructive">
-            {outcome.failure_reason ?? "任务失败，查看下方日志"}
+        {outcome.status === "failed" && failureProfile && (
+          <div className="space-y-2 border-[1.5px] border-destructive/40 bg-destructive/5 p-2.5">
+            <div className="flex items-center gap-2">
+              <span className="border-[1.5px] border-destructive/60 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-destructive">
+                {failureProfile.label}
+              </span>
+              <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
+                自动识别 · 仅供参考
+              </span>
+            </div>
+            {outcome.failure_reason && (
+              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-destructive opacity-90">
+                {outcome.failure_reason}
+              </pre>
+            )}
+            <p className="text-xs leading-relaxed text-foreground/85">{failureProfile.hint}</p>
           </div>
         )}
 
@@ -129,10 +148,22 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
               <ExternalLink className="mr-1 h-3.5 w-3.5" /> 看 PR
             </Button>
           )}
-          {/* 失败时给"去工作流修复"出口：跳到 /workflows?wf=&phase=，自动选中并展开该 phase drawer */}
+          {/* credential 类失败：建议先去 Setup 检查 provider 配置（重跑大概率还失败） */}
+          {failureProfile?.primary === "check_config" && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => navigate("/setup")}
+              className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+            >
+              <ShieldAlert className="mr-1 h-3.5 w-3.5" /> 去 SETUP 检查
+            </Button>
+          )}
+          {/* 失败时给"去工作流修复"出口：跳到 /workflows?wf=&phase=，自动选中并展开该 phase drawer。
+              prompt 类失败时升级为 default variant，引导用户优先去改 prompt */}
           {outcome.status === "failed" && parseFailedPhase(taskStatus) && (
             <Button
-              variant="outline"
+              variant={failureProfile?.primary === "fix_prompt" ? "default" : "outline"}
               size="sm"
               onClick={() => {
                 const phase = parseFailedPhase(taskStatus);
@@ -144,7 +175,19 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
             </Button>
           )}
           {requirementId && (
-            <Button variant="default" size="sm" disabled={retrying} onClick={handleRetry} className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]">
+            // 失败时 retry/unknown 类才让"重跑"是 default；其他类型（fix_prompt / check_config / view_logs / phase_crash）
+            // 都降级 outline，引导用户先做更对的事
+            <Button
+              variant={
+                outcome.status !== "failed" || failureProfile?.primary === "retry"
+                  ? "default"
+                  : "outline"
+              }
+              size="sm"
+              disabled={retrying}
+              onClick={handleRetry}
+              className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+            >
               <RotateCcw className="mr-1 h-3.5 w-3.5" /> {retrying ? "重跑中..." : "重跑"}
             </Button>
           )}
