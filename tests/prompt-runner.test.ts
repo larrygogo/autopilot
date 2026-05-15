@@ -1,0 +1,143 @@
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { expandPromptTemplate, tryMakePromptRunnerForPhase } from "../src/core/prompt-runner";
+import { _clearRegistry, loadYamlWorkflow, register, type PhaseDefinition } from "../src/core/registry";
+
+let tmpHome: string;
+
+beforeEach(() => {
+  tmpHome = join(tmpdir(), `autopilot-prompt-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(join(tmpHome, "workflows"), { recursive: true });
+  process.env.AUTOPILOT_HOME = tmpHome;
+  _clearRegistry();
+});
+
+afterEach(() => {
+  delete process.env.AUTOPILOT_HOME;
+  if (existsSync(tmpHome)) rmSync(tmpHome, { recursive: true, force: true });
+});
+
+describe("expandPromptTemplate", () => {
+  const ctx = {
+    taskId: "t1",
+    phase: "design",
+    task: {
+      title: "做个登录页",
+      requirement: "支持 OAuth + 邮箱",
+      repo_path: "/home/user/repos/app",
+    },
+  };
+
+  it("替换 ${VAR} 形式的内置变量", () => {
+    const out = expandPromptTemplate("任务 ${TASK_TITLE} 阶段 ${PHASE}", ctx);
+    expect(out).toBe("任务 做个登录页 阶段 design");
+  });
+
+  it("替换 $VAR 简写形式", () => {
+    const out = expandPromptTemplate("需求：$REQUIREMENT", ctx);
+    expect(out).toBe("需求：支持 OAuth + 邮箱");
+  });
+
+  it("${TASK.field} 取 task 上 setup_func 留下的字段", () => {
+    const out = expandPromptTemplate("仓库：${TASK.repo_path}", ctx);
+    expect(out).toBe("仓库：/home/user/repos/app");
+  });
+
+  it("未识别的变量原样保留（避免静默失败）", () => {
+    const out = expandPromptTemplate("UNKNOWN: ${MYSTERY_VAR}", ctx);
+    expect(out).toBe("UNKNOWN: ${MYSTERY_VAR}");
+  });
+
+  it("${WORKSPACE} 返回 task 的 workspace 路径（不为空）", () => {
+    const out = expandPromptTemplate("ws=${WORKSPACE}", ctx);
+    expect(out).toMatch(/ws=.+/);
+    expect(out).not.toContain("${WORKSPACE}");
+  });
+});
+
+describe("tryMakePromptRunnerForPhase", () => {
+  it("phase 有 prompt 字段 → 返回 runner 函数", () => {
+    const phase = { name: "design", prompt: "hello" } as unknown as PhaseDefinition;
+    const fn = tryMakePromptRunnerForPhase(phase, "wf");
+    expect(typeof fn).toBe("function");
+  });
+
+  it("phase 没 prompt 字段 → 返回 null", () => {
+    const phase = { name: "design" } as unknown as PhaseDefinition;
+    expect(tryMakePromptRunnerForPhase(phase, "wf")).toBeNull();
+  });
+
+  it("prompt 是空字符串 → 返回 null", () => {
+    const phase = { name: "design", prompt: "   " } as unknown as PhaseDefinition;
+    expect(tryMakePromptRunnerForPhase(phase, "wf")).toBeNull();
+  });
+});
+
+describe("loadYamlWorkflow + phase.prompt 集成", () => {
+  it("phase 有 prompt + 无 ts run_ 函数 → 自动绑定 prompt-runner", async () => {
+    const wfDir = join(tmpHome, "workflows", "promptwf");
+    mkdirSync(wfDir, { recursive: true });
+    writeFileSync(
+      join(wfDir, "workflow.yaml"),
+      `name: promptwf
+phases:
+  - name: do_it
+    prompt: |
+      用 \${TASK_TITLE} 做一个测试
+`,
+      "utf-8",
+    );
+
+    const wf = await loadYamlWorkflow(wfDir);
+    expect(wf).not.toBeNull();
+    const phase = wf!.phases[0] as PhaseDefinition;
+    expect(typeof phase.func).toBe("function");
+    // 验证不是抛错 stub（stub 会立刻抛）
+    expect(phase.func!.toString()).not.toContain('阶段函数 "run_do_it" 未定义');
+  });
+
+  it("phase 既无 prompt 又无 ts → 绑定的 func 调用时抛错", async () => {
+    const wfDir = join(tmpHome, "workflows", "stub");
+    mkdirSync(wfDir, { recursive: true });
+    writeFileSync(
+      join(wfDir, "workflow.yaml"),
+      `name: stub
+phases:
+  - name: empty
+`,
+      "utf-8",
+    );
+
+    const wf = await loadYamlWorkflow(wfDir);
+    const phase = wf!.phases[0] as PhaseDefinition;
+    await expect(phase.func!("t1")).rejects.toThrow(/未定义且未提供 prompt|未定义/);
+  });
+
+  it("ts 有 run_ 函数 + yaml 也有 prompt → 优先用 ts 函数", async () => {
+    const wfDir = join(tmpHome, "workflows", "both");
+    mkdirSync(wfDir, { recursive: true });
+    writeFileSync(
+      join(wfDir, "workflow.yaml"),
+      `name: both
+phases:
+  - name: do_it
+    prompt: this is yaml prompt
+`,
+      "utf-8",
+    );
+    writeFileSync(
+      join(wfDir, "workflow.ts"),
+      `export async function run_do_it(_taskId: string): Promise<void> {
+  throw new Error("从 ts 函数抛出");
+}`,
+      "utf-8",
+    );
+
+    const wf = await loadYamlWorkflow(wfDir);
+    const phase = wf!.phases[0] as PhaseDefinition;
+    // 用 ts 函数而非 prompt-runner → 错误信息来自 ts
+    await expect(phase.func!("t1")).rejects.toThrow(/从 ts 函数抛出/);
+  });
+});

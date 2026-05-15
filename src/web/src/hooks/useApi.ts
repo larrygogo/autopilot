@@ -197,6 +197,23 @@ export const api = {
     request<{ ok: boolean }>("/api/config", { method: "PUT", body: JSON.stringify({ yaml }) }),
   getWorkflowYaml: (name: string) => request<{ yaml: string }>(`/api/workflows/${name}/yaml`),
   getWorkflowTs: (name: string) => request<{ content: string }>(`/api/workflows/${name}/ts`),
+  setWorkflowPhaseFn: (name: string, phase: string, code: string) =>
+    request<{ ok: true; mode: "replaced" | "appended" }>(
+      `/api/workflows/${name}/phase-fn/${phase}`,
+      { method: "PUT", body: JSON.stringify({ code }) },
+    ),
+  dryRunPrompt: (
+    workflowName: string,
+    body: { agent: string; prompt: string; timeout?: number },
+  ) =>
+    request<{
+      text: string;
+      durationMs: number;
+      usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+    }>(
+      `/api/workflows/${workflowName}/dry-run`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   saveWorkflowYaml: (name: string, yaml: string) =>
     request<{ ok: boolean }>(`/api/workflows/${name}/yaml`, { method: "PUT", body: JSON.stringify({ yaml }) }),
   reloadWorkflows: () =>

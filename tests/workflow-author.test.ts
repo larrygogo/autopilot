@@ -63,6 +63,49 @@ describe("runWorkflowAuthor", () => {
     expect(r.yaml).toContain("review");
   });
 
+  it("AI 生成零代码工作流（所有 phase 都有 prompt） → ts 空字符串也接受，无 warning", async () => {
+    _setAuthorFnForTest(async () =>
+      JSON.stringify({
+        name: "zero_code",
+        description: "纯 prompt 工作流",
+        yaml: `name: zero_code
+phases:
+  - name: draft
+    prompt: 写一篇文章 \${REQUIREMENT}
+  - name: polish
+    prompt: 改进 \${WORKSPACE}/draft.md
+`,
+        ts: "",
+      }),
+    );
+    const r = await runWorkflowAuthor({ description: "测试" });
+    expect(r.name).toBe("zero_code");
+    expect(r.ts).toBe("");
+    expect(r.warnings.length).toBe(0);
+  });
+
+  it("AI 生成混合工作流（部分 phase 有 prompt，部分 ts）→ 只对没 prompt 也没 ts 的 phase 报 warning", async () => {
+    _setAuthorFnForTest(async () =>
+      JSON.stringify({
+        name: "mixed",
+        description: "混合",
+        yaml: `name: mixed
+phases:
+  - name: draft
+    prompt: 写
+  - name: review
+  - name: publish
+`,
+        ts: "export async function review(_t: string): Promise<void> {}\n",
+      }),
+    );
+    const r = await runWorkflowAuthor({ description: "x" });
+    // draft 有 prompt 不报，review 有 ts 不报，publish 既无 prompt 又无 ts → 报
+    expect(r.warnings.some((w) => w.includes("publish"))).toBe(true);
+    expect(r.warnings.some((w) => w.includes("draft"))).toBe(false);
+    expect(r.warnings.some((w) => w.includes("review"))).toBe(false);
+  });
+
   it("AI 生成带 label 的 yaml 时，label 原样保留在文本里", async () => {
     _setAuthorFnForTest(async () =>
       JSON.stringify({

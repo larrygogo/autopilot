@@ -95,6 +95,7 @@ import {
   syncWorkflowTs,
   renameRunFunctions,
   pruneOrphanRunFunctions,
+  replaceRunFunction,
   setWorkflowAgents,
   type PhaseEntryInput,
   type WorkflowAgentEntry,
@@ -2269,6 +2270,54 @@ export async function handleRequest(req: Request): Promise<Response> {
       const content = getWorkflowTs(tsReadMatch);
       if (content === null) return error("workflow.ts not found", 404);
       return json({ content });
+    }
+
+    // POST /api/workflows/:name/dry-run — 不建 task / 不写 workspace，直接调 agent.run 试跑 prompt
+    // body: { agent: string, prompt: string, timeout?: number(秒) }
+    const dryRunMatch = path.match(/^\/api\/workflows\/([\w.\-]+)\/dry-run$/);
+    if (method === "POST" && dryRunMatch) {
+      const [, wfName] = dryRunMatch;
+      const body = (await req.json().catch(() => null)) as
+        | { agent?: string; prompt?: string; timeout?: number }
+        | null;
+      if (!body || typeof body.prompt !== "string" || !body.prompt.trim()) {
+        return error("prompt is required", 400);
+      }
+      try {
+        const { getAgent } = await import("../agents/registry");
+        const agent = getAgent(body.agent || "coder", wfName);
+        const startMs = Date.now();
+        const result = await agent.run(body.prompt, {
+          timeout: Math.max(5, Math.min(body.timeout ?? 60, 600)) * 1000,
+        });
+        return json({
+          text: result.text,
+          durationMs: Date.now() - startMs,
+          usage: result.usage,
+        });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return error(msg, 500);
+      }
+    }
+
+    // PUT /api/workflows/:name/phase-fn/:phase — 单个 run_<phase> 函数代码替换
+    // extractParam 只取第一组 group，这里用两个 group 所以直接 path.match
+    const phaseFnMatch = path.match(/^\/api\/workflows\/([\w.\-]+)\/phase-fn\/([a-z][a-z0-9_]*)$/);
+    if (method === "PUT" && phaseFnMatch) {
+      const [, wfName, phaseName] = phaseFnMatch;
+      const body = (await req.json().catch(() => null)) as { code?: string } | null;
+      if (!body || typeof body.code !== "string" || !body.code.trim()) {
+        return error("code (function source) is required", 400);
+      }
+      try {
+        const result = replaceRunFunction(wfName, phaseName, body.code);
+        emit({ type: "workflow:reloaded", payload: {} });
+        return json({ ok: true, mode: result.mode });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return error(msg, msg.includes("不存在") ? 404 : 400);
+      }
     }
 
     // PUT /api/workflows/:name/yaml — 区分 source：db 走 updateDbWorkflow，file 写文件
