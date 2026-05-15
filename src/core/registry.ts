@@ -777,6 +777,20 @@ export async function discover(): Promise<void> {
       try {
         const wf = await loadYamlWorkflow(subDir);
         if (!wf) continue;
+        // 目录名 vs yaml 顶层 name 不一致警告——这通常是用户手工拷贝/移动了目录
+        // 但忘了改 yaml 里的 name，会导致跟源工作流同名互相覆盖、其中一个不可见
+        if (wf.name !== entry) {
+          log.warn(
+            "工作流目录名 (%s) 与 workflow.yaml name 字段 (%s) 不一致；推荐改 yaml 让两者一致，否则同名会被覆盖",
+            entry, wf.name,
+          );
+        }
+        if (fileDefs.has(wf.name)) {
+          log.warn(
+            "检测到重名工作流：%s 已被加载，目录 %s 的 yaml 也声明 name=%s，将覆盖前者",
+            wf.name, subDir, wf.name,
+          );
+        }
         fileDefs.set(wf.name, wf);
         const yaml_content = readFileSync(yamlPath, "utf-8");
         scanInputs.push({

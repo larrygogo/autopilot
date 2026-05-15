@@ -63,12 +63,15 @@ describe("listWorkflowTemplates", () => {
 });
 
 describe("cloneTemplate", () => {
-  it("拷贝模板到 AUTOPILOT_HOME/workflows/<name>/", () => {
+  it("拷贝模板到 AUTOPILOT_HOME/workflows/<name>/ 并把 yaml 顶层 name 改为 targetName", () => {
     cloneTemplate("dev", "my-dev");
     const dst = join(tmpHome, "workflows", "my-dev", "workflow.yaml");
     expect(existsSync(dst)).toBe(true);
     const yaml = readFileSync(dst, "utf-8");
-    expect(yaml).toContain("name: dev");  // 拷贝来源的 name 仍是 dev——用户自己改
+    // 关键：yaml 顶层 name 已自动改为 targetName，
+    // 否则 registry discover 时跟源工作流同名互相覆盖
+    expect(yaml).toMatch(/^name: my-dev/m);
+    expect(yaml).not.toMatch(/^name: dev$/m);
   });
 
   it("目标已存在 → 抛错", () => {
