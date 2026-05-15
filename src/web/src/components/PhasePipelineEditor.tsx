@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2, Layers, Ungroup } from "lucide-react";
+import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2, Layers, Ungroup, ArrowUpFromLine, ArrowDownToLine } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
@@ -118,6 +118,28 @@ export function PhasePipelineEditor({
     }
     return Array.from(set).sort();
   }, [globalAgents, workflowAgents]);
+
+  /** 当前所有并行块的 name（drawer 移入并行块的下拉用） */
+  const parallelBlockNames = useMemo(() => {
+    const names: string[] = [];
+    for (const p of phases) {
+      if (p?.parallel?.name && typeof p.parallel.name === "string") {
+        names.push(p.parallel.name);
+      }
+    }
+    return names;
+  }, [phases]);
+
+  /** 顶层普通 phase（非并行块、非并行子节点）的 name 列表 — 给"移入到此并行块"下拉用 */
+  const topLevelMovablePhaseNames = useMemo(() => {
+    const names: string[] = [];
+    for (const p of phases) {
+      if (p && !p.parallel && typeof p.name === "string") {
+        names.push(p.name);
+      }
+    }
+    return names;
+  }, [phases]);
 
   const allPhaseNames = useMemo(() => {
     const names: string[] = [];
@@ -249,6 +271,77 @@ export function PhasePipelineEditor({
     setDrawerPhase(null);
     setDirty(true);
     toast.success(`已拆分并行块 ${blockName}：子节点已平铺到顶层`);
+  }
+
+  /**
+   * 把顶层普通 phase 移入指定并行块（作为它的最后一个子节点）。
+   * 失败原因 — 该 phase 是并行块本身 / 不在顶层 / 目标并行块不存在 —
+   * 都静默返回 prev，由调用方校验后再触发。
+   */
+  function handleMoveIntoParallel(phaseName: string, parallelName: string) {
+    setPhases((prev) => {
+      let extracted: PhaseRaw | null = null;
+      const filtered: any[] = [];
+      for (const p of prev) {
+        if (p && !p.parallel && p.name === phaseName) {
+          extracted = p as PhaseRaw;
+        } else {
+          filtered.push(p);
+        }
+      }
+      if (!extracted) return prev;
+      let found = false;
+      const next = filtered.map((p) => {
+        if (p?.parallel?.name === parallelName) {
+          found = true;
+          const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+          // 子节点不再需要 reject（并行块内 reject 语义不适用），清掉
+          const moved = { ...extracted! };
+          delete (moved as Record<string, unknown>).reject;
+          return { ...p, parallel: { ...p.parallel, phases: [...subs, moved] } };
+        }
+        return p;
+      });
+      if (!found) return prev;
+      return next;
+    });
+    setDirty(true);
+    toast.success(`已把 ${phaseName} 移入并行块 ${parallelName}`);
+  }
+
+  /**
+   * 把并行块子节点移出，紧贴所属并行块之后插入到顶层。
+   */
+  function handleMoveOutOfParallel(phaseName: string) {
+    setPhases((prev) => {
+      let extracted: PhaseRaw | null = null;
+      let parallelTopIdx = -1;
+      const updated = prev.map((p, idx) => {
+        if (extracted) return p;
+        if (p?.parallel) {
+          const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+          const newSubs: PhaseRaw[] = [];
+          for (const s of subs) {
+            if (s?.name === phaseName && !extracted) {
+              extracted = s;
+              parallelTopIdx = idx;
+            } else {
+              newSubs.push(s);
+            }
+          }
+          if (extracted) {
+            return { ...p, parallel: { ...p.parallel, phases: newSubs } };
+          }
+        }
+        return p;
+      });
+      if (!extracted || parallelTopIdx < 0) return prev;
+      const next = [...updated];
+      next.splice(parallelTopIdx + 1, 0, extracted);
+      return next;
+    });
+    setDirty(true);
+    toast.success(`已把 ${phaseName} 移出并行块`);
   }
 
   function handleDeleteParallel(blockName: string) {
@@ -558,7 +651,10 @@ export function PhasePipelineEditor({
                 <ParallelBlockEditForm
                   raw={drawerPhaseLocation.raw}
                   allPhaseNames={allPhaseNames.filter((n) => n !== phaseName)}
+                  movableTopPhases={topLevelMovablePhaseNames}
                   onChange={(patch) => handleUpdateParallelField(phaseName, patch)}
+                  onMoveChildIn={(name) => handleMoveIntoParallel(name, phaseName)}
+                  onMoveChildOut={(name) => handleMoveOutOfParallel(name)}
                 />
               ) : (
                 <>
@@ -567,8 +663,12 @@ export function PhasePipelineEditor({
                     workflowName={workflowName}
                     allPhaseNames={allPhaseNames}
                     agentOptions={agentOptions}
+                    isTopLevel={drawerPhaseLocation.kind === "top"}
+                    parallelBlockNames={parallelBlockNames}
                     onChange={(patch) => updatePhaseField(phaseName, patch)}
                     onRename={(oldName, newName) => handleRenamePhase(oldName, newName)}
+                    onMoveIntoParallel={(parName) => handleMoveIntoParallel(phaseName, parName)}
+                    onMoveOutOfParallel={() => handleMoveOutOfParallel(phaseName)}
                   />
 
                   <PhaseTsEditor
@@ -733,12 +833,21 @@ export function PhasePipelineEditor({
 function ParallelBlockEditForm({
   raw,
   allPhaseNames,
+  movableTopPhases,
   onChange,
+  onMoveChildIn,
+  onMoveChildOut,
 }: {
   raw: PhaseRaw;
   /** 已存在的名字（用于重名检测），不含当前并行块自己 */
   allPhaseNames: string[];
+  /** 顶层普通 phase 名（可移入此并行块） */
+  movableTopPhases: string[];
   onChange: (patch: Record<string, unknown>) => void;
+  /** 把顶层 phase 移入此并行块 */
+  onMoveChildIn: (phaseName: string) => void;
+  /** 把子节点移出回顶层 */
+  onMoveChildOut: (phaseName: string) => void;
 }) {
   const blockName = String(raw.name ?? "");
   const failStrategy = (raw.fail_strategy as string | undefined) || "cancel_all";
@@ -818,20 +927,63 @@ function ParallelBlockEditForm({
           {subs.length === 0 ? (
             <li className="font-mono text-[10px] text-muted-foreground">（空）</li>
           ) : (
-            subs.map((s, i) => (
-              <li key={i} className="font-mono text-[11px]">
-                <code>{String(s?.name ?? "?")}</code>
-                {typeof s?.timeout === "number" && (
-                  <span className="ml-2 text-muted-foreground">timeout: {s.timeout}s</span>
-                )}
-              </li>
-            ))
+            subs.map((s, i) => {
+              const childName = String(s?.name ?? "");
+              return (
+                <li key={i} className="flex items-center justify-between gap-2 font-mono text-[11px]">
+                  <span className="min-w-0 flex-1 truncate">
+                    <code>{childName}</code>
+                    {typeof s?.timeout === "number" && (
+                      <span className="ml-2 text-muted-foreground">timeout: {s.timeout}s</span>
+                    )}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onMoveChildOut(childName)}
+                    title="移出回顶层"
+                    className="h-6 px-1.5"
+                  >
+                    <ArrowUpFromLine className="h-3 w-3" />
+                    移出
+                  </Button>
+                </li>
+              );
+            })
           )}
         </ul>
         <p className="mt-1 text-[10px] text-muted-foreground">
-          点击流水线图里的子节点可单独编辑；新增子阶段请用顶栏「+ 新增阶段」（待实现"移入并行块"操作，下个版本）
+          点击流水线图里的子节点可单独编辑；点旁边「移出」把子节点平铺回顶层
         </p>
       </section>
+
+      {movableTopPhases.length > 0 && (
+        <section>
+          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            移入子阶段
+          </div>
+          <Select
+            value="__none__"
+            onValueChange={(v) => { if (v !== "__none__") onMoveChildIn(v); }}
+          >
+            <SelectTrigger className="h-8 text-sm">
+              <SelectValue placeholder="选一个顶层 phase 移入" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">（取消）</SelectItem>
+              {movableTopPhases.map((n) => (
+                <SelectItem key={n} value={n} className="font-mono">
+                  <ArrowDownToLine className="mr-1 inline h-3 w-3" />
+                  {n}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            选中的顶层 phase 会成为本并行块的最后一个子节点
+          </p>
+        </section>
+      )}
     </div>
   );
 }
@@ -1017,16 +1169,26 @@ function PhaseEditForm({
   workflowName,
   allPhaseNames,
   agentOptions,
+  isTopLevel,
+  parallelBlockNames,
   onChange,
   onRename,
+  onMoveIntoParallel,
+  onMoveOutOfParallel,
 }: {
   raw: PhaseRaw;
   workflowName: string;
   allPhaseNames: string[];
   agentOptions: string[];
+  /** true 表示当前 phase 在顶层（顶层时可"移入并行块"；并行子项时可"移出"） */
+  isTopLevel: boolean;
+  /** 现有并行块名列表（顶层 phase 用） */
+  parallelBlockNames: string[];
   onChange: (patch: Record<string, unknown>) => void;
   /** 改名提交；返回 false 则恢复输入框为原 name */
   onRename: (oldName: string, newName: string) => boolean;
+  onMoveIntoParallel: (parallelName: string) => void;
+  onMoveOutOfParallel: () => void;
 }) {
   // 排除自己
   const rejectCandidates = allPhaseNames.filter((n) => n !== raw.name);
@@ -1204,6 +1366,53 @@ function PhaseEditForm({
           </FormRow>
         )}
       </div>
+
+      {/* 分组操作：顶层 phase 可以移入并行块；并行子项可以移出 */}
+      {isTopLevel && parallelBlockNames.length > 0 && (
+        <section className="mt-4 border-t border-dashed border-foreground/25 pt-3">
+          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            分组
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-[11px] text-muted-foreground">移入并行块：</Label>
+            <Select
+              value="__none__"
+              onValueChange={(v) => { if (v !== "__none__") onMoveIntoParallel(v); }}
+            >
+              <SelectTrigger className="h-7 w-44 text-xs">
+                <SelectValue placeholder="选择并行块" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">（取消）</SelectItem>
+                {parallelBlockNames.map((n) => (
+                  <SelectItem key={n} value={n} className="font-mono">{n}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            该阶段会成为并行块的最后一个子节点；移入后 reject 字段被清空（并行块内 reject 语义不适用）
+          </p>
+        </section>
+      )}
+      {!isTopLevel && (
+        <section className="mt-4 border-t border-dashed border-foreground/25 pt-3">
+          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            分组
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onMoveOutOfParallel}
+          >
+            <ArrowUpFromLine className="h-4 w-4" />
+            移出并行块
+          </Button>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            该子节点会平铺到顶层，紧接所属并行块之后
+          </p>
+        </section>
+      )}
     </div>
   );
 }
