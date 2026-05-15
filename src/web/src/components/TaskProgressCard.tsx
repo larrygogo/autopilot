@@ -192,13 +192,19 @@ export function TaskProgressCard({
           )}
         </div>
         {showDetailLink && (
-          <Link
-            to={`/tasks/${taskId}`}
-            className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:underline"
+          // 把"看实时日志"从小字 link 升级为可见的 small button，
+          // 任务运行时这就是用户最想点的目标，避免被边角弱视觉藏起来
+          <Button
+            asChild
+            variant={isRunning ? "default" : "outline"}
+            size="sm"
+            className="rounded-none font-mono text-[10px] uppercase tracking-[0.14em]"
           >
-            查看完整日志
-            <ExternalLink className="h-3 w-3" />
-          </Link>
+            <Link to={`/tasks/${taskId}`}>
+              <ExternalLink className="mr-1 h-3 w-3" />
+              {isRunning ? "看实时日志" : "看任务详情"}
+            </Link>
+          </Button>
         )}
       </div>
 

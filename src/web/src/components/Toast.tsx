@@ -12,10 +12,17 @@ interface ToastItem {
   persistent?: boolean;
 }
 
+/** toast 右侧可点击的 action 按钮（如"看任务详情 →"）。 */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface ToastApi {
-  success: (message: string) => void;
-  info: (message: string) => void;
-  warning: (message: string) => void;
+  /** 可选 action：在 toast 上加一个跳转/操作按钮，引导用户走 next step。 */
+  success: (message: string, action?: ToastAction) => void;
+  info: (message: string, action?: ToastAction) => void;
+  warning: (message: string, action?: ToastAction) => void;
   /** 错误默认持久，必须手动关闭；可传 detail 显示展开区 */
   error: (message: string, detail?: string) => void;
   /** 底层 API */
@@ -34,14 +41,14 @@ function makeAction(message: string, detail?: string) {
 }
 
 const api: ToastApi = {
-  success: (m) => {
-    sonnerToast.success(m);
+  success: (m, action) => {
+    sonnerToast.success(m, action ? { action, duration: 6000 } : undefined);
   },
-  info: (m) => {
-    sonnerToast.info(m);
+  info: (m, action) => {
+    sonnerToast.info(m, action ? { action, duration: 6000 } : undefined);
   },
-  warning: (m) => {
-    sonnerToast.warning(m);
+  warning: (m, action) => {
+    sonnerToast.warning(m, action ? { action, duration: 6000 } : undefined);
   },
   error: (m, detail) => {
     sonnerToast.error(m, {

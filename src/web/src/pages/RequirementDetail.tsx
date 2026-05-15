@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
 import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { RequirementProgressBar } from "@/components/RequirementProgressBar";
+import { NextStepCTA } from "@/components/NextStepCTA";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { SpecRevisionsSheet } from "@/components/SpecRevisionsSheet";
@@ -588,7 +589,8 @@ export function RequirementDetail() {
     try {
       await api.enqueueRequirement(id);
       await refresh();
-      toast.success("已入队执行");
+      // 用 toast action 引导跳任务看板，避免用户被留在需求页找不到任务
+      toast.success("已入队执行", { label: "看任务 →", onClick: () => navigate("/tasks") });
     } catch (e: unknown) {
       toast.error("入队失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -615,7 +617,7 @@ export function RequirementDetail() {
     try {
       await api.enqueueRequirement(id);
       await refresh();
-      toast.success("已审批通过，需求进入队列");
+      toast.success("已审批通过，任务进入队列", { label: "看任务 →", onClick: () => navigate("/tasks") });
     } catch (e: unknown) {
       toast.error("审批失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -686,7 +688,7 @@ export function RequirementDetail() {
     try {
       await api.enqueueRequirement(id);
       await refresh();
-      toast.success("已重新入队执行");
+      toast.success("已重新入队执行", { label: "看任务 →", onClick: () => navigate("/tasks") });
     } catch (e: unknown) {
       toast.error("重试失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -790,6 +792,12 @@ export function RequirementDetail() {
   const isTerminal = TERMINAL_STATUSES.has(req.status);
   const openQuestions = questions.filter((q) => q.status === "open");
   const resolvedQuestions = questions.filter((q) => q.status === "resolved");
+
+  /** 滚到某个锚点（NextStepCTA 在 awaiting_review/fix_revision 时跳反馈区、有未答问题时跳问答区） */
+  function scrollToSection(id: string) {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
@@ -905,6 +913,21 @@ export function RequirementDetail() {
           </div>
         </div>
       </header>
+
+      {/* "下一步"主 CTA banner — 解决用户每次都得在右侧 ACTIONS 卡找下一个按钮的痛点。
+          只在用户有可做的下一步动作时显示（queued / running / done / cancelled 不渲染，
+          因为这些状态由 TaskProgressCard / 终态文案承担）。 */}
+      <NextStepCTA
+        status={req.status}
+        openQuestionCount={openQuestions.length}
+        busy={actionBusy}
+        onMarkReady={markReady}
+        onEnqueue={enqueue}
+        onApprove={approve}
+        onRetry={() => void retryFromFailed()}
+        onScrollToQuestions={() => scrollToSection("clarification-section")}
+        onScrollToFeedback={() => scrollToSection("feedback-section")}
+      />
 
       {/* 关联子模块 PR */}
       {subPrs.length > 0 && (
@@ -1029,7 +1052,7 @@ export function RequirementDetail() {
           其他状态（ready / awaiting_approval / running / done 等）chat 区隐藏，
           PR-B 会重做：把历史问答折叠到 spec 区附近。*/}
       {questions.length > 0 && (req.status === "drafting" || req.status === "clarifying") && (
-        <Card className="mb-6">
+        <Card className="mb-6" id="clarification-section">
           <div className="flex items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="bp-label">需求澄清 · CLARIFICATION</span>
@@ -1337,7 +1360,7 @@ export function RequirementDetail() {
           {(feedbacks.length > 0 ||
             req.status === "awaiting_review" ||
             req.status === "fix_revision") && (
-            <Card>
+            <Card id="feedback-section">
               <div className="flex items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
                 <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="bp-label">反馈历史 · FEEDBACK</span>
