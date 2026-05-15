@@ -134,7 +134,7 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
               size="sm"
               onClick={() => {
                 const phase = parseFailedPhase(taskStatus);
-                navigate(`/workflows?wf=${encodeURIComponent(workflow)}&phase=${encodeURIComponent(phase!)}`);
+                navigate(`/workflows?wf=${encodeURIComponent(workflow)}&phase=${encodeURIComponent(phase!)}&fromTask=${encodeURIComponent(taskId)}`);
               }}
               className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
             >

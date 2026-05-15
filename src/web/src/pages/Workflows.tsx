@@ -82,14 +82,15 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
     refresh();
   }, []);
 
-  // 接收 URL query：?wf=<name>&phase=<name>
+  // 接收 URL query：?wf=<name>&phase=<name>&fromTask=<id>
   // 用于 TaskOutcomeCard 失败时「去工作流修复」跳过来自动定位
   const [searchParams] = useSearchParams();
   const autoSelectedRef = useRef<string | null>(null);
+  const fromTaskId = searchParams.get("fromTask");
+  const fromTaskPhase = searchParams.get("phase");
   useEffect(() => {
     const wf = searchParams.get("wf");
     if (!wf) return;
-    // 等 listWorkflows 拉完且未自动选过这个 wf
     if (workflows.length === 0 || autoSelectedRef.current === wf) return;
     if (!workflows.some((w) => w.name === wf)) return;
     autoSelectedRef.current = wf;
@@ -99,6 +100,21 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
       toast.info(`已选中工作流，请点击「${phase}」节点编辑 prompt 或 ts`);
     }
   }, [searchParams, workflows]);
+
+  // 修复完后回任务详情 + 重启
+  const [retryingFromTask, setRetryingFromTask] = useState(false);
+  const handleReturnAndRetry = async () => {
+    if (!fromTaskId) return;
+    setRetryingFromTask(true);
+    try {
+      await api.restartTask(fromTaskId);
+      toast.success(`已重启任务 ${fromTaskId}，跳转查看`);
+      navigate(`/tasks/${fromTaskId}`);
+    } catch (e: unknown) {
+      toast.error("重启失败", (e as Error)?.message ?? String(e));
+      setRetryingFromTask(false);
+    }
+  };
 
   const toggle = async (name: string) => {
     if (selected?.name === name) {
@@ -176,6 +192,34 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
       />
 
       {/* 工作流目录健康检查：孤儿 / 重名碰撞 → 顶部警告条 + 修复 dialog */}
+      {/* 从失败任务跳过来修复 prompt 的上下文 banner */}
+      {fromTaskId && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 border-[1.5px] border-accent/40 bg-accent/5 px-3 py-2.5">
+          <div className="flex-1 text-sm">
+            <span className="font-display font-bold uppercase tracking-wider text-accent">
+              修复来自任务 {fromTaskId}
+            </span>
+            <span className="ml-2 text-muted-foreground">
+              {fromTaskPhase && (
+                <>
+                  点击「<code className="font-mono text-foreground">{fromTaskPhase}</code>」节点编辑 prompt / ts → 保存
+                </>
+              )}
+              <span className="ml-1">→ 然后点右侧按钮回任务并重跑</span>
+            </span>
+          </div>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleReturnAndRetry}
+            disabled={retryingFromTask}
+            className="font-mono text-[11px] uppercase tracking-[0.12em]"
+          >
+            {retryingFromTask ? "重启中…" : `回任务 & 重跑 →`}
+          </Button>
+        </div>
+      )}
+
       {!selected && <WorkflowHealthBanner onFixed={refresh} />}
 
       {/* 用例目录视图（业务视角，PR #71 加） */}
