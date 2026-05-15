@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertTriangle } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
+
+/** WS 断开多久后认定"显示中的任务状态可能已过期"（毫秒） */
+const STALE_AFTER_MS = 10_000;
 
 interface RunningTask {
   id: string;
@@ -25,8 +28,10 @@ interface RunningTask {
  */
 export function RunningTasksIndicator() {
   const navigate = useNavigate();
-  const { subscribe } = useWebSocket();
+  const { state: wsState, subscribe } = useWebSocket();
   const [running, setRunning] = useState<RunningTask[]>([]);
+  // WS 断线超过 STALE_AFTER_MS 时进入 stale 状态：UI 灰化 + tooltip 提示
+  const [stale, setStale] = useState(false);
 
   const refresh = useCallback(() => {
     api.listTasks()
@@ -46,6 +51,16 @@ export function RunningTasksIndicator() {
     return () => { off(); clearInterval(t); };
   }, [refresh, subscribe]);
 
+  // WS 断开 > STALE_AFTER_MS 时把状态条灰化（别再骗用户"正在跑"），重连成功立刻还原
+  useEffect(() => {
+    if (wsState === "connected") {
+      setStale(false);
+      return;
+    }
+    const timer = setTimeout(() => setStale(true), STALE_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [wsState]);
+
   if (running.length === 0) return null;
 
   const handleClick = () => {
@@ -60,25 +75,34 @@ export function RunningTasksIndicator() {
   const single = running.length === 1 ? running[0]! : null;
   const phase = single ? parsePhase(single.status) : null;
 
+  const baseTitle = single
+    ? `任务 ${single.id} 在 ${phase ?? "running"} 阶段，点击查看`
+    : `${running.length} 个任务在跑，点击查看看板`;
+  const title = stale ? `${baseTitle}（与 daemon 失联，状态可能已过期）` : baseTitle;
+
   return (
     <button
       type="button"
       onClick={handleClick}
-      className="hidden md:inline-flex h-8 items-center gap-1.5 border-[1.5px] border-accent/40 bg-accent/8 px-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/15"
-      title={
-        single
-          ? `任务 ${single.id} 在 ${phase ?? "running"} 阶段，点击查看`
-          : `${running.length} 个任务在跑，点击查看看板`
+      className={
+        stale
+          ? "hidden md:inline-flex h-8 items-center gap-1.5 border-[1.5px] border-foreground/30 bg-muted/40 px-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:bg-muted/60"
+          : "hidden md:inline-flex h-8 items-center gap-1.5 border-[1.5px] border-accent/40 bg-accent/8 px-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/15"
       }
+      title={title}
     >
-      <Loader2 className="h-3 w-3 animate-spin" />
+      {stale ? (
+        <AlertTriangle className="h-3 w-3" />
+      ) : (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      )}
       {single ? (
         <span className="truncate max-w-[14rem]">
           {single.id}
-          {phase && <span className="ml-1 text-muted-foreground">· {phase}</span>}
+          {phase && <span className="ml-1 opacity-75">· {phase}</span>}
         </span>
       ) : (
-        <span>{running.length} 个任务在跑</span>
+        <span>{stale ? `${running.length} 个任务（状态未知）` : `${running.length} 个任务在跑`}</span>
       )}
     </button>
   );

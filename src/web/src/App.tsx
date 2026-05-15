@@ -23,6 +23,7 @@ import { FloatingChat } from "./components/FloatingChat";
 import { NewTaskDialog } from "./components/NewTaskDialog";
 import { QuickCreateMenu } from "./components/QuickCreateMenu";
 import { RunningTasksIndicator } from "./components/RunningTasksIndicator";
+import { DaemonOfflineBanner } from "./components/DaemonOfflineBanner";
 import { PageLoader } from "./components/PageLoader";
 import { useTheme } from "./lib/theme";
 import { cn } from "./lib/utils";
@@ -228,6 +229,9 @@ function AppInner() {
               </Tooltip>
             </div>
           </header>
+
+          {/* daemon 失联横幅：disconnected 持续 5s 才显示，避免短暂闪断吓人 */}
+          <DaemonOfflineBanner wsState={wsState} />
 
           <main
             className={cn(

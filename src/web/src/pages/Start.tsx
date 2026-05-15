@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { api, type Project, type Codebase } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,9 @@ export function Start() {
   const [codebaseId, setCodebaseId] = useState(CODEBASE_NONE);
   const [rawText, setRawText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // P2 断点修复：首跑场景 projects 为空时，inline 建项目而不是把用户卡死在 disabled select
+  const [newProjectName, setNewProjectName] = useState("");
+  const [creatingProject, setCreatingProject] = useState(false);
 
   // 进入页面：拉 projects + codebases
   useEffect(() => {
@@ -61,6 +64,23 @@ export function Start() {
     () => !submitting && !!projectId && rawText.trim().length > 0,
     [submitting, projectId, rawText],
   );
+
+  async function handleCreateProject() {
+    const name = newProjectName.trim();
+    if (!name) return;
+    setCreatingProject(true);
+    try {
+      const p = await api.createProject({ name });
+      setProjects((prev) => [...prev, p]);
+      setProjectId(p.id);
+      setNewProjectName("");
+      toast.success(`已创建项目「${p.name}」`);
+    } catch (e: unknown) {
+      toast.error("创建项目失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setCreatingProject(false);
+    }
+  }
 
   async function handleSubmit() {
     if (!canSubmit) return;
@@ -97,18 +117,51 @@ export function Start() {
       <div className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="project" className="font-mono text-[10px] uppercase tracking-[0.18em]">项目 *</Label>
-          <Select value={projectId} onValueChange={setProjectId} disabled={loadingProjects || projects.length <= 1}>
-            <SelectTrigger id="project">
-              <SelectValue placeholder={loadingProjects ? "加载中..." : projects.length === 0 ? "暂无项目（请先在 /library 创建）" : "选择项目"} />
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name} <span className="text-muted-foreground ml-2">{p.id}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {!loadingProjects && projects.length === 0 ? (
+            // 首跑空项目兜底：inline 一行创建，避免把用户卡死在 disabled select
+            <div className="space-y-2 border-[1.5px] border-accent/40 bg-accent/5 p-3">
+              <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-accent">
+                还没有项目 · 先建一个
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newProjectName.trim()) void handleCreateProject();
+                  }}
+                  placeholder="项目名（如 我的副业 / autopilot-demo）"
+                  disabled={creatingProject}
+                  className="flex-1 rounded-none border-[1.5px] border-foreground/25 bg-background px-2.5 py-1.5 font-mono text-sm focus:border-accent focus:outline-none"
+                  autoFocus
+                />
+                <Button
+                  variant="default"
+                  size="sm"
+                  disabled={creatingProject || !newProjectName.trim()}
+                  onClick={() => void handleCreateProject()}
+                  className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+                >
+                  {creatingProject ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                  {creatingProject ? "创建中..." : "创建并继续"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Select value={projectId} onValueChange={setProjectId} disabled={loadingProjects || projects.length <= 1}>
+              <SelectTrigger id="project">
+                <SelectValue placeholder={loadingProjects ? "加载中..." : "选择项目"} />
+              </SelectTrigger>
+              <SelectContent>
+                {projects.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name} <span className="text-muted-foreground ml-2">{p.id}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         <div className="space-y-2">
