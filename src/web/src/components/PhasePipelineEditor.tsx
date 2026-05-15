@@ -6,7 +6,7 @@ import { ConfirmDialog } from "./Modal";
 import { AddPhaseDialog, type NewPhaseData } from "./AddPhaseDialog";
 import { PhasePipeline } from "./PhasePipeline";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -406,22 +406,12 @@ export function PhasePipelineEditor({
                 onRename={(oldName, newName) => handleRenamePhase(oldName, newName)}
               />
 
-              {/* ts 函数代码（只读） */}
-              <section className="mt-4">
-                <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                  执行函数 · workflow.ts（只读）
-                </div>
-                {drawerTsCode ? (
-                  <pre className="scrollbar-thin max-h-56 overflow-auto border-[1.5px] border-foreground/30 bg-card p-3 font-mono text-[11px] leading-relaxed">
-                    {drawerTsCode}
-                  </pre>
-                ) : (
-                  <p className="border-[1.5px] border-dashed border-foreground/30 bg-muted/30 p-3 text-xs text-muted-foreground">
-                    未找到 <code className="font-mono">{phaseName}</code> 函数；
-                    保存修改时框架会自动追加 stub。
-                  </p>
-                )}
-              </section>
+              <PhaseTsEditor
+                workflowName={workflowName}
+                phaseName={phaseName}
+                initialCode={drawerTsCode}
+                onSaved={() => onSaved?.()}
+              />
 
               {/* 位置调整：仅顶层 phase 支持，并行块内子项不能在此调换 */}
               {!drawerTopIdx.isParallelChild && (
@@ -517,6 +507,82 @@ export function PhasePipelineEditor({
 
 // ──────────────────────────────────────────────
 // 表单：drawer 内单阶段字段编辑
+// ──────────────────────────────────────────────
+// 子组件：ts 函数代码编辑器（独立草稿 + 应用按钮）
+// ──────────────────────────────────────────────
+
+function PhaseTsEditor({
+  workflowName,
+  phaseName,
+  initialCode,
+  onSaved,
+}: {
+  workflowName: string;
+  phaseName: string;
+  initialCode: string | null;
+  onSaved?: () => void;
+}) {
+  const toast = useToast();
+  const [draft, setDraft] = useState(initialCode ?? "");
+  const [saving, setSaving] = useState(false);
+
+  // initialCode 变化时（外部 reload ts、切换 phase）重置草稿
+  useEffect(() => { setDraft(initialCode ?? ""); }, [initialCode, phaseName]);
+
+  const dirty = draft.trim() !== (initialCode ?? "").trim();
+  const empty = draft.trim() === "";
+
+  async function apply() {
+    setSaving(true);
+    try {
+      const r = await api.setWorkflowPhaseFn(workflowName, phaseName, draft);
+      toast.success(r.mode === "appended" ? "已新增函数到 workflow.ts" : "已更新 workflow.ts");
+      onSaved?.();
+    } catch (e: unknown) {
+      toast.error("写入 ts 失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="mt-4">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          执行函数 · workflow.ts
+          {dirty && <span className="ml-2 text-warning">· 未保存</span>}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={apply}
+          disabled={saving || !dirty || empty}
+          className="h-7 px-2"
+        >
+          <Save className="h-3 w-3" />
+          {saving ? "写入中…" : "应用代码"}
+        </Button>
+      </div>
+      {initialCode === null && draft === "" && (
+        <p className="mb-1 border-[1.5px] border-dashed border-foreground/30 bg-muted/30 p-2 text-[11px] text-muted-foreground">
+          未找到 <code className="font-mono">run_{phaseName}</code> 函数；在下方粘贴或编写完整函数后点「应用代码」会追加到 workflow.ts
+        </p>
+      )}
+      <Textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder={`export async function run_${phaseName}(taskId: string): Promise<void> {\n  // TODO\n}`}
+        className="scrollbar-thin h-56 resize-none border-[1.5px] border-foreground/30 bg-card p-3 font-mono text-[11px] leading-relaxed"
+        spellCheck={false}
+        disabled={saving}
+      />
+      <p className="mt-1 text-[10px] text-muted-foreground">
+        必须以 <code className="font-mono">export async function run_{phaseName}(</code> 开头；应用前会自动备份原 ts 为 .bak
+      </p>
+    </section>
+  );
+}
+
 // ──────────────────────────────────────────────
 
 function PhaseEditForm({

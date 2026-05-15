@@ -1394,6 +1394,52 @@ export function pruneOrphanRunFunctions(
 }
 
 /**
+ * 用用户提供的 newCode 整体替换 workflow.ts 中 run_<phase> 函数声明。
+ *
+ * - newCode 必须以 `export (async) function run_<phase>(` 开头（防止函数名 mismatch）。
+ * - 若旧函数不存在 → 追加到文件末尾；存在 → 字符级精确替换。
+ * - 写入前 .bak 备份。
+ *
+ * 不修改函数声明以外的 ts 代码（import、其它函数、注释等）。
+ */
+export function replaceRunFunction(
+  workflowName: string,
+  phase: string,
+  newCode: string,
+): { mode: "replaced" | "appended" } {
+  if (!/^[a-z][a-z0-9_]*$/.test(phase)) {
+    throw new Error(`非法 phase 名：${phase}`);
+  }
+  const trimmed = newCode.trim();
+  const header = new RegExp(`^export\\s+(?:async\\s+)?function\\s+run_${phase}\\s*\\(`);
+  if (!header.test(trimmed)) {
+    throw new Error(
+      `代码必须以 "export async function run_${phase}(" 开头；请勿改函数名或签名`,
+    );
+  }
+
+  const tsPath = getWorkflowTsPath(workflowName);
+  if (!existsSync(tsPath)) {
+    throw new Error(`workflow.ts 不存在：${workflowName}`);
+  }
+  const content = readFileSync(tsPath, "utf-8");
+  copyFileSync(tsPath, tsPath + ".bak");
+
+  const range = findRunFunctionRange(content, phase);
+  let next: string;
+  let mode: "replaced" | "appended";
+  if (range) {
+    next = content.slice(0, range.start) + trimmed + content.slice(range.end);
+    mode = "replaced";
+  } else {
+    next = content.replace(/\s*$/, "") + "\n\n" + trimmed + "\n";
+    mode = "appended";
+  }
+  writeFileSync(tsPath, next, "utf-8");
+  return { mode };
+}
+
+/**
  * 定位 `export (async) function run_<name>(...)` 整段函数的起止范围。
  * 不支持 `export const run_x = ...` 箭头函数形式（需要额外处理，少见）。
  */

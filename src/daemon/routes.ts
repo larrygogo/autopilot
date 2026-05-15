@@ -95,6 +95,7 @@ import {
   syncWorkflowTs,
   renameRunFunctions,
   pruneOrphanRunFunctions,
+  replaceRunFunction,
   setWorkflowAgents,
   type PhaseEntryInput,
   type WorkflowAgentEntry,
@@ -2269,6 +2270,25 @@ export async function handleRequest(req: Request): Promise<Response> {
       const content = getWorkflowTs(tsReadMatch);
       if (content === null) return error("workflow.ts not found", 404);
       return json({ content });
+    }
+
+    // PUT /api/workflows/:name/phase-fn/:phase — 单个 run_<phase> 函数代码替换
+    // extractParam 只取第一组 group，这里用两个 group 所以直接 path.match
+    const phaseFnMatch = path.match(/^\/api\/workflows\/([\w.\-]+)\/phase-fn\/([a-z][a-z0-9_]*)$/);
+    if (method === "PUT" && phaseFnMatch) {
+      const [, wfName, phaseName] = phaseFnMatch;
+      const body = (await req.json().catch(() => null)) as { code?: string } | null;
+      if (!body || typeof body.code !== "string" || !body.code.trim()) {
+        return error("code (function source) is required", 400);
+      }
+      try {
+        const result = replaceRunFunction(wfName, phaseName, body.code);
+        emit({ type: "workflow:reloaded", payload: {} });
+        return json({ ok: true, mode: result.mode });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return error(msg, msg.includes("不存在") ? 404 : 400);
+      }
     }
 
     // PUT /api/workflows/:name/yaml — 区分 source：db 走 updateDbWorkflow，file 写文件
