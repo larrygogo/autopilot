@@ -220,9 +220,7 @@ export function PhasePipelineEditor({
         parallel: {
           name: data.name,
           fail_strategy: data.failStrategy,
-          phases: [
-            { name: data.firstChild, timeout: data.firstChildTimeout },
-          ],
+          phases: data.children.map((c) => ({ name: c.name, timeout: c.timeout })),
         },
       };
       const next = [...prev];
@@ -230,11 +228,15 @@ export function PhasePipelineEditor({
       next.splice(insertAt, 0, newBlock);
       return next;
     });
-    // 第一个子节点是新建的，rename 时不必登记 renames
-    newlyAddedRef.current.add(data.firstChild);
+    // 所有子节点都是新建的；rename 时不必登记 renames
+    for (const c of data.children) {
+      newlyAddedRef.current.add(c.name);
+    }
     setDirty(true);
     setAddParallelOpen(false);
-    toast.success(`新增并行块 ${data.name}（未保存，点保存生效）`);
+    toast.success(
+      `新增并行块 ${data.name}（${data.children.length} 个子阶段，未保存，点保存生效）`,
+    );
   }
 
   function handleUpdateParallelField(blockName: string, patch: Record<string, unknown>) {

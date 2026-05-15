@@ -360,15 +360,13 @@ export function PhaseEditor({
       kind: "parallel",
       name: data.name,
       fail_strategy: data.failStrategy,
-      phases: [
-        {
-          kind: "phase",
-          name: data.firstChild,
-          timeout: data.firstChildTimeout,
-          reject: null,
-          extras: {},
-        },
-      ],
+      phases: data.children.map((c) => ({
+        kind: "phase" as const,
+        name: c.name,
+        timeout: c.timeout,
+        reject: null,
+        extras: {},
+      })),
     };
     setItems((prev) => {
       const copy = [...prev];
@@ -377,7 +375,7 @@ export function PhaseEditor({
       return copy;
     });
     newlyAddedRef.current.add(data.name);
-    newlyAddedRef.current.add(data.firstChild);
+    for (const c of data.children) newlyAddedRef.current.add(c.name);
     mark();
     setAddParallelOpen(false);
   };
