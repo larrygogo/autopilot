@@ -2,6 +2,7 @@ import type { ServerWebSocket } from "bun";
 import { VERSION } from "../index";
 import type { AutopilotEvent, ClientMessage, ServerMessage } from "./protocol";
 import { getChannelsForEvent } from "./protocol";
+import { invokeRpcMethod } from "./rpc";
 
 // ──────────────────────────────────────────────
 // WebSocket 连接管理器
@@ -76,6 +77,21 @@ class WebSocketManager {
       case "ping": {
         const pong: ServerMessage = { type: "pong" };
         ws.send(JSON.stringify(pong));
+        break;
+      }
+      case "req": {
+        // RPC: 走 rpc.ts 注册表，按 method 路由，结果包成 res frame。
+        // invokeRpcMethod 永不抛——失败也返回 { ok:false, error }。
+        void invokeRpcMethod(msg.method, msg.params).then((result) => {
+          const res: ServerMessage = result.ok
+            ? { type: "res", id: msg.id, ok: true, payload: result.payload }
+            : { type: "res", id: msg.id, ok: false, error: result.error };
+          try {
+            ws.send(JSON.stringify(res));
+          } catch {
+            // 客户端已断开
+          }
+        });
         break;
       }
     }

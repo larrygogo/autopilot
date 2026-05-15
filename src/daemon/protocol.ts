@@ -9,19 +9,37 @@ export type { AutopilotEvent } from "../core/events";
 
 // ──────────────────────────────────────────────
 // WebSocket Protocol — Client ↔ Server 消息
+//
+// 参考 OpenClaw Gateway 协议（三种 frame）：
+//   - req: 客户端发请求，用 id 关联响应；method 路由到 handler
+//   - res: 服务端响应，复制 id，ok=true 时带 payload，false 时带 error
+//   - event: 服务端主动推送（订阅触发），跟 RPC 响应无 id 关联
+//
+// 保留 legacy subscribe/unsubscribe/ping，过渡期共存。新代码统一走 req/res。
 // ──────────────────────────────────────────────
+
+/** RPC 错误对象 — code 是机器友好枚举（NOT_FOUND / INVALID_PARAM / INTERNAL），message 是人话 */
+export interface RpcError {
+  code: string;
+  message: string;
+}
 
 /** 客户端 → 服务端 */
 export type ClientMessage =
   | { type: "subscribe"; channels: string[] }
   | { type: "unsubscribe"; channels: string[] }
-  | { type: "ping" };
+  | { type: "ping" }
+  /** RPC 请求：id 由客户端生成（per-conn 单调递增），method 是注册名（如 "listTasks"） */
+  | { type: "req"; id: number | string; method: string; params?: unknown };
 
 /** 服务端 → 客户端 */
 export type ServerMessage =
   | { type: "connected"; version: string; pid: number }
   | { type: "event"; event: AutopilotEvent }
-  | { type: "pong" };
+  | { type: "pong" }
+  /** RPC 响应：id 复制自请求；ok=true 时带 payload，false 时带 error */
+  | { type: "res"; id: number | string; ok: true; payload?: unknown }
+  | { type: "res"; id: number | string; ok: false; error: RpcError };
 
 // ──────────────────────────────────────────────
 // API Response Types

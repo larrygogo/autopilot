@@ -80,6 +80,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 激活事件总线
   enableBus();
 
+  // 注册 RPC method（WS req/res 协议用，对 HTTP routes 无影响）
+  const { registerCoreRpcMethods } = await import("./rpc-methods");
+  registerCoreRpcMethods();
+
   // 启动 /now 状态推导引擎
   const nowAggregator: Aggregator = createDefaultAggregator();
   await nowAggregator.start();
