@@ -34,6 +34,15 @@ describe("listWorkflowTemplates", () => {
     expect(dev!.label).toBe("完整开发");
   });
 
+  it("prompt-only 工作流（无 workflow.ts）也能作为模板出现", () => {
+    const list = listWorkflowTemplates();
+    const pq = list.find((t) => t.name === "prompt_quick");
+    expect(pq).toBeDefined();
+    expect(pq!.label).toBe("提示词速写");
+    expect(pq!.phase_count).toBe(2);
+    expect(pq!.agent_count).toBe(2);
+  });
+
   it("yaml 没写 label 时 label 字段为 undefined", () => {
     // 临时写一个无 label 的模板到 tmp 目录里来验证；
     // 不便改 examples，这里只在已加 label 的模板里反向验证：

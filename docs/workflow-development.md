@@ -139,6 +139,53 @@ func: my_custom_func    # → workflow.py 中的 my_custom_func()
 - `notify_func` — 通知函数
 - `hooks.before_phase` / `hooks.after_phase` / `hooks.on_phase_error`
 
+### `prompt` 字段（零代码工作流）
+
+阶段可直接在 yaml 中写 `prompt`，省去写 ts 函数。当一个阶段：
+
+- 没有对应的 `run_<name>` 函数（`workflow.ts` 缺失或不存在）
+- yaml 里有非空 `prompt` 字段
+
+框架会自动绑定内置的 prompt-runner，等价于：
+
+```ts
+const agent = getAgent(phase.agent || "coder", workflowName);
+const result = await agent.run(resolvedPrompt, {
+  cwd: getTaskWorkspace(taskId),
+  timeout: (phase.timeout ?? 900) * 1000,
+});
+// 输出落到 workspace/<NN-phase>/agent_output.md
+```
+
+**变量占位符**（prompt 字符串内可用）：
+
+| 写法 | 含义 |
+|------|------|
+| `${TASK_ID}` | 任务 id |
+| `${TASK_TITLE}` | 任务标题 |
+| `${REQUIREMENT}` | task.requirement（用户需求详情） |
+| `${PHASE}` | 当前 phase name |
+| `${WORKSPACE}` | 任务 workspace 绝对路径 |
+| `${TASK.field}` | 取 `setup_func` 留下的任意字段（如 `${TASK.repo_path}`） |
+| `$VAR` | 简写形式（不支持点号） |
+
+未识别的变量原样保留，避免静默失败。
+
+**优先级**：
+
+| ts run_xxx | yaml prompt | 实际执行 |
+|---|---|---|
+| ✓ | — | 用 ts 函数（向后兼容） |
+| ✗ | ✓ | 框架自动 prompt-runner |
+| ✓ | ✓ | ts 优先（prompt 字段被忽略） |
+| ✗ | ✗ | 抛错 |
+
+**适用场景**：简单的"调一次 agent 跑一段 prompt"任务（写作 / 翻译 / 改写 / 总结 / 单轮分析）。
+
+**不适用**：需要 reject / 解析返回结论 / 多 agent 互动 / git 等 IO 操作的阶段——这些仍需写 ts 函数。
+
+完整示例参考 `examples/workflows/prompt_quick/`（无 `workflow.ts`，仅 yaml）。
+
 ### transitions 格式
 
 YAML 中手写 transitions 时使用列表格式：

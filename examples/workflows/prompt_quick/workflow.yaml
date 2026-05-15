@@ -1,0 +1,51 @@
+name: prompt_quick
+label: "提示词速写"
+description: "零代码工作流示例：仅 yaml 写 prompt，框架自动调用 agent 执行；适合简单的串行 agent 任务"
+
+# 注意：本工作流没有 workflow.ts 文件。phase.prompt 字段触发框架内置 prompt-runner，
+# 自动调用 getAgent(phase.agent).run(prompt)，无需用户写任何 ts 代码。
+#
+# 适用场景：简单的"调 agent 跑一段 prompt"任务（写作、翻译、改写、总结...）
+# 不适用：需要复杂分支（reject / 解析返回结论 / 多 agent 互动）的场景——那些仍要写 ts
+
+agents:
+  - name: writer
+    label: "写作助手"
+    extends: coder
+  - name: critic
+    label: "审稿员"
+    extends: reviewer
+
+phases:
+  # 阶段 1：撰稿
+  - name: draft
+    label: "撰稿"
+    agent: writer
+    timeout: 600
+    prompt: |
+      你是一位专业写作助手。请根据下面的需求撰写一篇 800-1200 字的文章。
+
+      ## 需求
+      ${REQUIREMENT}
+
+      ## 输出要求
+      - 中文输出
+      - 结构清晰：引言、主体、结论
+      - markdown 格式
+
+      请把完整文章写入 ${WORKSPACE}/draft.md。
+
+  # 阶段 2：润色
+  - name: polish
+    label: "润色"
+    agent: critic
+    timeout: 600
+    prompt: |
+      你是一位审稿员。请阅读 ${WORKSPACE}/draft.md，对它进行修改改进。
+
+      重点：
+      - 检查逻辑连贯性
+      - 优化语言流畅度
+      - 修正错别字 / 标点
+
+      请把改进后的版本写到 ${WORKSPACE}/final.md，同时简要列出做了哪些修改。
