@@ -574,6 +574,14 @@ task
     if (opts.follow) {
       // 通过 WebSocket 实时跟踪
       client.connect();
+      // 断线 / 重连感知：避免用户以为日志卡住其实是 daemon 没了
+      client.onStateChange((state) => {
+        if (state === "disconnected") {
+          console.error("[WS] daemon 失联，重连中…");
+        } else if (state === "connected") {
+          console.error("[WS] 已连接");
+        }
+      });
       client.subscribe(`log:${taskId}`, (event) => {
         if (event.type === "log:entry") {
           console.log(event.payload.message);

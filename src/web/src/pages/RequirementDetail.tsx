@@ -1217,26 +1217,21 @@ export function RequirementDetail() {
               <span className="bp-label">操作 · ACTIONS</span>
             </div>
             <div className="space-y-3 p-5">
+              {/* drafting/clarifying：主推由 NextStepCTA 给出（去回答问题 / 标为已澄清）；
+                  这里保留 outline 入口让用户跳过 AI 提问直接收尾（备用路径） */}
               {(req.status === "drafting" || req.status === "clarifying") && (
                 <Button
+                  variant="outline"
                   className="w-full"
                   size="sm"
                   onClick={markReady}
                   disabled={actionBusy}
+                  title="跳过 AI 澄清流程，直接标记为已澄清"
                 >
-                  {actionBusy ? "处理中…" : "标记为已澄清"}
+                  {actionBusy ? "处理中…" : "跳过澄清，标为已澄清"}
                 </Button>
               )}
-              {req.status === "ready" && (
-                <Button
-                  className="w-full"
-                  size="sm"
-                  onClick={enqueue}
-                  disabled={actionBusy}
-                >
-                  {actionBusy ? "处理中…" : "入队执行"}
-                </Button>
-              )}
+              {/* ready 主按钮已删（NextStepCTA "入队执行" 独占） */}
               {req.status === "queued" && (
                 <Button
                   variant="outline"
@@ -1249,26 +1244,16 @@ export function RequirementDetail() {
                 </Button>
               )}
               {req.status === "awaiting_approval" && (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">请审阅规约后决定：</p>
-                  <Button
-                    className="w-full"
-                    size="sm"
-                    onClick={approve}
-                    disabled={actionBusy}
-                  >
-                    {actionBusy ? "处理中…" : "✓ 审批通过，入队执行"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    size="sm"
-                    onClick={rejectApproval}
-                    disabled={actionBusy}
-                  >
-                    {actionBusy ? "处理中…" : "↩ 驳回，返回草稿"}
-                  </Button>
-                </div>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                  onClick={rejectApproval}
+                  disabled={actionBusy}
+                  title="审批通过的主按钮在上方"
+                >
+                  {actionBusy ? "处理中…" : "↩ 驳回，返回草稿"}
+                </Button>
               )}
               {(req.status === "awaiting_review" || req.status === "fix_revision") && (
                 <div className="space-y-2">
@@ -1318,16 +1303,7 @@ export function RequirementDetail() {
                   )}
                 </div>
               )}
-              {req.status === "failed" && (
-                <Button
-                  className="w-full"
-                  size="sm"
-                  onClick={() => void retryFromFailed()}
-                  disabled={actionBusy}
-                >
-                  {actionBusy ? "处理中…" : "重新入队执行"}
-                </Button>
-              )}
+              {/* failed 主按钮已删（NextStepCTA "重新入队执行" 独占） */}
               {!isTerminal && (
                 <Button
                   variant="destructive"
