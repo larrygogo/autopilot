@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Save, Trash2, ArrowLeft, ArrowRight } from "lucide-react";
+import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2 } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
@@ -429,6 +429,7 @@ export function PhasePipelineEditor({
 
               <PhaseEditForm
                 raw={drawerPhaseLocation.raw}
+                workflowName={workflowName}
                 allPhaseNames={allPhaseNames}
                 agentOptions={agentOptions}
                 onChange={(patch) => updatePhaseField(phaseName, patch)}
@@ -538,6 +539,89 @@ export function PhasePipelineEditor({
 // ──────────────────────────────────────────────
 // 表单：drawer 内单阶段字段编辑
 // ──────────────────────────────────────────────
+// 子组件：prompt 试跑器
+//
+// 让用户填完 prompt 后无需创建 task 就能看 agent 输出。
+// 仅替换 ${VAR} 中真实存在的内置变量（TASK_TITLE/REQUIREMENT/... 这些任务上下文
+// dry-run 时没有真值，保留占位让用户自己改）；后端用临时调用，不写 workspace。
+// ──────────────────────────────────────────────
+
+function PromptDryRunner({
+  workflowName,
+  agent,
+  prompt,
+}: {
+  workflowName: string;
+  agent: string;
+  prompt: string;
+}) {
+  const toast = useToast();
+  const [running, setRunning] = useState(false);
+  const [output, setOutput] = useState<string | null>(null);
+  const [durationMs, setDurationMs] = useState<number | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  async function dryRun() {
+    setRunning(true);
+    setOutput(null);
+    setDurationMs(null);
+    setErrorMsg(null);
+    try {
+      const r = await api.dryRunPrompt(workflowName, { agent, prompt, timeout: 120 });
+      setOutput(r.text);
+      setDurationMs(r.durationMs);
+    } catch (e: unknown) {
+      const msg = (e as Error)?.message ?? String(e);
+      setErrorMsg(msg);
+      toast.error("试跑失败", msg);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 border-[1.5px] border-dashed border-foreground/30 bg-muted/20 p-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          试跑 · 用当前 prompt 直接调一次 {agent}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={dryRun}
+          disabled={running || !prompt.trim()}
+          className="h-7 px-2"
+        >
+          {running ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+          {running ? "调用中…" : "试跑"}
+        </Button>
+      </div>
+      <p className="mt-1 text-[10px] text-muted-foreground">
+        变量占位符（${'$'}{'{REQUIREMENT}'} 等）原样发送给 agent，调试时建议先手动替换成真实测试值
+      </p>
+      {(output !== null || errorMsg !== null) && (
+        <div className="mt-2">
+          {durationMs !== null && (
+            <div className="mb-1 font-mono text-[10px] text-muted-foreground">
+              耗时 {(durationMs / 1000).toFixed(1)}s
+            </div>
+          )}
+          {errorMsg !== null ? (
+            <pre className="scrollbar-thin max-h-48 overflow-auto whitespace-pre-wrap border-[1.5px] border-destructive bg-destructive/8 p-2 font-mono text-[10px] leading-relaxed text-destructive">
+              {errorMsg}
+            </pre>
+          ) : (
+            <pre className="scrollbar-thin max-h-48 overflow-auto whitespace-pre-wrap border-[1.5px] border-foreground/30 bg-card p-2 font-mono text-[10px] leading-relaxed">
+              {output}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
 // 子组件：ts 函数代码编辑器（独立草稿 + 应用按钮）
 // ──────────────────────────────────────────────
 
@@ -630,12 +714,14 @@ function PhaseTsEditor({
 
 function PhaseEditForm({
   raw,
+  workflowName,
   allPhaseNames,
   agentOptions,
   onChange,
   onRename,
 }: {
   raw: PhaseRaw;
+  workflowName: string;
   allPhaseNames: string[];
   agentOptions: string[];
   onChange: (patch: Record<string, unknown>) => void;
@@ -750,6 +836,13 @@ function PhaseEditForm({
             yaml 写 prompt + 指定 agent → 框架自动调用 agent.run(prompt)，无需写 ts 函数；
             适合简单的"调 agent 跑一段 prompt"场景，复杂分支（reject / 解析返回）仍需 ts
           </p>
+          {typeof raw.prompt === "string" && raw.prompt.trim() && (
+            <PromptDryRunner
+              workflowName={workflowName}
+              agent={(raw.agent as string | undefined) || "coder"}
+              prompt={raw.prompt}
+            />
+          )}
         </FormRow>
 
         <FormRow label="驳回到">
