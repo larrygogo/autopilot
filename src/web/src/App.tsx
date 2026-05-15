@@ -35,6 +35,8 @@ import {
   Search,
   Menu,
   Circle,
+  GitBranch,
+  CalendarClock,
 } from "lucide-react";
 
 const Now = lazy(() => import("./pages/Now").then((m) => ({ default: m.Now })));
@@ -43,6 +45,8 @@ const Library = lazy(() => import("./pages/Library").then((m) => ({ default: m.L
 const SettingsHub = lazy(() => import("./pages/SettingsHub").then((m) => ({ default: m.SettingsHub })));
 const Setup = lazy(() => import("./pages/Setup").then((m) => ({ default: m.Setup })));
 const NewWorkflowWithAI = lazy(() => import("./pages/NewWorkflowWithAI").then((m) => ({ default: m.NewWorkflowWithAI })));
+const Workflows = lazy(() => import("./pages/Workflows").then((m) => ({ default: m.Workflows })));
+const Schedules = lazy(() => import("./pages/Schedules").then((m) => ({ default: m.Schedules })));
 const TaskDetail = lazy(() =>
   import("./pages/TaskDetail").then((m) => ({ default: m.TaskDetail })),
 );
@@ -62,11 +66,34 @@ interface NavItem {
   end?: boolean;
 }
 
-const MAIN_NAV: NavItem[] = [
-  { path: "/now", label: "现在", icon: Sparkles, end: true },
-  { path: "/start", label: "开始", icon: FilePlus, end: true },
-  { path: "/library", label: "库", icon: FolderOpen },
-  { path: "/settings", label: "设置", icon: Sliders },
+interface NavGroupDef {
+  /** 分组标题（mono 字体小字，对应一组导航项） */
+  title: string;
+  items: NavItem[];
+}
+
+const NAV_GROUPS: NavGroupDef[] = [
+  {
+    title: "任务",
+    items: [
+      { path: "/now", label: "现在", icon: Sparkles, end: true },
+      { path: "/start", label: "开始", icon: FilePlus, end: true },
+      { path: "/library", label: "库", icon: FolderOpen },
+    ],
+  },
+  {
+    title: "编排",
+    items: [
+      { path: "/workflows", label: "工作流", icon: GitBranch },
+      { path: "/schedules", label: "定时任务", icon: CalendarClock },
+    ],
+  },
+  {
+    title: "系统",
+    items: [
+      { path: "/settings", label: "设置", icon: Sliders },
+    ],
+  },
 ];
 
 function titleForPath(pathname: string): string {
@@ -214,12 +241,12 @@ function AppInner() {
                 <Route path="/projects/:id" element={<ProjectDetailRoute />} />
                 <Route path="/requirements/:id" element={<RequirementDetail />} />
                 <Route path="/projects" element={<Navigate to="/library?tab=projects" replace />} />
-                <Route path="/workflows" element={<Navigate to="/settings?tab=workflows" replace />} />
+                <Route path="/workflows/new-with-ai" element={<NewWorkflowWithAI />} />
+                <Route path="/workflows" element={<Workflows />} />
+                <Route path="/schedules" element={<SchedulesRoute subscribe={subscribe} />} />
                 <Route path="/agents" element={<Navigate to="/settings?tab=agents" replace />} />
                 <Route path="/providers" element={<Navigate to="/settings?tab=providers" replace />} />
-                <Route path="/schedules" element={<Navigate to="/settings?tab=schedules" replace />} />
                 <Route path="/setup" element={<Setup />} />
-                <Route path="/workflows/new-with-ai" element={<NewWorkflowWithAI />} />
                 <Route path="*" element={<Navigate to="/now" replace />} />
               </Routes>
             </Suspense>
@@ -264,6 +291,15 @@ function ProjectDetailRoute() {
   return <ProjectDetail projectId={id} />;
 }
 
+function SchedulesRoute({
+  subscribe,
+}: {
+  subscribe: (channel: string, handler: (event: any) => void) => () => void;
+}) {
+  const navigate = useNavigate();
+  return <Schedules subscribe={subscribe} onSelectTask={(id) => navigate(`/tasks/${id}`)} />;
+}
+
 function SidebarContent({
   wsState,
   activeCount = 0,
@@ -295,8 +331,15 @@ function SidebarContent({
         </div>
       </div>
 
-      <nav className="flex-1 space-y-5 overflow-y-auto scrollbar-thin p-3">
-        <NavGroup items={MAIN_NAV} badges={{ "/now": activeCount }} />
+      <nav className="flex-1 space-y-4 overflow-y-auto scrollbar-thin p-3">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.title}>
+            <div className="mb-1.5 px-2.5 font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground/70">
+              {group.title}
+            </div>
+            <NavGroup items={group.items} badges={{ "/now": activeCount }} />
+          </div>
+        ))}
       </nav>
 
       <div className="border-t border-dashed border-foreground/30" />
