@@ -1,16 +1,14 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2, AlertTriangle, MousePointerClick, ChevronDown, ChevronRight } from "lucide-react";
-import { parse as parseYaml } from "yaml";
+import { Loader2, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { parse as parseYaml, parseDocument } from "yaml";
 import { api, type AuthoredWorkflow } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { PhasePipeline } from "@/components/PhasePipeline";
-import { PhaseDetailDrawer, type DrawerPhaseInfo } from "@/components/PhaseDetailDrawer";
-import { extractPhaseFunction } from "@/lib/ts-extract";
+import { PhaseEditor } from "@/components/PhaseEditor";
 
 export function NewWorkflowWithAI() {
   const navigate = useNavigate();
@@ -22,10 +20,9 @@ export function NewWorkflowWithAI() {
   const [followup, setFollowup] = useState("");
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [drawerPhase, setDrawerPhase] = useState<DrawerPhaseInfo | null>(null);
-  /** YAML/TS 直接编辑折叠区，默认收起；drawer 触发 onLocateInEditor 时自动展开 */
+  /** YAML/TS 文本编辑折叠区，默认收起；给"我要看 yaml 原文"的用户出口 */
   const [editorOpen, setEditorOpen] = useState(false);
-  /** 编辑器 anchor — drawer 触发跳转时滚到这里 */
+  /** 编辑器 anchor — scroll target */
   const editorAnchorRef = useRef<HTMLDivElement | null>(null);
 
   // 把 AI 生成的 yaml 解析成 phases 数组，喂给 PhasePipeline。
@@ -40,52 +37,28 @@ export function NewWorkflowWithAI() {
     }
   }, [authored?.yaml]);
 
-  const phasesByName = useMemo(() => {
-    const map = new Map<string, Record<string, unknown>>();
-    for (const p of parsedPhases) {
-      if (!p || typeof p !== "object") continue;
-      const obj = p as Record<string, unknown>;
-      if (obj.parallel && typeof obj.parallel === "object") {
-        const par = obj.parallel as Record<string, unknown>;
-        const subs = Array.isArray(par.phases) ? (par.phases as Array<Record<string, unknown>>) : [];
-        for (const s of subs) {
-          if (s && typeof s.name === "string") map.set(s.name, s);
-        }
-      } else if (typeof obj.name === "string") {
-        map.set(obj.name, obj);
-      }
-    }
-    return map;
-  }, [parsedPhases]);
-
-  function openDrawerFor(phaseName: string) {
-    const raw = phasesByName.get(phaseName);
-    if (!raw) return;
-    setDrawerPhase({
-      name: phaseName,
-      label: typeof raw.label === "string" ? raw.label : undefined,
-      agent: typeof raw.agent === "string" ? raw.agent : undefined,
-      timeout: typeof raw.timeout === "number" ? raw.timeout : undefined,
-      reject: typeof raw.reject === "string" ? raw.reject : null,
-      gate: raw.gate === true,
-      gate_message: typeof raw.gate_message === "string" ? raw.gate_message : undefined,
-      max_rejections: typeof raw.max_rejections === "number" ? raw.max_rejections : undefined,
-      // 零代码模式下这才是核心配置，drawer 需要能看到
-      prompt: typeof raw.prompt === "string" ? raw.prompt : undefined,
-    });
-  }
-
-  const drawerTsCode = useMemo(() => {
-    if (!drawerPhase || !authored?.ts) return null;
-    return extractPhaseFunction(authored.ts, drawerPhase.name);
-  }, [drawerPhase, authored?.ts]);
-
   // 识别后端 fallback（AI 调用挂了、返回非法 JSON 等）— 此时 yaml/ts 是占位 stub，
   // 用户不应该能保存这种垃圾工作流。一律走"重新生成"或"追问"路径。
   const isFallback = useMemo(
-    () => !!authored?.warnings?.some((w) => w.startsWith("AI 生成失败") || w.startsWith("缺 yaml")),
+    () => !!authored?.warnings?.some((w) => w.startsWith("AI 生成失败") || w.startsWith("缺 yaml") || w.startsWith("AI 返回")),
     [authored?.warnings],
   );
+
+  /**
+   * PhaseEditor 草稿模式回调：把图形化编辑后的 phases 数组写回 authored.yaml。
+   * 用 yaml Document API 局部替换 phases 字段，保留其他顶层字段 + 注释 + 格式。
+   */
+  function applyPhasesToYaml(newPhases: unknown[]) {
+    if (!authored) return;
+    try {
+      const doc = parseDocument(authored.yaml);
+      doc.set("phases", newPhases);
+      setAuthored({ ...authored, yaml: doc.toString() });
+    } catch (e: unknown) {
+      // 极端情况：原 yaml 已不可解析（用户在文本编辑区破坏了）
+      toast.error("应用阶段修改失败", (e as Error)?.message ?? String(e));
+    }
+  }
 
   async function generate(prompt: string, includePrior: boolean) {
     if (!prompt.trim()) {
@@ -215,19 +188,18 @@ export function NewWorkflowWithAI() {
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">
-                  流水线预览
-                </Label>
-                <span className="inline-flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
-                  <MousePointerClick className="h-3 w-3" />
-                  点击阶段查看配置
-                </span>
-              </div>
+              <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">
+                阶段（可直接编辑）
+              </Label>
               {parsedPhases.length > 0 ? (
-                <PhasePipeline
-                  phases={parsedPhases}
-                  onPhaseClick={openDrawerFor}
+                // 复用 /workflows 的 PhaseEditor，draftMode 关闭所有持久化 API 调用，
+                // 改动通过 onItemsChange 上抛 → applyPhasesToYaml 回写 authored.yaml
+                // （用 yaml Document API 局部替换 phases 字段，保留其他顶层字段 + 注释）
+                <PhaseEditor
+                  workflowName="__draft__"
+                  initialPhases={parsedPhases}
+                  draftMode
+                  onItemsChange={applyPhasesToYaml}
                 />
               ) : (
                 <p className="border-[1.5px] border-dashed border-foreground/30 bg-muted/30 p-3 text-xs text-muted-foreground">
@@ -330,21 +302,6 @@ export function NewWorkflowWithAI() {
           </Card>
         </>
       )}
-
-      <PhaseDetailDrawer
-        mode="preview"
-        open={!!drawerPhase}
-        onOpenChange={(o) => { if (!o) setDrawerPhase(null); }}
-        phase={drawerPhase}
-        tsFunctionCode={drawerTsCode}
-        onLocateInEditor={() => {
-          // 展开下方 YAML/TS 编辑区 + 滚动到 anchor，让用户能直接改
-          setEditorOpen(true);
-          requestAnimationFrame(() => {
-            editorAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-          });
-        }}
-      />
     </div>
   );
 }

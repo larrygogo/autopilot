@@ -120,6 +120,16 @@ interface Props {
   /** 由父组件提供的联动 hover 信号（pipeline / state graph 共享） */
   hoveredPhase?: string | null;
   onHoverPhase?: (name: string | null) => void;
+  /**
+   * 草稿模式 — AI 生成工作流页用，绕过持久化 API：
+   *   - 隐藏 保存 / 撤销 / 校准 TS / 清孤儿 等工具栏按钮
+   *   - 不调任何 api.setWorkflowPhases / syncWorkflowTs / pruneOrphans
+   *   - 每次 items 变化通过 onItemsChange 把 serialize 后的 phases 数组上抛
+   *     给父组件回写 yaml；renames 在草稿模式无意义（没 ts 文件持久化）
+   */
+  draftMode?: boolean;
+  /** 草稿模式下 items 变化的回调，参数是已 serialize 的 phases 数组（可直接喂给 yaml） */
+  onItemsChange?: (phases: unknown[]) => void;
 }
 
 type DeleteTarget =
@@ -132,6 +142,8 @@ export function PhaseEditor({
   onSaved,
   hoveredPhase,
   onHoverPhase,
+  draftMode = false,
+  onItemsChange,
 }: Props) {
   const toast = useToast();
   const [items, setItems] = useState<Item[]>(() => normalize(initialPhases));
@@ -170,6 +182,22 @@ export function PhaseEditor({
     setItems(normalize(initialPhases));
     setDirty(false);
     resetDraftTracking();
+  }, [JSON.stringify(initialPhases), workflowName]);
+
+  // 草稿模式：items 变化时同步上抛给父组件回写 yaml；跳过首次（initialPhases 自身的 setState）
+  const draftSyncedOnceRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!draftMode || !onItemsChange) return;
+    if (!draftSyncedOnceRef.current) {
+      draftSyncedOnceRef.current = true;
+      return;
+    }
+    onItemsChange(serialize(items));
+  }, [items, draftMode, onItemsChange]);
+
+  // initialPhases 变更（外部覆盖）时重置 draft 首次 flag，避免下个 mutation 被吃掉
+  React.useEffect(() => {
+    draftSyncedOnceRef.current = false;
   }, [JSON.stringify(initialPhases), workflowName]);
 
   const allNames = useMemo(() => flatNames(items), [items]);
@@ -587,14 +615,17 @@ export function PhaseEditor({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={syncTs}
-            title="扫描 workflow.ts 并为缺失阶段追加 run_xxx 函数"
-          >
-            校准 TS
-          </Button>
+          {/* 草稿模式下不显示「校准 TS」— 没持久化的 ts 文件可校 */}
+          {!draftMode && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={syncTs}
+              title="扫描 workflow.ts 并为缺失阶段追加 run_xxx 函数"
+            >
+              校准 TS
+            </Button>
+          )}
           <Button size="sm" variant="secondary" onClick={() => setAddParallelOpen(true)}>
             <Layers className="h-3.5 w-3.5" />
             并行块
@@ -606,7 +637,8 @@ export function PhaseEditor({
         </div>
       </div>
 
-      {orphans.length > 0 && (
+      {/* 草稿模式不显示孤儿警告（孤儿是 yaml/ts 不一致问题，草稿没文件） */}
+      {!draftMode && orphans.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-[1.5px] border-warning bg-warning/8 px-3.5 py-2.5 text-sm">
           <span className="flex flex-wrap items-center gap-1.5">
             <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
@@ -738,7 +770,8 @@ export function PhaseEditor({
         </div>
       )}
 
-      {dirty && (
+      {/* 草稿模式不显示底部保存/撤销 — items 改动通过 onItemsChange 直接上抛父组件 */}
+      {!draftMode && dirty && (
         <div className="mt-4 flex flex-col gap-2.5 border-t pt-3">
           <div className="flex flex-wrap items-center gap-2">
             <Button
