@@ -988,8 +988,8 @@ program
 program.parseAsync(process.argv).then(() => {
   // 给 ws 一个 50ms 的窗口 flush 缓冲（unref 让计时器自身不阻塞 exit）
   const t = setTimeout(() => process.exit(0), 50);
-  // @ts-expect-error Bun Timer 兼容 Node Timer 的 unref
-  t.unref?.();
+  // Bun Timer 兼容 Node Timer 的 unref（动态访问避开类型分歧）
+  (t as { unref?: () => void }).unref?.();
 }).catch((err: unknown) => {
   console.error("CLI 错误：", err);
   process.exit(1);

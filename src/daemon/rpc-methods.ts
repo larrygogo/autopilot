@@ -126,7 +126,7 @@ import {
 } from "./task-actions";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
-import { registerRpcMethod, RpcError } from "./rpc";
+import { registerRpcMethod, hasRpcMethod, RpcError } from "./rpc";
 import { wsManager } from "./ws";
 import { VERSION } from "../index";
 
@@ -153,12 +153,9 @@ function asObj(params: unknown): Record<string, unknown> {
   return params as Record<string, unknown>;
 }
 
-let registered = false;
-
-/** 在 daemon 启动早期调用一次。重复调用幂等。 */
+/** 在 daemon 启动早期调用一次。重复调用幂等（检查 daemon.status 是否已注册）。 */
 export function registerCoreRpcMethods(): void {
-  if (registered) return;
-  registered = true;
+  if (hasRpcMethod("daemon.status")) return;
 
   registerRpcMethod({
     method: "daemon.status",
