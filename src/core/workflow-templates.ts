@@ -197,3 +197,115 @@ function copyDirSync(src: string, dst: string): void {
     }
   }
 }
+
+// ──────────────────────────────────────────────
+// 孤儿工作流扫描 / 修复
+// ──────────────────────────────────────────────
+
+export interface OrphanWorkflow {
+  /** 目录名（位于 ~/.autopilot/workflows/<dir>/） */
+  dir: string;
+  /** workflow.yaml 顶层 name 字段实际值 */
+  yamlName: string;
+  /** 不一致的原因 */
+  issue: "name_mismatch";
+  /** 建议的修复方式 */
+  suggestion: string;
+}
+
+export interface WorkflowCollision {
+  /** 冲突的 yaml.name */
+  name: string;
+  /** 共用此 name 的所有目录 */
+  dirs: string[];
+}
+
+export interface WorkflowHealthReport {
+  orphans: OrphanWorkflow[];
+  collisions: WorkflowCollision[];
+}
+
+/**
+ * 扫描 ~/.autopilot/workflows/ 下的所有目录，找出 yaml.name 跟目录名
+ * 不一致的孤儿（影响 UI 显示），以及多个目录共享同一 yaml.name 的碰撞
+ * （registry 内存覆盖 / 列表少条目）。
+ *
+ * 不解析整个 yaml，只读第一处顶层 `name:` 行（兼容注释、多文档头等）。
+ */
+export function scanWorkflowHealth(): WorkflowHealthReport {
+  const home = autopilotHome();
+  const root = join(home, "workflows");
+  if (!existsSync(root)) return { orphans: [], collisions: [] };
+
+  const orphans: OrphanWorkflow[] = [];
+  const byYamlName = new Map<string, string[]>();
+
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(root);
+  } catch {
+    return { orphans: [], collisions: [] };
+  }
+
+  for (const dir of entries) {
+    if (dir.startsWith("_") || dir.startsWith(".")) continue;
+    const yamlPath = join(root, dir, "workflow.yaml");
+    if (!existsSync(yamlPath)) continue;
+    const yamlName = readYamlTopName(yamlPath);
+    if (!yamlName) continue;
+    if (yamlName !== dir) {
+      orphans.push({
+        dir,
+        yamlName,
+        issue: "name_mismatch",
+        suggestion: `把 workflow.yaml 顶层 name 改为 "${dir}"，或重命名目录`,
+      });
+    }
+    const arr = byYamlName.get(yamlName) ?? [];
+    arr.push(dir);
+    byYamlName.set(yamlName, arr);
+  }
+
+  const collisions: WorkflowCollision[] = [];
+  for (const [name, dirs] of byYamlName.entries()) {
+    if (dirs.length > 1) collisions.push({ name, dirs });
+  }
+
+  return { orphans, collisions };
+}
+
+/**
+ * 修复指定孤儿目录：把 workflow.yaml 顶层 name 改为目录名。
+ * 失败原因：目录不存在 / 没有 workflow.yaml / yaml 当前 name 就已经一致。
+ */
+export function fixOrphanWorkflow(dir: string): { fixed: boolean; oldName: string; newName: string } {
+  if (!/^[\w.\-]+$/.test(dir)) {
+    throw new Error("目录名非法");
+  }
+  const yamlPath = join(autopilotHome(), "workflows", dir, "workflow.yaml");
+  if (!existsSync(yamlPath)) {
+    throw new Error("目录或 workflow.yaml 不存在");
+  }
+  const oldName = readYamlTopName(yamlPath) ?? "";
+  if (oldName === dir) {
+    return { fixed: false, oldName, newName: dir };
+  }
+  rewriteWorkflowName(yamlPath, dir);
+  return { fixed: true, oldName, newName: dir };
+}
+
+/** 读 yaml 顶层第一处 `name:` 字段值；找不到返回 null */
+function readYamlTopName(yamlPath: string): string | null {
+  try {
+    const content = readFileSync(yamlPath, "utf-8");
+    for (const line of content.split(/\r?\n/)) {
+      const m = line.match(/^name:\s*(.+?)\s*$/);
+      if (m) {
+        return m[1].replace(/^["']|["']$/g, "");
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}

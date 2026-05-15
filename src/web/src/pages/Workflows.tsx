@@ -14,6 +14,7 @@ import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
 import { useNavigate } from "react-router-dom";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
 import { WorkflowCatalog } from "@/components/WorkflowCatalog";
+import { WorkflowHealthBanner } from "@/components/WorkflowHealthBanner";
 import { ConfirmDialog } from "@/components/Modal";
 import { PageHero } from "@/components/PageHero";
 import { useToast } from "@/components/Toast";
@@ -257,6 +258,9 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
           </>
         }
       />
+
+      {/* 工作流目录健康检查：孤儿 / 重名碰撞 → 顶部警告条 + 修复 dialog */}
+      {!selected && <WorkflowHealthBanner onFixed={refresh} />}
 
       {/* 用例目录视图（业务视角，PR #71 加） */}
       {!selected && (

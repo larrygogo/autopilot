@@ -160,6 +160,13 @@ export const api = {
       `/api/workflows/${sourceName}/clone`,
       { method: "POST", body: JSON.stringify({ name: targetName }) },
     ),
+  scanWorkflowHealth: () =>
+    request<WorkflowHealthReport>(`/api/workflows/health`),
+  fixOrphanWorkflow: (dir: string) =>
+    request<{ ok: boolean; fixed: boolean; oldName: string; newName: string }>(
+      `/api/workflows/health/fix-orphan`,
+      { method: "POST", body: JSON.stringify({ dir }) },
+    ),
   authorWorkflow: (body: { description: string; prior_yaml?: string; prior_ts?: string }) =>
     request<AuthoredWorkflow>("/api/workflows/author", {
       method: "POST", body: JSON.stringify(body),
@@ -536,6 +543,23 @@ export interface WorkflowTemplate {
   description: string;
   phase_count: number;
   agent_count: number;
+}
+
+export interface OrphanWorkflow {
+  dir: string;
+  yamlName: string;
+  issue: "name_mismatch";
+  suggestion: string;
+}
+
+export interface WorkflowCollision {
+  name: string;
+  dirs: string[];
+}
+
+export interface WorkflowHealthReport {
+  orphans: OrphanWorkflow[];
+  collisions: WorkflowCollision[];
 }
 
 export interface AuthoredWorkflow {
