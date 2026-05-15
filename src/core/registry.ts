@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync, mkd
 import { homedir } from "os";
 import { join } from "path";
 import { parse as parseYaml, parseDocument, type Document } from "yaml";
+import { tryMakePromptRunnerForPhase } from "./prompt-runner";
 import {
   syncFileWorkflowsToDb,
   listWorkflowsInDb,
@@ -271,6 +272,7 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
   }
 
   // 展开阶段默认值并绑定函数
+  const workflowName = typeof wfDef["name"] === "string" ? (wfDef["name"] as string) : undefined;
   const expandedPhases: (PhaseDefinition | { parallel: ParallelDefinition })[] = [];
   for (const phase of rawPhases) {
     if (typeof phase !== "object" || !phase) continue;
@@ -280,12 +282,12 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
       const parExpanded = expandParallelDefaults(par, allPhaseNames);
       // 绑定子阶段函数
       for (const sub of parExpanded.phases) {
-        bindPhaseFunc(sub, tsModule);
+        bindPhaseFunc(sub, tsModule, workflowName);
       }
       expandedPhases.push({ parallel: parExpanded });
     } else {
       const phaseExpanded = expandPhaseDefaults(phase as Record<string, unknown>, allPhaseNames);
-      bindPhaseFunc(phaseExpanded, tsModule);
+      bindPhaseFunc(phaseExpanded, tsModule, workflowName);
       expandedPhases.push(phaseExpanded);
     }
   }
@@ -342,7 +344,8 @@ function normalizeTransitions(
 
 function bindPhaseFunc(
   phase: PhaseDefinition,
-  tsModule: Record<string, unknown> | null
+  tsModule: Record<string, unknown> | null,
+  workflowName?: string,
 ): void {
   const funcRef = phase.func;
   if (typeof funcRef === "function") return; // 已经是 callable
@@ -351,15 +354,27 @@ function bindPhaseFunc(
 
   if (tsModule && typeof tsModule[funcName] === "function") {
     phase.func = tsModule[funcName] as (taskId: string) => Promise<void>;
-  } else {
-    log.warn("找不到阶段函数 %s", funcName);
-    // 缺失的阶段函数在执行时抛出错误，防止工作流静默空跑
-    phase.func = async (_taskId: string) => {
-      throw new Error(
-        `阶段函数 "${funcName}" 未定义，请在 workflow.ts 中导出该函数`
-      );
-    };
+    return;
   }
+
+  // ts 函数缺失：如果 phase 声明了 prompt 字段，用框架内置的 prompt-runner 替代。
+  // 这是"零代码工作流"路径——用户只在 yaml 写 prompt，无需写 ts。
+  if (workflowName) {
+    const promptRunner = tryMakePromptRunnerForPhase(phase, workflowName);
+    if (promptRunner) {
+      phase.func = promptRunner;
+      log.info("阶段 %s 使用 prompt-runner（无 ts 函数，yaml 里有 prompt 字段）", phase.name);
+      return;
+    }
+  }
+
+  log.warn("找不到阶段函数 %s", funcName);
+  // 缺失的阶段函数在执行时抛出错误，防止工作流静默空跑
+  phase.func = async (_taskId: string) => {
+    throw new Error(
+      `阶段函数 "${funcName}" 未定义且未提供 prompt 字段；请在 workflow.ts 中导出该函数，或在 yaml 中添加 prompt`,
+    );
+  };
 }
 
 function bindWorkflowFuncs(
@@ -688,6 +703,12 @@ function composeDbWorkflow(
     if (typeof phaseObj.reject === "string") {
       merged.jump_trigger = `${phName}_reject`;
       merged.jump_target = phaseObj.reject;
+    }
+    // DB 工作流覆写 prompt：声明了 prompt → 用 prompt-runner 取代 base 的 func
+    if (typeof phaseObj.prompt === "string" && phaseObj.prompt.trim()) {
+      (merged as Record<string, unknown>)["prompt"] = phaseObj.prompt;
+      const promptFn = tryMakePromptRunnerForPhase(merged, name);
+      if (promptFn) merged.func = promptFn;
     }
     newPhases.push(merged);
   }

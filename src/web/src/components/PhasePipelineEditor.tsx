@@ -439,6 +439,7 @@ export function PhasePipelineEditor({
                 workflowName={workflowName}
                 phaseName={phaseName}
                 initialCode={drawerTsCode}
+                hasPrompt={typeof drawerPhaseLocation.raw.prompt === "string" && (drawerPhaseLocation.raw.prompt as string).trim() !== ""}
                 onSaved={() => onSaved?.()}
               />
 
@@ -544,11 +545,14 @@ function PhaseTsEditor({
   workflowName,
   phaseName,
   initialCode,
+  hasPrompt,
   onSaved,
 }: {
   workflowName: string;
   phaseName: string;
   initialCode: string | null;
+  /** 该 phase 在 yaml 里有 prompt 字段：用于显示"prompt 驱动 vs ts 函数"优先级提示 */
+  hasPrompt?: boolean;
   onSaved?: () => void;
 }) {
   const toast = useToast();
@@ -592,9 +596,19 @@ function PhaseTsEditor({
           {saving ? "写入中…" : "应用代码"}
         </Button>
       </div>
-      {initialCode === null && draft === "" && (
+      {hasPrompt && initialCode === null && (
+        <p className="mb-1 border-[1.5px] border-dashed border-success/40 bg-success/5 p-2 text-[11px] text-success">
+          该阶段由 prompt 驱动（yaml 里有 prompt 字段），框架自动调 agent.run；无需 ts 函数
+        </p>
+      )}
+      {hasPrompt && initialCode !== null && (
+        <p className="mb-1 border-[1.5px] border-dashed border-warning/40 bg-warning/5 p-2 text-[11px] text-warning">
+          该阶段同时有 prompt 字段和 ts 函数；框架会优先调用 ts 函数（prompt 字段被忽略）
+        </p>
+      )}
+      {!hasPrompt && initialCode === null && draft === "" && (
         <p className="mb-1 border-[1.5px] border-dashed border-foreground/30 bg-muted/30 p-2 text-[11px] text-muted-foreground">
-          未找到 <code className="font-mono">run_{phaseName}</code> 函数；在下方粘贴或编写完整函数后点「应用代码」会追加到 workflow.ts
+          未找到 <code className="font-mono">run_{phaseName}</code> 函数；上面填 prompt 即可零代码运行，或在下方编写完整 ts 函数
         </p>
       )}
       <Textarea
@@ -722,6 +736,20 @@ function PhaseEditForm({
             }}
             className="h-8 w-32 font-mono text-sm"
           />
+        </FormRow>
+
+        <FormRow label="提示词 (prompt)">
+          <Textarea
+            value={typeof raw.prompt === "string" ? raw.prompt : ""}
+            placeholder={`填了 prompt 就不需要写 ts 函数；可用变量：\${TASK_TITLE} \${REQUIREMENT} \${WORKSPACE} \${PHASE}\n例：你是一位资深工程师。请根据 \${REQUIREMENT} 输出方案。`}
+            onChange={(e) => onChange({ prompt: e.target.value || undefined })}
+            className="min-h-[100px] resize-y font-mono text-[11px] leading-relaxed"
+            spellCheck={false}
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            yaml 写 prompt + 指定 agent → 框架自动调用 agent.run(prompt)，无需写 ts 函数；
+            适合简单的"调 agent 跑一段 prompt"场景，复杂分支（reject / 解析返回）仍需 ts
+          </p>
         </FormRow>
 
         <FormRow label="驳回到">
