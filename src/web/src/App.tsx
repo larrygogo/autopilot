@@ -22,6 +22,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { FloatingChat } from "./components/FloatingChat";
 import { NewTaskDialog } from "./components/NewTaskDialog";
 import { QuickCreateMenu } from "./components/QuickCreateMenu";
+import { RunningTasksIndicator } from "./components/RunningTasksIndicator";
 import { PageLoader } from "./components/PageLoader";
 import { useTheme } from "./lib/theme";
 import { cn } from "./lib/utils";
@@ -194,6 +195,9 @@ function AppInner() {
             <h1 className="truncate font-display text-base font-bold uppercase tracking-wider">
               {headerTitle}
             </h1>
+            <div className="ml-3 hidden md:block">
+              <RunningTasksIndicator />
+            </div>
             <div className="ml-auto flex items-center gap-1">
               <QuickCreateMenu />
               <Button
