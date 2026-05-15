@@ -2329,6 +2329,57 @@ export async function handleRequest(req: Request): Promise<Response> {
       });
     }
 
+    // GET /api/workflows/:name/export-bundle — 导出为 JSON bundle（yaml + ts）便于分享
+    const exportBundleMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/export-bundle$/);
+    if (method === "GET" && exportBundleMatch) {
+      const wfName = exportBundleMatch;
+      // yaml 来源：db 工作流读 DB 行，file 工作流读磁盘
+      const row = getWorkflowFromDb(wfName);
+      let yaml: string | null = null;
+      if (row && row.source === "db") {
+        yaml = row.yaml_content;
+      } else {
+        yaml = getWorkflowYaml(wfName);
+      }
+      if (yaml === null) return error("Workflow not found", 404);
+      const ts = getWorkflowTs(wfName); // 可能为 null（prompt-only / db 工作流没磁盘 ts）
+      return json({
+        version: 1,
+        name: wfName,
+        yaml,
+        ts: ts ?? null,
+        exported_at: new Date().toISOString(),
+      });
+    }
+
+    // POST /api/workflows/import-bundle — 从 JSON bundle 创建新工作流
+    if (method === "POST" && path === "/api/workflows/import-bundle") {
+      const body = await req.json().catch(() => null) as
+        | { name?: string; yaml?: string; ts?: string | null }
+        | null;
+      if (!body || typeof body.name !== "string" || typeof body.yaml !== "string") {
+        return error("name + yaml required", 400);
+      }
+      if (!/^[\w.\-]+$/.test(body.name)) {
+        return error("name 只允许字母 / 数字 / . _ -", 400);
+      }
+      try {
+        const { saveAuthoredWorkflow } = await import("./workflow-author");
+        saveAuthoredWorkflow(body.name, body.yaml, body.ts ?? "");
+        // 复用 saveAuthoredWorkflow 后的同步逻辑
+        const { discover } = await import("../core/registry");
+        await discover();
+        emit({ type: "workflow:reloaded", payload: {} });
+        return json({ ok: true, name: body.name }, 201);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const status = msg.includes("already exists") ? 409
+          : msg.includes("只允许") ? 400
+          : 500;
+        return error(msg, status);
+      }
+    }
+
     // GET /api/workflows/:name/ts — 读 workflow.ts 源码
     const tsReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/ts$/);
     if (method === "GET" && tsReadMatch) {

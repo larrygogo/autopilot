@@ -160,6 +160,19 @@ export const api = {
       `/api/workflows/${sourceName}/clone`,
       { method: "POST", body: JSON.stringify({ name: targetName }) },
     ),
+  exportWorkflowBundle: (name: string) =>
+    request<{
+      version: number;
+      name: string;
+      yaml: string;
+      ts: string | null;
+      exported_at: string;
+    }>(`/api/workflows/${name}/export-bundle`),
+  importWorkflowBundle: (body: { name: string; yaml: string; ts: string | null }) =>
+    request<{ ok: boolean; name: string }>(`/api/workflows/import-bundle`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   scanWorkflowHealth: () =>
     request<WorkflowHealthReport>(`/api/workflows/health`),
   fixOrphanWorkflow: (dir: string) =>

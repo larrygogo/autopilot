@@ -55,6 +55,38 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
     }
   }, [selected, newName]);
 
+  async function importFromFile(file: File | null) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as {
+        version?: number;
+        name?: string;
+        yaml?: string;
+        ts?: string | null;
+      };
+      if (typeof parsed.name !== "string" || typeof parsed.yaml !== "string") {
+        toast.error("文件格式错误", "需要 { name, yaml, ts? } 字段");
+        return;
+      }
+      const targetName = window.prompt("新工作流名（可改）", parsed.name) ?? parsed.name;
+      if (!targetName.trim()) return;
+      if (!/^[\w.\-]+$/.test(targetName.trim())) {
+        toast.error("名字只允许字母 / 数字 / . _ -", "");
+        return;
+      }
+      await api.importWorkflowBundle({
+        name: targetName.trim(),
+        yaml: parsed.yaml,
+        ts: parsed.ts ?? null,
+      });
+      toast.success(`已从文件导入工作流 ${targetName.trim()}`);
+      onCreated(targetName.trim());
+    } catch (e: unknown) {
+      toast.error("导入失败", (e as Error)?.message ?? String(e));
+    }
+  }
+
   async function handleCreate() {
     if (selected === FROM_AI) {
       onFromAI();
@@ -115,6 +147,24 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
                   自然语言告诉 AI 你要的流程，AI 生成 yaml + ts
                 </p>
               </button>
+
+              <label
+                className={cn(
+                  "block w-full cursor-pointer rounded-none border-[1.5px] px-3 py-2 text-left transition-colors",
+                  "border-foreground/30 hover:border-foreground/60",
+                )}
+              >
+                <span className="font-mono text-sm font-bold">📦 从 JSON 文件导入</span>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  导入别人导出的 .workflow.json 文件（含 yaml + ts）
+                </p>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={(e) => importFromFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
 
               {loading && <p className="text-sm text-muted-foreground">加载中…</p>}
               {!loading && templates.length === 0 && (
