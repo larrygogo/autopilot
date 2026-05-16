@@ -585,13 +585,15 @@ export function RequirementDetail() {
       toast.error("请先关联代码库", "需要绑定代码库才能入队执行，请在下方选择代码库。");
       return;
     }
+    // optimistic：UI 立刻反映 queued 状态，不等服务端响应
+    const prev = req;
+    setReq({ ...req, status: "queued" });
     setActionBusy(true);
     try {
       await api.enqueueRequirement(id);
-      await refresh();
-      // 用 toast action 引导跳任务看板，避免用户被留在需求页找不到任务
       toast.success("已入队执行", { label: "看任务 →", onClick: () => navigate("/tasks") });
     } catch (e: unknown) {
+      setReq(prev); // rollback
       toast.error("入队失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
@@ -612,13 +614,15 @@ export function RequirementDetail() {
   }
 
   async function approve() {
-    if (!id) return;
+    if (!id || !req) return;
+    const prev = req;
+    setReq({ ...req, status: "queued" });
     setActionBusy(true);
     try {
       await api.enqueueRequirement(id);
-      await refresh();
       toast.success("已审批通过，任务进入队列", { label: "看任务 →", onClick: () => navigate("/tasks") });
     } catch (e: unknown) {
+      setReq(prev);
       toast.error("审批失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
@@ -626,13 +630,15 @@ export function RequirementDetail() {
   }
 
   async function rejectApproval() {
-    if (!id) return;
+    if (!id || !req) return;
+    const prev = req;
+    setReq({ ...req, status: "drafting" });
     setActionBusy(true);
     try {
       await api.transitionRequirement(id, "drafting");
-      await refresh();
       toast.success("已驳回，需求返回草稿");
     } catch (e: unknown) {
+      setReq(prev);
       toast.error("驳回失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
@@ -640,14 +646,15 @@ export function RequirementDetail() {
   }
 
   async function resumeClarify() {
-    if (!id) return;
+    if (!id || !req) return;
+    const prev = req;
+    setReq({ ...req, status: "clarifying" });
     setActionBusy(true);
     try {
-      // drafting → clarifying；clarifier 自动跑一轮，基于历史 spec_md + Q&A 决定下一题或 done=true
       await api.transitionRequirement(id, "clarifying");
-      await refresh();
       toast.success("已重新进入澄清，AI 正在思考下一个问题");
     } catch (e: unknown) {
+      setReq(prev);
       toast.error("操作失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
@@ -655,13 +662,15 @@ export function RequirementDetail() {
   }
 
   async function markDone() {
-    if (!id) return;
+    if (!id || !req) return;
+    const prev = req;
+    setReq({ ...req, status: "done" });
     setActionBusy(true);
     try {
       await api.transitionRequirement(id, "done");
-      await refresh();
       toast.success("需求已标记完成");
     } catch (e: unknown) {
+      setReq(prev);
       toast.error("操作失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
@@ -669,13 +678,15 @@ export function RequirementDetail() {
   }
 
   async function requestFix() {
-    if (!id) return;
+    if (!id || !req) return;
+    const prev = req;
+    setReq({ ...req, status: "fix_revision" });
     setActionBusy(true);
     try {
       await api.transitionRequirement(id, "fix_revision");
-      await refresh();
       toast.success("已标记需要修改，Agent 将继续修复");
     } catch (e: unknown) {
+      setReq(prev);
       toast.error("操作失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
@@ -683,13 +694,15 @@ export function RequirementDetail() {
   }
 
   async function retryFromFailed() {
-    if (!id) return;
+    if (!id || !req) return;
+    const prev = req;
+    setReq({ ...req, status: "queued" });
     setActionBusy(true);
     try {
       await api.enqueueRequirement(id);
-      await refresh();
       toast.success("已重新入队执行", { label: "看任务 →", onClick: () => navigate("/tasks") });
     } catch (e: unknown) {
+      setReq(prev);
       toast.error("重试失败", (e as Error)?.message ?? String(e));
     } finally {
       setActionBusy(false);
@@ -712,13 +725,15 @@ export function RequirementDetail() {
 
   async function inject() {
     if (!id || !feedbackBody.trim()) return;
+    // optimistic：立刻清空输入 + 假装成功；失败回滚 textarea 内容
+    const prevBody = feedbackBody;
+    setFeedbackBody("");
     setSubmittingFeedback(true);
     try {
-      await api.injectFeedback(id, feedbackBody.trim());
-      setFeedbackBody("");
-      await refresh();
+      await api.injectFeedback(id, prevBody.trim());
       toast.success("反馈已提交");
     } catch (e: unknown) {
+      setFeedbackBody(prevBody); // 失败把内容恢复让用户改后再试
       toast.error("提交失败", (e as Error)?.message ?? String(e));
     } finally {
       setSubmittingFeedback(false);

@@ -151,12 +151,15 @@ export function TaskProgressCard({
 
   async function cancelTask() {
     if (!confirm("确认取消任务？已生成的产物会保留。")) return;
+    // optimistic：立刻显示 cancelled，不等服务端
+    const prev = task;
+    if (task) setTask({ ...task, status: "cancelled" });
     setCancelling(true);
     try {
-      await fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
-      await refresh();
+      await api.cancelTask(taskId);
       toast.success("任务已取消");
     } catch (e: unknown) {
+      if (prev) setTask(prev);
       toast.error("取消失败", (e as Error)?.message ?? String(e));
     } finally {
       setCancelling(false);
@@ -164,12 +167,19 @@ export function TaskProgressCard({
   }
 
   async function restartTask() {
+    // optimistic：从原 status 提取 phase 名，立刻显示 pending_<phase>
+    const prev = task;
+    if (task) {
+      const m = task.status.match(/^(?:running_|pending_|awaiting_|failed_)(.+)$/);
+      const phase = m ? m[1] : null;
+      if (phase) setTask({ ...task, status: `pending_${phase}`, dangling: false });
+    }
     setRestarting(true);
     try {
-      await fetch(`/api/tasks/${taskId}/restart`, { method: "POST" });
-      await refresh();
+      await api.restartTask(taskId);
       toast.success("任务已重启");
     } catch (e: unknown) {
+      if (prev) setTask(prev);
       toast.error("重启失败", (e as Error)?.message ?? String(e));
     } finally {
       setRestarting(false);
