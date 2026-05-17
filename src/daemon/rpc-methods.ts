@@ -43,6 +43,7 @@ import {
 } from "../core/schedules";
 import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig } from "../core/config";
 import { requestRestart } from "./index";
+import { loadApiToken } from "../core/api-token";
 import {
   listWorkspaceDir,
   readWorkspaceFile,
@@ -198,6 +199,17 @@ export function registerCoreRpcMethods(): void {
     handler: () => {
       const ok = requestRestart(150);
       return { ok, scheduled_in_ms: 150 };
+    },
+  });
+
+  registerRpcMethod({
+    method: "daemon.revealToken",
+    description: "返回明文 API token（已鉴权调用方使用：loopback 豁免或带正确 token 的远端）",
+    handler: () => {
+      // 调用方能进到 RPC 链路一定已经过 token 校验（loopback 自动豁免或带对 token）
+      // 返回明文不增加新攻击面 —— 真正的安全边界是"拿到 token 才能进来"
+      const token = loadApiToken();
+      return { token: token ?? "", is_set: !!token };
     },
   });
 
@@ -1460,6 +1472,7 @@ export function registerCoreRpcMethods(): void {
       const id = nextProjectId();
       try {
         const project = coreCreateProject({ id, name, description: (p.description as string | null | undefined) ?? null });
+        emitBus({ type: "projects:changed", payload: { id: project.id, action: "create" } });
         return { project };
       } catch (e: unknown) {
         const code = (e as { code?: string }).code;
@@ -1486,6 +1499,7 @@ export function registerCoreRpcMethods(): void {
         description: (p.description as string | null | undefined),
       });
       if (!project) throw new RpcError("NOT_FOUND", "project not found");
+      emitBus({ type: "projects:changed", payload: { id: project.id, action: "update" } });
       return { project };
     },
   });
@@ -1499,6 +1513,7 @@ export function registerCoreRpcMethods(): void {
       if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
       try {
         coreDeleteProject(p.id);
+        emitBus({ type: "projects:changed", payload: { id: p.id, action: "delete" } });
         return { ok: true };
       } catch (e: unknown) {
         throw new RpcError("DELETE_FAILED", e instanceof Error ? e.message : String(e));

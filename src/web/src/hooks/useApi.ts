@@ -394,6 +394,9 @@ export const api = {
   // [WS-RPC] daemon.restart — 请求 supervisor 重启 daemon（exit code 75）
   restartDaemon: () =>
     requestRpc<{ ok: boolean; scheduled_in_ms: number }>("daemon.restart"),
+  // [WS-RPC] daemon.revealToken — 已鉴权调用方查看明文 token
+  revealApiToken: () =>
+    requestRpc<{ token: string; is_set: boolean }>("daemon.revealToken"),
   rotateApiToken: () =>
     request<{ ok: true; token: string; state: DaemonListenInfo["token"] }>(
       "/api/daemon/token/rotate",

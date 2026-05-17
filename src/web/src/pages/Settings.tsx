@@ -116,9 +116,8 @@ export function Settings(_props: { embedded?: boolean } = {}) {
       {/* 桌面通知 */}
       <DesktopNotifyCard />
 
-      {/* 网络访问 */}
+      {/* 网络访问（含 API token + 本浏览器 token 副本） */}
       <NetworkAccessCard />
-      <ClientTokenCard />
 
       {status && (
         <Card className="mb-4 p-4">
@@ -180,6 +179,12 @@ function NetworkAccessCard(): React.ReactElement {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 切到局域网时如果还没 token，先弹这个 dialog 强制生成
   const [pendingExpose, setPendingExpose] = useState(false);
+  // 点「显示明文」后从 daemon.revealToken 拿到的真实 token，再点收起
+  const [revealedToken, setRevealedToken] = useState<string | null>(null);
+  // 本浏览器 localStorage 里给局域网访问用的 token 副本
+  const [clientStored, setClientStored] = useState<string>(() => getApiToken());
+  const [clientDraft, setClientDraft] = useState<string>("");
+  const isLanBrowser = shouldUseToken();
 
   const refresh = useCallback(async () => {
     try {
@@ -398,7 +403,7 @@ function NetworkAccessCard(): React.ReactElement {
         )}
       </div>
 
-      {/* Token 区 */}
+      {/* Token 区：服务端 token + 本浏览器副本 */}
       <div className="border border-foreground/15 bg-card px-3 py-2.5">
         <div className="mb-2 flex items-center justify-between">
           <div className="text-sm font-medium">API 安全令牌</div>
@@ -410,10 +415,49 @@ function NetworkAccessCard(): React.ReactElement {
         </div>
         <div className="mb-2 text-[11px] text-muted-foreground">
           {info.token.is_set ? (
-            <>
-              已设置：<code className="font-mono">{info.token.preview}</code>
-              {!tokenLocked && "（仅本机来源免 token，外部访问必须带）"}
-            </>
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span>已设置：</span>
+                <code className="font-mono bg-muted/40 px-1.5 py-0.5">
+                  {revealedToken ?? info.token.preview}
+                </code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-[10px]"
+                  onClick={async () => {
+                    if (revealedToken) { setRevealedToken(null); return; }
+                    try {
+                      const res = await api.revealApiToken();
+                      setRevealedToken(res.token);
+                    } catch (e: unknown) {
+                      toast.error("拿明文 token 失败", (e as Error)?.message ?? String(e));
+                    }
+                  }}
+                >
+                  {revealedToken ? "隐藏" : "显示明文"}
+                </Button>
+                {revealedToken && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[10px]"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(revealedToken);
+                        toast.success("已复制 token 到剪贴板");
+                      } catch {
+                        toast.error("复制失败", "请手动选中复制");
+                      }
+                    }}
+                  >
+                    <Copy className="h-3 w-3" />
+                    复制
+                  </Button>
+                )}
+              </div>
+              {!tokenLocked && <div>仅本机来源免 token，外部访问必须带</div>}
+            </div>
           ) : (
             <span className="text-warning">未设置。切到"局域网开放"时必须设置，否则同网段任何人都能访问 daemon。</span>
           )}
@@ -442,6 +486,66 @@ function NetworkAccessCard(): React.ReactElement {
             </Button>
           )}
         </div>
+
+        {/* 本浏览器 token 副本 —— 仅从局域网 IP 访问时显示。本机回环 daemon 自动豁免，无需配 */}
+        {isLanBrowser && (
+          <div className="mt-3 border-t border-dashed border-foreground/15 pt-3">
+            <div className="mb-1 text-xs font-medium">本浏览器副本</div>
+            <p className="mb-2 text-[11px] text-muted-foreground">
+              你从局域网 <code className="font-mono">{location.host}</code> 访问 daemon，
+              请把上方明文 token 贴入此处保存到本浏览器 localStorage。每台设备各自配。
+            </p>
+            <dl className="mb-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+              <InfoField
+                label="已存 token"
+                value={
+                  clientStored
+                    ? clientStored.length > 8 ? `${clientStored.slice(0, 4)}…${clientStored.slice(-4)}` : "********"
+                    : "未设置"
+                }
+                mono
+              />
+            </dl>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="password"
+                value={clientDraft}
+                onChange={(e) => setClientDraft(e.target.value)}
+                placeholder={clientStored ? "贴入新 token 覆盖" : "贴入 token"}
+                className="max-w-md font-mono h-8 text-xs"
+              />
+              <Button
+                size="sm"
+                disabled={!clientDraft.trim()}
+                onClick={() => {
+                  const t = clientDraft.trim();
+                  setApiToken(t);
+                  setClientStored(t);
+                  setClientDraft("");
+                  toast.success("已保存，正在刷新页面…");
+                  setTimeout(() => location.reload(), 500);
+                }}
+              >
+                保存
+              </Button>
+              {clientStored && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    clearApiToken();
+                    setClientStored("");
+                    toast.success("已清除");
+                    setTimeout(() => location.reload(), 500);
+                  }}
+                >
+                  清除
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
         <p className="mt-2 text-[10px] text-muted-foreground">
           注：MCP <code className="font-mono">/mcp</code> 路由走独立 token（mcp-config 管理），不受此控制
         </p>
@@ -684,62 +788,6 @@ function DesktopNotifyCard(): React.ReactElement {
           启用桌面通知
         </Button>
       )}
-    </Card>
-  );
-}
-
-function ClientTokenCard(): React.ReactElement {
-  const toast = useToast();
-  const [stored, setStored] = useState<string>(() => getApiToken());
-  const [draft, setDraft] = useState<string>("");
-  const isLan = shouldUseToken();
-
-  function save() {
-    const t = draft.trim();
-    if (!t) {
-      toast.error("token 不能为空");
-      return;
-    }
-    setApiToken(t);
-    setStored(t);
-    setDraft("");
-    toast.success("已保存 token，正在刷新页面…");
-    setTimeout(() => location.reload(), 500);
-  }
-
-  function clear() {
-    clearApiToken();
-    setStored("");
-    toast.success("已清除 token");
-    if (isLan) setTimeout(() => location.reload(), 500);
-  }
-
-  const preview = stored ? (stored.length > 8 ? `${stored.slice(0, 4)}…${stored.slice(-4)}` : "********") : "未设置";
-
-  return (
-    <Card className="mb-4 p-4">
-      <h3 className="mb-1 text-sm font-semibold">客户端 Token</h3>
-      <p className="mb-3 text-[11px] text-muted-foreground leading-relaxed">
-        浏览器从局域网访问 daemon 时需要 token；本机回环（127.0.0.1）访问会被自动豁免，无需配置。
-        token 存在浏览器 localStorage，每个设备各自配置。
-      </p>
-      <dl className="mb-3 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-3">
-        <InfoField label="当前来源" value={isLan ? `局域网（${location.host}）` : "本机回环"} />
-        <InfoField label="已存 token" value={preview} mono />
-      </dl>
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          type="password"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={stored ? "贴入新 token 覆盖" : "贴入 token"}
-          className="max-w-md font-mono"
-        />
-        <Button size="sm" onClick={save} disabled={!draft.trim()}>保存</Button>
-        {stored && (
-          <Button size="sm" variant="outline" onClick={clear}>清除</Button>
-        )}
-      </div>
     </Card>
   );
 }
