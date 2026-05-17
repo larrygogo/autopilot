@@ -331,6 +331,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
         <GateBanner
           taskId={taskId}
           phase={awaitingPhase}
+          phaseLabel={gatePhaseDef?.label}
           gateMessage={gatePhaseDef?.gate_message}
           toast={toast}
         />
@@ -861,16 +862,31 @@ function AskBanner({
 function GateBanner({
   taskId,
   phase,
+  phaseLabel,
   gateMessage,
   toast,
 }: {
   taskId: string;
   phase: string;
+  /** 来自工作流 yaml 的业务标签，如「设计评审」；缺省时只显示 phase name */
+  phaseLabel?: string;
   gateMessage?: string;
   toast: ReturnType<typeof useToast>;
 }) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<"pass" | "reject" | "cancel" | null>(null);
+
+  // 把 awaiting_<phase> / running_<phase> 这种 status 翻成中文
+  // 业务标签优先；同时把原 trigger 名暴露在 ()里供懂行的反查
+  const decisionLabelOf = (s: string): string => {
+    if (s.startsWith("awaiting_")) return phaseLabel ? `等待${phaseLabel}` : `等待·${s.slice(9)}`;
+    if (s.startsWith("running_")) return phaseLabel ? `运行${phaseLabel}` : `运行·${s.slice(8)}`;
+    if (s.startsWith("pending_")) return phaseLabel ? `准备${phaseLabel}` : `准备·${s.slice(8)}`;
+    if (s.startsWith("failed_")) return phaseLabel ? `${phaseLabel}失败` : `失败·${s.slice(7)}`;
+    if (s === "done") return "完成";
+    if (s === "cancelled") return "已取消";
+    return s;
+  };
 
   const decide = async (decision: "pass" | "reject" | "cancel") => {
     if (decision === "reject" && !note.trim()) {
@@ -881,7 +897,10 @@ function GateBanner({
     try {
       const r = await api.decideTask(taskId, decision, note.trim() || undefined);
       const verb = decision === "pass" ? "通过" : decision === "reject" ? "驳回" : "取消";
-      toast.success(`已${verb} · ${r.from} → ${r.to}`);
+      // 业务标签 + 内核 trigger 同时显示，让放松的自己读得顺、懂行的自己能反查
+      toast.success(
+        `已${verb} · ${decisionLabelOf(r.from)} → ${decisionLabelOf(r.to)}  (${r.from} → ${r.to})`,
+      );
       setNote("");
     } catch (e: any) {
       toast.error(`${decision} 失败`, e?.message ?? String(e));
@@ -899,10 +918,19 @@ function GateBanner({
         <div className="min-w-0 flex-1 space-y-2.5">
           <div>
             <h3 className="font-display text-sm font-bold uppercase tracking-wider text-warning">
-              ✋ 等待你的决断
+              ✋ 等待你拍板{phaseLabel ? `：${phaseLabel}` : ""}
             </h3>
             <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-              阶段 <code className="border border-foreground/20 bg-muted px-1 font-mono">{phase}</code> 已完成。
+              阶段 {phaseLabel ? (
+                <>
+                  <span className="font-semibold text-foreground">{phaseLabel}</span>
+                  <span className="ml-1 opacity-60">(</span>
+                  <code className="border border-foreground/20 bg-muted px-1 font-mono">{phase}</code>
+                  <span className="opacity-60">)</span>
+                </>
+              ) : (
+                <code className="border border-foreground/20 bg-muted px-1 font-mono">{phase}</code>
+              )} 已完成。
               {gateMessage ? (
                 <> {gateMessage}</>
               ) : (

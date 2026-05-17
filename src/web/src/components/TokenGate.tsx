@@ -11,6 +11,8 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
   const [needsToken, setNeedsToken] = useState<boolean>(() => shouldUseToken() && !getApiToken());
   const [input, setInput] = useState("");
   const [touched, setTouched] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<null | { ok: boolean; msg: string }>(null);
 
   if (!needsToken) return <>{children}</>;
 
@@ -23,6 +25,32 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
     setNeedsToken(false);
     // 重新加载页面让 ws-singleton / useApi 用新 token 重连
     location.reload();
+  }
+
+  // 测试连接：不存 localStorage，直接拿输入框的 token 试 /api/status，
+  // 让用户先确认 token 对不对再保存（避免 reload → 401 → 又回到 TokenGate 死循环猜疑）
+  async function testConnection() {
+    const t = input.trim();
+    setTouched(true);
+    if (!t) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch("/api/status", {
+        headers: { Authorization: `Bearer ${t}` },
+      });
+      if (res.status === 401) {
+        setTestResult({ ok: false, msg: "token 错误（HTTP 401）—— 请检查从本机复制时是否带了空格/换行" });
+      } else if (!res.ok) {
+        setTestResult({ ok: false, msg: `daemon 返回 HTTP ${res.status}` });
+      } else {
+        setTestResult({ ok: true, msg: "✓ token 验证通过，可以保存" });
+      }
+    } catch (e: unknown) {
+      setTestResult({ ok: false, msg: `网络错误：${(e as Error)?.message ?? String(e)}` });
+    } finally {
+      setTesting(false);
+    }
   }
 
   return (
@@ -41,7 +69,7 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
           </div>
           <p>在装 daemon 的本机执行：</p>
           <pre className="mt-1 font-mono">cat ~/.autopilot/runtime/api-token</pre>
-          <p className="mt-2">或在本机浏览器打开 <span className="font-mono">127.0.0.1:6180/settings</span> → 「客户端 Token」复制。</p>
+          <p className="mt-2">或在本机浏览器打开 <span className="font-mono">127.0.0.1:6180/settings</span> → 「网络访问 → API 安全令牌 → 显示明文」复制。</p>
         </div>
         <form onSubmit={submit} className="space-y-3">
           <input
@@ -55,12 +83,27 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
           {touched && !input.trim() && (
             <p className="text-xs text-destructive">请粘贴 token</p>
           )}
-          <button
-            type="submit"
-            className="w-full border-[1.5px] border-foreground bg-foreground px-3 py-2 font-display text-xs font-bold uppercase tracking-wider text-background hover:bg-accent hover:border-accent rounded-none"
-          >
-            保存并继续
-          </button>
+          {testResult && (
+            <p className={`text-xs ${testResult.ok ? "text-success" : "text-destructive"}`}>
+              {testResult.msg}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void testConnection()}
+              disabled={testing || !input.trim()}
+              className="flex-1 border-[1.5px] border-foreground/30 bg-background px-3 py-2 font-display text-xs font-bold uppercase tracking-wider text-foreground hover:border-accent hover:text-accent disabled:opacity-50 rounded-none"
+            >
+              {testing ? "测试中…" : "测试连接"}
+            </button>
+            <button
+              type="submit"
+              className="flex-[2] border-[1.5px] border-foreground bg-foreground px-3 py-2 font-display text-xs font-bold uppercase tracking-wider text-background hover:bg-accent hover:border-accent rounded-none"
+            >
+              保存并继续
+            </button>
+          </div>
         </form>
       </div>
     </div>

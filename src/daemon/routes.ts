@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { readdir } from "node:fs/promises";
 import { join, resolve, sep, dirname, parse as parsePath } from "path";
 import { getPhaseIndex } from "../core/artifacts";
-import { VERSION } from "../index";
+import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
 import { initDb, getDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks, updateTask } from "../core/db";
 import { log } from "../core/logger";
 import { snapshotWorkflow } from "../core/manifest";
@@ -556,6 +556,8 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
       const status: DaemonStatus = {
         version: VERSION,
+        git_sha: GIT_SHA,
+        started_at_iso: STARTED_AT_ISO,
         uptime: Math.floor((Date.now() - startedAt) / 1000),
         pid: process.pid,
         taskCounts,

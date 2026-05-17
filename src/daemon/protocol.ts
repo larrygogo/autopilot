@@ -47,6 +47,10 @@ export type ServerMessage =
 
 export interface DaemonStatus {
   version: string;
+  /** 当前代码的 git 短 SHA；非 git 仓库或 git 不可用时为 "dev" */
+  git_sha: string;
+  /** daemon 进程启动时间 (ISO 8601)，配合 uptime 让 web 能展示「启动于 X 至今」 */
+  started_at_iso: string;
   uptime: number;
   pid: number;
   taskCounts: Record<string, number>;
@@ -124,6 +128,10 @@ export function getChannelsForEvent(event: AutopilotEvent): string[] {
     }
     case "schedule": {
       channels.push("schedule:*");
+      break;
+    }
+    case "projects": {
+      channels.push("projects:*");
       break;
     }
     case "requirement": {

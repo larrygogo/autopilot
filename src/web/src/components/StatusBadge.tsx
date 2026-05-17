@@ -1,5 +1,6 @@
 import React from "react";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 type Tone = NonNullable<BadgeProps["variant"]>;
@@ -50,16 +51,30 @@ export function StatusBadge({
   compact?: boolean;
 }) {
   const tone = resolveTone(status);
-  return (
+  const localized = localizeStatus(status);
+  // 只有"业务标签"和"原内核名"不同时才挂 tooltip —— 否则 hover 不增信息（产品分层定位：
+  // Web 是决策者面板，业务标签为主；懂行的自己可 hover 反查内核名）
+  const hasInternalDiff = localized !== status;
+  const badge = (
     <Badge
       variant={tone}
       className={cn(
         "font-mono",
         compact ? "px-1.5 py-0 text-[10px]" : "px-2 py-0.5 text-[11px]",
+        hasInternalDiff && "cursor-help",
         className,
       )}
     >
-      {localizeStatus(status)}
+      {localized}
     </Badge>
+  );
+  if (!hasInternalDiff) return badge;
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>{badge}</TooltipTrigger>
+        <TooltipContent className="font-mono text-[10px]">{status}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

@@ -133,7 +133,7 @@ import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
 import { registerRpcMethod, hasRpcMethod, RpcError } from "./rpc";
 import { wsManager } from "./ws";
-import { VERSION } from "../index";
+import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
 
 /** 业务错误 → RpcError 透传（保留 code）；其他错误让 invokeRpcMethod 包成 INTERNAL */
 function rethrowAsRpc(e: unknown): never {
@@ -164,9 +164,11 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "daemon.status",
-    description: "返回 daemon version / pid / uptime / 各状态任务数",
+    description: "返回 daemon version / git_sha / started_at / pid / uptime / 各状态任务数",
     handler: () => ({
       version: VERSION,
+      git_sha: GIT_SHA,
+      started_at_iso: STARTED_AT_ISO,
       pid: process.pid,
       uptime: Math.floor(process.uptime()),
       // taskCounts 由 daemon 启动时维护；此处直接现算一次（小数据量 OK）
