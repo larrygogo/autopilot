@@ -118,12 +118,12 @@ export function Settings(_props: { embedded?: boolean } = {}) {
 
       {/* 网络访问 */}
       <NetworkAccessCard />
-
+      <ClientTokenCard />
 
       {status && (
         <Card className="mb-4 p-4">
           <h3 className="mb-3 text-sm font-semibold">Daemon 信息</h3>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
             <InfoField label="版本" value={status.version} />
             <InfoField label="PID" value={String(status.pid)} mono />
             <InfoField label="运行时间" value={formatUptime(status.uptime)} />
@@ -132,8 +132,6 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         </Card>
       )}
 
-      <NetworkAccessCard />
-      <ClientTokenCard />
       <DaemonLogCard />
 
       {/* 编辑配置文件提示 */}
@@ -593,7 +591,7 @@ function DaemonLogCard(): React.ReactElement {
 
       {path ? (
         <p className="mb-2 text-[11px] text-muted-foreground">
-          位置：<code className="rounded bg-muted px-1 py-0.5 font-mono">{path}</code>
+          位置：<code className="rounded bg-muted px-1 py-0.5 font-mono break-all">{path}</code>
           <span className="ml-1">（最后 1000 行，时间倒序 · 新在顶）</span>
         </p>
       ) : (
@@ -725,7 +723,7 @@ function ClientTokenCard(): React.ReactElement {
         浏览器从局域网访问 daemon 时需要 token；本机回环（127.0.0.1）访问会被自动豁免，无需配置。
         token 存在浏览器 localStorage，每个设备各自配置。
       </p>
-      <dl className="mb-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+      <dl className="mb-3 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-3">
         <InfoField label="当前来源" value={isLan ? `局域网（${location.host}）` : "本机回环"} />
         <InfoField label="已存 token" value={preview} mono />
       </dl>
