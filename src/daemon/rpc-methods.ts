@@ -41,7 +41,8 @@ import {
   isValidTimezone,
   type ScheduleType,
 } from "../core/schedules";
-import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw } from "../core/config";
+import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig } from "../core/config";
+import { requestRestart } from "./index";
 import {
   listWorkspaceDir,
   readWorkspaceFile,
@@ -168,6 +169,36 @@ export function registerCoreRpcMethods(): void {
       // taskCounts 由 daemon 启动时维护；此处直接现算一次（小数据量 OK）
       taskCounts: countTasksByStatus(),
     }),
+  });
+
+  registerRpcMethod({
+    method: "daemon.setHost",
+    description: "写入 config.yaml.daemon.host；需配合 daemon.restart 才生效",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.host !== "string" || !p.host.trim()) {
+        throw new RpcError("INVALID_PARAM", "需要 host (string)");
+      }
+      const host = p.host.trim();
+      // 校验：仅允许 127.0.0.1 / 0.0.0.0 / IPv4 / localhost 字面量
+      const isIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+      const isAllowedLiteral = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
+      if (!isAllowedLiteral && !isIPv4) {
+        throw new RpcError("INVALID_PARAM", "host 必须是 localhost / 127.0.0.1 / 0.0.0.0 或 IPv4 地址");
+      }
+      const cur = loadDaemonConfig();
+      saveDaemonConfig({ ...cur, host });
+      return { ok: true, host, restart_required: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "daemon.restart",
+    description: "请求 supervisor 重启 daemon（exit code 75 触发 respawn）；裸跑模式下退化为 stop",
+    handler: () => {
+      const ok = requestRestart(150);
+      return { ok, scheduled_in_ms: 150 };
+    },
   });
 
   registerRpcMethod({

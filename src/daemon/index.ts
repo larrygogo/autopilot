@@ -25,6 +25,29 @@ import { initMcpRuntime, disposeMcpRuntime } from "./mcp-runtime";
 import { createDefaultAggregator, type Aggregator } from "../core/now-aggregator";
 import { setNowAggregator } from "./routes-now";
 import type { AutopilotEvent } from "./protocol";
+import { RESTART_SENTINEL_CODE } from "./supervisor";
+
+// ──────────────────────────────────────────────
+// Module 级 shutdown 注册表
+// supervisor 模式下 daemon 内 RPC（如 daemon.restart）需要主动触发自身退出，
+// 走相同的 shutdown 清理路径但 exit code 不同。
+// ──────────────────────────────────────────────
+let _activeShutdown: ((exitCode: number) => void) | null = null;
+
+/**
+ * 由 RPC 等内部调用方触发 daemon 重启。
+ *
+ * 行为：在下一 tick 调用 shutdown(75)，supervisor 看到 sentinel code 立即 respawn。
+ * delayMs 默认 100ms 给客户端 RPC 响应留出回流窗口。
+ *
+ * 注：必须在 supervisor 模式下使用；裸跑 daemon（无 supervisor）调用此函数等同于 stop。
+ */
+export function requestRestart(delayMs = 100): boolean {
+  if (!_activeShutdown) return false;
+  const fn = _activeShutdown;
+  setTimeout(() => fn(RESTART_SENTINEL_CODE), delayMs);
+  return true;
+}
 
 // ──────────────────────────────────────────────
 // Daemon 入口
@@ -199,8 +222,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   console.log(`autopilot daemon v${VERSION} started on http://${host}:${port} (pid=${process.pid})`);
 
   // 优雅退出
-  const shutdown = () => {
-    console.log("\ndaemon 正在关闭...");
+  const shutdown = (exitCode = 0) => {
+    console.log(`\ndaemon 正在关闭${exitCode === RESTART_SENTINEL_CODE ? "（请求 respawn）" : ""}...`);
     clearInterval(watcherTimer);
     clearInterval(clarifierWatchdogTimer);
     clearInterval(retentionTimer);
@@ -219,11 +242,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     removePid();
     removeListenInfo();
     console.log("daemon 已关闭。");
-    process.exit(0);
+    process.exit(exitCode);
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  _activeShutdown = shutdown;
+
+  process.on("SIGINT", () => shutdown(0));
+  process.on("SIGTERM", () => shutdown(0));
 }
 
 function recoverDanglingTasks(): void {

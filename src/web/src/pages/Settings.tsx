@@ -132,6 +132,7 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         </Card>
       )}
 
+      <NetworkAccessCard />
       <ClientTokenCard />
       <DaemonLogCard />
 
@@ -209,8 +210,51 @@ function NetworkAccessCard(): React.ReactElement {
     setSaving(true);
     try {
       const res = await api.saveDaemonListen(next);
-      toast.success("已保存 · 需 daemon restart 后才生效");
-      await refresh();
+      // 切回 127 时如果当前从局域网 IP 访问，restart 后此页面会失联
+      // 给用户机会取消（如果坚持切就走 reload 兜底）
+      if (
+        next.host === "127.0.0.1" &&
+        location.hostname !== "127.0.0.1" &&
+        location.hostname !== "localhost"
+      ) {
+        if (!confirm(
+          `你当前从 ${location.hostname} 访问。daemon 切回 127.0.0.1 后此页面将无法继续使用，` +
+          `需要改在装 daemon 的本机用 127.0.0.1 打开。\n\n仍要继续吗？`,
+        )) {
+          await refresh();
+          return null;
+        }
+      }
+      toast.success("已保存，正在重启 daemon…");
+      try {
+        await api.restartDaemon();
+      } catch (e: unknown) {
+        // restart 调用本身失败（如 daemon 已退出未起完）— 提示手动 restart 兜底
+        toast.error("自动重启失败，请手动执行 `autopilot daemon restart`", (e as Error)?.message ?? String(e));
+        await refresh();
+        return res;
+      }
+      // 轮询 getDaemonListen 等 WS 重连 + 新 daemon 起来；超时回退到刷新页面
+      const deadline = Date.now() + 15_000;
+      let recovered = false;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 600));
+        try {
+          const fresh = await api.getDaemonListen();
+          setInfo(fresh);
+          setPortDraft(String(fresh.port));
+          toast.success(`daemon 已重启，当前监听 ${fresh.host}:${fresh.port}`);
+          if (next.host === "0.0.0.0" && fresh.lan_ips.length > 0) {
+            toast.success(`局域网访问：${fresh.lan_ips.map((ip) => `http://${ip}:${fresh.port}`).join(" / ")}`);
+          }
+          recovered = true;
+          break;
+        } catch { /* 还在重启，继续等 */ }
+      }
+      if (!recovered) {
+        toast.error("daemon 重启等待超时，刷新页面尝试…");
+        setTimeout(() => location.reload(), 1000);
+      }
       return res;
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));

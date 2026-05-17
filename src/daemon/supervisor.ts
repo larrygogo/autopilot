@@ -16,11 +16,16 @@ import {
 //
 // 约定：
 // - 子进程退出码 0 → 优雅退出，supervisor 也退出
-// - 非 0 退出码 或 被信号杀死（SIGKILL / SIGSEGV）→ 视为崩溃，重启
+// - 子进程退出码 75（RESTART_SENTINEL）→ 主动请求 respawn（如改 host/port 后），
+//   supervisor 立即重启 daemon，跳过退避，不增加 attempt 计数
+// - 非 0 / 非 75 退出码 或 被信号杀死（SIGKILL / SIGSEGV）→ 视为崩溃，重启
 // - 指数退避：1s / 2s / 5s / 10s / 30s / 60s，上限 60s
 // - 连续 10 次 <30s 内重启 → 进入"快速崩溃"判定，退避到 60s
 // - Supervisor 收到 SIGTERM / SIGINT → 转发给子进程，等子进程退出后自己退出
 // ──────────────────────────────────────────────
+
+/** daemon 主动请求 respawn 的退出码（参考 sysexits.h EX_TEMPFAIL） */
+export const RESTART_SENTINEL_CODE = 75;
 
 const BASE_BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000];
 const CRASH_LOOP_WINDOW_MS = 30_000;
@@ -89,6 +94,12 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
     if (exitCode === 0) {
       console.log("daemon 优雅退出（code=0），supervisor 同步退出");
       break;
+    }
+
+    if (exitCode === RESTART_SENTINEL_CODE) {
+      console.log(`daemon 主动请求 respawn (code=${RESTART_SENTINEL_CODE})，立即重启`);
+      // 不增加 attempt，不退避；继续 while 循环 spawn 新 daemon
+      continue;
     }
 
     // 崩溃 —— 记录时间戳用于判断快速崩溃循环

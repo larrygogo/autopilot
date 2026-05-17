@@ -388,6 +388,12 @@ export const api = {
       "/api/daemon/listen",
       { method: "PUT", body: JSON.stringify(body) },
     ),
+  // [WS-RPC] daemon.setHost — 写 config.yaml.daemon.host
+  setDaemonHost: (host: string) =>
+    requestRpc<{ ok: true; host: string; restart_required: true }>("daemon.setHost", { host }),
+  // [WS-RPC] daemon.restart — 请求 supervisor 重启 daemon（exit code 75）
+  restartDaemon: () =>
+    requestRpc<{ ok: boolean; scheduled_in_ms: number }>("daemon.restart"),
   rotateApiToken: () =>
     request<{ ok: true; token: string; state: DaemonListenInfo["token"] }>(
       "/api/daemon/token/rotate",
