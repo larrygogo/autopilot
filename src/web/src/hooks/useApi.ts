@@ -477,18 +477,21 @@ export const api = {
     body: { alias: string; path: string; default_branch?: string; github_owner?: string | null; github_repo?: string | null },
   ) =>
     requestRpc<{ codebase: Codebase }>("projects.addCodebase", { id: projectId, ...body }).then((r) => r.codebase),
-  // codebases CRUD：保留 HTTP，下一轮单独迁
+  // [WS-RPC] codebases.delete
   deleteCodebase: (codebaseId: string) =>
-    request<{ ok: true }>(`/api/codebases/${encodeURIComponent(codebaseId)}`, { method: "DELETE" }),
+    requestRpc<{ ok: true }>("codebases.delete", { id: codebaseId }),
   // [WS-RPC] projects.requirements
   listProjectRequirements: (projectId: string) =>
     requestRpc<{ requirements: Requirement[] }>("projects.requirements", { id: projectId }).then((r) => r.requirements),
 
-  // Codebases —— 后端响应包了 envelope（{ codebases } / { codebase }），统一在此解包返回裸数据
+  // Codebases CRUD —— 走 WS RPC，handler 返回裸数据，无 envelope
+  // [WS-RPC] codebases.list
   listCodebases: () =>
-    request<{ codebases: Codebase[] }>("/api/codebases").then((r) => r.codebases),
+    requestRpc<Codebase[]>("codebases.list"),
+  // [WS-RPC] codebases.get
   getCodebase: (id: string) =>
-    request<{ codebase: Codebase }>(`/api/codebases/${id}`).then((r) => r.codebase),
+    requestRpc<Codebase>("codebases.get", { id }),
+  // [WS-RPC] codebases.create
   createCodebase: (body: {
     alias: string;
     path: string;
@@ -497,10 +500,8 @@ export const api = {
     github_repo?: string | null;
     project_id?: string;
   }) =>
-    request<{ codebase: Codebase }>("/api/codebases", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }).then((r) => r.codebase),
+    requestRpc<Codebase>("codebases.create", body),
+  // [WS-RPC] codebases.update
   updateCodebase: (id: string, body: Partial<{
     alias: string;
     path: string;
@@ -508,21 +509,18 @@ export const api = {
     github_owner: string | null;
     github_repo: string | null;
   }>) =>
-    request<{ codebase: Codebase }>(`/api/codebases/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }).then((r) => r.codebase),
+    requestRpc<Codebase>("codebases.update", { id, ...body }),
+  // [WS-RPC] codebases.healthcheck
   healthcheckCodebase: (id: string) =>
-    request<CodebaseHealthResult>(`/api/codebases/${id}/healthcheck`, { method: "POST" }),
+    requestRpc<CodebaseHealthResult>("codebases.healthcheck", { id }),
 
   // Submodules（仅查询；自动发现写在 healthcheck 里）
+  // [WS-RPC] codebases.listSubmodules
   listSubmodules: (parentId: string) =>
-    request<{ submodules: Codebase[] }>(`/api/codebases/${parentId}/submodules`).then((r) => r.submodules),
+    requestRpc<{ submodules: Codebase[] }>("codebases.listSubmodules", { id: parentId }).then((r) => r.submodules),
+  // [WS-RPC] codebases.rediscoverSubmodules
   rediscoverSubmodules: (parentId: string) =>
-    request<RediscoverSubmodulesResult>(
-      `/api/codebases/${parentId}/rediscover-submodules`,
-      { method: "POST" },
-    ),
+    requestRpc<RediscoverSubmodulesResult>("codebases.rediscoverSubmodules", { id: parentId }),
 
   // 文件系统浏览
   browseFs: (path?: string, showHidden = false) => {
@@ -537,28 +535,19 @@ export const api = {
   // [WS-RPC] setup.status
   setupStatus: () => requestRpc<DoctorReportWithDismiss>("setup.status"),
 
+  // [WS-RPC] setup.saveProviders
   setupProviders: (providers: Record<string, Record<string, unknown>>) =>
-    request<{ report: DoctorReportWithDismiss }>("/api/setup/providers", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ providers }),
-    }),
+    requestRpc<{ report: DoctorReportWithDismiss }>("setup.saveProviders", { providers }),
 
+  // [WS-RPC] setup.saveAgents
   setupAgents: (agents: Record<string, Record<string, unknown>>) =>
-    request<{ report: DoctorReportWithDismiss }>("/api/setup/agents", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agents }),
-    }),
+    requestRpc<{ report: DoctorReportWithDismiss }>("setup.saveAgents", { agents }),
 
+  // [WS-RPC] setup.saveCodebases
   setupCodebase: (payload: { name: string; path: string; project_id?: string }) =>
-    request<{ codebase: { id: string; alias: string; path: string; project_id: string } }>(
-      "/api/setup/codebases",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      },
+    requestRpc<{ codebase: { id: string; alias: string; path: string; project_id: string } }>(
+      "setup.saveCodebases",
+      payload,
     ),
 
   // [WS-RPC] setup.dismiss

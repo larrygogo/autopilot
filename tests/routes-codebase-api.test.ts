@@ -1,8 +1,8 @@
 /**
- * /api/codebases 新主路由测试。
+ * codebases.* RPC method 测试。
  *
- * 旧 /api/repos 路由继续保留作为别名（响应字段 repo/repos），
- * P6 清理；本测试覆盖新主路由的字段名与基础 CRUD。
+ * 旧 /api/repos HTTP 别名继续保留（响应字段 repo/repos），P6 清理；
+ * 本测试只覆盖 codebases.* WS RPC + /api/repos 别名留一个 smoke。
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
@@ -17,8 +17,10 @@ import { _setDbForTest } from "../src/core/db";
 import { createCodebase } from "../src/core/codebases";
 import { createProject } from "../src/core/projects";
 import { handleRequest } from "../src/daemon/routes";
+import { invokeRpcMethod } from "../src/daemon/rpc";
+import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
-describe("/api/codebases 新主路由", () => {
+describe("codebases.* RPC", () => {
   let db: Database;
 
   beforeAll(() => {
@@ -30,6 +32,7 @@ describe("/api/codebases 新主路由", () => {
     migrate007(db);
     migrate008(db);
     _setDbForTest(db);
+    registerCoreRpcMethods();
     createProject({ id: "proj-001", name: "P" });
   });
 
@@ -42,72 +45,76 @@ describe("/api/codebases 新主路由", () => {
     db.run("DELETE FROM codebases");
   });
 
-  it("GET /api/codebases 返回 { codebases: [...] }", async () => {
+  it("codebases.list 返回数组", async () => {
     createCodebase({ id: "cb-001", project_id: "proj-001", alias: "x", path: "/tmp/x", default_branch: "main" });
-    const res = await handleRequest(new Request("http://localhost/api/codebases"));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { codebases: Array<{ id: string; alias: string }> };
-    expect(Array.isArray(body.codebases)).toBe(true);
-    expect(body.codebases[0]?.id).toBe("cb-001");
-    expect(body.codebases[0]?.alias).toBe("x");
+    const r = await invokeRpcMethod("codebases.list", {});
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const list = r.payload as Array<{ id: string; alias: string }>;
+      expect(Array.isArray(list)).toBe(true);
+      expect(list[0]?.id).toBe("cb-001");
+      expect(list[0]?.alias).toBe("x");
+    }
   });
 
-  it("POST /api/codebases 返回 { codebase: {...} } + 201", async () => {
-    const res = await handleRequest(new Request("http://localhost/api/codebases", {
-      method: "POST",
-      body: JSON.stringify({ alias: "demo", path: "/tmp/demo", project_id: "proj-001" }),
-    }));
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { codebase: { id: string; alias: string; project_id: string } };
-    expect(body.codebase.alias).toBe("demo");
-    expect(body.codebase.project_id).toBe("proj-001");
-    expect(body.codebase.id).toMatch(/^cb-/);
+  it("codebases.create 返回裸 codebase", async () => {
+    const r = await invokeRpcMethod("codebases.create", {
+      alias: "demo",
+      path: "/tmp/demo",
+      project_id: "proj-001",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const cb = r.payload as { id: string; alias: string; project_id: string };
+      expect(cb.alias).toBe("demo");
+      expect(cb.project_id).toBe("proj-001");
+      expect(cb.id).toMatch(/^cb-/);
+    }
   });
 
-  it("POST /api/codebases 缺 alias / path → 400", async () => {
-    const res = await handleRequest(new Request("http://localhost/api/codebases", {
-      method: "POST",
-      body: JSON.stringify({ alias: "demo" }),
-    }));
-    expect(res.status).toBe(400);
+  it("codebases.create 缺 alias/path → INVALID_PARAM", async () => {
+    const r = await invokeRpcMethod("codebases.create", { alias: "demo" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe("INVALID_PARAM");
   });
 
-  it("GET /api/codebases/:id 返回 { codebase: {...} }", async () => {
+  it("codebases.get 返回单条", async () => {
     createCodebase({ id: "cb-002", project_id: "proj-001", alias: "y", path: "/tmp/y", default_branch: "main" });
-    const res = await handleRequest(new Request("http://localhost/api/codebases/cb-002"));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { codebase: { alias: string } };
-    expect(body.codebase.alias).toBe("y");
+    const r = await invokeRpcMethod("codebases.get", { id: "cb-002" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const cb = r.payload as { alias: string };
+      expect(cb.alias).toBe("y");
+    }
   });
 
-  it("GET /api/codebases/:id 不存在 → 404", async () => {
-    const res = await handleRequest(new Request("http://localhost/api/codebases/nope"));
-    expect(res.status).toBe(404);
+  it("codebases.get 不存在 → NOT_FOUND", async () => {
+    const r = await invokeRpcMethod("codebases.get", { id: "nope" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe("NOT_FOUND");
   });
 
-  it("PUT /api/codebases/:id 更新别名", async () => {
+  it("codebases.update 修改别名", async () => {
     createCodebase({ id: "cb-003", project_id: "proj-001", alias: "old", path: "/tmp/o", default_branch: "main" });
-    const res = await handleRequest(new Request("http://localhost/api/codebases/cb-003", {
-      method: "PUT",
-      body: JSON.stringify({ alias: "new" }),
-    }));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { codebase: { alias: string } };
-    expect(body.codebase.alias).toBe("new");
+    const r = await invokeRpcMethod("codebases.update", { id: "cb-003", alias: "new" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const cb = r.payload as { alias: string };
+      expect(cb.alias).toBe("new");
+    }
   });
 
-  it("DELETE /api/codebases/:id 返回 { ok: true }", async () => {
+  it("codebases.delete 返回 { ok: true } 且后续 get → NOT_FOUND", async () => {
     createCodebase({ id: "cb-004", project_id: "proj-001", alias: "z", path: "/tmp/z", default_branch: "main" });
-    const res = await handleRequest(new Request("http://localhost/api/codebases/cb-004", { method: "DELETE" }));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean };
-    expect(body.ok).toBe(true);
-    expect(
-      (await handleRequest(new Request("http://localhost/api/codebases/cb-004"))).status,
-    ).toBe(404);
+    const r = await invokeRpcMethod("codebases.delete", { id: "cb-004" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect((r.payload as { ok: boolean }).ok).toBe(true);
+    const g = await invokeRpcMethod("codebases.get", { id: "cb-004" });
+    expect(g.ok).toBe(false);
+    if (!g.ok) expect(g.error.code).toBe("NOT_FOUND");
   });
 
-  it("GET /api/codebases/:id/submodules 返回子模块列表", async () => {
+  it("codebases.listSubmodules 返回 { submodules: [...] }", async () => {
     createCodebase({ id: "cb-p", project_id: "proj-001", alias: "parent", path: "/tmp/p", default_branch: "main" });
     createCodebase({
       id: "cb-cc",
@@ -118,14 +125,16 @@ describe("/api/codebases 新主路由", () => {
       parent_codebase_id: "cb-p",
       submodule_path: "child",
     });
-    const res = await handleRequest(new Request("http://localhost/api/codebases/cb-p/submodules"));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { submodules: Array<{ alias: string }> };
-    expect(body.submodules.map((s) => s.alias)).toEqual(["child"]);
+    const r = await invokeRpcMethod("codebases.listSubmodules", { id: "cb-p" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const body = r.payload as { submodules: Array<{ alias: string }> };
+      expect(body.submodules.map((s) => s.alias)).toEqual(["child"]);
+    }
   });
 });
 
-describe("旧 /api/repos 别名仍工作", () => {
+describe("旧 /api/repos HTTP 别名 smoke", () => {
   let db: Database;
 
   beforeAll(() => {
@@ -147,7 +156,11 @@ describe("旧 /api/repos 别名仍工作", () => {
   });
 
   it("GET /api/repos 仍返回旧字段名 { repos: [...] }", async () => {
-    const res = await handleRequest(new Request("http://localhost/api/repos"));
+    // 模拟 loopback 来源让 checkAuth 豁免 token；测试场景下 daemon 可能已设 token
+    const fakeServer = {
+      requestIP: () => ({ address: "127.0.0.1", port: 0, family: "IPv4" }),
+    } as unknown as import("bun").Server<undefined>;
+    const res = await handleRequest(new Request("http://localhost/api/repos"), fakeServer);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { repos: Array<{ id: string }> };
     expect(Array.isArray(body.repos)).toBe(true);

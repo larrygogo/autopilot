@@ -11,9 +11,10 @@ import { createCodebase } from "../src/core/codebases";
 import { createProject } from "../src/core/projects";
 import { createRequirement, nextRequirementId } from "../src/core/requirements";
 import { appendSubPr } from "../src/core/requirement-sub-prs";
-import { handleRequest } from "../src/daemon/routes";
+import { invokeRpcMethod } from "../src/daemon/rpc";
+import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
-describe("submodule + sub-pr 查询 API", () => {
+describe("submodule + sub-pr 查询 RPC", () => {
   let db: Database;
 
   beforeAll(() => {
@@ -25,6 +26,7 @@ describe("submodule + sub-pr 查询 API", () => {
     migrate007(db);
     migrate008(db);
     _setDbForTest(db);
+    registerCoreRpcMethods();
 
     createProject({ id: "proj-001", name: "test-proj" });
     createCodebase({ id: "cb-p1", project_id: "proj-001", alias: "parent1", path: "/tmp/p1", default_branch: "main" });
@@ -61,30 +63,32 @@ describe("submodule + sub-pr 查询 API", () => {
     db.run("DELETE FROM requirements");
   });
 
-  it("GET /api/repos/:id/submodules 返回父 repo 的所有子模块", async () => {
-    const req = new Request("http://localhost/api/repos/cb-p1/submodules");
-    const res = await handleRequest(req);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { submodules: Array<{ id: string; alias: string }> };
-    expect(body.submodules.length).toBe(2);
-    expect(body.submodules.map((s) => s.alias).sort()).toEqual(["child1", "child2"]);
+  it("codebases.listSubmodules 返回父 codebase 的所有子模块", async () => {
+    const r = await invokeRpcMethod("codebases.listSubmodules", { id: "cb-p1" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const body = r.payload as { submodules: Array<{ id: string; alias: string }> };
+      expect(body.submodules.length).toBe(2);
+      expect(body.submodules.map((s) => s.alias).sort()).toEqual(["child1", "child2"]);
+    }
   });
 
-  it("GET /api/repos/:id/submodules 子模块 id 自身 → 返回空（非父 repo）", async () => {
-    const req = new Request("http://localhost/api/repos/cb-c1/submodules");
-    const res = await handleRequest(req);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { submodules: unknown[] };
-    expect(body.submodules.length).toBe(0);
+  it("codebases.listSubmodules 子模块 id 自身 → 返回空（非父 codebase）", async () => {
+    const r = await invokeRpcMethod("codebases.listSubmodules", { id: "cb-c1" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const body = r.payload as { submodules: unknown[] };
+      expect(body.submodules.length).toBe(0);
+    }
   });
 
-  it("GET /api/repos/:id/submodules 不存在的 repo → 404", async () => {
-    const req = new Request("http://localhost/api/repos/no-such/submodules");
-    const res = await handleRequest(req);
-    expect(res.status).toBe(404);
+  it("codebases.listSubmodules 不存在的 codebase → NOT_FOUND", async () => {
+    const r = await invokeRpcMethod("codebases.listSubmodules", { id: "no-such" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe("NOT_FOUND");
   });
 
-  it("GET /api/requirements/:id/sub-prs 返回该需求的所有子模块 PR", async () => {
+  it("requirements.subPrs 返回该需求的所有子模块 PR", async () => {
     const reqId = nextRequirementId();
     createRequirement({ id: reqId, project_id: "proj-001", codebase_id: "cb-p1", title: "T" });
     appendSubPr({
@@ -100,19 +104,20 @@ describe("submodule + sub-pr 查询 API", () => {
       pr_number: 20,
     });
 
-    const req = new Request(`http://localhost/api/requirements/${reqId}/sub-prs`);
-    const res = await handleRequest(req);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      sub_prs: Array<{ child_repo_id: string; pr_number: number; pr_url: string }>;
-    };
-    expect(body.sub_prs.length).toBe(2);
-    expect(body.sub_prs.map((p) => p.pr_number).sort()).toEqual([10, 20]);
+    const r = await invokeRpcMethod("requirements.subPrs", { id: reqId });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const body = r.payload as {
+        sub_prs: Array<{ child_repo_id: string; pr_number: number; pr_url: string }>;
+      };
+      expect(body.sub_prs.length).toBe(2);
+      expect(body.sub_prs.map((p) => p.pr_number).sort()).toEqual([10, 20]);
+    }
   });
 
-  it("GET /api/requirements/:id/sub-prs 不存在的 req → 404", async () => {
-    const req = new Request("http://localhost/api/requirements/no-such-req/sub-prs");
-    const res = await handleRequest(req);
-    expect(res.status).toBe(404);
+  it("requirements.subPrs 不存在的 req → NOT_FOUND", async () => {
+    const r = await invokeRpcMethod("requirements.subPrs", { id: "no-such-req" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe("NOT_FOUND");
   });
 });

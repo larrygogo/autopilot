@@ -9,6 +9,11 @@ import { _setDbForTest } from "../src/core/db";
 import { _clearRegistry, discover } from "../src/core/registry";
 import { createDbWorkflow } from "../src/core/workflows";
 import { handleRequest } from "../src/daemon/routes";
+
+// 模拟 loopback 来源让 checkAuth 豁免 token（测试场景 daemon 可能已设 token）
+const fakeLoopbackServer = {
+  requestIP: () => ({ address: "127.0.0.1", port: 0, family: "IPv4" }),
+} as unknown as import("bun").Server<undefined>;
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
@@ -75,7 +80,8 @@ describe("workflows API（W2 扩展）", () => {
           description: "skip review",
           derives_from: "req_dev", // 被忽略
         }),
-      })
+      }),
+      fakeLoopbackServer,
     );
     expect(res.status).toBe(201);
     const body = (await res.json()) as { ok: boolean; name: string; source: string };
@@ -135,7 +141,7 @@ describe("workflows API（W2 扩展）", () => {
     _clearRegistry();
     await discover();
 
-    const res = await handleRequest(new Request("http://localhost/api/workflows/wf_export/export"));
+    const res = await handleRequest(new Request("http://localhost/api/workflows/wf_export/export"), fakeLoopbackServer);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toMatch(/yaml|text/);
     const text = await res.text();
@@ -143,14 +149,14 @@ describe("workflows API（W2 扩展）", () => {
   });
 
   it("GET /api/workflows/:name/export 文件来源也支持", async () => {
-    const res = await handleRequest(new Request("http://localhost/api/workflows/req_dev/export"));
+    const res = await handleRequest(new Request("http://localhost/api/workflows/req_dev/export"), fakeLoopbackServer);
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(text).toContain("name: req_dev");
   });
 
   it("GET /api/workflows/:name/export 不存在 → 404", async () => {
-    const res = await handleRequest(new Request("http://localhost/api/workflows/no_such/export"));
+    const res = await handleRequest(new Request("http://localhost/api/workflows/no_such/export"), fakeLoopbackServer);
     expect(res.status).toBe(404);
   });
 });

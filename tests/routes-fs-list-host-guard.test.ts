@@ -4,6 +4,11 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { handleRequest, setListenHost } from "../src/daemon/routes";
 
+// 模拟 loopback 来源让 checkAuth 豁免 token（测试场景 daemon 可能已设 token）
+const fakeLoopbackServer = {
+  requestIP: () => ({ address: "127.0.0.1", port: 0, family: "IPv4" }),
+} as unknown as import("bun").Server<undefined>;
+
 let tmpHome: string;
 
 beforeEach(() => {
@@ -23,6 +28,7 @@ describe("/api/fs/list host 校验", () => {
     setListenHost("127.0.0.1");
     const res = await handleRequest(
       new Request(`http://127.0.0.1:6180/api/fs/list?path=${encodeURIComponent(tmpHome)}`),
+      fakeLoopbackServer,
     );
     expect(res.status).toBe(200);
   });
@@ -31,6 +37,7 @@ describe("/api/fs/list host 校验", () => {
     setListenHost("0.0.0.0");
     const res = await handleRequest(
       new Request(`http://127.0.0.1:6180/api/fs/list?path=${encodeURIComponent(tmpHome)}`),
+      fakeLoopbackServer,
     );
     expect(res.status).toBe(403);
     const body = await res.json();
@@ -41,6 +48,7 @@ describe("/api/fs/list host 校验", () => {
     setListenHost("192.168.1.100");
     const res = await handleRequest(
       new Request(`http://127.0.0.1:6180/api/fs/list?path=${encodeURIComponent(tmpHome)}`),
+      fakeLoopbackServer,
     );
     expect(res.status).toBe(403);
   });
@@ -49,6 +57,7 @@ describe("/api/fs/list host 校验", () => {
     setListenHost("localhost");
     const res = await handleRequest(
       new Request(`http://127.0.0.1:6180/api/fs/list?path=${encodeURIComponent(tmpHome)}`),
+      fakeLoopbackServer,
     );
     expect(res.status).toBe(200);
   });

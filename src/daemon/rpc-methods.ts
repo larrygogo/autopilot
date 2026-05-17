@@ -63,7 +63,9 @@ import {
   nextProjectId,
 } from "../core/projects";
 import { listRequirementsByProject } from "../core/requirements";
-import { listCodebases, getCodebaseById, createCodebase, nextCodebaseId } from "../core/codebases";
+import { listCodebases, getCodebaseById, createCodebase, updateCodebase, deleteCodebase, nextCodebaseId } from "../core/codebases";
+import { listSubmodules, discoverSubmodules } from "../core/submodules";
+import { checkCodebaseHealth } from "../core/codebase-health";
 import {
   listSessions as listChatSessions,
   deleteSession as deleteChatSession,
@@ -1401,6 +1403,69 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
+    method: "setup.saveProviders",
+    description: "批量保存 provider 配置（与 POST /api/setup/providers 等价），返回最新 level-1 doctor 报告",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (!p.providers || typeof p.providers !== "object" || Array.isArray(p.providers)) {
+        throw new RpcError("INVALID_PARAM", "providers must be an object");
+      }
+      for (const [name, cfg] of Object.entries(p.providers as Record<string, unknown>)) {
+        if (!(PROVIDER_NAMES as readonly string[]).includes(name)) continue;
+        if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
+          saveProvider(name as ProviderName, cfg as Record<string, unknown>);
+        }
+      }
+      return { report: await runChecks({ level: 1 }) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "setup.saveAgents",
+    description: "批量保存 agent 配置（与 POST /api/setup/agents 等价），返回最新 level-1 doctor 报告",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (!p.agents || typeof p.agents !== "object" || Array.isArray(p.agents)) {
+        throw new RpcError("INVALID_PARAM", "agents must be an object");
+      }
+      for (const [name, cfg] of Object.entries(p.agents as Record<string, unknown>)) {
+        if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
+          saveAgent(name, cfg as Record<string, unknown>);
+        }
+      }
+      return { report: await runChecks({ level: 1 }) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "setup.saveCodebases",
+    description: "新建 codebase（与 POST /api/setup/codebases 等价）；project_id 缺省则用首个 project 或新建 default",
+    handler: (params) => {
+      const p = asObj(params);
+      const name = typeof p.name === "string" ? p.name.trim() : "";
+      const pathField = typeof p.path === "string" ? p.path.trim() : "";
+      if (!name || !pathField) throw new RpcError("INVALID_PARAM", "name and path required");
+      let projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
+      if (!projectId) {
+        const projects = listProjects();
+        if (projects.length > 0) {
+          projectId = projects[0]!.id;
+        } else {
+          const proj = coreCreateProject({ id: nextProjectId(), name: "default" });
+          projectId = proj.id;
+        }
+      }
+      const cb = createCodebase({
+        id: nextCodebaseId(),
+        project_id: projectId,
+        alias: name,
+        path: pathField,
+      });
+      return { codebase: cb };
+    },
+  });
+
+  registerRpcMethod({
     method: "config.save",
     description: "保存 config.yaml 原文 + emit config:updated",
     handler: (params) => {
@@ -1573,6 +1638,186 @@ export function registerCoreRpcMethods(): void {
           throw new RpcError("ALREADY_EXISTS", msg);
         }
         throw new RpcError("CREATE_FAILED", msg);
+      }
+    },
+  });
+
+  // ── codebases.* —— Codebase CRUD + submodules / healthcheck ──
+
+  registerRpcMethod({
+    method: "codebases.list",
+    description: "列出所有 codebase（与 GET /api/codebases 等价；返回数组，无 envelope）",
+    handler: () => listCodebases(),
+  });
+
+  registerRpcMethod({
+    method: "codebases.get",
+    description: "按 id 取 codebase；不存在抛 NOT_FOUND",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const cb = getCodebaseById(p.id);
+      if (!cb) throw new RpcError("NOT_FOUND", "codebase not found");
+      return cb;
+    },
+  });
+
+  registerRpcMethod({
+    method: "codebases.create",
+    description: "创建 codebase（与 POST /api/codebases 等价）",
+    handler: (params) => {
+      const p = asObj(params);
+      const alias = typeof p.alias === "string" ? p.alias.trim() : "";
+      const pathField = typeof p.path === "string" ? p.path.trim() : "";
+      if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
+      const projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
+      try {
+        const codebase = createCodebase({
+          id: nextCodebaseId(),
+          project_id: projectId,
+          alias,
+          path: pathField,
+          default_branch: typeof p.default_branch === "string" && p.default_branch.trim()
+            ? p.default_branch.trim()
+            : "main",
+          github_owner: (p.github_owner as string | null | undefined) ?? null,
+          github_repo: (p.github_repo as string | null | undefined) ?? null,
+        });
+        return codebase;
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (code?.startsWith("SQLITE_CONSTRAINT") || msg.toLowerCase().includes("unique")) {
+          throw new RpcError("ALREADY_EXISTS", msg);
+        }
+        throw new RpcError("CREATE_FAILED", msg);
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "codebases.update",
+    description: "更新 codebase 字段（与 PUT /api/codebases/:id 等价）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const existing = getCodebaseById(p.id);
+      if (!existing) throw new RpcError("NOT_FOUND", "codebase not found");
+      const patch: Record<string, unknown> = {};
+      if (p.alias !== undefined) {
+        const trimmed = typeof p.alias === "string" ? p.alias.trim() : "";
+        if (!trimmed) throw new RpcError("INVALID_PARAM", "alias 不能为空");
+        patch.alias = trimmed;
+      }
+      if (p.path !== undefined) {
+        const trimmed = typeof p.path === "string" ? p.path.trim() : "";
+        if (!trimmed) throw new RpcError("INVALID_PARAM", "path 不能为空");
+        patch.path = trimmed;
+      }
+      if (p.default_branch !== undefined) {
+        const trimmed = typeof p.default_branch === "string" ? p.default_branch.trim() : "";
+        if (trimmed) patch.default_branch = trimmed;
+      }
+      if (p.github_owner !== undefined) patch.github_owner = p.github_owner;
+      if (p.github_repo !== undefined) patch.github_repo = p.github_repo;
+      try {
+        const codebase = updateCodebase(p.id, patch);
+        return codebase;
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (code?.startsWith("SQLITE_CONSTRAINT") || msg.toLowerCase().includes("unique")) {
+          throw new RpcError("ALREADY_EXISTS", msg);
+        }
+        throw new RpcError("UPDATE_FAILED", msg);
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "codebases.delete",
+    description: "删除 codebase（与 DELETE /api/codebases/:id 等价）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const existing = getCodebaseById(p.id);
+      if (!existing) throw new RpcError("NOT_FOUND", "codebase not found");
+      deleteCodebase(p.id);
+      return { ok: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "codebases.listSubmodules",
+    description: "列出 codebase 的子模块（与 GET /api/codebases/:id/submodules 等价）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const cb = getCodebaseById(p.id);
+      if (!cb) throw new RpcError("NOT_FOUND", "codebase not found");
+      return { submodules: listSubmodules(p.id) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "codebases.healthcheck",
+    description: "检查 codebase 健康状态 + 自动发现子模块（与 POST /api/codebases/:id/healthcheck 等价）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const codebase = getCodebaseById(p.id);
+      if (!codebase) throw new RpcError("NOT_FOUND", "codebase not found");
+      const health = await checkCodebaseHealth(codebase.path);
+      const patch: { github_owner?: string; github_repo?: string } = {};
+      if (health.github_owner && !codebase.github_owner) patch.github_owner = health.github_owner;
+      if (health.github_repo && !codebase.github_repo) patch.github_repo = health.github_repo;
+      if (patch.github_owner !== undefined || patch.github_repo !== undefined) {
+        updateCodebase(p.id, patch);
+      }
+      if (health.healthy && !codebase.parent_codebase_id) {
+        try {
+          const dr = discoverSubmodules(codebase.id);
+          return {
+            healthy: true,
+            issues: health.issues,
+            submodules: {
+              added: dr.added.map((r) => ({ id: r.id, alias: r.alias, path: r.submodule_path })),
+              existing: dr.existing.length,
+              warnings: dr.warnings,
+            },
+          };
+        } catch (e: unknown) {
+          return {
+            healthy: true,
+            issues: health.issues,
+            submodules: { error: (e as Error).message },
+          };
+        }
+      }
+      return { healthy: health.healthy, issues: health.issues };
+    },
+  });
+
+  registerRpcMethod({
+    method: "codebases.rediscoverSubmodules",
+    description: "重新扫描 codebase 子模块（与 POST /api/codebases/:id/rediscover-submodules 等价）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const codebase = getCodebaseById(p.id);
+      if (!codebase) throw new RpcError("NOT_FOUND", "codebase not found");
+      if (codebase.parent_codebase_id) {
+        throw new RpcError("INVALID_PARAM", "子模块自身不能再发现子模块（不支持嵌套）");
+      }
+      try {
+        const r = discoverSubmodules(p.id);
+        return {
+          added: r.added.map((x) => ({ id: x.id, alias: x.alias, submodule_path: x.submodule_path })),
+          existing_count: r.existing.length,
+          warnings: r.warnings,
+        };
+      } catch (e: unknown) {
+        throw new RpcError("DISCOVER_FAILED", (e as Error).message);
       }
     },
   });
