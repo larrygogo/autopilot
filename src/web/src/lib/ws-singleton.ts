@@ -18,7 +18,7 @@
  * `ensureConnected` no-op，订阅 / 调用都不触发；测试方可以注入自己的 WS 实现。
  */
 
-import { WsRpcClient, type CallOptions } from "./ws-rpc-client";
+import { WsRpcClient, RpcCallError, type CallOptions } from "./ws-rpc-client";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected";
 
@@ -201,9 +201,44 @@ export function subscribeChannel(channel: string, handler: EventHandler): () => 
   };
 }
 
-/** 发起 RPC 请求。ws 未连接时会先 ensureConnected，但仍可能立刻 reject DISCONNECTED（连接是异步的）。 */
-export function rpcCall<T = unknown>(method: string, params?: unknown, opts?: CallOptions): Promise<T> {
+/**
+ * 等待 ws 进入 OPEN，最长 timeoutMs 毫秒。
+ * - 已 OPEN：立刻 resolve(true)
+ * - 在超时窗内连上：resolve(true)
+ * - 超时仍未连上：resolve(false)（调用方自行 fast-fail）
+ */
+function waitForOpen(timeoutMs: number): Promise<boolean> {
+  if (ws?.readyState === WebSocket.OPEN) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      stateListeners.delete(listener);
+      resolve(false);
+    }, timeoutMs);
+    const listener: StateListener = (s) => {
+      if (s === "connected") {
+        clearTimeout(timer);
+        stateListeners.delete(listener);
+        resolve(true);
+      }
+    };
+    stateListeners.add(listener);
+  });
+}
+
+/**
+ * 发起 RPC 请求。
+ * 首次访问页面时 ws 通常还在 CONNECTING，先等一段时间让连接 ready 再发，
+ * 避免"页面刚打开 → 所有 RPC 一起 reject DISCONNECTED"的假死。
+ * 真断线场景：等不到 OPEN 仍会 reject DISCONNECTED，行为不变。
+ */
+export async function rpcCall<T = unknown>(method: string, params?: unknown, opts?: CallOptions): Promise<T> {
   ensureConnected();
+  if (ws?.readyState !== WebSocket.OPEN) {
+    const ok = await waitForOpen(5000);
+    if (!ok) {
+      throw new RpcCallError("DISCONNECTED", "WebSocket 未连接，等待超时");
+    }
+  }
   return rpc.call<T>(method, params, opts);
 }
 
