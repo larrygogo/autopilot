@@ -14,7 +14,7 @@ import { enableBus, disableBus, bus } from "../core/event-bus";
 import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
 import { startServerWithRetry } from "./server";
-import { setWebDistDir } from "./routes";
+import { setWebDistDir, reloadApiToken, getApiTokenState, extendAllowedOrigins, detectLanIPv4, isExposedHost } from "./routes";
 import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo } from "./pid";
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
 import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
@@ -41,6 +41,8 @@ const SCHEDULER_INTERVAL_MS = 30_000;    // 每 30 秒扫一次定时任务（�
 export interface DaemonOptions {
   host?: string;
   port?: number;
+  /** 显式允许"暴露 0.0.0.0 但不设 token"的裸奔配置。默认不允许。 */
+  insecureNoAuth?: boolean;
 }
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
@@ -59,6 +61,33 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   if (isDaemonRunning()) {
     console.error("错误：daemon 已在运行中。");
     process.exit(1);
+  }
+
+  // 安全检查：暴露 host 必须设 token，否则等于内网裸奔
+  reloadApiToken();
+  const tokenState = getApiTokenState();
+  if (isExposedHost(host) && !tokenState.is_set && !opts.insecureNoAuth) {
+    console.error(`
+错误：daemon 配置为监听 ${host}（对外暴露），但未设置 API token。
+
+这意味着同网段的任何人都能访问你的任务、凭证、Agent 调用，等于内网裸奔。
+
+请选择以下之一：
+  1. 在 Web 设置页生成 token（推荐）
+  2. 写入 ~/.autopilot/runtime/api-token 文件（一行 token 文本）
+  3. 设置环境变量 AUTOPILOT_API_TOKEN
+  4. 切回 127.0.0.1（autopilot daemon stop && autopilot daemon run，或改 config.yaml）
+  5. 明知风险仍要继续：autopilot daemon run --insecure-no-auth
+`);
+    process.exit(2);
+  }
+
+  // 暴露 host 时把所有 LAN IP 加进 CORS allowlist —— 从同网段其他机器浏览器访问
+  // daemon serve 的 SPA 时（同源访问 daemon 自己），同源策略下不会触发 CORS；
+  // 但若用户用别的本地工具跨域调 daemon，allowlist 能让它通过。
+  if (isExposedHost(host)) {
+    const origins = detectLanIPv4().map((ip) => `http://${ip}:${port}`);
+    extendAllowedOrigins(origins);
   }
 
   // 安装 @autopilot/* 别名解析器（必须早于任何 dynamic import 用户工作流）
@@ -252,6 +281,7 @@ if (import.meta.main) {
   const opts: DaemonOptions = {};
   if (portIdx !== -1 && args[portIdx + 1]) opts.port = parseInt(args[portIdx + 1], 10);
   if (hostIdx !== -1 && args[hostIdx + 1]) opts.host = args[hostIdx + 1];
+  if (args.includes("--insecure-no-auth")) opts.insecureNoAuth = true;
 
   startDaemon(opts);
 }

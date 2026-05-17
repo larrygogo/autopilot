@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Term } from "@/components/Term";
 
 /**
  * 工作流目录顶部的健康警告条带。
@@ -69,7 +70,7 @@ export function WorkflowHealthBanner({ onFixed }: { onFixed?: () => void }) {
     if (errors.length > 0) {
       toast.error(`已修复 ${okCount} 个，${errors.length} 个失败`, errors.join("\n"));
     } else {
-      toast.success(`已批量修复 ${okCount} 个孤儿目录`);
+      toast.success(`已批量修复 ${okCount} 个失联目录`);
     }
     refresh();
     onFixed?.();
@@ -89,7 +90,11 @@ export function WorkflowHealthBanner({ onFixed }: { onFixed?: () => void }) {
               工作流目录检测到问题
             </span>
             <span className="ml-2 text-muted-foreground">
-              {report.orphans.length > 0 && `${report.orphans.length} 个孤儿目录`}
+              {report.orphans.length > 0 && (
+                <>
+                  {report.orphans.length} 个<Term name="orphan_directory" />
+                </>
+              )}
               {report.orphans.length > 0 && report.collisions.length > 0 && "；"}
               {report.collisions.length > 0 && `${report.collisions.length} 组重名碰撞`}
               ；可能导致工作流不显示
@@ -117,7 +122,7 @@ export function WorkflowHealthBanner({ onFixed }: { onFixed?: () => void }) {
               <section>
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                    孤儿目录（{report.orphans.length}）
+                    失联目录 · orphan directory（{report.orphans.length}）
                   </h3>
                   <Button
                     variant="outline"
@@ -178,7 +183,7 @@ export function WorkflowHealthBanner({ onFixed }: { onFixed?: () => void }) {
                         <code className="ml-1 font-mono">{c.dirs.join(" / ")}</code>
                       </div>
                       <p className="mt-1 text-[10px] text-muted-foreground">
-                        修复孤儿目录后碰撞会自动消失；如确实要保留多个同源副本，请手工把 yaml.name 改成不同值
+                        修复失联目录后碰撞会自动消失；如确实要保留多个同源副本，请手工把 yaml.name 改成不同值
                       </p>
                     </li>
                   ))}

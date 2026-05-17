@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, CheckCircle2, AlertCircle, Clock, XCircle, Circle, Pencil } from "lucide-react";
 import { pickPhaseLabel } from "@/lib/workflow-labels";
 import { cn } from "@/lib/utils";
+import { Term } from "@/components/Term";
 
 // ──────────────────────────────────────────────
 // 阶段详情 Drawer：点击流水线节点时弹出，按上下文显示不同内容。
@@ -165,7 +166,7 @@ function PreviewBody({
 }
 
 function FieldGrid({ phase }: { phase: DrawerPhaseInfo }) {
-  const items: Array<{ label: string; value: React.ReactNode }> = [
+  const items: Array<{ label: React.ReactNode; value: React.ReactNode }> = [
     { label: "标识符", value: <code className="font-mono">{phase.name}</code> },
   ];
   if (phase.agent) {
@@ -191,7 +192,13 @@ function FieldGrid({ phase }: { phase: DrawerPhaseInfo }) {
   }
   if (phase.jump_trigger) {
     items.push({
-      label: "跳转触发",
+      label: (
+        <Term
+          name="jump_trigger"
+          variant="withSubtitle"
+          className="text-foreground text-sm normal-case tracking-normal"
+        />
+      ),
       value: <code className="font-mono">{phase.jump_trigger}</code>,
     });
   }
@@ -208,9 +215,16 @@ function FieldGrid({ phase }: { phase: DrawerPhaseInfo }) {
         配置
       </div>
       <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm">
-        {items.map((it) => (
-          <div key={it.label} className="contents">
-            <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground pt-0.5">
+        {items.map((it, idx) => (
+          <div key={idx} className="contents">
+            <dt
+              className={cn(
+                "pt-0.5",
+                typeof it.label === "string"
+                  ? "font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
+                  : "",
+              )}
+            >
               {it.label}
             </dt>
             <dd className="min-w-0 break-words">{it.value}</dd>

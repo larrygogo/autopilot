@@ -113,6 +113,8 @@ import {
   saveConfigRaw,
   loadDefaultsConfig,
   saveDefaultsConfig,
+  loadDaemonConfig,
+  saveDaemonConfig,
   loadProviders,
   saveProvider,
   loadGlobalAgents,
@@ -121,6 +123,7 @@ import {
   PROVIDER_NAMES,
   type ProviderName,
 } from "../core/config";
+import { loadApiToken, previewApiToken, saveApiToken, deleteApiToken, generateApiToken } from "../core/api-token";
 import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
 import { listProviderModels } from "../agents/model-list";
 import { runAgentOnce } from "../agents/registry";
@@ -152,14 +155,94 @@ const startedAt = Date.now();
 
 // 只允许显式 allowlist 中的 Origin 跨域访问；同源请求浏览器不发 Origin 头，
 // 因此 Web UI 由 daemon 自身同源提供时不受影响。
-const ALLOWED_ORIGINS = (process.env.AUTOPILOT_ALLOWED_ORIGINS ?? "")
+// mutable —— daemon 启动时按监听 host 追加局域网 IP（开 0.0.0.0 模式）。
+const ALLOWED_ORIGINS: string[] = (process.env.AUTOPILOT_ALLOWED_ORIGINS ?? "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 
-// 可选 token 鉴权：设置 AUTOPILOT_API_TOKEN 后，所有 /api/* 请求需带
-// `Authorization: Bearer <token>` 或 `X-Autopilot-Token: <token>`。
-const API_TOKEN = process.env.AUTOPILOT_API_TOKEN ?? "";
+/** 追加额外的 origin 到 allowlist（daemon 启动时调）。已存在则去重。 */
+export function extendAllowedOrigins(origins: string[]): void {
+  for (const o of origins) {
+    if (o && !ALLOWED_ORIGINS.includes(o)) ALLOWED_ORIGINS.push(o);
+  }
+}
+
+/**
+ * 一个 host 字符串是否会真的开放到本机以外（0.0.0.0 / :: / 具体外部 IP）。
+ * 用于：daemon 启动安全检查 + UI 切换前的 token 强制检查。
+ */
+export function isExposedHost(host: string): boolean {
+  const h = host.toLowerCase();
+  if (h === "127.0.0.1" || h.startsWith("127.") || h === "localhost") return false;
+  if (h === "::1" || h === "[::1]") return false;
+  return true;
+}
+
+/**
+ * 探测本机所有非 loopback、非 internal 的 IPv4 地址。
+ * 用于 daemon 启动时自动把局域网 IP 加进 CORS allowlist，
+ * 也用于 GET /api/daemon/listen 给 UI 展示当前可访问的 LAN 地址。
+ */
+export function detectLanIPv4(): string[] {
+  const { networkInterfaces } = require("os") as typeof import("os");
+  const out: string[] = [];
+  for (const ifaces of Object.values(networkInterfaces() ?? {})) {
+    if (!ifaces) continue;
+    for (const i of ifaces) {
+      if (i.internal) continue;
+      const fam = (i as { family: string | number }).family;
+      if (fam !== "IPv4" && fam !== 4) continue;
+      out.push(i.address);
+    }
+  }
+  return out;
+}
+
+// Token 鉴权：env AUTOPILOT_API_TOKEN > file ~/.autopilot/runtime/api-token > 空。
+// 设置后所有 /api/* 请求需带 `Authorization: Bearer <token>` 或 `X-Autopilot-Token: <token>`，
+// 本机 loopback 来源（127.x / ::1）即便有 token 也直接放行（本地浏览器无需改造）。
+type TokenSource = "env" | "file" | "none";
+let API_TOKEN: string = "";
+let API_TOKEN_SOURCE: TokenSource = "none";
+
+/** daemon 启动时 / token 轮换后调，刷新当前 token。 */
+export function reloadApiToken(): void {
+  const envToken = process.env.AUTOPILOT_API_TOKEN ?? "";
+  if (envToken) {
+    API_TOKEN = envToken;
+    API_TOKEN_SOURCE = "env";
+    return;
+  }
+  const fileToken = loadApiToken();
+  if (fileToken) {
+    API_TOKEN = fileToken;
+    API_TOKEN_SOURCE = "file";
+    return;
+  }
+  API_TOKEN = "";
+  API_TOKEN_SOURCE = "none";
+}
+
+// 启动时初始化一次（routes.ts 加载即生效）
+reloadApiToken();
+
+export interface ApiTokenState {
+  is_set: boolean;
+  /** env / file / none —— UI 用此判断"是否能在 UI 改"（env 来源时只读） */
+  source: TokenSource;
+  /** 已设时给一个 'abcd***wxyz' 形式预览，不暴露完整 token */
+  preview: string | null;
+}
+
+/** 返回当前 token 状态（不含明文），用于 GET /api/daemon/listen 等。 */
+export function getApiTokenState(): ApiTokenState {
+  return {
+    is_set: API_TOKEN.length > 0,
+    source: API_TOKEN_SOURCE,
+    preview: API_TOKEN ? previewApiToken(API_TOKEN) : null,
+  };
+}
 
 /**
  * 拉取所有 MCP 工具：autopilot 工具集 + workflow agent 工具集合并返回。
@@ -188,12 +271,55 @@ function corsHeaders(req: Request): Record<string, string> {
   return {};
 }
 
-function checkAuth(req: Request): boolean {
+/**
+ * 把 IPv4-mapped IPv6（::ffff:127.0.0.1）规范化回 IPv4 形式，方便 loopback 判定。
+ * 其他形式原样返回。
+ */
+function normalizeIp(addr: string): string {
+  const m = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(addr);
+  return m ? m[1] : addr;
+}
+
+/**
+ * 判定 socket 远端是否本机 loopback。
+ * 用于 token 鉴权豁免：开 0.0.0.0 时本机浏览器（127.0.0.1 来源）依然免 token，
+ * 只对真正从外部网卡进来的请求要 token。
+ *
+ * 不信任 Host header（可伪造）；不支持 X-Forwarded-For（autopilot 不应放反代后）。
+ */
+function isLoopbackSocket(server: import("bun").Server<undefined> | undefined, req: Request): boolean {
+  if (!server) return false;
+  try {
+    const info = server.requestIP(req);
+    if (!info) return false;
+    const addr = normalizeIp(info.address.toLowerCase());
+    if (addr === "127.0.0.1" || addr.startsWith("127.")) return true;
+    if (addr === "::1") return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function checkAuth(req: Request, server?: import("bun").Server<undefined>): boolean {
   if (!API_TOKEN) return true;
+  if (isLoopbackSocket(server, req)) return true;
   const header = req.headers.get("authorization") ?? "";
   if (header.startsWith("Bearer ") && header.slice(7) === API_TOKEN) return true;
   if (req.headers.get("x-autopilot-token") === API_TOKEN) return true;
+  // URL query string fallback：浏览器 WebSocket API 不能自定义 header，
+  // 只能把 token 塞 URL；HTTP 走 fetch 通常用 header，但 query 路径也开着兜底。
+  try {
+    const url = new URL(req.url);
+    const q = url.searchParams.get("token");
+    if (q && q === API_TOKEN) return true;
+  } catch { /* ignore URL parse 失败 */ }
   return false;
+}
+
+/** 仅 WebSocket upgrade 路径使用 —— 不复用 checkAuth 是为了避免 server 参数变成可选时静默通过。 */
+export function checkWebSocketAuth(req: Request, server: import("bun").Server<undefined>): boolean {
+  return checkAuth(req, server);
 }
 
 // ──────────────────────────────────────────────
@@ -368,7 +494,7 @@ function serveStatic(urlPath: string): Response | null {
 // 路由处理
 // ──────────────────────────────────────────────
 
-export async function handleRequest(req: Request): Promise<Response> {
+export async function handleRequest(req: Request, server?: import("bun").Server<undefined>): Promise<Response> {
   const url = new URL(req.url);
   const method = req.method;
   const path = url.pathname;
@@ -403,7 +529,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   // Token 鉴权（仅在 /api/* 上生效，静态资源不需要）
-  if (path.startsWith("/api/") && !checkAuth(req)) {
+  if (path.startsWith("/api/") && !checkAuth(req, server)) {
     return error("Unauthorized", 401);
   }
 
@@ -2075,6 +2201,80 @@ export async function handleRequest(req: Request): Promise<Response> {
         saveDefaultsConfig({ timezone: tz || undefined });
         emit({ type: "config:updated", payload: {} });
         return json({ ok: true, timezone: tz || null });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e));
+      }
+    }
+
+    // ── Daemon 监听配置 + API token ──
+    // 改完 host/port 需要 daemon restart 才生效；token 改动立即生效（不必重启）。
+
+    // GET /api/daemon/listen —— 当前监听配置 + token 状态 + 本机 LAN IP
+    if (method === "GET" && path === "/api/daemon/listen") {
+      const cfg = loadDaemonConfig();
+      return json({
+        host: cfg.host ?? "127.0.0.1",
+        port: cfg.port ?? 6180,
+        token: getApiTokenState(),
+        lan_ips: detectLanIPv4(),
+        mcp_note: "MCP /mcp 走独立 token（mcp-runtime 管理），不受此处控制",
+      });
+    }
+
+    // PUT /api/daemon/listen —— 写 host/port 到 config.yaml；需 daemon restart 生效
+    if (method === "PUT" && path === "/api/daemon/listen") {
+      const body = (await req.json()) as { host?: string; port?: number };
+      const host = typeof body.host === "string" ? body.host.trim() : undefined;
+      const port = typeof body.port === "number" ? body.port : undefined;
+      if (host !== undefined && host.length === 0) return error("host 不能为空");
+      if (port !== undefined && (!Number.isInteger(port) || port <= 0 || port >= 65536)) {
+        return error("port 必须是 1~65535 的整数");
+      }
+      // 暴露到外部时强制 token —— 否则裸奔
+      if (host && isExposedHost(host) && !getApiTokenState().is_set) {
+        return error("切到对外暴露的 host 前必须先设置 API token（POST /api/daemon/token/rotate）", 400);
+      }
+      try {
+        saveDaemonConfig({ host, port });
+        emit({ type: "config:updated", payload: {} });
+        return json({ ok: true, host, port, restart_required: true });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e));
+      }
+    }
+
+    // POST /api/daemon/token/rotate —— 生成新 token 写文件，返回一次性明文（Web 立即用此值替换 localStorage）
+    if (method === "POST" && path === "/api/daemon/token/rotate") {
+      // env 来源的 token 不允许在 UI 改 —— 它来自部署侧，UI 改了也不会生效
+      if (getApiTokenState().source === "env") {
+        return error("当前 token 来自环境变量 AUTOPILOT_API_TOKEN，无法在 UI 修改", 400);
+      }
+      try {
+        const token = generateApiToken();
+        saveApiToken(token);
+        reloadApiToken();
+        emit({ type: "config:updated", payload: {} });
+        return json({ ok: true, token, state: getApiTokenState() });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e));
+      }
+    }
+
+    // DELETE /api/daemon/token —— 清除文件 token；若当前 host 对外暴露则拒绝
+    if (method === "DELETE" && path === "/api/daemon/token") {
+      if (getApiTokenState().source === "env") {
+        return error("当前 token 来自环境变量，无法在 UI 删除", 400);
+      }
+      const cfg = loadDaemonConfig();
+      const currentHost = cfg.host ?? "127.0.0.1";
+      if (isExposedHost(currentHost)) {
+        return error("当前 host 为对外暴露状态，不能在保留暴露的同时删除 token；请先切回 127.0.0.1", 400);
+      }
+      try {
+        deleteApiToken();
+        reloadApiToken();
+        emit({ type: "config:updated", payload: {} });
+        return json({ ok: true, state: getApiTokenState() });
       } catch (e: unknown) {
         return error(e instanceof Error ? e.message : String(e));
       }

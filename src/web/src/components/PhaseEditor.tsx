@@ -13,6 +13,7 @@ import {
 import { api } from "../hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
+import { Term } from "./Term";
 import { AddPhaseDialog, type NewPhaseData } from "./AddPhaseDialog";
 import { AddParallelDialog, type NewParallelData } from "./AddParallelDialog";
 import {
@@ -592,7 +593,7 @@ export function PhaseEditor({
     try {
       const res = await api.pruneOrphans(workflowName, orphans);
       toast.success(
-        `已清理 ${res.removed.length} 个孤儿函数：${res.removed.join(", ")}（.bak 已备份）`,
+        `已清理 ${res.removed.length} 个废弃函数：${res.removed.join(", ")}（.bak 已备份）`,
       );
       setOrphans([]);
       onSaved?.();
@@ -642,7 +643,9 @@ export function PhaseEditor({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-[1.5px] border-warning bg-warning/8 px-3.5 py-2.5 text-sm">
           <span className="flex flex-wrap items-center gap-1.5">
             <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
-            <span>workflow.ts 中存在 {orphans.length} 个孤儿函数：</span>
+            <span>
+              workflow.ts 中存在 {orphans.length} 个<Term name="orphan_function" />：
+            </span>
             {orphans.map((n) => (
               <code
                 key={n}
@@ -654,7 +657,7 @@ export function PhaseEditor({
           </span>
           <Button size="sm" variant="destructive" onClick={() => setPruneConfirm(true)}>
             <Trash2 className="h-3.5 w-3.5" />
-            清理孤儿
+            清理废弃函数
           </Button>
         </div>
       )}
@@ -837,7 +840,14 @@ export function PhaseEditor({
 
       <ConfirmDialog
         open={pruneConfirm}
-        title="清理孤儿函数"
+        title={
+          <span className="inline-flex flex-col leading-tight">
+            <span>清理废弃函数</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              orphan function
+            </span>
+          </span>
+        }
         message={
           <div className="space-y-2">
             <p>将从 workflow.ts 中删除以下 {orphans.length} 个函数：</p>

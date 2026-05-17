@@ -1,5 +1,5 @@
 import type { Server } from "bun";
-import { handleRequest, setListenHost } from "./routes";
+import { handleRequest, setListenHost, checkWebSocketAuth } from "./routes";
 import { wsManager } from "./ws";
 
 // ──────────────────────────────────────────────
@@ -35,14 +35,18 @@ export function startServer(opts: { host: string; port: number }): Server<undefi
     idleTimeout: 120,
 
     async fetch(req, server) {
-      // WebSocket 升级
+      // WebSocket 升级 —— 跟 /api/* 同样要过 token 鉴权（loopback 来源豁免）。
+      // 否则开 0.0.0.0 后任何人连 WS 就能订阅所有 task/log/事件，绕过整个 token 体系。
       if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+        if (!checkWebSocketAuth(req, server)) {
+          return new Response("Unauthorized", { status: 401 });
+        }
         const success = server.upgrade(req);
         if (success) return undefined as unknown as Response;
         return new Response("WebSocket upgrade failed", { status: 400 });
       }
 
-      return handleRequest(req);
+      return handleRequest(req, server);
     },
 
     websocket: {

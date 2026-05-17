@@ -1,14 +1,25 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search, ExternalLink } from "lucide-react";
-import { api } from "@/hooks/useApi";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { RefreshCw, Search, ExternalLink, AlertTriangle, Copy, RotateCw, Trash2 } from "lucide-react";
+import { api, type DaemonListenInfo } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/Modal";
 import { cn } from "@/lib/utils";
 import { PageHero } from "@/components/PageHero";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
+import { getApiToken, setApiToken, clearApiToken, shouldUseToken } from "@/lib/api-token";
 
 // 保留 embedded 参数签名以兼容旧调用
 export function Settings(_props: { embedded?: boolean } = {}) {
@@ -105,6 +116,9 @@ export function Settings(_props: { embedded?: boolean } = {}) {
       {/* 桌面通知 */}
       <DesktopNotifyCard />
 
+      {/* 网络访问 */}
+      <NetworkAccessCard />
+
 
       {status && (
         <Card className="mb-4 p-4">
@@ -118,6 +132,7 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         </Card>
       )}
 
+      <ClientTokenCard />
       <DaemonLogCard />
 
       {/* 编辑配置文件提示 */}
@@ -147,6 +162,324 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         </dl>
       </Card>
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// 网络访问设置
+//   - Toggle: 仅本机 (127.0.0.1) / 局域网开放 (0.0.0.0)
+//   - 端口可改
+//   - 切局域网前强制生成 API token —— 否则同网段裸奔
+//   - host/port/token 都需 daemon restart 才生效（启动时读 config 一次）
+// ──────────────────────────────────────────────
+function NetworkAccessCard(): React.ReactElement {
+  const toast = useToast();
+  const [info, setInfo] = useState<DaemonListenInfo | null>(null);
+  const [portDraft, setPortDraft] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [showNewToken, setShowNewToken] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // 切到局域网时如果还没 token，先弹这个 dialog 强制生成
+  const [pendingExpose, setPendingExpose] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await api.getDaemonListen();
+      setInfo(res);
+      setPortDraft(String(res.port));
+    } catch (e: unknown) {
+      toast.error("加载网络配置失败", (e as Error)?.message ?? String(e));
+    }
+  }, [toast]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  if (!info) {
+    return (
+      <Card className="mb-4 p-4">
+        <div className="text-sm text-muted-foreground">加载网络配置中…</div>
+      </Card>
+    );
+  }
+
+  const isExposed = info.host !== "127.0.0.1" && info.host !== "localhost";
+  const tokenLocked = info.token.source === "env";
+
+  const persistListen = async (next: { host?: string; port?: number }) => {
+    setSaving(true);
+    try {
+      const res = await api.saveDaemonListen(next);
+      toast.success("已保存 · 需 daemon restart 后才生效");
+      await refresh();
+      return res;
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
+      await refresh();  // 回滚 UI 到服务端状态
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleExposed = async (checked: boolean) => {
+    if (checked) {
+      // 切到局域网：必须先有 token
+      if (!info.token.is_set) {
+        setPendingExpose(true);
+        return;
+      }
+      await persistListen({ host: "0.0.0.0" });
+    } else {
+      await persistListen({ host: "127.0.0.1" });
+    }
+  };
+
+  const handleRotateToken = async () => {
+    if (tokenLocked) {
+      toast.error("无法修改", "Token 来自环境变量 AUTOPILOT_API_TOKEN");
+      return;
+    }
+    try {
+      const res = await api.rotateApiToken();
+      setShowNewToken(res.token);
+      await refresh();
+    } catch (e: unknown) {
+      toast.error("生成 token 失败", (e as Error)?.message ?? String(e));
+    }
+  };
+
+  // 局域网开关被拦截后，从对话框生成 token 并继续切换
+  const handleGenerateAndExpose = async () => {
+    try {
+      const res = await api.rotateApiToken();
+      setShowNewToken(res.token);
+      setPendingExpose(false);
+      // 生成成功后真正切到局域网
+      await persistListen({ host: "0.0.0.0" });
+    } catch (e: unknown) {
+      toast.error("生成 token 失败", (e as Error)?.message ?? String(e));
+      setPendingExpose(false);
+    }
+  };
+
+  const handleDeleteToken = async () => {
+    if (tokenLocked) {
+      toast.error("无法删除", "Token 来自环境变量 AUTOPILOT_API_TOKEN");
+      return;
+    }
+    try {
+      await api.deleteApiToken();
+      toast.success("Token 已删除");
+      await refresh();
+    } catch (e: unknown) {
+      toast.error("删除失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setConfirmDelete(false);
+    }
+  };
+
+  const handlePortBlur = async () => {
+    const n = parseInt(portDraft, 10);
+    if (!Number.isInteger(n) || n <= 0 || n >= 65536) {
+      toast.error("端口无效", "请填 1~65535 的整数");
+      setPortDraft(String(info.port));
+      return;
+    }
+    if (n === info.port) return;
+    await persistListen({ port: n });
+  };
+
+  const copyToken = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(token);
+      toast.success("已复制到剪贴板");
+    } catch {
+      toast.error("复制失败", "请手动选中复制");
+    }
+  };
+
+  return (
+    <Card className="mb-4 p-4">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold">网络访问</h3>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          控制 daemon 监听范围。改后需在终端跑 <code className="bg-muted/40 px-1.5">autopilot daemon restart</code> 生效。
+        </p>
+      </div>
+
+      {/* Toggle: 仅本机 / 局域网 */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4 border border-foreground/15 bg-card px-3 py-2.5">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium">
+            {isExposed ? "局域网开放" : "仅本机访问"}
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            {isExposed
+              ? `监听 ${info.host}:${info.port}，同网段的机器都能访问`
+              : `监听 127.0.0.1:${info.port}，仅本机`}
+          </div>
+        </div>
+        <Switch
+          checked={isExposed}
+          onCheckedChange={handleToggleExposed}
+          disabled={saving}
+        />
+      </div>
+
+      {/* Port + LAN IP */}
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-[8rem_1fr] sm:items-end">
+        <div className="space-y-1.5">
+          <Label>端口</Label>
+          <Input
+            value={portDraft}
+            onChange={(e) => setPortDraft(e.target.value)}
+            onBlur={handlePortBlur}
+            inputMode="numeric"
+            className="font-mono"
+            disabled={saving}
+          />
+        </div>
+        {isExposed && info.lan_ips.length > 0 && (
+          <div className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground">同网段访问地址</Label>
+            <div className="flex flex-wrap gap-2">
+              {info.lan_ips.map((ip) => (
+                <code
+                  key={ip}
+                  className="border border-foreground/20 bg-muted/40 px-1.5 py-0.5 font-mono text-xs"
+                >
+                  http://{ip}:{info.port}
+                </code>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Token 区 */}
+      <div className="border border-foreground/15 bg-card px-3 py-2.5">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-sm font-medium">API 安全令牌</div>
+          {tokenLocked && (
+            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              来自环境变量
+            </span>
+          )}
+        </div>
+        <div className="mb-2 text-[11px] text-muted-foreground">
+          {info.token.is_set ? (
+            <>
+              已设置：<code className="font-mono">{info.token.preview}</code>
+              {!tokenLocked && "（仅本机来源免 token，外部访问必须带）"}
+            </>
+          ) : (
+            <span className="text-warning">未设置。切到"局域网开放"时必须设置，否则同网段任何人都能访问 daemon。</span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleRotateToken}
+            disabled={tokenLocked || saving}
+            title={tokenLocked ? "Token 来自环境变量，请改 AUTOPILOT_API_TOKEN" : undefined}
+          >
+            <RotateCw className="h-3.5 w-3.5" />
+            {info.token.is_set ? "重置令牌" : "生成令牌"}
+          </Button>
+          {info.token.is_set && !tokenLocked && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setConfirmDelete(true)}
+              disabled={saving || isExposed}
+              title={isExposed ? "局域网模式下不能删除 token；请先切回仅本机" : undefined}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              删除令牌
+            </Button>
+          )}
+        </div>
+        <p className="mt-2 text-[10px] text-muted-foreground">
+          注：MCP <code className="font-mono">/mcp</code> 路由走独立 token（mcp-config 管理），不受此控制
+        </p>
+      </div>
+
+      {/* 弹：切局域网前强制生成 token */}
+      <Dialog open={pendingExpose} onOpenChange={(open) => !open && setPendingExpose(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              <span className="inline-flex flex-col leading-tight">
+                <span>开启局域网访问</span>
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  expose to 0.0.0.0
+                </span>
+              </span>
+            </DialogTitle>
+            <DialogDescription>
+              对外暴露前必须先设置 API 安全令牌。生成后会立即切到"局域网开放"。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="border-l-[2px] border-warning bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
+            <AlertTriangle className="mb-1 inline h-3.5 w-3.5 text-warning" />{" "}
+            同网段的所有人将能尝试访问你的 daemon。本机浏览器和 CLI 不需要令牌；
+            其他机器访问时必须在 <code className="font-mono">Authorization: Bearer</code> 头里带令牌。
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingExpose(false)}>取消</Button>
+            <Button onClick={handleGenerateAndExpose}>生成令牌并开启</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 弹：显示新 token */}
+      <Dialog open={showNewToken !== null} onOpenChange={(open) => !open && setShowNewToken(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              <span className="inline-flex flex-col leading-tight">
+                <span>令牌已生成</span>
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  api token rotated
+                </span>
+              </span>
+            </DialogTitle>
+            <DialogDescription>
+              这是新令牌的完整明文，仅此一次显示。请复制保存到密码管理器，关闭后无法再看到完整值。
+            </DialogDescription>
+          </DialogHeader>
+          {showNewToken && (
+            <div className="space-y-2">
+              <code className="block break-all border border-foreground/30 bg-muted/40 p-2 font-mono text-xs">
+                {showNewToken}
+              </code>
+              <Button size="sm" variant="secondary" onClick={() => copyToken(showNewToken)}>
+                <Copy className="h-3.5 w-3.5" />
+                复制
+              </Button>
+              <p className="text-[11px] text-muted-foreground">
+                外部机器访问时把它放在 HTTP 头：<br />
+                <code className="font-mono">Authorization: Bearer {`<token>`}</code>
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setShowNewToken(null)}>我已保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="删除 API 令牌"
+        message={`删除后 daemon 将无任何鉴权。仅当 daemon 处于「仅本机」模式时才允许删除。是否继续？`}
+        confirmText="删除"
+        danger
+        onConfirm={handleDeleteToken}
+        onCancel={() => setConfirmDelete(false)}
+      />
+    </Card>
   );
 }
 
@@ -309,6 +642,62 @@ function DesktopNotifyCard(): React.ReactElement {
           启用桌面通知
         </Button>
       )}
+    </Card>
+  );
+}
+
+function ClientTokenCard(): React.ReactElement {
+  const toast = useToast();
+  const [stored, setStored] = useState<string>(() => getApiToken());
+  const [draft, setDraft] = useState<string>("");
+  const isLan = shouldUseToken();
+
+  function save() {
+    const t = draft.trim();
+    if (!t) {
+      toast.error("token 不能为空");
+      return;
+    }
+    setApiToken(t);
+    setStored(t);
+    setDraft("");
+    toast.success("已保存 token，正在刷新页面…");
+    setTimeout(() => location.reload(), 500);
+  }
+
+  function clear() {
+    clearApiToken();
+    setStored("");
+    toast.success("已清除 token");
+    if (isLan) setTimeout(() => location.reload(), 500);
+  }
+
+  const preview = stored ? (stored.length > 8 ? `${stored.slice(0, 4)}…${stored.slice(-4)}` : "********") : "未设置";
+
+  return (
+    <Card className="mb-4 p-4">
+      <h3 className="mb-1 text-sm font-semibold">客户端 Token</h3>
+      <p className="mb-3 text-[11px] text-muted-foreground leading-relaxed">
+        浏览器从局域网访问 daemon 时需要 token；本机回环（127.0.0.1）访问会被自动豁免，无需配置。
+        token 存在浏览器 localStorage，每个设备各自配置。
+      </p>
+      <dl className="mb-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+        <InfoField label="当前来源" value={isLan ? `局域网（${location.host}）` : "本机回环"} />
+        <InfoField label="已存 token" value={preview} mono />
+      </dl>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          type="password"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={stored ? "贴入新 token 覆盖" : "贴入 token"}
+          className="max-w-md font-mono"
+        />
+        <Button size="sm" onClick={save} disabled={!draft.trim()}>保存</Button>
+        {stored && (
+          <Button size="sm" variant="outline" onClick={clear}>清除</Button>
+        )}
+      </div>
     </Card>
   );
 }

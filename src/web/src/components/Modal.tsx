@@ -10,7 +10,7 @@ import { Button as ShadcnButton } from "@/components/ui/button";
 
 interface ConfirmProps {
   open: boolean;
-  title: string;
+  title: React.ReactNode;
   message: React.ReactNode;
   confirmText?: string;
   cancelText?: string;

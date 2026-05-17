@@ -19,6 +19,7 @@
  */
 
 import { WsRpcClient, RpcCallError, type CallOptions } from "./ws-rpc-client";
+import { getApiToken, shouldUseToken } from "./api-token";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected";
 
@@ -64,7 +65,14 @@ function setState(next: ConnectionState): void {
 function getWsUrl(): string {
   if (typeof location === "undefined") return "ws://127.0.0.1:6180/ws"; // 非浏览器兜底
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${location.host}/ws`;
+  // 浏览器 WebSocket API 不能自定义 header —— 局域网访问时把 token 放 query。
+  // 本机回环 daemon 会自动豁免 token，shouldUseToken() 返回 false 跳过。
+  let query = "";
+  if (shouldUseToken()) {
+    const token = getApiToken();
+    if (token) query = `?token=${encodeURIComponent(token)}`;
+  }
+  return `${proto}//${location.host}/ws${query}`;
 }
 
 function sendSubscriptions(): void {

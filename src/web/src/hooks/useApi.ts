@@ -1,8 +1,17 @@
 import type { NowCard } from "../lib/now-types";
 import { rpcCall } from "../lib/ws-singleton";
 import { RpcCallError, type CallOptions } from "../lib/ws-rpc-client";
+import { getApiToken, shouldUseToken } from "../lib/api-token";
 
 const BASE = "";
+
+/** 返回需要塞进 fetch headers 的 token 字段；本机访问不需要 token 时返回空对象。 */
+function authHeaders(): Record<string, string> {
+  if (!shouldUseToken()) return {};
+  const token = getApiToken();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
 
 /**
  * 走 WS RPC 的薄包装 — 当前阶段只迁了少量 PoC method（见下方注释标记），
@@ -53,14 +62,29 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/requirements(\?.*)?$/,
   /^\/api\/projects(\?.*)?$/,
   /^\/api\/now\/cards(\?.*)?$/,
+  /^\/api\/daemon\/listen(\?.*)?$/,
+  /^\/api\/daemon\/token\/rotate$/,
+  /^\/api\/daemon\/token$/,
 ];
+
+export interface DaemonListenInfo {
+  host: string;
+  port: number;
+  token: {
+    is_set: boolean;
+    source: "env" | "file" | "none";
+    preview: string | null;
+  };
+  lan_ips: string[];
+  mcp_note: string;
+}
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {
       ...opts,
-      headers: { "Content-Type": "application/json", ...opts?.headers },
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...opts?.headers },
     });
   } catch (e: any) {
     throw new Error(`网络请求失败：${e?.message ?? String(e)}（daemon 是否在运行？）`);
@@ -68,6 +92,10 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     let msg = (body as any).error ?? `HTTP ${res.status}`;
+    // 401 = token 缺失/错误。局域网访问场景下 token 在 localStorage 还没设。
+    if (res.status === 401 && shouldUseToken()) {
+      msg = "未授权（HTTP 401）：从局域网访问 daemon 需要设置 API token，请到「设置 → 客户端 Token」配置。";
+    }
     // 特判：新 API 返回 404 往往意味着 daemon 跑的是旧代码
     if (res.status === 404 && NEW_API_PATTERNS.some((re) => re.test(path))) {
       msg = `接口 ${path} 不存在（HTTP 404）。请确认 daemon 已重启到最新版本：\n\n  autopilot daemon stop && autopilot daemon start`;
@@ -352,6 +380,24 @@ export const api = {
   // [WS-RPC] defaults.save
   saveDefaults: (body: { timezone?: string | null }) =>
     requestRpc<{ ok: true; timezone: string | null }>("defaults.save", body),
+
+  // 网络访问设置
+  getDaemonListen: () => request<DaemonListenInfo>("/api/daemon/listen"),
+  saveDaemonListen: (body: { host?: string; port?: number }) =>
+    request<{ ok: true; host?: string; port?: number; restart_required: boolean }>(
+      "/api/daemon/listen",
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
+  rotateApiToken: () =>
+    request<{ ok: true; token: string; state: DaemonListenInfo["token"] }>(
+      "/api/daemon/token/rotate",
+      { method: "POST" },
+    ),
+  deleteApiToken: () =>
+    request<{ ok: true; state: DaemonListenInfo["token"] }>(
+      "/api/daemon/token",
+      { method: "DELETE" },
+    ),
 
   // Schedules
   // [WS-RPC] schedules.list

@@ -93,6 +93,21 @@ export function loadDaemonConfig(): DaemonListenConfig {
   } catch { return {}; }
 }
 
+/**
+ * 写回 daemon section 的 host/port。Token 不在此处管理 —— 见 core/api-token.ts。
+ * 字段为 undefined 时从 yaml 删除对应键；section 整体空则删 daemon 段。
+ */
+export function saveDaemonConfig(cfg: DaemonListenConfig): void {
+  const doc = loadDocument();
+  const clean = stripUndefined(cfg as Record<string, unknown>);
+  if (Object.keys(clean).length === 0) {
+    if (doc.hasIn(["daemon"])) doc.deleteIn(["daemon"]);
+  } else {
+    doc.setIn(["daemon"], clean);
+  }
+  writeDocument(doc);
+}
+
 // ──────────────────────────────────────────────
 // GitHub 集成配置
 // ──────────────────────────────────────────────
