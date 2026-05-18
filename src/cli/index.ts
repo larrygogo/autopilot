@@ -469,14 +469,42 @@ task
   .command("status [task-id]")
   .description("查看任务状态")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (taskId: string | undefined, opts: { port: string }) => {
+  .option("--json", "原始 JSON 输出（脚本友好）")
+  .action(async (taskId: string | undefined, opts: { port: string; json?: boolean }) => {
     const client = getClient(opts);
     await ensureDaemon(client);
 
     if (taskId) {
       try {
         const t = await client.getTask(taskId);
-        console.log(JSON.stringify(t, null, 2));
+        if (opts.json) {
+          console.log(JSON.stringify(t, null, 2));
+          return;
+        }
+        // 默认 human-readable 输出（dogfood-bug14）：之前 task status <id>
+        // 是裸 JSON dump，跟无 id 的表格视图风格不一致。客户看完跑完的
+        // task 应该看到清晰字段而不是手工读 JSON。
+        const tt = t as Record<string, unknown>;
+        const fields: Array<[string, unknown]> = [
+          ["ID", tt.id],
+          ["标题", tt.title],
+          ["工作流", tt.workflow],
+          ["状态", tt.status],
+          ["创建于", tt.created_at],
+          ["启动于", tt.started_at ?? "(未启动)"],
+          ["更新于", tt.updated_at],
+          ["失败次数", tt.failure_count ?? 0],
+          ["PR", tt.pr_url ?? "(无)"],
+          ["关联需求", tt.requirement_id ?? "(无)"],
+          ["父任务", tt.parent_task_id ?? "(无)"],
+        ];
+        const labelWidth = Math.max(...fields.map(([k]) => k.length));
+        for (const [k, v] of fields) {
+          console.log(`  ${k.padEnd(labelWidth)}  ${v}`);
+        }
+        console.log("");
+        console.log(`Workspace: ${process.env.AUTOPILOT_HOME || "~/.autopilot"}/runtime/tasks/${tt.id}/workspace/`);
+        console.log(`日志：autopilot task logs ${tt.id}`);
       } catch (e: unknown) {
         console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
         process.exit(1);
@@ -575,6 +603,16 @@ task
     const logs = await client.getTaskLogs(taskId, parseInt(opts.limit, 10));
     for (const log of logs.reverse()) {
       console.log(`${log.created_at}  ${log.from_status ?? "-"} → ${log.to_status}  [${log.trigger_name ?? "-"}]  ${log.note ?? ""}`);
+    }
+
+    // 末尾给客户指明 agent trace 位置 —— task logs 只显示状态机转换，客户
+    // 跑完最想看的"agent 写了啥 / 评审什么意见"在 workspace 里。
+    if (!opts.follow) {
+      const home = process.env.AUTOPILOT_HOME || `~/.autopilot`;
+      const wsRoot = `${home}/runtime/tasks/${taskId}/workspace/`;
+      console.log("");
+      console.log(`Agent trace + phase 产物：${wsRoot}<NN-phase>/agent-trace.md`);
+      console.log(`实时跟踪状态：autopilot task logs ${taskId} --follow`);
     }
 
     if (opts.follow) {
