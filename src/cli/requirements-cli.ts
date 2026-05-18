@@ -44,7 +44,12 @@ interface ReqNewOpts {
   file?: string;
   project?: string;
   codebase?: string;
-  noExtract?: boolean;
+  /**
+   * commander 把 `--no-extract` 解析为 `{ extract: false }`。
+   * 之前类型写 noExtract → opts.noExtract 永远 undefined → 走默认 extract 分支
+   * 跑 LLM（dogfood-bug23）。
+   */
+  extract?: boolean;
   port: string;
 }
 
@@ -138,7 +143,8 @@ export function registerRequirementCommands(program: Command): void {
 
       // 4) 抽取或兜底
       let title: string, specMd: string;
-      if (opts.noExtract) {
+      if (opts.extract === false) {
+        // commander 把 --no-extract 解析为 { extract: false }（dogfood-bug23）
         title = rawText.trim().slice(0, 30);
         specMd = rawText;
       } else {

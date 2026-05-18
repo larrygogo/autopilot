@@ -44,17 +44,25 @@ program
 // ──────────────────────────────────────────────
 
 function getClient(opts?: { port?: string }): AutopilotClient {
-  // 优先 CLI --port 覆盖；否则读 daemon.listen.json（daemon 启动时写入）；
-  // 再回退到默认端口
-  if (opts?.port) {
-    return new AutopilotClient({ port: parseInt(opts.port, 10) });
-  }
+  // 端口解析优先级（dogfood-bug22）：
+  //   1. 用户显式 --port 非默认值 → 覆盖（跨 HOME 场景）
+  //   2. daemon.listen.json → daemon 启动时写入的真实端口
+  //   3. opts.port（commander 注入的 default 也走这里）
+  //   4. DEFAULT_PORT 兜底
+  //
+  // 之前 commander 永远把 String(DEFAULT_PORT) 注入 opts.port → opts.port
+  // 永远 truthy → readListenInfo 永远走不到。客户改 config.yaml.daemon.port
+  // = 16180 后跑 daemon status 报"daemon 运行中 (pid=主daemon的pid)"，
+  // 因为 client 连 6180 = 用户主 daemon，但 readListenInfo() 显示 16180 →
+  // 两套数据源严重不一致。
+  const explicitPort =
+    opts?.port && parseInt(opts.port, 10) !== DEFAULT_PORT
+      ? parseInt(opts.port, 10)
+      : null;
   const info = readListenInfo();
-  if (info) {
-    // host 用 127.0.0.1 （客户端总是本机连）
-    return new AutopilotClient({ port: info.port });
-  }
-  return new AutopilotClient({ port: DEFAULT_PORT });
+  const port = explicitPort ?? info?.port ?? DEFAULT_PORT;
+  // host 用 127.0.0.1（客户端总是本机连）
+  return new AutopilotClient({ port });
 }
 
 async function ensureDaemon(client: AutopilotClient): Promise<void> {
