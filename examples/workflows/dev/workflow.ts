@@ -220,6 +220,19 @@ export async function run_develop(taskId: string): Promise<void> {
 
   runGit(["checkout", defaultBranch], repoPath);
   runGit(["pull", "--ff-only"], repoPath);
+
+  // 用户工作目录保护：develop 阶段开始前若 working tree 有未提交改动，
+  // 全部 stash（含 untracked），commit agent 自己的产物后再 pop 回来。
+  // 不加这层保护时 git add -A 会把用户散改一并卷入 dogfood commit，污染
+  // 下游 code_review 看到的 diff，让 reviewer 抱怨 agent 没写过的代码。
+  const dirtyBefore = runGit(["status", "--porcelain"], repoPath).stdout.trim();
+  let stashed = false;
+  if (dirtyBefore) {
+    const stashMsg = `autopilot-pre-develop-${taskId}`;
+    runGit(["stash", "push", "--include-untracked", "-m", stashMsg], repoPath);
+    stashed = true;
+  }
+
   const checkoutNew = runGit(["checkout", "-b", branch], repoPath, false);
   if (checkoutNew.exitCode !== 0) {
     runGit(["checkout", branch], repoPath);
@@ -234,15 +247,24 @@ export async function run_develop(taskId: string): Promise<void> {
     `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。`;
 
   const agent = getAgent("developer", task.workflow);
-  const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
+  try {
+    const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
+    const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
+    writeFileSync(reportPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
 
-  const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
-  writeFileSync(reportPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
-
-  const statusResult = runGit(["status", "--porcelain"], repoPath);
-  if (statusResult.stdout.trim()) {
-    runGit(["add", "-A"], repoPath);
-    runGit(["commit", "-m", `feat: ${task.title}`], repoPath);
+    const statusResult = runGit(["status", "--porcelain"], repoPath);
+    if (statusResult.stdout.trim()) {
+      // agent 自己改的文件 add + commit；此时 working tree 只有 agent
+      // 的产物（用户散改已 stash），git add -A 是安全的。
+      runGit(["add", "-A"], repoPath);
+      runGit(["commit", "-m", `feat: ${task.title}`], repoPath);
+    }
+  } finally {
+    // 不论 agent 成功 / 失败 / 超时，都要 pop 回用户散改，否则用户看不到
+    // 自己的未提交改动会很慌
+    if (stashed) {
+      runGit(["stash", "pop"], repoPath, false);
+    }
   }
 
   transition(taskId, "develop_complete", {
