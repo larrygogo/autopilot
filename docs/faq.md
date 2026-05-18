@@ -36,11 +36,14 @@ python --version
 
 ### Q: `autopilot init` 后 `~/.autopilot/` 目录为空
 
-**解决**：`init` 只创建目录结构，不复制示例工作流。手动复制：
+**v1.0+ 已修**（dogfood-bug 8 + bug 19）：`init` 现在会自动跑全部数据库迁移 +
+从 `examples/workflows/dev` 装一份默认 dev 工作流到 `~/.autopilot/workflows/dev/`。
 
-```bash
-cp -r examples/workflows/* ~/.autopilot/workflows/
-```
+预期输出含：
+- `已初始化数据库：...（应用 N 条迁移）`
+- `已装入默认工作流：~/.autopilot/workflows/dev`
+
+若仍看到空目录，确认你跑的是最新版（git pull 后 bun install）。
 
 ### Q: 数据库锁定（database is locked）
 
@@ -212,9 +215,8 @@ autopilot init
 # 删除用户数据（谨慎操作！）
 rm -rf ~/.autopilot/
 
-# 重新初始化
+# 重新初始化（init 已含迁移 + 装 dev workflow）
 autopilot init
-autopilot upgrade
 ```
 
 ---

@@ -36,11 +36,16 @@ If below 3.10, upgrade Python.
 
 ### Q: `~/.autopilot/` is empty after `autopilot init`
 
-**Solution**: `init` only creates the directory structure; it does not copy example workflows. Copy them manually:
+**Fixed in v1.0+** (dogfood-bug 8 + bug 19): `init` now auto-runs all database
+migrations and installs the default `dev` workflow from `examples/workflows/dev`
+into `~/.autopilot/workflows/dev/`.
 
-```bash
-cp -r examples/workflows/* ~/.autopilot/workflows/
-```
+Expected output includes:
+- `已初始化数据库：...（应用 N 条迁移）` (DB initialized with N migrations applied)
+- `已装入默认工作流：~/.autopilot/workflows/dev` (default workflow installed)
+
+If you still see an empty directory, confirm you're running the latest build
+(`git pull && bun install`).
 
 ### Q: Database is locked
 
@@ -212,9 +217,8 @@ autopilot init
 # Delete user data (use with caution!)
 rm -rf ~/.autopilot/
 
-# Re-initialize
+# Re-initialize (init now includes migrations + default dev workflow)
 autopilot init
-autopilot upgrade
 ```
 
 ---
