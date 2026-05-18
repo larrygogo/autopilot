@@ -41,7 +41,7 @@ LLM agent 单次调用很厉害，但**真实工作很少是单次的**。你想
 
 ## 三个真实场景
 
-> 项目本身用自己开发自己 — 见 [docs/dogfood-log.md](docs/dogfood-log.md) 完整记录（11 个真实 bug 修复 + PR #82 实跑产出）。
+> 项目本身用自己开发自己 — 见 [docs/dogfood-log.md](docs/dogfood-log.md) 完整记录（25 个真实 bug 修复 + PR #82 实跑产出）。
 
 ### 1. AI 驱动的开发流水线（自带的 `dev` 工作流）
 
@@ -165,9 +165,10 @@ graph TB
 ```bash
 git clone https://github.com/larrygogo/autopilot && cd autopilot
 bun install
-bun run dev init                  # 创建 ~/.autopilot/
-bun run dev upgrade               # 执行数据库迁移
+autopilot init                    # 创建 ~/.autopilot/、跑数据库迁移、装默认 dev workflow
 ```
+
+老用户拉新代码后跑：`autopilot upgrade`（增量执行新迁移）。
 
 ### 启动
 
@@ -175,6 +176,15 @@ bun run dev upgrade               # 执行数据库迁移
 autopilot daemon start            # 后台启动 daemon（带 supervisor 守护）
 autopilot dashboard               # 打开 Web UI（浏览器访问 http://127.0.0.1:6180）
 # 或：autopilot tui 进 TUI
+```
+
+### 纯 CLI 路径（不开浏览器也能跑）
+
+```bash
+autopilot project create "My Project"
+autopilot codebase create myrepo ./path/to/repo --github owner/repo
+autopilot req new "你的需求描述"   # cwd 在 codebase 内自动推断 codebase
+# 跑 dev workflow 自动 design → review → develop → code_review → submit_pr
 ```
 
 ### 第一个工作流

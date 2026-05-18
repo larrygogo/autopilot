@@ -163,9 +163,10 @@ graph TB
 ```bash
 git clone https://github.com/larrygogo/autopilot && cd autopilot
 bun install
-bun run dev init                  # create ~/.autopilot/
-bun run dev upgrade               # run database migrations
+autopilot init                    # create ~/.autopilot/, run migrations, install default dev workflow
 ```
+
+For existing users after `git pull`: run `autopilot upgrade` to apply new migrations.
 
 ### Launch
 
@@ -173,6 +174,15 @@ bun run dev upgrade               # run database migrations
 autopilot daemon start            # start daemon in background (with supervisor)
 autopilot dashboard               # open Web UI (browser http://127.0.0.1:6180)
 # or: autopilot tui  for the TUI
+```
+
+### Pure-CLI path (no browser needed)
+
+```bash
+autopilot project create "My Project"
+autopilot codebase create myrepo ./path/to/repo --github owner/repo
+autopilot req new "your requirement description"   # auto-detects codebase from cwd
+# runs the dev workflow automatically: design → review → develop → code_review → submit_pr
 ```
 
 ### Your First Workflow
