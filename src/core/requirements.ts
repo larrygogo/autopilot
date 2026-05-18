@@ -75,7 +75,7 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   ready: ["queued", "awaiting_approval", "drafting", "cancelled"],
   queued: ["running", "awaiting_approval", "ready", "cancelled"],
   awaiting_approval: ["queued", "running", "drafting", "cancelled"],
-  running: ["awaiting_review", "failed", "cancelled"],
+  running: ["awaiting_review", "done", "failed", "cancelled"],
   awaiting_review: ["fix_revision", "done", "cancelled"],
   fix_revision: ["awaiting_review", "failed", "cancelled"],
   done: [],
