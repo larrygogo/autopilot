@@ -179,17 +179,25 @@ export function registerCoreRpcMethods(): void {
   registerRpcMethod({
     method: "daemon.setHost",
     description: "写入 config.yaml.daemon.host；需配合 daemon.restart 才生效",
-    handler: (params) => {
+    handler: async (params) => {
       const p = asObj(params);
       if (typeof p.host !== "string" || !p.host.trim()) {
         throw new RpcError("INVALID_PARAM", "需要 host (string)");
       }
       const host = p.host.trim();
-      // 校验：仅允许 127.0.0.1 / 0.0.0.0 / IPv4 / localhost 字面量
-      const isIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+      // 校验白名单 + 本机网卡命中。
+      // 之前只看 IPv4 字面量合法 → 用户/恶意调用方传不可达 IP（如 192.0.2.1）
+      // 会让 Bun.serve EADDRNOTAVAIL，supervisor 进崩溃循环、UI 完全失联。
+      // 现在限定：loopback / 暴露全部网卡 / 命中 detectLanIPv4 的某个本机网卡。
+      const { detectLanIPv4 } = await import("./routes");
+      const lanIps = detectLanIPv4();
       const isAllowedLiteral = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
-      if (!isAllowedLiteral && !isIPv4) {
-        throw new RpcError("INVALID_PARAM", "host 必须是 localhost / 127.0.0.1 / 0.0.0.0 或 IPv4 地址");
+      const isBindableLanIp = lanIps.includes(host);
+      if (!isAllowedLiteral && !isBindableLanIp) {
+        throw new RpcError(
+          "INVALID_PARAM",
+          `host "${host}" 不可绑定。可选：localhost / 127.0.0.1 / 0.0.0.0 / ${lanIps.join(" / ") || "(无 LAN IP)"}`,
+        );
       }
       const cur = loadDaemonConfig();
       saveDaemonConfig({ ...cur, host });
@@ -1738,12 +1746,27 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "codebases.delete",
-    description: "删除 codebase（与 DELETE /api/codebases/:id 等价）",
-    handler: (params) => {
+    description: "删除 codebase；默认拒绝删有需求关联的 codebase，要求 force=true 才能级联清空 requirements.codebase_id",
+    handler: async (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const existing = getCodebaseById(p.id);
       if (!existing) throw new RpcError("NOT_FOUND", "codebase not found");
+      // 默认 in_use 检查 —— 防止 web/CLI 误删带走一批需求的 codebase_id
+      // 调用方必须显式 force: true 才能继续（前端弹 confirm dialog）
+      if (!p.force) {
+        const { getDb } = await import("../core/db");
+        const row = getDb()
+          .query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM requirements WHERE codebase_id = ?")
+          .get(p.id);
+        const affected = row?.n ?? 0;
+        if (affected > 0) {
+          throw new RpcError(
+            "IN_USE",
+            `${affected} 条需求关联此 codebase；带 force=true 后会把这些 requirement.codebase_id 置 NULL（需求保留）`,
+          );
+        }
+      }
       deleteCodebase(p.id);
       return { ok: true };
     },

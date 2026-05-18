@@ -228,14 +228,32 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   };
 
   const removeCb = async (cb: Codebase) => {
-    if (!confirm(`确定移除代码库「${cb.alias}」？\n\n注意：仍有未完成需求关联该代码库时，删除可能影响正在进行的任务。`)) return;
+    if (!confirm(`确定移除代码库「${cb.alias}」？`)) return;
     setDeletingCbId(cb.id);
     try {
       await api.deleteCodebase(cb.id);
       toast.success(`已移除代码库「${cb.alias}」`);
       refresh();
     } catch (e: unknown) {
-      toast.error("删除失败", (e as Error)?.message ?? String(e));
+      const msg = (e as Error)?.message ?? String(e);
+      // 后端 IN_USE：有需求挂在此 codebase；提取数字弹二次确认
+      if (msg.startsWith("IN_USE:")) {
+        const m = msg.match(/(\d+)/);
+        const n = m ? m[1] : "若干";
+        if (confirm(
+          `⚠ ${n} 条需求关联此代码库。继续删除会把这些需求的 codebase_id 置 NULL（需求保留，但变成"未关联代码库"）。\n\n确定要级联删除吗？`,
+        )) {
+          try {
+            await api.deleteCodebase(cb.id, true);
+            toast.success(`已移除代码库「${cb.alias}」（${n} 条需求已解关联）`);
+            refresh();
+          } catch (e2: unknown) {
+            toast.error("删除失败", (e2 as Error)?.message ?? String(e2));
+          }
+        }
+      } else {
+        toast.error("删除失败", msg);
+      }
     } finally {
       setDeletingCbId(null);
     }
@@ -370,8 +388,8 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                 <thead>
                   <tr className="border-b-[1.5px] border-foreground bg-secondary/50 text-left font-mono text-[10px] uppercase tracking-[0.2em] text-foreground/70">
                     <th className="px-4 py-2.5 font-semibold">别名</th>
-                    <th className="px-4 py-2.5 font-semibold">路径</th>
-                    <th className="px-4 py-2.5 font-semibold">分支</th>
+                    <th className="hidden px-4 py-2.5 font-semibold md:table-cell">路径</th>
+                    <th className="hidden px-4 py-2.5 font-semibold sm:table-cell">分支</th>
                     <th className="px-4 py-2.5 font-semibold">健康</th>
                     <th className="px-4 py-2.5 font-semibold text-right">操作</th>
                   </tr>
@@ -382,8 +400,19 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                       key={cb.id}
                       className="border-b border-dashed border-foreground/20 last:border-0 transition-colors hover:bg-accent/8"
                     >
-                      <td className="px-4 py-2.5 font-mono text-sm font-medium">{cb.alias}</td>
-                      <td className="max-w-[240px] px-4 py-2.5">
+                      <td className="px-4 py-2.5 font-mono text-sm font-medium">
+                        <div className="flex flex-col gap-0.5 md:gap-0">
+                          <span>{cb.alias}</span>
+                          {/* mobile 下路径列被隐藏，把路径附在别名下面，让用户至少能识别 */}
+                          <span
+                            className="block truncate text-[10px] font-normal text-muted-foreground md:hidden"
+                            title={cb.path}
+                          >
+                            {cb.path}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="hidden max-w-[240px] px-4 py-2.5 md:table-cell">
                         <span
                           className="block truncate font-mono text-xs text-muted-foreground"
                           title={cb.path}
@@ -391,7 +420,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                           {cb.path}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="hidden px-4 py-2.5 sm:table-cell">
                         <Badge variant="secondary">{cb.default_branch}</Badge>
                       </td>
                       <td className="px-4 py-2.5">

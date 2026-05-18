@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2 } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Codebase, type ProviderItem, type ClarifierRoundState } from "@/hooks/useApi";
@@ -413,6 +413,13 @@ export function RequirementDetail() {
   const [feedbackBody, setFeedbackBody] = useState("");
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  // 同步 lock：React setActionBusy 是异步的，连点 / 双击场景下第一次 click 后
+  // React 还没 re-render 前 actionBusy 仍是 false，按钮 disabled 检查不能拦。
+  // busyRef.current 是同步赋值的，能在第一次 click 同步拒掉第二次。
+  // 每个 mutation 函数遵守模式：
+  //   if (busyRef.current) return; busyRef.current = true; setActionBusy(true);
+  //   try { ... } finally { busyRef.current = false; setActionBusy(false); }
+  const busyRef = useRef(false);
   const [subPrs, setSubPrs] = useState<RequirementSubPr[]>([]);
   // 回复输入状态：qid → 文本
   const [projectCodebases, setProjectCodebases] = useState<Codebase[]>([]);
@@ -558,6 +565,8 @@ export function RequirementDetail() {
 
   async function markReady() {
     if (!id) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setActionBusy(true);
     try {
       // 新 B 模式：走 finish-clarification endpoint（一并清 active_question_id + 进 awaiting_approval）
@@ -575,6 +584,7 @@ export function RequirementDetail() {
     } catch (e: unknown) {
       toast.error("操作失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
@@ -586,9 +596,11 @@ export function RequirementDetail() {
       return;
     }
     // optimistic：UI 立刻反映 queued 状态，不等服务端响应
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setActionBusy(true);
     const prev = req;
     setReq({ ...req, status: "queued" });
-    setActionBusy(true);
     try {
       await api.enqueueRequirement(id);
       toast.success("已入队执行", { label: "看任务 →", onClick: () => navigate("/tasks") });
@@ -596,6 +608,7 @@ export function RequirementDetail() {
       setReq(prev); // rollback
       toast.error("入队失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
@@ -615,9 +628,11 @@ export function RequirementDetail() {
 
   async function approve() {
     if (!id || !req) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setActionBusy(true);
     const prev = req;
     setReq({ ...req, status: "queued" });
-    setActionBusy(true);
     try {
       await api.enqueueRequirement(id);
       toast.success("已审批通过，任务进入队列", { label: "看任务 →", onClick: () => navigate("/tasks") });
@@ -625,15 +640,18 @@ export function RequirementDetail() {
       setReq(prev);
       toast.error("审批失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
 
   async function rejectApproval() {
     if (!id || !req) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setActionBusy(true);
     const prev = req;
     setReq({ ...req, status: "drafting" });
-    setActionBusy(true);
     try {
       await api.transitionRequirement(id, "drafting");
       toast.success("已驳回，需求返回草稿");
@@ -641,15 +659,18 @@ export function RequirementDetail() {
       setReq(prev);
       toast.error("驳回失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
 
   async function resumeClarify() {
     if (!id || !req) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setActionBusy(true);
     const prev = req;
     setReq({ ...req, status: "clarifying" });
-    setActionBusy(true);
     try {
       await api.transitionRequirement(id, "clarifying");
       toast.success("已重新进入澄清，AI 正在思考下一个问题");
@@ -657,15 +678,18 @@ export function RequirementDetail() {
       setReq(prev);
       toast.error("操作失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
 
   async function markDone() {
     if (!id || !req) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setActionBusy(true);
     const prev = req;
     setReq({ ...req, status: "done" });
-    setActionBusy(true);
     try {
       await api.transitionRequirement(id, "done");
       toast.success("需求已标记完成");
@@ -673,15 +697,18 @@ export function RequirementDetail() {
       setReq(prev);
       toast.error("操作失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
 
   async function requestFix() {
     if (!id || !req) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setActionBusy(true);
     const prev = req;
     setReq({ ...req, status: "fix_revision" });
-    setActionBusy(true);
     try {
       await api.transitionRequirement(id, "fix_revision");
       toast.success("已标记需要修改，Agent 将继续修复");
@@ -689,15 +716,18 @@ export function RequirementDetail() {
       setReq(prev);
       toast.error("操作失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
 
   async function retryFromFailed() {
     if (!id || !req) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setActionBusy(true);
     const prev = req;
     setReq({ ...req, status: "queued" });
-    setActionBusy(true);
     try {
       await api.enqueueRequirement(id);
       toast.success("已重新入队执行", { label: "看任务 →", onClick: () => navigate("/tasks") });
@@ -705,12 +735,15 @@ export function RequirementDetail() {
       setReq(prev);
       toast.error("重试失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
 
   async function recallToReady() {
     if (!id) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setActionBusy(true);
     try {
       await api.transitionRequirement(id, "ready");
@@ -719,6 +752,7 @@ export function RequirementDetail() {
     } catch (e: unknown) {
       toast.error("操作失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
@@ -743,6 +777,8 @@ export function RequirementDetail() {
   async function cancel() {
     if (!id) return;
     if (!confirm(`确认取消需求「${req?.title}」？`)) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setActionBusy(true);
     try {
       await api.cancelRequirement(id);
@@ -751,6 +787,7 @@ export function RequirementDetail() {
     } catch (e: unknown) {
       toast.error("取消失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
@@ -758,6 +795,8 @@ export function RequirementDetail() {
   async function deleteReq() {
     if (!id || !req) return;
     if (!confirm(`确认删除需求「${req.title}」？此操作不可恢复。`)) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setActionBusy(true);
     try {
       await api.deleteRequirement(id);
@@ -765,6 +804,7 @@ export function RequirementDetail() {
       navigate(req.project_id ? `/projects/${req.project_id}` : "/projects");
     } catch (e: unknown) {
       toast.error("删除失败", (e as Error)?.message ?? String(e));
+      busyRef.current = false;
       setActionBusy(false);
     }
   }
@@ -1137,11 +1177,11 @@ export function RequirementDetail() {
             提示用户主动点 [继续澄清] 切到 clarifying，AI 才会基于历史提下一题。
           */}
           {req.status === "drafting" && resolvedQuestions.length > 0 && (
-            <div className="mx-5 mb-5 flex items-center justify-between gap-3 border-[1.5px] border-dashed border-foreground/30 bg-card/40 px-4 py-3">
+            <div className="mx-5 mb-5 flex flex-col gap-3 border-[1.5px] border-dashed border-foreground/30 bg-card/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
                 草稿状态。点击右侧让 AI 基于以上对话和当前 SPEC 继续澄清。
               </p>
-              <Button size="sm" onClick={resumeClarify} disabled={actionBusy} className="shrink-0">
+              <Button size="sm" onClick={resumeClarify} disabled={actionBusy} className="shrink-0 self-start sm:self-auto">
                 {actionBusy ? "处理中…" : "↻ 继续澄清"}
               </Button>
             </div>
@@ -1151,8 +1191,8 @@ export function RequirementDetail() {
 
       {/* 主体：左右两栏 */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* 左：需求规约 */}
-        <div className="lg:col-span-2 space-y-4">
+        {/* 左：需求规约。min-w-0 防 grid 子项被内部长串撑大 */}
+        <div className="lg:col-span-2 space-y-4 min-w-0">
           <Card>
             <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
               <div className="flex items-center gap-2">
@@ -1225,7 +1265,7 @@ export function RequirementDetail() {
         </div>
 
         {/* 右：操作 + 反馈历史 */}
-        <div className="space-y-4">
+        <div className="space-y-4 min-w-0">
           {/* 操作按钮区 */}
           <Card>
             <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">

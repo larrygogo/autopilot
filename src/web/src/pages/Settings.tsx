@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { PageHero } from "@/components/PageHero";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
 import { getApiToken, setApiToken, clearApiToken, shouldUseToken } from "@/lib/api-token";
+import { setRestarting } from "@/lib/ws-singleton";
 
 // 保留 embedded 参数签名以兼容旧调用
 export function Settings(_props: { embedded?: boolean } = {}) {
@@ -281,6 +282,10 @@ function NetworkAccessCard(): React.ReactElement {
         await refresh();
         return res;
       }
+      // restart RPC 已发出，daemon 150ms 后 exit。锁定 WS RPC 防用户在重启
+      // 窗口期发出的 mutation 卡 5s 才反馈。轮询 getDaemonListen 走 HTTP 不
+      // 受此锁影响。
+      setRestarting(true);
       // 轮询 getDaemonListen 等 WS 重连 + 新 daemon 起来；超时回退到刷新页面
       const deadline = Date.now() + 15_000;
       let recovered = false;
@@ -313,12 +318,16 @@ function NetworkAccessCard(): React.ReactElement {
         toast.error("daemon 重启等待超时，刷新页面尝试…");
         setTimeout(() => location.reload(), 1000);
       }
+      // 解锁 mutation：daemon 已稳定（或决定 reload 兜底）
+      setRestarting(false);
       return res;
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
       await refresh();  // 回滚 UI 到服务端状态
       return null;
     } finally {
+      // 防御性：意外 throw 路径也要解锁，避免 mutation 永久卡死
+      setRestarting(false);
       setSaving(false);
     }
   };

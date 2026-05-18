@@ -477,9 +477,9 @@ export const api = {
     body: { alias: string; path: string; default_branch?: string; github_owner?: string | null; github_repo?: string | null },
   ) =>
     requestRpc<{ codebase: Codebase }>("projects.addCodebase", { id: projectId, ...body }).then((r) => r.codebase),
-  // [WS-RPC] codebases.delete
-  deleteCodebase: (codebaseId: string) =>
-    requestRpc<{ ok: true }>("codebases.delete", { id: codebaseId }),
+  // [WS-RPC] codebases.delete —— 默认拒删 in-use codebase；force=true 才允许级联清空
+  deleteCodebase: (codebaseId: string, force = false) =>
+    requestRpc<{ ok: true }>("codebases.delete", { id: codebaseId, force }),
   // [WS-RPC] projects.requirements
   listProjectRequirements: (projectId: string) =>
     requestRpc<{ requirements: Requirement[] }>("projects.requirements", { id: projectId }).then((r) => r.requirements),

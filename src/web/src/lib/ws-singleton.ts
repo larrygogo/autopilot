@@ -233,13 +233,30 @@ function waitForOpen(timeoutMs: number): Promise<boolean> {
   });
 }
 
+// daemon 主动 restart 进行中标志位。调用方（如 NetworkAccessCard）在触发
+// daemon.restart 前后调 setRestarting(true/false)，期间所有新 rpcCall 直接
+// fast-fail（不等 waitForOpen 5s），避免用户在重启窗口期发出的 mutation
+// 卡 5s 才反馈 / optimistic UI 与真实状态长时间脱节。
+let restarting = false;
+export function setRestarting(value: boolean): void {
+  restarting = value;
+}
+export function isRestarting(): boolean {
+  return restarting;
+}
+
 /**
  * 发起 RPC 请求。
  * 首次访问页面时 ws 通常还在 CONNECTING，先等一段时间让连接 ready 再发，
  * 避免"页面刚打开 → 所有 RPC 一起 reject DISCONNECTED"的假死。
  * 真断线场景：等不到 OPEN 仍会 reject DISCONNECTED，行为不变。
+ * daemon 主动 restart 期间：调用方明知 daemon 在 respawn，立刻 reject 让 UI
+ * 即时给反馈，而不是 waitForOpen 拖 5s。
  */
 export async function rpcCall<T = unknown>(method: string, params?: unknown, opts?: CallOptions): Promise<T> {
+  if (restarting) {
+    throw new RpcCallError("RESTARTING", "daemon 正在重启，请稍后再试");
+  }
   ensureConnected();
   if (ws?.readyState !== WebSocket.OPEN) {
     const ok = await waitForOpen(5000);

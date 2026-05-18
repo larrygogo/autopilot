@@ -269,17 +269,20 @@ export class HttpClient {
     return this.call("projects.requirements", { id: projectId });
   }
 
-  // ── Codebases ── （codebases.* RPC 尚未注册，保留 placeholder 等后续）
+  // ── Codebases ── （走 WS RPC codebases.*，响应是裸数据无 envelope）
 
   async listCodebases(): Promise<{ codebases: Codebase[] }> {
-    throw new Error("listCodebases 暂未迁到 WS RPC（codebases.* 等待后续迁移）");
+    const list = await this.call<Codebase[]>("codebases.list", {});
+    // 保持薄客户端旧签名（CLI 解构 { codebases }），envelope 在此还原
+    return { codebases: list };
   }
 
-  async getCodebase(_id: string): Promise<{ codebase: Codebase }> {
-    throw new Error("getCodebase 暂未迁到 WS RPC");
+  async getCodebase(id: string): Promise<{ codebase: Codebase }> {
+    const cb = await this.call<Codebase>("codebases.get", { id });
+    return { codebase: cb };
   }
 
-  async createCodebase(_body: {
+  async createCodebase(body: {
     alias: string;
     path: string;
     default_branch?: string;
@@ -287,25 +290,27 @@ export class HttpClient {
     github_repo?: string | null;
     project_id?: string;
   }): Promise<{ codebase: Codebase }> {
-    throw new Error("createCodebase 暂未迁到 WS RPC，请用 projects.addCodebase");
+    const cb = await this.call<Codebase>("codebases.create", body);
+    return { codebase: cb };
   }
 
-  async updateCodebase(_id: string, _body: Partial<{
+  async updateCodebase(id: string, body: Partial<{
     alias: string;
     path: string;
     default_branch: string;
     github_owner: string | null;
     github_repo: string | null;
   }>): Promise<{ codebase: Codebase }> {
-    throw new Error("updateCodebase 暂未迁到 WS RPC");
+    const cb = await this.call<Codebase>("codebases.update", { id, ...body });
+    return { codebase: cb };
   }
 
-  async deleteCodebase(_id: string): Promise<{ ok: true }> {
-    throw new Error("deleteCodebase 暂未迁到 WS RPC");
+  async deleteCodebase(id: string): Promise<{ ok: true }> {
+    return this.call<{ ok: true }>("codebases.delete", { id });
   }
 
-  async healthcheckCodebase(_id: string): Promise<CodebaseHealthResult> {
-    throw new Error("healthcheckCodebase 暂未迁到 WS RPC");
+  async healthcheckCodebase(id: string): Promise<CodebaseHealthResult> {
+    return this.call<CodebaseHealthResult>("codebases.healthcheck", { id });
   }
 
   // ── Questions ──

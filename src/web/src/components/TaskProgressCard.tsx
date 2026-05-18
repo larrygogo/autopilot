@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { ExternalLink, Loader2, AlertCircle, CheckCircle2, XCircle, RotateCw } from "lucide-react";
 import { api } from "@/hooks/useApi";
@@ -64,6 +64,8 @@ export function TaskProgressCard({
   const [recentError, setRecentError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  // 同步 mutex：cancel / restart 互斥，防止双击 / 跨按钮连点
+  const busyRef = useRef(false);
   const [now, setNow] = useState(Date.now());
   // 当前任务所属工作流的 phase 定义（按 name 索引），用于显示 phase.label
   const [phasesByName, setPhasesByName] = useState<Map<string, { name: string; label?: string }>>(new Map());
@@ -150,11 +152,13 @@ export function TaskProgressCard({
   const elapsedMs = startedMs ? now - startedMs : 0;
 
   async function cancelTask() {
+    if (busyRef.current) return;
     if (!confirm("确认取消任务？已生成的产物会保留。")) return;
+    busyRef.current = true;
+    setCancelling(true);
     // optimistic：立刻显示 cancelled，不等服务端
     const prev = task;
     if (task) setTask({ ...task, status: "cancelled" });
-    setCancelling(true);
     try {
       await api.cancelTask(taskId);
       toast.success("任务已取消");
@@ -162,11 +166,15 @@ export function TaskProgressCard({
       if (prev) setTask(prev);
       toast.error("取消失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setCancelling(false);
     }
   }
 
   async function restartTask() {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setRestarting(true);
     // optimistic：从原 status 提取 phase 名，立刻显示 pending_<phase>
     const prev = task;
     if (task) {
@@ -174,7 +182,6 @@ export function TaskProgressCard({
       const phase = m ? m[1] : null;
       if (phase) setTask({ ...task, status: `pending_${phase}`, dangling: false });
     }
-    setRestarting(true);
     try {
       await api.restartTask(taskId);
       toast.success("任务已重启");
@@ -182,6 +189,7 @@ export function TaskProgressCard({
       if (prev) setTask(prev);
       toast.error("重启失败", (e as Error)?.message ?? String(e));
     } finally {
+      busyRef.current = false;
       setRestarting(false);
     }
   }
