@@ -61,6 +61,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 25 | daemon 启动 retention 用 `setInterval(prune, 3600_000)` 但 **不立即触发**。客户 `daemon stop` 累积一周旧 workspace → `daemon start` 后第一小时 retention 完全无效，看着像功能坏了 | 抽出 runRetention()，启动时同步跑一次再开 setInterval；加 3 个集成测试用 spawn 子进程完整跑 (loadConfig + DB + scan + prune) | `55f3382` |
 | 26 | bug22 系列遗漏：`TokenGate.tsx` 给局域网用户的指引文案硬编码 "127.0.0.1:6180/settings"。客户改了 daemon.port=16180 后，局域网用户照着说明在本机打开是 404 | 用 `location.port` 替代硬编码 6180，链接跟随客户实际端口 | `acf9b12` |
 | 27 | `config:updated` 事件 emit 后**无 daemon 内 subscriber**：客户在 web Settings 改 agent.model → "已保存"亮起 → 下个 task 跑的是 cached Agent 旧 model | daemon 启动时 onEvent("config:updated", clearAllAgentCache)，新增 clearAllAgentCache() 异步清 + close 所有缓存 Agent | `cd533a9` |
+| 28 | bug 27 同源遗漏：`workflow:reloaded` emit 后 daemon 内无 listener 清 agent cache。客户改 workflow.yaml.agents[] 保存 → daemon 重 discover → cache 还在 → 下个 task 旧 Provider | daemon 启动时 onEvent("workflow:reloaded", clearAllAgentCache)；顺手修 resolveQuestion 误导注释 | `4e666fb` |
 
 ---
 
