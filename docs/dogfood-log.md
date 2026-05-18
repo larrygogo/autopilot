@@ -53,6 +53,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 17 | doctor warning 计入 exit 1（"提示性"问题如可选 CLI 没装），客户 CI 里跑 `doctor` 被误判失败 | exitCodeFor 改 POSIX 标准：error → 1 / warning → 0 | `89f3c94` |
 | 18 | `168a47e` 在 package.json 加了 `coverage:rpc` script 但忘把 `bin/coverage-matrix.ts` 一起入库，刚 clone 仓库的客户跑 `bun run coverage:rpc` 直接 file not found | 补 commit 工具 + 文档（`docs/rpc-coverage.md`） | `b8f4cf9` |
 | 19 | `autopilot init` 只跑 SCHEMA 不跑 migrations，客户 init 完只有 tasks/task_logs 两张表，跑 dashboard 创 project 立即报 "no such table: projects"（bug 8 修过"自动装 workflow"但漏修了数据库本身） | init 内调 runPendingMigrations()，输出"应用 N 条迁移" | `9932f62` |
+| 20 | 纯 CLI 路径被 web 依赖打破：`autopilot req new` 在 0 project 时报"请先在 web /library 创建"。客户走 CLI 还要开浏览器才能创第一个 project | 加 `autopilot project list / create / delete`；req new 错误信息引导 `autopilot project create <name>` | `1f50389` |
 
 ---
 
@@ -61,9 +62,15 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 ```bash
 git clone https://github.com/larrygogo/autopilot && cd autopilot
 bun install
-autopilot init                       # 自动装 dev workflow（commit 312d633）
-autopilot daemon start               # 后台启动 daemon + supervisor
-autopilot dashboard                  # 浏览器 → 创建 project / codebase → 提需求
+autopilot init                              # 自动装 dev workflow + 跑全迁移
+autopilot daemon start                      # 后台启动 daemon + supervisor
+
+# 选一：纯 CLI（bug 20 修过后可行）
+autopilot project create "My Project"       # CLI 自包含建 project
+autopilot req new "你的需求描述"             # 默认挂到唯一 project
+
+# 选二：web UI
+autopilot dashboard                         # 浏览器 → 创建 project / codebase → 提需求
 ```
 
 老用户（init 已经在 fix 之前跑过）拉 repo 后跑一次：
@@ -93,7 +100,7 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 - `tests/cli-config.test.ts` +1 用例：warning → exit 0 / error → 1
 - `tests/requirements.test.ts` +5 用例：状态转换覆盖 bug 3/15
 
-830 测试 / 0 失败（截至 commit `9932f62`）。
+836 测试 / 0 失败（截至 commit `1f50389`）。
 
 ## 还没验过的边界（欢迎补）
 
