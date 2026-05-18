@@ -110,7 +110,7 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 
 ## 还没验过的边界（欢迎补）
 
-- ~~supervisor 真子进程端到端~~ ✓ **已验**：起 `daemon supervise` + `taskkill /F daemon-pid`，supervisor 1s 退避后自动重启；连续快速 kill 3 次（daemon 跑 < 10s）观察 backoff 从 1s → 1s → 1s → 2s 递增对齐 `BASE_BACKOFF_MS=[1000,2000,5000,...]`。RESTART_SENTINEL exit 75 路径未直接验（需触发 daemon.setHost，但 classifyExit() 单测已覆盖）。
+- ~~supervisor 真子进程端到端~~ ✓ **全部三场景已验**：(1) 起 `daemon supervise` + `taskkill /F daemon-pid`，supervisor 1s 退避后自动重启；(2) 连续快速 kill 3 次（daemon 跑 < 10s）观察 backoff 从 1s → 1s → 1s → 2s 递增对齐 `BASE_BACKOFF_MS=[1000,2000,5000,...]`；(3) 调 `daemon.restart` RPC 触发 exit 75 → supervisor log "daemon 主动请求 respawn (code=75)，立即重启" → 新 daemon 立即起，**无 backoff**。三条路径都跟 supervisor.ts 设计对齐。
 - ~~workspace_retention 在 daemon 实际跑一段时间后真触发清理~~ ✓ **已验**：手动跑 prune e2e 验证 days=1 + 30 天前 done task 被清；同时发现 bug 25（启动后第一小时不跑）并修复 + 3 个集成测试。
 - 多设备局域网访问 token 二维码扫码流程（需要真实手机/平板）
 - 4 个零调用 RPC method (`tasks.events`、`tasks.subtasks`、`requirements.finishClarification`、`requirements.retryClarify`) 是孤儿（注册了但客户端忘接）；删之前要确认是否未来想暴露
