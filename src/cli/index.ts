@@ -387,7 +387,13 @@ daemon
       const listen = readListenInfo();
       console.log(`daemon 运行中 (pid=${status.pid})`);
       if (listen) console.log(`  监听: ${listen.host}:${listen.port}`);
-      console.log(`  版本: ${status.version}`);
+      // 版本同时显示 git_sha + ISO 启动时间（dogfood-bug13）：客户做完
+      // daemon restart 后能从 CLI 一眼 verify"现在跑的真是新代码"，跟
+      // web Settings 的「Daemon 信息」卡片对齐。
+      const sha = (status as { git_sha?: string }).git_sha;
+      const startedAt = (status as { started_at_iso?: string }).started_at_iso;
+      console.log(`  版本: ${status.version}${sha ? ` · ${sha}` : ""}`);
+      if (startedAt) console.log(`  启动于: ${new Date(startedAt).toLocaleString()}`);
       console.log(`  运行时间: ${status.uptime}s`);
       const counts = Object.entries(status.taskCounts);
       if (counts.length > 0) {

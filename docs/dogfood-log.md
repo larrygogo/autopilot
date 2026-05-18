@@ -45,6 +45,8 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 |---|---|---|---|
 | 8 | `autopilot init` 只创空目录，新用户跑任何 dev task 都报"找不到工作流" | init 末尾自动 `cloneTemplate("dev", "dev")` | `312d633` |
 | 9 | 老用户已 init 过的，examples 后续改 bug fix 拿不到 | 新增 `autopilot workflow sync <name>` 命令（dry-run + `--apply`） | `659a908` |
+| 12 | `autopilot doctor` 在 CLAUDE.md 文档化的"零配置"模式（`providers` 段不写）下误报"没有 enabled provider"。客户跑 init 后看到红色 error 误以为没装好 | doctor providers 段不存在时视为零配置，L1 不报 error，引导 `--probe` 跑 L2 探测 CLI | `32debc2` |
+| 13 | CLI `autopilot daemon status` 只显示 `版本: 1.0.0`，缺 git_sha / started_at。客户做 daemon restart 后没法从 CLI 一眼 verify"现在跑的真是新代码" | daemon status 输出加 `· <git_sha>` 和`启动于` 行，跟 web Settings 「Daemon 信息」卡对齐 | _即将提交_ |
 
 ---
 
