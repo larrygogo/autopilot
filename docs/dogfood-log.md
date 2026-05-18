@@ -58,6 +58,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 22 | CLI 所有子命令 `--port` 默认硬编码 6180，commander 永远注入 opts.port，getClient 内 listen.json 永远被忽略。客户改 `config.yaml.daemon.port=16180` 后 `daemon status` 报错 pid（连用户主 6180）+ 监听 16180 两套数据源不一致 | getClient 改"显式 --port 非默认 → 覆盖；否则 listen.json 优先；最后 default" | `9edb0bf` |
 | 23 | `req new --no-extract` 完全不生效：commander 把 `--no-extract` 解析为 `{ extract: false }`，代码检查 `opts.noExtract` 永远 undefined → 永远走 extract 分支调 LLM。无 LLM 配置的客户必报 "抽取失败：TIMEOUT 300s" | 类型 noExtract → extract，检查 `opts.extract === false` | `9edb0bf` |
 | 24 | bug22 修了 12+ CLI 命令但漏了 `tui` + `dashboard`：tui 直接 `parseInt(opts.port)` 永远用 default 6180、dashboard 拼 URL 用 default 6180。客户改 `daemon.port=16180` 后跑 tui/dashboard 都连用户主 6180 daemon 而非自定义 daemon | 抽出 `resolvePort()` 纯函数给所有客户端命令共享，tui/dashboard 也走 listen.json 优先 | `11991d2` |
+| 25 | daemon 启动 retention 用 `setInterval(prune, 3600_000)` 但 **不立即触发**。客户 `daemon stop` 累积一周旧 workspace → `daemon start` 后第一小时 retention 完全无效，看着像功能坏了 | 抽出 runRetention()，启动时同步跑一次再开 setInterval；加 3 个集成测试用 spawn 子进程完整跑 (loadConfig + DB + scan + prune) | `55f3382` |
 
 ---
 
@@ -105,12 +106,12 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 - `tests/cli-config.test.ts` +1 用例：warning → exit 0 / error → 1
 - `tests/requirements.test.ts` +5 用例：状态转换覆盖 bug 3/15
 
-854 测试 / 0 失败（截至 commit `11991d2`）。
+857 测试 / 0 失败（截至 commit `55f3382`）。
 
 ## 还没验过的边界（欢迎补）
 
 - ~~supervisor 真子进程端到端~~ ✓ **已验**：起 `daemon supervise` + `taskkill /F daemon-pid`，supervisor 1s 退避后自动重启；连续快速 kill 3 次（daemon 跑 < 10s）观察 backoff 从 1s → 1s → 1s → 2s 递增对齐 `BASE_BACKOFF_MS=[1000,2000,5000,...]`。RESTART_SENTINEL exit 75 路径未直接验（需触发 daemon.setHost，但 classifyExit() 单测已覆盖）。
-- workspace_retention 在 daemon 实际跑一段时间后真触发清理（单测只覆盖纯函数路径）
+- ~~workspace_retention 在 daemon 实际跑一段时间后真触发清理~~ ✓ **已验**：手动跑 prune e2e 验证 days=1 + 30 天前 done task 被清；同时发现 bug 25（启动后第一小时不跑）并修复 + 3 个集成测试。
 - 多设备局域网访问 token 二维码扫码流程（需要真实手机/平板）
 - 4 个零调用 RPC method (`tasks.events`、`tasks.subtasks`、`requirements.finishClarification`、`requirements.retryClarify`) 是孤儿（注册了但客户端忘接）；删之前要确认是否未来想暴露
 - working tree 上有一个进行中的"邮箱+密码+JWT cookie 登录"feature（routes.ts auth 路由 + core/auth.ts + migration 020 + Login.tsx/AuthGate.tsx/useAuth.ts），后端完整、前端组件完整，但**缺"首次创建用户"入口** —— UI 无 setup 按钮、CLI 无 `autopilot auth setup` 命令，导致 authEnabled 永远 false（fallback 老 TokenGate），feature 实质未启用。补完只需把 AuthGate 在 `!authEnabled` 分支加"启用 auth"按钮或加 CLI `user create` 命令。白名单已加 auth.ts（commit `160b115`），feature 文件未 commit。
