@@ -165,22 +165,41 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
       google: "gemini",
     };
 
+    // 探测范围（dogfood-bug16）：
+    // - 用户显式 enabled providers → 只探测这些（精准对应配置）
+    // - 零配置模式（validEnabled 空） → 探测全部三家内置 CLI，让客户看到
+    //   "哪个 CLI 装了 / 哪个没装"，否则 --probe 输出空白看不到效果
+    const targetForCli = validEnabled.length > 0
+      ? validEnabled.map((p) => p.name)
+      : Object.keys(providerCliMap);
+
     await Promise.all(
-      validEnabled
-        .filter((p) => providerCliMap[p.name])
-        .map(async ({ name }) => {
+      targetForCli
+        .filter((name) => providerCliMap[name])
+        .map(async (name) => {
           const cli = providerCliMap[name];
           const result = await probeCliVersion(cli);
           if (result.ok) {
             checks.push({ id: `providers.${name}.cli`, category: "provider", status: "ok", title: `${name} CLI: ${cli} ${result.version ?? ""} ✓` });
           } else {
-            checks.push({ id: `providers.${name}.cli`, category: "provider", status: "error", title: `${name} CLI 探测失败`, detail: result.detail, fix: { cli: result.installHint } });
+            // 零配置场景 CLI 未装不是 error，是 warning（客户可能只用其中一家）
+            const isZeroConfig = validEnabled.length === 0;
+            checks.push({
+              id: `providers.${name}.cli`,
+              category: "provider",
+              status: isZeroConfig ? "warning" : "error",
+              title: `${name} CLI 探测失败`,
+              detail: result.detail,
+              fix: { cli: result.installHint },
+            });
           }
         }),
     );
 
     if (opts.level >= 3) {
-      const targetNames = opts.providers ?? validEnabled.map((p) => p.name);
+      const targetNames = opts.providers ?? (validEnabled.length > 0
+        ? validEnabled.map((p) => p.name)
+        : Object.keys(providerCliMap));
       // 串行避免凭证 race
       for (const name of targetNames) {
         const cli = providerCliMap[name];
@@ -189,7 +208,16 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
         if (result.ok) {
           checks.push({ id: `providers.${name}.ping`, category: "provider", status: "ok", title: `${name} 凭证验证通过` });
         } else {
-          checks.push({ id: `providers.${name}.ping`, category: "provider", status: "error", title: `${name} 凭证验证失败`, detail: result.detail, fix: { cli: result.loginHint } });
+          // 零配置场景下 ping 失败也降级为 warning
+          const isZeroConfig = validEnabled.length === 0;
+          checks.push({
+            id: `providers.${name}.ping`,
+            category: "provider",
+            status: isZeroConfig ? "warning" : "error",
+            title: `${name} 凭证验证失败`,
+            detail: result.detail,
+            fix: { cli: result.loginHint },
+          });
         }
       }
     }

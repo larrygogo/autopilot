@@ -68,7 +68,10 @@ export function printReport(report: DoctorReport): void {
 }
 
 function exitCodeFor(status: DoctorReport["status"]): number {
-  return status === "ok" ? 0 : status === "warning" ? 1 : 2;
+  // ok / warning 都 exit 0：warning 是"提示性"问题（如可选 CLI 没装），
+  // CI 和 install 脚本不该被它阻塞。只有 error 才 exit 1。
+  // 之前 warning → 1 让客户 CI 跑 \`doctor\` 时被误判失败 (dogfood-bug17)。
+  return status === "error" ? 1 : 0;
 }
 
 function redactCredentials(yaml: string): string {
