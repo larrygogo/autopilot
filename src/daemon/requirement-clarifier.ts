@@ -14,6 +14,7 @@ import {
   endRound,
 } from "./clarifier-progress";
 import { buildClarifierAgent } from "./clarifier-agent";
+import { parseLlmYamlWrapper } from "../core/llm-yaml";
 
 const log = createLogger("requirement-clarifier");
 
@@ -103,27 +104,42 @@ function buildPrompt(opts: {
     "1. 根据当前 spec_md 和已有 Q&A 历史，**精确修订** spec_md：",
     "   - 保留原文中正确的内容（不要重写整篇）",
     "   - 只改不对的、只加缺失的、只删冗余的",
-    "   - 不要包裹 ``` 代码块",
+    "   - 不要在 new_spec_md 字段值里再包 ``` 代码块",
     "2. 决定下一个最该问的问题，或宣告澄清完成。",
     "",
-    "# 输出格式（严格 JSON，不要任何前后多余文本）",
-    '{',
-    '  "new_spec_md": "...",        // 修订后的完整 spec_md',
-    '  "summary": "...",             // 本轮修订摘要（短，1-2 句），null 表示无变化',
-    '  "next_question": {',
-    '    "agent_text": "...",        // 下一个问题',
-    '    "suggestions": ["A","B"]   // 2-4 个短选项，可空数组',
-    '  } | null,                     // null 表示不再追问',
-    '  "done": true|false,           // true=信息已足够、可入队',
-    '  "new_title": "..." | null      // 改进后的需求标题（10-20 字），null 表示当前标题已足够好',
-    '}',
+    "# 输出格式（严格 YAML，顶层对象）",
+    "用 YAML 而不是 JSON 的理由：new_spec_md / next_question.agent_text 等字段经常含",
+    "**任意引号 / 中文 / 多行 / 反斜杠**，YAML 的 `|` 多行块完全不需要转义，从根上",
+    "绕开 JSON 字符串转义地狱。模板：",
+    "",
+    "```yaml",
+    "new_spec_md: |",
+    "  # 修订后的完整 spec_md，多行任意内容，不需要转义",
+    "  ## 背景",
+    "  ...",
+    "summary: 本轮改了什么（短，1-2 句）；无变化时填 null",
+    "next_question:",
+    "  agent_text: |",
+    "    下一个问题（可多行，含任意引号 / 中文 / 反斜杠都行）",
+    "  suggestions:",
+    "    - 短选项 A",
+    "    - 短选项 B",
+    "done: false",
+    "new_title: 改进后的需求标题（10-20 字）",
+    "```",
+    "",
+    "字段说明：",
+    "- `next_question`: 不再追问时整字段设为 `null`（含 agent_text 整体）",
+    "- `done`: true 时 `next_question` 必须为 null",
+    "- `new_title`: 当前 title 已足够好时设为 `null`",
+    "- `summary`: spec_md 无变化时设为 `null`",
     "",
     "# 关键规则",
     "- 如果 spec_md 没变化，new_spec_md 仍要原样输出，但 summary 可为 null。",
     "- 下一个问题必须**基于最新 spec_md 和已有 Q&A**，不要重复问已澄清的事。",
     "- 如果信息已足够实现需求，输出 done=true 且 next_question=null。",
     "- 标题（title）应该一句话概括需求；如果当前 title 看起来是用户直接从描述粗截的（如带省略号、半句话、过长），用 new_title 给出更好的版本。如果当前 title 已经准确，new_title 为 null。",
-    "- 输出**只有 JSON**，前后没有任何 markdown / 解释 / 代码块。",
+    "- 输出**只有 YAML**，前后没有任何额外解释 / markdown 文本。围栏可有可无（解析时会自动剥）。",
     "",
     "# 上下文",
     ctxLines.join("\n"),
@@ -136,7 +152,7 @@ function buildPrompt(opts: {
     "",
     opts.qaHistory ? "# 已完成的 Q&A 历史\n\n" + opts.qaHistory : "# 已完成的 Q&A 历史\n\n(暂无)",
     "",
-    "请直接输出 JSON：",
+    "请直接输出 YAML：",
   ].join("\n");
 }
 
@@ -153,11 +169,9 @@ interface ClarifyResult {
 }
 
 function parseClarifyResult(raw: string): ClarifyResult {
-  let text = raw.trim();
-  if (text.startsWith("```")) {
-    text = text.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
-  }
-  const parsed = JSON.parse(text) as Record<string, unknown>;
+  // 走 llm-yaml 顶层 wrapper：剥围栏 + YAML 解析。YAML 解析对 LLM 输出格式
+  // 更宽容（兼容 JSON、容忍轻微缩进偏移、支持 | 多行块零转义）。
+  const parsed = parseLlmYamlWrapper(raw);
   if (typeof parsed.new_spec_md !== "string") throw new Error("missing/invalid new_spec_md");
   if (typeof parsed.done !== "boolean") throw new Error("missing/invalid done");
   const summary = parsed.summary === null || typeof parsed.summary === "string" ? parsed.summary : null;
