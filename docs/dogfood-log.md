@@ -46,7 +46,12 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 8 | `autopilot init` 只创空目录，新用户跑任何 dev task 都报"找不到工作流" | init 末尾自动 `cloneTemplate("dev", "dev")` | `312d633` |
 | 9 | 老用户已 init 过的，examples 后续改 bug fix 拿不到 | 新增 `autopilot workflow sync <name>` 命令（dry-run + `--apply`） | `659a908` |
 | 12 | `autopilot doctor` 在 CLAUDE.md 文档化的"零配置"模式（`providers` 段不写）下误报"没有 enabled provider"。客户跑 init 后看到红色 error 误以为没装好 | doctor providers 段不存在时视为零配置，L1 不报 error，引导 `--probe` 跑 L2 探测 CLI | `32debc2` |
-| 13 | CLI `autopilot daemon status` 只显示 `版本: 1.0.0`，缺 git_sha / started_at。客户做 daemon restart 后没法从 CLI 一眼 verify"现在跑的真是新代码" | daemon status 输出加 `· <git_sha>` 和`启动于` 行，跟 web Settings 「Daemon 信息」卡对齐 | _即将提交_ |
+| 13 | CLI `autopilot daemon status` 只显示 `版本: 1.0.0`，缺 git_sha / started_at。客户做 daemon restart 后没法从 CLI 一眼 verify"现在跑的真是新代码" | daemon status 输出加 `· <git_sha>` 和`启动于` 行，跟 web Settings 「Daemon 信息」卡对齐 | `8465c5a` |
+| 14 | `autopilot task status <id>` 默认裸 `JSON.stringify` 输出，跟无 id 的表格视图风格不一致，客户读完跑完的 task 还得手工读 JSON | 默认 human-readable 字段列表 + `--json` 选项保留脚本友好；`task logs` 末尾加 workspace path + `--follow` 引导 | `a10d7ad` |
+| 15 | 状态机缺 `running → done` 转换，requirement 跑完 dev workflow 卡 running 状态，bridge silent skip 不报错 | ALLOWED_TRANSITIONS.running 加 done | `685c3ed` |
+| 16 | `autopilot config doctor --probe` 在零配置模式下不探测任何 CLI（providers 段空数组过滤后 enabled list 为空），客户看不到"装了 claude / codex / gemini" 提示 | 零配置时探测全部三家内置 CLI，凭证未登录降级 warning 而非 error | `89f3c94` |
+| 17 | doctor warning 计入 exit 1（"提示性"问题如可选 CLI 没装），客户 CI 里跑 `doctor` 被误判失败 | exitCodeFor 改 POSIX 标准：error → 1 / warning → 0 | `89f3c94` |
+| 18 | `168a47e` 在 package.json 加了 `coverage:rpc` script 但忘把 `bin/coverage-matrix.ts` 一起入库，刚 clone 仓库的客户跑 `bun run coverage:rpc` 直接 file not found | 补 commit 工具 + 文档（`docs/rpc-coverage.md`） | `b8f4cf9` |
 
 ---
 
@@ -79,12 +84,23 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 - `tests/workflow-templates.test.ts` +9 用例：workflow sync diff / 覆盖行为
 - `tests/supervisor-logic.test.ts` 11 用例：supervisor 退避决策（exit 0/75/crash、crash loop 30s 窗口、attempt 退避索引）
 - `tests/workspace-retention.test.ts` 10 用例：days / max_total_mb 策略 + isTerminal 注入保护运行中任务
+- `tests/logger-rotation.test.ts` 8 用例：daemon log 切割阈值 + rotateIfNeeded export
+- `tests/api-token.test.ts` 20 用例：token 生成/读取/验证/轮换 + 路径函数化
+- `tests/pid.test.ts` 28 用例：daemon/supervisor PID + listenInfo + 僵尸检测
+- `tests/pr-poller.test.ts` +6 用例：PR 轮询边界
+- `tests/doctor.test.ts` +3 用例：零配置模式 + exitCodeFor
+- `tests/cli-config.test.ts` +1 用例：warning → exit 0 / error → 1
+- `tests/requirements.test.ts` +5 用例：状态转换覆盖 bug 3/15
 
-760 测试 / 0 失败（截至 commit `34471d8`）。
+826 测试 / 0 失败（截至 commit `b8f4cf9`）。
 
 ## 还没验过的边界（欢迎补）
 
 - supervisor 真子进程端到端（spawn 实际 daemon 验证 RESTART_SENTINEL 立即重启 + crash loop 退避真生效）
-- daemon log 长跑切割 / 大小限制
 - workspace_retention 在 daemon 实际跑一段时间后真触发清理（单测只覆盖纯函数路径）
 - 多设备局域网访问 token 二维码扫码流程（需要真实手机/平板）
+- 22 个零调用 HTTP endpoint + 4 个零调用 RPC method（`bun run coverage:rpc` 揭示）需逐项确认是否真死代码可删
+
+## 诊断工具
+
+- `bun run coverage:rpc` —— 跑 RPC × {web/tui/cli} 客户端覆盖矩阵，发现死代码 / 反渗内核命名候选。输出在 `docs/rpc-coverage.md`。
