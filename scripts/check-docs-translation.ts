@@ -22,6 +22,12 @@ const DOCS_EN = join(ROOT, "docs", "en");
 // docs/ 下不参与对比的子目录（这些不是需要翻译的文档）
 const SKIP_DIRS = new Set(["en", "superpowers", "screenshots"]);
 
+// 单文件免翻译白名单：项目内部记录 / 自动生成 / 中文 first-class 资料
+const EXEMPT_FILES = new Set([
+  "dogfood-log.md",   // 项目自用 dogfood 记录，中文 first-class
+  "rpc-coverage.md",  // 自动生成的覆盖矩阵（bun run coverage:rpc）
+]);
+
 // 行数比低于此阈值触发警告（strict 模式下也计入失败）
 const WARN_RATIO = 0.85;
 // 行数比低于此阈值在严格模式下必须失败
@@ -100,6 +106,8 @@ const results: FileResult[] = [];
 
 for (const cnPath of cnFiles) {
   const relPath = relative(DOCS_CN, cnPath);   // e.g. "architecture.md"
+  // 免翻译白名单
+  if (EXEMPT_FILES.has(relPath)) continue;
   const enPath  = join(DOCS_EN, relPath);
 
   const cnText = readFileSync(cnPath, "utf-8");
