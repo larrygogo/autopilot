@@ -16,6 +16,12 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
 
   if (!needsToken) return <>{children}</>;
 
+  // 客户改了 daemon.port 后，给用户指引"在本机浏览器打开 X" 应该带上真实端口
+  // 而不是硬编码 6180（之前是 bug：客户在局域网看到 127.0.0.1:6180/settings
+  // 但本机 daemon 在别的端口，链接打不开）。location.port 是当前 daemon 的端口。
+  const daemonPort = typeof location !== "undefined" && location.port ? location.port : "6180";
+  const localSettingsUrl = `127.0.0.1:${daemonPort}/settings`;
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setTouched(true);
@@ -69,7 +75,7 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
           </div>
           <p>在装 daemon 的本机执行：</p>
           <pre className="mt-1 font-mono">cat ~/.autopilot/runtime/api-token</pre>
-          <p className="mt-2">或在本机浏览器打开 <span className="font-mono">127.0.0.1:6180/settings</span> → 「网络访问 → API 安全令牌 → 显示明文」复制。</p>
+          <p className="mt-2">或在本机浏览器打开 <span className="font-mono">{localSettingsUrl}</span> → 「网络访问 → API 安全令牌 → 显示明文」复制。</p>
         </div>
         <form onSubmit={submit} className="space-y-3">
           <input
