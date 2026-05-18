@@ -179,6 +179,47 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
     });
 
   // ── import ──
+  // ── sync ──（dogfood-bug9）
+  wf.command("sync <name>")
+    .description("用 repo 内 examples/workflows/<name>/ 覆盖 ~/.autopilot/workflows/<name>/ (老用户拿 dev workflow bug fix 用)")
+    .option("--apply", "真正写入；不带此 flag 时只 dry-run 显示 diff")
+    .action(async (name: string, opts: { apply: boolean }) => {
+      const { diffWorkflowTemplate, syncWorkflowTemplate } = await import("../core/workflow-templates");
+      let entries;
+      try {
+        entries = diffWorkflowTemplate(name);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      }
+      const changed = entries.filter((e) => !e.identical);
+      if (changed.length === 0) {
+        console.log(`✓ ${name} 已是最新，无需同步`);
+        return;
+      }
+      console.log(`本地 ~/.autopilot/workflows/${name}/ vs repo examples/workflows/${name}/ 差异：\n`);
+      for (const e of changed) {
+        const tag = !e.hasLocal ? "新增" : !e.hasTemplate ? "本地多" : "差异";
+        const lines = e.hasLocal && e.hasTemplate
+          ? `  本地 ${e.localLines} 行 / 模板 ${e.templateLines} 行`
+          : e.hasLocal ? `  本地 ${e.localLines} 行` : `  模板 ${e.templateLines} 行`;
+        console.log(`  [${tag}] ${e.path}\n${lines}`);
+      }
+      if (!opts.apply) {
+        console.log(`\n(dry-run) 加 --apply 后才真正覆盖本地文件。`);
+        console.log(`注意：本地文件改动会被覆盖；本地多出的文件不会被删（保留你自己加的辅助文件）。`);
+        return;
+      }
+      try {
+        const { copied } = syncWorkflowTemplate(name);
+        console.log(`\n✓ 已同步 ${copied.length} 个文件到 ~/.autopilot/workflows/${name}/`);
+        console.log(`  daemon 需重启才能加载新 workflow.ts：autopilot daemon restart`);
+      } catch (e: unknown) {
+        console.error(`同步失败：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      }
+    });
+
   wf.command("import <name>")
     .description("从 yaml 文件创建 DB 工作流")
     .requiredOption("--derives-from <base>", "派生自的 file 工作流名")

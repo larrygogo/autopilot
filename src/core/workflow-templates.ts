@@ -7,7 +7,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
 import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
 
@@ -196,6 +196,120 @@ function copyDirSync(src: string, dst: string): void {
       copyFileSync(s, d);
     }
   }
+}
+
+// ──────────────────────────────────────────────
+// 模板同步（dogfood-bug9）：repo 内 examples 改了 bug fix，老用户已有的
+// ~/.autopilot/workflows/<name>/ 副本是冻结快照拿不到。提供 diff + 覆盖能力。
+// ──────────────────────────────────────────────
+
+export interface TemplateDiffEntry {
+  /** 文件名（相对模板根） */
+  path: string;
+  /** local 是否存在 */
+  hasLocal: boolean;
+  /** template 是否存在 */
+  hasTemplate: boolean;
+  /** local 跟 template 内容是否一致（都不存在时 true） */
+  identical: boolean;
+  /** local 行数（不存在则 0） */
+  localLines: number;
+  /** template 行数（不存在则 0） */
+  templateLines: number;
+}
+
+/**
+ * 比对本地 ~/.autopilot/workflows/<name>/ 跟 repo 内 examples/workflows/<name>/
+ * 的所有文件，返回 diff 摘要。同时存在的文件按字节比较内容是否一致。
+ *
+ * - template 不存在 → 抛 Error
+ * - local 不存在 → 返回所有 template 文件标记 hasLocal=false
+ */
+export function diffWorkflowTemplate(name: string): TemplateDiffEntry[] {
+  const root = findExamplesRoot();
+  if (!root) throw new Error("templates root not found");
+  const tplDir = join(root, name);
+  if (!existsSync(tplDir) || !statSync(tplDir).isDirectory()) {
+    throw new Error(`template not found: ${name}`);
+  }
+  const home = autopilotHome();
+  const localDir = join(home, "workflows", name);
+
+  const tplFiles = listFilesRecursive(tplDir);
+  const localFiles = existsSync(localDir) ? listFilesRecursive(localDir) : new Set<string>();
+  const allRel = new Set<string>([...tplFiles, ...localFiles]);
+
+  const entries: TemplateDiffEntry[] = [];
+  for (const rel of [...allRel].sort()) {
+    const localPath = join(localDir, rel);
+    const tplPath = join(tplDir, rel);
+    const hasLocal = localFiles.has(rel);
+    const hasTemplate = tplFiles.has(rel);
+    let identical = hasLocal === hasTemplate; // 都不存在时 vacuously true
+    let localLines = 0;
+    let templateLines = 0;
+    if (hasLocal) {
+      try {
+        const buf = readFileSync(localPath, "utf-8");
+        localLines = buf.split("\n").length;
+        if (hasTemplate) {
+          const tplBuf = readFileSync(tplPath, "utf-8");
+          templateLines = tplBuf.split("\n").length;
+          identical = buf === tplBuf;
+        }
+      } catch { /* 读失败认为不一致 */ identical = false; }
+    } else if (hasTemplate) {
+      try {
+        const tplBuf = readFileSync(tplPath, "utf-8");
+        templateLines = tplBuf.split("\n").length;
+      } catch { /* ignore */ }
+    }
+    entries.push({ path: rel, hasLocal, hasTemplate, identical, localLines, templateLines });
+  }
+  return entries;
+}
+
+/**
+ * 用 repo 内 examples/workflows/<name>/ 覆盖 ~/.autopilot/workflows/<name>/。
+ * 不删本地多余的文件（保守：用户可能有自己加的辅助文件）。
+ * 调用方负责先 diff + 让用户确认。
+ */
+export function syncWorkflowTemplate(name: string): { copied: string[] } {
+  const root = findExamplesRoot();
+  if (!root) throw new Error("templates root not found");
+  const tplDir = join(root, name);
+  if (!existsSync(tplDir) || !statSync(tplDir).isDirectory()) {
+    throw new Error(`template not found: ${name}`);
+  }
+  const home = autopilotHome();
+  const localDir = join(home, "workflows", name);
+  mkdirSync(localDir, { recursive: true });
+
+  const tplFiles = [...listFilesRecursive(tplDir)].sort();
+  const copied: string[] = [];
+  for (const rel of tplFiles) {
+    const s = join(tplDir, rel);
+    const d = join(localDir, rel);
+    mkdirSync(dirname(d), { recursive: true });
+    copyFileSync(s, d);
+    copied.push(rel);
+  }
+  return { copied };
+}
+
+function listFilesRecursive(root: string, prefix = ""): Set<string> {
+  const out = new Set<string>();
+  for (const entry of readdirSync(root)) {
+    const full = join(root, entry);
+    const st = statSync(full);
+    const rel = prefix ? `${prefix}/${entry}` : entry;
+    if (st.isDirectory()) {
+      for (const child of listFilesRecursive(full, rel)) out.add(child);
+    } else if (st.isFile()) {
+      out.add(rel);
+    }
+  }
+  return out;
 }
 
 // ──────────────────────────────────────────────
