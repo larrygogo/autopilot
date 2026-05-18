@@ -279,7 +279,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   process.on("SIGTERM", () => shutdown(0));
 }
 
-function recoverDanglingTasks(isRespawnContinuation = false): void {
+export function recoverDanglingTasks(
+  isRespawnContinuation = false,
+  deps: { runInBackground?: (taskId: string, phase: string) => void } = {},
+): void {
+  const runFn = deps.runInBackground ?? runInBackground;
   try {
     const tasks = listTasks({});
     let danglingCount = 0;
@@ -303,7 +307,7 @@ function recoverDanglingTasks(isRespawnContinuation = false): void {
           t.id,
         );
         if (t["dangling"]) updateTask(t.id, { dangling: false });
-        runInBackground(t.id, "await_review");
+        runFn(t.id, "await_review");
         respawnCount++;
         continue;
       }
@@ -315,7 +319,7 @@ function recoverDanglingTasks(isRespawnContinuation = false): void {
           t.id, t.status, phase,
         );
         if (t["dangling"]) updateTask(t.id, { dangling: false });
-        runInBackground(t.id, phase);
+        runFn(t.id, phase);
         respawnCount++;
         continue;
       }
