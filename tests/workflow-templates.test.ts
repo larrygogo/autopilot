@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { listWorkflowTemplates, cloneTemplate } from "../src/core/workflow-templates";
+import {
+  listWorkflowTemplates,
+  cloneTemplate,
+  diffWorkflowTemplate,
+  syncWorkflowTemplate,
+} from "../src/core/workflow-templates";
 
 let tmpHome: string;
 
@@ -82,5 +87,106 @@ describe("cloneTemplate", () => {
 
   it("模板不存在 → 抛错", () => {
     expect(() => cloneTemplate("__nonexistent__", "x")).toThrow(/not found/);
+  });
+});
+
+describe("diffWorkflowTemplate", () => {
+  it("本地不存在 → 所有模板文件标 hasLocal=false", () => {
+    const entries = diffWorkflowTemplate("dev");
+    expect(entries.length).toBeGreaterThan(0);
+    for (const e of entries) {
+      expect(e.hasLocal).toBe(false);
+      expect(e.hasTemplate).toBe(true);
+      expect(e.identical).toBe(false);
+      expect(e.templateLines).toBeGreaterThan(0);
+    }
+  });
+
+  it("cloneTemplate 后立即 diff → 模板侧所有文件 hasLocal=true", () => {
+    cloneTemplate("dev", "dev");
+    const entries = diffWorkflowTemplate("dev");
+    for (const e of entries) {
+      expect(e.hasLocal).toBe(true);
+      expect(e.hasTemplate).toBe(true);
+    }
+    // workflow.yaml 因 cloneTemplate 会重写 name 行（即使 targetName 同名
+    // 也会触发 lines.join("\n") 把 \r\n 归一），内容会跟 template 略偏移。
+    // 这是 cloneTemplate 的合理副作用，不算 sync bug。
+    const nonYaml = entries.filter((e) => e.path !== "workflow.yaml");
+    for (const e of nonYaml) {
+      expect(e.identical).toBe(true);
+    }
+  });
+
+  it("本地改过文件 → 该文件 identical=false 且 localLines 跟 templateLines 可能不同", () => {
+    cloneTemplate("dev", "dev");
+    const tsPath = join(tmpHome, "workflows", "dev", "workflow.ts");
+    writeFileSync(tsPath, "// 本地手动改\n", "utf-8");
+    const entries = diffWorkflowTemplate("dev");
+    const tsEntry = entries.find((e) => e.path === "workflow.ts");
+    expect(tsEntry).toBeDefined();
+    expect(tsEntry!.identical).toBe(false);
+    expect(tsEntry!.localLines).toBe(2); // "// 本地手动改\n" 是 2 行（含尾空行）
+    expect(tsEntry!.templateLines).toBeGreaterThan(2);
+  });
+
+  it("本地多出文件 → 该文件 hasTemplate=false hasLocal=true", () => {
+    cloneTemplate("dev", "dev");
+    writeFileSync(join(tmpHome, "workflows", "dev", "EXTRA.md"), "user note\n", "utf-8");
+    const entries = diffWorkflowTemplate("dev");
+    const extra = entries.find((e) => e.path === "EXTRA.md");
+    expect(extra).toBeDefined();
+    expect(extra!.hasLocal).toBe(true);
+    expect(extra!.hasTemplate).toBe(false);
+    expect(extra!.identical).toBe(false);
+  });
+
+  it("模板不存在 → 抛错", () => {
+    expect(() => diffWorkflowTemplate("__nonexistent__")).toThrow(/not found/);
+  });
+});
+
+describe("syncWorkflowTemplate", () => {
+  it("修改本地 → sync → 再 diff 应全 identical", () => {
+    cloneTemplate("dev", "dev");
+    const tsPath = join(tmpHome, "workflows", "dev", "workflow.ts");
+    writeFileSync(tsPath, "// 我手改的\n", "utf-8");
+    // 同步前：workflow.ts 不一致
+    let entries = diffWorkflowTemplate("dev");
+    expect(entries.find((e) => e.path === "workflow.ts")!.identical).toBe(false);
+    // 同步
+    const r = syncWorkflowTemplate("dev");
+    expect(r.copied.length).toBeGreaterThan(0);
+    expect(r.copied).toContain("workflow.ts");
+    // 同步后：所有都 identical
+    entries = diffWorkflowTemplate("dev");
+    for (const e of entries) {
+      // 本地多出的 EXTRA.md 这种文件不会同步过来（保留），不影响 identical 判断
+      if (!e.hasTemplate) continue;
+      expect(e.identical).toBe(true);
+    }
+  });
+
+  it("sync 不删本地多出的文件（保留用户自加的辅助文件）", () => {
+    cloneTemplate("dev", "dev");
+    const extraPath = join(tmpHome, "workflows", "dev", "EXTRA.md");
+    writeFileSync(extraPath, "user note\n", "utf-8");
+    syncWorkflowTemplate("dev");
+    expect(existsSync(extraPath)).toBe(true);
+    expect(readFileSync(extraPath, "utf-8")).toBe("user note\n");
+  });
+
+  it("local 不存在时 sync 也能用（等价于 cloneTemplate 不改 yaml.name）", () => {
+    expect(existsSync(join(tmpHome, "workflows", "dev"))).toBe(false);
+    const r = syncWorkflowTemplate("dev");
+    expect(r.copied.length).toBeGreaterThan(0);
+    expect(existsSync(join(tmpHome, "workflows", "dev", "workflow.yaml"))).toBe(true);
+    // 区别于 cloneTemplate：sync 保留 yaml 原始 name 字段（不改名）
+    const yaml = readFileSync(join(tmpHome, "workflows", "dev", "workflow.yaml"), "utf-8");
+    expect(yaml).toMatch(/^name: dev/m);
+  });
+
+  it("模板不存在 → 抛错", () => {
+    expect(() => syncWorkflowTemplate("__nonexistent__")).toThrow(/not found/);
   });
 });
