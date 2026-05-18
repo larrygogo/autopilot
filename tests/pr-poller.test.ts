@@ -224,4 +224,87 @@ describe("pr-poller pollOne", () => {
     expect(getRequirementById(id)?.status).toBe("awaiting_review");
     expect(listFeedbacks(id).length).toBe(0);
   });
+
+  it("requirement 不存在 → 静默 no-op，不调 gh", async () => {
+    let called = 0;
+    _setGhRunnerForTest(async () => {
+      called++;
+      return { exitCode: 0, stdout: "{}", stderr: "" };
+    });
+    await pollOne("nonexistent-req", "gh");
+    expect(called).toBe(0);
+  });
+
+  it("requirement 状态非 awaiting_review → 跳过不调 gh", async () => {
+    const id = nextRequirementId();
+    createRequirement({ id, project_id: "proj-001", codebase_id: "cb-A", title: "T" });
+    setRequirementStatus(id, "clarifying"); // 不在 awaiting_review
+    let called = 0;
+    _setGhRunnerForTest(async () => {
+      called++;
+      return { exitCode: 0, stdout: "{}", stderr: "" };
+    });
+    await pollOne(id, "gh");
+    expect(called).toBe(0);
+    expect(getRequirementById(id)?.status).toBe("clarifying");
+  });
+
+  it("requirement 无 pr_number → 跳过不调 gh（典型：尚未跑到 submit_pr）", async () => {
+    const id = nextRequirementId();
+    createRequirement({ id, project_id: "proj-001", codebase_id: "cb-A", title: "T" });
+    setRequirementStatus(id, "clarifying");
+    setRequirementStatus(id, "ready");
+    setRequirementStatus(id, "queued");
+    setRequirementStatus(id, "running");
+    setRequirementStatus(id, "awaiting_review");
+    // 故意不 set pr_number
+    let called = 0;
+    _setGhRunnerForTest(async () => {
+      called++;
+      return { exitCode: 0, stdout: "{}", stderr: "" };
+    });
+    await pollOne(id, "gh");
+    expect(called).toBe(0);
+    expect(getRequirementById(id)?.status).toBe("awaiting_review");
+  });
+
+  it("gh 返回非法 JSON → 视为失败下周期重试，状态不变", async () => {
+    const id = setupReqAwaitingReview();
+    _setGhRunnerForTest(async () => ({
+      exitCode: 0,
+      stdout: "not valid json {{{",
+      stderr: "",
+    }));
+    await pollOne(id, "gh");
+    expect(getRequirementById(id)?.status).toBe("awaiting_review");
+    expect(listFeedbacks(id).length).toBe(0);
+  });
+
+  it("PR APPROVED 但未 merged → 不触发任何动作（仍 awaiting）", async () => {
+    const id = setupReqAwaitingReview();
+    _setGhRunnerForTest(mockGh({
+      state: "OPEN",
+      reviews: [
+        { id: "rev-approved-1", state: "APPROVED", body: "looks good", author: { login: "alice" } },
+      ],
+      mergeCommit: null,
+    }));
+    await pollOne(id, "gh");
+    expect(getRequirementById(id)?.status).toBe("awaiting_review");
+    expect(listFeedbacks(id).length).toBe(0);
+  });
+
+  it("PR COMMENTED （非 changes_requested）→ 不触发 fix_revision", async () => {
+    const id = setupReqAwaitingReview();
+    _setGhRunnerForTest(mockGh({
+      state: "OPEN",
+      reviews: [
+        { id: "rev-cm-1", state: "COMMENTED", body: "btw, nice", author: { login: "bob" } },
+      ],
+      mergeCommit: null,
+    }));
+    await pollOne(id, "gh");
+    expect(getRequirementById(id)?.status).toBe("awaiting_review");
+    expect(listFeedbacks(id).length).toBe(0);
+  });
 });
