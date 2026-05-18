@@ -27,12 +27,54 @@ import {
 /** daemon 主动请求 respawn 的退出码（参考 sysexits.h EX_TEMPFAIL） */
 export const RESTART_SENTINEL_CODE = 75;
 
-const BASE_BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000];
-const CRASH_LOOP_WINDOW_MS = 30_000;
-const CRASH_LOOP_THRESHOLD = 10;
+export const BASE_BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000];
+export const CRASH_LOOP_WINDOW_MS = 30_000;
+export const CRASH_LOOP_THRESHOLD = 10;
 
 function nextBackoff(attempt: number): number {
   return BASE_BACKOFF_MS[Math.min(attempt, BASE_BACKOFF_MS.length - 1)];
+}
+
+// ──────────────────────────────────────────────
+// 纯函数决策层（便于单测覆盖；runSupervisor 内部直接调用）
+// ──────────────────────────────────────────────
+
+export type ExitClassification = "exit_clean" | "respawn_immediate" | "crash";
+
+/**
+ * 子进程退出码 → supervisor 动作。
+ * - shuttingDown=true：不管 exitCode 都 exit_clean（信号传递完成）
+ * - exit 0：optional 退出
+ * - exit 75：主动 respawn，不退避
+ * - 其他：视为崩溃
+ */
+export function classifyExit(exitCode: number | null, shuttingDown: boolean): ExitClassification {
+  if (shuttingDown) return "exit_clean";
+  if (exitCode === 0) return "exit_clean";
+  if (exitCode === RESTART_SENTINEL_CODE) return "respawn_immediate";
+  return "crash";
+}
+
+/**
+ * 崩溃退避计算。
+ * - 维护近 CRASH_LOOP_WINDOW_MS 窗口内的崩溃时间戳
+ * - 加入当前时间戳；若总数 ≥ CRASH_LOOP_THRESHOLD 判定 crash loop，退避到 max
+ * - 否则按 attempt 索引取退避
+ *
+ * 调用方负责把 nextCrashTimestamps 写回 state 并应用 sleep(backoffMs)。
+ */
+export function computeCrashBackoff(input: {
+  crashTimestamps: number[];
+  attempt: number;
+  now: number;
+}): { backoffMs: number; isCrashLoop: boolean; nextCrashTimestamps: number[] } {
+  const filtered = input.crashTimestamps.filter((t) => input.now - t <= CRASH_LOOP_WINDOW_MS);
+  filtered.push(input.now);
+  const isCrashLoop = filtered.length >= CRASH_LOOP_THRESHOLD;
+  const backoffMs = isCrashLoop
+    ? BASE_BACKOFF_MS[BASE_BACKOFF_MS.length - 1]!
+    : nextBackoff(input.attempt);
+  return { backoffMs, isCrashLoop, nextCrashTimestamps: filtered };
 }
 
 export interface SupervisorOptions {
@@ -86,32 +128,28 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
     const exitCode = await currentChild.exited;
     const ranMs = Date.now() - startedAt;
 
-    if (shuttingDown) {
-      console.log(`daemon 退出（信号传递完成），supervisor 退出`);
+    const classification = classifyExit(exitCode, shuttingDown);
+    if (classification === "exit_clean") {
+      console.log(shuttingDown
+        ? `daemon 退出（信号传递完成），supervisor 退出`
+        : `daemon 优雅退出（code=0），supervisor 同步退出`);
       break;
     }
-
-    if (exitCode === 0) {
-      console.log("daemon 优雅退出（code=0），supervisor 同步退出");
-      break;
-    }
-
-    if (exitCode === RESTART_SENTINEL_CODE) {
+    if (classification === "respawn_immediate") {
       console.log(`daemon 主动请求 respawn (code=${RESTART_SENTINEL_CODE})，立即重启`);
-      // 不增加 attempt，不退避；继续 while 循环 spawn 新 daemon
       continue;
     }
 
-    // 崩溃 —— 记录时间戳用于判断快速崩溃循环
+    // crash 分支：用纯函数算 backoff
     const now = Date.now();
-    crashTimestamps.push(now);
-    while (crashTimestamps.length > 0 && now - crashTimestamps[0] > CRASH_LOOP_WINDOW_MS) {
-      crashTimestamps.shift();
-    }
-    const crashLoop = crashTimestamps.length >= CRASH_LOOP_THRESHOLD;
-
+    const { backoffMs: backoff, isCrashLoop: crashLoop, nextCrashTimestamps } = computeCrashBackoff({
+      crashTimestamps,
+      attempt,
+      now,
+    });
+    crashTimestamps.length = 0;
+    crashTimestamps.push(...nextCrashTimestamps);
     attempt++;
-    const backoff = crashLoop ? BASE_BACKOFF_MS[BASE_BACKOFF_MS.length - 1] : nextBackoff(attempt - 1);
     console.error(
       `daemon 异常退出 (code=${exitCode}, 运行 ${Math.round(ranMs / 1000)}s)` +
       `${crashLoop ? "，检测到快速崩溃循环，延长到" : "，将在"} ${backoff / 1000}s 后重启`,
