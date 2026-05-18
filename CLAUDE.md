@@ -77,11 +77,13 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
     └── locks/                   # 文件锁目录
 ```
 
-初始化：`autopilot init`
+初始化：`autopilot init`（会自动从 repo 内 `examples/workflows/dev` 装一份默认 dev 工作流到 `~/.autopilot/workflows/dev/`）
 升级：`autopilot upgrade`
 启动 daemon：`autopilot daemon run`
 启动 TUI：`autopilot tui`
 打开 Web UI：`autopilot dashboard`（浏览器访问 `http://127.0.0.1:6180`）
+
+**老用户拉 repo 内最新 workflow fix**：`autopilot workflow sync dev`（dry-run 看 diff，加 `--apply` 真覆盖）。examples 改了 bug fix 后老用户家目录里的副本是冻结快照拿不到，用此命令同步。
 
 ## 目录结构
 
@@ -274,7 +276,13 @@ autopilot task cancel <task-id>
 autopilot task logs <task-id> [--follow]
 
 # 工作流
-autopilot workflow list
+autopilot workflow list                          # 列出已注册
+autopilot workflow show <name>                   # 看 yaml
+autopilot workflow sync <name> [--apply]         # 老用户拉 repo 最新模板（先 dry-run，再 --apply）
+autopilot workflow create <name>                 # 从模板派生新工作流（交互）
+autopilot workflow delete <name>                 # 删工作流
+autopilot workflow export <name> [-o file]       # 导出 yaml
+autopilot workflow import <name> --from <yaml> --derives-from <base>  # 导入 yaml
 
 # UI
 autopilot tui                    # 终端 UI
