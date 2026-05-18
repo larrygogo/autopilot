@@ -7,23 +7,29 @@ import { AUTOPILOT_HOME } from "../index";
  * API token 持久化 —— 用于 daemon 暴露 0.0.0.0 时强制鉴权。
  *
  * 设计：
- *   - 独立文件 ~/.autopilot/runtime/api-token，权限 0600（仅 owner 可读写）
+ *   - 独立文件 <AUTOPILOT_HOME>/runtime/api-token，权限 0600（仅 owner 可读写）
  *   - 不写入 config.yaml（用户经常截图 / 贴日志 config.yaml）
  *   - 取值优先级在调用方：env AUTOPILOT_API_TOKEN > 此文件 > 空
  *   - 删除文件 = 关闭 token 鉴权
+ *
+ * 路径每次调用时重算（process.env.AUTOPILOT_HOME 优先 / 兜底 AUTOPILOT_HOME
+ * 常量），便于测试用 tmpdir 隔离。daemon 运行期间 env 通常不变，行为等价。
  */
 
-const TOKEN_FILE = join(AUTOPILOT_HOME, "runtime", "api-token");
+function tokenFilePath(): string {
+  return join(process.env.AUTOPILOT_HOME || AUTOPILOT_HOME, "runtime", "api-token");
+}
 
 export function getTokenFilePath(): string {
-  return TOKEN_FILE;
+  return tokenFilePath();
 }
 
 /** 读取文件中的 token。不存在或为空返回 null。 */
 export function loadApiToken(): string | null {
-  if (!existsSync(TOKEN_FILE)) return null;
+  const path = tokenFilePath();
+  if (!existsSync(path)) return null;
   try {
-    const content = readFileSync(TOKEN_FILE, "utf-8").trim();
+    const content = readFileSync(path, "utf-8").trim();
     return content.length > 0 ? content : null;
   } catch {
     return null;
@@ -32,10 +38,11 @@ export function loadApiToken(): string | null {
 
 /** 写入 token + 设置 0600 权限。Windows 上 chmod 是 no-op。 */
 export function saveApiToken(token: string): void {
-  mkdirSync(dirname(TOKEN_FILE), { recursive: true });
-  writeFileSync(TOKEN_FILE, token, "utf-8");
+  const path = tokenFilePath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, token, "utf-8");
   try {
-    chmodSync(TOKEN_FILE, 0o600);
+    chmodSync(path, 0o600);
   } catch {
     /* Windows 或权限不足时忽略 */
   }
@@ -44,7 +51,7 @@ export function saveApiToken(token: string): void {
 /** 删除 token 文件 = 关闭鉴权。文件不存在也 OK。 */
 export function deleteApiToken(): void {
   try {
-    unlinkSync(TOKEN_FILE);
+    unlinkSync(tokenFilePath());
   } catch {
     /* ignore */
   }
