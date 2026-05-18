@@ -21,6 +21,11 @@ import { saveApiToken, deleteApiToken } from "../src/core/api-token";
 import { handleRequest, reloadApiToken } from "../src/daemon/routes";
 
 const TEST_TOKEN = "test-token-abc123";
+
+// 备份 + 恢复真实 ~/.autopilot/runtime/api-token，防测试清理路径误删
+// 真实 token（之前 routes-auth-token 跑过一次把真实 token 删了，daemon 起不来）。
+let realTokenBackup: string | null = null;
+const REAL_AUTOPILOT_HOME = process.env.AUTOPILOT_HOME;
 const fakeLoopback = {
   requestIP: () => ({ address: "127.0.0.1", port: 0, family: "IPv4" }),
 } as unknown as import("bun").Server<undefined>;
@@ -33,6 +38,18 @@ describe("checkAuth 鉴权路径", () => {
   let oldHome: string | undefined;
 
   beforeAll(async () => {
+    // 先备份真实 token（如果存在），避免测试副作用删用户生产 token
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const homedir = require("os").homedir();
+      const realHome = REAL_AUTOPILOT_HOME ?? path.join(homedir, ".autopilot");
+      const realTokenPath = path.join(realHome, "runtime", "api-token");
+      if (fs.existsSync(realTokenPath)) {
+        realTokenBackup = fs.readFileSync(realTokenPath, "utf-8");
+      }
+    } catch { /* 备份失败不阻塞，但 deleteApiToken 仍只删 tmpHome 下文件 */ }
+
     tmpHome = mkdtempSync(join(tmpdir(), "autopilot-auth-test-"));
     mkdirSync(join(tmpHome, "runtime"), { recursive: true });
     oldHome = process.env.AUTOPILOT_HOME;
@@ -45,11 +62,24 @@ describe("checkAuth 鉴权路径", () => {
   });
 
   afterAll(() => {
+    // 先恢复 env（让 deleteApiToken 只删 tmpHome 下文件，不碰真实文件）
+    if (oldHome !== undefined) process.env.AUTOPILOT_HOME = oldHome;
+    else delete process.env.AUTOPILOT_HOME;
     try { deleteApiToken(); } catch { /* ignore */ }
     reloadApiToken();
     _setDbForTest(null);
-    if (oldHome !== undefined) process.env.AUTOPILOT_HOME = oldHome;
-    else delete process.env.AUTOPILOT_HOME;
+    // 兜底：如果 backup 有但真实文件不在，恢复
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const homedir = require("os").homedir();
+      const realHome = REAL_AUTOPILOT_HOME ?? path.join(homedir, ".autopilot");
+      const realTokenPath = path.join(realHome, "runtime", "api-token");
+      if (realTokenBackup && !fs.existsSync(realTokenPath)) {
+        fs.mkdirSync(path.dirname(realTokenPath), { recursive: true });
+        fs.writeFileSync(realTokenPath, realTokenBackup, "utf-8");
+      }
+    } catch { /* ignore */ }
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
