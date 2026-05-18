@@ -777,9 +777,18 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
 
       const entries: { name: string; is_dir: boolean }[] = [];
+      // 大目录截断：客户在 web 误点 /usr/lib 或 C:\Windows\System32（万级
+      // entries）会让 daemon 卡几秒做 stat + 序列化大 JSON。加上限保护
+      // UX + daemon 稳定性。
+      const MAX_ENTRIES = 2000;
+      let truncated = false;
       for (const ent of rawEntries) {
         // 跳过隐藏文件（以 . 开头）
         if (!showHidden && ent.name.startsWith(".")) continue;
+        if (entries.length >= MAX_ENTRIES) {
+          truncated = true;
+          break;
+        }
         let isDir = false;
         try {
           isDir = ent.isDirectory() || ent.isSymbolicLink()
@@ -800,7 +809,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         return a.name.localeCompare(b.name);
       });
 
-      return json({ current_path: targetPath, parent_path: parentPath, entries });
+      return json({ current_path: targetPath, parent_path: parentPath, entries, truncated });
     }
 
     // ─────────── Projects ───────────
