@@ -396,6 +396,12 @@ export async function run_submit_pr(taskId: string): Promise<void> {
 
   updateTask(taskId, { pr_url: prUrl });
 
+  // 切回 default branch，避免 daemon 主机 cwd 上 HEAD 长期停留在 task
+  // feature branch 上 — 用户在终端 / IDE 跑 git 时默认是 feature branch
+  // 而不是 main，连续两次 dogfood 都因此把我的 fix commit 误推到 feature
+  // branch 而不是 main。dogfood-bug6 修法。
+  runGit(["checkout", defaultBranch], repoPath, false);
+
   transition(taskId, "submit_pr_complete", {
     transitions: getTransitions(task.workflow),
     note: `PR 已提交：${prUrl}`,
