@@ -52,6 +52,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 16 | `autopilot config doctor --probe` 在零配置模式下不探测任何 CLI（providers 段空数组过滤后 enabled list 为空），客户看不到"装了 claude / codex / gemini" 提示 | 零配置时探测全部三家内置 CLI，凭证未登录降级 warning 而非 error | `89f3c94` |
 | 17 | doctor warning 计入 exit 1（"提示性"问题如可选 CLI 没装），客户 CI 里跑 `doctor` 被误判失败 | exitCodeFor 改 POSIX 标准：error → 1 / warning → 0 | `89f3c94` |
 | 18 | `168a47e` 在 package.json 加了 `coverage:rpc` script 但忘把 `bin/coverage-matrix.ts` 一起入库，刚 clone 仓库的客户跑 `bun run coverage:rpc` 直接 file not found | 补 commit 工具 + 文档（`docs/rpc-coverage.md`） | `b8f4cf9` |
+| 19 | `autopilot init` 只跑 SCHEMA 不跑 migrations，客户 init 完只有 tasks/task_logs 两张表，跑 dashboard 创 project 立即报 "no such table: projects"（bug 8 修过"自动装 workflow"但漏修了数据库本身） | init 内调 runPendingMigrations()，输出"应用 N 条迁移" | `9932f62` |
 
 ---
 
@@ -92,7 +93,7 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 - `tests/cli-config.test.ts` +1 用例：warning → exit 0 / error → 1
 - `tests/requirements.test.ts` +5 用例：状态转换覆盖 bug 3/15
 
-826 测试 / 0 失败（截至 commit `b8f4cf9`）。
+830 测试 / 0 失败（截至 commit `9932f62`）。
 
 ## 还没验过的边界（欢迎补）
 
