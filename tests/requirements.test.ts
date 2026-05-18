@@ -185,6 +185,15 @@ describe("requirements CRUD + 状态机", () => {
     expect(canTransitionStatus("queued", "running")).toBe(true);
     expect(canTransitionStatus("failed", "queued")).toBe(true);
     expect(canTransitionStatus("done", "queued")).toBe(false);
+    // dogfood-bug15: dev workflow 没 awaiting_review 中间阶段，task → done
+    // 时需要直接 running → done。修前 bridge 因不允许此转换 silent skip
+    // 导致 requirement 卡 running。
+    expect(canTransitionStatus("running", "done")).toBe(true);
+    expect(canTransitionStatus("running", "awaiting_review")).toBe(true);
+    expect(canTransitionStatus("running", "failed")).toBe(true);
+    expect(canTransitionStatus("running", "cancelled")).toBe(true);
+    // dogfood-bug3: awaiting_approval → queued（之前 enqueue 报"非法状态转换"）
+    expect(canTransitionStatus("awaiting_approval", "queued")).toBe(true);
   });
 
   it("updateRequirement 部分字段 + 不改 status", () => {
