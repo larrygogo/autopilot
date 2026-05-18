@@ -2,32 +2,48 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../index";
 
-const PID_FILE = join(AUTOPILOT_HOME, "runtime", "daemon.pid");
-const SUPERVISOR_PID_FILE = join(AUTOPILOT_HOME, "runtime", "supervisor.pid");
-const LISTEN_FILE = join(AUTOPILOT_HOME, "runtime", "daemon.listen.json");
+// 路径函数化（不是常量）以便测试用 tmpdir 隔离：process.env.AUTOPILOT_HOME
+// 优先 / 常量兜底。daemon 运行期间 env 不变，行为跟常量等价。
+
+function home(): string {
+  return process.env.AUTOPILOT_HOME || AUTOPILOT_HOME;
+}
+
+function pidFile(): string {
+  return join(home(), "runtime", "daemon.pid");
+}
+
+function supervisorPidFile(): string {
+  return join(home(), "runtime", "supervisor.pid");
+}
+
+function listenFile(): string {
+  return join(home(), "runtime", "daemon.listen.json");
+}
 
 export function getPidFilePath(): string {
-  return PID_FILE;
+  return pidFile();
 }
 
 export function getSupervisorPidFilePath(): string {
-  return SUPERVISOR_PID_FILE;
+  return supervisorPidFile();
 }
 
 export function writePid(): void {
-  writeFileSync(PID_FILE, String(process.pid), "utf-8");
+  writeFileSync(pidFile(), String(process.pid), "utf-8");
 }
 
 export function readPid(): number | null {
-  if (!existsSync(PID_FILE)) return null;
-  const content = readFileSync(PID_FILE, "utf-8").trim();
+  const path = pidFile();
+  if (!existsSync(path)) return null;
+  const content = readFileSync(path, "utf-8").trim();
   const pid = parseInt(content, 10);
   return isNaN(pid) ? null : pid;
 }
 
 export function removePid(): void {
   try {
-    unlinkSync(PID_FILE);
+    unlinkSync(pidFile());
   } catch {
     // ignore
   }
@@ -58,18 +74,19 @@ export function isDaemonRunning(): boolean {
 // ──────────────────────────────────────────────
 
 export function writeSupervisorPid(): void {
-  writeFileSync(SUPERVISOR_PID_FILE, String(process.pid), "utf-8");
+  writeFileSync(supervisorPidFile(), String(process.pid), "utf-8");
 }
 
 export function readSupervisorPid(): number | null {
-  if (!existsSync(SUPERVISOR_PID_FILE)) return null;
-  const content = readFileSync(SUPERVISOR_PID_FILE, "utf-8").trim();
+  const path = supervisorPidFile();
+  if (!existsSync(path)) return null;
+  const content = readFileSync(path, "utf-8").trim();
   const pid = parseInt(content, 10);
   return isNaN(pid) ? null : pid;
 }
 
 export function removeSupervisorPid(): void {
-  try { unlinkSync(SUPERVISOR_PID_FILE); } catch { /* ignore */ }
+  try { unlinkSync(supervisorPidFile()); } catch { /* ignore */ }
 }
 
 // ──────────────────────────────────────────────
@@ -82,13 +99,21 @@ export interface DaemonListenInfo {
 }
 
 export function writeListenInfo(info: DaemonListenInfo): void {
-  try { writeFileSync(LISTEN_FILE, JSON.stringify(info), "utf-8"); } catch { /* ignore */ }
+  try {
+    const path = listenFile();
+    // 自动创建 runtime 目录（init 没跑过 / tmpdir 隔离场景）
+    const { mkdirSync } = require("fs") as typeof import("fs");
+    const { dirname } = require("path") as typeof import("path");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(info), "utf-8");
+  } catch { /* ignore */ }
 }
 
 export function readListenInfo(): DaemonListenInfo | null {
-  if (!existsSync(LISTEN_FILE)) return null;
+  const path = listenFile();
+  if (!existsSync(path)) return null;
   try {
-    const parsed = JSON.parse(readFileSync(LISTEN_FILE, "utf-8"));
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
     if (typeof parsed?.host === "string" && typeof parsed?.port === "number") {
       return { host: parsed.host, port: parsed.port };
     }
@@ -97,7 +122,7 @@ export function readListenInfo(): DaemonListenInfo | null {
 }
 
 export function removeListenInfo(): void {
-  try { unlinkSync(LISTEN_FILE); } catch { /* ignore */ }
+  try { unlinkSync(listenFile()); } catch { /* ignore */ }
 }
 
 export function isSupervisorRunning(): boolean {
