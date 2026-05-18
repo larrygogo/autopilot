@@ -166,31 +166,69 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
   };
 
   // ⚠️ Hooks 必须在条件 return 之前调用，否则违反 hooks 顺序规则（React error #310）
-  // 从 transition 日志推导每个 phase 的运行状态，喂给 PhasePipeline 显示角标
+  // 从 transition 日志推导每个 phase 的运行状态，喂给 PhasePipeline 显示角标。
+  //
+  // 关键：runner 没有 `<phase>_complete` 这种中间 to_status，phase 完成的
+  // 信号是「to_status 跳出 running_<phase>」(下一个 phase 的 pending_X)。
+  // 所以处理 running_X / pending_X / awaiting_X 切换时，先把当前还在
+  // running 的其他 phase 全部标 done — 否则 design 一直留在 running，
+  // 导致 design + review + develop 多个 phase 同时显示 spinner 角标，
+  // 看上去全在 loading 状态（用户实际反馈的截图问题）。
   const phaseRunStatuses = useMemo<Record<string, PhasePipelineRunStatus>>(() => {
     const m: Record<string, PhasePipelineRunStatus> = {};
     if (!task) return m;
-    for (const l of logs as Array<{ to_status?: string }>) {
+
+    const markPriorRunningDone = (currentPhase: string) => {
+      for (const k of Object.keys(m)) {
+        if (m[k] === "running" && k !== currentPhase) m[k] = "done";
+      }
+    };
+
+    // logs 顺序：API 默认按 desc 返回；按时间正序处理
+    const ordered = [...(logs as Array<{ to_status?: string }>)].reverse();
+    for (const l of ordered) {
       const to = l?.to_status;
       if (!to) continue;
       if (to.startsWith("running_")) {
-        m[to.slice("running_".length)] = "running";
+        const p = to.slice("running_".length);
+        markPriorRunningDone(p);
+        m[p] = "running";
       } else if (to.startsWith("pending_")) {
         const p = to.slice("pending_".length);
-        if (!m[p]) m[p] = "pending";
+        markPriorRunningDone(p);
+        if (!m[p] || m[p] === "idle") m[p] = "pending";
       } else if (to.startsWith("awaiting_")) {
-        m[to.slice("awaiting_".length)] = "awaiting";
+        const p = to.slice("awaiting_".length);
+        markPriorRunningDone(p);
+        m[p] = "awaiting";
       } else if (to.startsWith("failed_")) {
-        m[to.slice("failed_".length)] = "failed";
+        const p = to.slice("failed_".length);
+        markPriorRunningDone(p);
+        m[p] = "failed";
       } else if (to.endsWith("_complete")) {
+        // 兼容老 transition（个别工作流可能 emit _complete）
         m[to.slice(0, -"_complete".length)] = "done";
       }
+      // 其它 to_status（如 review_rejected）不直接映射 phase 状态，
+      // 由后面的 pending_/running_ 切换接管
     }
-    // 当前状态覆盖（log 滞后）
+
+    // 当前状态覆盖（防 log 滞后）
     const cur = task.status as string;
-    if (cur.startsWith("running_")) m[cur.slice("running_".length)] = "running";
-    else if (cur.startsWith("failed_")) m[cur.slice("failed_".length)] = "failed";
-    else if (cur.startsWith("awaiting_")) m[cur.slice("awaiting_".length)] = "awaiting";
+    if (cur.startsWith("running_")) {
+      const p = cur.slice("running_".length);
+      markPriorRunningDone(p);
+      m[p] = "running";
+    } else if (cur.startsWith("failed_")) {
+      m[cur.slice("failed_".length)] = "failed";
+    } else if (cur.startsWith("awaiting_")) {
+      m[cur.slice("awaiting_".length)] = "awaiting";
+    } else if (cur === "done") {
+      // 终态：所有还在 running 的标 done
+      for (const k of Object.keys(m)) {
+        if (m[k] === "running") m[k] = "done";
+      }
+    }
     return m;
   }, [logs, task]);
 
