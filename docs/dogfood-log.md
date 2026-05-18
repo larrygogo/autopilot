@@ -60,6 +60,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 24 | bug22 修了 12+ CLI 命令但漏了 `tui` + `dashboard`：tui 直接 `parseInt(opts.port)` 永远用 default 6180、dashboard 拼 URL 用 default 6180。客户改 `daemon.port=16180` 后跑 tui/dashboard 都连用户主 6180 daemon 而非自定义 daemon | 抽出 `resolvePort()` 纯函数给所有客户端命令共享，tui/dashboard 也走 listen.json 优先 | `11991d2` |
 | 25 | daemon 启动 retention 用 `setInterval(prune, 3600_000)` 但 **不立即触发**。客户 `daemon stop` 累积一周旧 workspace → `daemon start` 后第一小时 retention 完全无效，看着像功能坏了 | 抽出 runRetention()，启动时同步跑一次再开 setInterval；加 3 个集成测试用 spawn 子进程完整跑 (loadConfig + DB + scan + prune) | `55f3382` |
 | 26 | bug22 系列遗漏：`TokenGate.tsx` 给局域网用户的指引文案硬编码 "127.0.0.1:6180/settings"。客户改了 daemon.port=16180 后，局域网用户照着说明在本机打开是 404 | 用 `location.port` 替代硬编码 6180，链接跟随客户实际端口 | `acf9b12` |
+| 27 | `config:updated` 事件 emit 后**无 daemon 内 subscriber**：客户在 web Settings 改 agent.model → "已保存"亮起 → 下个 task 跑的是 cached Agent 旧 model | daemon 启动时 onEvent("config:updated", clearAllAgentCache)，新增 clearAllAgentCache() 异步清 + close 所有缓存 Agent | `cd533a9` |
 
 ---
 
@@ -107,7 +108,7 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 - `tests/cli-config.test.ts` +1 用例：warning → exit 0 / error → 1
 - `tests/requirements.test.ts` +5 用例：状态转换覆盖 bug 3/15
 
-857 测试 / 0 失败（截至 commit `55f3382`）。
+859 测试 / 0 失败（截至 commit `cd533a9`）。
 
 ## 还没验过的边界（欢迎补）
 
