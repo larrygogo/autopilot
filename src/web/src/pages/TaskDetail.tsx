@@ -228,6 +228,12 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       for (const k of Object.keys(m)) {
         if (m[k] === "running") m[k] = "done";
       }
+    } else if (cur === "cancelled" || cur === "canceled" || cur === "failed") {
+      // 已取消 / 失败：把残留 running 清成 idle（之前是 running 现在不再跑了，
+      // 既不算 done 也不算 failed，恢复中性视觉避免误以为还在转圈）
+      for (const k of Object.keys(m)) {
+        if (m[k] === "running") m[k] = "idle";
+      }
     }
     return m;
   }, [logs, task]);
