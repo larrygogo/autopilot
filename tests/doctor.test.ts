@@ -73,6 +73,31 @@ describe("L1 C3-C7", () => {
     expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("error");
   });
 
+  it("零配置（providers 段完全没写）→ ok（依赖 CLI 凭证）", async () => {
+    // 这是 CLAUDE.md 文档化的"零配置"路径：不写 providers 段，让 CLI 凭证
+    // 自管理。doctor L1 不能报 error，否则 init 完客户看到一片红色误以为
+    // 装坏了（dogfood 实跑暴露的问题）。
+    writeFileSync(tmpFile, "agents: {}\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    const c = report.checks.find((c) => c.id === "providers.has-enabled");
+    expect(c?.status).toBe("ok");
+    expect(c?.title).toContain("零配置模式");
+  });
+
+  it("零配置（完全空 yaml）→ ok", async () => {
+    writeFileSync(tmpFile, "\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("ok");
+  });
+
+  it("用户显式写 providers: {} 空对象 → error（明确没启用）", async () => {
+    // 跟"零配置"不同：用户显式写了 providers 段但为空，是明确"我没启用"。
+    // 保留 error 提示去 /setup 配置。
+    writeFileSync(tmpFile, "providers: {}\nagents: {}\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("error");
+  });
+
   it("C4 enabled 但无 default_model → error", async () => {
     writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\nagents: {}\n", "utf-8");
     const report = await runChecks({ level: 1 });
