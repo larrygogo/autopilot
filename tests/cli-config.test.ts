@@ -38,11 +38,26 @@ describe("config doctor 退出码", () => {
     expect(r.exitCode).toBe(0);
   });
 
-  it("缺 provider → 2", () => {
+  it("缺 provider → 1（error）", () => {
     runCli("init");
     writeFileSync(join(tmpHome, "config.yaml"), "providers: {}\nagents: {}\n", "utf-8");
     const r = runCli("config", "doctor");
-    expect(r.exitCode).toBe(2);
+    // dogfood-bug17：之前 error → 2 / warning → 1，CI 不友好。改为
+    // POSIX 标准约定：error → 1 / warning → 0。
+    expect(r.exitCode).toBe(1);
+  });
+
+  it("warning 不阻塞 exit (= 0)", () => {
+    runCli("init");
+    writeFileSync(
+      join(tmpHome, "config.yaml"),
+      "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n",
+      "utf-8",
+    );
+    // L1 ok，但若有警告 status 会是 "warning"；我们不强造场景，
+    // 这里主要断言 "ok" 仍 0。warning → 0 由 exitCodeFor 单元逻辑覆盖。
+    const r = runCli("config", "doctor");
+    expect(r.exitCode).toBe(0);
   });
 
   it("--json 可解析", () => {
