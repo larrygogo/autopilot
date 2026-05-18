@@ -17,9 +17,9 @@
 - RPC method 总数：107
   - 只 web 用：102
   - 无人调用：4
-- HTTP endpoint 总数：39
-  - 只 web 用：17
-  - 无人调用：22
+- HTTP endpoint 总数：23
+  - 只 web 用：21
+  - 无人调用：2
 
 ## WS RPC methods
 
@@ -137,42 +137,26 @@
 
 | Name | Web | TUI | CLI |
 |------|-----|-----|-----|
-| `GET /api/agents` | — | — | — |
-| `POST /api/agents` | — | — | — |
+| `POST /api/auth/login` | 1 | — | — |
+| `POST /api/auth/logout` | 1 | — | — |
+| `GET /api/auth/me` | 1 | — | — |
+| `POST /api/auth/setup` | 1 | — | — |
 | `POST /api/chat` | 1 | — | — |
-| `GET /api/config` | — | — | — |
-| `PUT /api/config` | — | — | — |
 | `GET /api/daemon/listen` | 2 | — | — |
 | `PUT /api/daemon/listen` | 2 | — | — |
-| `GET /api/daemon/log` | — | — | — |
 | `DELETE /api/daemon/token` | 2 | — | — |
 | `POST /api/daemon/token/rotate` | 1 | — | — |
-| `GET /api/defaults` | — | — | — |
-| `PUT /api/defaults` | — | — | — |
 | `GET /api/fs/list` | 1 | — | — |
-| `GET /api/projects` | — | — | — |
-| `POST /api/projects` | — | — | — |
-| `GET /api/providers` | — | — | — |
-| `GET /api/providers/status` | — | — | — |
 | `POST /api/reload` | 1 | — | — |
 | `GET /api/repos` | — | — | — |
 | `POST /api/repos` | — | — | — |
 | `GET /api/requirements` | 4 | — | — |
 | `POST /api/requirements` | 4 | — | — |
-| `GET /api/schedules` | — | — | — |
-| `POST /api/schedules` | — | — | — |
-| `GET /api/sessions` | — | — | — |
-| `GET /api/setup/status` | — | — | — |
 | `GET /api/status` | 1 | — | — |
 | `GET /api/tasks` | 2 | — | — |
 | `POST /api/tasks` | 2 | — | — |
 | `GET /api/workflows` | 10 | — | — |
 | `POST /api/workflows` | 10 | — | — |
-| `POST /api/workflows/author` | — | — | — |
-| `POST /api/workflows/author/save` | — | — | — |
 | `POST /api/workflows/from-template` | 1 | — | — |
 | `GET /api/workflows/health` | 1 | — | — |
 | `POST /api/workflows/health/fix-orphan` | 1 | — | — |
-| `POST /api/workflows/import-bundle` | — | — | — |
-| `GET /api/workflows/templates` | — | — | — |
-| `GET /api/workspaces/usage` | — | — | — |

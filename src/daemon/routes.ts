@@ -1,6 +1,18 @@
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { readdir } from "node:fs/promises";
 import { join, resolve, sep, dirname, parse as parsePath } from "path";
+import {
+  signJwt,
+  verifyJwt,
+  extractJwtFromCookie,
+  makeSessionCookie,
+  hasAnyUser,
+  verifyUser,
+  getUserById,
+  createUser,
+  listUsers,
+  type User,
+} from "../core/auth";
 import { getPhaseIndex } from "../core/artifacts";
 import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
 import { initDb, getDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks, updateTask } from "../core/db";
@@ -12,8 +24,6 @@ import {
   readManifest as readSessionManifest,
   readMessages as readSessionMessages,
   updateManifest as updateSessionManifest,
-  listSessions as listChatSessions,
-  deleteSession as deleteChatSession,
   type ChatMessage,
 } from "../core/sessions";
 import { resolveChatAgentName, createChatAgent } from "../agents/registry";
@@ -25,18 +35,6 @@ import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
 import { cancelTaskAction, restartTaskAction, answerTaskAction, decideTaskAction, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import {
-  createSchedule,
-  getSchedule,
-  listSchedules,
-  updateSchedule,
-  deleteSchedule,
-  markScheduleFired,
-  computeNextRun,
-  systemTimezone,
-  isValidTimezone,
-  type ScheduleType,
-} from "../core/schedules";
-import {
   listCodebases,
   getCodebaseById,
   createCodebase,
@@ -44,13 +42,11 @@ import {
   deleteCodebase,
   nextCodebaseId,
 } from "../core/codebases";
-import { listProjects, getProjectById, createProject, updateProject, deleteProject, nextProjectId } from "../core/projects";
 import { checkCodebaseHealth } from "../core/codebase-health";
 import { discoverSubmodules, listSubmodules } from "../core/submodules";
 import { listSubPrs } from "../core/requirement-sub-prs";
 import {
   listRequirements,
-  listRequirementsByProject,
   getRequirementById,
   createRequirement,
   updateRequirement,
@@ -109,24 +105,11 @@ import {
   deleteDbWorkflow,
 } from "../core/workflows";
 import {
-  loadConfigRaw,
-  saveConfigRaw,
-  loadDefaultsConfig,
-  saveDefaultsConfig,
   loadDaemonConfig,
   saveDaemonConfig,
-  loadProviders,
-  saveProvider,
   loadGlobalAgents,
-  saveAgent,
-  deleteAgent,
-  PROVIDER_NAMES,
-  type ProviderName,
 } from "../core/config";
 import { loadApiToken, previewApiToken, saveApiToken, deleteApiToken, generateApiToken } from "../core/api-token";
-import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
-import { listProviderModels } from "../agents/model-list";
-import { runAgentOnce } from "../agents/registry";
 import {
   ensureTaskWorkspace,
   getTaskWorkspace,
@@ -135,11 +118,9 @@ import {
   resolveWorkspacePath,
   spawnWorkspaceZip,
   deleteTaskWorkspace,
-  scanTaskWorkspaces,
   workspaceSize,
 } from "../core/workspace";
 import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task-logs";
-import { readDaemonFileLog, getDaemonFileLogPath } from "../core/logger";
 import { emit } from "../core/event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -528,9 +509,26 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     });
   }
 
+  // ── /api/auth/* 路由（公开，无需 API token）──────────────────────────────
+  if (path.startsWith("/api/auth/")) {
+    const authResult = await handleAuthRoute(req, method, path, json, error, cors);
+    if (authResult) return authResult;
+  }
+
   // Token 鉴权（仅在 /api/* 上生效，静态资源不需要）
+  // 回落策略：API token 不通时再检查 JWT cookie（Web UI 登录后用此方式鉴权）
   if (path.startsWith("/api/") && !checkAuth(req, server)) {
-    return error("Unauthorized", 401);
+    const jwtToken = extractJwtFromCookie(req);
+    if (jwtToken) {
+      try {
+        await verifyJwt(jwtToken);
+        // JWT 有效，放行
+      } catch {
+        return error("Unauthorized", 401);
+      }
+    } else {
+      return error("Unauthorized", 401);
+    }
   }
 
   try {
@@ -565,15 +563,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       return json(status);
     }
 
-    // GET /api/daemon/log?tail=N
-    if (method === "GET" && path === "/api/daemon/log") {
-      const tailParam = url.searchParams.get("tail");
-      const tail = tailParam ? parseInt(tailParam, 10) : 500;
-      return json({
-        path: getDaemonFileLogPath() ?? null,
-        content: readDaemonFileLog(tail),
-      });
-    }
+    // GET /api/daemon/log 已迁到 WS RPC: daemon.log
 
     // GET /api/tasks
     if (method === "GET" && path === "/api/tasks") {
@@ -617,124 +607,15 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // ─────────── Schedules ───────────
+    // /api/schedules/* HTTP endpoints 已全部迁到 WS RPC：
+    //   GET    /api/schedules            → schedules.list
+    //   POST   /api/schedules            → schedules.create
+    //   GET    /api/schedules/:id        → schedules.get
+    //   PATCH  /api/schedules/:id        → schedules.update
+    //   DELETE /api/schedules/:id        → schedules.delete
+    //   POST   /api/schedules/:id/run-now → schedules.runNow
 
-    // GET /api/schedules
-    if (method === "GET" && path === "/api/schedules") {
-      return json(listSchedules());
-    }
-
-    // POST /api/schedules
-    if (method === "POST" && path === "/api/schedules") {
-      const body = (await req.json()) as {
-        name?: string;
-        type?: ScheduleType;
-        run_at?: string | null;
-        cron_expr?: string | null;
-        timezone?: string;
-        workflow?: string;
-        title?: string;
-        requirement?: string | null;
-        enabled?: boolean;
-      };
-      if (!body.name?.trim()) return error("name 不能为空");
-      if (body.type !== "once" && body.type !== "cron") {
-        return error("type 必须是 once 或 cron");
-      }
-      if (!body.workflow?.trim()) return error("workflow 不能为空");
-      if (!body.title?.trim()) return error("title 不能为空");
-
-      // 校验 workflow 存在
-      await discover();
-      if (!getWorkflow(body.workflow)) {
-        return error(`workflow "${body.workflow}" 不存在`);
-      }
-
-      const timezone =
-        body.timezone?.trim() || loadDefaultsConfig().timezone || systemTimezone();
-      if (!isValidTimezone(timezone)) {
-        return error(`时区无效：${timezone}`);
-      }
-      try {
-        const sch = createSchedule({
-          name: body.name.trim(),
-          type: body.type,
-          run_at: body.run_at ?? null,
-          cron_expr: body.cron_expr ?? null,
-          timezone,
-          workflow: body.workflow,
-          title: body.title.trim(),
-          requirement: body.requirement?.trim() || null,
-          enabled: body.enabled,
-        });
-        return json(sch, 201);
-      } catch (e: unknown) {
-        return error(e instanceof Error ? e.message : String(e));
-      }
-    }
-
-    // GET /api/schedules/:id
-    const scheduleIdMatch = extractParam(path, /^\/api\/schedules\/([\w.\-]+)$/);
-    if (method === "GET" && scheduleIdMatch) {
-      const sch = getSchedule(scheduleIdMatch);
-      if (!sch) return error("Schedule not found", 404);
-      return json(sch);
-    }
-
-    // PATCH /api/schedules/:id
-    if (method === "PATCH" && scheduleIdMatch) {
-      const body = (await req.json()) as Record<string, unknown>;
-      try {
-        const sch = updateSchedule(scheduleIdMatch, body);
-        if (!sch) return error("Schedule not found", 404);
-        return json(sch);
-      } catch (e: unknown) {
-        return error(e instanceof Error ? e.message : String(e));
-      }
-    }
-
-    // DELETE /api/schedules/:id
-    if (method === "DELETE" && scheduleIdMatch) {
-      const ok = deleteSchedule(scheduleIdMatch);
-      if (!ok) return error("Schedule not found", 404);
-      return json({ ok: true });
-    }
-
-    // POST /api/schedules/:id/run-now —— 立即触发一次（不影响 next_run_at）
-    const runNowMatch = extractParam(path, /^\/api\/schedules\/([\w.\-]+)\/run-now$/);
-    if (method === "POST" && runNowMatch) {
-      const sch = getSchedule(runNowMatch);
-      if (!sch) return error("Schedule not found", 404);
-      try {
-        const task = await startTaskFromTemplate({
-          workflow: sch.workflow,
-          title: sch.title,
-          requirement: sch.requirement ?? undefined,
-        });
-        // 更新最近触发记录，但保留原 next_run_at 不动
-        markScheduleFired(sch.id, task.id, sch.next_run_at, sch.enabled === 0);
-        return json({ ok: true, taskId: task.id });
-      } catch (e: unknown) {
-        if (e instanceof StartTaskError) return error(e.message, e.status);
-        return error(e instanceof Error ? e.message : String(e), 500);
-      }
-    }
-
-    // ─────────── 首跑配置（setup） ───────────
-
-    if (method === "GET" && path === "/api/setup/status") {
-      const { runChecks } = await import("../core/doctor");
-      const { getKv } = await import("../core/db");
-      const report = await runChecks({ level: 1 });
-      let dismissed = false;
-      try {
-        dismissed = getKv("setup.dismissed") === "1";
-      } catch {
-        // kv 表未建（迁移未跑）时跳过 dismissed 读取
-      }
-      return json({ ...report, setupDismissed: dismissed });
-    }
-
+    // /api/setup/status 已迁到 WS RPC: setup.status
     // POST /api/setup/* 已迁到 WS RPC（setup.saveProviders / saveAgents / saveCodebases / setup.dismiss）
 
     // ─────────── 文件系统浏览 ───────────
@@ -812,119 +693,15 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       return json({ current_path: targetPath, parent_path: parentPath, entries, truncated });
     }
 
-    // ─────────── Projects ───────────
-
-    // GET /api/projects
-    if (method === "GET" && path === "/api/projects") {
-      return json({ projects: listProjects() });
-    }
-
-    // POST /api/projects
-    if (method === "POST" && path === "/api/projects") {
-      const body = (await req.json()) as { name?: string; description?: string | null };
-      if (!body.name?.trim()) return error("name 必填");
-      const id = nextProjectId();
-      try {
-        const project = createProject({ id, name: body.name.trim(), description: body.description ?? null });
-        return json({ project }, 201);
-      } catch (e: unknown) {
-        const code = (e as { code?: string }).code;
-        const msg = e instanceof Error ? e.message : String(e);
-        if (
-          code === "SQLITE_CONSTRAINT_UNIQUE" ||
-          code?.startsWith("SQLITE_CONSTRAINT") ||
-          msg.toLowerCase().includes("unique")
-        ) {
-          return error(msg, 409);
-        }
-        return error(msg, 500);
-      }
-    }
-
-    // GET /api/projects/:id/codebases — 必须在 GET /api/projects/:id 之前
-    const projectCodebasesMatch = extractParam(path, /^\/api\/projects\/([\w-]+)\/codebases$/);
-    if (method === "GET" && projectCodebasesMatch) {
-      if (!getProjectById(projectCodebasesMatch)) return error("project not found", 404);
-      return json({ codebases: listCodebases({ projectId: projectCodebasesMatch }) });
-    }
-
-    // POST /api/projects/:id/codebases
-    if (method === "POST" && projectCodebasesMatch) {
-      const proj = getProjectById(projectCodebasesMatch);
-      if (!proj) return error("project not found", 404);
-      const body = (await req.json()) as {
-        alias?: string;
-        path?: string;
-        default_branch?: string;
-        github_owner?: string | null;
-        github_repo?: string | null;
-      };
-      if (!body.alias?.trim() || !body.path?.trim()) {
-        return error("alias 和 path 必填");
-      }
-      const cbId = nextCodebaseId();
-      try {
-        const codebase = createCodebase({
-          id: cbId,
-          project_id: projectCodebasesMatch,
-          alias: body.alias.trim(),
-          path: body.path.trim(),
-          default_branch: body.default_branch?.trim() || "main",
-          github_owner: body.github_owner ?? null,
-          github_repo: body.github_repo ?? null,
-        });
-        return json({ codebase }, 201);
-      } catch (e: unknown) {
-        const code = (e as { code?: string }).code;
-        const msg = e instanceof Error ? e.message : String(e);
-        if (
-          code === "SQLITE_CONSTRAINT_UNIQUE" ||
-          code?.startsWith("SQLITE_CONSTRAINT") ||
-          msg.toLowerCase().includes("unique")
-        ) {
-          return error(msg, 409);
-        }
-        return error(msg, 500);
-      }
-    }
-
-    // GET /api/projects/:id/requirements — 必须在 GET /api/projects/:id 之前
-    const projectRequirementsMatch = extractParam(path, /^\/api\/projects\/([\w-]+)\/requirements$/);
-    if (method === "GET" && projectRequirementsMatch) {
-      if (!getProjectById(projectRequirementsMatch)) return error("project not found", 404);
-      return json({ requirements: listRequirementsByProject(projectRequirementsMatch).map((r) => withRepoIdAlias(r)) });
-    }
-
-    // GET /api/projects/:id
-    const projectIdMatch = extractParam(path, /^\/api\/projects\/([\w-]+)$/);
-    if (method === "GET" && projectIdMatch) {
-      const project = getProjectById(projectIdMatch);
-      if (!project) return error("project not found", 404);
-      return json({ project });
-    }
-
-    // PUT /api/projects/:id
-    if (method === "PUT" && projectIdMatch) {
-      const body = (await req.json()) as { name?: string; description?: string | null };
-      if (body.name !== undefined && body.name.trim() === "") return error("name 不能为空", 400);
-      const project = updateProject(projectIdMatch, {
-        name: body.name?.trim(),
-        description: body.description,
-      });
-      if (!project) return error("project not found", 404);
-      return json({ project });
-    }
-
-    // DELETE /api/projects/:id — 级联删除需求、codebase（含子模块）后再删项目
-    if (method === "DELETE" && projectIdMatch) {
-      if (!getProjectById(projectIdMatch)) return error("project not found", 404);
-      const reqs = listRequirementsByProject(projectIdMatch);
-      for (const r of reqs) deleteRequirement(r.id);
-      const codebases = listCodebases({ projectId: projectIdMatch });
-      for (const cb of codebases) deleteCodebase(cb.id);
-      deleteProject(projectIdMatch);
-      return json({ ok: true });
-    }
+    // /api/projects/* HTTP endpoints 已全部迁到 WS RPC：
+    //   GET    /api/projects                    → projects.list
+    //   POST   /api/projects                    → projects.create
+    //   GET    /api/projects/:id                → projects.get
+    //   PUT    /api/projects/:id                → projects.update
+    //   DELETE /api/projects/:id                → projects.delete
+    //   GET    /api/projects/:id/codebases      → projects.codebases
+    //   POST   /api/projects/:id/codebases      → projects.addCodebase
+    //   GET    /api/projects/:id/requirements   → projects.requirements
 
     // ─────────── Codebases（主路由已迁 WS RPC：codebases.list/get/create/update/delete/listSubmodules/healthcheck/rediscoverSubmodules） ───────────
     // 旧 /api/repos/* HTTP 别名仍保留至 P6 清理（响应字段 repo / repos）
@@ -1555,16 +1332,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // GET /api/workspaces/usage — 扫描所有任务的 workspace 占用（Dashboard 用）
-    if (method === "GET" && path === "/api/workspaces/usage") {
-      try {
-        const list = scanTaskWorkspaces();
-        const total = list.reduce((a, it) => a + it.size, 0);
-        return json({ total, tasks: list });
-      } catch (e: unknown) {
-        return error(e instanceof Error ? e.message : String(e), 500);
-      }
-    }
+    // GET /api/workspaces/usage 已迁到 WS RPC: workspaces.usage
 
     // GET /api/tasks/:id/logs
     const logsMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/logs$/);
@@ -1687,33 +1455,11 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // GET /api/sessions
-    if (method === "GET" && path === "/api/sessions") {
-      return json(listChatSessions());
-    }
-
-    // GET /api/sessions/:id (含最近消息)
-    const sessionGetMatch = extractParam(path, /^\/api\/sessions\/([\w.\-]+)$/);
-    if (method === "GET" && sessionGetMatch) {
-      const m = readSessionManifest(sessionGetMatch);
-      if (!m) return error("session not found", 404);
-      const messages = readSessionMessages(sessionGetMatch);
-      return json({ ...m, messages });
-    }
-
-    // DELETE /api/sessions/:id
-    if (method === "DELETE" && sessionGetMatch) {
-      const ok = deleteChatSession(sessionGetMatch);
-      return ok ? json({ ok: true }) : error("session not found", 404);
-    }
-
-    // GET /api/sessions/:id/messages?limit=N
-    const sessionMsgsMatch = extractParam(path, /^\/api\/sessions\/([\w.\-]+)\/messages$/);
-    if (method === "GET" && sessionMsgsMatch) {
-      const limit = url.searchParams.get("limit");
-      const n = limit ? parseInt(limit, 10) : undefined;
-      return json(readSessionMessages(sessionMsgsMatch, Number.isFinite(n) ? n : undefined));
-    }
+    // /api/sessions/* HTTP endpoints 已迁到 WS RPC：
+    //   GET    /api/sessions             → sessions.list
+    //   GET    /api/sessions/:id         → sessions.get
+    //   DELETE /api/sessions/:id         → sessions.delete
+    //   GET    /api/sessions/:id/messages → sessions.get (响应含 messages)
 
     // GET /api/workflows
     if (method === "GET" && path === "/api/workflows") {
@@ -1731,49 +1477,10 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       return json(result);
     }
 
-    // GET /api/workflows/templates — 列出可用的内置模板
-    if (method === "GET" && path === "/api/workflows/templates") {
-      const { listWorkflowTemplates } = await import("../core/workflow-templates");
-      return json({ templates: listWorkflowTemplates() });
-    }
-
-    // POST /api/workflows/author — AI 生成 workflow.yaml + ts（不落盘，返回预览）
-    if (method === "POST" && path === "/api/workflows/author") {
-      const { runWorkflowAuthor } = await import("./workflow-author");
-      const body = (await req.json().catch(() => null)) as
-        | { description?: string; prior_yaml?: string; prior_ts?: string }
-        | null;
-      if (!body || typeof body.description !== "string" || !body.description.trim()) {
-        return error("description required", 400);
-      }
-      const result = await runWorkflowAuthor({
-        description: body.description,
-        prior_yaml: typeof body.prior_yaml === "string" ? body.prior_yaml : undefined,
-        prior_ts: typeof body.prior_ts === "string" ? body.prior_ts : undefined,
-      });
-      return json(result);
-    }
-
-    // POST /api/workflows/author/save — 把 AI 生成的工作流落盘
-    if (method === "POST" && path === "/api/workflows/author/save") {
-      const body = (await req.json().catch(() => null)) as
-        | { name?: string; yaml?: string; ts?: string }
-        | null;
-      if (!body?.name || !body?.yaml || !body?.ts) {
-        return error("name / yaml / ts required", 400);
-      }
-      try {
-        const { saveAuthoredWorkflow } = await import("./workflow-author");
-        saveAuthoredWorkflow(body.name, body.yaml, body.ts);
-        const { discover } = await import("../core/registry");
-        await discover();
-        return json({ ok: true, name: body.name }, 201);
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const status = msg.includes("already exists") ? 409 : msg.includes("only allows") || msg.includes("只允许") ? 400 : 500;
-        return error(msg, status);
-      }
-    }
+    // /api/workflows/templates|author|author/save HTTP endpoints 已迁到 WS RPC：
+    //   GET  /api/workflows/templates    → workflows.templates
+    //   POST /api/workflows/author       → workflows.author
+    //   POST /api/workflows/author/save  → workflows.saveAuthored
 
     // GET /api/workflows/health — 扫描 yaml.name 跟目录名不一致 / 重名碰撞
     if (method === "GET" && path === "/api/workflows/health") {
@@ -1921,51 +1628,11 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // ── Config API ──
-
-    // GET /api/config
-    if (method === "GET" && path === "/api/config") {
-      return json({ yaml: loadConfigRaw() });
-    }
-
-    // PUT /api/config
-    if (method === "PUT" && path === "/api/config") {
-      const body = await req.json() as { yaml: string };
-      if (typeof body.yaml !== "string") return error("yaml field is required");
-      try {
-        saveConfigRaw(body.yaml);
-        emit({ type: "config:updated", payload: {} });
-        return json({ ok: true });
-      } catch (e: unknown) {
-        return error(`Invalid YAML: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-
-    // GET /api/defaults —— 返回默认偏好（含 resolved timezone）
-    if (method === "GET" && path === "/api/defaults") {
-      const cfg = loadDefaultsConfig();
-      return json({
-        timezone: cfg.timezone ?? null,
-        resolved_timezone: cfg.timezone ?? systemTimezone(),
-        system_timezone: systemTimezone(),
-      });
-    }
-
-    // PUT /api/defaults
-    if (method === "PUT" && path === "/api/defaults") {
-      const body = (await req.json()) as { timezone?: string | null };
-      const tz = typeof body.timezone === "string" ? body.timezone.trim() : "";
-      if (tz && !isValidTimezone(tz)) {
-        return error(`时区无效：${tz}`);
-      }
-      try {
-        saveDefaultsConfig({ timezone: tz || undefined });
-        emit({ type: "config:updated", payload: {} });
-        return json({ ok: true, timezone: tz || null });
-      } catch (e: unknown) {
-        return error(e instanceof Error ? e.message : String(e));
-      }
-    }
+    // /api/config + /api/defaults HTTP endpoints 已迁到 WS RPC：
+    //   GET  /api/config   → config.get
+    //   PUT  /api/config   → config.save
+    //   GET  /api/defaults → defaults.get
+    //   PUT  /api/defaults → defaults.save
 
     // ── Daemon 监听配置 + API token ──
     // 改完 host/port 需要 daemon restart 才生效；token 改动立即生效（不必重启）。
@@ -2094,33 +1761,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       });
     }
 
-    // POST /api/workflows/import-bundle — 从 JSON bundle 创建新工作流
-    if (method === "POST" && path === "/api/workflows/import-bundle") {
-      const body = await req.json().catch(() => null) as
-        | { name?: string; yaml?: string; ts?: string | null }
-        | null;
-      if (!body || typeof body.name !== "string" || typeof body.yaml !== "string") {
-        return error("name + yaml required", 400);
-      }
-      if (!/^[\w.\-]+$/.test(body.name)) {
-        return error("name 只允许字母 / 数字 / . _ -", 400);
-      }
-      try {
-        const { saveAuthoredWorkflow } = await import("./workflow-author");
-        saveAuthoredWorkflow(body.name, body.yaml, body.ts ?? "");
-        // 复用 saveAuthoredWorkflow 后的同步逻辑
-        const { discover } = await import("../core/registry");
-        await discover();
-        emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true, name: body.name }, 201);
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const status = msg.includes("already exists") ? 409
-          : msg.includes("只允许") ? 400
-          : 500;
-        return error(msg, status);
-      }
-    }
+    // POST /api/workflows/import-bundle 已迁到 WS RPC: workflows.importBundle
 
     // GET /api/workflows/:name/ts — 读 workflow.ts 源码
     const tsReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/ts$/);
@@ -2298,157 +1939,21 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       return json({ ok: true, workflows: listWorkflows() });
     }
 
-    // ── Providers API ──
+    // /api/providers/* HTTP endpoints 已全部迁到 WS RPC：
+    //   GET /api/providers              → providers.list
+    //   GET /api/providers/status       → providers.statusAll
+    //   GET /api/providers/:name/status → providers.status
+    //   GET /api/providers/:name/models → providers.models
+    //   PUT /api/providers/:name        → providers.save
 
-    // GET /api/providers — 返回三个内置 provider 的当前配置 + agent_count
-    if (method === "GET" && path === "/api/providers") {
-      const providers = loadProviders();
-      const agents = loadGlobalAgents();
-      const counts: Record<string, number> = {};
-      for (const cfg of Object.values(agents)) {
-        const p = (cfg as Record<string, unknown>)["provider"];
-        if (typeof p === "string") counts[p] = (counts[p] ?? 0) + 1;
-      }
-      return json(
-        PROVIDER_NAMES.map((name) => ({
-          name,
-          ...providers[name],
-          agent_count: counts[name] ?? 0,
-        }))
-      );
-    }
-
-    // GET /api/providers/status — 全部三家 CLI 健康检查
-    if (method === "GET" && path === "/api/providers/status") {
-      const all = await detectAllProviders();
-      return json(Object.values(all));
-    }
-
-    // GET /api/providers/:name/status — 单独检测某家
-    const providerStatusMatch = extractParam(path, /^\/api\/providers\/([\w\-]+)\/status$/);
-    if (method === "GET" && providerStatusMatch) {
-      if (!(PROVIDER_NAMES as readonly string[]).includes(providerStatusMatch)) {
-        return error(`未知 provider：${providerStatusMatch}`, 400);
-      }
-      const status = await detectProviderCli(providerStatusMatch as ProviderName);
-      return json(status);
-    }
-
-    // GET /api/providers/:name/models — 列表（API 或 catalog）
-    const providerModelsMatch = extractParam(path, /^\/api\/providers\/([\w\-]+)\/models$/);
-    if (method === "GET" && providerModelsMatch) {
-      if (!(PROVIDER_NAMES as readonly string[]).includes(providerModelsMatch)) {
-        return error(`未知 provider：${providerModelsMatch}`, 400);
-      }
-      const result = await listProviderModels(providerModelsMatch as ProviderName);
-      return json(result);
-    }
-
-    // PUT /api/providers/:name
-    const providerMatch = extractParam(path, /^\/api\/providers\/([\w\-]+)$/);
-    if (method === "PUT" && providerMatch) {
-      if (!(PROVIDER_NAMES as readonly string[]).includes(providerMatch)) {
-        return error(`未知 provider：${providerMatch}`, 400);
-      }
-      const body = await req.json() as Record<string, unknown>;
-      try {
-        saveProvider(providerMatch as ProviderName, body);
-        emit({ type: "config:updated", payload: {} });
-        return json({ ok: true });
-      } catch (e: unknown) {
-        return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 500);
-      }
-    }
-
-    // ── Agents API ──
-
-    // GET /api/agents — 返回全局 agents 列表（含 used_by 工作流）
-    if (method === "GET" && path === "/api/agents") {
-      const agents = loadGlobalAgents();
-      const usage = computeAgentUsage(Object.keys(agents));
-      return json(
-        Object.entries(agents).map(([name, cfg]) => ({
-          name,
-          ...cfg,
-          used_by: usage[name] ?? [],
-        }))
-      );
-    }
-
-    // GET /api/agents/:name
-    const agentReadMatch = extractParam(path, /^\/api\/agents\/([\w.\-]+)$/);
-    if (method === "GET" && agentReadMatch) {
-      const agents = loadGlobalAgents();
-      const cfg = agents[agentReadMatch];
-      if (!cfg) return error("Agent not found", 404);
-      return json({ name: agentReadMatch, ...cfg });
-    }
-
-    // POST /api/agents — 新建（name 在 body 中）
-    if (method === "POST" && path === "/api/agents") {
-      const body = await req.json() as Record<string, unknown> & { name?: string };
-      const name = body.name;
-      if (typeof name !== "string" || !name) return error("name is required");
-      const agents = loadGlobalAgents();
-      if (agents[name]) return error(`Agent "${name}" 已存在，请用 PUT 更新`, 409);
-      try {
-        const { name: _, ...rest } = body;
-        saveAgent(name, rest);
-        emit({ type: "config:updated", payload: {} });
-        return json({ ok: true, name }, 201);
-      } catch (e: unknown) {
-        return error(`创建失败：${e instanceof Error ? e.message : String(e)}`, 400);
-      }
-    }
-
-    // PUT /api/agents/:name
-    if (method === "PUT" && agentReadMatch) {
-      const body = await req.json() as Record<string, unknown>;
-      try {
-        const { name: _, ...rest } = body;
-        saveAgent(agentReadMatch, rest);
-        emit({ type: "config:updated", payload: {} });
-        return json({ ok: true });
-      } catch (e: unknown) {
-        return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
-      }
-    }
-
-    // DELETE /api/agents/:name
-    if (method === "DELETE" && agentReadMatch) {
-      const removed = deleteAgent(agentReadMatch);
-      if (!removed) return error("Agent not found", 404);
-      emit({ type: "config:updated", payload: {} });
-      return json({ ok: true });
-    }
-
-    // POST /api/agents/:name/dry-run — 一次性调用，用于 UI 调试
-    const agentDryRunMatch = extractParam(path, /^\/api\/agents\/([\w.\-]+)\/dry-run$/);
-    if (method === "POST" && agentDryRunMatch) {
-      const body = await req.json() as {
-        prompt?: string;
-        system_prompt?: string;
-        additional_system?: string;
-        model?: string;
-        max_turns?: number;
-      };
-      if (typeof body.prompt !== "string" || !body.prompt.trim()) {
-        return error("prompt 不能为空", 400);
-      }
-      try {
-        const started = Date.now();
-        const result = await runAgentOnce(agentDryRunMatch, body.prompt, {
-          system_prompt: body.system_prompt,
-          additional_system: body.additional_system,
-          model: body.model,
-          max_turns: body.max_turns,
-        });
-        const elapsed_ms = Date.now() - started;
-        return json({ ok: true, elapsed_ms, result });
-      } catch (e: unknown) {
-        return error(`试跑失败：${e instanceof Error ? e.message : String(e)}`, 500);
-      }
-    }
+    // /api/agents/* HTTP endpoints 已全部迁到 WS RPC：
+    //   GET  /api/agents          → agents.list
+    //   GET  /api/agents/:name    → agents.get
+    //   POST /api/agents          → agents.create
+    //   PUT  /api/agents/:name    → agents.update
+    //   DELETE /api/agents/:name  → agents.delete
+    //   POST /api/agents/:name/dry-run → agents.dryRun
+    // 客户端 (web/cli/tui) 已全部不再调用 HTTP 路径（`bun run coverage:rpc` 验证）。
 
     // ── Static files ──
     if (method === "GET" && !path.startsWith("/api/")) {
@@ -2461,6 +1966,117 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     const message = e instanceof Error ? e.message : String(e);
     return error(message, 500);
   }
+}
+
+// ──────────────────────────────────────────────
+// Auth 路由（公开，不过 API token 门）
+// ──────────────────────────────────────────────
+
+/**
+ * 处理 /api/auth/* 请求。
+ * 返回 Response 表示已处理；返回 null 表示路径不匹配，交由后续逻辑继续。
+ */
+async function handleAuthRoute(
+  req: Request,
+  method: string,
+  path: string,
+  json: (data: unknown, status?: number) => Response,
+  error: (message: string, status?: number) => Response,
+  cors: Record<string, string>,
+): Promise<Response | null> {
+  // POST /api/auth/login — 邮箱+密码登录，成功后 Set-Cookie JWT
+  if (method === "POST" && path === "/api/auth/login") {
+    if (!hasAnyUser()) {
+      return json({ error: "未配置任何用户，auth 未启用" }, 400);
+    }
+    const body = await req.json().catch(() => null) as { email?: string; password?: string } | null;
+    if (!body?.email || !body?.password) {
+      return error("email 和 password 必填", 400);
+    }
+    const user = await verifyUser(body.email, body.password);
+    if (!user) {
+      return error("邮箱或密码错误", 401);
+    }
+    const token = await signJwt(user.id, user.email);
+    const cookie = makeSessionCookie(token);
+    return new Response(JSON.stringify({ ok: true, user }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Set-Cookie": cookie,
+        ...cors,
+      },
+    });
+  }
+
+  // POST /api/auth/logout — 清除 cookie
+  if (method === "POST" && path === "/api/auth/logout") {
+    const cookie = makeSessionCookie("", true);
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Set-Cookie": cookie,
+        ...cors,
+      },
+    });
+  }
+
+  // GET /api/auth/me — 返回当前认证状态
+  if (method === "GET" && path === "/api/auth/me") {
+    const authEnabled = hasAnyUser();
+    if (!authEnabled) {
+      return json({ auth_enabled: false, user: null });
+    }
+    const token = extractJwtFromCookie(req);
+    if (!token) {
+      return json({ error: "未登录", code: "unauthenticated", auth_enabled: true }, 401);
+    }
+    try {
+      const payload = await verifyJwt(token);
+      const user = getUserById(payload.sub);
+      if (!user) {
+        return json({ error: "用户不存在", code: "unauthenticated", auth_enabled: true }, 401);
+      }
+      return json({ auth_enabled: true, user });
+    } catch {
+      return json({ error: "会话已过期，请重新登录", code: "unauthenticated", auth_enabled: true }, 401);
+    }
+  }
+
+  // POST /api/auth/setup — 首次设置（仅在无用户时可用）
+  if (method === "POST" && path === "/api/auth/setup") {
+    if (hasAnyUser()) {
+      return error("已存在用户，请通过登录进入", 400);
+    }
+    const body = await req.json().catch(() => null) as { email?: string; password?: string } | null;
+    if (!body?.email || !body?.password) {
+      return error("email 和 password 必填", 400);
+    }
+    if (body.password.length < 8) {
+      return error("密码至少 8 位", 400);
+    }
+    try {
+      const user = await createUser(body.email, body.password);
+      const token = await signJwt(user.id, user.email);
+      const cookie = makeSessionCookie(token);
+      return new Response(JSON.stringify({ ok: true, user }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Set-Cookie": cookie,
+          ...cors,
+        },
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return error(`创建用户失败：${msg}`, 400);
+    }
+  }
+
+  // GET /api/auth/users — 列出所有用户（需要鉴权，在下方正常鉴权逻辑里处理）
+  // 此处仅处理公开 auth 路由，匹配不到则返回 null
+  return null;
 }
 
 // ──────────────────────────────────────────────
