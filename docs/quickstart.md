@@ -76,26 +76,23 @@ bun install v1.x.x
 
 ```bash
 autopilot init
-autopilot upgrade
 ```
 
-`init` 预期输出：
+`init` 预期输出（含数据库迁移 + 自动装默认 dev 工作流）：
 
 ```
 已创建目录：/Users/you/.autopilot/workflows
 已创建目录：/Users/you/.autopilot/prompts
 已创建目录：/Users/you/.autopilot/runtime
-已初始化数据库：/Users/you/.autopilot/runtime/workflow.db
+已初始化数据库：/Users/you/.autopilot/runtime/workflow.db（应用 19 条迁移）
+已生成配置模板：/Users/you/.autopilot/config.yaml
+已装入默认工作流：/Users/you/.autopilot/workflows/dev
 初始化完成。
 ```
 
-`upgrade` 预期输出（首次）：
-
-```
-数据库升级完成，共执行 N 条迁移。
-```
-
 这会在 `~/.autopilot/` 创建你的用户数据目录——配置文件、工作流、运行时数据都放在这里，与框架代码完全隔离。
+
+后续 `git pull` 拉新代码后再跑 `autopilot upgrade` 增量执行新迁移（init 已跑全部时 no-op）。
 
 ---
 
@@ -274,6 +271,13 @@ autopilot daemon start          # 后台启动
 autopilot daemon stop           # 停止
 autopilot daemon status         # 查看状态
 autopilot daemon restart        # 重启（重载配置后用）
+
+# Project / Codebase / Requirement（纯 CLI 路径，不必开浏览器）
+autopilot project create "<name>" [-d desc]           # 创建 project
+autopilot project list                                # 列出 project
+autopilot codebase create <alias> <path> [--github owner/repo]  # 注册 git 仓库
+autopilot codebase list                               # 列出 codebase
+autopilot req new --from-prompt "<需求>" [--no-extract] # 创建 requirement
 
 # 任务
 autopilot start "<标题>"        # 快捷创建任务

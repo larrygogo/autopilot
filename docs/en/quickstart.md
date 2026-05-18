@@ -73,26 +73,23 @@ bun install v1.x.x
 
 ```bash
 autopilot init
-autopilot upgrade
 ```
 
-`init` expected output:
+`init` expected output (includes DB migrations + auto-installs the default `dev` workflow):
 
 ```
 已创建目录：/Users/you/.autopilot/workflows
 已创建目录：/Users/you/.autopilot/prompts
 已创建目录：/Users/you/.autopilot/runtime
-已初始化数据库：/Users/you/.autopilot/runtime/workflow.db
+已初始化数据库：/Users/you/.autopilot/runtime/workflow.db（应用 19 条迁移）
+已生成配置模板：/Users/you/.autopilot/config.yaml
+已装入默认工作流：/Users/you/.autopilot/workflows/dev
 初始化完成。
 ```
 
-`upgrade` expected output (first run):
-
-```
-数据库升级完成，共执行 N 条迁移。
-```
-
 This creates `~/.autopilot/` — your user data directory for config, workflows, and runtime state, fully isolated from the framework source.
+
+After `git pull` for new releases, run `autopilot upgrade` to apply new migrations (no-op when nothing pending).
 
 ---
 
@@ -266,6 +263,13 @@ autopilot daemon start          # start in background
 autopilot daemon stop           # stop
 autopilot daemon status         # check status
 autopilot daemon restart        # restart (after config changes)
+
+# Project / Codebase / Requirement (pure CLI path, no browser needed)
+autopilot project create "<name>" [-d desc]           # create project
+autopilot project list                                # list projects
+autopilot codebase create <alias> <path> [--github owner/repo]  # register git repo
+autopilot codebase list                               # list codebases
+autopilot req new --from-prompt "<requirement>" [--no-extract]   # create requirement
 
 # Tasks
 autopilot start "<title>"       # quick-create a task
