@@ -105,3 +105,71 @@ describe("端口解析优先级逻辑（bug22 fix）", () => {
     expect(resolvePort({ port: "6180" }, 16180, 6180)).toBe(16180);
   });
 });
+
+/**
+ * bug24: tui + dashboard 命令也走 resolvePort，跟随客户改的 daemon.port。
+ *
+ * 之前 tui 直接 `startTui({ port: parseInt(opts.port, 10) })`、dashboard
+ * 拼 URL 用 opts.port —— 都硬编码 default 6180，客户改端口后必连错。
+ */
+describe("tui + dashboard 端口解析（dogfood-bug24）", () => {
+  import("fs").then(({ mkdirSync, writeFileSync, rmSync, existsSync }) => {
+    // intentionally empty —— 真正测试在下面 spawn CLI
+  });
+
+  it("dashboard 命令 listen.json 存在时打印的 URL 用 listen.json 的端口", async () => {
+    const { join } = await import("path");
+    const { mkdirSync, writeFileSync, rmSync, existsSync } = await import("fs");
+    const { tmpdir } = await import("os");
+    const tmpHome = join(
+      tmpdir(),
+      `autopilot-dash-port-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(join(tmpHome, "runtime"), { recursive: true });
+    writeFileSync(
+      join(tmpHome, "runtime", "daemon.listen.json"),
+      JSON.stringify({ host: "127.0.0.1", port: 16180 }),
+      "utf-8",
+    );
+    try {
+      const r = Bun.spawnSync({
+        cmd: ["bun", "run", join(process.cwd(), "bin/autopilot.ts"), "dashboard"],
+        env: { ...process.env, AUTOPILOT_HOME: tmpHome },
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 5000,
+      });
+      const out = r.stdout.toString();
+      // URL 应该用 16180 而不是 default 6180
+      expect(out).toContain("127.0.0.1:16180");
+      expect(out).not.toContain("127.0.0.1:6180");
+    } finally {
+      if (existsSync(tmpHome)) rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("dashboard 命令 listen.json 不存在时 fallback default port", async () => {
+    const { join } = await import("path");
+    const { mkdirSync, rmSync, existsSync } = await import("fs");
+    const { tmpdir } = await import("os");
+    const tmpHome = join(
+      tmpdir(),
+      `autopilot-dash-default-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(join(tmpHome, "runtime"), { recursive: true });
+    try {
+      const r = Bun.spawnSync({
+        cmd: ["bun", "run", join(process.cwd(), "bin/autopilot.ts"), "dashboard"],
+        env: { ...process.env, AUTOPILOT_HOME: tmpHome },
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 5000,
+      });
+      const out = r.stdout.toString();
+      // 没 listen.json → 用默认 6180
+      expect(out).toContain("127.0.0.1:6180");
+    } finally {
+      if (existsSync(tmpHome)) rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+});

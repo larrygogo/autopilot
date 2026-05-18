@@ -43,26 +43,27 @@ program
 // 辅助
 // ──────────────────────────────────────────────
 
-function getClient(opts?: { port?: string }): AutopilotClient {
-  // 端口解析优先级（dogfood-bug22）：
-  //   1. 用户显式 --port 非默认值 → 覆盖（跨 HOME 场景）
-  //   2. daemon.listen.json → daemon 启动时写入的真实端口
-  //   3. opts.port（commander 注入的 default 也走这里）
-  //   4. DEFAULT_PORT 兜底
-  //
-  // 之前 commander 永远把 String(DEFAULT_PORT) 注入 opts.port → opts.port
-  // 永远 truthy → readListenInfo 永远走不到。客户改 config.yaml.daemon.port
-  // = 16180 后跑 daemon status 报"daemon 运行中 (pid=主daemon的pid)"，
-  // 因为 client 连 6180 = 用户主 daemon，但 readListenInfo() 显示 16180 →
-  // 两套数据源严重不一致。
+/**
+ * 端口解析优先级（dogfood-bug22 / bug24）：
+ *   1. 用户显式 --port 非默认值 → 覆盖（跨 HOME 场景）
+ *   2. daemon.listen.json → daemon 启动时写入的真实端口
+ *   3. DEFAULT_PORT 兜底
+ *
+ * 之前 commander 永远把 String(DEFAULT_PORT) 注入 opts.port → opts.port
+ * 永远 truthy → readListenInfo 永远走不到。客户改 config.yaml.daemon.port
+ * = 16180 后跑 daemon status / tui / dashboard 都连 6180 → 错的 daemon。
+ */
+function resolvePort(opts?: { port?: string }): number {
   const explicitPort =
     opts?.port && parseInt(opts.port, 10) !== DEFAULT_PORT
       ? parseInt(opts.port, 10)
       : null;
   const info = readListenInfo();
-  const port = explicitPort ?? info?.port ?? DEFAULT_PORT;
-  // host 用 127.0.0.1（客户端总是本机连）
-  return new AutopilotClient({ port });
+  return explicitPort ?? info?.port ?? DEFAULT_PORT;
+}
+
+function getClient(opts?: { port?: string }): AutopilotClient {
+  return new AutopilotClient({ port: resolvePort(opts) });
 }
 
 async function ensureDaemon(client: AutopilotClient): Promise<void> {
@@ -831,7 +832,7 @@ program
   .action(async (opts: { port: string }) => {
     try {
       const { startTui } = await import("../tui/index");
-      startTui({ port: parseInt(opts.port, 10) });
+      startTui({ port: resolvePort(opts) });
     } catch (e: unknown) {
       console.error("错误：TUI 模块未安装。请运行 `bun install` 安装依赖。");
       console.error(e instanceof Error ? e.message : String(e));
@@ -848,7 +849,9 @@ program
   .description("打开 Web 控制台")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
   .action(async (opts: { port: string }) => {
-    const url = `http://${DEFAULT_HOST}:${opts.port}`;
+    // 优先 listen.json（客户改端口后跟随）；显式 --port 非默认覆盖
+    const port = resolvePort(opts);
+    const url = `http://${DEFAULT_HOST}:${port}`;
     console.log(`打开浏览器：${url}`);
     const platform = process.platform;
     const cmd: string[] =
