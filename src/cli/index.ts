@@ -943,7 +943,7 @@ program
 program
   .command("init")
   .description("初始化 AUTOPILOT_HOME 目录结构和数据库")
-  .action(() => {
+  .action(async () => {
     const dirs = [
       join(AUTOPILOT_HOME, "workflows"),
       join(AUTOPILOT_HOME, "prompts"),
@@ -962,6 +962,22 @@ program
       console.log(`已生成配置模板：${cfgPath}`);
     } else {
       console.log(`配置文件已存在，保留：${cfgPath}`);
+    }
+
+    // dogfood-bug8 修复：自动装 dev workflow，让新用户 init 完就能跑通第一个
+    // task。之前 init 只创空目录，跑任何 dev task 都报"找不到工作流"。
+    const devWorkflowDir = join(AUTOPILOT_HOME, "workflows", "dev");
+    if (!existsSync(devWorkflowDir)) {
+      try {
+        const { cloneTemplate } = await import("../core/workflow-templates");
+        cloneTemplate("dev", "dev");
+        console.log(`已装入默认工作流：${devWorkflowDir}`);
+      } catch (e: unknown) {
+        console.warn(`装 dev workflow 失败（不阻塞 init）：${e instanceof Error ? e.message : String(e)}`);
+        console.warn("可稍后用 web UI 或 CLI 手动克隆 dev 模板");
+      }
+    } else {
+      console.log(`dev workflow 已存在，保留：${devWorkflowDir}`);
     }
 
     console.log("\n初始化完成。下一步（三选一）：");
