@@ -14,6 +14,7 @@ import { registerWorkflowCommands } from "./workflow";
 import { registerConfigCommands, printReport as printDoctorReport } from "./config";
 import { registerRequirementCommands } from "./requirements-cli";
 import { registerProjectCommands } from "./project";
+import { registerCodebaseCommands } from "./codebase";
 import { runChecks as runDoctorChecks } from "../core/doctor";
 import {
   readPid,
@@ -656,6 +657,7 @@ registerWorkflowCommands(program, {
 registerConfigCommands(program);
 registerRequirementCommands(program);
 registerProjectCommands(program);
+registerCodebaseCommands(program);
 
 program
   .command("doctor")

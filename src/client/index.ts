@@ -58,6 +58,10 @@ export class AutopilotClient {
   get updateProject() { return this.http.updateProject.bind(this.http); }
   get deleteProject() { return this.http.deleteProject.bind(this.http); }
   get listCodebases() { return this.http.listCodebases.bind(this.http); }
+  get getCodebase() { return this.http.getCodebase.bind(this.http); }
+  get createCodebase() { return this.http.createCodebase.bind(this.http); }
+  get deleteCodebase() { return this.http.deleteCodebase.bind(this.http); }
+  get healthcheckCodebase() { return this.http.healthcheckCodebase.bind(this.http); }
 
   // ── 便捷方法：代理 WebSocket ──
 
