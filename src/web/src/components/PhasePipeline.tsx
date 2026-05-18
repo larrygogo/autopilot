@@ -266,11 +266,17 @@ function PhaseStatusBadge({ status }: { status?: PhasePipelineRunStatus }) {
     awaiting: { Icon: Hand, cls: "text-warning", title: "等待人工" },
   } as const;
   const { Icon, cls, title } = map[status];
+  // 用一个不旋转的圆形背景容器套住会旋转的 Icon：
+  // 直接给 Icon 加 bg-background 时，矩形背景会跟着 animate-spin 一起转，
+  // 对角线扫到节点 border 外侧（用户反馈：旋转挡住 border）。
+  // 圆形背景旋转不变形，且承担与节点底色一致的"角标镶嵌"视觉。
   return (
-    <Icon
-      className={cn("absolute -right-1.5 -top-1.5 h-4 w-4 bg-background", cls)}
+    <span
+      className="absolute -right-1.5 -top-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-background"
       aria-label={title}
-    />
+    >
+      <Icon className={cn("h-3.5 w-3.5", cls)} aria-hidden="true" />
+    </span>
   );
 }
 
