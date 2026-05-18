@@ -111,7 +111,7 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 - supervisor 真子进程端到端（spawn 实际 daemon 验证 RESTART_SENTINEL 立即重启 + crash loop 退避真生效）
 - workspace_retention 在 daemon 实际跑一段时间后真触发清理（单测只覆盖纯函数路径）
 - 多设备局域网访问 token 二维码扫码流程（需要真实手机/平板）
-- 22 个零调用 HTTP endpoint + 4 个零调用 RPC method（`bun run coverage:rpc` 揭示）需逐项确认是否真死代码可删
+- 4 个零调用 RPC method (`tasks.events`、`tasks.subtasks`、`requirements.finishClarification`、`requirements.retryClarify`) 是孤儿（注册了但客户端忘接）；删之前要确认是否未来想暴露
 - working tree 上有一个进行中的"邮箱+密码+JWT cookie 登录"feature（routes.ts auth 路由 + core/auth.ts + migration 020 + Login.tsx/AuthGate.tsx/useAuth.ts），后端完整、前端组件完整，但**缺"首次创建用户"入口** —— UI 无 setup 按钮、CLI 无 `autopilot auth setup` 命令，导致 authEnabled 永远 false（fallback 老 TokenGate），feature 实质未启用。补完只需把 AuthGate 在 `!authEnabled` 分支加"启用 auth"按钮或加 CLI `user create` 命令。白名单已加 auth.ts（commit `160b115`），feature 文件未 commit。
 
 ## 诊断工具
