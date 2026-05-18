@@ -119,3 +119,4 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 ## 诊断工具
 
 - `bun run coverage:rpc` —— 跑 RPC × {web/tui/cli} 客户端覆盖矩阵，发现死代码 / 反渗内核命名候选。输出在 `docs/rpc-coverage.md`。
+- `bun run smoke-test` —— 跑客户 onboarding CLI 完整路径（init → 表全建 → 二次幂等 → doctor → project/codebase/req new 命令存在 → workflow list → daemon status）。12 步任意失败立即 exit 非 0。CI 在每个 PR 跑一遍防回归（`.github/workflows/ci.yml`）。
