@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { api } from "../hooks/useApi";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -191,10 +190,6 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
             )
           )}
         </div>
-        <Button variant="ghost" size="sm" onClick={refreshList} title="刷新阶段列表">
-          <RefreshCw className="h-3.5 w-3.5" />
-          刷新
-        </Button>
       </div>
 
       <div className="p-4">

@@ -142,6 +142,10 @@
   body {
     @apply bg-background text-foreground font-sans;
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* mobile 兜底：长 URL / 文件路径 / 任务 ID 等无空格串不撑爆父容器。
+       overflow-wrap: anywhere 比 break-word 更激进，能在任意字符断；
+       对正常英文阅读几乎无影响（只在没空格的超长串才生效），中文本来就字字可断。 */
+    overflow-wrap: anywhere;
     background-image:
       linear-gradient(rgba(29, 53, 87, 0.06) 1px, transparent 1px),
       linear-gradient(90deg, rgba(29, 53, 87, 0.06) 1px, transparent 1px),
@@ -284,6 +288,18 @@
   .font-mono-strict {
     font-family: var(--font-mono);
     font-variant-ligatures: none;
+  }
+
+  /* MarkdownView 容器：显式兜底（虽然 body 已继承 overflow-wrap，
+     某些 prose 风库可能覆盖，这里 belt-and-suspenders）。 */
+  .prose-bp {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .prose-bp pre {
+    /* pre 块自己有 overflow-x-auto，不应触发 wrap（破坏代码格式） */
+    overflow-wrap: normal;
+    word-break: normal;
   }
 
   /* 编号块（L1 / L2 那种厚边框 + 单色填充） */

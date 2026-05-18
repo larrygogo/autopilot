@@ -277,9 +277,36 @@ export async function run_develop(taskId: string): Promise<void> {
     }
   } finally {
     // 不论 agent 成功 / 失败 / 超时，都要 pop 回用户散改，否则用户看不到
-    // 自己的未提交改动会很慌
+    // 自己的未提交改动会很慌。
+    //
+    // dogfood-bug11 修法：pop 冲突时不能 silent 失败 —— 必须显式告诉用户
+    // working tree 当前有 conflict marker 在某些文件，否则下游 submit_pr
+    // 的 checkout default_branch 会因 unmerged 状态再失败一次（连锁 bug 6
+    // fix 失效）。检测 pop 失败 → 把 conflict 状态写进 dev_report.md，
+    // 任务仍 done 但 user 能看到"该手工解 conflict"的指引。
     if (stashed) {
-      runGit(["stash", "pop"], repoPath, false);
+      const popResult = runGit(["stash", "pop"], repoPath, false);
+      if (popResult.exitCode !== 0) {
+        const unmergedResult = runGit(["diff", "--name-only", "--diff-filter=U"], repoPath, false);
+        const unmergedFiles = unmergedResult.stdout.trim();
+        const warning =
+          `\n\n---\n\n` +
+          `## ⚠ 用户散改恢复冲突\n\n` +
+          `develop 阶段开始前 stash 了用户工作目录散改（含 untracked），` +
+          `开发完成 commit 后 \`git stash pop\` 失败：\n\n` +
+          `\`\`\`\n${popResult.stderr || "(no stderr)"}\n\`\`\`\n\n` +
+          (unmergedFiles
+            ? `**unmerged 文件**：\n\n\`\`\`\n${unmergedFiles}\n\`\`\`\n\n`
+            : "") +
+          `这些文件的散改可能因为本次 task commit 修改同名文件而冲突。\n` +
+          `**stash 仍保留在 \`git stash list\` 顶部**，可手工 \`git stash apply\` 后解冲突。\n` +
+          `submit_pr 阶段会因 unmerged 状态无法 checkout main —— 请先手工解决冲突。\n`;
+        try {
+          const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
+          const existing = existsSync(reportPath) ? readFileSync(reportPath, "utf-8") : "";
+          writeFileSync(reportPath, existing + warning, "utf-8");
+        } catch { /* 写不进 report 也不能影响 task 进展 */ }
+      }
     }
   }
 

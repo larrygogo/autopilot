@@ -29,9 +29,9 @@ export const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
-/** 四角对齐标记（registration marks）—— 蓝图标志元素 */
+/** 四角对齐标记（registration marks）—— 蓝图标志元素。mobile 下隐藏让出内容宽。 */
 function RegMarks() {
-  const base = "absolute w-3.5 h-3.5 opacity-60 pointer-events-none";
+  const base = "hidden sm:block absolute w-3.5 h-3.5 opacity-60 pointer-events-none";
   const v = "absolute left-1/2 top-0 bottom-0 w-px bg-foreground -translate-x-1/2";
   const h = "absolute top-1/2 left-0 right-0 h-px bg-foreground -translate-y-1/2";
   return (
@@ -65,7 +65,7 @@ export const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-none border-2 border-foreground bg-card p-8 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        "fixed left-1/2 top-1/2 z-50 grid w-[calc(100vw-1rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-none border-2 border-foreground bg-card p-4 sm:p-8 sm:w-full duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         "max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain",
         "shadow-[6px_6px_0_0_var(--color-foreground)]",
         className,

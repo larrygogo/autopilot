@@ -4,7 +4,6 @@ import {
   Repeat,
   Play,
   Trash2,
-  RefreshCw,
   ExternalLink,
 } from "lucide-react";
 import { api, type Schedule } from "@/hooks/useApi";
@@ -124,12 +123,6 @@ export function Schedules({ onSelectTask, subscribe }: Props) {
         meta={[
           { k: "总数", v: schedules.length },
         ]}
-        actions={
-          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            刷新
-          </Button>
-        }
       />
 
       {loadError && (

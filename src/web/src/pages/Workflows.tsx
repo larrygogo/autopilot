@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 import { api } from "@/hooks/useApi";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
@@ -57,6 +58,7 @@ interface Props {
 export function Workflows({ onJumpToAgent }: Props = {}) {
   const toast = useToast();
   const navigate = useNavigate();
+  const { subscribe } = useWebSocket();
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Selected | null>(null);
@@ -81,6 +83,14 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
   useEffect(() => {
     refresh();
   }, []);
+
+  // WS：daemon 重载工作流（修复孤儿 / discover 新增等）后自动同步列表
+  useEffect(() => {
+    const unsub = subscribe("daemon", (event) => {
+      if (event.type === "workflow:reloaded") refresh();
+    });
+    return unsub;
+  }, [subscribe]);
 
   // 接收 URL query：?wf=<name>&phase=<name>&fromTask=<id>
   // 用于 TaskOutcomeCard 失败时「去工作流修复」跳过来自动定位
@@ -274,7 +284,7 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
               <p className="mb-3 text-sm text-muted-foreground">{selected.detail.description}</p>
             )}
 
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
               <SummaryField label="初始状态">
                 <code className="font-mono">{selected.detail.initial_state}</code>
               </SummaryField>

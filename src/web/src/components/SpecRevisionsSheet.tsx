@@ -42,7 +42,7 @@ export function SpecRevisionsSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[640px] max-w-full p-0 flex flex-col">
+      <SheetContent side="right" className="w-full max-w-full sm:w-[640px] sm:max-w-[90vw] p-0 flex flex-col">
         <header className="border-b-[1.5px] border-foreground/30 px-5 py-3.5 pr-12 shrink-0">
           <h2 className="font-display text-base font-bold uppercase tracking-wider">修订历史</h2>
           <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mt-0.5">

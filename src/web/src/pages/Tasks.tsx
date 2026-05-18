@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, RefreshCw, ChevronDown, ChevronRight, Hand, AlertCircle, CheckCircle2, XCircle, Play, Clock, Search, X } from "lucide-react";
 import { api } from "@/hooks/useApi";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageHero } from "@/components/PageHero";
@@ -41,6 +42,7 @@ interface Group {
 const TERMINAL_PREVIEW_LIMIT = 20;
 
 export function Tasks() {
+  const { subscribe } = useWebSocket();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +66,13 @@ export function Tasks() {
       .finally(() => setLoading(false));
   };
   useEffect(() => { refresh(); }, []);
+
+  // WS：task:* 变化（创建 / 更新 / transition / 删除）自动 refetch
+  // 节流不需要 —— refresh 已 set loading 防抖
+  useEffect(() => {
+    const unsub = subscribe("task:*", () => refresh());
+    return unsub;
+  }, [subscribe]);
 
   // distinct workflow 列表（用于 chip 筛选）— 来自当前 tasks
   const allWorkflows = useMemo(() => {

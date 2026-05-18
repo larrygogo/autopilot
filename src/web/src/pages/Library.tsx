@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Layers, Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ const EMPTY_FORM: FormState = { name: "", description: "" };
 function ProjectsTab() {
   const navigate = useNavigate();
   const toast = useToast();
+  const { subscribe } = useWebSocket();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -57,6 +59,12 @@ function ProjectsTab() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // WS：projects:* 自动 refetch（含跨标签页 / 跨设备的项目变化）
+  useEffect(() => {
+    const unsub = subscribe("projects:*", () => refresh());
+    return unsub;
+  }, [subscribe, refresh]);
 
   const openCreateDialog = () => {
     setEditingProject(null);
@@ -143,10 +151,6 @@ function ProjectsTab() {
           共 {projects.length} 个项目
         </p>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            刷新
-          </Button>
           <Button size="sm" onClick={openCreateDialog}>
             <Plus className="h-4 w-4" />
             新建项目
