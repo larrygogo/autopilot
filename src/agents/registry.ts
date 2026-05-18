@@ -228,7 +228,23 @@ export async function closeAgents(workflowName: string): Promise<void> {
 }
 
 /**
- * 仅用于测试：清空全部缓存
+ * 清空所有 Agent 缓存 + close 它们各自的资源（dogfood-bug27）。
+ *
+ * 客户在 web Settings 改 agent model / system_prompt 后，daemon 必须丢弃
+ * 旧 cache 实例，否则下个 task 仍用老配置。daemon 启动时订阅
+ * `config:updated` 事件回调此函数即可。
+ */
+export async function clearAllAgentCache(): Promise<void> {
+  const closePromises: Promise<void>[] = [];
+  for (const agent of _cache.values()) {
+    closePromises.push(agent.close().catch(() => { /* close 失败不影响清缓存 */ }));
+  }
+  _cache.clear();
+  await Promise.all(closePromises);
+}
+
+/**
+ * 仅用于测试：清空全部缓存（同步，不等 close）
  */
 export function _resetForTest(): void {
   _cache.clear();

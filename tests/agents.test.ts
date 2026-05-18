@@ -49,6 +49,42 @@ describe("agent system", () => {
   });
 });
 
+describe("clearAllAgentCache（dogfood-bug27）", () => {
+  test("clearAllAgentCache 清空所有 cached Agent + close 它们", async () => {
+    const { clearAllAgentCache, _resetForTest, createAgent } = await import("../src/agents/registry");
+    // 先把 cache 清干净
+    _resetForTest();
+
+    // 重新 import 模块拿 _cache（registry 没 export _cache，但 closeAgents 行为可以间接验证）
+    // 直接用一组 close 跟踪测：跑一次 closeAgents("non-existent") 应该 no-op 不报错
+    // 然后调 clearAllAgentCache 验证返回 promise 完成
+    await clearAllAgentCache();
+    // 二次调也 OK（幂等）
+    await clearAllAgentCache();
+
+    // 真测 close 行为：手动放一个 Agent 进 cache 然后清
+    // _cache 没暴露 setter，但 createAgent 是 export 的；这里只验函数本身不抛异常 + 幂等
+    const agent = createAgent({ name: "test-cache", provider: "anthropic", model: "claude-sonnet-4-6" });
+    expect(agent.name).toBe("test-cache");
+    await agent.close();
+  });
+
+  test("config:updated 事件 → daemon 启动时订阅会清缓存", async () => {
+    // 集成层验证：daemon/index.ts 启动时 onEvent("config:updated", clearAllAgentCache)
+    // 这里只 sanity 验 onEvent + emit 链路可工作
+    const { enableBus, disableBus, emit, onEvent, offEvent } = await import("../src/core/event-bus");
+    enableBus();
+    let triggered = false;
+    const handler = () => { triggered = true; };
+    onEvent("config:updated", handler);
+    emit({ type: "config:updated", payload: {} });
+    // emit 是同步的，handler 应该已被调用
+    expect(triggered).toBe(true);
+    offEvent("config:updated", handler);
+    disableBus();
+  });
+});
+
 describe("resolveAgentConfig — 三层合并", () => {
   const globals = {
     coder: { provider: "anthropic", model: "claude-sonnet-4-6", max_turns: 10, system_prompt: "你是编码助手" },

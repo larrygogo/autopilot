@@ -158,6 +158,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 激活事件总线
   enableBus();
 
+  // dogfood-bug27：config 改了之后 agent cache 必须丢弃，否则下个 task 还用老配置
+  const { onEvent } = await import("../core/event-bus");
+  const { clearAllAgentCache } = await import("../agents/registry");
+  onEvent("config:updated", () => {
+    clearAllAgentCache().catch((e: unknown) => {
+      console.error("config:updated 后清 agent cache 失败：", e instanceof Error ? e.message : String(e));
+    });
+  });
+
   // 注册 RPC method（WS req/res 协议用，对 HTTP routes 无影响）
   const { registerCoreRpcMethods } = await import("./rpc-methods");
   registerCoreRpcMethods();
