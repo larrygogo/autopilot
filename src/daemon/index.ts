@@ -26,6 +26,7 @@ import { createDefaultAggregator, type Aggregator } from "../core/now-aggregator
 import { setNowAggregator } from "./routes-now";
 import type { AutopilotEvent } from "./protocol";
 import { RESTART_SENTINEL_CODE } from "./supervisor";
+import { writeFileSync, existsSync, unlinkSync } from "fs";
 
 // ──────────────────────────────────────────────
 // Module 级 shutdown 注册表
@@ -34,18 +35,43 @@ import { RESTART_SENTINEL_CODE } from "./supervisor";
 // ──────────────────────────────────────────────
 let _activeShutdown: ((exitCode: number) => void) | null = null;
 
+/** 主动 respawn 标志文件路径：让新 daemon 启动时识别"上一次是主动重启不是崩溃" */
+const restartFlagPath = (): string => join(AUTOPILOT_HOME, "runtime", "restart.flag");
+
 /**
  * 由 RPC 等内部调用方触发 daemon 重启。
  *
- * 行为：在下一 tick 调用 shutdown(75)，supervisor 看到 sentinel code 立即 respawn。
+ * 行为：先写 restart.flag 标志，然后下一 tick 调 shutdown(75)，supervisor
+ * 看到 sentinel code 立即 respawn。新 daemon 启动时 recoverDanglingTasks 会
+ * 检测到 flag 文件存在 → 知道这次是主动 respawn → 走 await_review 同款的
+ * 自动重启路径而不是把 task 标 dangling 等用户介入。
+ *
  * delayMs 默认 100ms 给客户端 RPC 响应留出回流窗口。
  *
  * 注：必须在 supervisor 模式下使用；裸跑 daemon（无 supervisor）调用此函数等同于 stop。
  */
 export function requestRestart(delayMs = 100): boolean {
   if (!_activeShutdown) return false;
+  try {
+    writeFileSync(restartFlagPath(), String(Date.now()), "utf-8");
+  } catch (e: unknown) {
+    console.warn("写 restart.flag 失败（继续重启，但运行中 task 会被标 dangling）：", e);
+  }
   const fn = _activeShutdown;
   setTimeout(() => fn(RESTART_SENTINEL_CODE), delayMs);
+  return true;
+}
+
+/**
+ * 检查并消费 restart.flag。返回 true 表示这次启动是主动 respawn 的延续。
+ * 调用方负责在消费后决定是否对 running_* task 做自动重启。
+ */
+function consumeRestartFlag(): boolean {
+  const p = restartFlagPath();
+  if (!existsSync(p)) return false;
+  try {
+    unlinkSync(p);
+  } catch { /* 删失败也不影响逻辑，下次启动还会再读到（保守做法） */ }
   return true;
 }
 
@@ -173,10 +199,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   writePid();
   writeListenInfo({ host, port });
 
-  // 重启检测：把所有 status=running_* 且 pending_question 非空的 task 标 dangling
-  // —— ask_user 的 in-memory promise 在 daemon 重启时丢失，agent 永远收不到 tool result，
-  // 这些 task 实际已死，UI 看到 dangling=true 时会提示用户取消重启。
-  recoverDanglingTasks();
+  // 重启检测：区分主动 respawn vs 崩溃，决定怎么处理 running_* task。
+  // - 主动重启（daemon.restart RPC 触发 exit 75）：consumeRestartFlag 返回 true →
+  //   认为 task 只是被用户主动打断，自动 respawn 让它们继续跑
+  // - 崩溃 / 干净启动：保守标 dangling 让用户决定 cancel/retry
+  const isRespawnContinuation = consumeRestartFlag();
+  recoverDanglingTasks(isRespawnContinuation);
 
   // 启动 watcher 定时器
   const watcherTimer = setInterval(() => {
@@ -251,7 +279,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   process.on("SIGTERM", () => shutdown(0));
 }
 
-function recoverDanglingTasks(): void {
+function recoverDanglingTasks(isRespawnContinuation = false): void {
   try {
     const tasks = listTasks({});
     let danglingCount = 0;
@@ -260,20 +288,34 @@ function recoverDanglingTasks(): void {
     // 处理策略分两类：
     //  1. await_review 是设计上的长挂起 polling 阶段，幂等可重启 →
     //     直接 runInBackground 重新 spawn，无需用户介入
-    //  2. 其他 running_<phase>（含 agent 调用、I/O 等不可幂等的操作）→
-    //     标 dangling，让 UI 提示用户决定取消还是 restart
+    //  2. 其他 running_<phase>：
+    //     - isRespawnContinuation=true（主动 daemon.restart 触发的 respawn）→
+    //       同样 runInBackground，让 phase 继续跑（用户明确触发的重启，不应
+    //       打断业务）
+    //     - 否则（崩溃 / 干净启动）→ 标 dangling 让 UI 提示用户决定
     for (const t of tasks) {
       if (!t.status.startsWith("running_")) continue;
+      const phase = t.status.slice("running_".length);
 
       if (t.status === "running_await_review") {
-        // 幂等阶段，daemon 启动后立即 respawn 即可恢复
         log.info(
-          "task %s 在 daemon 重启时停留在 running_await_review → 自动重启该阶段函数",
+          "task %s 在 daemon 启动时停留在 running_await_review → 自动重启 await_review",
           t.id,
         );
-        // 清掉历史可能残留的 dangling 标记
         if (t["dangling"]) updateTask(t.id, { dangling: false });
         runInBackground(t.id, "await_review");
+        respawnCount++;
+        continue;
+      }
+
+      if (isRespawnContinuation) {
+        // 主动重启：跟 await_review 同款的自动 respawn 路径
+        log.info(
+          "task %s 在 daemon 主动重启时仍处于 %s → 自动重启 phase %s",
+          t.id, t.status, phase,
+        );
+        if (t["dangling"]) updateTask(t.id, { dangling: false });
+        runInBackground(t.id, phase);
         respawnCount++;
         continue;
       }
@@ -286,11 +328,15 @@ function recoverDanglingTasks(): void {
       );
       danglingCount++;
     }
-    if (danglingCount > 0) {
-      log.warn("共 %d 个 task 因 daemon 重启被标 dangling，请在 UI 选择取消或重启", danglingCount);
-    }
-    if (respawnCount > 0) {
-      log.info("共 %d 个 await_review task 在 daemon 启动时被自动 respawn", respawnCount);
+    if (isRespawnContinuation) {
+      log.info("此次启动是主动 respawn 的延续，%d 个 task 已自动重启 phase 函数", respawnCount);
+    } else {
+      if (danglingCount > 0) {
+        log.warn("共 %d 个 task 因 daemon 重启被标 dangling，请在 UI 选择取消或重启", danglingCount);
+      }
+      if (respawnCount > 0) {
+        log.info("共 %d 个 await_review task 在 daemon 启动时被自动 respawn", respawnCount);
+      }
     }
   } catch (e: unknown) {
     console.error("recoverDanglingTasks 异常：", e instanceof Error ? e.message : String(e));
