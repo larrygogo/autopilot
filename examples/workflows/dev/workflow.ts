@@ -241,10 +241,26 @@ export async function run_develop(taskId: string): Promise<void> {
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
 
-  const prompt =
-    `你是一位高级开发工程师。请根据以下技术方案进行开发。\n\n` +
-    `## 技术方案\n${planContent}\n\n` +
-    `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。`;
+  // reject 重做时把上一轮 code_review 反馈拼进 prompt — dogfood-bug7：
+  // 之前 prompt 只含 plan.md，reject 重做时 developer 看到 commit 已存在
+  // 就回答"任务已完成无需额外工作"，反复 reject 直到 max_rejections。
+  // 现在显式告诉 developer 这是 reject 重做轮 + 上轮 reviewer 的具体抱怨，
+  // 让它知道要去 specifically address critical 问题。
+  const codeReviewReportPath = join(
+    phaseDir(taskId, task.workflow, "code_review"),
+    "code_review_report.md",
+  );
+  const hasPriorReview = existsSync(codeReviewReportPath);
+  const priorReviewContent = hasPriorReview ? readFileSync(codeReviewReportPath, "utf-8") : "";
+
+  const prompt = hasPriorReview
+    ? `你是一位高级开发工程师。**这是 reject 重做轮** —— 上一轮你的提交被代码审查打回，需要根据 review 反馈修改代码。\n\n` +
+      `## 技术方案\n${planContent}\n\n` +
+      `## 上一轮代码审查反馈（必须 address 所有 Critical 问题）\n${priorReviewContent}\n\n` +
+      `注意：当前 feature branch 上已有上一轮的 commit。**不要因为"已经 commit 过"就回答"任务已完成"** — review 明确指出了需要补充/修改的具体内容，你必须基于现有 commit **追加新的修改**（修文件、补字段、删冗余等），然后追加一个新 commit。代码可编译、可运行。`
+    : `你是一位高级开发工程师。请根据以下技术方案进行开发。\n\n` +
+      `## 技术方案\n${planContent}\n\n` +
+      `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。`;
 
   const agent = getAgent("developer", task.workflow);
   try {
