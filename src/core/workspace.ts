@@ -291,22 +291,33 @@ export function loadRetentionPolicy(): RetentionPolicy {
  * 应用保留策略清理 workspace：按 (a) 超过 days 的任务 (b) 总占用超 max_total_mb
  * 的老任务清 workspace。返回被清理的 taskId 列表。
  * 仅清 workspace 目录，不动 logs / agent-calls / DB 记录。
+ *
+ * 可注入 opts.tasksRoot 让测试用 tmpdir 模拟 AUTOPILOT_HOME；生产路径不传走默认。
  */
 export function applyRetentionPolicy(
   policy: RetentionPolicy,
-  opts?: { isTerminal?: (taskId: string) => boolean; now?: number },
+  opts?: {
+    isTerminal?: (taskId: string) => boolean;
+    now?: number;
+    /** 显式指定 tasks 根目录（测试用 tmpdir），默认 AUTOPILOT_HOME/runtime/tasks */
+    tasksRoot?: string;
+  },
 ): { removed: string[]; reclaimedBytes: number } {
   const now = opts?.now ?? Date.now();
-  const all = scanTaskWorkspaces().filter((u) => u.exists && u.size > 0);
+  const tasksRoot = opts?.tasksRoot ?? join(AUTOPILOT_HOME, "runtime", "tasks");
+  const all = scanTaskWorkspaces(tasksRoot).filter((u) => u.exists && u.size > 0);
 
   const removed: string[] = [];
   let reclaimed = 0;
 
   const doRemove = (u: TaskWorkspaceUsage) => {
-    if (deleteTaskWorkspace(u.taskId)) {
+    const ws = join(tasksRoot, u.taskId, "workspace");
+    if (!existsSync(ws)) return;
+    try {
+      rmSync(ws, { recursive: true, force: true });
       removed.push(u.taskId);
       reclaimed += u.size;
-    }
+    } catch { /* ignore */ }
   };
 
   // (a) 按天数清终态任务
@@ -341,8 +352,12 @@ export function applyRetentionPolicy(
   return { removed, reclaimedBytes: reclaimed };
 }
 
-export function scanTaskWorkspaces(): TaskWorkspaceUsage[] {
-  const root = join(AUTOPILOT_HOME, "runtime", "tasks");
+/**
+ * 扫所有任务 workspace 大小 + mtime。
+ * 可注入 root 让测试用 tmpdir；默认 AUTOPILOT_HOME/runtime/tasks。
+ */
+export function scanTaskWorkspaces(rootOverride?: string): TaskWorkspaceUsage[] {
+  const root = rootOverride ?? join(AUTOPILOT_HOME, "runtime", "tasks");
   if (!existsSync(root)) return [];
   const out: TaskWorkspaceUsage[] = [];
   for (const taskId of readdirSync(root)) {
