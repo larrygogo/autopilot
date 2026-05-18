@@ -107,7 +107,10 @@ export function registerRequirementCommands(program: Command): void {
         try {
           const { projects } = await client.listProjects();
           if (projects.length === 0) {
-            console.error("错误：未找到任何 project。请先在 web /library 创建。");
+            console.error("错误：未找到任何 project。");
+            console.error("请先创建一个，二选一：");
+            console.error("  CLI:  autopilot project create <name>");
+            console.error("  Web:  autopilot dashboard → /library");
             process.exit(2);
           }
           // 简化：用第一个 project（后续可改"最近活跃"逻辑）

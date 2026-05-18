@@ -13,6 +13,7 @@ import { loadDaemonConfig } from "../core/config";
 import { registerWorkflowCommands } from "./workflow";
 import { registerConfigCommands, printReport as printDoctorReport } from "./config";
 import { registerRequirementCommands } from "./requirements-cli";
+import { registerProjectCommands } from "./project";
 import { runChecks as runDoctorChecks } from "../core/doctor";
 import {
   readPid,
@@ -654,6 +655,7 @@ registerWorkflowCommands(program, {
 
 registerConfigCommands(program);
 registerRequirementCommands(program);
+registerProjectCommands(program);
 
 program
   .command("doctor")

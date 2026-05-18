@@ -53,6 +53,10 @@ export class AutopilotClient {
   get createRequirement() { return this.http.createRequirement.bind(this.http); }
   get extractRequirement() { return this.http.extractRequirement.bind(this.http); }
   get listProjects() { return this.http.listProjects.bind(this.http); }
+  get getProject() { return this.http.getProject.bind(this.http); }
+  get createProject() { return this.http.createProject.bind(this.http); }
+  get updateProject() { return this.http.updateProject.bind(this.http); }
+  get deleteProject() { return this.http.deleteProject.bind(this.http); }
   get listCodebases() { return this.http.listCodebases.bind(this.http); }
 
   // ── 便捷方法：代理 WebSocket ──
