@@ -70,7 +70,9 @@ describe("config doctor 退出码", () => {
     const r = runCli("config", "doctor", "--json");
     const parsed = JSON.parse(r.stdout);
     expect(parsed.level).toBe(1);
-    expect(parsed.status).toBe("ok");
+    // status 可能 ok 或 warning（dogfood-bug19 后 init 跑全迁移，projects
+    // 表存在但 0 行 → "暂无 project" warning；config 合法所以不会 error）
+    expect(["ok", "warning"]).toContain(parsed.status);
     expect(Array.isArray(parsed.checks)).toBe(true);
   });
 });
