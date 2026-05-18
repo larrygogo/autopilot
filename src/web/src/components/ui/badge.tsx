@@ -18,6 +18,7 @@ const badgeVariants = cva(
         success: "border-success bg-success/15 text-success",
         warning: "border-warning bg-warning/15 text-warning",
         info: "border-info bg-info/15 text-info",
+        accent: "border-accent bg-accent/15 text-accent",
         destructive: "border-destructive bg-destructive/15 text-destructive",
         muted: "border-foreground/20 bg-muted text-muted-foreground",
       },
