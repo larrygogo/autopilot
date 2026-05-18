@@ -26,3 +26,15 @@ jobs:
           bun-version: latest
       - run: bun install
       - run: bun test
+
+  docs-translation:
+    name: 文档中英对照检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # 不需要 bun install，脚本只用 Node 内置模块
+      - name: 检查中英文档对照
+        run: bun run scripts/check-docs-translation.ts

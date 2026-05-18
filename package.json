@@ -13,7 +13,9 @@
     "build:web": "cd src/web && bunx vite build --outDir ../../web-dist",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "coverage:rpc": "bun run bin/coverage-matrix.ts"
+    "coverage:rpc": "bun run bin/coverage-matrix.ts",
+    "check:docs": "bun run scripts/check-docs-translation.ts",
+    "check:docs:strict": "bun run scripts/check-docs-translation.ts --strict"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
