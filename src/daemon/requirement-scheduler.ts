@@ -76,8 +76,13 @@ export async function tickRepo(codebaseId: string): Promise<void> {
 
   let task;
   try {
+    // workflow 名硬编码为 "dev" — 项目现状里 dev 是默认开发工作流，
+    // 用户的 ~/.autopilot/workflows/dev/workflow.yaml 也是这个名。早期叫
+    // "req_dev" 在迁移时漏改了这一处，导致 enqueue 后 tickRepo 抛
+    // "Workflow req_dev not found"。未来要做 per-requirement workflow
+    // 选择时再改成动态读 requirement.workflow 字段。
     task = await startTaskFromTemplate({
-      workflow: "req_dev",
+      workflow: "dev",
       title: candidate.title,
       requirement,
       // setup_func 仍按 repo_id 命名传参（runtime 透传字段，保持兼容）
