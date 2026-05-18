@@ -13,7 +13,7 @@ let currentTaskId: string | undefined;
 // 保留 1 份历史，总占用上限约 2 * MAX_FILE_BYTES。
 // ──────────────────────────────────────────────
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024;  // 10 MB
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;  // 10 MB
 let fileLogPath: string | undefined;
 
 export function initDaemonFileLog(path: string): void {
@@ -36,10 +36,15 @@ export function getDaemonFileLogPath(): string | undefined {
   return fileLogPath;
 }
 
-function rotateIfNeeded(path: string): void {
+/**
+ * 文件超 maxBytes 时 rename 为 `.1`（覆盖已存在的旧 .1）。下次 append 会重建原路径。
+ * 测试用：maxBytes 默认 MAX_FILE_BYTES，可注入小值方便构造场景。
+ * 失败静默 — daemon 不会因为日志写不了就挂。
+ */
+export function rotateIfNeeded(path: string, maxBytes: number = MAX_FILE_BYTES): void {
   try {
     const s = statSync(path);
-    if (s.size < MAX_FILE_BYTES) return;
+    if (s.size < maxBytes) return;
     const backup = path + ".1";
     // 删除旧 backup（rename 到已存在文件在部分平台不原子）
     try { if (existsSync(backup)) unlinkSync(backup); } catch { /* ignore */ }
