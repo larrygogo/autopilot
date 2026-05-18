@@ -250,12 +250,11 @@ phases:
 # 首次安装
 git clone ... && cd autopilot
 bun install
-bun run dev init                 # 初始化 ~/.autopilot/
-bun run dev upgrade              # 执行迁移
+bun run dev init                 # 初始化 ~/.autopilot/ + 跑全部迁移 + 装默认 dev workflow
 
 # 日常升级
 git pull                         # 更新框架代码（不影响用户数据）
-bun run dev upgrade              # 执行新迁移（如有）
+bun run dev upgrade              # 执行新迁移（如有；init 已跑全部时 no-op）
 ```
 
 ## 启动和使用
@@ -269,9 +268,16 @@ autopilot daemon start
 autopilot daemon status
 autopilot daemon stop
 
+# Project / Codebase / Requirement（纯 CLI 路径，不必开浏览器；dogfood-bug20/21）
+autopilot project create <name> [-d desc]
+autopilot project list / delete <id>
+autopilot codebase create <alias> <path> [-b branch] [-p project-id] [--github owner/repo]
+autopilot codebase list / delete <id> / health <id>
+autopilot req new --from-prompt "<需求>" [--no-extract] [-p project-id] [-c codebase-id]
+
 # 任务管理（通过 daemon API）
-autopilot task start <req-id> [-w workflow]
-autopilot task status [task-id]
+autopilot task start <title> [-w workflow] [-r "<需求>"] [--repo alias]
+autopilot task status [task-id] [--json]
 autopilot task cancel <task-id>
 autopilot task logs <task-id> [--follow]
 
@@ -297,6 +303,8 @@ bun run build:web
 ```bash
 bun test
 bun run typecheck
+bun run smoke-test       # 客户 onboarding CLI 完整路径烟雾测试（12 步）
+bun run coverage:rpc     # RPC × {web/tui/cli} 覆盖矩阵（发现死代码 / 反渗内核命名候选）
 ```
 
 ## 配置
