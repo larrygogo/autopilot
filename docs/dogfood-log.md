@@ -57,6 +57,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 21 | 同 bug 20 下游：`autopilot req new` / `autopilot task start --repo X` 都依赖 codebase 已注册，但 CLI 没有 codebase 注册命令。客户卡在 project 之后第二步 | 加 `autopilot codebase list / create / delete / health`，create 含本地路径校验 + --github 格式校验 + --no-project 走全局 | `500263b` |
 | 22 | CLI 所有子命令 `--port` 默认硬编码 6180，commander 永远注入 opts.port，getClient 内 listen.json 永远被忽略。客户改 `config.yaml.daemon.port=16180` 后 `daemon status` 报错 pid（连用户主 6180）+ 监听 16180 两套数据源不一致 | getClient 改"显式 --port 非默认 → 覆盖；否则 listen.json 优先；最后 default" | `9edb0bf` |
 | 23 | `req new --no-extract` 完全不生效：commander 把 `--no-extract` 解析为 `{ extract: false }`，代码检查 `opts.noExtract` 永远 undefined → 永远走 extract 分支调 LLM。无 LLM 配置的客户必报 "抽取失败：TIMEOUT 300s" | 类型 noExtract → extract，检查 `opts.extract === false` | `9edb0bf` |
+| 24 | bug22 修了 12+ CLI 命令但漏了 `tui` + `dashboard`：tui 直接 `parseInt(opts.port)` 永远用 default 6180、dashboard 拼 URL 用 default 6180。客户改 `daemon.port=16180` 后跑 tui/dashboard 都连用户主 6180 daemon 而非自定义 daemon | 抽出 `resolvePort()` 纯函数给所有客户端命令共享，tui/dashboard 也走 listen.json 优先 | `11991d2` |
 
 ---
 
@@ -104,7 +105,7 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 - `tests/cli-config.test.ts` +1 用例：warning → exit 0 / error → 1
 - `tests/requirements.test.ts` +5 用例：状态转换覆盖 bug 3/15
 
-852 测试 / 0 失败（截至 commit `9edb0bf`）。
+854 测试 / 0 失败（截至 commit `11991d2`）。
 
 ## 还没验过的边界（欢迎补）
 
