@@ -158,14 +158,18 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 激活事件总线
   enableBus();
 
-  // dogfood-bug27：config 改了之后 agent cache 必须丢弃，否则下个 task 还用老配置
+  // dogfood-bug27/28：config 或 workflow 改了之后 agent cache 必须丢弃，
+  // 否则下个 task 还用老配置（cache key 是 workflowName:agentName，旧 Provider
+  // 实例还持着旧 model / system_prompt / MCP 连接）。
   const { onEvent } = await import("../core/event-bus");
   const { clearAllAgentCache } = await import("../agents/registry");
-  onEvent("config:updated", () => {
+  const refreshAgentCache = (reason: string) => {
     clearAllAgentCache().catch((e: unknown) => {
-      console.error("config:updated 后清 agent cache 失败：", e instanceof Error ? e.message : String(e));
+      console.error(`${reason} 后清 agent cache 失败：`, e instanceof Error ? e.message : String(e));
     });
-  });
+  };
+  onEvent("config:updated", () => refreshAgentCache("config:updated"));
+  onEvent("workflow:reloaded", () => refreshAgentCache("workflow:reloaded"));
 
   // 注册 RPC method（WS req/res 协议用，对 HTTP routes 无影响）
   const { registerCoreRpcMethods } = await import("./rpc-methods");

@@ -1042,7 +1042,7 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.resolveQuestion",
-    description: "标记问题已解决；全部解决时 emit requirement:all-questions-resolved 触发 clarifier",
+    description: "标记问题已解决；全部解决时 emit requirement:all-questions-resolved（push 到 web 显示'全部完成'，daemon 内 clarifier 实际监听的是 question-resolved 每个）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id（requirement）");
