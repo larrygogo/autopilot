@@ -123,3 +123,17 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 
 - `bun run coverage:rpc` —— 跑 RPC × {web/tui/cli} 客户端覆盖矩阵，发现死代码 / 反渗内核命名候选。输出在 `docs/rpc-coverage.md`。
 - `bun run smoke-test` —— 跑客户 onboarding CLI 完整路径（init → 表全建 → 二次幂等 → doctor → project/codebase/req new 命令存在 → workflow list → daemon status）。12 步任意失败立即 exit 非 0。CI 在每个 PR 跑一遍防回归（`.github/workflows/ci.yml`）。
+
+## 端到端 dogfood 验证（28 bug 隐式覆盖）
+
+最后一次完整 e2e（commit `e3071aa` 后）：客户在临时 HOME 跑 init → daemon supervise + 16183 端口 → project create → codebase create → req new --no-extract。
+
+观察结果：
+- `daemon status` 显示正确 pid + git_sha（bug 22 / 24 端口解析路径通）
+- project / codebase / req new 命令完整链路通（bug 20 / 21）
+- daemon 内部 log **0 WARN / 0 ERROR**
+- clarifier 真调通了 LLM（user 主 daemon 配过 claude），创了 qst-001 提"实现范围 + 技术栈"问题，req-001 进 clarifying 状态
+- title 被 LLM 改写成 "myrepo 项目新增用户登录页面"
+- spec_md 走 noExtract 分支（bug 23 fix 生效，daemon 端模板包装）
+
+实际所有前面修过的 28 个 bug 都隐式跑通。
