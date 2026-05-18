@@ -59,6 +59,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 23 | `req new --no-extract` 完全不生效：commander 把 `--no-extract` 解析为 `{ extract: false }`，代码检查 `opts.noExtract` 永远 undefined → 永远走 extract 分支调 LLM。无 LLM 配置的客户必报 "抽取失败：TIMEOUT 300s" | 类型 noExtract → extract，检查 `opts.extract === false` | `9edb0bf` |
 | 24 | bug22 修了 12+ CLI 命令但漏了 `tui` + `dashboard`：tui 直接 `parseInt(opts.port)` 永远用 default 6180、dashboard 拼 URL 用 default 6180。客户改 `daemon.port=16180` 后跑 tui/dashboard 都连用户主 6180 daemon 而非自定义 daemon | 抽出 `resolvePort()` 纯函数给所有客户端命令共享，tui/dashboard 也走 listen.json 优先 | `11991d2` |
 | 25 | daemon 启动 retention 用 `setInterval(prune, 3600_000)` 但 **不立即触发**。客户 `daemon stop` 累积一周旧 workspace → `daemon start` 后第一小时 retention 完全无效，看着像功能坏了 | 抽出 runRetention()，启动时同步跑一次再开 setInterval；加 3 个集成测试用 spawn 子进程完整跑 (loadConfig + DB + scan + prune) | `55f3382` |
+| 26 | bug22 系列遗漏：`TokenGate.tsx` 给局域网用户的指引文案硬编码 "127.0.0.1:6180/settings"。客户改了 daemon.port=16180 后，局域网用户照着说明在本机打开是 404 | 用 `location.port` 替代硬编码 6180，链接跟随客户实际端口 | `acf9b12` |
 
 ---
 
