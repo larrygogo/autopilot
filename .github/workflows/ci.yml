@@ -38,3 +38,15 @@ jobs:
       # 不需要 bun install，脚本只用 Node 内置模块
       - name: 检查中英文档对照
         run: bun run scripts/check-docs-translation.ts
+
+  smoke-test:
+    name: 客户 onboarding CLI 烟雾测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      # 跑客户从 init 到 daemon status 的完整 CLI 路径，任何一步失败立即退出非 0
+      - run: bun run smoke-test

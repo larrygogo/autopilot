@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "coverage:rpc": "bun run bin/coverage-matrix.ts",
     "check:docs": "bun run scripts/check-docs-translation.ts",
-    "check:docs:strict": "bun run scripts/check-docs-translation.ts --strict"
+    "check:docs:strict": "bun run scripts/check-docs-translation.ts --strict",
+    "smoke-test": "bun run scripts/smoke-test.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
