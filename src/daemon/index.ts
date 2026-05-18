@@ -222,13 +222,17 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   }, CLARIFIER_WATCHDOG_INTERVAL_MS);
 
   // workspace 保留策略定时器（配置为空时函数内部会提前返回）
-  const retentionTimer = setInterval(() => {
+  // dogfood-bug25：启动时**立即跑一次**，否则 setInterval 1 小时后才第一次触发，
+  // 上次 daemon 停机期间累积的旧 workspace 在新启动后第一小时完全不会清。
+  const runRetention = () => {
     try {
       pruneWorkspacesByPolicy();
     } catch (e: unknown) {
       console.error("retention 异常：", e instanceof Error ? e.message : String(e));
     }
-  }, RETENTION_INTERVAL_MS);
+  };
+  runRetention();
+  const retentionTimer = setInterval(runRetention, RETENTION_INTERVAL_MS);
 
   // scheduler 定时器：扫描到期的 schedule，创建对应任务
   const schedulerTimer = setInterval(() => {
