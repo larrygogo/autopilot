@@ -55,6 +55,8 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 19 | `autopilot init` 只跑 SCHEMA 不跑 migrations，客户 init 完只有 tasks/task_logs 两张表，跑 dashboard 创 project 立即报 "no such table: projects"（bug 8 修过"自动装 workflow"但漏修了数据库本身） | init 内调 runPendingMigrations()，输出"应用 N 条迁移" | `9932f62` |
 | 20 | 纯 CLI 路径被 web 依赖打破：`autopilot req new` 在 0 project 时报"请先在 web /library 创建"。客户走 CLI 还要开浏览器才能创第一个 project | 加 `autopilot project list / create / delete`；req new 错误信息引导 `autopilot project create <name>` | `1f50389` |
 | 21 | 同 bug 20 下游：`autopilot req new` / `autopilot task start --repo X` 都依赖 codebase 已注册，但 CLI 没有 codebase 注册命令。客户卡在 project 之后第二步 | 加 `autopilot codebase list / create / delete / health`，create 含本地路径校验 + --github 格式校验 + --no-project 走全局 | `500263b` |
+| 22 | CLI 所有子命令 `--port` 默认硬编码 6180，commander 永远注入 opts.port，getClient 内 listen.json 永远被忽略。客户改 `config.yaml.daemon.port=16180` 后 `daemon status` 报错 pid（连用户主 6180）+ 监听 16180 两套数据源不一致 | getClient 改"显式 --port 非默认 → 覆盖；否则 listen.json 优先；最后 default" | `9edb0bf` |
+| 23 | `req new --no-extract` 完全不生效：commander 把 `--no-extract` 解析为 `{ extract: false }`，代码检查 `opts.noExtract` 永远 undefined → 永远走 extract 分支调 LLM。无 LLM 配置的客户必报 "抽取失败：TIMEOUT 300s" | 类型 noExtract → extract，检查 `opts.extract === false` | `9edb0bf` |
 
 ---
 
@@ -102,7 +104,7 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 - `tests/cli-config.test.ts` +1 用例：warning → exit 0 / error → 1
 - `tests/requirements.test.ts` +5 用例：状态转换覆盖 bug 3/15
 
-842 测试 / 0 失败（截至 commit `500263b`）。
+852 测试 / 0 失败（截至 commit `9edb0bf`）。
 
 ## 还没验过的边界（欢迎补）
 
