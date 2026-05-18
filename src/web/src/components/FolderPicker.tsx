@@ -143,6 +143,13 @@ export function FolderPicker({ open, initialPath, onSelect, onCancel }: FolderPi
           </ul>
         </div>
 
+        {/* 截断提示：后端 fs.list 大目录保护，超过 2000 entries 时只显示前 2000 */}
+        {result?.truncated && (
+          <div className="text-xs text-warning border border-warning/30 bg-warning/10 px-2 py-1.5 rounded">
+            ⚠ 仅显示前 2000 个子目录（系统目录条目过多，已截断）。建议进入子目录定位，或直接在路径栏输入完整路径。
+          </div>
+        )}
+
         {/* 显示隐藏文件夹 checkbox */}
         <label className="flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
           <Checkbox

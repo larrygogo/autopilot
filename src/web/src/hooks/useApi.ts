@@ -932,4 +932,6 @@ export interface FsListResult {
   current_path: string;
   parent_path: string | null;
   entries: { name: string; is_dir: boolean }[];
+  /** 后端截断到 2000 entries 时为 true（系统大目录保护）；老 daemon 不返回此字段 */
+  truncated?: boolean;
 }
