@@ -99,15 +99,26 @@ export function listWorkflowTemplates(): WorkflowTemplate[] {
  * 否则克隆出来的 yaml 还是用模板原名，discover 时会和源工作流同名冲突，
  * 内存 registry 用 wf.name 作 key 互相覆盖，UI 列表里只看到一个。
  */
+/** 在 root 下列出可用模板目录名（含 workflow.yaml 的）。给错误信息当 hint。 */
+function availableTemplates(root: string): string[] {
+  try {
+    return readdirSync(root)
+      .filter((entry) => {
+        const dir = join(root, entry);
+        return statSync(dir).isDirectory() && existsSync(join(dir, "workflow.yaml"));
+      });
+  } catch { return []; }
+}
+
 export function cloneTemplate(template: string, targetName: string): void {
   const root = findExamplesRoot();
-  if (!root) throw new Error("templates root not found");
+  if (!root) throw new Error(`找不到 examples/workflows 根目录（cwd=${process.cwd()}）。确保仓库结构完整，或自行 cp 模板到 ~/.autopilot/workflows/`);
   const srcDir = join(root, template);
   if (!existsSync(srcDir) || !statSync(srcDir).isDirectory()) {
-    throw new Error("template not found");
+    throw new Error(`模板 "${template}" 不存在：${srcDir}。已有模板：${availableTemplates(root).join(", ") || "(无)"}`);
   }
   if (!existsSync(join(srcDir, "workflow.yaml"))) {
-    throw new Error("template invalid (no workflow.yaml)");
+    throw new Error(`模板 "${template}" 缺 workflow.yaml：${srcDir}`);
   }
 
   const home = autopilotHome();

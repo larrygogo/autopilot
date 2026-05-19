@@ -1064,13 +1064,13 @@ export function createWorkflow(input: CreateWorkflowInput): { dir: string; yamlP
  */
 export function deleteWorkflowDir(workflowName: string): boolean {
   if (!WORKFLOW_NAME_RE.test(workflowName)) {
-    throw new Error("工作流名称非法");
+    throw new Error(`工作流名称 "${workflowName}" 非法（只允许字母/数字/._-）`);
   }
   const wfRoot = join(getAutopilotHomeDynamic(), "workflows");
   const dir = join(wfRoot, workflowName);
-  // 安全校验：最终路径必须仍在 wfRoot 下
+  // 安全校验：最终路径必须仍在 wfRoot 下（防 path traversal）
   if (!dir.startsWith(wfRoot + "/") && dir !== wfRoot) {
-    throw new Error("非法路径");
+    throw new Error(`非法路径：${dir}（必须在 ${wfRoot} 下）`);
   }
   if (!existsSync(dir)) return false;
   rmSync(dir, { recursive: true, force: true });
@@ -1218,7 +1218,7 @@ export function collectPhaseNames(phases: PhaseEntryInput[]): string[] {
  */
 export function setWorkflowPhases(workflowName: string, phases: PhaseEntryInput[]): void {
   if (!Array.isArray(phases) || phases.length === 0) {
-    throw new Error("phases 不能为空数组");
+    throw new Error(`工作流 "${workflowName}" 的 phases 不能为空数组（至少一个阶段）`);
   }
 
   // 1. 校验
@@ -1595,14 +1595,14 @@ const AGENT_NAME_RE = /^[\w.\-]+$/;
  */
 export function setWorkflowAgents(workflowName: string, agents: WorkflowAgentEntry[]): void {
   if (!Array.isArray(agents)) {
-    throw new Error("agents 必须是数组");
+    throw new Error(`工作流 "${workflowName}" 的 agents 必须是数组，收到 ${typeof agents}`);
   }
 
   // 校验
   const seen = new Set<string>();
   for (let i = 0; i < agents.length; i++) {
     const a = agents[i];
-    if (!a || typeof a !== "object") throw new Error(`第 ${i + 1} 项非法`);
+    if (!a || typeof a !== "object") throw new Error(`agents 第 ${i + 1} 项非法（不是对象）`);
     if (typeof a.name !== "string" || !AGENT_NAME_RE.test(a.name)) {
       throw new Error(`第 ${i + 1} 项 name 非法：${a.name}`);
     }

@@ -85,8 +85,8 @@ describe("cloneTemplate", () => {
     expect(() => cloneTemplate("dev", "exists")).toThrow(/already exists/);
   });
 
-  it("模板不存在 → 抛错", () => {
-    expect(() => cloneTemplate("__nonexistent__", "x")).toThrow(/not found/);
+  it("模板不存在 → 抛错（含模板名 + 已有模板列表）", () => {
+    expect(() => cloneTemplate("__nonexistent__", "x")).toThrow(/不存在|not found/);
   });
 });
 
