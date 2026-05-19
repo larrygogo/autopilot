@@ -64,6 +64,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 28 | bug 27 同源遗漏：`workflow:reloaded` emit 后 daemon 内无 listener 清 agent cache。客户改 workflow.yaml.agents[] 保存 → daemon 重 discover → cache 还在 → 下个 task 旧 Provider | daemon 启动时 onEvent("workflow:reloaded", clearAllAgentCache)；顺手修 resolveQuestion 误导注释 | `4e666fb` |
 | 29 | 5 处 web silent failure：Workflows.tsx toggle/reloadSelected catch ignore → 用户点 workflow 看着卡住；3 个组件的 clipboard.copy() catch ignore → 点复制按钮没反应。Web 上"没反应"等同于"应用挂了" | 全部改成 catch (e) + toast.error() 告诉用户失败原因 | `7110d4e` |
 | 30 | src/core 多处错误信息缺上下文：`"template not found"`、`"工作流名称非法"`、`"phases 不能为空数组"`、`"agents 必须是数组"`、`"templates root not found"` 等。客户看到一脸懵：哪个模板？哪个工作流？怎么是非法？ | 全部加具体上下文：模板名 + 已有模板列表 / 工作流名 + 允许字符 / 实际路径 + 期望边界 / 实际类型。新增 availableTemplates() 辅助列模板 | `73ab4c9` |
+| 31 | 状态机非法转换错误信息缺 hint：`"非法状态转换：queued → done"`、`"非法转换：状态 'running_dev' 不支持触发器 'foo'"`。客户/dev 调试时不知道合法去向，要翻源码 | 错误信息追加 hint：requirement 用 legalTransitionsFrom() 列合法去向；task state-machine 列状态支持的全部触发器；终态时显式说"已是终态" | `a0e017a` |
 
 ---
 
@@ -111,7 +112,7 @@ autopilot daemon restart             # 让新 workflow.ts 生效
 - `tests/cli-config.test.ts` +1 用例：warning → exit 0 / error → 1
 - `tests/requirements.test.ts` +5 用例：状态转换覆盖 bug 3/15
 
-859 测试 / 0 失败（截至 commit `cd533a9`）。
+861 测试 / 0 失败（截至 commit `a0e017a`）。
 
 ## 还没验过的边界（欢迎补）
 
