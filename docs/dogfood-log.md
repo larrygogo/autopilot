@@ -65,6 +65,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 29 | 5 处 web silent failure：Workflows.tsx toggle/reloadSelected catch ignore → 用户点 workflow 看着卡住；3 个组件的 clipboard.copy() catch ignore → 点复制按钮没反应。Web 上"没反应"等同于"应用挂了" | 全部改成 catch (e) + toast.error() 告诉用户失败原因 | `7110d4e` |
 | 30 | src/core 多处错误信息缺上下文：`"template not found"`、`"工作流名称非法"`、`"phases 不能为空数组"`、`"agents 必须是数组"`、`"templates root not found"` 等。客户看到一脸懵：哪个模板？哪个工作流？怎么是非法？ | 全部加具体上下文：模板名 + 已有模板列表 / 工作流名 + 允许字符 / 实际路径 + 期望边界 / 实际类型。新增 availableTemplates() 辅助列模板 | `73ab4c9` |
 | 31 | 状态机非法转换错误信息缺 hint：`"非法状态转换：queued → done"`、`"非法转换：状态 'running_dev' 不支持触发器 'foo'"`。客户/dev 调试时不知道合法去向，要翻源码 | 错误信息追加 hint：requirement 用 legalTransitionsFrom() 列合法去向；task state-machine 列状态支持的全部触发器；终态时显式说"已是终态" | `a0e017a` |
+| 32 | rpc-methods.ts 80+ handler 报 `RpcError("INVALID_PARAM", "需要 id")` 不知是哪种 id（task/req/proj/cb）。逐个改改工作量大 | 在 `invokeRpcMethod` 单点改动：所有 error message 自动加 `[method]` 前缀，覆盖 80+ handler。客户截图给开发时不必再追问"调的哪个接口" | `4280544` |
 
 ---
 
