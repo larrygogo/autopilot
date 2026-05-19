@@ -178,6 +178,22 @@ describe("requirements CRUD + 状态机", () => {
     expect(getRequirementById("req-001")?.status).toBe("ready");
   });
 
+  it("legalTransitionsFrom 返回从某状态出发可去的全部状态（dogfood-bug31 hint 用）", async () => {
+    const { legalTransitionsFrom } = await import("../src/core/requirements");
+    const from = legalTransitionsFrom("queued");
+    expect(from).toContain("running");
+    expect(from).toContain("ready");
+    // 未知状态 → 空数组（不抛）
+    expect(legalTransitionsFrom("__nonexistent__")).toEqual([]);
+    // 终态 done 没合法去向（已 finalized）
+    expect(legalTransitionsFrom("done")).toEqual([]);
+  });
+
+  it("setRequirementStatus 非法转换错误信息含合法去向 hint（bug31）", () => {
+    // queued → done 不合法（必须先走 running）
+    expect(() => setRequirementStatus("req-001", "done")).toThrow(/合法去向/);
+  });
+
   it("canTransitionStatus 表对照", () => {
     expect(canTransitionStatus("drafting", "ready")).toBe(true);
     expect(canTransitionStatus("done", "running")).toBe(false);

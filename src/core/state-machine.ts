@@ -58,8 +58,13 @@ export function transition(
     const match = available.find(([t]) => t === trigger);
 
     if (!match) {
+      // 把状态可用的全部触发器列出来，dev workflow 调试时一眼看出来哪个 trigger 写错了
+      const availableTriggers = available.map(([t]) => t);
+      const hint = availableTriggers.length > 0
+        ? `（${fromStatus} 支持的触发器：${availableTriggers.join(" / ")}）`
+        : `（${fromStatus} 是终态，没有任何触发器）`;
       throw new InvalidTransitionError(
-        `非法转换：状态 "${fromStatus}" 不支持触发器 "${trigger}"`
+        `任务 ${taskId} 非法转换：状态 "${fromStatus}" 不支持触发器 "${trigger}"${hint}`
       );
     }
 

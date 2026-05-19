@@ -87,6 +87,11 @@ export function canTransitionStatus(from: string, to: string): boolean {
   return (ALLOWED_TRANSITIONS[from] ?? []).includes(to);
 }
 
+/** 从某状态出发可以合法转去的全部状态。给错误信息当 hint 用。 */
+export function legalTransitionsFrom(from: string): string[] {
+  return [...(ALLOWED_TRANSITIONS[from] ?? [])];
+}
+
 // ──────────────────────────────────────────────
 // 内部工具
 // ──────────────────────────────────────────────
@@ -242,7 +247,10 @@ export function setRequirementStatus(id: string, to: string): Requirement {
   if (!cur) throw new Error(`requirement not found: ${id}`);
   if (cur.status === to) return cur;
   if (!canTransitionStatus(cur.status, to)) {
-    throw new Error(`非法状态转换：${cur.status} → ${to}`);
+    // 把当前合法目标列出来，客户读 daemon log 时知道下一步可以走哪
+    const allowed = legalTransitionsFrom(cur.status);
+    const hint = allowed.length > 0 ? `（合法去向：${allowed.join(" / ")}）` : "（无合法去向，已是终态）";
+    throw new Error(`requirement ${id} 非法状态转换：${cur.status} → ${to}${hint}`);
   }
   const db = getDb();
   db.run("UPDATE requirements SET status = ?, updated_at = ? WHERE id = ?", [to, nowMs(), id]);
