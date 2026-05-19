@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { ThemeProvider } from "./lib/theme";
-import { TokenGate } from "./components/TokenGate";
+import { AuthGate } from "./components/AuthGate";
 import { setApiToken } from "./lib/api-token";
 import "./index.css";
 
@@ -26,9 +26,9 @@ createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ThemeProvider>
       <BrowserRouter>
-        <TokenGate>
+        <AuthGate>
           <App />
-        </TokenGate>
+        </AuthGate>
       </BrowserRouter>
     </ThemeProvider>
   </React.StrictMode>
