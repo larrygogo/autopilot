@@ -436,8 +436,8 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
             toast.success(`工作流 ${name} 已删除`);
             setSelected(null);
             refresh();
-          } catch (e: any) {
-            toast.error("删除失败", e?.message ?? String(e));
+          } catch (e: unknown) {
+            toast.error("删除失败", (e as Error)?.message ?? String(e));
           } finally {
             setPendingDelete(null);
           }

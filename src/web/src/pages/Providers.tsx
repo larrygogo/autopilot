@@ -34,7 +34,7 @@ export function Providers(_props: { embedded?: boolean } = {}) {
     setLoadError(null);
     api.listProviders()
       .then(setProviders)
-      .catch((e) => setLoadError(e?.message ?? String(e)))
+      .catch((e) => setLoadError((e as Error)?.message ?? String(e)))
       .finally(() => setLoading(false));
   };
 
@@ -78,8 +78,8 @@ export function Providers(_props: { embedded?: boolean } = {}) {
       const { name, ...cfg } = p;
       await api.saveProviderConfig(name, cfg);
       toast.success(`${name} 配置已保存`);
-    } catch (e: any) {
-      toast.error("保存失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
     } finally {
       setSaving(null);
     }

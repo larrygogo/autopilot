@@ -86,8 +86,8 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
       ...opts,
       headers: { "Content-Type": "application/json", ...authHeaders(), ...opts?.headers },
     });
-  } catch (e: any) {
-    throw new Error(`网络请求失败：${e?.message ?? String(e)}（daemon 是否在运行？）`);
+  } catch (e: unknown) {
+    throw new Error(`网络请求失败：${(e as Error)?.message ?? String(e)}（daemon 是否在运行？）`);
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));

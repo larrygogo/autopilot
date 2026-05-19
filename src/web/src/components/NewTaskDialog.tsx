@@ -97,7 +97,7 @@ export function NewTaskDialog({ open, onClose, onCreated, onScheduled }: Props) 
         setWorkflows(list);
         if (list.length > 0 && !workflow) setWorkflow(list[0].name);
       })
-      .catch((e) => toast.error("加载工作流失败", e?.message ?? String(e)))
+      .catch((e) => toast.error("加载工作流失败", (e as Error)?.message ?? String(e)))
       .finally(() => setLoadingWf(false));
     api
       .getDefaults()
@@ -145,8 +145,8 @@ export function NewTaskDialog({ open, onClose, onCreated, onScheduled }: Props) 
         onScheduled?.(sch.id);
         onClose();
       }
-    } catch (e: any) {
-      toast.error(scheduled ? "创建定时任务失败" : "创建任务失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error(scheduled ? "创建定时任务失败" : "创建任务失败", (e as Error)?.message ?? String(e));
     } finally {
       setSubmitting(false);
     }

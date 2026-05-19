@@ -89,8 +89,8 @@ export async function runPendingMigrations(): Promise<number> {
 
       log.info("迁移 v%s 应用成功：%s", version, file);
       count++;
-    } catch (e: any) {
-      log.error("迁移 v%s 执行失败：%s — %s", version, file, e.message);
+    } catch (e: unknown) {
+      log.error("迁移 v%s 执行失败：%s — %s", version, file, e instanceof Error ? e.message : String(e));
       throw e;
     }
   }

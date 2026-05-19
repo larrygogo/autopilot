@@ -59,8 +59,8 @@ export function NewWorkflowDialog({ open, onClose, onCreated }: Props) {
       onCreated?.(name);
       reset();
       onClose();
-    } catch (e: any) {
-      toast.error("创建失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("创建失败", (e as Error)?.message ?? String(e));
     } finally {
       setSubmitting(false);
     }

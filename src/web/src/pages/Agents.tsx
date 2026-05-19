@@ -52,7 +52,7 @@ export function Agents(_props: { embedded?: boolean } = {}) {
     setLoadError(null);
     api.listAgents()
       .then(setAgents)
-      .catch((e) => setLoadError(e?.message ?? String(e)))
+      .catch((e) => setLoadError((e as Error)?.message ?? String(e)))
       .finally(() => setLoading(false));
   };
 
@@ -79,8 +79,8 @@ export function Agents(_props: { embedded?: boolean } = {}) {
       await api.deleteAgent(name);
       toast.success(`已删除 ${name}`);
       refresh();
-    } catch (e: any) {
-      toast.error("删除失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("删除失败", (e as Error)?.message ?? String(e));
     } finally {
       setPendingDelete(null);
     }
@@ -117,8 +117,8 @@ export function Agents(_props: { embedded?: boolean } = {}) {
       toast.success("已保存");
       setEdit(null);
       refresh();
-    } catch (e: any) {
-      toast.error("保存失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
     } finally {
       setSaving(false);
     }

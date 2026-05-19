@@ -16,12 +16,12 @@ export async function notify(
     try {
       await Promise.resolve(workflow.notify_func(task, message));
       return;
-    } catch (e: any) {
+    } catch (e: unknown) {
       log.warn(
         "notify_func 执行失败 [task=%s workflow=%s]: %s",
         task.id,
         task.workflow,
-        e.message
+        e instanceof Error ? e.message : String(e),
       );
     }
   }

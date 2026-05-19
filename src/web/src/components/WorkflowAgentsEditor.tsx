@@ -50,8 +50,8 @@ export function WorkflowAgentsEditor({
       setItems(next);
       toast.success("已保存");
       onSaved?.();
-    } catch (e: any) {
-      toast.error("保存失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
       throw e;
     } finally {
       setSaving(false);

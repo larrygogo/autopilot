@@ -40,7 +40,7 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         setDefaultsTz(res.timezone);
         setSystemTz(res.system_timezone);
       })
-      .catch((e) => toast.error("加载默认偏好失败", e?.message ?? String(e)))
+      .catch((e) => toast.error("加载默认偏好失败", (e as Error)?.message ?? String(e)))
       .finally(() => setDefaultsLoading(false));
   }, []);
 
@@ -50,8 +50,8 @@ export function Settings(_props: { embedded?: boolean } = {}) {
       const res = await api.saveDefaults({ timezone: tz });
       setDefaultsTz(res.timezone);
       toast.success("默认偏好已保存");
-    } catch (e: any) {
-      toast.error("保存失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
     } finally {
       setDefaultsSaving(false);
     }
@@ -765,8 +765,8 @@ function DaemonLogCard(): React.ReactElement {
       const res = await api.getDaemonLog(1000);
       setContent(res.content);
       setPath(res.path);
-    } catch (e: any) {
-      toast.error("加载 daemon 日志失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("加载 daemon 日志失败", (e as Error)?.message ?? String(e));
     } finally {
       setLoading(false);
     }

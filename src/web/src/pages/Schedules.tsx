@@ -58,7 +58,7 @@ export function Schedules({ onSelectTask, subscribe }: Props) {
     api
       .listSchedules()
       .then(setSchedules)
-      .catch((e) => setLoadError(e?.message ?? String(e)))
+      .catch((e) => setLoadError((e as Error)?.message ?? String(e)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -79,8 +79,8 @@ export function Schedules({ onSelectTask, subscribe }: Props) {
     try {
       await api.updateSchedule(s.id, { enabled });
       refresh();
-    } catch (e: any) {
-      toast.error("切换失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("切换失败", (e as Error)?.message ?? String(e));
     } finally {
       setBusy(null);
     }
@@ -92,8 +92,8 @@ export function Schedules({ onSelectTask, subscribe }: Props) {
       const res = await api.runScheduleNow(s.id);
       toast.success(`已触发一次：${s.name}（任务 ID: ${res.taskId}）`);
       refresh();
-    } catch (e: any) {
-      toast.error("触发失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("触发失败", (e as Error)?.message ?? String(e));
     } finally {
       setBusy(null);
     }
@@ -106,8 +106,8 @@ export function Schedules({ onSelectTask, subscribe }: Props) {
       await api.deleteSchedule(s.id);
       toast.success(`已删除：${s.name}`);
       refresh();
-    } catch (e: any) {
-      toast.error("删除失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("删除失败", (e as Error)?.message ?? String(e));
     } finally {
       setBusy(null);
     }

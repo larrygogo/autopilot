@@ -79,8 +79,8 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
         text: res.result.text,
         usage: res.result.usage,
       });
-    } catch (e: any) {
-      toast.error("试跑失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("试跑失败", (e as Error)?.message ?? String(e));
     } finally {
       setRunning(false);
     }

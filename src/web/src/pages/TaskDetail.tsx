@@ -135,8 +135,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
     try {
       await api.cancelTask(taskId);
       toast.success(`任务 ${taskId} 已请求取消`);
-    } catch (e: any) {
-      toast.error("取消失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("取消失败", (e as Error)?.message ?? String(e));
     } finally {
       setConfirmCancel(false);
     }
@@ -149,8 +149,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       toast.success(`任务 ${taskId} 已删除${extra}`);
       setConfirmDelete(false);
       onBack();
-    } catch (e: any) {
-      toast.error("删除失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("删除失败", (e as Error)?.message ?? String(e));
       setConfirmDelete(false);
     }
   };
@@ -307,8 +307,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
                 try {
                   const r = await api.restartTask(taskId);
                   toast.success(`已重启 · 从 ${r.phase} 阶段重新执行`);
-                } catch (e: any) {
-                  toast.error("重启失败", e?.message ?? String(e));
+                } catch (e: unknown) {
+                  toast.error("重启失败", (e as Error)?.message ?? String(e));
                 }
               }}
               title="把任务从当前阶段重新执行（绕过状态机；用于 dangling / 卡死 救援）"
@@ -736,8 +736,8 @@ function DanglingBanner({
     try {
       const r = await api.restartTask(taskId);
       toast.success(`已重新执行 · 从 ${r.phase} 阶段重启`);
-    } catch (e: any) {
-      toast.error("重启失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("重启失败", (e as Error)?.message ?? String(e));
     } finally {
       setBusy(null);
     }
@@ -748,8 +748,8 @@ function DanglingBanner({
     try {
       await api.cancelTask(taskId);
       toast.success("已取消该 dangling task");
-    } catch (e: any) {
-      toast.error("取消失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("取消失败", (e as Error)?.message ?? String(e));
     } finally {
       setBusy(null);
     }
@@ -830,8 +830,8 @@ function AskBanner({
       await api.answerTask(taskId, trimmed);
       toast.success("已回答");
       setText("");
-    } catch (e: any) {
-      toast.error("回答失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("回答失败", (e as Error)?.message ?? String(e));
     } finally {
       setBusy(false);
     }
@@ -946,8 +946,8 @@ function GateBanner({
         `已${verb} · ${decisionLabelOf(r.from)} → ${decisionLabelOf(r.to)}  (${r.from} → ${r.to})`,
       );
       setNote("");
-    } catch (e: any) {
-      toast.error(`${decision} 失败`, e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error(`${decision} 失败`, (e as Error)?.message ?? String(e));
     } finally {
       setBusy(null);
     }

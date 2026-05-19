@@ -52,8 +52,8 @@ export function WorkspaceBrowser({ taskId }: Props) {
       const res = await api.getWorkspaceTree(taskId, path);
       setEntries(res.entries);
       setCwd(res.path);
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setErr((e as Error)?.message ?? String(e));
       setEntries([]);
     } finally {
       setLoading(false);
@@ -71,8 +71,8 @@ export function WorkspaceBrowser({ taskId }: Props) {
     try {
       const res = await api.getWorkspaceFile(taskId, fullPath);
       setFile({ path: fullPath, ...res });
-    } catch (e: any) {
-      toast.error("打开失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("打开失败", (e as Error)?.message ?? String(e));
     } finally {
       setLoadingFile(false);
     }
@@ -307,8 +307,8 @@ export function WorkspaceBrowser({ taskId }: Props) {
             else toast.info("workspace 不存在或已被清理");
             setFile(null);
             loadTree("");
-          } catch (e: any) {
-            toast.error("释放失败", e?.message ?? String(e));
+          } catch (e: unknown) {
+            toast.error("释放失败", (e as Error)?.message ?? String(e));
           } finally {
             setConfirmRelease(false);
           }

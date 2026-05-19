@@ -47,8 +47,8 @@ export function AgentCallsViewer({ taskId }: Props) {
     try {
       const list = await api.listAgentCalls(taskId);
       setCalls(list);
-    } catch (e: any) {
-      toast.error("加载失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("加载失败", (e as Error)?.message ?? String(e));
     } finally {
       setLoading(false);
     }
@@ -70,8 +70,8 @@ export function AgentCallsViewer({ taskId }: Props) {
     try {
       const rec = await api.getAgentCall(taskId, seq);
       setExpanded(rec);
-    } catch (e: any) {
-      toast.error("加载详情失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("加载详情失败", (e as Error)?.message ?? String(e));
     }
   };
 

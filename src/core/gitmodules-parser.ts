@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { log } from "./logger";
 
 export interface SubmoduleEntry {
   name: string;
@@ -18,6 +19,8 @@ export function parseGitmodulesFile(repoPath: string): SubmoduleEntry[] {
     const content = readFileSync(filePath, "utf-8");
     return parseGitmodulesContent(content);
   } catch (e: unknown) {
+    // 之前 silent return []：客户看子模块没出来不知是文件读失败还是真没子模块。
+    log.warn(".gitmodules 读取/解析失败 path=%s: %s", filePath, e instanceof Error ? e.message : String(e));
     return [];
   }
 }

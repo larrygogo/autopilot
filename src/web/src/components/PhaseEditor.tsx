@@ -558,8 +558,8 @@ export function PhaseEditor({
       setDirty(false);
       resetDraftTracking();
       onSaved?.();
-    } catch (e: any) {
-      toast.error("保存失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
     } finally {
       setSaving(false);
     }
@@ -584,8 +584,8 @@ export function PhaseEditor({
           `这些函数使用 ctx: { task, log } 形式，但 runner 实际只传 taskId 字符串，会导致运行时 "task.id undefined" 报错。\n\n请改为：\nexport async function run_xxx(taskId: string): Promise<void> { ... }`,
         );
       }
-    } catch (e: any) {
-      toast.error("校准失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("校准失败", (e as Error)?.message ?? String(e));
     }
   };
 
@@ -597,8 +597,8 @@ export function PhaseEditor({
       );
       setOrphans([]);
       onSaved?.();
-    } catch (e: any) {
-      toast.error("清理失败", e?.message ?? String(e));
+    } catch (e: unknown) {
+      toast.error("清理失败", (e as Error)?.message ?? String(e));
     } finally {
       setPruneConfirm(false);
     }

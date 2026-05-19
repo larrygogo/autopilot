@@ -93,8 +93,8 @@ program
     if (typeof workflow.setup_func === "function") {
       try {
         extra = workflow.setup_func({ reqId, title, taskId }) ?? {};
-      } catch (e: any) {
-        console.error(`setup_func 执行失败：${e.message}`);
+      } catch (e: unknown) {
+        console.error(`setup_func 执行失败：${e instanceof Error ? e.message : String(e)}`);
         process.exit(1);
       }
     }

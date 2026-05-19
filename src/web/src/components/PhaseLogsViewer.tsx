@@ -73,8 +73,8 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
       const list = await api.getPhaseLogsList(taskId);
       setPhases(list);
       if (list.length > 0 && !selected) setSelected(list[0].phase);
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setErr((e as Error)?.message ?? String(e));
     }
   };
 
@@ -111,7 +111,7 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
         }
       })
       .catch((e) => {
-        if (!cancelled) setErr(e?.message ?? String(e));
+        if (!cancelled) setErr((e as Error)?.message ?? String(e));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
