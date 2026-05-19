@@ -67,6 +67,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 31 | 状态机非法转换错误信息缺 hint：`"非法状态转换：queued → done"`、`"非法转换：状态 'running_dev' 不支持触发器 'foo'"`。客户/dev 调试时不知道合法去向，要翻源码 | 错误信息追加 hint：requirement 用 legalTransitionsFrom() 列合法去向；task state-machine 列状态支持的全部触发器；终态时显式说"已是终态" | `a0e017a` |
 | 32 | rpc-methods.ts 80+ handler 报 `RpcError("INVALID_PARAM", "需要 id")` 不知是哪种 id（task/req/proj/cb）。逐个改改工作量大 | 在 `invokeRpcMethod` 单点改动：所有 error message 自动加 `[method]` 前缀，覆盖 80+ handler。客户截图给开发时不必再追问"调的哪个接口" | `4280544` |
 | 33 | 5 处 daemon-side silent failure：task-logs.appendTaskEvent 写文件失败、chat handler 3 处 emit 失败、agent.close 失败。全 `catch { /* ignore */ }` 留 daemon log 空白 → 定位问题最大障碍 | 全部改 catch (e) + log.warn 留证据。保留合理 silent（PID unlink / supervisor kill / tmp 清理 / workspace rmSync 等已知终态场景） | `1ff72be` |
+| 34 | 32 处 `catch (e: any)` 违反 CLAUDE.md 规范（要求 `e: unknown`）。`any` 让 e.message 等访问绕过 TS 检查，未来 e 不是 Error 时 silent bug | 批量 sed 修：`catch (e: any)` → `catch (e: unknown)` + `e?.message` → `(e as Error)?.message`；同时补 .gitmodules 解析失败 log.warn | `49e31b1` |
 
 ---
 
