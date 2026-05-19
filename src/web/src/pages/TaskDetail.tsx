@@ -160,8 +160,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
     try {
       await navigator.clipboard.writeText(task.workspace);
       toast.success("已复制 workspace 路径");
-    } catch {
-      /* ignore */
+    } catch (e: unknown) {
+      toast.error("复制失败", (e as Error)?.message ?? "可能是浏览器拒绝了 clipboard 权限");
     }
   };
 

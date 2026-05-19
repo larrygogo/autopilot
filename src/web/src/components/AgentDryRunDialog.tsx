@@ -91,8 +91,9 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
     try {
       await navigator.clipboard.writeText(result.text);
       toast.success("已复制到剪贴板");
-    } catch {
-      /* ignore */
+    } catch (e: unknown) {
+      // 之前 silent：用户点复制按钮 → 啥也没发生，不知道成没成功。
+      toast.error("复制失败", (e as Error)?.message ?? "可能是浏览器拒绝了 clipboard 权限");
     }
   };
 

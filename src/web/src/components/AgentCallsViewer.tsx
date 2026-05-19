@@ -79,8 +79,10 @@ export function AgentCallsViewer({ taskId }: Props) {
     try {
       await navigator.clipboard.writeText(text);
       toast.success("已复制");
-    } catch {
-      /* ignore */
+    } catch (e: unknown) {
+      // 之前 silent：用户点复制按钮 → 啥也没发生，不知道成没成功。
+      // 浏览器权限被拒（非 HTTPS / 无 user-gesture）时常见，告诉用户原因。
+      toast.error("复制失败", (e as Error)?.message ?? "可能是浏览器拒绝了 clipboard 权限");
     }
   };
 

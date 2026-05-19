@@ -142,8 +142,9 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
       setSelected({ name, detail, graph });
       // 后台预载 ts 给 drawer 用
       void loadTsSilently(name);
-    } catch {
-      /* ignore */
+    } catch (e: unknown) {
+      // 之前 silent ignore：用户点 workflow → loading 停了但 detail 没出现，看着卡住。
+      toast.error("加载工作流详情失败", (e as Error)?.message ?? String(e));
     } finally {
       setLoadingDetail(false);
     }
@@ -170,8 +171,10 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
         api.getWorkflowGraph(selected.name),
       ]);
       setSelected({ name: selected.name, detail, graph });
-    } catch {
-      /* ignore */
+    } catch (e: unknown) {
+      // 之前 silent：用户保存 workflow 后 reload 失败时 UI 还显示旧数据，
+      // 像"保存了没生效"。露出 toast 让用户知道刷新失败需重试。
+      toast.error("刷新工作流失败", (e as Error)?.message ?? String(e));
     }
   };
 
