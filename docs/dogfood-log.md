@@ -62,6 +62,7 @@ autopilot req new --from-prompt "docs 里中文版有些文件..." -p proj-002
 | 26 | bug22 系列遗漏：`TokenGate.tsx` 给局域网用户的指引文案硬编码 "127.0.0.1:6180/settings"。客户改了 daemon.port=16180 后，局域网用户照着说明在本机打开是 404 | 用 `location.port` 替代硬编码 6180，链接跟随客户实际端口 | `acf9b12` |
 | 27 | `config:updated` 事件 emit 后**无 daemon 内 subscriber**：客户在 web Settings 改 agent.model → "已保存"亮起 → 下个 task 跑的是 cached Agent 旧 model | daemon 启动时 onEvent("config:updated", clearAllAgentCache)，新增 clearAllAgentCache() 异步清 + close 所有缓存 Agent | `cd533a9` |
 | 28 | bug 27 同源遗漏：`workflow:reloaded` emit 后 daemon 内无 listener 清 agent cache。客户改 workflow.yaml.agents[] 保存 → daemon 重 discover → cache 还在 → 下个 task 旧 Provider | daemon 启动时 onEvent("workflow:reloaded", clearAllAgentCache)；顺手修 resolveQuestion 误导注释 | `4e666fb` |
+| 29 | 5 处 web silent failure：Workflows.tsx toggle/reloadSelected catch ignore → 用户点 workflow 看着卡住；3 个组件的 clipboard.copy() catch ignore → 点复制按钮没反应。Web 上"没反应"等同于"应用挂了" | 全部改成 catch (e) + toast.error() 告诉用户失败原因 | `7110d4e` |
 
 ---
 
