@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync, statSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../index";
+import { log } from "./logger";
 
 // ──────────────────────────────────────────────
 // 任务日志落盘
@@ -78,7 +79,12 @@ export function appendTaskEvent(taskId: string, event: Omit<TaskEvent, "ts"> & {
     const path = eventsPath(taskId);
     const full = { ...event, ts: event.ts ?? new Date().toISOString() } as TaskEvent;
     appendFileSync(path, JSON.stringify(full) + "\n", "utf-8");
-  } catch { /* ignore */ }
+  } catch (e: unknown) {
+    // 之前 silent ignore：写 events.jsonl 失败（磁盘满 / 权限）→ 客户看 task
+    // events 空了不知原因。warn 留 daemon log 证据，不抛因为 event 写失败
+    // 不该让 phase 失败回滚。
+    log.warn("task event 写入失败 task=%s: %s", taskId, e instanceof Error ? e.message : String(e));
+  }
 }
 
 /**

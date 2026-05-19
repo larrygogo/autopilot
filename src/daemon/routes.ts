@@ -2132,7 +2132,8 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
       providerSessionId: manifest.provider_session_id,
       enableTools: body.enable_tools !== false,  // 默认开工具
       onDelta: (delta) => {
-        try { emit({ type: "chat:delta", payload: { sessionId: sid, delta } }); } catch { /* ignore */ }
+        try { emit({ type: "chat:delta", payload: { sessionId: sid, delta } }); }
+        catch (ee: unknown) { log.warn("emit chat:delta 失败 session=%s: %s", sid, (ee as Error)?.message ?? String(ee)); }
       },
     });
     assistantText = result.text;
@@ -2140,10 +2141,12 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
     usage = result.usage;
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : String(e);
-    try { emit({ type: "chat:error", payload: { sessionId: sid, error: errMsg } }); } catch { /* ignore */ }
+    try { emit({ type: "chat:error", payload: { sessionId: sid, error: errMsg } }); }
+    catch (ee: unknown) { log.warn("emit chat:error 失败 session=%s: %s", sid, (ee as Error)?.message ?? String(ee)); }
     throw e;
   } finally {
-    try { await agent.close(); } catch { /* ignore */ }
+    try { await agent.close(); }
+    catch (ee: unknown) { log.warn("agent.close 失败 session=%s: %s", sid, (ee as Error)?.message ?? String(ee)); }
   }
 
   // 4. 更新 provider_session_id（新 session 首次拿到 id；续 session 一般不变但也更新）
@@ -2161,7 +2164,8 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
   appendMessage(manifest.id, assistantMsg);
 
   // 6. 完整消息到达后推 complete 事件（UI 可用此校准 delta 累积）
-  try { emit({ type: "chat:complete", payload: { sessionId: sid, message: assistantMsg } }); } catch { /* ignore */ }
+  try { emit({ type: "chat:complete", payload: { sessionId: sid, message: assistantMsg } }); }
+  catch (ee: unknown) { log.warn("emit chat:complete 失败 session=%s: %s", sid, (ee as Error)?.message ?? String(ee)); }
 
   return { session_id: manifest.id, message: assistantMsg };
 }
