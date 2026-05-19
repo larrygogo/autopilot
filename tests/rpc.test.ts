@@ -59,7 +59,7 @@ describe("invokeRpcMethod", () => {
     }
   });
 
-  it("handler 抛 RpcError → 透传 code/message", async () => {
+  it("handler 抛 RpcError → 透传 code + 加 [method] 前缀（dogfood-bug32）", async () => {
     registerRpcMethod({
       method: "badparam",
       handler: () => {
@@ -69,11 +69,12 @@ describe("invokeRpcMethod", () => {
     const r = await invokeRpcMethod("badparam", null);
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.error).toEqual({ code: "INVALID_PARAM", message: "需要 id" });
+      expect(r.error.code).toBe("INVALID_PARAM");
+      expect(r.error.message).toBe("[badparam] 需要 id");
     }
   });
 
-  it("handler 抛普通 Error → 包成 INTERNAL", async () => {
+  it("handler 抛普通 Error → 包成 INTERNAL + [method] 前缀", async () => {
     registerRpcMethod({
       method: "crash",
       handler: () => {
@@ -84,11 +85,11 @@ describe("invokeRpcMethod", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.error.code).toBe("INTERNAL");
-      expect(r.error.message).toBe("boom");
+      expect(r.error.message).toBe("[crash] boom");
     }
   });
 
-  it("handler 抛非 Error（如字符串） → INTERNAL + stringify", async () => {
+  it("handler 抛非 Error（如字符串） → INTERNAL + [method] + stringify", async () => {
     registerRpcMethod({
       method: "weird",
       handler: () => {
@@ -99,7 +100,7 @@ describe("invokeRpcMethod", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.error.code).toBe("INTERNAL");
-      expect(r.error.message).toBe("string error");
+      expect(r.error.message).toBe("[weird] string error");
     }
   });
 

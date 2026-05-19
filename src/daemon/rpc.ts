@@ -85,15 +85,16 @@ export async function invokeRpcMethod(
     const payload = await reg.handler(params, ctx);
     return { ok: true, payload };
   } catch (e: unknown) {
+    // dogfood-bug32：所有 handler 错误自动加 method 前缀让客户端 toast 时
+    // 一眼看出"哪个 API 报的"。例如 "需要 id" → "[tasks.cancel] 需要 id"。
+    // 截图给开发排错时不必再追问"你调的哪个接口"。
     if (e instanceof RpcError) {
-      return { ok: false, error: { code: e.code, message: e.message } };
+      return { ok: false, error: { code: e.code, message: `[${method}] ${e.message}` } };
     }
+    const raw = e instanceof Error ? e.message : String(e);
     return {
       ok: false,
-      error: {
-        code: "INTERNAL",
-        message: e instanceof Error ? e.message : String(e),
-      },
+      error: { code: "INTERNAL", message: `[${method}] ${raw}` },
     };
   }
 }

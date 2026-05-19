@@ -102,7 +102,9 @@ describe("ws RPC dispatch", () => {
       | { type: string; id: number; ok: boolean; error: { code: string; message: string } }
       | undefined;
     expect(res?.ok).toBe(false);
-    expect(res?.error).toEqual({ code: "INVALID_PARAM", message: "需要 id" });
+    expect(res?.error.code).toBe("INVALID_PARAM");
+    // dogfood-bug32: invokeRpcMethod 自动给所有 error message 加 [method] 前缀
+    expect(res?.error.message).toBe("[badparam] 需要 id");
 
     wsManager.unregister(ws);
   });
