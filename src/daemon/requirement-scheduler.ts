@@ -85,8 +85,7 @@ export async function tickRepo(codebaseId: string): Promise<void> {
       workflow: "dev",
       title: candidate.title,
       requirement,
-      // setup_func 仍按 repo_id 命名传参（runtime 透传字段，保持兼容）
-      repo_id: candidateCodebase.id,
+      codebase_id: candidateCodebase.id,
       requirement_id: candidate.id,
     });
   } catch (e: unknown) {

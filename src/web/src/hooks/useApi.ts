@@ -560,7 +560,7 @@ export const api = {
 
   // Requirements
   // [WS-RPC] requirements.list
-  listRequirements: (filters?: { repo_id?: string; project_id?: string; status?: string }) =>
+  listRequirements: (filters?: { codebase_id?: string; project_id?: string; status?: string }) =>
     requestRpc<{ requirements: Requirement[] }>("requirements.list", filters ?? {})
       .then((r) => r.requirements),
 
@@ -572,7 +572,6 @@ export const api = {
   createRequirement: (body: {
     project_id?: string;
     codebase_id?: string | null;
-    repo_id?: string;
     title: string;
     spec_md?: string;
     chat_session_id?: string | null;
@@ -863,7 +862,6 @@ export interface QuestionReply {
 
 export interface Requirement {
   id: string;
-  repo_id: string;
   codebase_id: string | null;
   project_id: string;
   title: string;

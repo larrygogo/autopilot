@@ -2,7 +2,7 @@
  * req_dev workflow 阶段函数
  *
  * 与旧 dev workflow 的本质差别：
- *  - setup_func 接收 repo_id（从 repos 表查 path / branch / github_owner / github_repo）
+ *  - setup_func 接收 codebase_id（从 codebases 表查 path / branch / github_owner / github_repo）
  *    而非读 workflow.config.repo_path
  *  - 阶段函数从 task extra 读 repo_path / github_owner / github_repo，无全局 config 依赖
  *  - submit_pr 阶段写回 pr_url / pr_number 到 task extra（P3 await_review 阶段用）
@@ -102,7 +102,7 @@ function phaseDir(taskId: string, workflowName: string, phaseName: string): stri
 // ──────────────────────────────────────────────
 
 export interface ReqDevSetupArgs {
-  repo_id: string;
+  codebase_id: string;
   title?: string;
   requirement?: string;
 }
@@ -118,15 +118,15 @@ export interface SubmoduleInfo {
 }
 
 export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknown> {
-  if (!args.repo_id) throw new Error("setup_req_dev_task: repo_id 必填");
-  const repo = getCodebaseById(args.repo_id);
-  if (!repo) throw new Error(`setup_req_dev_task: codebase not found: ${args.repo_id}`);
+  if (!args.codebase_id) throw new Error("setup_req_dev_task: codebase_id 必填");
+  const codebase = getCodebaseById(args.codebase_id);
+  if (!codebase) throw new Error(`setup_req_dev_task: codebase not found: ${args.codebase_id}`);
 
   const title = args.title ?? "untitled";
   const requirement = args.requirement ?? "";
   const branch = `feat/${title.slice(0, 20).replace(/\s+/g, "-").toLowerCase()}`;
 
-  const submodules = listSubmodules(args.repo_id).map((sm): SubmoduleInfo => ({
+  const submodules = listSubmodules(args.codebase_id).map((sm): SubmoduleInfo => ({
     id: sm.id,
     alias: sm.alias,
     path: sm.path,
@@ -139,11 +139,11 @@ export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknow
   return {
     title,
     requirement,
-    repo_id: repo.id,
-    repo_path: repo.path,
-    default_branch: repo.default_branch,
-    github_owner: repo.github_owner,
-    github_repo: repo.github_repo,
+    codebase_id: codebase.id,
+    repo_path: codebase.path,
+    default_branch: codebase.default_branch,
+    github_owner: codebase.github_owner,
+    github_repo: codebase.github_repo,
     branch,
     submodules,
   };

@@ -143,12 +143,6 @@ function rethrowAsRpc(e: unknown): never {
   throw e;
 }
 
-/** 兼容老 web UI 的 repo_id 别名（codebase_id 的旧名），跟 routes.ts withRepoIdAlias 等价 */
-function withRepoIdAlias(req: Requirement | null): (Requirement & { repo_id: string | null }) | null {
-  if (!req) return null;
-  return { ...req, repo_id: req.codebase_id };
-}
-
 /** 把 unknown params 视为对象，缺失时给 {} */
 function asObj(params: unknown): Record<string, unknown> {
   if (params == null) return {};
@@ -768,13 +762,11 @@ export function registerCoreRpcMethods(): void {
     description: "列出需求，可选 codebase_id / project_id / status 过滤",
     handler: (params) => {
       const p = asObj(params);
-      const codebase_id = typeof p.codebase_id === "string" ? p.codebase_id
-        : typeof p.repo_id === "string" ? p.repo_id : undefined;
+      const codebase_id = typeof p.codebase_id === "string" ? p.codebase_id : undefined;
       const project_id = typeof p.project_id === "string" ? p.project_id : undefined;
       const status = typeof p.status === "string" ? p.status : undefined;
       return {
-        requirements: coreListRequirements({ codebase_id, project_id, status })
-          .map((r) => withRepoIdAlias(r)),
+        requirements: coreListRequirements({ codebase_id, project_id, status }),
       };
     },
   });
@@ -788,7 +780,7 @@ export function registerCoreRpcMethods(): void {
       const r = getRequirementById(p.id);
       if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
       return {
-        requirement: withRepoIdAlias(r),
+        requirement: r,
         feedbacks: listFeedbacks(p.id),
       };
     },
@@ -829,7 +821,7 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       const codebaseId = (typeof p.codebase_id === "string" || p.codebase_id === null)
         ? (p.codebase_id ?? null)
-        : (typeof p.repo_id === "string" ? p.repo_id : null);
+        : null;
       const title = typeof p.title === "string" ? p.title.trim() : "";
       if (!title) throw new RpcError("INVALID_PARAM", "title 必填");
       let projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
@@ -851,7 +843,7 @@ export function registerCoreRpcMethods(): void {
         chat_session_id: (p.chat_session_id as string | null | undefined) ?? null,
       });
       const clarifying = setRequirementStatus(id, "clarifying");
-      return { requirement: withRepoIdAlias(clarifying) };
+      return { requirement: clarifying };
     },
   });
 
@@ -870,7 +862,7 @@ export function registerCoreRpcMethods(): void {
         clarifier_model: (p.clarifier_model as string | null | undefined),
       });
       if (!updated) throw new RpcError("NOT_FOUND", "requirement not found");
-      return { requirement: withRepoIdAlias(updated) };
+      return { requirement: updated };
     },
   });
 
@@ -893,7 +885,7 @@ export function registerCoreRpcMethods(): void {
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (typeof p.to !== "string" || !p.to.trim()) throw new RpcError("INVALID_PARAM", "to 必填");
       if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
-      return { requirement: withRepoIdAlias(setRequirementStatus(p.id, p.to.trim())) };
+      return { requirement: setRequirementStatus(p.id, p.to.trim()) };
     },
   });
 
@@ -909,7 +901,7 @@ export function registerCoreRpcMethods(): void {
       if (!(r.spec_md ?? "").trim()) {
         throw new RpcError("PRECONDITION_FAILED", "需求规约为空，请先完成澄清或手动填写规约");
       }
-      return { requirement: withRepoIdAlias(setRequirementStatus(p.id, "queued")) };
+      return { requirement: setRequirementStatus(p.id, "queued") };
     },
   });
 
@@ -943,7 +935,7 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
-      return { requirement: withRepoIdAlias(setRequirementStatus(p.id, "cancelled")) };
+      return { requirement: setRequirementStatus(p.id, "cancelled") };
     },
   });
 
@@ -1001,7 +993,7 @@ export function registerCoreRpcMethods(): void {
       if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
       finishClarification(p.id);
       const updated = getRequirementById(p.id);
-      return { requirement: withRepoIdAlias(updated) };
+      return { requirement: updated };
     },
   });
 
@@ -1614,7 +1606,7 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
-      return { requirements: listRequirementsByProject(p.id).map((r) => withRepoIdAlias(r)) };
+      return { requirements: listRequirementsByProject(p.id) };
     },
   });
 

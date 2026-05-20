@@ -1,8 +1,5 @@
 /**
  * codebases.* RPC method 测试。
- *
- * 旧 /api/repos HTTP 别名继续保留（响应字段 repo/repos），P6 清理；
- * 本测试只覆盖 codebases.* WS RPC + /api/repos 别名留一个 smoke。
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
@@ -16,7 +13,6 @@ import { up as migrate008 } from "../src/migrations/008-projects";
 import { _setDbForTest } from "../src/core/db";
 import { createCodebase } from "../src/core/codebases";
 import { createProject } from "../src/core/projects";
-import { handleRequest } from "../src/daemon/routes";
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
@@ -134,36 +130,3 @@ describe("codebases.* RPC", () => {
   });
 });
 
-describe("旧 /api/repos HTTP 别名 smoke", () => {
-  let db: Database;
-
-  beforeAll(() => {
-    db = new Database(":memory:");
-    migrate001(db);
-    migrate004(db);
-    migrate005(db);
-    migrate006(db);
-    migrate007(db);
-    migrate008(db);
-    _setDbForTest(db);
-    createProject({ id: "proj-r", name: "R" });
-    createCodebase({ id: "cb-r1", project_id: "proj-r", alias: "r1", path: "/tmp/r1", default_branch: "main" });
-  });
-
-  afterAll(() => {
-    _setDbForTest(null);
-    db.close();
-  });
-
-  it("GET /api/repos 仍返回旧字段名 { repos: [...] }", async () => {
-    // 模拟 loopback 来源让 checkAuth 豁免 token；测试场景下 daemon 可能已设 token
-    const fakeServer = {
-      requestIP: () => ({ address: "127.0.0.1", port: 0, family: "IPv4" }),
-    } as unknown as import("bun").Server<undefined>;
-    const res = await handleRequest(new Request("http://localhost/api/repos"), fakeServer);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { repos: Array<{ id: string }> };
-    expect(Array.isArray(body.repos)).toBe(true);
-    expect(body.repos[0]?.id).toBe("cb-r1");
-  });
-});

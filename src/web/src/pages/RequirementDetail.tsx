@@ -544,8 +544,8 @@ export function RequirementDetail() {
 
   const repoAlias = useMemo(() => {
     if (!req) return "";
-    if (!req.repo_id) return "";
-    return repos.find((r) => r.id === req.repo_id)?.alias ?? req.repo_id;
+    if (!req.codebase_id) return "";
+    return repos.find((r) => r.id === req.codebase_id)?.alias ?? req.codebase_id;
   }, [repos, req]);
 
   async function saveSpec() {

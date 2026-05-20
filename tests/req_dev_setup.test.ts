@@ -43,14 +43,14 @@ describe("setup_req_dev_task", () => {
     sqlite.close();
   });
 
-  it("根据 repo_id 派生 task 字段", () => {
+  it("根据 codebase_id 派生 task 字段", () => {
     const result = setup_req_dev_task({
-      repo_id: "cb-001",
+      codebase_id: "cb-001",
       title: "GitHub 集成",
       requirement: "加 GitHub Issues 接入",
     });
     expect(result.title).toBe("GitHub 集成");
-    expect(result.repo_id).toBe("cb-001");
+    expect(result.codebase_id).toBe("cb-001");
     expect(result.repo_path).toBe("/tmp/autopilot");
     expect(result.default_branch).toBe("main");
     expect(result.github_owner).toBe("larrygogo");
@@ -59,13 +59,13 @@ describe("setup_req_dev_task", () => {
     expect((result.branch as string).startsWith("feat/")).toBe(true);
   });
 
-  it("repo_id 不存在时报错", () => {
-    expect(() => setup_req_dev_task({ repo_id: "no-such", title: "x", requirement: "y" }))
+  it("codebase_id 不存在时报错", () => {
+    expect(() => setup_req_dev_task({ codebase_id: "no-such", title: "x", requirement: "y" }))
       .toThrow(/codebase not found/);
   });
 
   it("title / requirement 缺省", () => {
-    const result = setup_req_dev_task({ repo_id: "cb-001" });
+    const result = setup_req_dev_task({ codebase_id: "cb-001" });
     expect(result.title).toBe("untitled");
     expect(result.requirement).toBe("");
   });
@@ -96,7 +96,7 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
   it("无子模块时 submodules 为空数组", () => {
     createCodebase({ id: "cb-no-sub", project_id: "proj-sub", alias: "no-sub", path: "/tmp/no-sub" });
     const result = setup_req_dev_task({
-      repo_id: "cb-no-sub",
+      codebase_id: "cb-no-sub",
       title: "x",
       requirement: "y",
     });
@@ -117,7 +117,7 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
       submodule_path: "child",
     });
     const result = setup_req_dev_task({
-      repo_id: "cb-with-sub",
+      codebase_id: "cb-with-sub",
       title: "feat",
       requirement: "x",
     });

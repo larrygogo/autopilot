@@ -141,13 +141,13 @@ describe("req_dev e2e smoke", () => {
   });
 
   it("通过任务工厂创建 req_dev task，setup_func 注入派生字段到 extra", async () => {
-    // 用工厂创建 task（传入 repo_id 作为额外参数）
+    // 用工厂创建 task（传入 codebase_id 作为额外参数）
     // 注意：工厂会自动执行第一阶段，所以返回时状态可能已转移
     const task = await startTaskFromTemplate({
       workflow: "req_dev",
       title: "smoke test requirement",
       requirement: "test requirement content",
-      repo_id: "cb-001", // 额外工作流参数，转发给 setup_func
+      codebase_id: "cb-001", // 额外工作流参数，转发给 setup_func
     });
 
     // 验证 task 本体
@@ -157,8 +157,8 @@ describe("req_dev e2e smoke", () => {
     expect(task.title).toBe("smoke test requirement");
 
     // 验证派生字段（扁平化在 task 对象上，不在单独的 extra 属性）
-    // 派生自 repo_id 的字段
-    expect(task["repo_id"]).toBe("cb-001");
+    // 派生自 codebase_id 的字段
+    expect(task["codebase_id"]).toBe("cb-001");
     expect(task["repo_path"]).toBe(process.cwd());
     expect(task["default_branch"]).toBe("main");
     expect(task["github_owner"]).toBe("larrygogo");
@@ -175,7 +175,7 @@ describe("req_dev e2e smoke", () => {
     const storedTask = getTask(task.id);
     expect(storedTask).not.toBeNull();
     expect(storedTask!.workflow).toBe("req_dev");
-    expect(storedTask!["repo_id"]).toBe("cb-001");
+    expect(storedTask!["codebase_id"]).toBe("cb-001");
     expect(storedTask!["github_owner"]).toBe("larrygogo");
   });
 
@@ -183,7 +183,7 @@ describe("req_dev e2e smoke", () => {
     const task = await startTaskFromTemplate({
       workflow: "req_dev",
       title: "no requirement",
-      repo_id: "cb-001", // 额外工作流参数
+      codebase_id: "cb-001", // 额外工作流参数
       // requirement 未传
     });
 

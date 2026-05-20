@@ -37,7 +37,7 @@ export interface StartTaskOpts {
   requirement?: string;
   /** 兼容老接口：可选传入 reqId，不传则生成 */
   reqId?: string;
-  /** 额外工作流参数（如 repo_id），转发给 setup_func */
+  /** 额外工作流参数（如 codebase_id），转发给 setup_func */
   [key: string]: unknown;
 }
 
@@ -90,7 +90,7 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
         taskId,
         requirement,
       };
-      // 添加所有额外参数（如 repo_id）
+      // 添加所有额外参数（如 codebase_id）
       for (const [key, value] of Object.entries(opts)) {
         if (!["workflow", "title", "requirement", "reqId"].includes(key)) {
           setupArgs[key] = value;

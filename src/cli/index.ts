@@ -431,9 +431,9 @@ task
   .description("创建并启动任务（task ID 自动生成）")
   .option("-w, --workflow <name>", "工作流名称")
   .option("-r, --requirement <text>", "需求详情；以 @ 开头则从文件读，例如 -r @./req.md")
-  .option("--repo <alias>", "绑定仓库别名（用于 req_dev 等需要仓库的工作流）")
+  .option("--codebase <alias>", "绑定 codebase 别名（用于 req_dev 等需要 codebase 的工作流）")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
+  .action(async (title: string, opts: { workflow?: string; requirement?: string; codebase?: string; port: string }) => {
     try {
       const preflight = await runDoctorChecks({ level: 2 });
       if (preflight.status === "error") {
@@ -465,9 +465,9 @@ task
         title?: string;
         requirement?: string;
         workflow?: string;
-        repo_alias?: string;
+        codebase_alias?: string;
       } = { title, requirement, workflow: opts.workflow };
-      if (opts.repo) startOpts.repo_alias = opts.repo;
+      if (opts.codebase) startOpts.codebase_alias = opts.codebase;
       const t = await client.startTask(startOpts);
       console.log(`任务已创建 [id=${t.id} workflow=${t.workflow} status=${t.status}]`);
     } catch (e: unknown) {
@@ -950,9 +950,9 @@ program
   .description("快捷创建并启动任务（task start 的顶层别名）")
   .option("-w, --workflow <name>", "工作流名称")
   .option("-r, --requirement <text>", "需求详情；以 @ 开头则从文件读")
-  .option("--repo <alias>", "绑定仓库别名")
+  .option("--codebase <alias>", "绑定 codebase 别名")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
+  .action(async (title: string, opts: { workflow?: string; requirement?: string; codebase?: string; port: string }) => {
     try {
       const preflight = await runDoctorChecks({ level: 2 });
       if (preflight.status === "error") {
@@ -984,9 +984,9 @@ program
         title?: string;
         requirement?: string;
         workflow?: string;
-        repo_alias?: string;
+        codebase_alias?: string;
       } = { title, requirement, workflow: opts.workflow };
-      if (opts.repo) startOpts.repo_alias = opts.repo;
+      if (opts.codebase) startOpts.codebase_alias = opts.codebase;
       const t = await client.startTask(startOpts);
       console.log(`任务已创建 [id=${t.id} workflow=${t.workflow} status=${t.status}]`);
     } catch (e: unknown) {
