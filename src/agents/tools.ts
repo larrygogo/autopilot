@@ -42,7 +42,7 @@ import {
   setRequirementStatus,
   nextRequirementId,
 } from "../core/requirements";
-import { appendFeedback } from "../core/requirement-feedbacks";
+import { createComment, nextCommentId } from "../core/requirement-comments";
 
 type ToolContent = { content: Array<{ type: "text"; text: string }> };
 
@@ -588,9 +588,11 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
       async (args) => {
         const r = getRequirementById(args.req_id);
         if (!r) return err(`需求不存在：${args.req_id}`);
-        appendFeedback({
+        createComment({
+          id: nextCommentId(),
           requirement_id: args.req_id,
-          source: "manual",
+          kind: "feedback",
+          from_role: "user",
           body: args.body,
         });
         let triggered = false;

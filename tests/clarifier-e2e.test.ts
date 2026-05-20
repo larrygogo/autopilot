@@ -11,6 +11,7 @@ import { up as m009 } from "../src/migrations/009-nullable-codebase";
 import { up as m010 } from "../src/migrations/010-question-suggestions";
 import { up as m011 } from "../src/migrations/011-now-dismissed-cards";
 import { up as m019 } from "../src/migrations/019-task-requirement-id";
+import { up as m021 } from "../src/migrations/021-requirement-comments";
 import { up as m012 } from "../src/migrations/012-spec-revisions";
 import { up as m013 } from "../src/migrations/013-active-question-id";
 import { up as m014 } from "../src/migrations/014-resolve-orphan-open-questions";
@@ -30,7 +31,7 @@ describe("clarifier e2e — 完整链路", () => {
 
   beforeAll(async () => {
     const db = new Database(":memory:");
-    [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m019].forEach(fn => fn(db));
+    [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m019, m021].forEach(fn => fn(db));
     _setDbForTest(db);
     registerCoreRpcMethods();
     createProject({ id: "p1", name: "测试项目" });
@@ -84,14 +85,12 @@ describe("clarifier e2e — 完整链路", () => {
       done: false,
     }));
 
-    const replyR = await invokeRpcMethod("requirements.addReply", {
-      id: "e2e-1", qid: activeQid, author_role: "user", text: "开发者",
+    const replyR = await invokeRpcMethod("comments.add", {
+      requirementId: "e2e-1", kind: "question", parent_id: activeQid, from_role: "user", body: "开发者",
     });
     expect(replyR.ok).toBe(true);
 
-    const resolveR = await invokeRpcMethod("requirements.resolveQuestion", {
-      id: "e2e-1", qid: activeQid,
-    });
+    const resolveR = await invokeRpcMethod("comments.resolve", { id: activeQid });
     expect(resolveR.ok).toBe(true);
 
     await new Promise(r => setTimeout(r, 100));

@@ -9,6 +9,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
+import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { createCodebase } from "../src/core/codebases";
 import { createProject } from "../src/core/projects";
@@ -134,6 +135,9 @@ describe("requirements CRUD + 状态机", () => {
     migrate006(testDb);
     migrate007(testDb);
     migrate008(testDb);
+    migrate009(testDb);
+    migrate010(testDb);
+    migrate021(testDb);
     // 准备关联的 project + codebase 记录
     createProject({ id: "proj-001", name: "test-proj" });
     createCodebase({ id: "cb-001", project_id: "proj-001", alias: "test", path: "/tmp/x", default_branch: "main" });
@@ -359,6 +363,7 @@ describe("deleteRequirement 级联删除", () => {
     migrate008(testDb);
     migrate009(testDb);
     migrate010(testDb);
+    migrate021(testDb);
   });
 
   afterAll(() => {
@@ -376,8 +381,8 @@ describe("deleteRequirement 级联删除", () => {
     deleteRequirement("REQ-CASCADE");
 
     expect(testDb.query("SELECT COUNT(*) AS n FROM requirements WHERE id = 'REQ-CASCADE'").get()).toEqual({ n: 0 });
-    expect(testDb.query("SELECT COUNT(*) AS n FROM requirement_questions WHERE requirement_id = 'REQ-CASCADE'").get()).toEqual({ n: 0 });
-    expect(testDb.query("SELECT COUNT(*) AS n FROM requirement_question_replies WHERE question_id = 'QST-C1'").get()).toEqual({ n: 0 });
-    expect(testDb.query("SELECT COUNT(*) AS n FROM requirement_feedbacks WHERE requirement_id = 'REQ-CASCADE'").get()).toEqual({ n: 0 });
+    expect(testDb.query("SELECT COUNT(*) AS n FROM requirement_comments WHERE kind = 'question' AND parent_id IS NULL AND requirement_id = 'REQ-CASCADE'").get()).toEqual({ n: 0 });
+    expect(testDb.query("SELECT COUNT(*) AS n FROM requirement_comments WHERE kind = 'question' AND parent_id = 'QST-C1'").get()).toEqual({ n: 0 });
+    expect(testDb.query("SELECT COUNT(*) AS n FROM requirement_comments WHERE kind = 'feedback' AND requirement_id = 'REQ-CASCADE'").get()).toEqual({ n: 0 });
   });
 });

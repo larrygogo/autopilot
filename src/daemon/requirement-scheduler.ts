@@ -3,7 +3,7 @@ import type { AutopilotEvent } from "./protocol";
 import { listRequirements, setRequirementStatus, updateRequirement, getRequirementById } from "../core/requirements";
 import { getCodebaseById } from "../core/codebases";
 import { listSubmodules } from "../core/submodules";
-import { listQuestionsByRequirement } from "../core/requirement-questions";
+import { listComments } from "../core/requirement-comments";
 import { startTaskFromTemplate } from "../core/task-factory";
 import { createLogger } from "../core/logger";
 
@@ -62,12 +62,13 @@ export async function tickRepo(codebaseId: string): Promise<void> {
   }
 
   // 将已解决的澄清问答拼入 requirement，让 Agent 知晓用户的补充说明
-  const questions = listQuestionsByRequirement(candidate.id).filter(q => q.status === "resolved");
+  const questions = listComments(candidate.id, { kind: "question", status: "resolved", parent_id: null });
   let requirement = candidate.spec_md ?? "";
   if (questions.length > 0) {
     const qa = questions.map((q, i) => {
-      const userReply = (q.replies ?? []).find(r => r.author_role === "user")?.text ?? "(未回复)";
-      return `**问题 ${i + 1}：** ${q.agent_text}\n**回答：** ${userReply}`;
+      const userReply = listComments(candidate.id, { kind: "question", parent_id: q.id })
+        .find(r => r.from_role === "user")?.body ?? "(未回复)";
+      return `**问题 ${i + 1}：** ${q.body}\n**回答：** ${userReply}`;
     }).join("\n\n");
     requirement = requirement
       ? `${requirement}\n\n## 需求澄清记录\n\n${qa}`

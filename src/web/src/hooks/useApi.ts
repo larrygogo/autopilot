@@ -5,6 +5,59 @@ import { getApiToken, shouldUseToken } from "../lib/api-token";
 
 const BASE = "";
 
+// ──────────────────────────────────────────────
+// Comment → 旧 Question / RequirementFeedback 适配
+// 仅用于让 UI 沿用旧字段名（agent_text / replies / RequirementFeedback.source）
+// ──────────────────────────────────────────────
+
+function commentToQuestionReply(c: { id: string; parent_id: string | null; from_role: string; body: string; created_at: number }): QuestionReply {
+  return {
+    id: c.id,
+    question_id: c.parent_id ?? "",
+    author_role: (c.from_role === "user" ? "user" : "agent"),
+    text: c.body,
+    created_at: c.created_at,
+  };
+}
+
+function commentsToQuestions(all: Comment[]): Question[] {
+  const tops = all.filter((c) => c.kind === "question" && c.parent_id === null);
+  const repliesByParent = new Map<string, Comment[]>();
+  for (const c of all) {
+    if (c.kind === "question" && c.parent_id) {
+      const arr = repliesByParent.get(c.parent_id) ?? [];
+      arr.push(c);
+      repliesByParent.set(c.parent_id, arr);
+    }
+  }
+  return tops.map<Question>((q) => ({
+    id: q.id,
+    requirement_id: q.requirement_id,
+    agent_text: q.body,
+    suggestions: q.suggestions ?? [],
+    status: q.status,
+    created_at: q.created_at,
+    resolved_at: q.resolved_at,
+    replies: (repliesByParent.get(q.id) ?? []).map(commentToQuestionReply),
+  }));
+}
+
+function commentsToFeedbacks(all: Comment[]): RequirementFeedback[] {
+  let fakeId = 0;
+  return all
+    .filter((c) => c.kind === "feedback")
+    .map<RequirementFeedback>((c) => ({
+      // 旧 RequirementFeedback.id 是 INTEGER；comment.id 是字符串（fb-N 或 cmt-N）。
+      // UI 仅用 id 做 React key，不用真整数。这里给递增整数避免 number 类型冲突。
+      id: ++fakeId,
+      requirement_id: c.requirement_id,
+      source: c.from_role === "github" ? "github_review" : "manual",
+      body: c.body,
+      github_review_id: c.github_review_id,
+      created_at: c.created_at,
+    }));
+}
+
 /** 返回需要塞进 fetch headers 的 token 字段；本机访问不需要 token 时返回空对象。 */
 function authHeaders(): Record<string, string> {
   if (!shouldUseToken()) return {};
@@ -564,9 +617,15 @@ export const api = {
     requestRpc<{ requirements: Requirement[] }>("requirements.list", filters ?? {})
       .then((r) => r.requirements),
 
-  // [WS-RPC] requirements.get
-  getRequirement: (id: string) =>
-    requestRpc<{ requirement: Requirement; feedbacks: RequirementFeedback[] }>("requirements.get", { id }),
+  // [WS-RPC] requirements.get （返回 comments，UI 沿用 feedbacks/questions 视图，由 adapter 拆分）
+  getRequirement: async (id: string) => {
+    const res = await requestRpc<{ requirement: Requirement; comments: Comment[] }>("requirements.get", { id });
+    return {
+      requirement: res.requirement,
+      comments: res.comments,
+      feedbacks: commentsToFeedbacks(res.comments),
+    };
+  },
 
   // [WS-RPC] requirements.create
   createRequirement: (body: {
@@ -602,8 +661,14 @@ export const api = {
     requestRpc<{ requirement: Requirement }>("requirements.enqueue", { id }).then((r) => r.requirement),
 
   // [WS-RPC] requirements.injectFeedback
+  /** 注入反馈：comments.add(kind=feedback) 的语法糖；在 awaiting_review 自动触发 fix_revision */
   injectFeedback: (id: string, body: string, source: "manual" | "github_review" = "manual") =>
-    requestRpc<{ ok: true }>("requirements.injectFeedback", { id, body, source }),
+    requestRpc<{ comment: Comment }>("comments.add", {
+      requirementId: id,
+      kind: "feedback",
+      from_role: source === "github_review" ? "github" : "user",
+      body,
+    }).then((r) => r.comment),
 
   // [WS-RPC] requirements.cancel
   cancelRequirement: (id: string) =>
@@ -622,16 +687,27 @@ export const api = {
     requestRpc<{ round: ClarifierRoundState | null }>("requirements.clarifierRound", { id })
       .then((r) => r.round),
 
-  // Questions（评论线程）
-  // [WS-RPC] requirements.questions
-  listQuestions: (reqId: string) =>
-    requestRpc<{ questions: Question[] }>("requirements.questions", { id: reqId }).then((r) => r.questions),
-  // [WS-RPC] requirements.addReply
+  // Comments（统一评论线程：question / feedback / handoff）
+  // [WS-RPC] comments.list
+  listComments: (reqId: string, filter?: { kind?: "question" | "feedback" | "handoff"; status?: "open" | "resolved" }) =>
+    requestRpc<{ comments: Comment[] }>("comments.list", { requirementId: reqId, ...(filter ?? {}) })
+      .then((r) => r.comments),
+  /** 兼容 web 旧用法：返回 Question[]（顶层 question + replies 嵌套），由 Comment[] 适配 */
+  listQuestions: (reqId: string): Promise<Question[]> =>
+    requestRpc<{ comments: Comment[] }>("comments.list", { requirementId: reqId, kind: "question" })
+      .then((r) => commentsToQuestions(r.comments)),
+  // [WS-RPC] comments.add（用于在某 question 下追加 reply）
   addQuestionReply: (reqId: string, qid: string, body: { author_role: "agent" | "user"; text: string }) =>
-    requestRpc<{ reply: QuestionReply }>("requirements.addReply", { id: reqId, qid, ...body }).then((r) => r.reply),
-  // [WS-RPC] requirements.resolveQuestion
-  resolveQuestion: (reqId: string, qid: string) =>
-    requestRpc<{ ok: true }>("requirements.resolveQuestion", { id: reqId, qid }),
+    requestRpc<{ comment: Comment }>("comments.add", {
+      requirementId: reqId,
+      kind: "question",
+      parent_id: qid,
+      from_role: body.author_role,
+      body: body.text,
+    }).then((r) => r.comment),
+  // [WS-RPC] comments.resolve
+  resolveQuestion: (_reqId: string, qid: string) =>
+    requestRpc<{ ok: true }>("comments.resolve", { id: qid }),
 
   // /now state-derivation engine (PR 1 backend)
   // [WS-RPC] now.cards（RPC handler 直接返回数组，不再 wrap cards 字段）
@@ -841,6 +917,32 @@ export interface Codebase {
   updated_at: number;
 }
 
+export interface Comment {
+  id: string;
+  requirement_id: string;
+  parent_id: string | null;
+  kind: "question" | "feedback" | "handoff";
+  from_role: "agent" | "user" | "github";
+  body: string;
+  suggestions: string[] | null;
+  status: "open" | "resolved";
+  github_review_id: string | null;
+  created_at: number;
+  resolved_at: number | null;
+}
+
+// ── Legacy 视图类型（UI 沿用，由 Comment 适配） ──
+// Phase 2 数据层已合并到 requirement_comments；保留这些类型让 UI 不必大改。
+// 等 UI 全面用 Comment 直接渲染时再删（spec follow-up）。
+
+export interface QuestionReply {
+  id: string;
+  question_id: string;
+  author_role: "agent" | "user";
+  text: string;
+  created_at: number;
+}
+
 export interface Question {
   id: string;
   requirement_id: string;
@@ -850,14 +952,6 @@ export interface Question {
   created_at: number;
   resolved_at: number | null;
   replies?: QuestionReply[];
-}
-
-export interface QuestionReply {
-  id: string;
-  question_id: string;
-  author_role: "agent" | "user";
-  text: string;
-  created_at: number;
 }
 
 export interface Requirement {

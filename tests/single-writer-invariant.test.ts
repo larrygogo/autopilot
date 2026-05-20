@@ -20,14 +20,16 @@ const ALLOWLIST = new Set([
   "src/core/codebases.ts",       // codebases 表（P1 由 repos 改名）：SQLite 即权威源，无 manifest 同步需求
   "src/core/projects.ts",        // projects 表：SQLite 即权威源（CRUD 模块），无 manifest 同步需求
   "src/core/requirements.ts",    // requirements 表：SQLite 即权威源，无 manifest 同步需求
-  "src/core/requirement-feedbacks.ts", // requirement_feedbacks 表：SQLite 即权威源，无 manifest 同步需求
-  "src/core/requirement-questions.ts", // 评论线程：SQLite 即权威源（CRUD 模块），无 manifest 同步需求
+  "src/core/requirement-feedbacks.ts", // 旧 shim：转发到 requirement-comments.ts（Phase 2 后保留兼容，无独立写）
+  "src/core/requirement-questions.ts", // 旧 shim：转发到 requirement-comments.ts（Phase 2 后保留兼容）
+  "src/core/requirement-comments.ts", // 统一评论表：question / feedback / handoff 合并后的 SQLite 权威源
   "src/core/requirement-sub-prs.ts", // requirement_sub_prs 表：SQLite 即权威源，无 manifest 同步需求
   "src/core/spec-revisions.ts",  // spec_revisions 表：SQLite 即权威源，spec 修订历史无 manifest 同步需求
   "src/core/submodules.ts",      // submodules：通过 createRepo 写 repos 表，SQLite 即权威源
   "src/core/workflows.ts",       // workflows 表：SQLite 即权威源（file 工作流由 daemon 同步），无 manifest 同步需求
   "src/migrations/008-projects.ts", // P1 项目工作台改造：codebases 表重建需 INSERT 数据 copy（DDL+一次性数据迁移，无 manifest 同步需求）
   "src/migrations/009-nullable-codebase.ts", // requirements.codebase_id NOT NULL → NULLable 需表重建（DDL+一次性数据迁移）
+  "src/migrations/021-requirement-comments.ts", // Phase 2 合并：把 questions+replies+feedbacks 迁移到 requirement_comments（一次性数据迁移）
   "src/core/now-dismiss.ts",       // now_dismissed_cards 表：SQLite 即权威源，dismiss 状态无 manifest 同步需求
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
 ]);

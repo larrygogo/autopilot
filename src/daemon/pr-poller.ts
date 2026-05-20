@@ -4,7 +4,7 @@ import {
   setRequirementStatus,
   updateRequirement,
 } from "../core/requirements";
-import { appendFeedback } from "../core/requirement-feedbacks";
+import { createComment, nextCommentId } from "../core/requirement-comments";
 import { getCodebaseById } from "../core/codebases";
 import { loadGithubConfig } from "../core/config";
 import { createLogger } from "../core/logger";
@@ -129,9 +129,11 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
     changes.length,
   );
 
-  appendFeedback({
+  createComment({
+    id: nextCommentId(),
     requirement_id: reqId,
-    source: "github_review",
+    kind: "feedback",
+    from_role: "github",
     body,
     github_review_id: latestId,
   });

@@ -84,19 +84,19 @@ import {
   finishClarification,
   type Requirement,
 } from "../core/requirements";
-import { appendFeedback, listFeedbacks } from "../core/requirement-feedbacks";
 import { listSubPrs } from "../core/requirement-sub-prs";
 import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
 import { getRound as getClarifierRound } from "./clarifier-progress";
 import { runClarifierRound } from "./requirement-clarifier";
 import { runClarifierExtract } from "./requirement-extract";
 import {
-  listQuestionsByRequirement,
-  getQuestionById,
-  addReply,
-  resolveQuestion as coreResolveQuestion,
-  nextReplyId,
-} from "../core/requirement-questions";
+  listComments,
+  createComment,
+  getCommentById,
+  resolveComment,
+  nextCommentId,
+  type Comment,
+} from "../core/requirement-comments";
 import {
   loadProviders,
   loadGlobalAgents,
@@ -773,7 +773,7 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.get",
-    description: "需求详情 + 反馈历史",
+    description: "需求详情 + 评论历史（统一 question / feedback / handoff）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
@@ -781,7 +781,7 @@ export function registerCoreRpcMethods(): void {
       if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
       return {
         requirement: r,
-        feedbacks: listFeedbacks(p.id),
+        comments: listComments(p.id),
       };
     },
   });
@@ -905,28 +905,6 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
-  registerRpcMethod({
-    method: "requirements.injectFeedback",
-    description: "注入用户反馈（awaiting_review 时自动进 fix_revision）",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const bodyText = typeof p.body === "string" ? p.body.trim() : "";
-      if (!bodyText) throw new RpcError("INVALID_PARAM", "body 必填");
-      const r = getRequirementById(p.id);
-      if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
-      appendFeedback({
-        requirement_id: p.id,
-        source: (p.source === "github_review" ? "github_review" : "manual"),
-        body: bodyText,
-        github_review_id: typeof p.github_review_id === "string" ? p.github_review_id : null,
-      });
-      if (r.status === "awaiting_review") {
-        try { setRequirementStatus(p.id, "fix_revision"); } catch { /* tolerated */ }
-      }
-      return { ok: true };
-    },
-  });
 
   registerRpcMethod({
     method: "requirements.cancel",
@@ -997,54 +975,82 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+  // ── 评论线程（统一 question / feedback / handoff） ──
+
   registerRpcMethod({
-    method: "requirements.questions",
-    description: "需求关联的评论线程问题列表",
+    method: "comments.list",
+    description: "需求关联的评论列表（可按 kind / status 过滤）",
+    handler: (params) => {
+      const p = asObj(params);
+      const reqId = typeof p.requirementId === "string" ? p.requirementId : (typeof p.id === "string" ? p.id : "");
+      if (!reqId) throw new RpcError("INVALID_PARAM", "需要 requirementId");
+      if (!getRequirementById(reqId)) throw new RpcError("NOT_FOUND", "requirement not found");
+      const filter: { kind?: Comment["kind"]; status?: Comment["status"] } = {};
+      if (p.kind === "question" || p.kind === "feedback" || p.kind === "handoff") filter.kind = p.kind;
+      if (p.status === "open" || p.status === "resolved") filter.status = p.status;
+      return { comments: listComments(reqId, filter) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "comments.add",
+    description: "追加一条评论（question/feedback/handoff）。feedback 在 awaiting_review 自动进 fix_revision",
+    handler: (params) => {
+      const p = asObj(params);
+      const reqId = typeof p.requirementId === "string" ? p.requirementId : (typeof p.id === "string" ? p.id : "");
+      if (!reqId) throw new RpcError("INVALID_PARAM", "需要 requirementId");
+      if (p.kind !== "question" && p.kind !== "feedback" && p.kind !== "handoff") {
+        throw new RpcError("INVALID_PARAM", "kind 必须是 question / feedback / handoff");
+      }
+      if (p.from_role !== "agent" && p.from_role !== "user" && p.from_role !== "github") {
+        throw new RpcError("INVALID_PARAM", "from_role 必须是 agent / user / github");
+      }
+      const bodyText = typeof p.body === "string" ? p.body.trim() : "";
+      if (!bodyText) throw new RpcError("INVALID_PARAM", "body 必填");
+      const r = getRequirementById(reqId);
+      if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
+      if (p.parent_id !== undefined && p.parent_id !== null && typeof p.parent_id !== "string") {
+        throw new RpcError("INVALID_PARAM", "parent_id 必须是字符串或 null");
+      }
+      if (p.parent_id) {
+        if (!getCommentById(p.parent_id as string)) throw new RpcError("NOT_FOUND", "parent comment not found");
+      }
+      const suggestions = Array.isArray(p.suggestions)
+        ? p.suggestions.filter((s): s is string => typeof s === "string")
+        : undefined;
+      const id = nextCommentId();
+      const comment = createComment({
+        id,
+        requirement_id: reqId,
+        kind: p.kind as Comment["kind"],
+        from_role: p.from_role as Comment["from_role"],
+        body: bodyText,
+        parent_id: (p.parent_id as string | undefined) ?? null,
+        suggestions,
+        github_review_id: typeof p.github_review_id === "string" ? p.github_review_id : null,
+      });
+      // feedback 注入：若 requirement 当前 awaiting_review 自动进 fix_revision（沿用旧 inject_feedback 语义）
+      if (comment.kind === "feedback" && r.status === "awaiting_review") {
+        try { setRequirementStatus(reqId, "fix_revision"); } catch { /* tolerated */ }
+      }
+      return { comment };
+    },
+  });
+
+  registerRpcMethod({
+    method: "comments.resolve",
+    description: "标记评论已解决；question 全部 resolved 时 emit requirement:all-questions-resolved",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
-      return { questions: listQuestionsByRequirement(p.id) };
-    },
-  });
-
-  registerRpcMethod({
-    method: "requirements.addReply",
-    description: "在问题下追加回复（author_role: agent / user）",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id（requirement）");
-      if (typeof p.qid !== "string" || !p.qid) throw new RpcError("INVALID_PARAM", "需要 qid");
-      if (p.author_role !== "agent" && p.author_role !== "user") {
-        throw new RpcError("INVALID_PARAM", 'author_role 必须是 "agent" 或 "user"');
-      }
-      if (typeof p.text !== "string" || !p.text) throw new RpcError("INVALID_PARAM", "需要 text");
-      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
-      if (!getQuestionById(p.qid)) throw new RpcError("NOT_FOUND", "question not found");
-      const replyId = nextReplyId();
-      const reply = addReply({
-        id: replyId,
-        question_id: p.qid,
-        author_role: p.author_role as "agent" | "user",
-        text: p.text,
-      });
-      return { reply };
-    },
-  });
-
-  registerRpcMethod({
-    method: "requirements.resolveQuestion",
-    description: "标记问题已解决；全部解决时 emit requirement:all-questions-resolved（push 到 web 显示'全部完成'，daemon 内 clarifier 实际监听的是 question-resolved 每个）",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id（requirement）");
-      if (typeof p.qid !== "string" || !p.qid) throw new RpcError("INVALID_PARAM", "需要 qid");
-      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
-      if (!getQuestionById(p.qid)) throw new RpcError("NOT_FOUND", "question not found");
-      coreResolveQuestion(p.qid);
-      const allQuestions = listQuestionsByRequirement(p.id);
-      if (allQuestions.length > 0 && allQuestions.every((q) => q.status === "resolved")) {
-        emitBus({ type: "requirement:all-questions-resolved", payload: { id: p.id } });
+      const c = getCommentById(p.id);
+      if (!c) throw new RpcError("NOT_FOUND", "comment not found");
+      resolveComment(p.id);
+      if (c.kind === "question") {
+        const allQuestions = listComments(c.requirement_id, { kind: "question" });
+        if (allQuestions.length > 0 && allQuestions.every((q) => q.status === "resolved")) {
+          emitBus({ type: "requirement:all-questions-resolved", payload: { id: c.requirement_id } });
+        }
       }
       return { ok: true };
     },

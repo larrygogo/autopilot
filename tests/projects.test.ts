@@ -11,6 +11,7 @@ import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
+import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import {
   createProject, getProjectById, listProjects,
   updateProject, deleteProject, nextProjectId,
@@ -36,6 +37,7 @@ describe("projects CRUD", () => {
     migrate009(sqlite);
     migrate010(sqlite);
     migrate011(sqlite);
+    migrate021(sqlite);
   });
 
   afterAll(() => {
@@ -98,6 +100,6 @@ describe("projects CRUD", () => {
     expect(db.query("SELECT COUNT(*) AS n FROM projects WHERE id = 'proj-cascade'").get()).toEqual({ n: 0 });
     expect(db.query("SELECT COUNT(*) AS n FROM codebases WHERE project_id = 'proj-cascade'").get()).toEqual({ n: 0 });
     expect(db.query("SELECT COUNT(*) AS n FROM requirements WHERE project_id = 'proj-cascade'").get()).toEqual({ n: 0 });
-    expect(db.query("SELECT COUNT(*) AS n FROM requirement_questions WHERE requirement_id = 'REQ-CP1'").get()).toEqual({ n: 0 });
+    expect(db.query("SELECT COUNT(*) AS n FROM requirement_comments WHERE kind = 'question' AND parent_id IS NULL AND requirement_id = 'REQ-CP1'").get()).toEqual({ n: 0 });
   });
 });

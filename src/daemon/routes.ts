@@ -46,7 +46,13 @@ import {
   deleteRequirement,
   finishClarification,
 } from "../core/requirements";
-import { listQuestionsByRequirement, createQuestion, getQuestionById, addReply, resolveQuestion, nextQuestionId, nextReplyId } from "../core/requirement-questions";
+import {
+  listComments,
+  createComment,
+  getCommentById,
+  resolveComment,
+  nextCommentId,
+} from "../core/requirement-comments";
 import type { Requirement } from "../core/requirements";
 import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
 import { runClarifierRound } from "./requirement-clarifier";
@@ -56,7 +62,6 @@ import { getMcpToken } from "./mcp-runtime";
 import { buildAutopilotTools, buildWorkflowAgentTools } from "../agents/tools";
 import type { RegisteredTool } from "../agents/mcp-tools";
 
-import { appendFeedback, listFeedbacks } from "../core/requirement-feedbacks";
 import {
   discover,
   reload,
@@ -773,35 +778,6 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // POST /api/requirements/:id/inject_feedback
-    const reqInjectMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/inject_feedback$/);
-    if (reqInjectMatch && method === "POST") {
-      const id = reqInjectMatch;
-      const body = (await req.json()) as {
-        body?: string;
-        source?: "manual" | "github_review";
-        github_review_id?: string;
-      };
-      if (!body.body?.trim()) return error("body 必填");
-      const r = getRequirementById(id);
-      if (!r) return error("requirement not found", 404);
-      appendFeedback({
-        requirement_id: id,
-        source: body.source ?? "manual",
-        body: body.body.trim(),
-        github_review_id: body.github_review_id ?? null,
-      });
-      // P3：如果当前 awaiting_review，触发 fix_revision
-      // run_await_review 阶段函数循环会检测到 status 变化，emit jump trigger 切换到 fix_revision 阶段
-      if (r.status === "awaiting_review") {
-        try {
-          setRequirementStatus(id, "fix_revision");
-        } catch (e: unknown) {
-          log.warn("inject_feedback 触发 fix_revision 失败（反馈已写入）[req=%s err=%s]", id, (e as Error).message);
-        }
-      }
-      return json({ ok: true });
-    }
 
     // POST /api/requirements/:id/cancel
     const reqCancelMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/cancel$/);
@@ -854,75 +830,77 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       return json({ revisions: listSpecRevisionsByRequirement(id) });
     }
 
-    // ─────────── Questions（评论线程） ───────────
+    // ─────────── Comments（评论线程：question / feedback / handoff） ───────────
 
-    // POST /api/requirements/:reqId/questions/:qid/replies — 必须在 /:qid 之前
-    const reqQidRepliesMatch = path.match(/^\/api\/requirements\/([\w-]+)\/questions\/([\w-]+)\/replies$/);
-    if (method === "POST" && reqQidRepliesMatch) {
-      const [, reqId, qid] = reqQidRepliesMatch;
+    // POST /api/requirements/:reqId/comments/:cid/resolve
+    const reqCidResolveMatch = path.match(/^\/api\/requirements\/([\w-]+)\/comments\/([\w-]+)\/resolve$/);
+    if (method === "POST" && reqCidResolveMatch) {
+      const [, reqId, cid] = reqCidResolveMatch;
       if (!getRequirementById(reqId)) return error("requirement not found", 404);
-      const q = getQuestionById(qid);
-      if (!q) return error("question not found", 404);
-      const body = (await req.json()) as { author_role?: string; text?: string };
-      if (!body.author_role || !body.text) return error("author_role 和 text 必填");
-      if (body.author_role !== "agent" && body.author_role !== "user") {
-        return error('author_role 必须是 "agent" 或 "user"');
-      }
-      try {
-        const replyId = nextReplyId();
-        const reply = addReply({
-          id: replyId,
-          question_id: qid,
-          author_role: body.author_role as "agent" | "user",
-          text: body.text,
-        });
-        return json({ reply }, 201);
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return error(msg, 500);
-      }
-    }
-
-    // POST /api/requirements/:reqId/questions/:qid/resolve — 必须在 /:qid 之前
-    const reqQidResolveMatch = path.match(/^\/api\/requirements\/([\w-]+)\/questions\/([\w-]+)\/resolve$/);
-    if (method === "POST" && reqQidResolveMatch) {
-      const [, reqId, qid] = reqQidResolveMatch;
-      if (!getRequirementById(reqId)) return error("requirement not found", 404);
-      if (!getQuestionById(qid)) return error("question not found", 404);
-      resolveQuestion(qid);
-      // 全部问题解决时通知 clarifier 决定是否继续追问
-      const allQuestions = listQuestionsByRequirement(reqId);
-      if (allQuestions.length > 0 && allQuestions.every(q => q.status === "resolved")) {
-        emit({ type: "requirement:all-questions-resolved", payload: { id: reqId } });
+      const c = getCommentById(cid);
+      if (!c) return error("comment not found", 404);
+      resolveComment(cid);
+      // 当 question 全部 resolved 时通知 clarifier 决定是否继续追问
+      if (c.kind === "question") {
+        const allQuestions = listComments(reqId, { kind: "question" });
+        if (allQuestions.length > 0 && allQuestions.every(q => q.status === "resolved")) {
+          emit({ type: "requirement:all-questions-resolved", payload: { id: reqId } });
+        }
       }
       return json({ ok: true });
     }
 
-    // GET /api/requirements/:reqId/questions/:qid
-    const reqQidMatch = path.match(/^\/api\/requirements\/([\w-]+)\/questions\/([\w-]+)$/);
-    if (method === "GET" && reqQidMatch) {
-      const [, reqId, qid] = reqQidMatch;
-      if (!getRequirementById(reqId)) return error("requirement not found", 404);
-      const q = getQuestionById(qid);
-      if (!q) return error("question not found", 404);
-      return json({ question: q });
+    // GET /api/requirements/:reqId/comments?kind=&status=
+    const reqCommentsMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/comments$/);
+    if (method === "GET" && reqCommentsMatch) {
+      if (!getRequirementById(reqCommentsMatch)) return error("requirement not found", 404);
+      const kind = url.searchParams.get("kind") as ("question" | "feedback" | "handoff" | null);
+      const status = url.searchParams.get("status") as ("open" | "resolved" | null);
+      return json({
+        comments: listComments(reqCommentsMatch, {
+          ...(kind ? { kind } : {}),
+          ...(status ? { status } : {}),
+        }),
+      });
     }
 
-    // GET /api/requirements/:reqId/questions — 必须在 /:reqId 之前
-    const reqQuestionsMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/questions$/);
-    if (method === "GET" && reqQuestionsMatch) {
-      if (!getRequirementById(reqQuestionsMatch)) return error("requirement not found", 404);
-      return json({ questions: listQuestionsByRequirement(reqQuestionsMatch) });
-    }
-
-    // POST /api/requirements/:reqId/questions
-    if (method === "POST" && reqQuestionsMatch) {
-      if (!getRequirementById(reqQuestionsMatch)) return error("requirement not found", 404);
-      const body = (await req.json()) as { agent_text?: string };
-      if (!body.agent_text?.trim()) return error("agent_text 必填");
-      const qId = nextQuestionId();
-      const question = createQuestion({ id: qId, requirement_id: reqQuestionsMatch, agent_text: body.agent_text.trim() });
-      return json({ question }, 201);
+    // POST /api/requirements/:reqId/comments
+    if (method === "POST" && reqCommentsMatch) {
+      const reqId = reqCommentsMatch;
+      const r = getRequirementById(reqId);
+      if (!r) return error("requirement not found", 404);
+      const body = (await req.json()) as {
+        kind?: "question" | "feedback" | "handoff";
+        from_role?: "agent" | "user" | "github";
+        body?: string;
+        parent_id?: string;
+        suggestions?: string[];
+        github_review_id?: string;
+      };
+      if (!body.kind) return error("kind 必填");
+      if (!body.from_role) return error("from_role 必填");
+      if (!body.body?.trim()) return error("body 必填");
+      const id = nextCommentId();
+      const comment = createComment({
+        id,
+        requirement_id: reqId,
+        kind: body.kind,
+        from_role: body.from_role,
+        body: body.body.trim(),
+        parent_id: body.parent_id ?? null,
+        suggestions: body.suggestions,
+        github_review_id: body.github_review_id ?? null,
+      });
+      // feedback 注入：若 requirement 当前 awaiting_review，触发 fix_revision
+      // （原 inject_feedback endpoint 的行为，spec §3.2 统一进 comments.add）
+      if (body.kind === "feedback" && r.status === "awaiting_review") {
+        try {
+          setRequirementStatus(reqId, "fix_revision");
+        } catch (e: unknown) {
+          log.warn("comments.add(feedback) 触发 fix_revision 失败（反馈已写入）[req=%s err=%s]", reqId, (e as Error).message);
+        }
+      }
+      return json({ comment }, 201);
     }
 
     // GET|PUT|DELETE /api/requirements/:id
@@ -932,7 +910,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       if (!r) return error("requirement not found", 404);
 
       if (method === "GET") {
-        return json({ requirement: r, feedbacks: listFeedbacks(reqDetailMatch) });
+        return json({ requirement: r, comments: listComments(reqDetailMatch) });
       }
       if (method === "PUT") {
         const body = (await req.json()) as {

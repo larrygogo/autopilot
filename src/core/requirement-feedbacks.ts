@@ -1,4 +1,17 @@
+/**
+ * Phase 2 后兼容 shim：数据合并到 requirement_comments 表后，本模块改为
+ * 在 comments 表上提供旧 RequirementFeedback API，让既有调用方
+ * 和测试不必同步重写。
+ *
+ * 等代码全面用 Comment 直接渲染时，本文件可整体删除（spec follow-up）。
+ */
+
 import { getDb } from "./db";
+import {
+  createComment,
+  nextCommentId,
+  type Comment,
+} from "./requirement-comments";
 
 export interface RequirementFeedback {
   id: number;
@@ -16,38 +29,65 @@ export interface AppendFeedbackOpts {
   github_review_id?: string | null;
 }
 
-/**
- * 追加一条反馈（append-only），返回插入的完整记录。
- */
-export function appendFeedback(opts: AppendFeedbackOpts): RequirementFeedback {
-  const db = getDb();
-  const ts = Date.now();
-  db.run(
-    "INSERT INTO requirement_feedbacks (requirement_id, source, body, github_review_id, created_at) VALUES (?,?,?,?,?)",
-    [opts.requirement_id, opts.source, opts.body, opts.github_review_id ?? null, ts],
-  );
-  const id = db.query<{ id: number }, []>("SELECT last_insert_rowid() AS id").get()!.id;
-  return db.query<RequirementFeedback, [number]>(
-    "SELECT * FROM requirement_feedbacks WHERE id = ?",
-  ).get(id) as RequirementFeedback;
+interface CommentRow {
+  id: string;
+  requirement_id: string;
+  from_role: string;
+  body: string;
+  github_review_id: string | null;
+  created_at: number;
 }
 
-/**
- * 列出某需求的全部反馈，按 created_at 升序。
- */
+function commentRowToFeedback(row: CommentRow, fakeId: number): RequirementFeedback {
+  return {
+    id: fakeId,
+    requirement_id: row.requirement_id,
+    source: row.from_role === "github" ? "github_review" : "manual",
+    body: row.body,
+    github_review_id: row.github_review_id,
+    created_at: row.created_at,
+  };
+}
+
+function commentToFeedback(c: Comment, fakeId: number): RequirementFeedback {
+  return {
+    id: fakeId,
+    requirement_id: c.requirement_id,
+    source: c.from_role === "github" ? "github_review" : "manual",
+    body: c.body,
+    github_review_id: c.github_review_id,
+    created_at: c.created_at,
+  };
+}
+
+export function appendFeedback(opts: AppendFeedbackOpts): RequirementFeedback {
+  const c = createComment({
+    id: nextCommentId(),
+    requirement_id: opts.requirement_id,
+    kind: "feedback",
+    from_role: opts.source === "github_review" ? "github" : "user",
+    body: opts.body,
+    github_review_id: opts.github_review_id ?? null,
+  });
+  return commentToFeedback(c, Date.now());
+}
+
 export function listFeedbacks(requirement_id: string): RequirementFeedback[] {
   const db = getDb();
-  return db.query<RequirementFeedback, [string]>(
-    "SELECT * FROM requirement_feedbacks WHERE requirement_id = ? ORDER BY created_at ASC, id ASC",
-  ).all(requirement_id);
+  const rows = db
+    .query<CommentRow, [string]>(
+      "SELECT id, requirement_id, from_role, body, github_review_id, created_at FROM requirement_comments WHERE requirement_id = ? AND kind = 'feedback' ORDER BY created_at ASC, id ASC",
+    )
+    .all(requirement_id);
+  return rows.map((row, i) => commentRowToFeedback(row, i + 1));
 }
 
-/**
- * 取最新一条反馈（fix_revision 阶段用作输入）。
- */
 export function latestFeedback(requirement_id: string): RequirementFeedback | null {
   const db = getDb();
-  return db.query<RequirementFeedback, [string]>(
-    "SELECT * FROM requirement_feedbacks WHERE requirement_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
-  ).get(requirement_id) ?? null;
+  const row = db
+    .query<CommentRow, [string]>(
+      "SELECT id, requirement_id, from_role, body, github_review_id, created_at FROM requirement_comments WHERE requirement_id = ? AND kind = 'feedback' ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .get(requirement_id);
+  return row ? commentRowToFeedback(row, 1) : null;
 }

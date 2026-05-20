@@ -18,8 +18,8 @@ export async function runClarifierWatchdog(): Promise<void> {
   // case 1: active 指向 resolved question 的不一致状态
   const stuck = db.query<{ id: string }, []>(`
     SELECT r.id FROM requirements r
-    INNER JOIN requirement_questions q ON q.id = r.active_question_id
-    WHERE r.status = 'clarifying' AND q.status = 'resolved'
+    INNER JOIN requirement_comments c ON c.id = r.active_question_id
+    WHERE r.status = 'clarifying' AND c.kind = 'question' AND c.status = 'resolved'
   `).all();
 
   // case 2: clarifying + active=NULL + 已经 120 秒没动静（avoid 触发刚创建/正在跑的）

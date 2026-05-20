@@ -6,6 +6,7 @@ import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
+import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { _setDbForTest } from "../src/core/db";
 import { createCodebase } from "../src/core/codebases";
 import { createProject } from "../src/core/projects";
@@ -29,6 +30,7 @@ describe("tickRepo", () => {
     migrate006(db);
     migrate007(db);
     migrate008(db);
+    migrate021(db);
     _setDbForTest(db);
     createProject({ id: "proj-001", name: "test-proj" });
     createCodebase({ id: "cb-001", project_id: "proj-001", alias: "r1", path: "/tmp/r1", default_branch: "main" });
@@ -42,7 +44,7 @@ describe("tickRepo", () => {
 
   beforeEach(() => {
     // 清掉 requirements 表数据（保留 repos）
-    db.run("DELETE FROM requirement_feedbacks");
+    db.run("DELETE FROM requirement_comments WHERE kind = 'feedback'");
     db.run("DELETE FROM requirements");
   });
 
@@ -133,6 +135,7 @@ describe("tickRepo 组级锁（父 + 子模块同组 1 active）", () => {
     migrate006(db);
     migrate007(db);
     migrate008(db);
+    migrate021(db);
     _setDbForTest(db);
     createProject({ id: "proj-grp", name: "group-test-proj" });
     // 父 codebase
@@ -157,7 +160,7 @@ describe("tickRepo 组级锁（父 + 子模块同组 1 active）", () => {
   });
 
   beforeEach(() => {
-    db.run("DELETE FROM requirement_feedbacks");
+    db.run("DELETE FROM requirement_comments WHERE kind = 'feedback'");
     db.run("DELETE FROM requirements");
   });
 

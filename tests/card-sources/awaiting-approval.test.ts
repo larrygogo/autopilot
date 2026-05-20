@@ -11,6 +11,7 @@ import { up as m009 } from "../../src/migrations/009-nullable-codebase";
 import { up as m010 } from "../../src/migrations/010-question-suggestions";
 import { up as m011 } from "../../src/migrations/011-now-dismissed-cards";
 import { up as m019 } from "../../src/migrations/019-task-requirement-id";
+import { up as m021 } from "../../src/migrations/021-requirement-comments";
 import { _setDbForTest } from "../../src/core/db";
 import { createProject } from "../../src/core/projects";
 import { createRequirement, setRequirementStatus } from "../../src/core/requirements";
@@ -18,7 +19,7 @@ import { createAwaitingApprovalSource } from "../../src/core/card-sources/awaiti
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m019].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m019, m021].forEach(fn => fn(db));
   _setDbForTest(db);
 }
 

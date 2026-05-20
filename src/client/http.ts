@@ -46,24 +46,6 @@ export interface Codebase {
   updated_at: number;
 }
 
-export interface QuestionReply {
-  id: string;
-  question_id: string;
-  author_role: "agent" | "user";
-  text: string;
-  created_at: number;
-}
-
-export interface Question {
-  id: string;
-  requirement_id: string;
-  agent_text: string;
-  status: "open" | "resolved";
-  created_at: number;
-  resolved_at: number | null;
-  replies?: QuestionReply[];
-}
-
 // ──────────────────────────────────────────────
 // HttpClient — 名字保留兼容，内部走 WS RPC
 // ──────────────────────────────────────────────
@@ -313,30 +295,6 @@ export class HttpClient {
     return this.call<CodebaseHealthResult>("codebases.healthcheck", { id });
   }
 
-  // ── Questions ──
-
-  async listQuestions(reqId: string): Promise<{ questions: Question[] }> {
-    return this.call("requirements.questions", { id: reqId });
-  }
-
-  async createQuestion(_reqId: string, _body: { agent_text: string }): Promise<{ question: Question }> {
-    throw new Error("createQuestion 暂未迁到 WS RPC");
-  }
-
-  async getQuestion(_reqId: string, _qid: string): Promise<{ question: Question }> {
-    throw new Error("getQuestion 暂未迁到 WS RPC（用 listQuestions 过滤）");
-  }
-
-  async addQuestionReply(reqId: string, qid: string, body: {
-    author_role: "agent" | "user";
-    text: string;
-  }): Promise<{ reply: QuestionReply }> {
-    return this.call("requirements.addReply", { id: reqId, qid, ...body });
-  }
-
-  async resolveQuestion(reqId: string, qid: string): Promise<{ ok: true }> {
-    return this.call("requirements.resolveQuestion", { id: reqId, qid });
-  }
 
   // ── Chat（流式聊天暂未迁，保留 placeholder） ──
 

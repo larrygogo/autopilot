@@ -6,6 +6,7 @@ import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
+import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { createCodebase } from "../src/core/codebases";
 import { createProject } from "../src/core/projects";
@@ -31,6 +32,7 @@ describe("chat tools 集成（直接走 core 函数验证流程）", () => {
     migrate006(db);
     migrate007(db);
     migrate008(db);
+    migrate021(db);
     createProject({ id: "proj-001", name: "test-proj" });
     createCodebase({ id: "cb-001", project_id: "proj-001", alias: "test-repo", path: "/tmp/x", default_branch: "main" });
   });
@@ -172,6 +174,7 @@ describe("enqueue 失败回滚", () => {
     migrate006(db);
     migrate007(db);
     migrate008(db);
+    migrate021(db);
     createProject({ id: "proj-rb", name: "rollback-proj" });
     createCodebase({ id: "cb-rollback", project_id: "proj-rb", alias: "rollback-repo", path: "/tmp/rb", default_branch: "main" });
   });

@@ -1,6 +1,6 @@
 import { getDb } from "./db";
 import { emit } from "./event-bus";
-import { resolveQuestion } from "./requirement-questions";
+import { resolveComment } from "./requirement-comments";
 import { listCodebases } from "./codebases";
 
 // ──────────────────────────────────────────────
@@ -223,14 +223,8 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
 export function deleteRequirement(id: string): void {
   const db = getDb();
   db.transaction(() => {
-    // 先删问题的回复，再删问题本身
-    db.run(
-      "DELETE FROM requirement_question_replies WHERE question_id IN " +
-      "(SELECT id FROM requirement_questions WHERE requirement_id = ?)",
-      [id],
-    );
-    db.run("DELETE FROM requirement_questions WHERE requirement_id = ?", [id]);
-    db.run("DELETE FROM requirement_feedbacks WHERE requirement_id = ?", [id]);
+    // requirement_comments 已有 ON DELETE CASCADE，但显式删一次便于无 FK 场景（如旧 DB / 测试纯表）
+    db.run("DELETE FROM requirement_comments WHERE requirement_id = ?", [id]);
     db.run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [id]);
     db.run("DELETE FROM requirement_codebases WHERE requirement_id = ?", [id]);
     db.run("DELETE FROM requirements WHERE id = ?", [id]);
@@ -288,7 +282,7 @@ export function finishClarification(requirementId: string): void {
     const req = getRequirementById(requirementId);
     if (!req) return;
     if (req.active_question_id) {
-      resolveQuestion(req.active_question_id);
+      resolveComment(req.active_question_id);
     }
     db.run(
       "UPDATE requirements SET active_question_id = NULL, updated_at = ? WHERE id = ?",
@@ -311,11 +305,11 @@ export function finishClarification(requirementId: string): void {
  */
 export function nextRequirementId(): string {
   const db = getDb();
-  // 同时扫 requirements 和 requirement_questions，防止需求被删后问题残留导致 ID 复用
+  // 同时扫 requirements 和 requirement_comments，防止需求被删后评论残留导致 ID 复用
   const rows = db
     .query<{ id: string }, []>(
       "SELECT id FROM requirements WHERE id LIKE 'req-%' " +
-      "UNION SELECT requirement_id AS id FROM requirement_questions WHERE requirement_id LIKE 'req-%' " +
+      "UNION SELECT requirement_id AS id FROM requirement_comments WHERE requirement_id LIKE 'req-%' " +
       "ORDER BY id DESC LIMIT 1",
     )
     .all();

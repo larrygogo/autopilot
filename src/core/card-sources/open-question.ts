@@ -14,20 +14,20 @@ interface ActiveQuestionRow {
 function listActiveQuestions(): ActiveQuestionRow[] {
   return getDb().query<ActiveQuestionRow, []>(`
     SELECT r.id AS req_id, r.title AS req_title,
-           q.id AS q_id, q.agent_text, q.created_at
+           c.id AS q_id, c.body AS agent_text, c.created_at
     FROM requirements r
-    INNER JOIN requirement_questions q ON q.id = r.active_question_id
-    WHERE q.status = 'open' AND r.status = 'clarifying'
+    INNER JOIN requirement_comments c ON c.id = r.active_question_id
+    WHERE c.kind = 'question' AND c.status = 'open' AND r.status = 'clarifying'
   `).all();
 }
 
 function listActiveQuestionForReq(reqId: string): ActiveQuestionRow | null {
   const row = getDb().query<ActiveQuestionRow, [string]>(`
     SELECT r.id AS req_id, r.title AS req_title,
-           q.id AS q_id, q.agent_text, q.created_at
+           c.id AS q_id, c.body AS agent_text, c.created_at
     FROM requirements r
-    INNER JOIN requirement_questions q ON q.id = r.active_question_id
-    WHERE r.id = ? AND q.status = 'open' AND r.status = 'clarifying'
+    INNER JOIN requirement_comments c ON c.id = r.active_question_id
+    WHERE r.id = ? AND c.kind = 'question' AND c.status = 'open' AND r.status = 'clarifying'
   `).get(reqId);
   return row ?? null;
 }

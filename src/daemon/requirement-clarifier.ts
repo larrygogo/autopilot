@@ -5,7 +5,11 @@ import type { AutopilotEvent } from "./protocol";
 import { getRequirementById, updateRequirement, setActiveQuestionId, setRequirementStatus } from "../core/requirements";
 import { getProjectById } from "../core/projects";
 import { getCodebaseById } from "../core/codebases";
-import { createQuestion, nextQuestionId, listQuestionsByRequirement } from "../core/requirement-questions";
+import {
+  createComment,
+  nextCommentId,
+  listComments,
+} from "../core/requirement-comments";
 import { createSpecRevision } from "../core/spec-revisions";
 import { createLogger } from "../core/logger";
 import {
@@ -261,12 +265,13 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     updateRequirement(reqId, { clarifier_error: null });
   }
 
-  const allQuestions = listQuestionsByRequirement(reqId);
-  const qaHistory = allQuestions
-    .filter(q => q.status === "resolved")
+  // 历史 Q&A 重建：从 requirement_comments 拿 question 顶层 + parent_id 关联的 user reply
+  const allQuestionsResolved = listComments(reqId, { kind: "question", status: "resolved", parent_id: null });
+  const qaHistory = allQuestionsResolved
     .map((q, i) => {
-      const userReply = (q.replies ?? []).find(r => r.author_role === "user")?.text ?? "(未回复)";
-      return `Q${i + 1}：${q.agent_text}\nA${i + 1}：${userReply}`;
+      const userReply = listComments(reqId, { kind: "question", parent_id: q.id })
+        .find(r => r.from_role === "user")?.body ?? "(未回复)";
+      return `Q${i + 1}：${q.body}\nA${i + 1}：${userReply}`;
     }).join("\n\n");
 
   const prompt = buildPrompt({
@@ -366,12 +371,15 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     endRound(reqId, "aborted");
     return;
   }
-  const qId = nextQuestionId();
-  createQuestion({
+  const qId = nextCommentId();
+  createComment({
     id: qId,
     requirement_id: reqId,
-    agent_text: result.next_question.agent_text,
+    kind: "question",
+    from_role: "agent",
+    body: result.next_question.agent_text,
     suggestions: result.next_question.suggestions,
+    status: "open",
   });
   setActiveQuestionId(reqId, qId);
   emit({ type: "requirement:questions-updated", payload: { id: reqId } });
