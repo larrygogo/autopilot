@@ -389,7 +389,16 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
             workflowSnapshot: snapshotWorkflow(wf),
           });
           try {
-            ensureTaskWorkspace(taskId, workflowName, wf.workspace);
+            // workspace.git=true 时反查 codebase 让 ensureTaskWorkspace 起 git worktree
+            let codebase;
+            if (wf.workspace?.git) {
+              const codebaseId = typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined;
+              if (codebaseId) {
+                const cb = getCodebaseById(codebaseId);
+                if (cb) codebase = { id: cb.id, path: cb.path, default_branch: cb.default_branch };
+              }
+            }
+            ensureTaskWorkspace(taskId, workflowName, wf.workspace, codebase);
           } catch (e: unknown) {
             log.warn("start_task: ensureTaskWorkspace 失败 [task=%s]: %s",
               taskId, e instanceof Error ? e.message : String(e));

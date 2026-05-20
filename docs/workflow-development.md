@@ -511,6 +511,40 @@ stateDiagram-v2
 
 ---
 
+## Workspace 配置（workflow.yaml `workspace:` 段）
+
+每个 task 都有独立的 workspace 目录（`AUTOPILOT_HOME/runtime/tasks/<task-id>/workspace/`）。
+工作流可声明 workspace 初始化方式：
+
+```yaml
+workspace:
+  template: workspace_template   # 模式 A：拷贝模板目录（相对 workflow 目录）
+  git: true                      # 模式 B：基于 codebase 起一个 git worktree
+  branch_prefix: "autopilot/"    # 可选，git=true 用，默认 "autopilot/"
+  base: "main"                   # 可选，git=true 用，默认 codebase.default_branch
+```
+
+**三种模式**：
+
+| 配置 | 行为 |
+|------|------|
+| 都不写 | 空目录 |
+| `template: xxx` | 从 `<workflow-dir>/xxx/` 递归拷贝到 workspace（防穿越 .. 检查） |
+| `git: true` + 提供 codebase | `git worktree add -b <branch_prefix><taskId> <ws> <base>`，task 的 workspace 就是 codebase 上的一个临时分支 |
+
+**git 模式细节**：
+
+- caller（`task-factory` / `tools.start_task`）反查 `task.extra.codebase_id` 拿 codebase 信息传给 `ensureTaskWorkspace`。
+- 分支名：`${branch_prefix}${taskId}`，若已存在自动附 `-2 / -3` 后缀。
+- 元数据写到 `runtime/tasks/<taskId>/.worktree.json`（`codebase_id` / `branch` / `base` / `created_at`），删除路径无需查 DB。
+- **退化**：codebase 缺失 / 非 git 仓库 / `git worktree add` 失败 → warn 退化空目录，**不阻塞任务启动**。
+- **template 与 git 互斥**：同时配置时 `git` 优先，`template` 被忽略并 warn。
+- **清理**：`deleteTaskWorkspace` / `applyRetentionPolicy` 自动调 `git worktree remove --force` 干掉临时分支再 rmSync 兜底。超过保留期还没提交的就是垃圾，直接 force 干掉。
+
+> 与现有 workspace（非 git 模式）兼容：未在 yaml 写 `git: true` 的工作流走原逻辑，task workspace 仍是普通目录。
+
+---
+
 ## 相关文档
 
 | 文档 | 说明 |

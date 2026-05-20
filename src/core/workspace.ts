@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join, resolve, sep } from "path";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
@@ -9,22 +9,49 @@ import { log } from "./logger";
 // 布局：
 //   AUTOPILOT_HOME/
 //     runtime/tasks/<task-id>/
-//       └── workspace/         ← 阶段函数的工作区（本模块管理）
+//       ├── workspace/         ← 阶段函数的工作区（本模块管理）
+//       └── .worktree.json     ← git worktree 元数据（仅 workspace.git=true 时）
 //
 // 工作流可在 workflow.yaml 声明：
 //   workspace:
 //     template: workspace_template   # 可选，相对于工作流目录
-// 如有 template，任务创建时自动 cp -r 到 workspace/。
+//     git: true                      # 启用 git worktree 模式（基于 codebase 临时分支）
+//     branch_prefix: "autopilot/"    # worktree 分支名前缀（默认 autopilot/）
+//     base: "main"                   # 派生 base 分支（默认 codebase.default_branch）
+// template 与 git 互斥：同时配置时 git 优先，template 忽略 + warn。
+// 非 git 仓库 codebase / 缺 codebase → warn 退化空目录，不阻塞任务启动。
 // ──────────────────────────────────────────────
 
 const TASK_ID_RE = /^[\w.\-]+$/;
+const WORKTREE_MANIFEST = ".worktree.json";
 
 export interface WorkspaceConfig {
   /** 模板目录名（相对于 workflow 目录），默认 undefined = 空 workspace */
   template?: string;
-  /** 保留给 W3：是否 git init。当前未实现。 */
+  /** 启用 git worktree 模式（基于 codebase 临时分支沙盒） */
   git?: boolean;
+  /** worktree 分支名前缀，默认 "autopilot/" */
+  branch_prefix?: string;
+  /** 派生 base 分支，默认 codebase.default_branch */
+  base?: string;
 }
+
+/** 创建 worktree 时传入的 codebase 信息（caller 反查后传入，workspace.ts 不依赖 codebases.ts） */
+export interface CodebaseRef {
+  id: string;
+  path: string;
+  default_branch: string;
+}
+
+/** task workspace 走 git worktree 时记录在 .worktree.json 的元数据 */
+export interface WorktreeMeta {
+  codebase_id: string;
+  codebase_path: string;
+  branch: string;
+  base: string;
+  created_at: number;
+}
+
 
 /**
  * 获取任务 workspace 的绝对路径（不保证存在）。
@@ -37,23 +64,43 @@ export function getTaskWorkspace(taskId: string): string {
 }
 
 /**
- * 确保 workspace 目录存在；若工作流声明了 template 且 workspace 为空则复制。
+ * 确保 workspace 目录存在；按 workspace.yaml 配置选择初始化方式：
+ *   - git=true + 提供 codebase 信息 → git worktree 模式（在 codebase 临时分支上工作）
+ *   - template=xxx → 拷贝模板目录
+ *   - 其余 → 空目录
+ *
  * 幂等：已存在非空 workspace 时不会覆盖用户数据。
+ * 退化策略：worktree 创建失败（codebase 非 git / 命令失败）→ warn + 空目录，不抛错。
  *
  * @param taskId 任务 ID
  * @param workflowName 工作流名（决定 template 查找路径）
  * @param workspaceConfig 工作流 workflow.yaml 里的 workspace 段（可选）
- * @returns workspace 绝对路径
+ * @param codebase git worktree 模式所需的 codebase 信息（caller 反查后传入；不传 + git=true 时退化）
+ * @returns workspace 绝对路径（无论 worktree 是否成功 — 失败会退化为空目录）。
+ *   worktree 元数据通过 getTaskWorktreeMeta(taskId) 单独读取。
  */
 export function ensureTaskWorkspace(
   taskId: string,
   workflowName: string,
   workspaceConfig?: WorkspaceConfig,
+  codebase?: CodebaseRef,
 ): string {
   const wsPath = getTaskWorkspace(taskId);
 
+  // 幂等：已存在非空 workspace 直接返回
   const alreadyPopulated = existsSync(wsPath) && readdirSync(wsPath).length > 0;
-  if (alreadyPopulated) {
+  if (alreadyPopulated) return wsPath;
+
+  // git worktree 模式优先（template 与 git 互斥，git=true 时忽略 template）
+  if (workspaceConfig?.git) {
+    if (workspaceConfig.template) {
+      log.warn("workspace.git=true 与 template=%s 互斥，忽略 template [task=%s]",
+        workspaceConfig.template, taskId);
+    }
+    const wt = tryCreateWorktree(taskId, workspaceConfig, codebase, wsPath);
+    if (wt) return wsPath;
+    // 退化：worktree 创建失败 → 空目录
+    if (!existsSync(wsPath)) mkdirSync(wsPath, { recursive: true });
     return wsPath;
   }
 
@@ -74,6 +121,136 @@ export function ensureTaskWorkspace(
   }
 
   return wsPath;
+}
+
+/** 读取 task 的 worktree 元数据（若 task 走 git worktree 模式且 .worktree.json 存在）。 */
+export function getTaskWorktreeMeta(taskId: string): WorktreeMeta | null {
+  return readWorktreeMeta(taskId);
+}
+
+/**
+ * 试图为 task 创建 git worktree。成功返回 WorktreeMeta，失败 warn + 返回 null（caller 退化空目录）。
+ *
+ * 步骤：
+ *   1. 校验 codebase 已传入且 codebase.path/.git 是 git 仓库
+ *   2. 计算 branch 名 ${branch_prefix}${taskId}，冲突附 -2 / -3 后缀（最多 10 次）
+ *   3. git -C <codebase.path> worktree add -b <branch> <wsPath> <base>
+ *   4. 写 .worktree.json 让删除路径自包含
+ */
+function tryCreateWorktree(
+  taskId: string,
+  cfg: WorkspaceConfig,
+  codebase: CodebaseRef | undefined,
+  wsPath: string,
+): WorktreeMeta | null {
+  if (!codebase) {
+    log.warn("workspace.git=true 但未提供 codebase（task.extra 无 codebase_id？）；退化空目录 [task=%s]", taskId);
+    return null;
+  }
+  if (!existsSync(join(codebase.path, ".git"))) {
+    log.warn("workspace.git=true 但 codebase %s 不是 git 仓库（%s/.git 不存在）；退化空目录 [task=%s]",
+      codebase.id, codebase.path, taskId);
+    return null;
+  }
+  const prefix = cfg.branch_prefix ?? "autopilot/";
+  const base = cfg.base ?? codebase.default_branch;
+
+  // 计算唯一 branch 名（防止与 codebase 现有分支冲突）
+  const branch = pickUniqueBranchName(codebase.path, prefix, taskId);
+
+  // worktree 目录的父目录要存在（mkdir wsPath 父级），但 wsPath 本身 git worktree add 会创建
+  const parent = join(wsPath, "..");
+  if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
+  // wsPath 必须不存在或为空，否则 git worktree add 会拒绝
+  if (existsSync(wsPath) && readdirSync(wsPath).length === 0) {
+    rmSync(wsPath, { recursive: true, force: true });
+  }
+
+  const argv = ["git", "-C", codebase.path, "worktree", "add", "-b", branch, wsPath, base];
+  const proc = Bun.spawnSync(argv, { stdout: "pipe", stderr: "pipe" });
+  if (proc.exitCode !== 0) {
+    const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+    log.warn("git worktree add 失败 [task=%s codebase=%s branch=%s base=%s exit=%d]: %s",
+      taskId, codebase.id, branch, base, proc.exitCode, stderr.slice(0, 300));
+    return null;
+  }
+
+  const meta: WorktreeMeta = {
+    codebase_id: codebase.id,
+    codebase_path: codebase.path,
+    branch,
+    base,
+    created_at: Date.now(),
+  };
+  writeWorktreeMeta(taskId, meta);
+  log.info("git worktree 创建 [task=%s codebase=%s branch=%s base=%s ws=%s]",
+    taskId, codebase.id, branch, base, wsPath);
+  return meta;
+}
+
+function pickUniqueBranchName(codebasePath: string, prefix: string, taskId: string): string {
+  const base = `${prefix}${taskId}`;
+  for (let i = 0; i < 10; i++) {
+    const candidate = i === 0 ? base : `${base}-${i + 1}`;
+    const proc = Bun.spawnSync(["git", "-C", codebasePath, "rev-parse", "--verify", "--quiet", `refs/heads/${candidate}`], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    // exitCode != 0 表示分支不存在 → 可以用
+    if (proc.exitCode !== 0) return candidate;
+  }
+  // 10 次都冲突时取一个带时间戳的（极端情况，几乎不会触发）
+  return `${base}-${Date.now()}`;
+}
+
+function worktreeMetaPath(taskId: string): string {
+  if (!TASK_ID_RE.test(taskId)) throw new Error(`非法 task ID：${taskId}`);
+  return join(AUTOPILOT_HOME, "runtime", "tasks", taskId, WORKTREE_MANIFEST);
+}
+
+function readWorktreeMeta(taskId: string): WorktreeMeta | null {
+  const p = worktreeMetaPath(taskId);
+  if (!existsSync(p)) return null;
+  try {
+    return JSON.parse(readFileSync(p, "utf8")) as WorktreeMeta;
+  } catch { return null; }
+}
+
+function writeWorktreeMeta(taskId: string, meta: WorktreeMeta): void {
+  const p = worktreeMetaPath(taskId);
+  mkdirSync(join(p, ".."), { recursive: true });
+  writeFileSync(p, JSON.stringify(meta, null, 2));
+}
+
+/**
+ * 移除任务的 git worktree（清掉 .worktree.json）。
+ *
+ * 调用 `git worktree remove --force <wsPath>`，无视未提交修改（spec §3.4：超过保留期还没提交就是垃圾）。
+ * 若 .worktree.json 不存在（task 未走 worktree 模式）→ no-op 返回 false。
+ *
+ * @returns true 若执行了 git worktree remove；false 若 task 未走 worktree 或元数据缺失
+ */
+export function removeTaskWorktree(taskId: string): boolean {
+  const meta = readWorktreeMeta(taskId);
+  if (!meta) return false;
+  const wsPath = getTaskWorkspace(taskId);
+
+  const proc = Bun.spawnSync(
+    ["git", "-C", meta.codebase_path, "worktree", "remove", "--force", wsPath],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (proc.exitCode !== 0) {
+    const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+    // 常见失败：worktree 已不存在 / 路径不在 codebase 里。仍然清掉 .worktree.json 让上游继续 rmSync。
+    log.warn("git worktree remove 失败（继续清理元数据）[task=%s ws=%s exit=%d]: %s",
+      taskId, wsPath, proc.exitCode, stderr.slice(0, 300));
+  } else {
+    log.info("git worktree 移除 [task=%s codebase=%s branch=%s]", taskId, meta.codebase_id, meta.branch);
+  }
+
+  // 清元数据文件（无论 git worktree remove 是否成功）
+  try { rmSync(worktreeMetaPath(taskId), { force: true }); } catch { /* ignore */ }
+  return proc.exitCode === 0;
 }
 
 /**
@@ -232,23 +409,31 @@ function dirSizeBytes(dir: string): number {
 
 /**
  * 删除任务 workspace 目录。返回是否真的删除过。
+ * 若 task 走的是 git worktree，先调 git worktree remove --force 让 codebase 干净，再 rmSync 兜底。
  * logs / agent-calls.jsonl 等元数据不受影响（保留在 runtime/tasks/<id>/ 顶层）。
  */
 export function deleteTaskWorkspace(taskId: string): boolean {
+  // 先尝试 worktree 移除（若是 worktree task；非 worktree 直接 no-op 返回 false）
+  // worktree 模式下 git worktree remove 会同步删 ws 目录，无需再 rmSync。
+  const removedWorktree = removeTaskWorktree(taskId);
   const ws = getTaskWorkspace(taskId);
-  if (!existsSync(ws)) return false;
-  rmSync(ws, { recursive: true, force: true });
-  return true;
+  if (existsSync(ws)) {
+    rmSync(ws, { recursive: true, force: true });
+    return true;
+  }
+  return removedWorktree;
 }
 
 /**
  * 彻底删除任务运行时目录（`runtime/tasks/<task-id>/` 全部内容，包括 workspace、
  * logs、events、agent-calls、task-manifest.json）。用于"删除任务"路径。
+ * 若 task 走 worktree，先清 worktree 让 codebase 干净。
  */
 export function deleteTaskRuntimeDir(taskId: string): boolean {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
   }
+  removeTaskWorktree(taskId);
   const dir = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
   if (!existsSync(dir)) return false;
   rmSync(dir, { recursive: true, force: true });
@@ -313,6 +498,12 @@ export function applyRetentionPolicy(
   const doRemove = (u: TaskWorkspaceUsage) => {
     const ws = join(tasksRoot, u.taskId, "workspace");
     if (!existsSync(ws)) return;
+    // 若是 worktree task，先 git worktree remove --force 让 codebase 干净（spec §3.4：
+    // 超过保留期还没提交就是垃圾，直接 force 干掉）。测试场景 tasksRoot 是 tmpdir 时
+    // .worktree.json 不存在，removeTaskWorktree 是 no-op，不影响。
+    if (tasksRoot === join(AUTOPILOT_HOME, "runtime", "tasks")) {
+      try { removeTaskWorktree(u.taskId); } catch { /* ignore */ }
+    }
     try {
       rmSync(ws, { recursive: true, force: true });
       removed.push(u.taskId);
