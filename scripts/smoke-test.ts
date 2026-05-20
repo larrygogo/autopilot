@@ -204,6 +204,32 @@ async function main(): Promise<void> {
   assertContains(wfListR.stdout, "dev", "workflow list 含 dev（init 装的默认 workflow）");
 
   // ────────────────────────────────────────────────
+  step("init 装入 ad-hoc workflow 模板（Phase 4 spec §3.7）");
+  // ────────────────────────────────────────────────
+  // workflow list 走的是 daemon RPC（smoke-test 不跑 daemon，命令实际打到用户已有 daemon，
+  // 拿不到 tmpHome 数据），所以直接检查 tmpHome 目录。
+  const adHocDir = join(tmpHome, "workflows", "ad-hoc");
+  if (!existsSync(adHocDir)) {
+    console.error(`  ✗ tmpHome 下缺 ad-hoc workflow：${adHocDir}`);
+    cleanup();
+    process.exit(1);
+  }
+  if (!existsSync(join(adHocDir, "workflow.yaml"))) {
+    console.error(`  ✗ ad-hoc 工作流缺 workflow.yaml`);
+    cleanup();
+    process.exit(1);
+  }
+  console.log(`  ✓ ad-hoc workflow 装入 ${adHocDir}`);
+
+  // ────────────────────────────────────────────────
+  step("autopilot run --help —— ad-hoc 命令完整（Phase 4 spec §3.7）");
+  // ────────────────────────────────────────────────
+  const runHelpR = runCli(["run", "--help"]);
+  for (const opt of ["--codebase", "--workflow", "--no-follow"]) {
+    assertContains(runHelpR.stdout, opt, `run ${opt} 选项注册`);
+  }
+
+  // ────────────────────────────────────────────────
   step("autopilot daemon status —— daemon 未启时优雅提示");
   // ────────────────────────────────────────────────
   const dStatusR = runCli(["daemon", "status"]);

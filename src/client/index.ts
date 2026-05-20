@@ -32,6 +32,7 @@ export class AutopilotClient {
   get listTasks() { return this.http.listTasks.bind(this.http); }
   get getTask() { return this.http.getTask.bind(this.http); }
   get startTask() { return this.http.startTask.bind(this.http); }
+  get startAdHocTask() { return this.http.startAdHocTask.bind(this.http); }
   get cancelTask() { return this.http.cancelTask.bind(this.http); }
   get getTaskLogs() { return this.http.getTaskLogs.bind(this.http); }
   get getSubTasks() { return this.http.getSubTasks.bind(this.http); }

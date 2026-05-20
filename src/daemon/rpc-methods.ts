@@ -497,6 +497,40 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
+    method: "tasks.startAdHoc",
+    description: "一句话发包：跳过 project / requirement / workflow 选择，直接跑 ad-hoc workflow（spec §3.7）",
+    handler: async (params) => {
+      const p = asObj(params);
+      const prompt = typeof p.prompt === "string" ? p.prompt.trim() : "";
+      if (!prompt) throw new RpcError("INVALID_PARAM", "需要 prompt");
+      const workflow = typeof p.workflow === "string" && p.workflow.trim() ? p.workflow.trim() : "ad-hoc";
+      const opts: Parameters<typeof startTaskFromTemplate>[0] = {
+        workflow,
+        // ad-hoc 工作流通过 prompt-runner 的 ${REQUIREMENT} 占位读 requirement
+        requirement: prompt,
+        // 取 prompt 第一行（不超 60 字）当 task title 方便 UI 显示
+        title: prompt.split("\n")[0].slice(0, 60),
+      };
+      // 可选 codebase 透传：让 workspace.git=true 时能起 git worktree
+      // alias 在此 handler 解析为 codebase_id（startTaskFromTemplate 不解析 alias）
+      if (typeof p.codebase_id === "string" && p.codebase_id.trim()) {
+        (opts as Record<string, unknown>).codebase_id = p.codebase_id.trim();
+      } else if (typeof p.codebase_alias === "string" && p.codebase_alias.trim()) {
+        const alias = p.codebase_alias.trim();
+        const codebases = await import("../core/codebases");
+        const cb = codebases.listCodebases({ includeSubmodules: true }).find(c => c.alias === alias);
+        if (!cb) throw new RpcError("NOT_FOUND", `找不到别名为 "${alias}" 的 codebase`);
+        (opts as Record<string, unknown>).codebase_id = cb.id;
+      }
+      try {
+        return await startTaskFromTemplate(opts);
+      } catch (e: unknown) {
+        rethrowAsRpc(e);
+      }
+    },
+  });
+
+  registerRpcMethod({
     method: "tasks.cancel",
     description: "取消任务（非终态才允许）",
     handler: (params) => {

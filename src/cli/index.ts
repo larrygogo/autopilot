@@ -654,6 +654,68 @@ task
   });
 
 // ──────────────────────────────────────────────
+// run — 一句话发包（spec §3.7 ad-hoc 入口）
+// ──────────────────────────────────────────────
+
+program
+  .command("run <prompt>")
+  .description("一句话发包：跳过项目/需求/工作流选择，直接跑 ad-hoc 工作流")
+  .option("-c, --codebase <alias>", "绑定 codebase 别名（启用 git worktree 模式）")
+  .option("-w, --workflow <name>", "覆盖默认 ad-hoc workflow")
+  .option("--no-follow", "不跟踪实时日志，仅返回 task id")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (prompt: string, opts: { codebase?: string; workflow?: string; follow?: boolean; port: string }) => {
+    const client = getClient(opts);
+    await ensureDaemon(client);
+
+    let task;
+    try {
+      task = await client.startAdHocTask({
+        prompt,
+        codebase_alias: opts.codebase,
+        workflow: opts.workflow,
+      });
+    } catch (e: unknown) {
+      console.error(`启动失败：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(2);
+    }
+
+    console.log(`任务已创建 [id=${task.id} workflow=${task.workflow} status=${task.status}]`);
+
+    // 默认跟随实时日志（--no-follow 跳过）
+    if (opts.follow === false) {
+      console.log(`查看日志：autopilot task logs ${task.id} --follow`);
+      return;
+    }
+
+    client.connect();
+    client.onStateChange((state) => {
+      if (state === "disconnected") console.error("[WS] daemon 失联，重连中…");
+    });
+    client.subscribe(`log:${task.id}`, (event) => {
+      if (event.type === "log:entry") console.log(event.payload.message);
+    });
+    let finalStatus: string | null = null;
+    client.subscribe(`task:${task.id}`, (event) => {
+      if (event.type === "task:transition") {
+        const to = event.payload.to;
+        console.log(`[状态] ${event.payload.from} → ${to} (${event.payload.trigger})`);
+        if (to === "done") finalStatus = "done";
+        else if (to === "failed" || to === "cancelled") finalStatus = to;
+      }
+    });
+
+    // 轮询：终态时退出
+    const exitCode = await new Promise<number>((resolve) => {
+      const timer = setInterval(() => {
+        if (finalStatus === "done") { clearInterval(timer); resolve(0); }
+        else if (finalStatus === "failed" || finalStatus === "cancelled") { clearInterval(timer); resolve(1); }
+      }, 500);
+    });
+    process.exit(exitCode);
+  });
+
+// ──────────────────────────────────────────────
 // workflow — 工作流管理（list / show / create / edit / delete / export / import）
 // ──────────────────────────────────────────────
 
@@ -1046,6 +1108,20 @@ program
       }
     } else {
       console.log(`dev workflow 已存在，保留：${devWorkflowDir}`);
+    }
+
+    // Phase 4：装 ad-hoc workflow，让 `autopilot run "<prompt>"` 开箱即用
+    const adHocWorkflowDir = join(AUTOPILOT_HOME, "workflows", "ad-hoc");
+    if (!existsSync(adHocWorkflowDir)) {
+      try {
+        const { cloneTemplate } = await import("../core/workflow-templates");
+        cloneTemplate("ad-hoc", "ad-hoc");
+        console.log(`已装入 ad-hoc 工作流：${adHocWorkflowDir}`);
+      } catch (e: unknown) {
+        console.warn(`装 ad-hoc workflow 失败（不阻塞 init）：${e instanceof Error ? e.message : String(e)}`);
+      }
+    } else {
+      console.log(`ad-hoc workflow 已存在，保留：${adHocWorkflowDir}`);
     }
 
     console.log("\n初始化完成。下一步（三选一）：");

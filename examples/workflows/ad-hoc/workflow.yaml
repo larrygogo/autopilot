@@ -1,0 +1,20 @@
+name: ad-hoc
+label: "即兴任务"
+description: "一句话发包：跳过项目/需求，直接跑一个 agent prompt。autopilot run \"<prompt>\" 的默认 workflow。"
+
+# 零代码工作流。只有一个 phase，框架内置 prompt-runner 自动调 agent.run(prompt)。
+# workspace 模式：
+#   - 若 caller 传了 codebase_id（autopilot run -c <alias>）→ 在该 codebase 上起 git worktree
+#   - 否则退化空目录（适合不依赖现有代码的生成任务：写文档、生成脚本、实验）
+# 这是 spec §3.7 + §10「已决议」的两档心智。
+
+workspace:
+  git: true   # caller 传 codebase 时启用 worktree；不传则 ensureTaskWorkspace 自动退化空目录
+
+phases:
+  - name: run
+    label: "执行"
+    agent: coder
+    timeout: 1800
+    prompt: |
+      ${REQUIREMENT}

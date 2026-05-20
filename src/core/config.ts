@@ -66,6 +66,48 @@ export function saveDefaultsConfig(cfg: DefaultsConfig): void {
 }
 
 // ──────────────────────────────────────────────
+// notify driver 配置（config.yaml notify.drivers[]）
+// ──────────────────────────────────────────────
+
+export interface NotifyDriverConfigEntry {
+  type: string;
+  on_events?: string[];
+  [key: string]: unknown;
+}
+
+/**
+ * 读取 config.yaml 的 notify.drivers 段。返回 driver 配置数组；段缺失/非法时返回 []。
+ * 任意 entry 缺 type 字段 → 跳过该 entry + warn。
+ */
+export function loadNotifyDrivers(): NotifyDriverConfigEntry[] {
+  try {
+    const raw = loadConfig();
+    const section = raw["notify"];
+    if (!section || typeof section !== "object" || Array.isArray(section)) return [];
+    const drivers = (section as Record<string, unknown>)["drivers"];
+    if (!Array.isArray(drivers)) return [];
+    const out: NotifyDriverConfigEntry[] = [];
+    for (const d of drivers) {
+      if (!d || typeof d !== "object" || Array.isArray(d)) continue;
+      const obj = d as Record<string, unknown>;
+      if (typeof obj.type !== "string" || !obj.type.trim()) continue;
+      const entry: NotifyDriverConfigEntry = { type: obj.type.trim() };
+      if (Array.isArray(obj.on_events)) {
+        entry.on_events = obj.on_events.filter((e): e is string => typeof e === "string");
+      }
+      // 透传其他字段（如 slack-webhook 的 url）
+      for (const [k, v] of Object.entries(obj)) {
+        if (k !== "type" && k !== "on_events") entry[k] = v;
+      }
+      out.push(entry);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+// ──────────────────────────────────────────────
 // daemon 监听配置
 // ──────────────────────────────────────────────
 

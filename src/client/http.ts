@@ -101,6 +101,19 @@ export class HttpClient {
     return this.call("tasks.start", opts, { timeoutMs: 300_000 });
   }
 
+  /**
+   * 一句话发包：跳过项目/需求/工作流选择，直接跑 ad-hoc 工作流。
+   * 接 codebase_id 或 codebase_alias 任一（daemon 端解析）；workflow 默认 "ad-hoc"。
+   */
+  async startAdHocTask(opts: {
+    prompt: string;
+    codebase_id?: string;
+    codebase_alias?: string;
+    workflow?: string;
+  }): Promise<Task> {
+    return this.call("tasks.startAdHoc", opts, { timeoutMs: 300_000 });
+  }
+
   async cancelTask(id: string): Promise<{ from: string; to: string }> {
     return this.call("tasks.cancel", { id });
   }
