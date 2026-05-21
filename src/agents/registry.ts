@@ -5,8 +5,31 @@ import { AnthropicProvider } from "./providers/anthropic";
 import { OpenAIProvider } from "./providers/openai";
 import { GoogleProvider } from "./providers/google";
 import { getWorkflow } from "../core/registry";
-import { loadGlobalAgents, loadProviders, loadConversationConfig, type ProviderConfig } from "../core/config";
+import { loadGlobalAgents, loadProviders, loadConversationConfig, loadAgentAliases, type ProviderConfig } from "../core/config";
 import { AGENT_DEFAULTS } from "../core/agent-defaults";
+
+/**
+ * 解析 agent 别名（spec §3.11.1）。
+ *
+ * 规则：
+ *   - alias 不在表里 → 返回原名
+ *   - 命中 → 返回 target；若 target 又是 alias key，**抛错拒绝链式**（只允许一跳）
+ *   - 调用方应在 workflow.agents[] 同名查询失败后才走 alias，让 workflow 覆盖优先
+ */
+export function resolveAliasTarget(
+  agentName: string,
+  aliases: Record<string, string> = loadAgentAliases(),
+): string {
+  if (!(agentName in aliases)) return agentName;
+  const target = aliases[agentName];
+  if (target in aliases) {
+    throw new Error(
+      `agent alias 链式跳转禁止：${agentName} → ${target} → ${aliases[target]}。` +
+      `请在 config.yaml agent_aliases 改为直接指向最终 target（只允许一跳）`,
+    );
+  }
+  return target;
+}
 
 /**
  * 加载"生效"的全局 agents：内置默认 + 用户 yaml override。
@@ -41,12 +64,17 @@ const _cache = new Map<string, Agent>();
 /**
  * 将全局 agent 基底与工作流覆盖做浅合并（后者优先）。
  * 返回完整 AgentConfig；若缺 provider 或字段不合法则抛错。
+ *
+ * Phase 7（spec §3.11.1）：若 baseKey 不在 globalAgents 中，且 workflowAgent 也没提供
+ * provider，则查 agent_aliases —— alias 命中 target 时用 target 的 base，但 merged.name
+ * 保留原 agentName（UI/日志显示用户视角的 role）。
  */
 export function resolveAgentConfig(
   agentName: string,
   workflowAgent: Partial<AgentConfig> | undefined,
   globalAgents: Record<string, Record<string, unknown>> = loadEffectiveGlobalAgents(),
   providers: Record<string, ProviderConfig> = loadProviders(),
+  aliases: Record<string, string> = loadAgentAliases(),
 ): AgentConfig {
   // 确定继承的全局 key：workflow 显式写 extends 则用它；
   // extends === null/false 则跳过继承；未写则默认继承同名。
@@ -56,7 +84,17 @@ export function resolveAgentConfig(
     if (ext === null || ext === false) baseKey = null;
     else if (typeof ext === "string" && ext.length > 0) baseKey = ext;
   }
-  const base = baseKey ? (globalAgents[baseKey] ?? {}) : {};
+
+  let base: Record<string, unknown> = baseKey ? (globalAgents[baseKey] ?? {}) : {};
+
+  // Phase 7: alias fallback —— workflow 没有覆盖该 agent 且 globalAgents 里没找到 baseKey 时
+  // 尝试查 agent_aliases。命中 → 用 alias target 的 base，但 name 保留 agentName
+  if (baseKey && Object.keys(base).length === 0 && !workflowAgent) {
+    const aliasTarget = resolveAliasTarget(baseKey, aliases);
+    if (aliasTarget !== baseKey && globalAgents[aliasTarget]) {
+      base = globalAgents[aliasTarget];
+    }
+  }
 
   // 浅合并：base < workflow override
   const merged: Record<string, unknown> = { ...base, ...(workflowAgent ?? {}) };
@@ -142,14 +180,19 @@ export function getAgent(agentName: string, workflowName: string): Agent {
 
   const globalAgents = loadEffectiveGlobalAgents();
   const providers = loadProviders();
+  const aliases = loadAgentAliases();
   const workflowAgents = (wf.agents as Partial<AgentConfig>[] | undefined) ?? [];
   const workflowAgent = workflowAgents.find((a) => a?.name === agentName);
 
+  // Phase 7: workflow 没有覆盖 + 全局也没有同名 → 查 alias
   if (!workflowAgent && !globalAgents[agentName]) {
-    throw new Error(`找不到 agent "${agentName}"：工作流 ${workflowName} 未定义，全局 config.yaml 中也没有同名条目`);
+    const aliasTarget = resolveAliasTarget(agentName, aliases);
+    if (aliasTarget === agentName || !globalAgents[aliasTarget]) {
+      throw new Error(`找不到 agent "${agentName}"：工作流 ${workflowName} 未定义，全局 config.yaml 中也没有同名条目${aliasTarget !== agentName ? `（agent_aliases 指向 "${aliasTarget}" 也未在全局定义）` : ""}`);
+    }
   }
 
-  const resolved = resolveAgentConfig(agentName, workflowAgent, globalAgents, providers);
+  const resolved = resolveAgentConfig(agentName, workflowAgent, globalAgents, providers, aliases);
   const agent = createAgent(resolved);
   _cache.set(cacheKey, agent);
   return agent;

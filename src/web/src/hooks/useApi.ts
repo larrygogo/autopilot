@@ -849,6 +849,8 @@ export interface AgentItem {
   system_prompt?: string;
   extends?: string | null;
   used_by?: string[];
+  /** Phase 7（spec §3.11.1）：若该名称是 alias，target 名供 UI 显示 badge */
+  alias_of?: string;
   [key: string]: unknown;
 }
 

@@ -66,6 +66,36 @@ export function saveDefaultsConfig(cfg: DefaultsConfig): void {
 }
 
 // ──────────────────────────────────────────────
+// agent 别名（config.yaml agent_aliases，spec §3.11）
+// ──────────────────────────────────────────────
+
+/**
+ * 读取 config.yaml 的 agent_aliases 段。返回 alias → target 映射；段缺失/非法时返回 {}。
+ *
+ * yaml 示例：
+ *   agent_aliases:
+ *     code-reviewer: reviewer
+ *     harsh-critic: reviewer
+ *     planner: architect
+ *
+ * 非字符串 value 的 entry 静默跳过。
+ */
+export function loadAgentAliases(): Record<string, string> {
+  try {
+    const raw = loadConfig();
+    const section = raw["agent_aliases"];
+    if (!section || typeof section !== "object" || Array.isArray(section)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(section as Record<string, unknown>)) {
+      if (typeof v === "string" && v.trim()) out[k] = v.trim();
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// ──────────────────────────────────────────────
 // notify driver 配置（config.yaml notify.drivers[]）
 // ──────────────────────────────────────────────
 

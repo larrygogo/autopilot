@@ -587,6 +587,36 @@ phases:
 
 ---
 
+## Agent 别名（config.yaml `agent_aliases`）
+
+跨 workflow 复用同一全局 agent 但想用不同命名时，不必在每个 workflow.yaml 的 `agents[]` 里复制粘贴（spec §3.11.1）。在全局 `config.yaml` 写：
+
+```yaml
+agent_aliases:
+  code-reviewer: reviewer
+  harsh-critic: reviewer
+  planner: architect
+```
+
+含义：workflow.yaml 写 `agent: code-reviewer` 时，runtime 等价于 `agent: reviewer`。
+
+**优先级**：
+
+1. **workflow.agents[] 同名**（最高）— workflow.yaml 里 `agents: [{ name: code-reviewer, ... }]` → 用这个，alias 不生效
+2. **globalAgents 同名** — config.yaml `agents.code-reviewer` 存在 → 用这个
+3. **alias 命中** — 都没有，且 `agent_aliases.code-reviewer = reviewer` → 用 reviewer 的全局配置作 base，**merged.name 仍是 code-reviewer**（UI/日志显示用户视角的 role）
+4. 都没有 → 抛错
+
+**限制**：
+
+- **只允许一跳**：`a → b → c` 链式跳转直接 throw，让用户在 config.yaml 改为直接指向最终 target。
+- **不引入 tier**：autopilot 不抄 OMC 的 HIGH/MEDIUM/LOW tier 抽象（spec §10.X 决策记录）。直接写 `model:` 或留空靠 `providers.<name>.default_model` 跟随升级。
+- **不引入 provider fallback chain**：CLI 不可用直接 fail loudly（spec §10.X 决策记录），不静默切到另一家 provider。
+
+**与 web UI**：`agents.list` RPC 把 alias 作为虚拟 entry 一并返回，response 含 `alias_of: <target>` 字段，UI 可显示 badge 标识"这是别名"。
+
+---
+
 ## 相关文档
 
 | 文档 | 说明 |

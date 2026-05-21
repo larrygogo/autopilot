@@ -294,15 +294,30 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "agents.list",
-    description: "全局 agents 列表 + 各 agent 被哪些工作流引用",
+    description: "全局 agents 列表 + 各 agent 被哪些工作流引用；alias 单独作为 entry 加入，alias_of 指向 target",
     handler: () => {
       const agents = loadGlobalAgents();
-      const usage = computeAgentUsage(Object.keys(agents));
-      return Object.entries(agents).map(([name, cfg]) => ({
-        name,
-        ...cfg,
-        used_by: usage[name] ?? [],
-      }));
+      const { loadAgentAliases } = require("../core/config") as typeof import("../core/config");
+      const aliases = loadAgentAliases();
+      const allNames = Array.from(new Set([...Object.keys(agents), ...Object.keys(aliases)]));
+      const usage = computeAgentUsage(allNames);
+      const out: Array<Record<string, unknown>> = [];
+      // 真实 agent
+      for (const [name, cfg] of Object.entries(agents)) {
+        out.push({ name, ...cfg, used_by: usage[name] ?? [] });
+      }
+      // alias 作为虚拟 entry（UI 能看到、能引用）
+      for (const [aliasName, target] of Object.entries(aliases)) {
+        if (aliasName in agents) continue; // 真实同名优先
+        const targetCfg = agents[target] ?? {};
+        out.push({
+          name: aliasName,
+          ...targetCfg,
+          alias_of: target,
+          used_by: usage[aliasName] ?? [],
+        });
+      }
+      return out;
     },
   });
 
