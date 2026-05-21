@@ -39,6 +39,14 @@ export interface PhaseDefinition {
   gate?: boolean;
   /** 等待界面的提示文案；默认 "请审阅产物后决定" */
   gate_message?: string;
+  /**
+   * Phase 6: 是否启用 handoff 协议（spec §3.10）。
+   * true 时 prompt-runner 在 prompt 末尾追加 4 段指令（Decided/Files/Risks/Remaining），
+   * 跑完后解析 agent_output.md 抽出 4 段写 handoff.md；
+   * 下游 phase 通过 ${HANDOFF} 占位符拿到拼接的 handoff 链。
+   * 仅对纯 yaml prompt phase 生效（ts phase 已有完全控制权，不强加）。
+   */
+  handoff?: boolean;
   [key: string]: unknown;
 }
 

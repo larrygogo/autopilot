@@ -545,6 +545,48 @@ workspace:
 
 ---
 
+## Prompt phase handoff 协议（workflow.yaml `phases[].handoff`）
+
+**仅对纯 yaml prompt phase 生效**（ts phase 已有完全控制权，不强加 4 段格式）。详见 spec §3.10。
+
+启用：
+```yaml
+phases:
+  - name: draft
+    agent: writer
+    handoff: true    # 跑完后解析 agent_output.md 抽出 4 段写 handoff.md
+    prompt: |
+      ${REQUIREMENT}
+  - name: polish
+    handoff: true
+    prompt: |
+      请基于上一阶段决策润色：
+      ${HANDOFF}     # 内置占位符：拼接所有前序 phase 的 handoff.md
+```
+
+**handoff: true 的运行时行为**：
+
+1. prompt 末尾**自动追加** 4 段输出指令（中文，固定格式），不需要在 yaml 里重复写：
+   ```
+   ## Handoff（必填，给下一阶段读）
+
+   在 agent_output.md 末尾输出以下 4 段，每段非空（无内容写「无」），用 markdown 二级标题分隔：
+   - ## Decided    做了什么决定（关键选择 + 理由）
+   - ## Files      关键文件路径（绝对 / 相对皆可）
+   - ## Risks      给下一阶段的风险与注意点
+   - ## Remaining  本阶段未完成 / 留给后续的事
+   ```
+2. 阶段函数跑完后，**逐段独立解析** `agent_output.md` 中 4 段（缺一段不影响其他段），写到同目录 `handoff.md`。
+3. 缺段时写**占位**「无（agent 未输出）」+ emit `phase:handoff-incomplete` 事件 + 写 task_logs WARN，**继续 transition**（不阻塞）。
+
+**占位符**：
+- `${HANDOFF}` — 拼接所有**前序** phase 的 handoff.md（按顺序，每段加 `## <phase label>` 标题）；上游全无时填降级提示。
+- `${HANDOFF_<PHASE_NAME>}` — 单独取某个 phase 的 handoff（大写转换：`${HANDOFF_DRAFT}` 取 `draft` phase）。
+
+**为什么 ts phase 不强制 handoff**：ts phase 已有 readFileSync 任意文件的完整控制权（dev workflow 的 plan.md / dev_report.md 是结构化报告，不该被压扁成 4 段）。零代码 yaml prompt phase 才需要协议约束。
+
+---
+
 ## 相关文档
 
 | 文档 | 说明 |

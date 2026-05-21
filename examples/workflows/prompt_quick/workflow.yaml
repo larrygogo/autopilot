@@ -22,6 +22,7 @@ phases:
     label: "撰稿"
     agent: writer
     timeout: 600
+    handoff: true   # 启用 handoff 协议（spec §3.10）：跑完写 handoff.md，让 polish 阶段拿到 ${HANDOFF}
     prompt: |
       你是一位专业写作助手。请根据下面的需求撰写一篇 800-1200 字的文章。
 
@@ -40,8 +41,12 @@ phases:
     label: "润色"
     agent: critic
     timeout: 600
+    handoff: true   # polish 也写 handoff，给可能的后续阶段用
     prompt: |
       你是一位审稿员。请阅读 ${WORKSPACE}/draft.md，对它进行修改改进。
+
+      ## 上一阶段的决策与遗留事项
+      ${HANDOFF}
 
       重点：
       - 检查逻辑连贯性

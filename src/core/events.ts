@@ -56,6 +56,8 @@ export type AutopilotEvent =
   | { type: "task:prompt-queued"; payload: { id: string; source: string; queued_at: number } }
   | { type: "task:prompt-answered"; payload: { id: string; source: string } }
   | { type: "phase:pending-prompts-unconsumed"; payload: { taskId: string; phase: string; count: number; preview: string[] } }
+  // Phase 6 — prompt phase handoff 协议（spec §3.10）
+  | { type: "phase:handoff-incomplete"; payload: { taskId: string; phase: string; missing: string[] } }
   // /now 推送事件
   | { type: "now:card_added"; payload: { card: NowCard } }
   | { type: "now:card_updated"; payload: { id: string; patch: Partial<NowCard> } }
