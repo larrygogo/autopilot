@@ -18,6 +18,7 @@ import { runInBackground } from "@autopilot/core/runner";
 import { getAgent } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 import { getTaskWorkspace } from "@autopilot/core/workspace";
+import { notify } from "@autopilot/core/notify";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
 const REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT";
@@ -188,9 +189,18 @@ export async function run_review(taskId: string): Promise<void> {
     const reviewPhase = wf?.phases.find(
       (p) => !("parallel" in p) && (p as { name: string }).name === "review"
     ) as { max_rejections?: number } | undefined;
-    const maxRejections = reviewPhase?.max_rejections ?? 10;
+    const maxRejections = reviewPhase?.max_rejections ?? 3;
 
     if (newCount >= maxRejections) {
+      // spec §10.X follow-up：触顶时 surface 给用户（notify driver 推系统通知，
+      // 让用户知道 task 是因 reject 触顶被 cancel，而不是悄悄消失）
+      try {
+        await notify(
+          task,
+          `方案评审反复驳回 ${newCount} 次（≥ ${maxRejections}），任务被取消。最近一次理由：${reason.slice(0, 200)}`,
+          "task-failed",
+        );
+      } catch { /* notify 失败不阻塞 cancel */ }
       transition(taskId, "cancel", {
         transitions,
         note: `方案评审驳回 ${newCount} 次，已取消`,
@@ -365,9 +375,17 @@ export async function run_code_review(taskId: string): Promise<void> {
     const codeReviewPhase = wf?.phases.find(
       (p) => !("parallel" in p) && (p as { name: string }).name === "code_review"
     ) as { max_rejections?: number } | undefined;
-    const maxRejections = codeReviewPhase?.max_rejections ?? 10;
+    const maxRejections = codeReviewPhase?.max_rejections ?? 3;
 
     if (newCount >= maxRejections) {
+      // spec §10.X follow-up：触顶时 surface 给用户
+      try {
+        await notify(
+          task,
+          `代码审查反复驳回 ${newCount} 次（≥ ${maxRejections}），任务被取消。最近一次理由：${reason.slice(0, 200)}`,
+          "task-failed",
+        );
+      } catch { /* notify 失败不阻塞 cancel */ }
       transition(taskId, "cancel", {
         transitions,
         note: `代码审查驳回 ${newCount} 次，已取消`,
