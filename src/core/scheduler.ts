@@ -6,6 +6,9 @@ import {
   type Schedule,
 } from "./schedules";
 import { startTaskFromTemplate } from "./task-factory";
+import { sendPromptToTask } from "./task-send-prompt";
+import { getTask } from "./db";
+import { appendTaskEvent } from "./task-logs";
 
 /**
  * 扫描并触发所有到期的 schedule。由 daemon 定时调用。
@@ -23,6 +26,48 @@ export async function runScheduledTasks(): Promise<void> {
 
 async function fireSchedule(sch: Schedule): Promise<void> {
   try {
+    // Phase 5: send_prompt 模式 — 对已有 task 追加 prompt（spec §3.6）
+    if (sch.mode === "send_prompt") {
+      if (!sch.target_task_id || !sch.prompt) {
+        log.warn("schedule %s mode=send_prompt 但缺 target_task_id/prompt，跳过", sch.id);
+        markScheduleFired(sch.id, sch.last_task_id ?? "", null, true);
+        return;
+      }
+      const targetTask = getTask(sch.target_task_id);
+      if (!targetTask) {
+        log.warn("schedule %s 目标 task %s 不存在，disable", sch.id, sch.target_task_id);
+        markScheduleFired(sch.id, sch.last_task_id ?? "", null, true);
+        return;
+      }
+
+      const result = sendPromptToTask(sch.target_task_id, sch.prompt, { source: "schedule" });
+      if (!result.accepted) {
+        // 目标终态等情况：disable schedule + 写 task log 解释
+        log.warn(
+          "schedule %s 注入失败 task=%s reason=%s，disable",
+          sch.id, sch.target_task_id, result.reason ?? "?",
+        );
+        try {
+          appendTaskEvent(sch.target_task_id, {
+            type: "scheduled-prompt-skipped",
+            scheduleId: sch.id,
+            reason: result.reason ?? "rejected",
+          });
+        } catch { /* best-effort */ }
+        markScheduleFired(sch.id, sch.target_task_id, null, true);
+        return;
+      }
+
+      const { nextRunAt, disable } = computeNextState(sch);
+      markScheduleFired(sch.id, sch.target_task_id, nextRunAt, disable);
+      log.info(
+        "schedule %s send_prompt → task %s（mode=%s, next_run_at=%s, disable=%s）",
+        sch.id, sch.target_task_id, result.mode, nextRunAt ?? "—", String(disable),
+      );
+      return;
+    }
+
+    // mode=start_task：原行为
     const task = await startTaskFromTemplate({
       workflow: sch.workflow,
       title: sch.title,

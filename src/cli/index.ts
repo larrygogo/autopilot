@@ -562,6 +562,22 @@ task
   });
 
 task
+  .command("send-prompt <task-id> <prompt>")
+  .description("运行中 task 追加 prompt（spec §3.8：running→排队 / awaiting→answerPending / 终态拒绝）")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (taskId: string, prompt: string, opts: { port: string }) => {
+    const client = getClient(opts);
+    await ensureDaemon(client);
+    try {
+      const r = await client.sendTaskPrompt(taskId, prompt);
+      console.log(`prompt 已${r.mode === "queued" ? "排队" : "投递"} [task=${taskId} mode=${r.mode}]`);
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+task
   .command("rebuild-index")
   .description("从磁盘上的 task-manifest.json 重建 SQLite 索引（要求 daemon 停止）")
   .action(async () => {

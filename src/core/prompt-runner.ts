@@ -24,8 +24,12 @@ import { getTaskWorkspace } from "./workspace";
 import { getPhaseIndex } from "./artifacts";
 import { getWorkflow, type PhaseDefinition } from "./registry";
 import { createLogger } from "./logger";
+import { consumePendingPrompts } from "./task-send-prompt";
 
 const log = createLogger("prompt-runner");
+
+/** 同一 phase 内 pending_prompts 消费循环上限（防意外死循环 / 用户疯狂排队） */
+const MAX_PROMPT_TURNS = 10;
 
 /**
  * 把 prompt 里的占位符替换为 task 上下文实际值。
@@ -103,26 +107,60 @@ export function makePromptRunner(
       taskId, phaseName, agentName, resolved.length,
     );
 
-    const result = await agent.run(resolved, {
-      cwd: getTaskWorkspace(taskId),
-      timeout: (options.timeoutSec ?? 900) * 1000,
-    });
-
-    // 输出落到 workspace/<NN-phase>/agent_output.md
+    // 输出目录预备
     const wf = getWorkflow(workflowName);
     if (!wf) throw new Error(`工作流不存在：${workflowName}`);
     const idx = getPhaseIndex(wf, phaseName);
     const dirName = idx >= 0 ? `${String(idx).padStart(2, "0")}-${phaseName}` : phaseName;
     const dir = join(getTaskWorkspace(taskId), dirName);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const outPath = join(dir, "agent_output.md");
-    const header = `<!-- generated:${new Date().toISOString()} phase:${phaseName} agent:${agentName} -->\n`;
-    writeFileSync(outPath, header + result.text, "utf-8");
 
-    log.info(
-      "prompt-runner 完成 [task=%s phase=%s 输出=%s 字符]",
-      taskId, phaseName, result.text.length,
-    );
+    // 第一轮：用解析后的 phase prompt 跑
+    let currentPrompt = resolved;
+    let turn = 0;
+    let finalText = "";
+
+    while (turn < MAX_PROMPT_TURNS) {
+      turn++;
+      const result = await agent.run(currentPrompt, {
+        cwd: getTaskWorkspace(taskId),
+        timeout: (options.timeoutSec ?? 900) * 1000,
+      });
+
+      // 每轮输出独立写文件（turn=1 落 agent_output.md，后续 follow-up-<N>.md 防覆盖）
+      const fileName = turn === 1 ? "agent_output.md" : `follow-up-${turn - 1}.md`;
+      const outPath = join(dir, fileName);
+      const header = `<!-- generated:${new Date().toISOString()} phase:${phaseName} agent:${agentName} turn:${turn} -->\n`;
+      writeFileSync(outPath, header + result.text, "utf-8");
+      finalText = result.text;
+
+      log.info(
+        "prompt-runner turn=%d 完成 [task=%s phase=%s 输出=%s 字符]",
+        turn, taskId, phaseName, result.text.length,
+      );
+
+      // 消费 pending_prompts（spec §3.8 A 路径自动消费）。空 → 退出循环。
+      const pending = consumePendingPrompts(taskId);
+      if (pending.length === 0) break;
+
+      // 把所有 pending 拼成下一轮 prompt，附带原 prompt 上下文
+      const joined = pending.join("\n\n---\n\n");
+      currentPrompt = `用户追加了以下指令，请在上一轮输出基础上继续处理：\n\n${joined}`;
+      log.info(
+        "prompt-runner 检测到 %d 条 pending_prompts，启动 turn=%d [task=%s phase=%s]",
+        pending.length, turn + 1, taskId, phaseName,
+      );
+    }
+
+    if (turn >= MAX_PROMPT_TURNS) {
+      log.warn(
+        "prompt-runner 达到 turn 上限 %d，丢弃剩余 pending_prompts [task=%s phase=%s]",
+        MAX_PROMPT_TURNS, taskId, phaseName,
+      );
+    }
+
+    // finalText 用于日志/调试，正式产物已写文件
+    void finalText;
   };
 }
 

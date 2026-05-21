@@ -52,6 +52,10 @@ export type AutopilotEvent =
   | { type: "provider:health-snapshot"; payload: { states: import("./provider-health").ProviderHealthState[]; ts: number } }
   // Clarifier 进度反馈（内存态，daemon 重启即清）
   | { type: "requirement:clarifier-round-update"; payload: import("../daemon/clarifier-progress").ClarifierRoundState }
+  // Phase 5 — 运行中 task 追加 prompt（spec §3.8）
+  | { type: "task:prompt-queued"; payload: { id: string; source: string; queued_at: number } }
+  | { type: "task:prompt-answered"; payload: { id: string; source: string } }
+  | { type: "phase:pending-prompts-unconsumed"; payload: { taskId: string; phase: string; count: number; preview: string[] } }
   // /now 推送事件
   | { type: "now:card_added"; payload: { card: NowCard } }
   | { type: "now:card_updated"; payload: { id: string; patch: Partial<NowCard> } }

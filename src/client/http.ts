@@ -118,6 +118,15 @@ export class HttpClient {
     return this.call("tasks.cancel", { id });
   }
 
+  /**
+   * Phase 5: 运行中 task 追加 prompt。
+   * mode: queued (running 排队) / answered (awaiting pending question)。
+   * 终态 task 抛 TASK_TERMINAL。
+   */
+  async sendTaskPrompt(id: string, prompt: string): Promise<{ mode: "queued" | "answered"; accepted: boolean }> {
+    return this.call("tasks.sendPrompt", { id, prompt });
+  }
+
   async triggerTransition(_id: string, _trigger: string, _note?: string): Promise<{ from: string; to: string }> {
     // tasks.transition 还没注册 RPC（CLI 用，等用到时再加）；暂留占位以保签名
     throw new Error("triggerTransition 暂未迁到 WS RPC，请用 tasks.cancel / tasks.decide");

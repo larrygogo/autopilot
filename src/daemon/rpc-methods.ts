@@ -497,6 +497,25 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
+    method: "tasks.sendPrompt",
+    description: "运行中 task 追加 prompt（spec §3.8 三档分支：running→排队 / awaiting→answerPending / 终态拒绝）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const prompt = typeof p.prompt === "string" ? p.prompt : "";
+      if (!prompt.trim()) throw new RpcError("INVALID_PARAM", "需要 prompt");
+      const { sendPromptToTask } = await import("../core/task-send-prompt");
+      const result = sendPromptToTask(p.id, prompt, { source: "user" });
+      if (!result.accepted) {
+        if (result.reason === "TASK_TERMINAL") throw new RpcError("TASK_TERMINAL", "task 已是终态，无法接受新 prompt");
+        if (result.reason === "NO_PROMPT_TARGET") throw new RpcError("NOT_FOUND", "task 不存在");
+        throw new RpcError("INVALID_PARAM", result.reason ?? "rejected");
+      }
+      return { mode: result.mode, accepted: true };
+    },
+  });
+
+  registerRpcMethod({
     method: "tasks.startAdHoc",
     description: "一句话发包：跳过 project / requirement / workflow 选择，直接跑 ad-hoc workflow（spec §3.7）",
     handler: async (params) => {

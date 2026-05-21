@@ -332,6 +332,42 @@ export function touchTaskHeartbeat(taskId: string): void {
 }
 
 /**
+ * 原子追加一条 pending_prompt 到 task.extra.pending_prompts 数组（spec §3.8 + §8 风险表）。
+ *
+ * 走单事务 read-modify-write 整个数组，避免短间隔多次 send_prompt 在 updateTask 合并时
+ * 后写覆盖前写。所有 send_prompt 写入必须走此函数，不要直接 updateTask({pending_prompts: ...})。
+ */
+export interface PendingPromptItem {
+  prompt: string;
+  source: "user" | "schedule" | "github";
+  queued_at: number;
+}
+
+export function appendPendingPrompt(taskId: string, item: PendingPromptItem): void {
+  const db = getDb();
+  db.transaction(() => {
+    const row = db
+      .query<{ extra: string | null }, [string]>("SELECT extra FROM tasks WHERE id = ?")
+      .get(taskId);
+    if (!row) throw new Error(`appendPendingPrompt: task not found: ${taskId}`);
+    let extra: Record<string, unknown> = {};
+    try { extra = row.extra ? JSON.parse(row.extra) : {}; } catch { extra = {}; }
+    const existing = Array.isArray(extra.pending_prompts) ? extra.pending_prompts : [];
+    extra.pending_prompts = [...existing, item];
+    db.run(
+      "UPDATE tasks SET extra = ?, updated_at = ? WHERE id = ?",
+      [JSON.stringify(extra), now(), taskId],
+    );
+  })();
+
+  const updated = getTask(taskId);
+  if (updated) {
+    syncManifestFromTask(updated);
+    emit({ type: "task:updated", payload: { task: updated, fields: ["pending_prompts"] } });
+  }
+}
+
+/**
  * 把 Task（含合并后的 extra）同步到 task-manifest.json。
  * manifest 不存在时 best-effort 跳过（老任务或 snapshot 未提供的 createTask 路径）。
  */

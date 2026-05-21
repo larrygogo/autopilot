@@ -956,6 +956,22 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
+    // POST /api/tasks/:id/send_prompt — 运行中 task 追加 prompt（spec §3.8）
+    const sendPromptMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/send_prompt$/);
+    if (method === "POST" && sendPromptMatch) {
+      const body = (await req.json()) as { prompt?: string };
+      const prompt = typeof body.prompt === "string" ? body.prompt : "";
+      if (!prompt.trim()) return error("prompt 必填");
+      const { sendPromptToTask } = await import("../core/task-send-prompt");
+      const result = sendPromptToTask(sendPromptMatch, prompt, { source: "user" });
+      if (!result.accepted) {
+        if (result.reason === "TASK_TERMINAL") return error("TASK_TERMINAL: task 已是终态，无法接受新 prompt", 409);
+        if (result.reason === "NO_PROMPT_TARGET") return error("task 不存在", 404);
+        return error(result.reason ?? "rejected", 400);
+      }
+      return json({ mode: result.mode, accepted: true });
+    }
+
     // POST /api/tasks/:id/restart — 把未完成的任务从当前阶段重新执行（dangling 救援用）
     const restartMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/restart$/);
     if (method === "POST" && restartMatch) {

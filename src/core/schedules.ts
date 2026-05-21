@@ -7,6 +7,9 @@ import { emit } from "./event-bus";
 
 export type ScheduleType = "once" | "cron";
 
+/** Phase 5: schedule 触发行为模式（spec §3.6） */
+export type ScheduleMode = "start_task" | "send_prompt";
+
 export interface Schedule {
   id: string;
   name: string;
@@ -22,6 +25,12 @@ export interface Schedule {
   last_run_at: string | null;
   last_task_id: string | null;
   run_count: number;
+  /** Phase 5: 触发行为模式，'start_task'（默认）或 'send_prompt' */
+  mode: ScheduleMode;
+  /** mode=send_prompt 时必填，目标 task id */
+  target_task_id: string | null;
+  /** mode=send_prompt 时必填，要追加的 prompt 文本 */
+  prompt: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -73,15 +82,25 @@ export interface CreateScheduleOpts {
   run_at?: string | null;
   cron_expr?: string | null;
   timezone: string;
+  /** mode=start_task 时必填；mode=send_prompt 时可填占位 'send_prompt' */
   workflow: string;
   title: string;
   requirement?: string | null;
   enabled?: boolean;
+  /** Phase 5：默认 start_task；send_prompt 时 target_task_id 和 prompt 必填 */
+  mode?: ScheduleMode;
+  target_task_id?: string | null;
+  prompt?: string | null;
 }
 
 export function createSchedule(opts: CreateScheduleOpts): Schedule {
   if (opts.type === "once" && !opts.run_at) throw new Error("type=once 需要 run_at");
   if (opts.type === "cron" && !opts.cron_expr) throw new Error("type=cron 需要 cron_expr");
+  const mode: ScheduleMode = opts.mode ?? "start_task";
+  if (mode === "send_prompt") {
+    if (!opts.target_task_id) throw new Error("mode=send_prompt 需要 target_task_id");
+    if (!opts.prompt?.trim()) throw new Error("mode=send_prompt 需要 prompt");
+  }
 
   const id = generateUniqueScheduleId();
   const ts = now();
@@ -96,8 +115,8 @@ export function createSchedule(opts: CreateScheduleOpts): Schedule {
   getDb().run(
     "INSERT INTO schedules" +
       " (id, name, type, run_at, cron_expr, timezone, workflow, title, requirement," +
-      "  enabled, next_run_at, run_count, created_at, updated_at)" +
-      " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+      "  enabled, next_run_at, run_count, mode, target_task_id, prompt, created_at, updated_at)" +
+      " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
     [
       id,
       opts.name,
@@ -110,6 +129,9 @@ export function createSchedule(opts: CreateScheduleOpts): Schedule {
       opts.requirement ?? null,
       enabled,
       nextRunAt,
+      mode,
+      opts.target_task_id ?? null,
+      opts.prompt ?? null,
       ts,
       ts,
     ]

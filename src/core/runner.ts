@@ -138,6 +138,25 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     appendTaskEvent(taskId, { type: "phase-completed", phase });
     archivePhaseArtifacts(taskId, workflow, phase);
 
+    // Phase 5 兜底（spec §3.8 ts phase 兜底机制）：检查 pending_prompts 是否未消费。
+    // prompt-runner 跑完会自动 consumePendingPrompts；ts phase 函数需自己显式调，
+    // 忘调则在此 warn 让用户能从日志看到。不 fail，仅提醒。
+    try {
+      const { peekPendingPrompts } = await import("./task-send-prompt");
+      const unconsumed = peekPendingPrompts(taskId);
+      if (unconsumed.length > 0) {
+        log.warn(
+          "phase:pending-prompts-unconsumed [task=%s phase=%s count=%d] 阶段函数未调 consumePendingPrompts，prompts 仍留 extra.pending_prompts：%s",
+          taskId, phase, unconsumed.length,
+          unconsumed.map(p => p.slice(0, 80)).join(" | "),
+        );
+        emit({
+          type: "phase:pending-prompts-unconsumed",
+          payload: { taskId, phase, count: unconsumed.length, preview: unconsumed.map(p => p.slice(0, 80)) },
+        });
+      }
+    } catch { /* import 失败 / task 已删 → 静默 */ }
+
     // 自动推进下一阶段（若阶段函数没主动 transition）
     //
     // 规则：
