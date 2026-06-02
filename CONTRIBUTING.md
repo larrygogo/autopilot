@@ -6,22 +6,22 @@
 
 ```bash
 git clone https://github.com/larrygogo/autopilot && cd autopilot
-pip install -e ".[dev]"
-autopilot init
-autopilot upgrade
+bun install
+bun run dev init
+bun run dev upgrade
 ```
 
 ## 代码规范
 
-- **Python 3.10+**，所有模块使用 `from __future__ import annotations`
-- **ruff** 格式化与 lint（行宽 120）
+- **Bun + TypeScript strict 模式**
 - 核心函数必须有**类型提示**
-- 框架核心（`core/`）**不得引入任何工作流专属的常量或逻辑**
+- catch 块使用 `catch (e: unknown)` 而非 `catch (e: any)`
+- 框架核心（`src/core/`）**不得引入任何工作流专属的常量或逻辑**
 
 ```bash
 # 提交前务必通过
-ruff check . && ruff format --check .
-pytest tests/ -v
+bun run typecheck
+bun test
 ```
 
 ## 提交流程
@@ -41,8 +41,8 @@ git checkout -b docs/update-yaml-guide
 ### 2. 编写代码 & 测试
 
 - 新功能请添加对应的测试用例
-- 确保所有测试通过：`pytest tests/ -v`
-- 确保 lint 通过：`ruff check .`
+- 确保所有测试通过：`bun test`
+- 确保类型检查通过：`bun run typecheck`
 
 ### 3. 提交
 
@@ -68,7 +68,7 @@ chore: 更新依赖 / 配置
 请在 [Issues](https://github.com/larrygogo/autopilot/issues) 中提交，包含：
 
 - autopilot 版本（`autopilot --version`）
-- Python 版本
+- Bun 版本
 - 操作系统
 - 复现步骤
 - 期望行为 vs 实际行为
@@ -91,17 +91,17 @@ chore: 更新依赖 / 配置
 
 ```bash
 # 1. 更新版本号
-#    修改 core/__init__.py 中的 __version__
+#    修改 src/index.ts 的 VERSION 与 package.json 的 version（保持一致）
 
 # 2. 更新 CHANGELOG.md
 #    添加新版本条目，破坏性变更务必写在 Breaking Changes 章节
 
 # 3. 提交
-git add core/__init__.py CHANGELOG.md
-git commit -m "chore: release v0.3.0"
+git add src/index.ts package.json CHANGELOG.md
+git commit -m "chore: release v1.1.0"
 
 # 4. 打 tag 并推送（CI 自动创建 GitHub Release）
-git tag v0.3.0
+git tag v1.1.0
 git push origin main --tags
 ```
 

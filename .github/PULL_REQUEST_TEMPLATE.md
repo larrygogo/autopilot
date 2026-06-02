@@ -16,8 +16,8 @@
 <!-- 描述你如何验证这些变更 -->
 
 - [ ] 新增/更新了测试用例
-- [ ] 所有测试通过 (`pytest tests/ -v`)
-- [ ] lint 通过 (`ruff check . && ruff format --check .`)
+- [ ] 所有测试通过 (`bun test`)
+- [ ] 类型检查通过 (`bun run typecheck`)
 
 ## 关联 Issue
 
