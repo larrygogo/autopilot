@@ -26,7 +26,8 @@ import {
   updateManifest as updateSessionManifest,
   type ChatMessage,
 } from "../core/sessions";
-import { resolveChatAgentName, createChatAgent } from "../agents/registry";
+import { createAgent } from "../agents/registry";
+import { DEFAULT_AGENT } from "../core/agent-defaults";
 import type { ListTasksFilters } from "../core/db";
 import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
@@ -80,9 +81,7 @@ import {
   renameRunFunctions,
   pruneOrphanRunFunctions,
   replaceRunFunction,
-  setWorkflowAgents,
   type PhaseEntryInput,
-  type WorkflowAgentEntry,
 } from "../core/registry";
 import {
   listWorkflowsInDb,
@@ -93,8 +92,10 @@ import {
 import {
   loadDaemonConfig,
   saveDaemonConfig,
-  loadGlobalAgents,
+  loadProviders,
+  type ProviderName,
 } from "../core/config";
+import type { Agent } from "../agents/agent";
 import { loadApiToken, previewApiToken, saveApiToken, deleteApiToken, generateApiToken } from "../core/api-token";
 import {
   ensureTaskWorkspace,
@@ -307,34 +308,6 @@ function makeResponders(req: Request) {
 function extractParam(path: string, pattern: RegExp): string | null {
   const match = path.match(pattern);
   return match?.[1] ?? null;
-}
-
-/**
- * 统计每个全局 agent 被哪些工作流引用。引用条件：
- *   workflow.agents[] 中存在 name === agentName（同名继承）
- *   或 extends === agentName（别名继承）
- * 返回 { [agentName]: [workflowName, ...] }
- */
-export function computeAgentUsage(agentNames: string[]): Record<string, string[]> {
-  const result: Record<string, string[]> = Object.fromEntries(agentNames.map((n) => [n, []]));
-  const wfs = listWorkflows();
-  for (const wf of wfs) {
-    const full = getWorkflow(wf.name);
-    const wfAgents = (full?.agents as Array<Record<string, unknown>> | undefined) ?? [];
-    const refs = new Set<string>();
-    for (const a of wfAgents) {
-      const name = typeof a.name === "string" ? a.name : null;
-      const ext = a.extends;
-      if (name && agentNames.includes(name) && (ext === undefined || ext === name)) {
-        refs.add(name);
-      }
-      if (typeof ext === "string" && agentNames.includes(ext)) {
-        refs.add(ext);
-      }
-    }
-    for (const r of refs) result[r].push(wf.name);
-  }
-  return result;
 }
 
 // ──────────────────────────────────────────────
@@ -1554,19 +1527,20 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     }
 
     // POST /api/workflows/:name/dry-run — 不建 task / 不写 workspace，直接调 agent.run 试跑 prompt
-    // body: { agent: string, prompt: string, timeout?: number(秒) }
+    // body: { agent?: InlineAgentConfig, prompt: string, timeout?: number(秒) }
+    // 命名复用 agent 移除后：agent 字段接收一个内联配置对象（provider/model/system_prompt...），
+    // 省略则用 DEFAULT_AGENT 兜底。
     const dryRunMatch = path.match(/^\/api\/workflows\/([\w.\-]+)\/dry-run$/);
     if (method === "POST" && dryRunMatch) {
-      const [, wfName] = dryRunMatch;
       const body = (await req.json().catch(() => null)) as
-        | { agent?: string; prompt?: string; timeout?: number }
+        | { agent?: Record<string, unknown>; prompt?: string; timeout?: number }
         | null;
       if (!body || typeof body.prompt !== "string" || !body.prompt.trim()) {
         return error("prompt is required", 400);
       }
+      let agent: Agent | null = null;
       try {
-        const { getAgent } = await import("../agents/registry");
-        const agent = getAgent(body.agent || "coder", wfName);
+        agent = buildInlineDryRunAgent(body.agent);
         const startMs = Date.now();
         const result = await agent.run(body.prompt, {
           timeout: Math.max(5, Math.min(body.timeout ?? 60, 600)) * 1000,
@@ -1579,6 +1553,8 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         return error(msg, 500);
+      } finally {
+        if (agent) { try { await agent.close(); } catch { /* ignore */ } }
       }
     }
 
@@ -1667,20 +1643,8 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // PUT /api/workflows/:name/agents — 结构化更新 agents 段
-    const wfAgentsMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/agents$/);
-    if (method === "PUT" && wfAgentsMatch) {
-      const body = await req.json() as { agents: unknown };
-      if (!Array.isArray(body.agents)) return error("agents must be array", 400);
-      try {
-        setWorkflowAgents(wfAgentsMatch, body.agents as WorkflowAgentEntry[]);
-        await reload();
-        emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true });
-      } catch (e: unknown) {
-        return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
-      }
-    }
+    // PUT /api/workflows/:name/agents 已移除 —— 命名复用 agent 机制删除（Phase 3）。
+    // phase 内联 agent 配置走 PUT /api/workflows/:name/yaml（整文件写）或 phases 编辑。
 
     // POST /api/workflows/:name/prune-orphans — 删除指定的孤儿 run_ 函数
     const pruneMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/prune-orphans$/);
@@ -1880,6 +1844,50 @@ interface ChatResponsePayload {
   message: ChatMessage;
 }
 
+/**
+ * 默认 chat agent 名（命名复用 agent 机制移除后，chat 不再走命名 agent）。
+ * 仅作为 session 元数据里的标识展示用。
+ */
+const DEFAULT_CHAT_AGENT_NAME = "assistant";
+
+/**
+ * 构造一个对话用 Agent 实例（不入缓存，调用方负责 close）。
+ *
+ * 命名复用 agent 机制移除后，chat 直接用一个硬编码默认配置（daemon 层基础设施）。
+ * model 缺省时从 anthropic provider 的 default_model 补。
+ */
+function buildChatAgent(): Agent {
+  const providers = loadProviders();
+  const provider: ProviderName = "anthropic";
+  return createAgent({
+    name: DEFAULT_CHAT_AGENT_NAME,
+    provider,
+    model: providers[provider]?.default_model,
+    max_turns: 20,
+    permission_mode: "default",
+    system_prompt:
+      "你是 autopilot 的助理。可调用内建工具查询/操作任务、工作流、需求队列；" +
+      "回答简洁直接，代码注释和说明用中文。",
+  });
+}
+
+/**
+ * 从内联 agent 配置对象构造一次性 dry-run Agent（不入缓存，调用方负责 close）。
+ * 与 agentForPhase 同构的两层合并：inline 覆盖 DEFAULT_AGENT，model 缺省走
+ * providers.<provider>.default_model。inline 省略时纯走 DEFAULT_AGENT。
+ */
+function buildInlineDryRunAgent(inline?: Record<string, unknown>): Agent {
+  const merged: Record<string, unknown> = { ...DEFAULT_AGENT, ...(inline ?? {}) };
+  const provider = (merged["provider"] as string | undefined) ?? DEFAULT_AGENT.provider;
+  merged["provider"] = provider;
+  if (!merged["model"]) {
+    const providerCfg = loadProviders()[provider as ProviderName];
+    if (providerCfg?.default_model) merged["model"] = providerCfg.default_model;
+  }
+  merged["name"] = (typeof merged["name"] === "string" && merged["name"]) ? merged["name"] : "dry-run";
+  return createAgent(merged as Parameters<typeof createAgent>[0]);
+}
+
 async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
   const message = body.message!;
 
@@ -1888,7 +1896,7 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
   if (body.session_id && !manifest) {
     throw new Error(`session 不存在：${body.session_id}`);
   }
-  const agentName = manifest?.agent ?? resolveChatAgentName({ agent: body.agent, workflow: body.workflow });
+  const agentName = manifest?.agent ?? body.agent ?? DEFAULT_CHAT_AGENT_NAME;
   const workflow = manifest?.workflow ?? body.workflow;
 
   if (!manifest) {
@@ -1905,7 +1913,7 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
 
   // 3. 跑 agent.chat —— 流式 delta 通过 WS 推；POST 仍等完整结果返回
   const sid = manifest.id;
-  const agent = createChatAgent(agentName, workflow);
+  const agent = buildChatAgent();
   let assistantText = "";
   let newProviderSid: string | undefined;
   let usage: ChatMessage["usage"];

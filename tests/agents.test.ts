@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { Agent } from "../src/agents/agent";
 import { BaseProvider } from "../src/agents/providers/base";
 import type { AgentResult, RunOptions } from "../src/agents/types";
-import { resolveAgentConfig } from "../src/agents/registry";
 
 class MockProvider extends BaseProvider {
   async run(prompt: string): Promise<AgentResult> { return { text: `mock: ${prompt}` }; }
@@ -82,97 +81,6 @@ describe("clearAllAgentCache（dogfood-bug27）", () => {
     expect(triggered).toBe(true);
     offEvent("config:updated", handler);
     disableBus();
-  });
-});
-
-describe("resolveAgentConfig — 三层合并", () => {
-  const globals = {
-    coder: { provider: "anthropic", model: "claude-sonnet-4-6", max_turns: 10, system_prompt: "你是编码助手" },
-    reviewer: { provider: "anthropic", model: "claude-opus-4-7", system_prompt: "你是审查员" },
-  };
-
-  test("workflow 未定义时直接使用全局 agent", () => {
-    const cfg = resolveAgentConfig("coder", undefined, globals);
-    expect(cfg.provider).toBe("anthropic");
-    expect(cfg.model).toBe("claude-sonnet-4-6");
-    expect(cfg.system_prompt).toBe("你是编码助手");
-    expect(cfg.name).toBe("coder");
-  });
-
-  test("workflow 覆盖全局字段", () => {
-    const cfg = resolveAgentConfig(
-      "coder",
-      { name: "coder", max_turns: 30, system_prompt: "专写 Go" },
-      globals
-    );
-    expect(cfg.model).toBe("claude-sonnet-4-6");      // 继承
-    expect(cfg.max_turns).toBe(30);                    // 覆盖
-    expect(cfg.system_prompt).toBe("专写 Go");         // 覆盖
-  });
-
-  test("extends 指定别名基底", () => {
-    const cfg = resolveAgentConfig(
-      "go_coder",
-      { name: "go_coder", extends: "coder", system_prompt: "专写 Go" },
-      globals
-    );
-    expect(cfg.provider).toBe("anthropic");
-    expect(cfg.model).toBe("claude-sonnet-4-6");
-    expect(cfg.system_prompt).toBe("专写 Go");
-    expect("extends" in cfg).toBe(false);              // 合并后应被清理
-  });
-
-  test("extends: null 关闭继承", () => {
-    const cfg = resolveAgentConfig(
-      "coder",
-      { name: "coder", extends: null, provider: "openai", model: "o4-mini" },
-      globals
-    );
-    expect(cfg.provider).toBe("openai");
-    expect(cfg.model).toBe("o4-mini");
-    expect(cfg.system_prompt).toBeUndefined();         // 不再继承
-  });
-
-  test("全局与 workflow 都没定义 provider 时抛错", () => {
-    expect(() =>
-      resolveAgentConfig("ghost", { name: "ghost" }, {})
-    ).toThrow(/缺少 provider/);
-  });
-
-  test("未知 provider 抛错", () => {
-    expect(() =>
-      resolveAgentConfig("x", { name: "x", provider: "unknown" as any }, {})
-    ).toThrow("未知 provider");
-  });
-
-  test("agent 未指定 model 时使用 providers.<provider>.default_model", () => {
-    const cfg = resolveAgentConfig(
-      "coder",
-      { name: "coder", provider: "anthropic" },
-      {},
-      { anthropic: { default_model: "claude-opus-4-7" }, openai: {}, google: {} }
-    );
-    expect(cfg.model).toBe("claude-opus-4-7");
-  });
-
-  test("agent 自己的 model 优先于 provider 默认", () => {
-    const cfg = resolveAgentConfig(
-      "coder",
-      { name: "coder", provider: "anthropic", model: "claude-haiku-4-5" },
-      {},
-      { anthropic: { default_model: "claude-opus-4-7" }, openai: {}, google: {} }
-    );
-    expect(cfg.model).toBe("claude-haiku-4-5");
-  });
-
-  test("provider 默认 model 缺失时保持 agent.model 为 undefined（交由 provider 自身 fallback）", () => {
-    const cfg = resolveAgentConfig(
-      "coder",
-      { name: "coder", provider: "anthropic" },
-      {},
-      { anthropic: {}, openai: {}, google: {} }
-    );
-    expect(cfg.model).toBeUndefined();
   });
 });
 

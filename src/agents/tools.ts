@@ -252,7 +252,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
 
     tool(
       "get_workflow",
-      "查看工作流结构（阶段列表、初始/终态、chat_agent）。",
+      "查看工作流结构（阶段列表、初始/终态）。",
       { name: z.string().describe("工作流名") },
       async (args) => {
         try {
@@ -273,7 +273,6 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
             description: wf.description,
             initial_state: wf.initial_state,
             terminal_states: wf.terminal_states,
-            chat_agent: wf.chat_agent,
             phases,
           });
         } catch (e: unknown) {

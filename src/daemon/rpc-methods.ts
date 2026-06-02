@@ -99,17 +99,15 @@ import {
 } from "../core/requirement-comments";
 import {
   loadProviders,
-  loadGlobalAgents,
   loadConfigRaw,
   PROVIDER_NAMES,
   saveProvider,
-  saveAgent,
-  deleteAgent,
   type ProviderName,
 } from "../core/config";
 import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
 import { listProviderModels } from "../agents/model-list";
-import { runAgentOnce } from "../agents/registry";
+import { createAgent } from "../agents/registry";
+import { DEFAULT_AGENT } from "../core/agent-defaults";
 import { runChecks } from "../core/doctor";
 import {
   listPhaseLogs,
@@ -120,7 +118,7 @@ import {
 } from "../core/task-logs";
 import { getNowAggregator } from "./routes-now";
 import { dismissCard as coreDismissCard } from "../core/now-dismiss";
-import { computeAgentUsage, phaseIndex, parseDecisionCounts, renderDecisionMd } from "./routes";
+import { phaseIndex, parseDecisionCounts, renderDecisionMd } from "./routes";
 import { computeTaskOutcome } from "./task-outcome";
 import {
   cancelTaskAction,
@@ -269,19 +267,14 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "providers.list",
-    description: "返回三个内置 provider 的配置 + 各 provider 的 agent 引用计数",
+    description: "返回三个内置 provider 的配置（agent_count 恒为 0：命名复用 agent 机制已移除，保留字段仅为 Web shape 兼容）",
     handler: () => {
       const providers = loadProviders();
-      const agents = loadGlobalAgents();
-      const counts: Record<string, number> = {};
-      for (const cfg of Object.values(agents)) {
-        const p = (cfg as Record<string, unknown>)["provider"];
-        if (typeof p === "string") counts[p] = (counts[p] ?? 0) + 1;
-      }
       return PROVIDER_NAMES.map((name) => ({
         name,
         ...providers[name],
-        agent_count: counts[name] ?? 0,
+        // 命名复用 agent 已移除；保留 agent_count 字段（恒 0）兼容 Web 旧 shape
+        agent_count: 0,
       }));
     },
   });
@@ -292,34 +285,8 @@ export function registerCoreRpcMethods(): void {
     handler: async () => Object.values(await detectAllProviders()),
   });
 
-  registerRpcMethod({
-    method: "agents.list",
-    description: "全局 agents 列表 + 各 agent 被哪些工作流引用；alias 单独作为 entry 加入，alias_of 指向 target",
-    handler: () => {
-      const agents = loadGlobalAgents();
-      const { loadAgentAliases } = require("../core/config") as typeof import("../core/config");
-      const aliases = loadAgentAliases();
-      const allNames = Array.from(new Set([...Object.keys(agents), ...Object.keys(aliases)]));
-      const usage = computeAgentUsage(allNames);
-      const out: Array<Record<string, unknown>> = [];
-      // 真实 agent
-      for (const [name, cfg] of Object.entries(agents)) {
-        out.push({ name, ...cfg, used_by: usage[name] ?? [] });
-      }
-      // alias 作为虚拟 entry（UI 能看到、能引用）
-      for (const [aliasName, target] of Object.entries(aliases)) {
-        if (aliasName in agents) continue; // 真实同名优先
-        const targetCfg = agents[target] ?? {};
-        out.push({
-          name: aliasName,
-          ...targetCfg,
-          alias_of: target,
-          used_by: usage[aliasName] ?? [],
-        });
-      }
-      return out;
-    },
-  });
+  // agents.list 已移除（Phase 3：命名复用 agent 机制删除）。
+  // Web Agents 页运行时会拿到 METHOD_NOT_FOUND，留待 Phase 4 处理客户端。
 
   registerRpcMethod({
     method: "now.cards",
@@ -1173,92 +1140,49 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
-  registerRpcMethod({
-    method: "agents.get",
-    description: "单 agent 详情",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      const agents = loadGlobalAgents();
-      const cfg = agents[p.name];
-      if (!cfg) throw new RpcError("NOT_FOUND", "Agent not found");
-      return { name: p.name, ...cfg };
-    },
-  });
-
-  registerRpcMethod({
-    method: "agents.create",
-    description: "新建 agent（name 在 params 里；重名报 ALREADY_EXISTS）",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      const agents = loadGlobalAgents();
-      if (agents[p.name]) {
-        throw new RpcError("ALREADY_EXISTS", `Agent "${p.name}" 已存在，请用 agents.update`);
-      }
-      const { name: _n, ...cfg } = p;
-      try {
-        saveAgent(p.name, cfg);
-        emitBus({ type: "config:updated", payload: {} });
-        return { ok: true, name: p.name };
-      } catch (e: unknown) {
-        throw new RpcError("CREATE_FAILED", e instanceof Error ? e.message : String(e));
-      }
-    },
-  });
-
-  registerRpcMethod({
-    method: "agents.update",
-    description: "更新已有 agent 的配置（不存在抛 NOT_FOUND）",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      const agents = loadGlobalAgents();
-      if (!agents[p.name]) throw new RpcError("NOT_FOUND", "Agent not found");
-      const { name: _n, ...cfg } = p;
-      try {
-        saveAgent(p.name, cfg);
-        emitBus({ type: "config:updated", payload: {} });
-        return { ok: true };
-      } catch (e: unknown) {
-        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
-      }
-    },
-  });
-
-  registerRpcMethod({
-    method: "agents.delete",
-    description: "删除 agent",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      const removed = deleteAgent(p.name);
-      if (!removed) throw new RpcError("NOT_FOUND", "Agent not found");
-      emitBus({ type: "config:updated", payload: {} });
-      return { ok: true };
-    },
-  });
+  // agents.get / create / update / delete 已移除（Phase 3：命名复用 agent 机制删除）。
 
   registerRpcMethod({
     method: "agents.dryRun",
-    description: "一次性调 agent（UI 调试）；prompt 必填，返回 text + usage",
+    description: "一次性试跑一个内联 agent 配置（UI 调试）；prompt 必填，agent 为内联配置对象（provider/model/system_prompt...，可省略走 DEFAULT_AGENT），返回 text + usage",
     handler: async (params) => {
       const p = asObj(params);
-      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
       if (typeof p.prompt !== "string" || !p.prompt.trim()) {
         throw new RpcError("INVALID_PARAM", "prompt 不能为空");
       }
+      // 内联配置：优先取 p.agent（对象），向后兼容顶层 provider/model/... 字段
+      const inline: Record<string, unknown> =
+        p.agent && typeof p.agent === "object" && !Array.isArray(p.agent)
+          ? (p.agent as Record<string, unknown>)
+          : {
+              ...(typeof p.provider === "string" ? { provider: p.provider } : {}),
+              ...(typeof p.model === "string" ? { model: p.model } : {}),
+              ...(typeof p.system_prompt === "string" ? { system_prompt: p.system_prompt } : {}),
+              ...(typeof p.max_turns === "number" ? { max_turns: p.max_turns } : {}),
+              ...(typeof p.permission_mode === "string" ? { permission_mode: p.permission_mode } : {}),
+            };
+
+      const merged: Record<string, unknown> = { ...DEFAULT_AGENT, ...inline };
+      const provider = (merged["provider"] as string | undefined) ?? DEFAULT_AGENT.provider;
+      merged["provider"] = provider;
+      if (!merged["model"]) {
+        const providerCfg = loadProviders()[provider as ProviderName];
+        if (providerCfg?.default_model) merged["model"] = providerCfg.default_model;
+      }
+      merged["name"] = (typeof merged["name"] === "string" && merged["name"]) ? merged["name"] : "dry-run";
+
+      let agent: ReturnType<typeof createAgent> | null = null;
       try {
+        agent = createAgent(merged as Parameters<typeof createAgent>[0]);
         const started = Date.now();
-        const result = await runAgentOnce(p.name, p.prompt, {
-          system_prompt: typeof p.system_prompt === "string" ? p.system_prompt : undefined,
+        const result = await agent.run(p.prompt, {
           additional_system: typeof p.additional_system === "string" ? p.additional_system : undefined,
-          model: typeof p.model === "string" ? p.model : undefined,
-          max_turns: typeof p.max_turns === "number" ? p.max_turns : undefined,
         });
         return { ok: true, elapsed_ms: Date.now() - started, result };
       } catch (e: unknown) {
         throw new RpcError("DRY_RUN_FAILED", e instanceof Error ? e.message : String(e));
+      } finally {
+        if (agent) { try { await agent.close(); } catch { /* ignore */ } }
       }
     },
   });
@@ -1496,22 +1420,8 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
-  registerRpcMethod({
-    method: "setup.saveAgents",
-    description: "批量保存 agent 配置（与 POST /api/setup/agents 等价），返回最新 level-1 doctor 报告",
-    handler: async (params) => {
-      const p = asObj(params);
-      if (!p.agents || typeof p.agents !== "object" || Array.isArray(p.agents)) {
-        throw new RpcError("INVALID_PARAM", "agents must be an object");
-      }
-      for (const [name, cfg] of Object.entries(p.agents as Record<string, unknown>)) {
-        if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
-          saveAgent(name, cfg as Record<string, unknown>);
-        }
-      }
-      return { report: await runChecks({ level: 1 }) };
-    },
-  });
+  // setup.saveAgents 已移除（Phase 3：命名复用 agent 机制删除）。
+  // setup 流程不再写命名 agent；agent 配置改为工作流 phase 内联。
 
   registerRpcMethod({
     method: "setup.saveCodebases",

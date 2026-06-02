@@ -76,9 +76,6 @@ export interface WorkflowDefinition {
   label?: string;
   description?: string;
   config?: Record<string, unknown>;
-  agents?: Record<string, unknown>[];
-  /** 工作流专属对话 agent 的名字；`autopilot chat --workflow <name>` 时优先用 */
-  chat_agent?: string;
   workspace?: WorkflowWorkspaceSpec;
   phases: (PhaseDefinition | { parallel: ParallelDefinition })[];
   initial_state: string;
@@ -737,8 +734,6 @@ function composeDbWorkflow(
     initial_state: base.initial_state,
     terminal_states: base.terminal_states,
   };
-  if (base.agents !== undefined) composed.agents = base.agents;
-  if (base.chat_agent !== undefined) composed.chat_agent = base.chat_agent;
   if (base.workspace !== undefined) composed.workspace = base.workspace;
   if (base.setup_func !== undefined) composed.setup_func = base.setup_func;
   if (base.notify_func !== undefined) composed.notify_func = base.notify_func;
@@ -1112,12 +1107,6 @@ function normalizeWorkflowFields(wfDef: Record<string, unknown>, yamlPath: strin
       yamlPath, wfDef.name);
     wfDef.name = String(wfDef.name);
   }
-  // chat_agent 必须是字符串
-  if ("chat_agent" in wfDef && wfDef.chat_agent != null && typeof wfDef.chat_agent !== "string") {
-    log.warn("workflow.yaml %s：chat_agent 应为字符串，忽略非法值 %o",
-      yamlPath, wfDef.chat_agent);
-    delete wfDef.chat_agent;
-  }
 }
 
 function renderWorkflowYamlTemplate(name: string, description: string | undefined, firstPhase: string): string {
@@ -1136,12 +1125,11 @@ description: ${desc}
 phases:
   - name: ${firstPhase}
     timeout: 900
-
-# 可选：覆盖工作流内的智能体（全局 agents 在 config.yaml 定义）
-# agents:
-#   - name: coder
-#     extends: coder       # 继承全局同名 agent，可在此覆盖字段
-#     system_prompt: "特化提示词..."
+    # 可选：为该 phase 内联配置 agent（省略则用 DEFAULT_AGENT 兜底）
+    # agent:
+    #   provider: anthropic
+    #   model: claude-sonnet-4-6
+    #   system_prompt: "特化提示词..."
 `;
 }
 
@@ -1156,9 +1144,9 @@ function renderWorkflowTsTemplate(firstPhase: string): string {
 // 如需把 workspace 传给 agent，调用 agent.run(prompt, { cwd: wsPath })。
 //
 // 常见 import（按需启用）：
-//   import { getTask } from "@autopilot/db";                // 取任务对象
-//   import { getAgent } from "@autopilot/agents";           // 取配置好的 agent
-//   import { getTaskWorkspace } from "@autopilot/core";     // 取 workspace 路径
+//   import { getTask } from "@autopilot/db";                  // 取任务对象
+//   import { agentForPhase } from "@autopilot/agents";        // 按 phase 取内联配置 agent
+//   import { getTaskWorkspace } from "@autopilot/core";       // 取 workspace 路径
 
 import { homedir } from "os";
 import { join } from "path";
@@ -1172,7 +1160,7 @@ export async function ${fn}(taskId: string): Promise<void> {
   const ws = taskWorkspace(taskId);
   console.log(\`[\${taskId}] 执行阶段 ${firstPhase}，workspace=\${ws}\`);
   // TODO: 在这里实现阶段业务逻辑。例如：
-  //   const agent = getAgent("coder", "<工作流名>");
+  //   const agent = agentForPhase("<工作流名>", "${firstPhase}");
   //   await agent.run("修改 src/index.ts 添加 hello 函数", { cwd: ws });
 }
 `;
@@ -1587,85 +1575,6 @@ function extractRunFunctions(source: string): string[] {
     }
   }
   return names;
-}
-
-// ──────────────────────────────────────────────
-// 工作流内 agents[] 段的结构化读写
-// ──────────────────────────────────────────────
-
-export interface WorkflowAgentEntry {
-  name: string;
-  extends?: string | null;
-  provider?: string;
-  model?: string;
-  max_turns?: number;
-  permission_mode?: string;
-  system_prompt?: string;
-  [key: string]: unknown;
-}
-
-const AGENT_NAME_RE = /^[\w.\-]+$/;
-
-/**
- * 结构化写入工作流 agents 段。支持空数组（会移除该段）。
- * 不自动 reload —— 调用方负责。
- */
-export function setWorkflowAgents(workflowName: string, agents: WorkflowAgentEntry[]): void {
-  if (!Array.isArray(agents)) {
-    throw new Error(`工作流 "${workflowName}" 的 agents 必须是数组，收到 ${typeof agents}`);
-  }
-
-  // 校验
-  const seen = new Set<string>();
-  for (let i = 0; i < agents.length; i++) {
-    const a = agents[i];
-    if (!a || typeof a !== "object") throw new Error(`agents 第 ${i + 1} 项非法（不是对象）`);
-    if (typeof a.name !== "string" || !AGENT_NAME_RE.test(a.name)) {
-      throw new Error(`第 ${i + 1} 项 name 非法：${a.name}`);
-    }
-    if (seen.has(a.name)) throw new Error(`名称重复：${a.name}`);
-    seen.add(a.name);
-    if (a.extends !== undefined && a.extends !== null && typeof a.extends !== "string") {
-      throw new Error(`"${a.name}" 的 extends 必须是字符串`);
-    }
-    if (a.max_turns !== undefined && (typeof a.max_turns !== "number" || a.max_turns <= 0)) {
-      throw new Error(`"${a.name}" 的 max_turns 必须是正整数`);
-    }
-  }
-
-  const yamlPath = getWorkflowYamlPath(workflowName);
-  if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
-
-  const raw = readFileSync(yamlPath, "utf-8");
-  const doc = parseDocument(raw);
-
-  if (agents.length === 0) {
-    doc.deleteIn(["agents"]);
-  } else {
-    const cleaned = agents.map(cleanWorkflowAgent);
-    doc.setIn(["agents"], cleaned);
-  }
-
-  copyFileSync(yamlPath, yamlPath + ".bak");
-  writeFileSync(yamlPath, doc.toString(), "utf-8");
-}
-
-function cleanWorkflowAgent(a: WorkflowAgentEntry): Record<string, unknown> {
-  const out: Record<string, unknown> = { name: a.name };
-  if (a.extends) out.extends = a.extends;
-  if (a.provider) out.provider = a.provider;
-  if (a.model) out.model = a.model;
-  if (typeof a.max_turns === "number" && a.max_turns > 0) out.max_turns = a.max_turns;
-  if (a.permission_mode) out.permission_mode = a.permission_mode;
-  if (a.system_prompt) out.system_prompt = a.system_prompt;
-  // 保留未知扩展字段
-  const handled = new Set(["name", "extends", "provider", "model", "max_turns", "permission_mode", "system_prompt"]);
-  for (const [k, v] of Object.entries(a)) {
-    if (handled.has(k)) continue;
-    if (v === undefined || v === null || v === "") continue;
-    out[k] = v;
-  }
-  return out;
 }
 
 function renderRunFunctionStub(phaseName: string): string {

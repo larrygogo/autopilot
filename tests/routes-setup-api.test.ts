@@ -67,11 +67,12 @@ describe("setup.save* RPC", () => {
     }
   });
 
-  it("setup.saveAgents 写入", async () => {
+  it("setup.saveAgents 已移除（Phase 3：命名复用 agent 机制删除）", async () => {
     const r = await invokeRpcMethod("setup.saveAgents", {
       agents: { coder: { provider: "anthropic", model: "x", max_turns: 10, permission_mode: "auto" } },
     });
-    expect(r.ok).toBe(true);
+    // 方法已注销 → 不再成功
+    expect(r.ok).toBe(false);
   });
 
   it("setup.saveCodebases 自动建 default project + 写 codebase", async () => {

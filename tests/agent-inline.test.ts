@@ -4,7 +4,7 @@
  * 覆盖 agentForPhase 三种解析路径：
  *   1. phase.agent 为内联对象 → 覆盖 DEFAULT_AGENT
  *   2. phase 不配 agent      → 走 DEFAULT_AGENT
- *   3. phase.agent 为字符串   → 旧格式兼容（降级到命名 agent getAgent）
+ *   3. phase.agent 为字符串   → 已废弃（命名 agent），warn 一次 + 回退 DEFAULT_AGENT
  * 以及缓存复用。
  */
 
@@ -49,11 +49,14 @@ describe("agentForPhase — phase 内联 agent 配置", () => {
     expect(agent.name).toBe("bare");
   });
 
-  test("旧格式字符串 agent 仍可用（兼容降级）", () => {
+  test("旧格式字符串 agent → 废弃，warn + 回退 DEFAULT_AGENT", () => {
     const agent = agentForPhase(WF, "named");
-    // 走 getAgent("coder") 命名路径，name 保留为命名 agent 名
-    expect(agent.name).toBe("coder");
-    expect(agent.config.provider).toBe("anthropic");
+    // 命名 agent 机制已移除：string 形态视为废弃，按 DEFAULT_AGENT 兜底
+    // 匿名 agent 用 phase 名标识，配置等同 DEFAULT_AGENT
+    expect(agent.name).toBe("named");
+    expect(agent.config.provider).toBe(DEFAULT_AGENT.provider);
+    expect(agent.config.model).toBe(DEFAULT_AGENT.model);
+    expect(agent.config.system_prompt).toBe(DEFAULT_AGENT.system_prompt);
   });
 
   test("同 phase 重复解析复用同一实例（缓存）", () => {

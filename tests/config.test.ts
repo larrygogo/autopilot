@@ -6,9 +6,6 @@ import { tmpdir } from "os";
 import {
   loadProviders,
   saveProvider,
-  loadGlobalAgents,
-  saveAgent,
-  deleteAgent,
   PROVIDER_NAMES,
   loadGithubConfig,
 } from "../src/core/config";
@@ -74,45 +71,6 @@ describe("providers 段读写", () => {
     expect(providers.anthropic.default_model).toBe("claude-sonnet-4-6");
     expect(providers.anthropic.enabled).toBeUndefined();
     expect((providers.anthropic as any).unknown_field).toBeUndefined();
-  });
-});
-
-describe("agents 段读写", () => {
-  it("saveAgent 写入后 loadGlobalAgents 可读", () => {
-    saveAgent("coder", {
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      system_prompt: "你是编码助手",
-    });
-    const agents = loadGlobalAgents();
-    expect(agents.coder.provider).toBe("anthropic");
-    expect(agents.coder.system_prompt).toBe("你是编码助手");
-  });
-
-  it("saveAgent 校验名称", () => {
-    expect(() => saveAgent("", { provider: "anthropic" })).toThrow(/非法/);
-    expect(() => saveAgent("bad name", { provider: "anthropic" })).toThrow(/非法/);
-  });
-
-  it("saveAgent 不把 name 字段写入 YAML（避免与 key 重复）", () => {
-    saveAgent("coder", { name: "coder", provider: "anthropic" });
-    const content = readFileSync(tmpFile, "utf-8");
-    // coder key 出现一次（作为 map key），不会在值里重复写 name: coder
-    const matches = content.match(/coder/g) ?? [];
-    expect(matches.length).toBe(1);
-  });
-
-  it("deleteAgent 移除条目并返回 true", () => {
-    saveAgent("coder", { provider: "anthropic" });
-    saveAgent("reviewer", { provider: "anthropic" });
-    expect(deleteAgent("coder")).toBe(true);
-    const agents = loadGlobalAgents();
-    expect(agents.coder).toBeUndefined();
-    expect(agents.reviewer).toBeDefined();
-  });
-
-  it("deleteAgent 对不存在的返回 false", () => {
-    expect(deleteAgent("nonexistent")).toBe(false);
   });
 });
 

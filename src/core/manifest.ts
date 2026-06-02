@@ -42,7 +42,6 @@ export interface WorkflowSnapshot {
   terminal_states: string[];
   phases: (PhaseDefinition | { parallel: ParallelDefinition })[];
   transitions?: TransitionTable;
-  agents?: Record<string, unknown>[];
   workspace?: WorkflowWorkspaceSpec;
   config?: Record<string, unknown>;
   /** rebuild-manifest 给老任务补的结构性占位标记 */
@@ -93,7 +92,6 @@ export function snapshotWorkflow(wf: WorkflowDefinition): WorkflowSnapshot {
   };
   if (wf.description !== undefined) snap.description = wf.description;
   if (wf.transitions !== undefined) snap.transitions = wf.transitions;
-  if (wf.agents !== undefined) snap.agents = wf.agents;
   if (wf.workspace !== undefined) snap.workspace = wf.workspace;
   if (wf.config !== undefined) snap.config = wf.config;
   return snap;

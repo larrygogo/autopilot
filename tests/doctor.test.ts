@@ -104,32 +104,26 @@ describe("L1 C3-C7", () => {
     expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("error");
   });
 
-  it("C5 agent 引用未启用 provider → error", async () => {
+  it("命名复用 agent 移除后：config.yaml 的 agents 段不再产生健康检查", async () => {
+    // Phase 3：删除命名 agent 机制。即便用户在 agents 段引用了未启用 provider，
+    // doctor 也不再对其报错（该段已不被框架读取）。
     writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n  openai:\n    enabled: false\nagents:\n  coder:\n    provider: openai\n", "utf-8");
     const report = await runChecks({ level: 1 });
-    const c5 = report.checks.find((c) => c.id === "agents.coder.provider-bound");
-    expect(c5?.status).toBe("error");
-    expect(c5?.fix?.auto).toBe("fix.agent.unbind-disabled-provider");
-  });
-
-  it("C6 用户 yaml 无 agent → 仍 ok（内置默认兜底）", async () => {
-    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents: {}\n", "utf-8");
-    const report = await runChecks({ level: 1 });
-    const c6 = report.checks.find((c) => c.id === "agents.has-any");
-    expect(c6?.status).toBe("ok");
-    expect(c6?.title).toContain("内置默认");
+    expect(report.checks.find((c) => c.id.startsWith("agents."))).toBeUndefined();
+    // provider 校验仍正常
+    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("ok");
   });
 
   it("全部合规 → ok", async () => {
-    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n", "utf-8");
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n", "utf-8");
     const report = await runChecks({ level: 1 });
     // 注：beforeEach 注入了 in-memory DB，C7 (projects.has-any) 查询会抛错被 catch 吞掉
     // 不产生 check，所以这里可以安全地断言 status === "ok"
     expect(report.checks.find((c) => c.id === "config.exists")?.status).toBe("ok");
     expect(report.checks.find((c) => c.id === "config.parses")?.status).toBe("ok");
     expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("ok");
-    expect(report.checks.find((c) => c.id === "agents.coder.provider-bound")?.status).toBe("ok");
-    expect(report.checks.find((c) => c.id === "agents.has-any")?.status).toBe("ok");
+    // 命名 agent 健康检查已移除
+    expect(report.checks.find((c) => c.id.startsWith("agents."))).toBeUndefined();
     expect(report.status).toBe("ok");
   });
 });
@@ -178,7 +172,7 @@ describe("报告契约", () => {
     writeFileSync(tmpFile, "providers: {}\nagents: {}\n", "utf-8");
     const r2 = await runChecks({ level: 1 });
     const allFix = [...r1.checks, ...r2.checks].map((c) => c.fix?.auto).filter(Boolean);
-    const allowed = ["init.providers", "init.agents", "fix.config.create", "fix.agent.unbind-disabled-provider"];
+    const allowed = ["init.providers", "fix.config.create"];
     for (const id of allFix) expect(allowed).toContain(id!);
   });
 });

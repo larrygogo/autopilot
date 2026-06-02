@@ -10,7 +10,7 @@
  *
  * 行为：
  *   1. 把 prompt 里 ${VAR} / $VAR 占位符替换成 task 上下文（title/requirement/workspace/...）
- *   2. 调用 getAgent(phase.agent || "coder", workflow.name).run(promptResolved)
+ *   2. 调用 agentForPhase(workflow.name, phase.name).run(promptResolved)
  *   3. 把 result.text 写入 workspace/<NN-phase>/agent_output.md
  *
  * 没有 reject / 复杂分支；runner 会自动 complete_trigger 推进下一阶段。

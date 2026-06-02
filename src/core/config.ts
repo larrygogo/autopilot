@@ -9,29 +9,6 @@ export const PROVIDER_NAMES = ["anthropic", "openai", "google"] as const;
 export type ProviderName = typeof PROVIDER_NAMES[number];
 
 // ──────────────────────────────────────────────
-// 对话（chat）系统全局配置
-// ──────────────────────────────────────────────
-
-export interface ConversationConfig {
-  /** 全局主对话 agent 的名字；对话命令未指定 --agent / --workflow 时使用 */
-  default_agent?: string;
-}
-
-export function loadConversationConfig(): ConversationConfig {
-  try {
-    const raw = loadConfig();
-    const section = raw["conversation"];
-    if (!section || typeof section !== "object" || Array.isArray(section)) return {};
-    const s = section as Record<string, unknown>;
-    const out: ConversationConfig = {};
-    if (typeof s.default_agent === "string" && s.default_agent.trim()) {
-      out.default_agent = s.default_agent.trim();
-    }
-    return out;
-  } catch { return {}; }
-}
-
-// ──────────────────────────────────────────────
 // 默认偏好（defaults）
 // ──────────────────────────────────────────────
 
@@ -63,36 +40,6 @@ export function saveDefaultsConfig(cfg: DefaultsConfig): void {
     doc.setIn(["defaults"], clean);
   }
   writeDocument(doc);
-}
-
-// ──────────────────────────────────────────────
-// agent 别名（config.yaml agent_aliases，spec §3.11）
-// ──────────────────────────────────────────────
-
-/**
- * 读取 config.yaml 的 agent_aliases 段。返回 alias → target 映射；段缺失/非法时返回 {}。
- *
- * yaml 示例：
- *   agent_aliases:
- *     code-reviewer: reviewer
- *     harsh-critic: reviewer
- *     planner: architect
- *
- * 非字符串 value 的 entry 静默跳过。
- */
-export function loadAgentAliases(): Record<string, string> {
-  try {
-    const raw = loadConfig();
-    const section = raw["agent_aliases"];
-    if (!section || typeof section !== "object" || Array.isArray(section)) return {};
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(section as Record<string, unknown>)) {
-      if (typeof v === "string" && v.trim()) out[k] = v.trim();
-    }
-    return out;
-  } catch {
-    return {};
-  }
 }
 
 // ──────────────────────────────────────────────
@@ -296,14 +243,6 @@ export function saveConfigRaw(yamlContent: string): void {
 }
 
 /**
- * 从全局 config.yaml 读取 `agents.<name>` 段，返回 `name -> partial AgentConfig` 映射。
- * 不校验字段，由 agents/registry 在合并后的 AgentConfig 上做校验。
- */
-export function loadGlobalAgents(): Record<string, Record<string, unknown>> {
-  return loadSection("agents");
-}
-
-/**
  * 读取 `providers.<name>` 段。仅返回已知的三个 provider；未配置时该 provider 对应值为 {}。
  */
 export function loadProviders(): Record<ProviderName, ProviderConfig> {
@@ -355,29 +294,6 @@ export function saveProvider(name: ProviderName, cfg: ProviderConfig): void {
   const clean = stripUndefined(cfg);
   doc.setIn(["providers", name], clean);
   writeDocument(doc);
-}
-
-/**
- * 写入/更新某个 agent 的配置。
- */
-export function saveAgent(name: string, cfg: Record<string, unknown>): void {
-  if (!name || !/^[\w.\-]+$/.test(name)) {
-    throw new Error(`非法 agent 名：${name}（仅允许字母、数字、._-）`);
-  }
-  const doc = loadDocument();
-  const clean = stripUndefined(cfg);
-  // 不允许把 name 字段写入 YAML（key 即 name）
-  delete clean["name"];
-  doc.setIn(["agents", name], clean);
-  writeDocument(doc);
-}
-
-export function deleteAgent(name: string): boolean {
-  const doc = loadDocument();
-  if (!doc.hasIn(["agents", name])) return false;
-  doc.deleteIn(["agents", name]);
-  writeDocument(doc);
-  return true;
 }
 
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {

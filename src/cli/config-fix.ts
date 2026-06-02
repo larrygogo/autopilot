@@ -1,4 +1,4 @@
-import { saveProvider, saveAgent, PROVIDER_NAMES, type ProviderName } from "../core/config";
+import { saveProvider, PROVIDER_NAMES, type ProviderName } from "../core/config";
 
 const DEFAULT_MODELS: Record<ProviderName, string> = {
   anthropic: "claude-sonnet-4-6",
@@ -73,22 +73,8 @@ export async function runFixWizard(): Promise<void> {
     manualSteps.push(`$ ${LOGIN_CMDS[name]}`);
   }
 
-  while (true) {
-    const agentName = (await ask("? 创建一个 agent（回车跳过）» 名字：")).trim();
-    if (!agentName) break;
-    const provider = (await ask(`? 该 agent 用哪个 provider？（${chosen.join("/")}）» `)).trim() as ProviderName;
-    if (!chosen.includes(provider)) {
-      console.log(`! 无效 provider，跳过 ${agentName}`);
-      continue;
-    }
-    saveAgent(agentName, {
-      provider,
-      model: DEFAULT_MODELS[provider],
-      max_turns: 10,
-      permission_mode: "auto",
-    });
-    console.log(`✓ 已写入 agent ${agentName}`);
-  }
+  // 命名复用 agent 机制已移除（Phase 3）：不再向导式创建命名 agent。
+  // 每个工作流 phase 内联配置 agent、省略则走 DEFAULT_AGENT 兜底。
 
   console.log("\n✓ 已写入 ~/.autopilot/config.yaml");
   if (manualSteps.length > 0) {

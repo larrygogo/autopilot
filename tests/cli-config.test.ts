@@ -93,10 +93,11 @@ describe("config path / show", () => {
 });
 
 describe("config doctor --fix 交互式", () => {
-  it("空 config + 输入选 anthropic + 默认 model + agent name=coder", () => {
+  it("空 config + 输入选 anthropic + 默认 model（命名 agent 创建已移除）", () => {
     runCli("init");
     writeFileSync(join(tmpHome, "config.yaml"), "providers: {}\nagents: {}\n", "utf-8");
-    const stdin = ["anthropic", "claude-sonnet-4-6", "coder", "anthropic", ""].join("\n") + "\n";
+    // Phase 3：向导不再创建命名 agent，只配 provider。stdin 只需 provider + model。
+    const stdin = ["anthropic", "claude-sonnet-4-6"].join("\n") + "\n";
 
     const r = Bun.spawnSync({
       cmd: ["bun", "run", join(REPO, "bin/autopilot.ts"), "config", "doctor", "--fix"],
@@ -109,6 +110,6 @@ describe("config doctor --fix 交互式", () => {
 
     const yaml = readFileSync(join(tmpHome, "config.yaml"), "utf-8");
     expect(yaml).toContain("default_model: claude-sonnet-4-6");
-    expect(yaml).toMatch(/agents:[\s\S]*coder:[\s\S]*provider:\s*anthropic/);
+    expect(yaml).toContain("enabled: true");
   });
 });
