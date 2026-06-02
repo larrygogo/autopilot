@@ -10,7 +10,6 @@ import { WorkflowHealthBanner } from "@/components/WorkflowHealthBanner";
 import { ConfirmDialog } from "@/components/Modal";
 import { PageHero } from "@/components/PageHero";
 import { useToast } from "@/components/Toast";
-import { WorkflowAgentsEditor } from "@/components/WorkflowAgentsEditor";
 import { PhasePipelineEditor } from "@/components/PhasePipelineEditor";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -36,7 +35,6 @@ interface WorkflowInfo {
 interface WorkflowDetail {
   name: string;
   description?: string;
-  agents?: Array<{ name: string; extends?: string; provider?: string; model?: string }>;
   phases?: unknown[];
   initial_state?: string;
   terminal_states?: string[];
@@ -51,11 +49,7 @@ interface Selected {
   graph: any;
 }
 
-interface Props {
-  onJumpToAgent?: (name: string) => void;
-}
-
-export function Workflows({ onJumpToAgent }: Props = {}) {
+export function Workflows() {
   const toast = useToast();
   const navigate = useNavigate();
   const { subscribe } = useWebSocket();
@@ -295,27 +289,16 @@ export function Workflows({ onJumpToAgent }: Props = {}) {
                 {selected.detail.terminal_states?.length ?? 0}
               </SummaryField>
               <SummaryField label="阶段数">{selected.detail.phases?.length ?? 0}</SummaryField>
-              <SummaryField label="智能体数">{selected.detail.agents?.length ?? 0}</SummaryField>
             </dl>
           </Card>
 
-          {/* Agents editor */}
-          <Card className="p-4">
-            <WorkflowAgentsEditor
-              workflowName={selected.name}
-              initialAgents={(selected.detail.agents as any[]) ?? []}
-              onJumpToAgent={onJumpToAgent}
-              onSaved={reloadSelected}
-            />
-          </Card>
-
-          {/* 流水线 + 阶段编辑器合二为一：流水线节点点击弹编辑 drawer */}
+          {/* 流水线 + 阶段编辑器合二为一：流水线节点点击弹编辑 drawer。
+              agent 配置已下放到每个 phase 内联编辑（点节点 → drawer 里的「智能体 · agent」区） */}
           <Card className="p-4">
             <PhasePipelineEditor
               workflowName={selected.name}
               initialPhases={(selected.detail.phases as any[]) ?? []}
               tsSource={tsSource}
-              workflowAgents={(selected.detail.agents as Array<{ name: string }> | undefined) ?? []}
               onSaved={async () => {
                 // 同步刷新 drawer 里用的 ts 源码
                 void loadTsSilently(selected.name);

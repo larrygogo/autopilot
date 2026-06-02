@@ -58,6 +58,30 @@ function commentsToFeedbacks(all: Comment[]): RequirementFeedback[] {
     }));
 }
 
+/**
+ * 内联 agent 配置（命名复用 agent 删除后的唯一形态）。
+ * 与后端 core/agent-defaults.InlineAgentConfig 同构；phase 上挂 `agent` 字段，
+ * dry-run 时也直接传这个对象，省略则后端走 DEFAULT_AGENT 兜底。
+ */
+export interface InlineAgentConfig {
+  provider?: string;
+  model?: string;
+  max_turns?: number;
+  permission_mode?: string;
+  system_prompt?: string;
+}
+
+/** dry-run 时把临时 model/max_turns 覆盖合到内联配置上；全空则返回 undefined（让后端走默认）。 */
+function mergeInlineAgent(
+  agent: InlineAgentConfig | undefined,
+  override: { model?: string; max_turns?: number },
+): InlineAgentConfig | undefined {
+  const merged: InlineAgentConfig = { ...(agent ?? {}) };
+  if (override.model) merged.model = override.model;
+  if (typeof override.max_turns === "number" && override.max_turns > 0) merged.max_turns = override.max_turns;
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 /** 返回需要塞进 fetch headers 的 token 字段；本机访问不需要 token 时返回空对象。 */
 function authHeaders(): Record<string, string> {
   if (!shouldUseToken()) return {};
@@ -99,7 +123,6 @@ const NEW_API_PATTERNS: RegExp[] = [
   // 带固定后缀的子路径 endpoint
   /^\/api\/workflows\/[\w.\-]+\/phases$/,
   /^\/api\/workflows\/[\w.\-]+\/sync-ts$/,
-  /^\/api\/workflows\/[\w.\-]+\/agents$/,
   /^\/api\/codebases\/[\w.\-]+\/submodules$/,
   /^\/api\/codebases\/[\w.\-]+\/rediscover-submodules$/,
   /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
@@ -107,7 +130,6 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/requirements\/[\w.\-]+\/clarifier-round$/,
   // 顶层 collection endpoint（list/create，不匹配 /:id 详情）
   /^\/api\/providers(\?.*)?$/,
-  /^\/api\/agents(\?.*)?$/,
   /^\/api\/schedules(\?.*)?$/,
   /^\/api\/defaults(\?.*)?$/,
   /^\/api\/codebases(\?.*)?$/,
@@ -342,10 +364,6 @@ export const api = {
     request<{ removed: string[] }>(`/api/workflows/${name}/prune-orphans`, {
       method: "POST", body: JSON.stringify({ names }),
     }),
-  setWorkflowAgents: (name: string, agents: unknown[]) =>
-    request<{ ok: boolean }>(`/api/workflows/${name}/agents`, {
-      method: "PUT", body: JSON.stringify({ agents }),
-    }),
 
   // Config
   // [WS-RPC] config.get
@@ -362,9 +380,13 @@ export const api = {
       `/api/workflows/${name}/phase-fn/${phase}`,
       { method: "PUT", body: JSON.stringify({ code }) },
     ),
+  /**
+   * 试跑某 workflow 的 prompt。命名复用 agent 删除后：agent 字段是一个内联配置对象
+   * （provider/model/system_prompt/...），省略则后端走 DEFAULT_AGENT 兜底。
+   */
   dryRunPrompt: (
     workflowName: string,
-    body: { agent: string; prompt: string; timeout?: number },
+    body: { agent?: InlineAgentConfig; prompt: string; timeout?: number },
   ) =>
     request<{
       text: string;
@@ -394,20 +416,9 @@ export const api = {
   getProviderModels: (name: string) =>
     requestRpc<ProviderModelsResult>("providers.models", { name }),
 
-  // Agents
-  // [WS-RPC] agents.list
-  listAgents: () => requestRpc<AgentItem[]>("agents.list"),
-  // [WS-RPC] agents.get
-  getAgent: (name: string) => requestRpc<AgentItem>("agents.get", { name }),
-  // [WS-RPC] agents.create
-  createAgent: (body: AgentItem) =>
-    requestRpc<{ ok: boolean; name: string }>("agents.create", body),
-  // [WS-RPC] agents.update
-  updateAgent: (name: string, body: Record<string, unknown>) =>
-    requestRpc<{ ok: boolean }>("agents.update", { name, ...body }),
-  // [WS-RPC] agents.delete
-  deleteAgent: (name: string) =>
-    requestRpc<{ ok: boolean }>("agents.delete", { name }),
+  // Agents — 命名复用 agent 机制已删除（Phase 3）。
+  // agent 配置现在内联挂在 phase 上；试跑见下方 dryRunAgent（收内联配置对象）。
+
   // Chat
   chat: (body: { message: string; session_id?: string; agent?: string; workflow?: string; title?: string }) =>
     request<{ session_id: string; message: ChatMessage }>("/api/chat", {
@@ -489,13 +500,12 @@ export const api = {
     requestRpc<{ ok: true; taskId: string }>("schedules.runNow", { id }),
 
   // [WS-RPC] agents.dryRun（LLM 调用，5min 超时）
-  dryRunAgent: (name: string, body: {
-    prompt: string;
-    system_prompt?: string;
-    additional_system?: string;
-    model?: string;
-    max_turns?: number;
-  }) =>
+  // 命名复用 agent 删除后：传一个内联 agent 配置对象（provider/model/system_prompt/...），
+  // 省略 agent 字段则后端走 DEFAULT_AGENT 兜底。additional_system 叠加到 system_prompt 之后。
+  dryRunAgent: (
+    agent: InlineAgentConfig | undefined,
+    body: { prompt: string; additional_system?: string; model?: string; max_turns?: number },
+  ) =>
     requestRpc<{
       ok: boolean;
       elapsed_ms: number;
@@ -503,7 +513,11 @@ export const api = {
         text: string;
         usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
       };
-    }>("agents.dryRun", { name, ...body }, { timeoutMs: 300_000 }),
+    }>(
+      "agents.dryRun",
+      { agent: mergeInlineAgent(agent, body), prompt: body.prompt, additional_system: body.additional_system },
+      { timeoutMs: 300_000 },
+    ),
 
   // Projects
   // [WS-RPC] projects.list — P3 第一批 PoC（RPC 直接返回数组，不再 wrap projects 字段）
@@ -592,9 +606,7 @@ export const api = {
   setupProviders: (providers: Record<string, Record<string, unknown>>) =>
     requestRpc<{ report: DoctorReportWithDismiss }>("setup.saveProviders", { providers }),
 
-  // [WS-RPC] setup.saveAgents
-  setupAgents: (agents: Record<string, Record<string, unknown>>) =>
-    requestRpc<{ report: DoctorReportWithDismiss }>("setup.saveAgents", { agents }),
+  // setup.saveAgents 已移除（Phase 3：命名复用 agent 机制删除；首跑向导不再单独配 agent）。
 
   // [WS-RPC] setup.saveCodebases
   setupCodebase: (payload: { name: string; path: string; project_id?: string }) =>
@@ -838,20 +850,6 @@ export interface WorkspaceEntry {
   type: "file" | "dir";
   size?: number;
   mtime?: number;
-}
-
-export interface AgentItem {
-  name: string;
-  provider?: string;
-  model?: string;
-  max_turns?: number;
-  permission_mode?: string;
-  system_prompt?: string;
-  extends?: string | null;
-  used_by?: string[];
-  /** Phase 7（spec §3.11.1）：若该名称是 alias，target 名供 UI 显示 badge */
-  alias_of?: string;
-  [key: string]: unknown;
 }
 
 export interface ChatMessage {

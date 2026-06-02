@@ -265,7 +265,8 @@ function AppInner() {
                 <Route path="/workflows/new-with-ai" element={<NewWorkflowWithAI />} />
                 <Route path="/workflows" element={<Workflows />} />
                 <Route path="/schedules" element={<SchedulesRoute subscribe={subscribe} />} />
-                <Route path="/agents" element={<Navigate to="/settings?tab=agents" replace />} />
+                {/* /agents 旧入口：命名复用 agent 已删除，agent 配置下放到 phase 内联编辑（工作流编辑器） */}
+                <Route path="/agents" element={<Navigate to="/workflows" replace />} />
                 <Route path="/providers" element={<Navigate to="/settings?tab=providers" replace />} />
                 <Route path="/setup" element={<Setup />} />
                 <Route path="*" element={<Navigate to="/now" replace />} />

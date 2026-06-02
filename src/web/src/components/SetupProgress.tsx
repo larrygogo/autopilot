@@ -1,17 +1,19 @@
 import { cn } from "@/lib/utils";
 
 export interface SetupProgressProps {
-  current: 1 | 2 | 3;
-  labels?: [string, string, string];
+  current: number;
+  /** 步骤标签，长度即步数（默认 2 步：Provider / Codebase） */
+  labels?: string[];
 }
 
-const DEFAULT_LABELS: [string, string, string] = ["Provider", "Agent", "Codebase"];
+const DEFAULT_LABELS: string[] = ["Provider", "Codebase"];
 
 export function SetupProgress({ current, labels = DEFAULT_LABELS }: SetupProgressProps) {
+  const total = labels.length;
   return (
     <ol className="mb-6 flex items-center gap-2 font-mono text-xs uppercase tracking-[0.12em]">
       {labels.map((label, idx) => {
-        const step = (idx + 1) as 1 | 2 | 3;
+        const step = idx + 1;
         const isActive = step === current;
         const isDone = step < current;
         return (
@@ -27,7 +29,7 @@ export function SetupProgress({ current, labels = DEFAULT_LABELS }: SetupProgres
               {step}
             </span>
             <span className={cn(!isActive && "text-muted-foreground")}>{label}</span>
-            {step < 3 && <span className="text-muted-foreground">———</span>}
+            {step < total && <span className="text-muted-foreground">———</span>}
           </li>
         );
       })}

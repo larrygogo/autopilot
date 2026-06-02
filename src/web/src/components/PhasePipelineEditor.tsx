@@ -1,11 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2, Layers, Ungroup, ArrowUpFromLine, ArrowDownToLine } from "lucide-react";
-import { api } from "@/hooks/useApi";
+import { api, type InlineAgentConfig } from "@/hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
 import { AddPhaseDialog, type NewPhaseData } from "./AddPhaseDialog";
 import { AddParallelDialog, type NewParallelData } from "./AddParallelDialog";
+import { PhaseAgentEditor } from "./PhaseAgentEditor";
 import { PhasePipeline } from "./PhasePipeline";
+
+/** phase.agent 规整成内联配置对象；历史里 agent 曾是字符串名 → 视为无配置（走默认）。 */
+function normalizeInlineAgent(raw: unknown): InlineAgentConfig | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const a = raw as Record<string, unknown>;
+  const out: InlineAgentConfig = {};
+  if (typeof a.provider === "string") out.provider = a.provider;
+  if (typeof a.model === "string") out.model = a.model;
+  if (typeof a.max_turns === "number") out.max_turns = a.max_turns;
+  if (typeof a.permission_mode === "string") out.permission_mode = a.permission_mode;
+  if (typeof a.system_prompt === "string") out.system_prompt = a.system_prompt;
+  return out;
+}
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,8 +49,6 @@ interface Props {
   initialPhases: any[];
   /** workflow.ts 完整源码；drawer 里只读展示对应 phase 的函数片段 */
   tsSource?: string | null;
-  /** 工作流局部 agents（来自 workflow.yaml.agents[]），合到全局 agents 一起列入下拉 */
-  workflowAgents?: Array<{ name: string }>;
   /** 工作流详情数据需要刷新的时候触发 */
   onSaved?: () => void;
 }
@@ -45,7 +57,6 @@ export function PhasePipelineEditor({
   workflowName,
   initialPhases,
   tsSource,
-  workflowAgents,
   onSaved,
 }: Props) {
   const toast = useToast();
@@ -57,7 +68,6 @@ export function PhasePipelineEditor({
   const [addParallelOpen, setAddParallelOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingDeleteParallel, setPendingDeleteParallel] = useState<string | null>(null);
-  const [globalAgents, setGlobalAgents] = useState<string[]>([]);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
 
   // ── rename 追踪：保存时把 oldName→newName 一起传给后端，让 workflow.ts 里
@@ -103,21 +113,6 @@ export function PhasePipelineEditor({
   }, [dirty, saving]);
   // save 函数引用 — 给 keydown 闭包用，避免依赖整个 save 函数变更触发 listener 重绑
   const saveRef = useRef<(() => Promise<void>) | null>(null);
-
-  // 加载全局 agent 名字给 drawer 下拉用
-  useEffect(() => {
-    api.listAgents()
-      .then((list) => setGlobalAgents(list.map((a) => a.name)))
-      .catch(() => setGlobalAgents([]));
-  }, []);
-
-  const agentOptions = useMemo(() => {
-    const set = new Set<string>(globalAgents);
-    for (const a of workflowAgents ?? []) {
-      if (a?.name) set.add(a.name);
-    }
-    return Array.from(set).sort();
-  }, [globalAgents, workflowAgents]);
 
   /** 当前所有并行块的 name（drawer 移入并行块的下拉用） */
   const parallelBlockNames = useMemo(() => {
@@ -710,7 +705,6 @@ export function PhasePipelineEditor({
                     raw={drawerPhaseLocation.raw}
                     workflowName={workflowName}
                     allPhaseNames={allPhaseNames}
-                    agentOptions={agentOptions}
                     isTopLevel={drawerPhaseLocation.kind === "top"}
                     parallelBlockNames={parallelBlockNames}
                     onChange={(patch) => updatePhaseField(phaseName, patch)}
@@ -1112,7 +1106,8 @@ function PromptDryRunner({
   prompt,
 }: {
   workflowName: string;
-  agent: string;
+  /** phase 内联 agent 配置；undefined → 后端走 DEFAULT_AGENT 兜底 */
+  agent: InlineAgentConfig | undefined;
   prompt: string;
 }) {
   const toast = useToast();
@@ -1120,6 +1115,8 @@ function PromptDryRunner({
   const [output, setOutput] = useState<string | null>(null);
   const [durationMs, setDurationMs] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const agentLabel = agent?.model || agent?.provider || "默认 agent";
 
   async function dryRun() {
     setRunning(true);
@@ -1143,7 +1140,7 @@ function PromptDryRunner({
     <div className="mt-2 border-[1.5px] border-dashed border-foreground/30 bg-muted/20 p-2">
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          试跑 · 用当前 prompt 直接调一次 {agent}
+          试跑 · 用当前 prompt 直接调一次 {agentLabel}
         </span>
         <Button
           variant="outline"
@@ -1276,7 +1273,6 @@ function PhaseEditForm({
   raw,
   workflowName,
   allPhaseNames,
-  agentOptions,
   isTopLevel,
   parallelBlockNames,
   onChange,
@@ -1287,7 +1283,6 @@ function PhaseEditForm({
   raw: PhaseRaw;
   workflowName: string;
   allPhaseNames: string[];
-  agentOptions: string[];
   /** true 表示当前 phase 在顶层（顶层时可"移入并行块"；并行子项时可"移出"） */
   isTopLevel: boolean;
   /** 现有并行块名列表（顶层 phase 用） */
@@ -1361,25 +1356,6 @@ function PhaseEditForm({
           </p>
         </FormRow>
 
-        <FormRow label="智能体 (agent)">
-          <Select
-            value={(raw.agent as string | undefined) || "__none__"}
-            onValueChange={(v) => onChange({ agent: v === "__none__" ? undefined : v })}
-          >
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue placeholder="（不指定，用 coder 默认）" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">（不指定）</SelectItem>
-              {agentOptions.map((n) => (
-                <SelectItem key={n} value={n} className="font-mono">
-                  {n}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </FormRow>
-
         <FormRow label="超时 (秒)">
           <Input
             type="number"
@@ -1403,17 +1379,23 @@ function PhaseEditForm({
             spellCheck={false}
           />
           <p className="mt-1 text-[10px] text-muted-foreground">
-            yaml 写 prompt + 指定 agent → 框架自动调用 agent.run(prompt)，无需写 ts 函数；
+            yaml 写 prompt → 框架自动调用 phase 内联 agent（或默认 agent）.run(prompt)，无需写 ts 函数；
             适合简单的"调 agent 跑一段 prompt"场景，复杂分支（reject / 解析返回）仍需 ts
           </p>
           {typeof raw.prompt === "string" && raw.prompt.trim() && (
             <PromptDryRunner
               workflowName={workflowName}
-              agent={(raw.agent as string | undefined) || "coder"}
+              agent={normalizeInlineAgent(raw.agent)}
               prompt={raw.prompt}
             />
           )}
         </FormRow>
+
+        <PhaseAgentEditor
+          phaseName={phaseName}
+          agent={normalizeInlineAgent(raw.agent)}
+          onChange={(next) => onChange({ agent: next })}
+        />
 
         <FormRow label="驳回到">
           <Select

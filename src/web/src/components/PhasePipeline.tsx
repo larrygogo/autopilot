@@ -40,6 +40,19 @@ interface Props {
   phaseStatuses?: Record<string, PhasePipelineRunStatus>;
 }
 
+// phase.agent 现为内联对象（移除命名复用 agent 后）。预览节点只需一个简短标识：
+//   字符串（废弃格式）→ 原样；对象 → model || provider || "自定义"；省略 → undefined（走默认 agent，不显示徽章）
+function agentLabel(agent: unknown): string | undefined {
+  if (typeof agent === "string") return agent || undefined;
+  if (agent && typeof agent === "object") {
+    const a = agent as Record<string, unknown>;
+    if (typeof a.model === "string" && a.model) return a.model;
+    if (typeof a.provider === "string" && a.provider) return a.provider;
+    return "自定义";
+  }
+  return undefined;
+}
+
 function normalize(raw: any[]): Entry[] {
   return raw.map((p) => {
     if (p && p.parallel) {
@@ -52,7 +65,7 @@ function normalize(raw: any[]): Entry[] {
           name: sub.name,
           label: typeof sub.label === "string" ? sub.label : undefined,
           timeout: sub.timeout,
-          agent: typeof sub.agent === "string" ? sub.agent : undefined,
+          agent: agentLabel(sub.agent),
           gate: sub.gate === true,
         })),
       };
@@ -64,7 +77,7 @@ function normalize(raw: any[]): Entry[] {
         label: typeof p.label === "string" ? p.label : undefined,
         timeout: p.timeout,
         reject: p.reject ?? null,
-        agent: typeof p.agent === "string" ? p.agent : undefined,
+        agent: agentLabel(p.agent),
         gate: p.gate === true,
       },
     };

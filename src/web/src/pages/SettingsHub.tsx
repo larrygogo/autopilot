@@ -4,12 +4,11 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/PageLoader";
 
 const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
-const ClarifierSettings = lazy(() => import("./ClarifierSettings").then((m) => ({ default: m.ClarifierSettings })));
 
 // 工作流 / 定时任务已提到顶层导航（"编排"分组），不在设置内
+// 需求澄清模型已移除全局命名 clarifier agent，改由 requirement 维度配置（clarifier_provider/model）
 const TABS = [
   { key: "general", label: "通用" },
-  { key: "clarifier", label: "需求澄清" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -35,7 +34,7 @@ export function SettingsHub() {
       <header className="mb-4 border-b-[1.5px] border-foreground/30 pb-3">
         <h1 className="font-display text-2xl font-bold uppercase tracking-wider">设置 · SETTINGS</h1>
         <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground mt-1">
-          通用 / 需求澄清
+          通用
         </p>
       </header>
 
@@ -51,9 +50,6 @@ export function SettingsHub() {
         <Suspense fallback={<PageLoader />}>
           <TabsContent value="general">
             <Settings embedded />
-          </TabsContent>
-          <TabsContent value="clarifier">
-            <ClarifierSettings />
           </TabsContent>
         </Suspense>
       </Tabs>

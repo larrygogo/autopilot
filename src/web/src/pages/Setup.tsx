@@ -21,7 +21,9 @@ export function Setup() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  // 命名复用 agent 删除后，首跑向导从 3 步简化为 2 步：Provider → Codebase。
+  // agent 配置不再在向导里单独配，改由每个工作流的 phase 内联编辑（默认 agent 兜底）。
+  const [step, setStep] = useState<1 | 2>(1);
   const [report, setReport] = useState<DoctorReportWithDismiss | null>(null);
 
   const [enabledProviders, setEnabledProviders] = useState<Record<ProviderName, boolean>>({
@@ -34,9 +36,6 @@ export function Setup() {
   const [modelCatalogs, setModelCatalogs] = useState<Record<ProviderName, string[]>>({
     anthropic: [], openai: [], google: [],
   });
-
-  const [agentName, setAgentName] = useState("coder");
-  const [agentProvider, setAgentProvider] = useState<ProviderName>("anthropic");
 
   const [cbName, setCbName] = useState("");
   const [cbPath, setCbPath] = useState("");
@@ -66,33 +65,13 @@ export function Setup() {
     try {
       const { report } = await api.setupProviders(payload);
       setReport(report);
-      const first = ALL_PROVIDERS.find((p) => enabledProviders[p.name])?.name;
-      if (first) setAgentProvider(first);
       setStep(2);
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
     }
   }
 
-  async function submitStep2() {
-    if (!agentName.trim()) { toast.error("agent 名不能为空", ""); return; }
-    try {
-      const { report } = await api.setupAgents({
-        [agentName.trim()]: {
-          provider: agentProvider,
-          model: models[agentProvider],
-          max_turns: 10,
-          permission_mode: "auto",
-        },
-      });
-      setReport(report);
-      setStep(3);
-    } catch (e: unknown) {
-      toast.error("保存失败", (e as Error)?.message ?? String(e));
-    }
-  }
-
-  async function submitStep3OrSkip(skip: boolean) {
+  async function submitStep2OrSkip(skip: boolean) {
     if (!skip) {
       if (!cbName.trim() || !cbPath.trim()) { toast.error("name / path 不能为空", ""); return; }
       try {
@@ -106,7 +85,8 @@ export function Setup() {
     navigate("/now");
   }
 
-  const minimumReady = report && report.checks.find((c) => c.id === "agents.has-any")?.status === "ok";
+  // 核心就绪 = 至少启用了一个 provider（命名 agent 检查已移除）
+  const minimumReady = report && report.checks.find((c) => c.id === "providers.has-enabled")?.status === "ok";
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
@@ -117,17 +97,17 @@ export function Setup() {
         </p>
       </header>
 
-      <SetupProgress current={step} />
+      <SetupProgress current={step} labels={["Provider", "Codebase"]} />
 
-      {step === 3 && minimumReady && (
+      {step === 2 && minimumReady && (
         <div className="mb-4 border-[1.5px] border-foreground/30 px-3 py-2 font-mono text-xs">
-          ✓ 核心配置已就绪 · 第 3 步可选
+          ✓ 核心配置已就绪 · 第 2 步可选
         </div>
       )}
 
       {step === 1 && (
         <section className="space-y-4">
-          <h2 className="font-mono text-sm font-bold uppercase">1/3 · 启用 Provider</h2>
+          <h2 className="font-mono text-sm font-bold uppercase">1/2 · 启用 Provider</h2>
           {ALL_PROVIDERS.map((p) => (
             <div key={p.name} className="flex items-center gap-3">
               <Checkbox
@@ -160,33 +140,7 @@ export function Setup() {
 
       {step === 2 && (
         <section className="space-y-4">
-          <h2 className="font-mono text-sm font-bold uppercase">2/3 · 创建 Agent</h2>
-          <div>
-            <Label htmlFor="agent-name">名字</Label>
-            <Input id="agent-name" value={agentName} onChange={(e) => setAgentName(e.target.value)} />
-          </div>
-          <div>
-            <Label>Provider</Label>
-            <select
-              className="block w-full border-[1.5px] bg-background p-2 font-mono"
-              value={agentProvider}
-              onChange={(e) => setAgentProvider(e.target.value as ProviderName)}
-            >
-              {ALL_PROVIDERS.filter((p) => enabledProviders[p.name]).map((p) => (
-                <option key={p.name} value={p.name}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex justify-end gap-2 pt-4">
-            <Button variant="ghost" onClick={() => setStep(1)}>← 上一步</Button>
-            <Button onClick={submitStep2}>下一步 →</Button>
-          </div>
-        </section>
-      )}
-
-      {step === 3 && (
-        <section className="space-y-4">
-          <h2 className="font-mono text-sm font-bold uppercase">3/3 · 添加 Codebase（可选）</h2>
+          <h2 className="font-mono text-sm font-bold uppercase">2/2 · 添加 Codebase（可选）</h2>
           <div>
             <Label htmlFor="cb-name">名称</Label>
             <Input id="cb-name" value={cbName} onChange={(e) => setCbName(e.target.value)} placeholder="my-project" />
@@ -199,9 +153,9 @@ export function Setup() {
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-4">
-            <Button variant="ghost" onClick={() => setStep(2)}>← 上一步</Button>
-            <Button variant="outline" onClick={() => submitStep3OrSkip(true)}>跳过</Button>
-            <Button onClick={() => submitStep3OrSkip(false)}>完成</Button>
+            <Button variant="ghost" onClick={() => setStep(1)}>← 上一步</Button>
+            <Button variant="outline" onClick={() => submitStep2OrSkip(true)}>跳过</Button>
+            <Button onClick={() => submitStep2OrSkip(false)}>完成</Button>
           </div>
 
           <FolderPicker

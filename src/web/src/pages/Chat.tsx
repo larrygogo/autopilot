@@ -12,7 +12,6 @@ import {
   api,
   type ChatMessage,
   type ChatSessionManifest,
-  type AgentItem,
 } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
@@ -41,9 +40,7 @@ export function Chat({ subscribe }: ChatProps) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState("");
-  const [agents, setAgents] = useState<AgentItem[]>([]);
   const [workflows, setWorkflows] = useState<{ name: string; description: string }[]>([]);
-  const [agent, setAgent] = useState<string>("");
   const [workflow, setWorkflow] = useState<string>("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -56,7 +53,6 @@ export function Chat({ subscribe }: ChatProps) {
 
   useEffect(() => {
     refreshSessions();
-    api.listAgents().then(setAgents).catch(() => {});
     api.listWorkflows().then(setWorkflows).catch(() => {});
   }, [refreshSessions]);
 
@@ -69,7 +65,6 @@ export function Chat({ subscribe }: ChatProps) {
       .getSession(selected)
       .then((s) => {
         setMessages(s.messages);
-        if (s.agent) setAgent(s.agent);
         setWorkflow(s.workflow ?? "");
       })
       .catch(() => {});
@@ -121,7 +116,6 @@ export function Chat({ subscribe }: ChatProps) {
       const result = await api.chat({
         message: text,
         session_id: selected ?? undefined,
-        agent: agent || undefined,
         workflow: workflow || undefined,
       });
       if (!selected) setSelected(result.session_id);
@@ -136,7 +130,7 @@ export function Chat({ subscribe }: ChatProps) {
     } finally {
       setSending(false);
     }
-  }, [draft, sending, selected, agent, workflow, refreshSessions, toast]);
+  }, [draft, sending, selected, workflow, refreshSessions, toast]);
 
   const newChat = () => {
     setSelected(null);
@@ -167,7 +161,7 @@ export function Chat({ subscribe }: ChatProps) {
   const currentSession = sessions.find((s) => s.id === selected) ?? null;
   const currentTitle =
     currentSession?.title || (selected ? selected.slice(0, 8) : "新对话");
-  const currentAgent = currentSession?.agent || agent || "默认";
+  const currentAgent = currentSession?.agent || "默认";
   const currentWorkflow = currentSession?.workflow || workflow;
 
   const sidebar = (
@@ -227,20 +221,10 @@ export function Chat({ subscribe }: ChatProps) {
               </>
             ) : (
               <>
-                <Select value={agent || "__default__"} onValueChange={(v) => setAgent(v === "__default__" ? "" : v)}>
-                  <SelectTrigger className="h-7 w-auto gap-1 px-2 text-xs">
-                    <Bot className="h-3 w-3 opacity-60" />
-                    <SelectValue placeholder="默认 agent" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__default__">默认 agent</SelectItem>
-                    {agents.map((a) => (
-                      <SelectItem key={a.name} value={a.name}>
-                        {a.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Badge variant="muted" className="gap-1">
+                  <Bot className="h-3 w-3" />
+                  默认 agent
+                </Badge>
                 <Select value={workflow || "__none__"} onValueChange={(v) => setWorkflow(v === "__none__" ? "" : v)}>
                   <SelectTrigger className="h-7 w-auto gap-1 px-2 text-xs">
                     <WorkflowIcon className="h-3 w-3 opacity-60" />

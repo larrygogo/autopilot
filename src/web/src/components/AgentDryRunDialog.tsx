@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Copy } from "lucide-react";
-import { api, type AgentItem, type ProviderModelsResult } from "../hooks/useApi";
+import { api, type InlineAgentConfig, type ProviderModelsResult } from "../hooks/useApi";
 import { useToast } from "./Toast";
 import {
   Dialog,
@@ -18,7 +18,10 @@ import { Label } from "@/components/ui/label";
 interface Props {
   open: boolean;
   onClose: () => void;
-  agent: AgentItem | null;
+  /** 试跑用的内联 agent 配置；undefined → 后端走 DEFAULT_AGENT 兜底 */
+  agent: InlineAgentConfig | undefined;
+  /** 对话框标题里展示的名称（如 phase 名）；不传则显示"内联配置" */
+  title?: string;
 }
 
 interface RunResult {
@@ -27,7 +30,7 @@ interface RunResult {
   usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
 }
 
-export function AgentDryRunDialog({ open, onClose, agent }: Props) {
+export function AgentDryRunDialog({ open, onClose, agent, title }: Props) {
   const toast = useToast();
   const [prompt, setPrompt] = useState("");
   const [additionalSystem, setAdditionalSystem] = useState("");
@@ -36,6 +39,8 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
   const [models, setModels] = useState<ProviderModelsResult | null>(null);
+
+  const displayName = title ?? "内联配置";
 
   // 打开时重置
   useEffect(() => {
@@ -46,7 +51,7 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
       setMaxTurns("");
       setResult(null);
     }
-  }, [open, agent?.name]);
+  }, [open, title]);
 
   // 加载 provider 对应的模型列表（只在有 provider 时）
   useEffect(() => {
@@ -57,8 +62,6 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
     api.getProviderModels(agent.provider).then(setModels).catch(() => setModels(null));
   }, [open, agent?.provider]);
 
-  if (!agent) return null;
-
   const canRun = prompt.trim().length > 0 && !running;
 
   const run = async () => {
@@ -67,13 +70,12 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
     setResult(null);
     try {
       const turns = maxTurns ? parseInt(maxTurns, 10) : undefined;
-      const body = {
+      const res = await api.dryRunAgent(agent, {
         prompt,
         ...(additionalSystem ? { additional_system: additionalSystem } : {}),
         ...(modelOverride ? { model: modelOverride } : {}),
         ...(typeof turns === "number" && turns > 0 ? { max_turns: turns } : {}),
-      };
-      const res = await api.dryRunAgent(agent.name, body);
+      });
       setResult({
         elapsed_ms: res.elapsed_ms,
         text: res.result.text,
@@ -110,7 +112,7 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
     >
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>试跑智能体：{agent.name}</DialogTitle>
+          <DialogTitle>试跑智能体：{displayName}</DialogTitle>
           <DialogDescription>
             试跑不创建任务、不走工作流；失败不会影响任何运行中的任务。
           </DialogDescription>
@@ -120,17 +122,22 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
           {/* agent 基础信息摘要 */}
           <Card className="bg-muted/40 px-3 py-2.5 text-sm">
             <div className="font-mono text-xs text-accent">
-              {agent.provider ?? "—"}
-              {agent.model ? ` / ${agent.model}` : ""}
-              {agent.max_turns !== undefined && (
+              {agent?.provider ?? "默认 · anthropic"}
+              {agent?.model ? ` / ${agent.model}` : ""}
+              {agent?.max_turns !== undefined && (
                 <span className="text-muted-foreground"> · {agent.max_turns} 轮</span>
               )}
             </div>
-            {agent.system_prompt && (
+            {agent?.system_prompt && (
               <p className="mt-1.5 whitespace-pre-wrap text-xs text-muted-foreground">
                 {agent.system_prompt.length > 200
                   ? agent.system_prompt.slice(0, 200) + "…"
                   : agent.system_prompt}
+              </p>
+            )}
+            {!agent?.system_prompt && (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                未配置内联 agent，试跑将使用默认 agent（DEFAULT_AGENT）。
               </p>
             )}
           </Card>
@@ -156,7 +163,7 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
                 <Input
                   id="dry-run-model"
                   className="font-mono"
-                  placeholder={agent.model ?? "使用 agent 配置的模型"}
+                  placeholder={agent?.model ?? "使用 agent 配置的模型"}
                   list={models ? "dry-run-models" : undefined}
                   value={modelOverride}
                   onChange={(e) => setModelOverride(e.target.value)}
@@ -176,7 +183,7 @@ export function AgentDryRunDialog({ open, onClose, agent }: Props) {
                   id="dry-run-turns"
                   type="number"
                   min={1}
-                  placeholder={String(agent.max_turns ?? 10)}
+                  placeholder={String(agent?.max_turns ?? 10)}
                   value={maxTurns}
                   onChange={(e) => setMaxTurns(e.target.value)}
                 />
