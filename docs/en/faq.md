@@ -10,25 +10,24 @@
 
 **Solution**:
 
-1. Confirm installation: `pip install -e ".[dev]"`
-2. Ensure the pip scripts directory is in your PATH:
-   ```bash
-   python -m site --user-base
-   # Add the bin/ (Linux/macOS) or Scripts/ (Windows) subdirectory to PATH
-   ```
-3. Or run directly as a module: `python -m core.cli`
+1. Confirm dependencies are installed: run `bun install` in the repo root
+2. Run from source with `bun run dev <command>` (e.g. `bun run dev task status`)
+3. To use `autopilot` globally: link `bin/autopilot.ts` into your PATH, or run `bun link` in the repo root
 
-### Q: Python version incompatible
+### Q: Bun not installed / version too old
 
-**Symptoms**: `SyntaxError` or `ImportError: cannot import name 'annotations'`
+**Symptoms**: `command not found: bun`, or unsupported API/syntax errors at runtime
 
-**Solution**: autopilot requires Python 3.10+. Check your version:
+**Solution**: autopilot's runtime is Bun. Install or upgrade, then retry:
 
 ```bash
-python --version
-```
+# macOS / Linux
+curl -fsSL https://bun.sh/install | bash
+# Windows (PowerShell)
+powershell -c "irm bun.sh/install.ps1 | iex"
 
-If below 3.10, upgrade Python.
+bun --version
+```
 
 ---
 
@@ -49,7 +48,7 @@ If you still see an empty directory, confirm you're running the latest build
 
 ### Q: Database is locked
 
-**Symptoms**: `sqlite3.OperationalError: database is locked`
+**Symptoms**: `SqliteError: database is locked`
 
 **Cause**: Multiple processes writing to SQLite simultaneously.
 
@@ -57,12 +56,15 @@ If you still see an empty directory, confirm you're running the latest build
 
 1. Check for stalled autopilot processes:
    ```bash
+   # Linux/macOS
    ps aux | grep autopilot
+   # Windows
+   Get-Process | Where-Object { $_.ProcessName -like '*bun*' }
    ```
 2. Kill stalled processes and retry
 3. If the issue persists, remove lock files:
    ```bash
-   rm -f ~/.autopilot/runtime/*.lock
+   rm -f ~/.autopilot/runtime/locks/*
    ```
 
 ---
@@ -71,7 +73,7 @@ If you still see an empty directory, confirm you're running the latest build
 
 ### Q: Custom workflow not discovered
 
-**Symptoms**: `autopilot workflows` doesn't show the newly added workflow
+**Symptoms**: `autopilot workflow list` doesn't show the newly added workflow
 
 **Troubleshooting**:
 
@@ -79,10 +81,10 @@ If you still see an empty directory, confirm you're running the latest build
    ```
    ~/.autopilot/workflows/my_workflow/
    ├── workflow.yaml    # Must exist
-   └── workflow.py      # Must exist
+   └── workflow.ts      # Must exist
    ```
 2. Confirm `workflow.yaml` has a `name` field
-3. Run validation for specific errors: `autopilot validate my_workflow`
+3. Check the specific load error: `autopilot workflow show my_workflow` or `autopilot doctor`
 
 ### Q: Workflow validation errors
 
@@ -90,19 +92,21 @@ If you still see an empty directory, confirm you're running the latest build
 
 - **`reject` target doesn't exist**: The target in `reject: xxx` must be a phase defined before the current one
 - **`reject` target is after current phase**: `reject` only allows backward jumps; use `jump_trigger` / `jump_target` for forward jumps
-- **`func` function not found**: `workflow.py` must contain the corresponding function (default: `run_{phase_name}`)
+- **`func` function not found**: `workflow.ts` must export the corresponding function (default: `run_{phase_name}`)
 - **Missing `name` field**: Every phase must have a `name` field
 
-### Q: Phase function not found (AttributeError)
+### Q: Phase function not found
 
-**Symptoms**: `AttributeError: module 'workflow' has no attribute 'run_xxx'`
+**Symptoms**: `workflow <name> is missing phase function run_xxx` at registration or execution
 
 **Solution**:
 
-1. Ensure the function is defined in `workflow.py`:
-   ```python
-   def run_my_phase(task_id: str) -> None:  # function name = run_ + phase name
-       ...
+1. Ensure the function is exported from `workflow.ts`:
+   ```typescript
+   // function name = run_ + phase name
+   export async function run_my_phase(taskId: string): Promise<void> {
+     // ...
+   }
    ```
 2. If using a custom function name, declare it in `workflow.yaml`:
    ```yaml
@@ -120,16 +124,15 @@ If you still see an empty directory, confirm you're running the latest build
 
 1. **Phase function crashed**: Check the logs
    ```bash
-   autopilot show <task_id> --logs 20
+   autopilot task logs <task-id>
    ```
-2. **Push failed**: The `run_in_background()` process after phase completion failed to start
+2. **Push failed**: The `runInBackground()` subprocess after phase completion failed to start
 3. **Lock not released**: Process crashed without cleaning up the file lock
 
 **Solution**:
 
-- Wait for Watcher to auto-recover (triggers after default 600s timeout)
-- Or manually trigger Watcher: `autopilot watch`
-- In emergencies, manually remove lock files: `rm -f ~/.autopilot/runtime/<task_id>.lock`
+- Wait for Watcher to auto-recover (built into the daemon, triggers after the default timeout)
+- In emergencies, manually remove lock files: `rm -f ~/.autopilot/runtime/locks/<task-id>.lock`
 
 ### Q: `InvalidTransitionError`
 
@@ -139,12 +142,8 @@ If you still see an empty directory, confirm you're running the latest build
 
 **Troubleshooting**:
 
-1. Check current task status: `autopilot show <task_id>`
-2. View available triggers:
-   ```python
-   from core.state_machine import get_available_triggers
-   print(get_available_triggers(task_id))
-   ```
+1. Check current task status: `autopilot task status <task-id>`
+2. View the workflow's transition table: `autopilot workflow show <name>`
 3. See the full state diagram: refer to [State Machine Details](state-machine.md)
 
 ### Q: How is the parent task handled when a parallel subtask fails?
@@ -154,11 +153,11 @@ Depends on the `fail_strategy` configuration:
 - **`cancel_all`** (default): any subtask failure → cancel all sibling subtasks → parent task rolls back
 - **`continue`**: wait for other subtasks to complete before handling
 
-Check subtask status:
+Check task (including subtask) status:
 
 ```bash
-autopilot show <parent_task_id>   # Shows subtask list
-autopilot list --all              # Shows all tasks including subtasks
+autopilot task status <parent-task-id>   # parent task and its subtasks
+autopilot task status                     # list all tasks
 ```
 
 ---
@@ -202,7 +201,7 @@ bun run build:web
 ### Q: How to check the framework version?
 
 ```bash
-python -c "from core import __version__; print(__version__)"
+autopilot --version
 ```
 
 ### Q: Can AUTOPILOT_HOME be customized?

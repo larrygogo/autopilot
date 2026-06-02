@@ -39,7 +39,7 @@ _resolve_transitions(task_id, conn)
 
 This means:
 - Different workflows can have completely different state spaces
-- Adding new workflows requires no changes to `state_machine.py`
+- Adding new workflows requires no changes to `state-machine.ts`
 - Transition table validation occurs at runtime
 
 ## Atomic Transition Process
@@ -293,28 +293,37 @@ stateDiagram-v2
 
 ### Query Available Actions for a Task
 
-```python
-from core.state_machine import get_available_triggers
+```typescript
+import { getAvailableTriggers } from "src/core/state-machine";
 
-triggers = get_available_triggers(task_id)
-# Returns e.g.: ['start_design', 'cancel']
+const triggers = getAvailableTriggers(taskId);
+// Returns e.g.: ['start_design', 'cancel']
 ```
 
 ### Check Transition Validity
 
-```python
-from core.state_machine import can_transition
+```typescript
+import { canTransition, transition } from "src/core/state-machine";
 
-if can_transition(task_id, 'review_pass'):
-    transition(task_id, 'review_pass')
+if (canTransition(taskId, "review_pass")) {
+  transition(taskId, "review_pass");
+}
 ```
 
 ### Manually Cancel a Task
 
-```python
-from core.state_machine import transition
+The most direct way is the CLI:
 
-transition(task_id, 'cancel', note='Manually cancelled by user')
+```bash
+autopilot task cancel <task-id>
+```
+
+Or programmatically (framework-internal API exported from `src/core/state-machine.ts`):
+
+```typescript
+import { transition } from "src/core/state-machine";
+
+transition(taskId, "cancel");
 ```
 
 ---

@@ -39,7 +39,7 @@ _resolve_transitions(task_id, conn)
 
 这意味着：
 - 不同工作流可以有完全不同的状态空间
-- 新增工作流无需修改 `state_machine.py`
+- 新增工作流无需修改 `state-machine.ts`
 - 转换表验证在运行时进行
 
 ## 原子转换过程
@@ -292,28 +292,37 @@ stateDiagram-v2
 
 ### 查询任务可用操作
 
-```python
-from core.state_machine import get_available_triggers
+```typescript
+import { getAvailableTriggers } from "src/core/state-machine";
 
-triggers = get_available_triggers(task_id)
-# 返回如：['start_design', 'cancel']
+const triggers = getAvailableTriggers(taskId);
+// 返回如：['start_design', 'cancel']
 ```
 
 ### 检查转换合法性
 
-```python
-from core.state_machine import can_transition
+```typescript
+import { canTransition, transition } from "src/core/state-machine";
 
-if can_transition(task_id, 'review_pass'):
-    transition(task_id, 'review_pass')
+if (canTransition(taskId, "review_pass")) {
+  transition(taskId, "review_pass");
+}
 ```
 
 ### 手动取消任务
 
-```python
-from core.state_machine import transition
+CLI 最直接：
 
-transition(task_id, 'cancel', note='用户手动取消')
+```bash
+autopilot task cancel <task-id>
+```
+
+或编程方式（框架内部 API，`src/core/state-machine.ts` 导出）：
+
+```typescript
+import { transition } from "src/core/state-machine";
+
+transition(taskId, "cancel");
 ```
 
 ---

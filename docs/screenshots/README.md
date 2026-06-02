@@ -13,14 +13,14 @@
 
 | 文件名 | 用途 | 使用位置 |
 |--------|------|----------|
-| `webui-dashboard.png` | WebUI 仪表盘页面 | quickstart.md, plugins/README.md |
-| `webui-task-detail.png` | WebUI 任务详情页（含状态机图） | quickstart.md, plugins/README.md |
-| `webui-workflow-list.png` | WebUI 工作流列表页 | plugins/README.md |
+| `webui-dashboard.png` | Web UI 仪表盘页面 | quickstart.md |
+| `webui-task-detail.png` | Web UI 任务详情页（含状态机图） | quickstart.md |
+| `webui-workflow-list.png` | Web UI 工作流列表页 | quickstart.md |
 
 ## 如何截图
 
-1. 安装 WebUI 插件：`pip install -e examples/plugins/autopilot-webui`
+1. 启动 daemon：`autopilot daemon start`
 2. 创建一些示例任务用于展示
-3. 启动 WebUI：`autopilot webui`
+3. 打开 Web UI：`autopilot dashboard`（浏览器访问 `http://127.0.0.1:6180`）
 4. 使用浏览器开发者工具设置视窗为 1280×800
 5. 截图并保存为 PNG 格式到本目录

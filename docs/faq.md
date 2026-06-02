@@ -10,25 +10,24 @@
 
 **解决**：
 
-1. 确认已安装：`pip install -e ".[dev]"`
-2. 确认 pip scripts 目录在 PATH 中：
-   ```bash
-   python -m site --user-base
-   # 将输出路径下的 bin/（Linux/macOS）或 Scripts/（Windows）加入 PATH
-   ```
-3. 或直接使用模块方式运行：`python -m core.cli`
+1. 确认已装依赖：在 repo 根目录跑 `bun install`
+2. 从源码运行用 `bun run dev <命令>`（如 `bun run dev task status`）
+3. 想全局直接用 `autopilot`：把 `bin/autopilot.ts` 链接进 PATH，或在 repo 根目录 `bun link`
 
-### Q: Python 版本不兼容
+### Q: Bun 未安装 / 版本过低
 
-**症状**：`SyntaxError` 或 `ImportError: cannot import name 'annotations'`
+**症状**：`command not found: bun`，或运行时报 API/语法不支持
 
-**解决**：autopilot 要求 Python 3.10+。检查版本：
+**解决**：autopilot 运行时是 Bun。安装或升级后重试：
 
 ```bash
-python --version
-```
+# macOS / Linux
+curl -fsSL https://bun.sh/install | bash
+# Windows (PowerShell)
+powershell -c "irm bun.sh/install.ps1 | iex"
 
-如果版本低于 3.10，请升级 Python。
+bun --version
+```
 
 ---
 
@@ -47,7 +46,7 @@ python --version
 
 ### Q: 数据库锁定（database is locked）
 
-**症状**：`sqlite3.OperationalError: database is locked`
+**症状**：`SqliteError: database is locked`
 
 **原因**：多个进程同时写入 SQLite 数据库。
 
@@ -55,12 +54,15 @@ python --version
 
 1. 检查是否有卡死的 autopilot 进程：
    ```bash
+   # Linux/macOS
    ps aux | grep autopilot
+   # Windows
+   Get-Process | Where-Object { $_.ProcessName -like '*bun*' }
    ```
 2. 终止卡死进程后重试
 3. 如果问题持续，删除锁文件：
    ```bash
-   rm -f ~/.autopilot/runtime/*.lock
+   rm -f ~/.autopilot/runtime/locks/*
    ```
 
 ---
@@ -69,7 +71,7 @@ python --version
 
 ### Q: 自定义工作流不被发现
 
-**症状**：`autopilot workflows` 中看不到新添加的工作流
+**症状**：`autopilot workflow list` 中看不到新添加的工作流
 
 **排查**：
 
@@ -77,10 +79,10 @@ python --version
    ```
    ~/.autopilot/workflows/my_workflow/
    ├── workflow.yaml    # 必须存在
-   └── workflow.py      # 必须存在
+   └── workflow.ts      # 必须存在
    ```
 2. 确认 `workflow.yaml` 中有 `name` 字段
-3. 运行校验查看具体错误：`autopilot validate my_workflow`
+3. 看具体加载错误：`autopilot workflow show my_workflow` 或 `autopilot doctor`
 
 ### Q: 工作流校验报错
 
@@ -88,19 +90,21 @@ python --version
 
 - **`reject` 目标不存在**：`reject: xxx` 中的 `xxx` 必须是当前阶段之前已定义的阶段名
 - **`reject` 目标在后方**：`reject` 只能往回跳，往前跳请使用 `jump_trigger` / `jump_target`
-- **`func` 函数找不到**：`workflow.py` 中必须有对应函数（默认 `run_{phase_name}`）
+- **`func` 函数找不到**：`workflow.ts` 中必须导出对应函数（默认 `run_{phase_name}`）
 - **`name` 字段缺失**：每个 phase 必须有 `name` 字段
 
-### Q: 阶段函数找不到（AttributeError）
+### Q: 阶段函数找不到
 
-**症状**：`AttributeError: module 'workflow' has no attribute 'run_xxx'`
+**症状**：注册或执行时报 `workflow <name> 缺少阶段函数 run_xxx`
 
 **解决**：
 
-1. 确认 `workflow.py` 中定义了对应函数：
-   ```python
-   def run_my_phase(task_id: str) -> None:  # 函数名 = run_ + phase name
-       ...
+1. 确认 `workflow.ts` 导出了对应函数：
+   ```typescript
+   // 函数名 = run_ + phase name
+   export async function run_my_phase(taskId: string): Promise<void> {
+     // ...
+   }
    ```
 2. 如果使用了自定义函数名，在 `workflow.yaml` 中声明：
    ```yaml
@@ -118,16 +122,15 @@ python --version
 
 1. **阶段函数异常退出**：查看日志确认
    ```bash
-   autopilot show <task_id> --logs 20
+   autopilot task logs <task-id>
    ```
-2. **Push 失败**：阶段完成后的 `run_in_background()` 进程启动失败
+2. **Push 失败**：阶段完成后的 `runInBackground()` 子进程启动失败
 3. **锁未释放**：进程异常退出但文件锁未清理
 
 **解决**：
 
-- 等待 Watcher 自动恢复（默认 600s 超时后触发）
-- 或手动启动 Watcher 检测：`autopilot watch`
-- 紧急情况下手动清理锁文件：`rm -f ~/.autopilot/runtime/<task_id>.lock`
+- 等待 Watcher 自动恢复（daemon 内置，默认超时后触发）
+- 紧急情况下手动清理锁文件：`rm -f ~/.autopilot/runtime/locks/<task-id>.lock`
 
 ### Q: `InvalidTransitionError` 非法状态转换
 
@@ -137,12 +140,8 @@ python --version
 
 **排查**：
 
-1. 查看当前任务状态：`autopilot show <task_id>`
-2. 查看可用触发器：
-   ```python
-   from core.state_machine import get_available_triggers
-   print(get_available_triggers(task_id))
-   ```
+1. 查看当前任务状态：`autopilot task status <task-id>`
+2. 查看该工作流的转换表：`autopilot workflow show <name>`
 3. 查看完整状态图：参考 [状态机详解](state-machine.md)
 
 ### Q: 并行子任务失败后父任务如何处理？
@@ -152,11 +151,11 @@ python --version
 - **`cancel_all`**（默认）：任一子任务失败 → 取消所有兄弟子任务 → 父任务回退
 - **`continue`**：等待其他子任务完成后再处理
 
-查看子任务状态：
+查看任务（含子任务）状态：
 
 ```bash
-autopilot show <parent_task_id>   # 显示子任务列表
-autopilot list --all              # 显示包括子任务在内的所有任务
+autopilot task status <parent-task-id>   # 查看父任务及子任务
+autopilot task status                     # 列出所有任务
 ```
 
 ---
@@ -200,7 +199,7 @@ bun run build:web
 ### Q: 如何查看框架版本？
 
 ```bash
-python -c "from core import __version__; print(__version__)"
+autopilot --version
 ```
 
 ### Q: AUTOPILOT_HOME 可以自定义吗？
