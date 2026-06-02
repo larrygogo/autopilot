@@ -1,25 +1,36 @@
-import type { NotifyDriver, NotifyDriverConfig, NotifyPayload } from "./types";
+import type { NotifyDriver, NotifyDriverConfig, NotifyPayload, NotifyEvent } from "./types";
 import { log } from "../logger";
 
 /**
- * Linux notify-send driver。
+ * Linux notify-send driver（libnotify，桌面环境内建）。
  *
- * TODO（spec follow-up）：当前为 stub，仅 log。完整实现：
- *   - 调用 `notify-send "<title>" "<body>"`（libnotify 工具）
- *   - enabled() 检查 process.platform === "linux" + which notify-send
- *   - 处理 stderr 失败回退到 log
+ * 实现：`notify-send "<title>" "<body>"`
+ *
+ * enabled() 仅在 process.platform === "linux" 且 PATH 上能找到 notify-send 时返回 true，
+ * 避免在没装 libnotify（或纯无头服务器）的环境上喷错。
  */
-export function createLinuxNotifySendDriver(_cfg: NotifyDriverConfig): NotifyDriver {
+export function createLinuxNotifySendDriver(cfg: NotifyDriverConfig): NotifyDriver {
+  const allowed = new Set<NotifyEvent>(cfg.on_events ?? ["task-done", "task-failed", "phase-awaiting"]);
+
   return {
     name: "linux-notify-send",
 
     enabled(): boolean {
-      // stub：默认禁用，避免在没装 libnotify 的 Linux 上喷错。
-      return false;
+      return process.platform === "linux" && Bun.which("notify-send") !== null;
     },
 
     async send(payload: NotifyPayload): Promise<void> {
-      log.info("[linux-notify-send stub] %s — %s", payload.event, payload.message);
+      if (!allowed.has(payload.event)) return;
+
+      const title = `Autopilot · ${payload.event}`;
+      const text = `[${payload.task.id}] ${payload.message}`.slice(0, 200);
+
+      // notify-send 以独立 argv 接收 title/body，无需 shell 转义
+      const proc = Bun.spawnSync(["notify-send", title, text], { stdout: "pipe", stderr: "pipe" });
+      if (proc.exitCode !== 0) {
+        const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+        log.warn("linux-notify-send 发送失败 [exit=%d]: %s", proc.exitCode, stderr.slice(0, 200));
+      }
     },
   };
 }

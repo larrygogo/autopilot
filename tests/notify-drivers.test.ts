@@ -94,28 +94,38 @@ describe("notify driver — macos-osascript", () => {
   });
 });
 
-describe("notify driver — linux-notify-send (stub)", () => {
-  it("enabled() 当前为 false（stub）", () => {
+describe("notify driver — linux-notify-send", () => {
+  it("enabled() 仅 linux + 有 notify-send 为 true", () => {
     const d = createLinuxNotifySendDriver({ type: "linux-notify-send" });
-    expect(d.enabled()).toBe(false);
+    const expected = process.platform === "linux" && Bun.which("notify-send") !== null;
+    expect(d.enabled()).toBe(expected);
   });
 
-  it("send() 不抛错（仅 log）", async () => {
-    const d = createLinuxNotifySendDriver({ type: "linux-notify-send" });
-    await d.send({ task: fakeTask as never, message: "x", event: "task-done" });
+  it("on_events 白名单过滤：不在列表的事件 send no-op（不 spawn）", async () => {
+    const d = createLinuxNotifySendDriver({ type: "linux-notify-send", on_events: ["task-failed"] });
+    // event 不在白名单 → 在 spawn 前 return，跨平台都不抛
+    await d.send({ task: fakeTask as never, message: "filtered", event: "task-done" });
     expect(true).toBe(true);
   });
 });
 
-describe("notify driver — slack-webhook (stub)", () => {
+describe("notify driver — slack-webhook", () => {
   it("enabled() 需要 url 以 https:// 开头", () => {
     expect(createSlackWebhookDriver({ type: "slack-webhook" }).enabled()).toBe(false);
     expect(createSlackWebhookDriver({ type: "slack-webhook", url: "http://x" }).enabled()).toBe(false);
     expect(createSlackWebhookDriver({ type: "slack-webhook", url: "https://hooks.slack.com/x" }).enabled()).toBe(true);
   });
 
-  it("send() 不抛错（仅 log）", async () => {
-    const d = createSlackWebhookDriver({ type: "slack-webhook", url: "https://x" });
+  it("on_events 白名单过滤：不在列表的事件 send no-op（不发 HTTP）", async () => {
+    const d = createSlackWebhookDriver({ type: "slack-webhook", url: "https://x", on_events: ["task-failed"] });
+    // event 不在白名单 → 在 fetch 前 return，不触网
+    await d.send({ task: fakeTask as never, message: "filtered", event: "task-done" });
+    expect(true).toBe(true);
+  });
+
+  it("send() 网络失败仅 log 不抛错", async () => {
+    // 不可解析的 host → fetch reject → 被 catch 吞掉
+    const d = createSlackWebhookDriver({ type: "slack-webhook", url: "https://invalid.invalid" });
     await d.send({ task: fakeTask as never, message: "y", event: "task-done" });
     expect(true).toBe(true);
   });
