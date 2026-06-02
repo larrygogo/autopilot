@@ -4,22 +4,18 @@
 
 This document guides you through creating custom workflows for autopilot.
 
-## Two Definition Approaches
+## Definition Approach
 
-### Approach 1: YAML Workflow (Recommended)
-
-Directory-paired format, one directory per workflow:
+YAML workflow (directory-paired format), one directory per workflow:
 
 ```
 ~/.autopilot/workflows/
 ├── my_workflow/
 │   ├── workflow.yaml    # Workflow definition (structure, phases, states)
-│   └── workflow.py      # Phase functions (Python code)
+│   └── workflow.ts      # Phase functions (TypeScript)
 ```
 
-### Approach 2: Single-file Python Workflow
-
-A single `.py` file placed in `~/.autopilot/workflows/`, exporting a `WORKFLOW` dictionary.
+`workflow.yaml` defines the structure, `workflow.ts` holds only the phase functions; states and transitions are auto-derived from phase names (see below). Simple phases can even use just the yaml `prompt` field, skipping `workflow.ts` entirely.
 
 ---
 
@@ -85,7 +81,7 @@ Auto-generated from phase `name` (using `design` as an example):
 | `complete_trigger` | `design_complete` |
 | `fail_trigger` | `design_fail` |
 | `label` | `DESIGN` |
-| `func` | `run_design` (looked up in workflow.py) |
+| `func` | `run_design` (looked up in workflow.ts) |
 
 Workflow-level derivation:
 - `initial_state`: defaults to the first phase's `pending_state` if not specified
@@ -125,10 +121,10 @@ Legacy fields `reject_trigger` / `retry_target` can still be used and are automa
 
 ### Function Binding
 
-The `func` field in YAML is a string corresponding to a function name in `workflow.py`:
+The `func` field in YAML is a string corresponding to a function exported from `workflow.ts`:
 
 ```yaml
-func: my_custom_func    # → my_custom_func() in workflow.py
+func: my_custom_func    # → my_custom_func() exported from workflow.ts
 ```
 
 When `func` is omitted, the `run_{phase_name}` convention is used automatically.
@@ -201,56 +197,45 @@ Subtasks automatically inherit the parent task's `extra` JSON field.
 
 ### CLI Behavior
 
-- `list`: subtasks are hidden by default; use `--all` to show them
-- `show`: for parent tasks, displays subtask list; for subtasks, displays parent task ID
-- `cancel`: cancelling a parent task cascades to cancel all subtasks
+- `task status`: subtasks are hidden by default; given a parent task ID it shows the subtask list, given a subtask ID it shows the parent task ID
+- `task cancel`: cancelling a parent task cascades to cancel all subtasks
 
 ---
 
-## WORKFLOW Dictionary Structure (Single-file Python Workflow)
+## workflow.yaml top-level fields
 
-```python
-WORKFLOW = {
-    # === Required ===
-    'name': str,                # Unique workflow identifier
-    'phases': list[dict],       # Phase definition list
+| Field | Required | Description |
+|------|------|------|
+| `name` | ✓ | Unique workflow identifier |
+| `phases` | ✓ | Phase definition list |
+| `description` | | Description |
+| `initial_state` | | Default: first phase's `pending_state` |
+| `terminal_states` | | Default: `[done, cancelled]` |
+| `transitions` | | Auto-generated from `phases` if not provided |
+| `setup_func` | | Task initialization hook (function name exported from `workflow.ts`) |
+| `notify_func` | | Notification implementation (function name exported from `workflow.ts`) |
+| `hooks` | | `before_phase` / `after_phase` / `on_phase_error` (function names) |
 
-    # === Optional ===
-    'description': str,
-    'initial_state': str,       # Default: first phase's pending_state
-    'terminal_states': list,    # Default: ['done', 'cancelled']
-    'transitions': dict,        # Auto-generated if not provided
-    'setup_func': callable,     # Task initialization hook
-    'notify_func': callable,    # Notification implementation
-    'notify_backends': list,    # Multi-backend notification config
-    'hooks': dict,              # before_phase / after_phase / on_phase_error
-    'retry_policy': dict,       # Retry policy
-}
-```
+## Phase fields
 
-## Phase Definition Fields
-
-```python
-{
-    'name': str,                # Phase identifier
-    'label': str,               # Log tag (YAML auto-derives as NAME.upper())
-    'trigger': str | None,      # Trigger to enter running state
-    'pending_state': str,       # Pending state name
-    'running_state': str,       # Running state name
-    'complete_trigger': str,    # Completion trigger
-    'fail_trigger': str | None, # Failure trigger (returns to pending for retry)
-    'jump_trigger': str | None,     # Jump trigger (generated from reject syntactic sugar)
-    'jump_target': str | None,      # Jump target phase name
-    'max_rejections': int,      # Maximum rejection count (default 10)
-    'func': callable,           # Phase execution function
-}
-```
+| Field | Description |
+|------|------|
+| `name` | Phase identifier |
+| `label` | Log tag (auto-derived as `NAME.upper()`) |
+| `timeout` | Timeout in seconds |
+| `func` | Phase execution function name (default `run_<name>`, looked up in `workflow.ts`) |
+| `trigger` / `complete_trigger` / `fail_trigger` | Triggers (auto-derived, rarely written by hand) |
+| `jump_trigger` / `jump_target` | Jump (generated from `reject` syntactic sugar) |
+| `max_rejections` | Maximum rejection count (the task fails once exceeded) |
+| `agent` | Bound agent name (for prompt phases / built-in agents) |
+| `prompt` | Zero-code prompt (see "the `prompt` field" above) |
+| `gate` / `gate_message` | Human approval gate (see "Gate" below) |
 
 ## Transition Table: Auto-generated vs Manual
 
 ### Auto-generated (Recommended)
 
-When `transitions` field is not provided, `registry.build_transitions()` auto-generates from `phases`:
+When `transitions` field is not provided, the registry auto-generates from `phases`:
 
 - `pending_state` -> `(trigger, running_state)`
 - `running_state` -> `(complete_trigger, next_pending_state)`
@@ -274,54 +259,57 @@ transitions:
 
 The framework schema retains only core columns; workflow-specific fields are stored in `extra` JSON:
 
-```python
-# Create task: core fields passed explicitly, rest auto-stored in extra
-create_task(
-    task_id="T001",
-    title="My Task",
-    workflow="dev",
-    channel="telegram",
-    notify_target="chat-id",
-    # Everything below stored in extra JSON
-    req_id="REQ-001",
-    project="my-project",
-    repo_path="/path/to/repo",
-    branch="feat/T001",
-    agents={"dev": "claude"},
-)
+```typescript
+import { createTask, getTask, updateTask } from "src/core/db";
 
-# Read: extra fields auto-expanded, direct access
-task = get_task("T001")
-task["repo_path"]  # Directly accessible, no need to worry about storage location
-task["project"]    # Same
+// Create task: core fields passed explicitly, rest auto-stored in extra
+createTask({
+  task_id: "T001",
+  title: "My Task",
+  workflow: "dev",
+  channel: "telegram",
+  notify_target: "chat-id",
+  // Everything below stored in extra JSON
+  req_id: "REQ-001",
+  project: "my-project",
+  repo_path: "/path/to/repo",
+  branch: "feat/T001",
+  agents: { dev: "claude" },
+});
 
-# Update: transparent distinction between column fields vs extra
-update_task("T001", pr_url="https://...", failure_count=1)
+// Read: extra fields auto-expanded, direct access
+const task = getTask("T001");
+task.repo_path;  // Directly accessible, no need to worry about storage location
+task.project;    // Same
+
+// Update: transparent distinction between column fields vs extra
+updateTask("T001", { pr_url: "https://...", failure_count: 1 });
 ```
 
 ## Phase Function Writing Guidelines
 
 ### Writing Pattern
 
-```python
-def run_my_phase(task_id: str) -> None:
-    # 1. Get task info (extra fields auto-expanded)
-    task = get_task(task_id)
+```typescript
+export async function run_my_phase(taskId: string): Promise<void> {
+  // 1. Get task info (extra fields auto-expanded)
+  const task = getTask(taskId);
 
-    # 2. Prepare inputs
-    plan = (task_dir / "plan.md").read_text()
+  // 2. Prepare inputs
+  const plan = readFileSync(join(taskDir, "plan.md"), "utf8");
 
-    # 3. Execute core logic (direct access to extra fields)
-    result = my_execute(prompt, repo_path=task['repo_path'])
+  // 3. Execute core logic (direct access to extra fields)
+  const result = await myExecute(prompt, { repoPath: task.repo_path });
 
-    # 4. Save artifacts
-    (task_dir / "output.md").write_text(result)
+  // 4. Save artifacts
+  writeFileSync(join(taskDir, "output.md"), result);
 
-    # 5. State transition (extra_updates also transparently distinguished)
-    transition(task_id, 'my_phase_complete')
+  // 5. State transition
+  transition(taskId, "my_phase_complete");
 
-    # 6. Push next phase
-    run_in_background(task_id, 'next_phase')
+  // 6. Push next phase
+  runInBackground(taskId, "next_phase");
+}
 ```
 
 ### Important Notes
@@ -329,7 +317,7 @@ def run_my_phase(task_id: str) -> None:
 - **Do not manually manage locks**: `execute_phase()` acquires locks automatically
 - **Do not swallow exceptions**: let exceptions propagate; Runner will catch and log them
 - **Transition before Push**: call `transition()` before `run_in_background()`
-- **Transparent field storage**: `get_task()` auto-expands extra; developers need not worry about whether a field is in a column or JSON
+- **Transparent field storage**: `getTask()` auto-expands extra; developers need not worry about whether a field is in a column or JSON
 
 ## Human-in-the-loop (Gate & ask_user)
 
@@ -436,7 +424,7 @@ phases:
 
 See `examples/workflows/dev/` and `examples/workflows/req_review/`:
 - `workflow.yaml` — workflow definition
-- `workflow.py` — phase function implementation
+- `workflow.ts` — phase function implementation
 
 ## doc_gen Workflow State Machine
 

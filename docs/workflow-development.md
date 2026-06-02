@@ -4,22 +4,18 @@
 
 本文档指导你如何为 autopilot 创建自定义工作流。
 
-## 两种定义方式
+## 定义方式
 
-### 方式一：YAML 工作流（推荐）
-
-目录配对格式，每个工作流一个目录：
+YAML 工作流（目录配对格式），每个工作流一个目录：
 
 ```
 ~/.autopilot/workflows/
 ├── my_workflow/
 │   ├── workflow.yaml    # 工作流定义（结构、阶段、状态）
-│   └── workflow.py      # 阶段函数（Python 代码）
+│   └── workflow.ts      # 阶段函数（TypeScript）
 ```
 
-### 方式二：单文件 Python 工作流
-
-单个 `.py` 文件放入 `~/.autopilot/workflows/`，导出 `WORKFLOW` 字典。
+`workflow.yaml` 定义结构，`workflow.ts` 只写阶段函数；状态与转换从阶段名自动推导（见下）。简单阶段甚至可只写 yaml 的 `prompt` 字段，省去 `workflow.ts`。
 
 ---
 
@@ -85,7 +81,7 @@ phases:
 | `complete_trigger` | `design_complete` |
 | `fail_trigger` | `design_fail` |
 | `label` | `DESIGN` |
-| `func` | `run_design`（在 workflow.py 中查找） |
+| `func` | `run_design`（在 workflow.ts 中查找） |
 
 Workflow 级别推导：
 - `initial_state`：不写则取第一个 phase 的 `pending_state`
@@ -125,10 +121,10 @@ Workflow 级别推导：
 
 ### 函数绑定
 
-YAML 中 `func` 字段是字符串，对应 `workflow.py` 中的函数名：
+YAML 中 `func` 字段是字符串，对应 `workflow.ts` 导出的函数名：
 
 ```yaml
-func: my_custom_func    # → workflow.py 中的 my_custom_func()
+func: my_custom_func    # → workflow.ts 中导出的 my_custom_func()
 ```
 
 不写 `func` 时，自动使用 `run_{phase_name}` 约定。
@@ -248,56 +244,45 @@ phases:
 
 ### CLI 行为
 
-- `list`：默认隐藏子任务，加 `--all` 显示
-- `show`：如果是父任务，显示子任务列表；如果是子任务，显示父任务 ID
-- `cancel`：取消父任务时级联取消所有子任务
+- `task status`：默认隐藏子任务；指定父任务 ID 时显示其子任务列表，指定子任务 ID 时显示父任务 ID
+- `task cancel`：取消父任务时级联取消所有子任务
 
 ---
 
-## WORKFLOW 字典结构（单文件 Python 工作流）
+## workflow.yaml 顶层字段
 
-```python
-WORKFLOW = {
-    # === 必填 ===
-    'name': str,                # 工作流唯一标识
-    'phases': list[dict],       # 阶段定义列表
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | ✓ | 工作流唯一标识 |
+| `phases` | ✓ | 阶段定义列表 |
+| `description` | | 描述 |
+| `initial_state` | | 默认：第一个阶段的 `pending_state` |
+| `terminal_states` | | 默认：`[done, cancelled]` |
+| `transitions` | | 不提供则从 `phases` 自动生成 |
+| `setup_func` | | 任务初始化钩子（`workflow.ts` 导出的函数名） |
+| `notify_func` | | 通知实现（`workflow.ts` 导出的函数名） |
+| `hooks` | | `before_phase` / `after_phase` / `on_phase_error`（函数名） |
 
-    # === 选填 ===
-    'description': str,
-    'initial_state': str,       # 默认：第一个阶段的 pending_state
-    'terminal_states': list,    # 默认：['done', 'cancelled']
-    'transitions': dict,        # 不提供则自动生成
-    'setup_func': callable,     # 任务初始化钩子
-    'notify_func': callable,    # 通知实现
-    'notify_backends': list,    # 多后端通知配置
-    'hooks': dict,              # before_phase / after_phase / on_phase_error
-    'retry_policy': dict,       # 重试策略
-}
-```
+## 阶段（phase）字段
 
-## 阶段（Phase）定义字段
-
-```python
-{
-    'name': str,                # 阶段标识符
-    'label': str,               # 日志标签（YAML 自动推导为 NAME.upper()）
-    'trigger': str | None,      # 进入运行态的触发器
-    'pending_state': str,       # 等待状态名
-    'running_state': str,       # 运行状态名
-    'complete_trigger': str,    # 完成触发器
-    'fail_trigger': str | None, # 失败触发器（回到 pending 重试）
-    'jump_trigger': str | None,     # 跳转触发器（reject 语法糖展开后生成）
-    'jump_target': str | None,      # 跳转目标阶段名
-    'max_rejections': int,      # 最大驳回次数（默认 10）
-    'func': callable,           # 阶段执行函数
-}
-```
+| 字段 | 说明 |
+|------|------|
+| `name` | 阶段标识符 |
+| `label` | 日志标签（自动推导为 `NAME.upper()`） |
+| `timeout` | 超时秒数 |
+| `func` | 阶段执行函数名（默认 `run_<name>`，在 `workflow.ts` 中查找） |
+| `trigger` / `complete_trigger` / `fail_trigger` | 触发器（自动推导，一般不手写） |
+| `jump_trigger` / `jump_target` | 跳转（`reject` 语法糖展开后生成） |
+| `max_rejections` | 最大驳回次数（超过则任务失败） |
+| `agent` | 绑定的 agent 名（prompt phase / 内置 agent 用） |
+| `prompt` | 零代码 prompt（见上「`prompt` 字段」） |
+| `gate` / `gate_message` | 人工审批门（见下「Gate」） |
 
 ## 转换表：自动生成 vs 手写
 
 ### 自动生成（推荐）
 
-不提供 `transitions` 字段时，`registry.build_transitions()` 从 `phases` 自动生成：
+不提供 `transitions` 字段时，registry 从 `phases` 自动生成：
 
 - `pending_state` → `(trigger, running_state)`
 - `running_state` → `(complete_trigger, next_pending_state)`
@@ -321,54 +306,57 @@ transitions:
 
 框架 schema 只保留核心列，工作流自定义字段存入 `extra` JSON：
 
-```python
-# 创建任务：核心字段显式传入，其余自动存入 extra
-create_task(
-    task_id="T001",
-    title="My Task",
-    workflow="dev",
-    channel="telegram",
-    notify_target="chat-id",
-    # 以下全部存入 extra JSON
-    req_id="REQ-001",
-    project="my-project",
-    repo_path="/path/to/repo",
-    branch="feat/T001",
-    agents={"dev": "claude"},
-)
+```typescript
+import { createTask, getTask, updateTask } from "src/core/db";
 
-# 读取：extra 字段自动展开，直接访问
-task = get_task("T001")
-task["repo_path"]  # 直接可用，无需关心存储位置
-task["project"]    # 同上
+// 创建任务：核心字段显式传入，其余自动存入 extra
+createTask({
+  task_id: "T001",
+  title: "My Task",
+  workflow: "dev",
+  channel: "telegram",
+  notify_target: "chat-id",
+  // 以下全部存入 extra JSON
+  req_id: "REQ-001",
+  project: "my-project",
+  repo_path: "/path/to/repo",
+  branch: "feat/T001",
+  agents: { dev: "claude" },
+});
 
-# 更新：透明区分列字段 vs extra
-update_task("T001", pr_url="https://...", failure_count=1)
+// 读取：extra 字段自动展开，直接访问
+const task = getTask("T001");
+task.repo_path;  // 直接可用，无需关心存储位置
+task.project;    // 同上
+
+// 更新：透明区分列字段 vs extra
+updateTask("T001", { pr_url: "https://...", failure_count: 1 });
 ```
 
 ## 阶段函数编写规范
 
 ### 编写模式
 
-```python
-def run_my_phase(task_id: str) -> None:
-    # 1. 获取任务信息（extra 字段自动展开）
-    task = get_task(task_id)
+```typescript
+export async function run_my_phase(taskId: string): Promise<void> {
+  // 1. 获取任务信息（extra 字段自动展开）
+  const task = getTask(taskId);
 
-    # 2. 准备输入
-    plan = (task_dir / "plan.md").read_text()
+  // 2. 准备输入
+  const plan = readFileSync(join(taskDir, "plan.md"), "utf8");
 
-    # 3. 执行核心逻辑（直接访问 extra 字段）
-    result = my_execute(prompt, repo_path=task['repo_path'])
+  // 3. 执行核心逻辑（直接访问 extra 字段）
+  const result = await myExecute(prompt, { repoPath: task.repo_path });
 
-    # 4. 保存产出物
-    (task_dir / "output.md").write_text(result)
+  // 4. 保存产出物
+  writeFileSync(join(taskDir, "output.md"), result);
 
-    # 5. 状态转换（extra_updates 同样透明区分）
-    transition(task_id, 'my_phase_complete')
+  // 5. 状态转换
+  transition(taskId, "my_phase_complete");
 
-    # 6. Push 下一阶段
-    run_in_background(task_id, 'next_phase')
+  // 6. Push 下一阶段
+  runInBackground(taskId, "next_phase");
+}
 ```
 
 ### 注意事项
@@ -376,7 +364,7 @@ def run_my_phase(task_id: str) -> None:
 - **不要手动管理锁**：`execute_phase()` 自动获取锁
 - **不要吞异常**：让异常抛出，Runner 会捕获并记录
 - **转换必须在 Push 之前**：先 `transition()` 再 `run_in_background()`
-- **字段存储透明**：`get_task()` 自动展开 extra，开发者无需关心字段在列里还是 JSON 里
+- **字段存储透明**：`getTask()` 自动展开 extra，开发者无需关心字段在列里还是 JSON 里
 
 ## 人机交互（Gate 与 ask_user）
 
@@ -483,7 +471,7 @@ phases:
 
 参见 `examples/workflows/dev/` 和 `examples/workflows/req_review/`：
 - `workflow.yaml` — 工作流定义
-- `workflow.py` — 阶段函数实现
+- `workflow.ts` — 阶段函数实现
 
 ## doc_gen 工作流状态机
 

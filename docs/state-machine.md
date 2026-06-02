@@ -4,20 +4,20 @@
 
 ## 状态转换表结构
 
-转换表是一个字典，键为当前状态，值为该状态下可用的 `(trigger, target_state)` 列表：
+转换表是一个对象，键为当前状态，值为该状态下可用的 `[trigger, target_state]` 列表：
 
-```python
+```typescript
 {
-    'state_a': [
-        ('trigger_1', 'state_b'),   # state_a + trigger_1 → state_b
-        ('trigger_2', 'state_c'),   # state_a + trigger_2 → state_c
-        ('cancel', 'cancelled'),    # 任何非终态都可取消
-    ],
-    'state_b': [
-        ('trigger_3', 'state_d'),
-        ('cancel', 'cancelled'),
-    ],
-    # ...
+  state_a: [
+    ["trigger_1", "state_b"],   // state_a + trigger_1 → state_b
+    ["trigger_2", "state_c"],   // state_a + trigger_2 → state_c
+    ["cancel", "cancelled"],    // 任何非终态都可取消
+  ],
+  state_b: [
+    ["trigger_3", "state_d"],
+    ["cancel", "cancelled"],
+  ],
+  // ...
 }
 ```
 
@@ -26,12 +26,12 @@
 状态机在每次转换时动态加载转换表：
 
 ```
-transition(task_id, trigger)
+transition(taskId, trigger)
     │
     ▼
-_resolve_transitions(task_id, conn)
+resolveTransitions(taskId)
     ├── 查询 task.workflow 字段
-    ├── registry.build_transitions(workflow_name)
+    ├── registry.buildTransitions(workflowName)
     │   ├── 工作流有 'transitions' 字段？→ 直接返回
     │   └── 否则从 'phases' 自动生成
     └── 回退：返回空转换表 {}
@@ -116,13 +116,13 @@ reviewing ──[review_reject]──→ review_rejected ──[retry_design]─
 **终态**：任务到达终态后不再允许任何转换（`cancel` 除外，终态本身也不可取消）。
 
 判断方式：
-```python
-# 工作流定义的终态
-terminal_states = registry.get_terminal_states(workflow_name)
-# 如：['pr_submitted', 'cancelled']
+```typescript
+// 工作流定义的终态
+const terminalStates = registry.getTerminalStates(workflowName);
+// 如：['pr_submitted', 'cancelled']
 
-# 活跃状态 = 所有状态 - 终态
-active_states = [s for s in all_states if s not in terminal_states]
+// 活跃状态 = 所有状态 - 终态
+const activeStates = allStates.filter((s) => !terminalStates.includes(s));
 ```
 
 Watcher 只关注活跃状态的任务。

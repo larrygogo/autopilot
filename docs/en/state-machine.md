@@ -4,20 +4,20 @@
 
 ## Transition Table Structure
 
-The transition table is a dictionary where keys are current states and values are lists of `(trigger, target_state)` tuples available from that state:
+The transition table is an object where keys are current states and values are lists of `[trigger, target_state]` tuples available from that state:
 
-```python
+```typescript
 {
-    'state_a': [
-        ('trigger_1', 'state_b'),   # state_a + trigger_1 → state_b
-        ('trigger_2', 'state_c'),   # state_a + trigger_2 → state_c
-        ('cancel', 'cancelled'),    # Any non-terminal state can be cancelled
-    ],
-    'state_b': [
-        ('trigger_3', 'state_d'),
-        ('cancel', 'cancelled'),
-    ],
-    # ...
+  state_a: [
+    ["trigger_1", "state_b"],   // state_a + trigger_1 → state_b
+    ["trigger_2", "state_c"],   // state_a + trigger_2 → state_c
+    ["cancel", "cancelled"],    // Any non-terminal state can be cancelled
+  ],
+  state_b: [
+    ["trigger_3", "state_d"],
+    ["cancel", "cancelled"],
+  ],
+  // ...
 }
 ```
 
@@ -26,12 +26,12 @@ The transition table is a dictionary where keys are current states and values ar
 The state machine dynamically loads the transition table on each transition:
 
 ```
-transition(task_id, trigger)
+transition(taskId, trigger)
     │
     ▼
-_resolve_transitions(task_id, conn)
+resolveTransitions(taskId)
     ├── Query task.workflow field
-    ├── registry.build_transitions(workflow_name)
+    ├── registry.buildTransitions(workflowName)
     │   ├── Workflow has 'transitions' field? → return directly
     │   └── Otherwise auto-generate from 'phases'
     └── Fallback: return empty transition table {}
@@ -117,13 +117,13 @@ Legacy fields `reject_trigger` / `retry_target` can still be used and are automa
 **Terminal states**: once a task reaches a terminal state, no further transitions are allowed (`cancel` included — terminal states themselves cannot be cancelled).
 
 Determination method:
-```python
-# Workflow-defined terminal states
-terminal_states = registry.get_terminal_states(workflow_name)
-# e.g.: ['pr_submitted', 'cancelled']
+```typescript
+// Workflow-defined terminal states
+const terminalStates = registry.getTerminalStates(workflowName);
+// e.g.: ['pr_submitted', 'cancelled']
 
-# Active states = all states - terminal states
-active_states = [s for s in all_states if s not in terminal_states]
+// Active states = all states - terminal states
+const activeStates = allStates.filter((s) => !terminalStates.includes(s));
 ```
 
 Watcher only monitors tasks in active states.
