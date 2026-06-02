@@ -287,7 +287,6 @@ Push 偶尔会失败（spawn 进程失败 / OOM 杀子进程 / 阶段函数 hang
 | [req_dev workflow 指南](req-dev-workflow.md) | 内置工作流 7 阶段细节 |
 | [状态机详解](state-machine.md) | 状态推导规则、驳回机制、完整状态图 |
 | [工作流开发指南](workflow-development.md) | YAML 字段参考、阶段函数编写规范 |
-| [插件开发指南](plugin-development.md) | 自定义工作流 / 通知后端 / Agent provider |
 | [需求队列设计文档](superpowers/specs/2026-05-06-requirement-queue-design.md) | 需求队列模式的设计推演 |
 | [子模块支持设计文档](superpowers/specs/2026-05-07-submodule-support-design.md) | P5 git submodule 集成的设计推演 |
 | [FAQ 与故障排查](faq.md) | 常见问题与解决方案 |

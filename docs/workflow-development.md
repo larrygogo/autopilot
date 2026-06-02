@@ -624,5 +624,4 @@ agent_aliases:
 | [5 分钟快速入门](quickstart.md) | 从安装到跑通第一个 demo |
 | [架构总览](architecture.md) | 整体架构、模块职责、数据流 |
 | [状态机详解](state-machine.md) | 状态转换表、驳回机制、完整状态图 |
-| [插件开发指南](plugin-development.md) | 第三方插件开发、扩展点、框架 API |
 | [FAQ 与故障排查](faq.md) | 常见问题与解决方案 |

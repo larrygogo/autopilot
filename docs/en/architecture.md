@@ -113,7 +113,6 @@ Core interface:
 | `get_cli_commands()` | All plugin CLI commands |
 | `get_global_hooks(name)` | List of global hooks for a given name |
 
-See [Plugin Development Guide](plugin-development.md) for details.
 
 ### state_machine.py — State Machine
 
@@ -290,5 +289,4 @@ Both are essential:
 | [5-Minute Quickstart](quickstart.md) | From installation to running your first demo |
 | [Workflow Development Guide](workflow-development.md) | YAML syntax, phase function guidelines |
 | [State Machine Details](state-machine.md) | Transition tables, rejection mechanism, state diagrams |
-| [Plugin Development Guide](plugin-development.md) | Third-party plugins, extension points, framework API |
 | [FAQ & Troubleshooting](faq.md) | Common issues and solutions |

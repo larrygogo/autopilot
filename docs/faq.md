@@ -161,34 +161,37 @@ autopilot list --all              # 显示包括子任务在内的所有任务
 
 ---
 
-## WebUI 问题
+## Web UI 问题
 
-### Q: `autopilot webui` 命令不存在
+### Q: 怎么打开 Web UI
 
-**症状**：`Error: No such command 'webui'`
-
-**解决**：WebUI 是独立插件，需单独安装：
+**解决**：Web UI 由 daemon 自身 serve，无需单独安装。先确认 daemon 在跑，再打开浏览器：
 
 ```bash
-pip install -e examples/plugins/autopilot-webui
+autopilot daemon status     # 确认 daemon 运行中
+autopilot dashboard         # 浏览器打开 http://127.0.0.1:6180
 ```
 
-安装后重新运行 `autopilot webui`。
+若提示静态资源缺失（首次从源码运行 / 刚改过前端），先构建 Web UI：
 
-### Q: WebUI 页面打不开
+```bash
+bun run build:web
+```
+
+### Q: Web UI 页面打不开 / 端口冲突
 
 **排查**：
 
-1. 确认服务已启动：终端应显示 `Serving on http://127.0.0.1:8080`
+1. 确认 daemon 已启动：`autopilot daemon status` 应显示监听地址（默认 `127.0.0.1:6180`）
 2. 确认端口未被占用：
    ```bash
    # Linux/macOS
-   lsof -i :8080
+   lsof -i :6180
    # Windows
-   netstat -ano | findstr :8080
+   netstat -ano | findstr :6180
    ```
-3. 尝试换端口：`autopilot webui --port 9090`
-4. 如果需要远程访问：`autopilot webui --host 0.0.0.0`
+3. 改端口：编辑 `config.yaml` 的 `daemon.port`，然后 `autopilot daemon restart`
+4. 如需局域网访问：把 `config.yaml` 的 `daemon.host` 设为 `0.0.0.0` 后重启 daemon
 
 ---
 
@@ -229,4 +232,3 @@ autopilot init
 | [架构总览](architecture.md) | 整体架构、模块职责、数据流 |
 | [工作流开发指南](workflow-development.md) | YAML 定义语法、阶段函数编写规范 |
 | [状态机详解](state-machine.md) | 状态转换表、驳回机制、完整状态图 |
-| [插件开发指南](plugin-development.md) | 第三方插件开发、扩展点、框架 API |

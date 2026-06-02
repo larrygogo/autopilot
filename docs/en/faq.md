@@ -163,34 +163,37 @@ autopilot list --all              # Shows all tasks including subtasks
 
 ---
 
-## WebUI Issues
+## Web UI Issues
 
-### Q: `autopilot webui` command doesn't exist
+### Q: How do I open the Web UI
 
-**Symptoms**: `Error: No such command 'webui'`
-
-**Solution**: WebUI is a separate plugin that needs to be installed:
+**Solution**: The Web UI is served by the daemon itself, no separate install needed. Confirm the daemon is running, then open the browser:
 
 ```bash
-pip install -e examples/plugins/autopilot-webui
+autopilot daemon status     # Confirm the daemon is running
+autopilot dashboard         # Opens http://127.0.0.1:6180 in the browser
 ```
 
-Then run `autopilot webui` again.
+If static assets are reported missing (first run from source / just changed the frontend), build the Web UI first:
 
-### Q: WebUI page won't load
+```bash
+bun run build:web
+```
+
+### Q: Web UI page won't load / port conflict
 
 **Troubleshooting**:
 
-1. Confirm the server is running: terminal should show `Serving on http://127.0.0.1:8080`
+1. Confirm the daemon is running: `autopilot daemon status` should show the listen address (default `127.0.0.1:6180`)
 2. Check if the port is in use:
    ```bash
    # Linux/macOS
-   lsof -i :8080
+   lsof -i :6180
    # Windows
-   netstat -ano | findstr :8080
+   netstat -ano | findstr :6180
    ```
-3. Try a different port: `autopilot webui --port 9090`
-4. For remote access: `autopilot webui --host 0.0.0.0`
+3. Change the port: edit `daemon.port` in `config.yaml`, then `autopilot daemon restart`
+4. For LAN access: set `daemon.host` in `config.yaml` to `0.0.0.0`, then restart the daemon
 
 ---
 
@@ -231,4 +234,3 @@ autopilot init
 | [Architecture Overview](architecture.md) | Overall architecture, module responsibilities, data flow |
 | [Workflow Development Guide](workflow-development.md) | YAML syntax, phase function guidelines |
 | [State Machine Details](state-machine.md) | Transition tables, rejection mechanism, state diagrams |
-| [Plugin Development Guide](plugin-development.md) | Third-party plugins, extension points, framework API |

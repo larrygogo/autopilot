@@ -326,5 +326,4 @@ transition(task_id, 'cancel', note='Manually cancelled by user')
 | [5-Minute Quickstart](quickstart.md) | From installation to running your first demo |
 | [Architecture Overview](architecture.md) | Overall architecture, module responsibilities, data flow |
 | [Workflow Development Guide](workflow-development.md) | YAML syntax, phase function guidelines |
-| [Plugin Development Guide](plugin-development.md) | Third-party plugins, extension points, framework API |
 | [FAQ & Troubleshooting](faq.md) | Common issues and solutions |
