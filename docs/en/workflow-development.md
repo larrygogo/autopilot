@@ -135,6 +135,53 @@ Supported function binding fields:
 - `notify_func` — notification function
 - `hooks.before_phase` / `hooks.after_phase` / `hooks.on_phase_error`
 
+### The `prompt` field (zero-code workflow)
+
+A phase can write a `prompt` directly in yaml, skipping the ts function. When a phase:
+
+- has no corresponding `run_<name>` function (`workflow.ts` missing or absent)
+- has a non-empty `prompt` field in yaml
+
+the framework automatically binds the built-in prompt-runner, equivalent to:
+
+```ts
+const agent = getAgent(phase.agent || "coder", workflowName);
+const result = await agent.run(resolvedPrompt, {
+  cwd: getTaskWorkspace(taskId),
+  timeout: (phase.timeout ?? 900) * 1000,
+});
+// output goes to workspace/<NN-phase>/agent_output.md
+```
+
+**Variable placeholders** (usable inside the prompt string):
+
+| Syntax | Meaning |
+|------|------|
+| `${TASK_ID}` | task id |
+| `${TASK_TITLE}` | task title |
+| `${REQUIREMENT}` | task.requirement (user requirement details) |
+| `${PHASE}` | current phase name |
+| `${WORKSPACE}` | absolute path of the task workspace |
+| `${TASK.field}` | any field left by `setup_func` (e.g. `${TASK.repo_path}`) |
+| `$VAR` | shorthand form (no dot notation) |
+
+Unrecognized variables are left as-is to avoid silent failures.
+
+**Priority**:
+
+| ts run_xxx | yaml prompt | Actual execution |
+|---|---|---|
+| ✓ | — | use the ts function (backward compatible) |
+| ✗ | ✓ | framework auto prompt-runner |
+| ✓ | ✓ | ts takes priority (prompt field ignored) |
+| ✗ | ✗ | throws |
+
+**Applicable scenarios**: simple "call an agent once to run a prompt" tasks (writing / translation / rewriting / summarization / single-round analysis).
+
+**Not applicable**: phases needing reject / parsing a returned conclusion / multi-agent interaction / git and other IO operations — these still require a ts function.
+
+See `examples/workflows/prompt_quick/` for a complete example (no `workflow.ts`, yaml only).
+
 ### transitions Format
 
 When writing transitions manually in YAML, use list format:
@@ -449,6 +496,112 @@ stateDiagram-v2
 ```
 
 > For more workflow state diagrams, see [State Machine Details](state-machine.md)
+
+---
+
+## Workspace configuration (`workspace:` section in workflow.yaml)
+
+Every task has an independent workspace directory (`AUTOPILOT_HOME/runtime/tasks/<task-id>/workspace/`).
+A workflow can declare how the workspace is initialized:
+
+```yaml
+workspace:
+  template: workspace_template   # Mode A: copy a template directory (relative to the workflow dir)
+  git: true                      # Mode B: spin up a git worktree based on the codebase
+  branch_prefix: "autopilot/"    # optional, used with git=true, default "autopilot/"
+  base: "main"                   # optional, used with git=true, default codebase.default_branch
+```
+
+**Three modes**:
+
+| Config | Behavior |
+|------|------|
+| neither | empty directory |
+| `template: xxx` | recursively copy from `<workflow-dir>/xxx/` into the workspace (with `..` traversal check) |
+| `git: true` + a codebase | `git worktree add -b <branch_prefix><taskId> <ws> <base>`; the task's workspace is a temporary branch on the codebase |
+
+**git mode details**:
+
+- The caller (`task-factory` / `tools.start_task`) looks up `task.extra.codebase_id` to get codebase info and passes it to `ensureTaskWorkspace`.
+- Branch name: `${branch_prefix}${taskId}`; if it already exists, a `-2 / -3` suffix is auto-appended.
+- Metadata is written to `runtime/tasks/<taskId>/.worktree.json` (`codebase_id` / `branch` / `base` / `created_at`), so the delete path needs no DB lookup.
+- **Degradation**: missing codebase / non-git repo / `git worktree add` failure → warn and fall back to an empty directory, **without blocking task startup**.
+- **template and git are mutually exclusive**: when both are configured, `git` wins and `template` is ignored with a warning.
+- **Cleanup**: `deleteTaskWorkspace` / `applyRetentionPolicy` automatically call `git worktree remove --force` to remove the temporary branch, with an rmSync fallback. Anything uncommitted past the retention period is garbage and force-removed.
+
+> Compatible with existing (non-git) workspaces: workflows that don't set `git: true` in yaml use the original logic, and the task workspace remains a plain directory.
+
+---
+
+## Prompt phase handoff protocol (`phases[].handoff` in workflow.yaml)
+
+**Applies only to pure yaml prompt phases** (ts phases already have full control and are not forced into the 4-section format). See spec §3.10.
+
+Enable:
+```yaml
+phases:
+  - name: draft
+    agent: writer
+    handoff: true    # after running, parse agent_output.md to extract 4 sections into handoff.md
+    prompt: |
+      ${REQUIREMENT}
+  - name: polish
+    handoff: true
+    prompt: |
+      Polish based on the previous phase's decisions:
+      ${HANDOFF}     # built-in placeholder: concatenates the handoff.md of all prior phases
+```
+
+**Runtime behavior of `handoff: true`**:
+
+1. The prompt automatically **appends** 4-section output instructions at the end (fixed format), so you don't repeat them in yaml:
+   ```
+   ## Handoff (required, for the next phase to read)
+
+   At the end of agent_output.md, output the following 4 sections, each non-empty (write "none" if empty), separated by markdown level-2 headings:
+   - ## Decided    what decisions were made (key choices + rationale)
+   - ## Files      key file paths (absolute / relative both fine)
+   - ## Risks      risks and caveats for the next phase
+   - ## Remaining  what's unfinished / left for later
+   ```
+2. After the phase function finishes, it **parses each of the 4 sections independently** from `agent_output.md` (a missing section does not affect the others) and writes them to `handoff.md` in the same directory.
+3. For a missing section it writes a **placeholder** "none (agent did not output)" + emits a `phase:handoff-incomplete` event + writes a task_logs WARN, and **continues the transition** (non-blocking).
+
+**Placeholders**:
+- `${HANDOFF}` — concatenates the handoff.md of all **prior** phases (in order, each prefixed with a `## <phase label>` heading); falls back to a degradation note when there is no upstream.
+- `${HANDOFF_<PHASE_NAME>}` — fetches a single phase's handoff (uppercased: `${HANDOFF_DRAFT}` fetches the `draft` phase).
+
+**Why ts phases are not forced into handoff**: ts phases already have full control to readFileSync any file (the dev workflow's plan.md / dev_report.md are structured reports that should not be flattened into 4 sections). Only zero-code yaml prompt phases need the protocol constraint.
+
+---
+
+## Agent aliases (`agent_aliases` in config.yaml)
+
+To reuse the same global agent across workflows under a different name, you don't have to copy-paste it into each workflow.yaml's `agents[]` (spec §3.11.1). Write in the global `config.yaml`:
+
+```yaml
+agent_aliases:
+  code-reviewer: reviewer
+  harsh-critic: reviewer
+  planner: architect
+```
+
+Meaning: when workflow.yaml writes `agent: code-reviewer`, at runtime it is equivalent to `agent: reviewer`.
+
+**Priority**:
+
+1. **workflow.agents[] same name** (highest) — if workflow.yaml has `agents: [{ name: code-reviewer, ... }]` → use that, the alias does not apply
+2. **globalAgents same name** — if config.yaml `agents.code-reviewer` exists → use that
+3. **alias hit** — neither exists, and `agent_aliases.code-reviewer = reviewer` → use reviewer's global config as the base, **merged.name remains code-reviewer** (UI/logs show the user-facing role)
+4. none → throws
+
+**Constraints**:
+
+- **Only one hop allowed**: a chained `a → b → c` jump throws directly, prompting the user to point straight to the final target in config.yaml.
+- **No tiers introduced**: autopilot does not copy OMC's HIGH/MEDIUM/LOW tier abstraction (spec §10.X decision record). Write `model:` directly or leave it empty to follow `providers.<name>.default_model` for upgrades.
+- **No provider fallback chain**: if the CLI is unavailable, fail loudly (spec §10.X decision record) instead of silently switching to another provider.
+
+**With the web UI**: the `agents.list` RPC returns aliases as virtual entries too, with an `alias_of: <target>` field in the response, so the UI can show a badge indicating "this is an alias".
 
 ---
 
