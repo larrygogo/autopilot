@@ -5,6 +5,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { parse as parseYaml, parseDocument, type Document } from "yaml";
 import { tryMakePromptRunnerForPhase } from "./prompt-runner";
+import type { InlineAgentConfig } from "./agent-defaults";
 import {
   syncFileWorkflowsToDb,
   listWorkflowsInDb,
@@ -29,7 +30,13 @@ export interface PhaseDefinition {
   fail_trigger: string;
   label: string;
   timeout?: number;
-  agent?: string;
+  /**
+   * Phase 内联 agent 配置。
+   * - 对象：就地配置（provider/model/system_prompt...），不引用命名 agent
+   * - 省略：走 DEFAULT_AGENT 兜底
+   * - string：旧格式（引用命名 agent），兼容期保留，由 agentForPhase 降级处理
+   */
+  agent?: string | InlineAgentConfig;
   func?: (taskId: string) => Promise<void>;
   jump_trigger?: string;
   jump_target?: string;
@@ -706,7 +713,9 @@ function composeDbWorkflow(
     }
     const merged: PhaseDefinition = { ...basePhase };
     if (typeof phaseObj.timeout === "number") merged.timeout = phaseObj.timeout;
-    if (typeof phaseObj.agent === "string") merged.agent = phaseObj.agent;
+    if (typeof phaseObj.agent === "string" || (phaseObj.agent !== null && typeof phaseObj.agent === "object")) {
+      merged.agent = phaseObj.agent as PhaseDefinition["agent"];
+    }
     if (typeof phaseObj.label === "string") merged.label = phaseObj.label;
     if (typeof phaseObj.reject === "string") {
       merged.jump_trigger = `${phName}_reject`;

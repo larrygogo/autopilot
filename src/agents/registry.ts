@@ -4,9 +4,9 @@ import type { BaseProvider } from "./providers/base";
 import { AnthropicProvider } from "./providers/anthropic";
 import { OpenAIProvider } from "./providers/openai";
 import { GoogleProvider } from "./providers/google";
-import { getWorkflow } from "../core/registry";
+import { getWorkflow, getPhase } from "../core/registry";
 import { loadGlobalAgents, loadProviders, loadConversationConfig, loadAgentAliases, type ProviderConfig } from "../core/config";
-import { AGENT_DEFAULTS } from "../core/agent-defaults";
+import { AGENT_DEFAULTS, DEFAULT_AGENT, type InlineAgentConfig } from "../core/agent-defaults";
 
 /**
  * 解析 agent 别名（spec §3.11.1）。
@@ -194,6 +194,51 @@ export function getAgent(agentName: string, workflowName: string): Agent {
 
   const resolved = resolveAgentConfig(agentName, workflowAgent, globalAgents, providers, aliases);
   const agent = createAgent(resolved);
+  _cache.set(cacheKey, agent);
+  return agent;
+}
+
+/**
+ * 按 phase 解析并构建 Agent（spec：移除命名复用 agent）。
+ *
+ * 解析规则（取代「按名 getAgent + 三层合并」）：
+ *   - phase.agent 是对象 → 内联配置覆盖 DEFAULT_AGENT，model 缺失走 providers.<provider>.default_model
+ *   - phase.agent 省略   → 直接用 DEFAULT_AGENT
+ *   - phase.agent 是字符串 → 旧格式（命名 agent），兼容期降级走 getAgent（Phase 3 删除）
+ *
+ * 缓存 key 用 `workflowName:@phase:phaseName`，与 getAgent 的命名 key 区分；
+ * closeAgents/clearAllAgentCache 用 `workflowName:` 前缀仍能清理到（防 provider 子进程泄漏）。
+ */
+export function agentForPhase(workflowName: string, phaseName: string): Agent {
+  const phase = getPhase(workflowName, phaseName);
+  const spec = phase?.agent;
+
+  // 旧格式：字符串命名 agent → 兼容降级（Phase 3 前保留）
+  if (typeof spec === "string") {
+    return getAgent(spec, workflowName);
+  }
+
+  const cacheKey = `${workflowName}:@phase:${phaseName}`;
+  const cached = _cache.get(cacheKey);
+  if (cached) return cached;
+
+  const inline: InlineAgentConfig =
+    spec && typeof spec === "object" ? (spec as InlineAgentConfig) : {};
+  const merged: Record<string, unknown> = { ...DEFAULT_AGENT, ...inline };
+
+  const provider = (merged["provider"] as string | undefined) ?? DEFAULT_AGENT.provider;
+  merged["provider"] = provider;
+
+  // provider 层 fallback：没写 model 时用 providers.<provider>.default_model
+  if (!merged["model"]) {
+    const providerCfg = loadProviders()[provider as ProviderName];
+    if (providerCfg?.default_model) merged["model"] = providerCfg.default_model;
+  }
+
+  // 匿名 agent：用 phase 名做标识（日志 / header / 缓存）
+  merged["name"] = phaseName;
+
+  const agent = createAgent(merged as AgentConfig);
   _cache.set(cacheKey, agent);
   return agent;
 }

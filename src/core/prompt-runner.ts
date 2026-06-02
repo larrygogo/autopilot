@@ -18,7 +18,8 @@
 
 import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { getAgent } from "../agents/registry";
+import { agentForPhase } from "../agents/registry";
+import type { InlineAgentConfig } from "./agent-defaults";
 import { getTask } from "./db";
 import { getTaskWorkspace } from "./workspace";
 import { getPhaseIndex } from "./artifacts";
@@ -241,7 +242,7 @@ export function makePromptRunner(
   workflowName: string,
   prompt: string,
   options: {
-    agent?: string;
+    agent?: string | InlineAgentConfig;
     timeoutSec?: number;
     /** Phase 6: 启用 handoff 协议（spec §3.10）。true 时 prompt 末尾追加 4 段指令，跑完解析写 handoff.md */
     handoff?: boolean;
@@ -263,8 +264,9 @@ export function makePromptRunner(
     // 启用 handoff 时在 prompt 末尾追加 4 段输出指令
     const promptWithHandoff = options.handoff ? resolved + HANDOFF_PROMPT_SUFFIX : resolved;
 
-    const agentName = options.agent || "coder";
-    const agent = getAgent(agentName, workflowName);
+    // phase 内联配置或默认兜底解析（不再按命名 agent 取用）
+    const agent = agentForPhase(workflowName, phaseName);
+    const agentName = typeof options.agent === "string" ? options.agent : agent.name;
 
     log.info(
       "prompt-runner 启动 [task=%s phase=%s agent=%s prompt 长度=%d handoff=%s]",
