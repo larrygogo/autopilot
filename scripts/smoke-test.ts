@@ -200,14 +200,17 @@ async function main(): Promise<void> {
   // ────────────────────────────────────────────────
   step("autopilot workflow list —— 不依赖 daemon");
   // ────────────────────────────────────────────────
-  const wfListR = runCli(["workflow", "list"]);
+  // 用死端口强制走离线路径：daemon 不可达时 CLI 直接读 tmpHome 本地 registry。
+  // （不指定端口会打到开发者本地已有的 daemon、拿到真实 home 的数据 → 在开发机假绿、
+  //  只有干净环境 CI 才暴露；这正是此步曾长期失败的原因。）
+  const wfListR = runCli(["workflow", "list", "--port", "19999"]);
   assertContains(wfListR.stdout, "dev", "workflow list 含 dev（init 装的默认 workflow）");
+  assertContains(wfListR.stdout, "ad-hoc", "workflow list 含 ad-hoc（离线读 tmpHome 生效）");
 
   // ────────────────────────────────────────────────
   step("init 装入 ad-hoc workflow 模板（Phase 4 spec §3.7）");
   // ────────────────────────────────────────────────
-  // workflow list 走的是 daemon RPC（smoke-test 不跑 daemon，命令实际打到用户已有 daemon，
-  // 拿不到 tmpHome 数据），所以直接检查 tmpHome 目录。
+  // 直接检查 tmpHome 目录，确认 init 把 ad-hoc 模板文件（workflow.yaml）落了盘。
   const adHocDir = join(tmpHome, "workflows", "ad-hoc");
   if (!existsSync(adHocDir)) {
     console.error(`  ✗ tmpHome 下缺 ad-hoc workflow：${adHocDir}`);
