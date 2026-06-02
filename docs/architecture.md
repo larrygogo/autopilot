@@ -36,7 +36,7 @@ graph TB
     end
 
     subgraph Agents["Agent 系统（src/agents/）"]
-      AG["Anthropic / OpenAI / Google<br/>三层配置：global → workflow → run"]
+      AG["Anthropic / OpenAI / Google<br/>phase 内联 agent + DEFAULT_AGENT 兜底"]
     end
 
     subgraph Home["AUTOPILOT_HOME（~/.autopilot/）"]
@@ -97,7 +97,7 @@ autopilot dashboard             ← 浏览器打开 daemon serve 的 SPA
 | `watcher.ts` | 定期扫 `running_*` 状态 + 无锁 + 超时的 task；按策略恢复（重试或失败）；emit `watcher:recovery` |
 | `logger.ts` | 阶段标签日志；emit `log:entry` 让 WS 客户端实时订阅 |
 | `migrate.ts` | DB 迁移引擎：扫 `src/migrations/NNN-*.ts`、按文件名前缀版本号顺序执行；用 `schema_version` 表追踪已应用版本 |
-| `config.ts` | 加载 `config.yaml`、提取 `providers / agents / daemon / workspace_retention` 段 |
+| `config.ts` | 加载 `config.yaml`、提取 `providers / daemon / workspace_retention` 段 |
 | `task-factory.ts` | 高层工厂：`startTaskFromTemplate` 创建 task 行 + 准备 workspace + 启动首阶段 |
 | `workspace.ts` | `<HOME>/runtime/tasks/<id>/workspace/` 目录管理 + 模板拷贝；路径穿越防护 |
 | `manifest.ts` | task 创建时 snapshot 当前 workflow 定义到 task 行（保证旧 task 在工作流改动后仍能读对状态机） |
@@ -127,7 +127,7 @@ autopilot dashboard             ← 浏览器打开 daemon serve 的 SPA
 |---|---|
 | `agent.ts` | Agent 基类（spawn provider CLI + 收集输出 + 解析 usage） |
 | `providers/anthropic.ts / openai.ts / google.ts` | 三大 provider 子类（凭证由对应 CLI 自身管理；autopilot 不存 token） |
-| `registry.ts` | 命名 agent 缓存；解析三层配置：global `config.yaml.agents` → workflow `agents[]` 覆盖 → 运行时 `RunOptions` 覆盖 |
+| `registry.ts` | agent 实例缓存（按 `workflow:phase`）；解析 phase 内联 `agent:` 对象，省略时回退框架内置 `DEFAULT_AGENT`，`model` 缺省回退 `providers.<provider>.default_model` |
 | `tools.ts` | chat agent 用的工具集（`list_repos / create_requirement_draft / inject_feedback / start_task ...`）+ workflow agent 用的 `ask_user` 工具 |
 | `pending-questions.ts` | `ask_user` 工具的等待中 promise 注册表；用户在 UI 回答后 resolve |
 
@@ -226,7 +226,7 @@ sequenceDiagram
 
 ```
 ~/.autopilot/                    # 默认；可用 AUTOPILOT_HOME 环境变量覆盖
-├── config.yaml                  # providers / agents / daemon / workspace_retention
+├── config.yaml                  # providers / daemon / workspace_retention
 ├── workflows/                   # 用户工作流
 │   └── req_dev/
 │       ├── workflow.yaml        # 阶段定义（推导状态 + 转换）

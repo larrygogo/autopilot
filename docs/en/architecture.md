@@ -36,7 +36,7 @@ graph TB
     end
 
     subgraph Agents["Agent system (src/agents/)"]
-      AG["Anthropic / OpenAI / Google<br/>three-tier config: global → workflow → run"]
+      AG["Anthropic / OpenAI / Google<br/>phase-inline agent + DEFAULT_AGENT fallback"]
     end
 
     subgraph Home["AUTOPILOT_HOME (~/.autopilot/)"]
@@ -97,7 +97,7 @@ Each **phase function** still follows the Push model: when a phase completes, `r
 | `watcher.ts` | Periodically scans tasks in `running_*` state + no lock + timed out; recovers per policy (retry or fail); emits `watcher:recovery` |
 | `logger.ts` | Phase-tagged logging; emits `log:entry` for WS clients to subscribe in real time |
 | `migrate.ts` | DB migration engine: scans `src/migrations/NNN-*.ts`, runs them in order by filename prefix version; tracks applied versions with the `schema_version` table |
-| `config.ts` | Loads `config.yaml`, extracts the `providers / agents / daemon / workspace_retention` sections |
+| `config.ts` | Loads `config.yaml`, extracts the `providers / daemon / workspace_retention` sections |
 | `task-factory.ts` | High-level factory: `startTaskFromTemplate` creates the task row + prepares the workspace + starts the first phase |
 | `workspace.ts` | Manages the `<HOME>/runtime/tasks/<id>/workspace/` directory + template copying; path traversal protection |
 | `manifest.ts` | Snapshots the current workflow definition into the task row at creation time (so old tasks still read the correct state machine after workflow changes) |
@@ -127,7 +127,7 @@ Each **phase function** still follows the Push model: when a phase completes, `r
 |---|---|
 | `agent.ts` | Agent base class (spawns the provider CLI + collects output + parses usage) |
 | `providers/anthropic.ts / openai.ts / google.ts` | The three provider subclasses (credentials are managed by each CLI itself; autopilot stores no tokens) |
-| `registry.ts` | Named agent cache; resolves the three-tier config: global `config.yaml.agents` → workflow `agents[]` override → runtime `RunOptions` override |
+| `registry.ts` | Agent instance cache (keyed by `workflow:phase`); resolves each phase's inline `agent:` object, falling back to the built-in `DEFAULT_AGENT` when omitted, and falling back to `providers.<provider>.default_model` when `model` is unset |
 | `tools.ts` | Tool set for the chat agent (`list_repos / create_requirement_draft / inject_feedback / start_task ...`) + the `ask_user` tool for workflow agents |
 | `pending-questions.ts` | Registry of pending promises for the `ask_user` tool; resolved after the user answers in the UI |
 
@@ -226,7 +226,7 @@ Framework code and user data are strictly separated:
 
 ```
 ~/.autopilot/                    # default; overridable via the AUTOPILOT_HOME env var
-├── config.yaml                  # providers / agents / daemon / workspace_retention
+├── config.yaml                  # providers / daemon / workspace_retention
 ├── workflows/                   # user workflows
 │   └── req_dev/
 │       ├── workflow.yaml        # phase definitions (derived states + transitions)

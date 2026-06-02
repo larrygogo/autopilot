@@ -52,8 +52,8 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **并发安全**：文件锁（PID 存活检测 + 僵尸锁清理）防止双重执行
 - **Watcher 保底**：定期检测卡死任务，自动恢复
 - **Agent 系统**：内置 Anthropic / OpenAI / Google 三大 Agent 提供商（凭证由对应 CLI 自身管理）
-- **Agent 三层配置**：全局 `config.yaml.agents` → 工作流 `agents[]` 覆盖 → 运行时 `RunOptions` 覆盖
-- **Web UI 工作流编辑器**：阶段 CRUD / 并行块 / 驳回 / 智能体覆盖全图形化，`workflow.ts` 自动同步（改名重命名函数、追加缺失、孤儿清理）
+- **Phase 内联 Agent**：每个 phase 在 `workflow.yaml` 里内联配置自己的 agent（`agent: {provider, model, system_prompt, max_turns, permission_mode}`）；省略则用 `DEFAULT_AGENT` 兜底。无"全局命名可复用 agent"概念（已于 2026-06 移除）。model 缺省时回退到 `providers.<provider>.default_model`
+- **Web UI 工作流编辑器**：阶段 CRUD / 并行块 / 驳回 / **phase 内联 agent 编辑**全图形化，`workflow.ts` 自动同步（改名重命名函数、追加缺失、孤儿清理）
 - **项目工作台**：两层数据模型 `Project ⊃ Codebase`，需求挂项目维度，支持 AI 调查 + 评论线程 + 用户审批流
 - **评论线程**：`requirement_questions` + `requirement_question_replies`，Agent 调查期主动提问，用户回复后继续
 - **框架零业务知识**：核心模块不含任何工作流专属常量或逻辑
@@ -244,6 +244,22 @@ phases:
     timeout: 1200
 ```
 
+Phase 内联 agent（省略 `agent:` 则用框架内置 `DEFAULT_AGENT`）：
+```yaml
+phases:
+  - name: develop
+    timeout: 1800
+    agent:                         # 仅本 phase 生效，不被复用
+      provider: anthropic
+      model: claude-opus-4-6       # 省略则回退 providers.anthropic.default_model
+      permission_mode: bypassPermissions
+      system_prompt: 你是资深工程师，实现需求并自查。
+  - name: review
+    timeout: 1200                  # 不写 agent → 走 DEFAULT_AGENT
+```
+
+`workflow.ts` 阶段函数里按 phase 取 agent：`agentForPhase(workflowName, phaseName)`（零代码 `prompt:` 模式下框架自动调用，无需手写）。
+
 ## 升级流程
 
 ```bash
@@ -320,14 +336,8 @@ providers:             # LLM 提供商默认值（凭证由 CLI 管理）
   openai: { ... }
   google: { ... }
 
-agents:                # 命名 agent 定义，工作流可同名引用或 extends
-  coder:
-    provider: anthropic
-    model: claude-sonnet-4-6
-    max_turns: 10
-    permission_mode: auto
-    system_prompt: |
-      你是通用编码助手。
+# 注：已无全局 `agents:` 段。agent 现按 phase 内联配置在各工作流的
+# workflow.yaml 里（省略则走框架内置 DEFAULT_AGENT）。详见「新增工作流」一节。
 
 daemon:                # 可选：daemon 监听配置（改后 `autopilot daemon restart` 生效）
   host: 127.0.0.1      # 默认 127.0.0.1；设 0.0.0.0 暴露到局域网

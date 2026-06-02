@@ -106,18 +106,11 @@ providers:
   anthropic:
     default_model: claude-sonnet-4-6
     enabled: true
-
-agents:
-  coder:
-    provider: anthropic
-    model: claude-sonnet-4-6
-    max_turns: 10
-    permission_mode: auto
-    system_prompt: |
-      You are a general-purpose coding assistant.
 ```
 
 > **Credentials**: autopilot does not store API keys. Your installed AI CLI tool (claude-code / codex / gemini-cli) manages authentication. Make sure you've run `claude login` (or equivalent) before starting.
+
+> **Agent config lives in the workflow, not globally**: the global `config.yaml` only holds cross-workflow infrastructure such as providers. Each phase's agent (provider / model / system_prompt / max_turns / permission_mode) is declared inline in the workflow directory's `workflow.yaml`; a phase that omits `agent:` falls back to the framework's built-in default agent (anthropic / claude-sonnet-4-6). See the [Workflow Development Guide](workflow-development.md).
 
 ### Option B: Web UI settings
 
@@ -173,7 +166,7 @@ The Web UI has four sections:
 | **Now** | `/now` | What needs your attention right now (priority-sorted card stream) |
 | **Start** | `/start` | Submit new requirements and start tasks |
 | **Library** | `/library` | Browse all tasks and workflows |
-| **Settings** | `/settings` | Configure providers, agents, etc. |
+| **Settings** | `/settings` | Configure providers and other infrastructure |
 
 ---
 

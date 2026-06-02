@@ -145,13 +145,15 @@ func: my_custom_func    # → workflow.ts 中导出的 my_custom_func()
 框架会自动绑定内置的 prompt-runner，等价于：
 
 ```ts
-const agent = getAgent(phase.agent || "coder", workflowName);
+const agent = agentForPhase(workflowName, phase.name);
 const result = await agent.run(resolvedPrompt, {
   cwd: getTaskWorkspace(taskId),
   timeout: (phase.timeout ?? 900) * 1000,
 });
 // 输出落到 workspace/<NN-phase>/agent_output.md
 ```
+
+`agentForPhase(workflowName, phaseName)` 解析该 phase 内联的 `agent:` 对象；phase 未写 `agent:` 时回退框架内置 `DEFAULT_AGENT`（anthropic / claude-sonnet-4-6 / max_turns 10 / permission_mode auto），`model` 缺省时回退 `providers.<provider>.default_model`。
 
 **变量占位符**（prompt 字符串内可用）：
 
@@ -274,7 +276,7 @@ phases:
 | `trigger` / `complete_trigger` / `fail_trigger` | 触发器（自动推导，一般不手写） |
 | `jump_trigger` / `jump_target` | 跳转（`reject` 语法糖展开后生成） |
 | `max_rejections` | 最大驳回次数（超过则任务失败） |
-| `agent` | 绑定的 agent 名（prompt phase / 内置 agent 用） |
+| `agent` | 该 phase 内联的 agent 配置对象（`provider` / `model` / `system_prompt` / `max_turns` / `permission_mode`）；省略则用 `DEFAULT_AGENT` 兜底 |
 | `prompt` | 零代码 prompt（见上「`prompt` 字段」） |
 | `gate` / `gate_message` | 人工审批门（见下「Gate」） |
 
@@ -321,7 +323,7 @@ createTask({
   project: "my-project",
   repo_path: "/path/to/repo",
   branch: "feat/T001",
-  agents: { dev: "claude" },
+  codebase_id: "cb-001",
 });
 
 // 读取：extra 字段自动展开，直接访问
@@ -575,33 +577,51 @@ phases:
 
 ---
 
-## Agent 别名（config.yaml `agent_aliases`）
+## Phase 内联 agent（workflow.yaml `phases[].agent`）
 
-跨 workflow 复用同一全局 agent 但想用不同命名时，不必在每个 workflow.yaml 的 `agents[]` 里复制粘贴（spec §3.11.1）。在全局 `config.yaml` 写：
+每个 phase 在 `workflow.yaml` 里**内联自己的 agent 配置对象**，不再依赖全局 `config.yaml` 的命名 agent。全局 `config.yaml` 只保留 `providers` 等跨工作流基础设施，不含 `agents:` 段。
 
 ```yaml
-agent_aliases:
-  code-reviewer: reviewer
-  harsh-critic: reviewer
-  planner: architect
+phases:
+  - name: design
+    timeout: 900
+    agent:
+      provider: anthropic
+      model: claude-sonnet-4-6
+      max_turns: 10
+      permission_mode: auto
+      system_prompt: |
+        你是一位资深架构师，负责输出技术方案。
+
+  - name: develop
+    timeout: 1800
+    # 省略 agent: → 用框架内置 DEFAULT_AGENT 兜底
 ```
 
-含义：workflow.yaml 写 `agent: code-reviewer` 时，runtime 等价于 `agent: reviewer`。
+**字段**：
 
-**优先级**：
+| 字段 | 说明 |
+|------|------|
+| `provider` | `anthropic` / `openai` / `google` |
+| `model` | 省略则回退 `providers.<provider>.default_model` |
+| `system_prompt` | 该 phase 的 agent 系统提示词 |
+| `max_turns` | 最大对话轮数 |
+| `permission_mode` | 权限模式（如 `auto`） |
 
-1. **workflow.agents[] 同名**（最高）— workflow.yaml 里 `agents: [{ name: code-reviewer, ... }]` → 用这个，alias 不生效
-2. **globalAgents 同名** — config.yaml `agents.code-reviewer` 存在 → 用这个
-3. **alias 命中** — 都没有，且 `agent_aliases.code-reviewer = reviewer` → 用 reviewer 的全局配置作 base，**merged.name 仍是 code-reviewer**（UI/日志显示用户视角的 role）
-4. 都没有 → 抛错
+**两层心智模型**（取代旧的"全局 → 工作流 → 运行时"三层覆盖）：
 
-**限制**：
+1. **phase 内联 `agent:` 对象** — 写了就用它；阶段函数里用 `agentForPhase(workflowName, phaseName)` 取。
+2. **`DEFAULT_AGENT` 兜底** — phase 省略 `agent:` → 用框架内置默认 agent（anthropic / claude-sonnet-4-6 / max_turns 10 / permission_mode auto）。
 
-- **只允许一跳**：`a → b → c` 链式跳转直接 throw，让用户在 config.yaml 改为直接指向最终 target。
-- **不引入 tier**：autopilot 不抄 OMC 的 HIGH/MEDIUM/LOW tier 抽象（spec §10.X 决策记录）。直接写 `model:` 或留空靠 `providers.<name>.default_model` 跟随升级。
-- **不引入 provider fallback chain**：CLI 不可用直接 fail loudly（spec §10.X 决策记录），不静默切到另一家 provider。
+外加一条 `model` 回退：phase 写了 `agent:` 但缺 `model` → 回退 `providers.<provider>.default_model`，跟随 provider 默认模型升级。
 
-**与 web UI**：`agents.list` RPC 把 alias 作为虚拟 entry 一并返回，response 含 `alias_of: <target>` 字段，UI 可显示 badge 标识"这是别名"。
+**已移除的旧抽象**（迁移自旧文档时注意）：
+
+- ❌ 全局 `config.yaml` 的 `agents:` 段（命名可复用 agent）
+- ❌ 工作流级 `agents[]` 段 + `extends`
+- ❌ `agent_aliases`（agent 别名）
+- ❌ `chat_agent` 字段（chat 现在固定用 `DEFAULT_AGENT`）
+- ❌ `getAgent(name, workflow)`（改为 `agentForPhase(workflow, phase)`）
 
 ---
 

@@ -145,13 +145,15 @@ A phase can write a `prompt` directly in yaml, skipping the ts function. When a 
 the framework automatically binds the built-in prompt-runner, equivalent to:
 
 ```ts
-const agent = getAgent(phase.agent || "coder", workflowName);
+const agent = agentForPhase(workflowName, phase.name);
 const result = await agent.run(resolvedPrompt, {
   cwd: getTaskWorkspace(taskId),
   timeout: (phase.timeout ?? 900) * 1000,
 });
 // output goes to workspace/<NN-phase>/agent_output.md
 ```
+
+`agentForPhase(workflowName, phaseName)` resolves the phase's inline `agent:` object; when a phase omits `agent:`, it falls back to the framework's built-in `DEFAULT_AGENT` (anthropic / claude-sonnet-4-6 / max_turns 10 / permission_mode auto), and when `model` is unset it falls back to `providers.<provider>.default_model`.
 
 **Variable placeholders** (usable inside the prompt string):
 
@@ -274,7 +276,7 @@ Subtasks automatically inherit the parent task's `extra` JSON field.
 | `trigger` / `complete_trigger` / `fail_trigger` | Triggers (auto-derived, rarely written by hand) |
 | `jump_trigger` / `jump_target` | Jump (generated from `reject` syntactic sugar) |
 | `max_rejections` | Maximum rejection count (the task fails once exceeded) |
-| `agent` | Bound agent name (for prompt phases / built-in agents) |
+| `agent` | The phase's inline agent config object (`provider` / `model` / `system_prompt` / `max_turns` / `permission_mode`); falls back to `DEFAULT_AGENT` when omitted |
 | `prompt` | Zero-code prompt (see "the `prompt` field" above) |
 | `gate` / `gate_message` | Human approval gate (see "Gate" below) |
 
@@ -321,7 +323,7 @@ createTask({
   project: "my-project",
   repo_path: "/path/to/repo",
   branch: "feat/T001",
-  agents: { dev: "claude" },
+  codebase_id: "cb-001",
 });
 
 // Read: extra fields auto-expanded, direct access
@@ -575,33 +577,51 @@ phases:
 
 ---
 
-## Agent aliases (`agent_aliases` in config.yaml)
+## Phase-inline agent (`phases[].agent` in workflow.yaml)
 
-To reuse the same global agent across workflows under a different name, you don't have to copy-paste it into each workflow.yaml's `agents[]` (spec §3.11.1). Write in the global `config.yaml`:
+Each phase **declares its own agent config object inline** in `workflow.yaml`; there is no longer any dependency on named agents in the global `config.yaml`. The global `config.yaml` only keeps cross-workflow infrastructure such as `providers` and has no `agents:` section.
 
 ```yaml
-agent_aliases:
-  code-reviewer: reviewer
-  harsh-critic: reviewer
-  planner: architect
+phases:
+  - name: design
+    timeout: 900
+    agent:
+      provider: anthropic
+      model: claude-sonnet-4-6
+      max_turns: 10
+      permission_mode: auto
+      system_prompt: |
+        You are a senior architect responsible for producing the technical plan.
+
+  - name: develop
+    timeout: 1800
+    # Omit agent: → falls back to the built-in DEFAULT_AGENT
 ```
 
-Meaning: when workflow.yaml writes `agent: code-reviewer`, at runtime it is equivalent to `agent: reviewer`.
+**Fields**:
 
-**Priority**:
+| Field | Description |
+|------|------|
+| `provider` | `anthropic` / `openai` / `google` |
+| `model` | falls back to `providers.<provider>.default_model` when omitted |
+| `system_prompt` | system prompt for this phase's agent |
+| `max_turns` | maximum number of conversation turns |
+| `permission_mode` | permission mode (e.g. `auto`) |
 
-1. **workflow.agents[] same name** (highest) — if workflow.yaml has `agents: [{ name: code-reviewer, ... }]` → use that, the alias does not apply
-2. **globalAgents same name** — if config.yaml `agents.code-reviewer` exists → use that
-3. **alias hit** — neither exists, and `agent_aliases.code-reviewer = reviewer` → use reviewer's global config as the base, **merged.name remains code-reviewer** (UI/logs show the user-facing role)
-4. none → throws
+**Two-layer mental model** (replacing the old "global → workflow → runtime" three-tier override):
 
-**Constraints**:
+1. **phase-inline `agent:` object** — if present, it is used; phase functions read it via `agentForPhase(workflowName, phaseName)`.
+2. **`DEFAULT_AGENT` fallback** — when a phase omits `agent:`, the framework's built-in default agent is used (anthropic / claude-sonnet-4-6 / max_turns 10 / permission_mode auto).
 
-- **Only one hop allowed**: a chained `a → b → c` jump throws directly, prompting the user to point straight to the final target in config.yaml.
-- **No tiers introduced**: autopilot does not copy OMC's HIGH/MEDIUM/LOW tier abstraction (spec §10.X decision record). Write `model:` directly or leave it empty to follow `providers.<name>.default_model` for upgrades.
-- **No provider fallback chain**: if the CLI is unavailable, fail loudly (spec §10.X decision record) instead of silently switching to another provider.
+Plus one `model` fallback: if a phase has `agent:` but no `model`, it falls back to `providers.<provider>.default_model`, following the provider's default-model upgrades.
 
-**With the web UI**: the `agents.list` RPC returns aliases as virtual entries too, with an `alias_of: <target>` field in the response, so the UI can show a badge indicating "this is an alias".
+**Removed legacy abstractions** (watch out when migrating from older docs):
+
+- ❌ the global `config.yaml` `agents:` section (named reusable agents)
+- ❌ the workflow-level `agents[]` section + `extends`
+- ❌ `agent_aliases` (agent aliases)
+- ❌ the `chat_agent` field (chat now always uses `DEFAULT_AGENT`)
+- ❌ `getAgent(name, workflow)` (replaced by `agentForPhase(workflow, phase)`)
 
 ---
 

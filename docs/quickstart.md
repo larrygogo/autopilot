@@ -109,18 +109,11 @@ providers:
   anthropic:
     default_model: claude-sonnet-4-6
     enabled: true
-
-agents:
-  coder:
-    provider: anthropic
-    model: claude-sonnet-4-6
-    max_turns: 10
-    permission_mode: auto
-    system_prompt: |
-      你是通用编码助手。
 ```
 
 > **凭证**：autopilot 不存储 API key，由你已登录的 CLI 工具（claude-code / codex / gemini-cli）负责管理。确保已在对应 CLI 里 `claude login` / `codex login` 登录过。
+
+> **agent 配置在工作流里，不在全局**：全局 `config.yaml` 只放 providers 等跨工作流基础设施。每个阶段的 agent（provider / model / system_prompt / max_turns / permission_mode）写在工作流目录的 `workflow.yaml` 里，由阶段内联声明；阶段省略 `agent:` 时框架用内置默认 agent（anthropic / claude-sonnet-4-6）兜底。详见[工作流开发指南](workflow-development.md)。
 
 ### 方式 B：Web UI 配置
 
@@ -176,7 +169,7 @@ Web UI 有四个区域：
 | **现在** | `/now` | 当前需要你关注的事（按优先级排序的卡片流） |
 | **开始** | `/start` | 提交新需求、启动任务 |
 | **库** | `/library` | 查看所有任务和工作流 |
-| **设置** | `/settings` | 配置 providers、agents 等 |
+| **设置** | `/settings` | 配置 providers 等基础设施 |
 
 ---
 
