@@ -17,7 +17,7 @@ import { getTask, updateTask } from "@autopilot/core/db";
 import { transition } from "@autopilot/core/state-machine";
 import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
 import { runInBackground } from "@autopilot/core/runner";
-import { getAgent } from "@autopilot/agents/registry";
+import { agentForPhase } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 import { getTaskWorkspace } from "@autopilot/core/workspace";
 import { getCodebaseById } from "@autopilot/core/codebases";
@@ -198,7 +198,7 @@ export async function run_design(taskId: string): Promise<void> {
     rejectionHistory +
     submodulesSection;
 
-  const agent = getAgent("architect", task.workflow);
+  const agent = agentForPhase(task.workflow, "design");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 900_000 });
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
@@ -231,7 +231,7 @@ export async function run_review(taskId: string): Promise<void> {
     `- ${REVIEW_RESULT_REJECT}\n\n` +
     `如果驳回，请在 ## 驳回理由 下说明具体问题。`;
 
-  const agent = getAgent("reviewer", task.workflow);
+  const agent = agentForPhase(task.workflow, "review");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 900_000 });
   const text = result.text;
 
@@ -326,7 +326,7 @@ export async function run_develop(taskId: string): Promise<void> {
     `写完代码后不要 commit、不要 push，commit 由后续步骤统一处理。` +
     submodulesSection;
 
-  const agent = getAgent("developer", task.workflow);
+  const agent = agentForPhase(task.workflow, "develop");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
 
   const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
@@ -408,7 +408,7 @@ export async function run_code_review(taskId: string): Promise<void> {
     `- ${REVIEW_RESULT_REJECT}\n\n` +
     `如果驳回，请在 ## 不通过理由 下说明具体问题。`;
 
-  const agent = getAgent("reviewer", task.workflow);
+  const agent = agentForPhase(task.workflow, "code_review");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_200_000 });
   const text = result.text;
 
@@ -543,7 +543,7 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const diffStatResult = runGit(["diff", `${defaultBranch}...HEAD`, "--stat"], repoPath);
   const gitDiffStat = diffStatResult.stdout.slice(0, 3000);
 
-  const agent = getAgent("reviewer", task.workflow);
+  const agent = agentForPhase(task.workflow, "submit_pr");
   const prPrompt =
     `请根据以下信息生成 PR 描述（Markdown 格式）：\n\n` +
     `## 标题\n${task.title}\n\n` +
@@ -707,7 +707,7 @@ export async function run_fix_revision(taskId: string): Promise<void> {
     }
   }
 
-  const agent = getAgent("developer", task.workflow);
+  const agent = agentForPhase(task.workflow, "fix_revision");
   const prompt =
     `请按以下反馈修改代码（在仓库 ${repoPath}，当前分支 ${branch}）：\n\n` +
     `## 反馈来源\n${latest.source === "github_review" ? "GitHub PR review" : "用户手动注入"}\n\n` +

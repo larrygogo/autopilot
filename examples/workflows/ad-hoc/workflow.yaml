@@ -12,9 +12,9 @@ workspace:
   git: true   # caller 传 codebase 时启用 worktree；不传则 ensureTaskWorkspace 自动退化空目录
 
 phases:
+  # 不配 agent → 走 DEFAULT_AGENT（通用编码助手）兜底
   - name: run
     label: "执行"
-    agent: coder
     timeout: 1800
     prompt: |
       ${REQUIREMENT}

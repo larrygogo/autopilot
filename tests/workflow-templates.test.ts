@@ -45,7 +45,8 @@ describe("listWorkflowTemplates", () => {
     expect(pq).toBeDefined();
     expect(pq!.label).toBe("提示词速写");
     expect(pq!.phase_count).toBe(2);
-    expect(pq!.agent_count).toBe(2);
+    // 移除命名复用 agent 后，agent 改为 phase 内联，agents[] 块为空 → agent_count 0
+    expect(pq!.agent_count).toBe(0);
   });
 
   it("yaml 没写 label 时 label 字段为 undefined", () => {

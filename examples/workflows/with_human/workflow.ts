@@ -17,7 +17,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { getTask } from "@autopilot/core/db";
-import { getAgent } from "@autopilot/agents/registry";
+import { agentForPhase } from "@autopilot/agents/registry";
 import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
 import { transition } from "@autopilot/core/state-machine";
 import { runInBackground } from "@autopilot/core/runner";
@@ -117,7 +117,7 @@ export async function run_plan(taskId: string): Promise<void> {
     `3. 实施步骤\n4. 验收标准` +
     rejectionHistory;
 
-  const agent = getAgent("planner", task.workflow);
+  const agent = agentForPhase(task.workflow, "plan");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 600_000 });
 
   writeFileSync(
@@ -153,7 +153,7 @@ export async function run_review(taskId: string): Promise<void> {
     `最后必须独占一行输出以下结论之一：\n- ${PASS}\n- ${REJECT}\n\n` +
     `如果驳回，请在 "## 驳回理由" 标题下说明具体问题。`;
 
-  const agent = getAgent("reviewer", task.workflow);
+  const agent = agentForPhase(task.workflow, "review");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 600_000 });
   const text = result.text;
 

@@ -3,26 +3,19 @@ label: "提示词速写"
 description: "零代码工作流示例：仅 yaml 写 prompt，框架自动调用 agent 执行；适合简单的串行 agent 任务"
 
 # 注意：本工作流没有 workflow.ts 文件。phase.prompt 字段触发框架内置 prompt-runner，
-# 自动调用 getAgent(phase.agent).run(prompt)，无需用户写任何 ts 代码。
+# 自动用 phase 内联 agent 配置（或 DEFAULT_AGENT 兜底）跑 prompt，无需写任何 ts 代码。
 #
 # 适用场景：简单的"调 agent 跑一段 prompt"任务（写作、翻译、改写、总结...）
 # 不适用：需要复杂分支（reject / 解析返回结论 / 多 agent 互动）的场景——那些仍要写 ts
 
-agents:
-  - name: writer
-    label: "写作助手"
-    extends: coder
-  - name: critic
-    label: "审稿员"
-    extends: reviewer
-
 phases:
-  # 阶段 1：撰稿
+  # 阶段 1：撰稿（用默认 agent，仅起个展示用 label）
   - name: draft
     label: "撰稿"
-    agent: writer
     timeout: 600
     handoff: true   # 启用 handoff 协议（spec §3.10）：跑完写 handoff.md，让 polish 阶段拿到 ${HANDOFF}
+    agent:
+      label: "写作助手"
     prompt: |
       你是一位专业写作助手。请根据下面的需求撰写一篇 800-1200 字的文章。
 
@@ -36,12 +29,18 @@ phases:
 
       请把完整文章写入 ${WORKSPACE}/draft.md。
 
-  # 阶段 2：润色
+  # 阶段 2：润色（内联审稿员配置）
   - name: polish
     label: "润色"
-    agent: critic
     timeout: 600
     handoff: true   # polish 也写 handoff，给可能的后续阶段用
+    agent:
+      label: "审稿员"
+      provider: anthropic
+      model: claude-sonnet-4-6
+      max_turns: 5
+      permission_mode: default
+      system_prompt: "你是代码审查员。关注正确性、可读性、边界与失败处理。找出真问题而非格式纠错；按 critical / important / minor 分级反馈。"
     prompt: |
       你是一位审稿员。请阅读 ${WORKSPACE}/draft.md，对它进行修改改进。
 

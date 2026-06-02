@@ -15,7 +15,7 @@ import { getTask, updateTask } from "@autopilot/core/db";
 import { transition } from "@autopilot/core/state-machine";
 import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
 import { runInBackground } from "@autopilot/core/runner";
-import { getAgent } from "@autopilot/agents/registry";
+import { agentForPhase } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 import { getTaskWorkspace } from "@autopilot/core/workspace";
 import { notify } from "@autopilot/core/notify";
@@ -131,7 +131,7 @@ export async function run_design(taskId: string): Promise<void> {
     `1. 需求分析\n2. 技术方案\n3. 实现步骤\n4. 影响范围\n5. 测试计划` +
     rejectionHistory;
 
-  const agent = getAgent("architect", task.workflow);
+  const agent = agentForPhase(task.workflow, "design");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 900_000 });
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
@@ -164,7 +164,7 @@ export async function run_review(taskId: string): Promise<void> {
     `- ${REVIEW_RESULT_REJECT}\n\n` +
     `如果驳回，请在 ## 驳回理由 下说明具体问题。`;
 
-  const agent = getAgent("reviewer", task.workflow);
+  const agent = agentForPhase(task.workflow, "review");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 900_000 });
   const text = result.text;
 
@@ -272,7 +272,7 @@ export async function run_develop(taskId: string): Promise<void> {
       `## 技术方案\n${planContent}\n\n` +
       `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。`;
 
-  const agent = getAgent("developer", task.workflow);
+  const agent = agentForPhase(task.workflow, "develop");
   try {
     const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
     const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
@@ -350,7 +350,7 @@ export async function run_code_review(taskId: string): Promise<void> {
     `- ${REVIEW_RESULT_REJECT}\n\n` +
     `如果驳回，请在 ## 不通过理由 下说明具体问题。`;
 
-  const agent = getAgent("reviewer", task.workflow);
+  const agent = agentForPhase(task.workflow, "code_review");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_200_000 });
   const text = result.text;
 
@@ -420,7 +420,7 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const diffStatResult = runGit(["diff", `${defaultBranch}...HEAD`, "--stat"], repoPath);
   const gitDiffStat = diffStatResult.stdout.slice(0, 3000);
 
-  const agent = getAgent("reviewer", task.workflow);
+  const agent = agentForPhase(task.workflow, "submit_pr");
   const prPrompt =
     `请根据以下信息生成 PR 描述（Markdown 格式）：\n\n` +
     `## 标题\n${task.title}\n\n` +
