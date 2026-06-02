@@ -4,6 +4,13 @@ import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { AutopilotClient } from "../client";
+import {
+  discover,
+  listWorkflows as registryListWorkflows,
+  getWorkflow as registryGetWorkflow,
+  getWorkflowYaml as registryGetWorkflowYaml,
+} from "../core/registry";
+import { listWorkflowsInDb } from "../core/workflows";
 
 export interface WorkflowCmdContext {
   getClient: (opts: { port: string }) => AutopilotClient;
@@ -16,6 +23,42 @@ interface WorkflowItem {
   description?: string;
   source?: "db" | "file";
   derives_from?: string | null;
+}
+
+/** daemon 是否可达（探测 getStatus；不可达不报错，返回 false 让调用方走离线路径）。 */
+async function daemonReachable(client: AutopilotClient): Promise<boolean> {
+  try {
+    await client.getStatus();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 离线读取本地 registry——daemon 未运行时的 fallback。
+ * 工作流本质是本地文件（AUTOPILOT_HOME/workflows/）+ 本地 SQLite，列出它们不该依赖 daemon。
+ * 逻辑与 daemon 的 workflows.list RPC 一致（registry 内存 merge DB 的 source/derives_from）。
+ */
+async function listWorkflowsOffline(): Promise<WorkflowItem[]> {
+  await discover();
+  const inMem = registryListWorkflows();
+  let dbRows: ReturnType<typeof listWorkflowsInDb> = [];
+  try {
+    dbRows = listWorkflowsInDb();
+  } catch {
+    dbRows = [];
+  }
+  const sourceMap = new Map(dbRows.map((r) => [r.name, r]));
+  return inMem.map((wf) => {
+    const row = sourceMap.get(wf.name);
+    return {
+      name: wf.name,
+      description: wf.description,
+      source: row?.source ?? "file",
+      derives_from: row?.derives_from ?? null,
+    };
+  });
 }
 
 /**
@@ -31,8 +74,10 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
     .action(async (opts: { port: string }) => {
       const client = ctx.getClient(opts);
-      await ctx.ensureDaemon(client);
-      const list = (await client.listWorkflows()) as WorkflowItem[];
+      // 列本地工作流不依赖 daemon：daemon 可达走 RPC，否则直接读本地 registry。
+      const list = (await daemonReachable(client))
+        ? ((await client.listWorkflows()) as WorkflowItem[])
+        : await listWorkflowsOffline();
       if (list.length === 0) {
         console.log("暂无已注册工作流。");
         return;
@@ -62,22 +107,51 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
     .action(async (name: string, opts: { port: string }) => {
       const client = ctx.getClient(opts);
-      await ctx.ensureDaemon(client);
-      try {
-        const meta = (await client.getWorkflow(name)) as unknown as WorkflowItem & {
-          phases?: unknown[];
-        };
-        const yaml = (await client.getWorkflowYaml(name)) as { yaml: string };
-        console.log(`# ${meta.name}`);
-        console.log(`source: ${meta.source ?? "file"}`);
-        if (meta.derives_from) console.log(`derives_from: ${meta.derives_from}`);
-        if (meta.description) console.log(`description: ${meta.description}`);
-        console.log("\n--- yaml ---\n");
-        console.log(yaml.yaml);
-      } catch (e: unknown) {
-        console.error(`查询失败：${e instanceof Error ? e.message : String(e)}`);
+      // 查看本地工作流不依赖 daemon：daemon 可达走 RPC，否则直接读本地 registry。
+      if (await daemonReachable(client)) {
+        try {
+          const meta = (await client.getWorkflow(name)) as unknown as WorkflowItem & {
+            phases?: unknown[];
+          };
+          const yaml = (await client.getWorkflowYaml(name)) as { yaml: string };
+          console.log(`# ${meta.name}`);
+          console.log(`source: ${meta.source ?? "file"}`);
+          if (meta.derives_from) console.log(`derives_from: ${meta.derives_from}`);
+          if (meta.description) console.log(`description: ${meta.description}`);
+          console.log("\n--- yaml ---\n");
+          console.log(yaml.yaml);
+        } catch (e: unknown) {
+          console.error(`查询失败：${e instanceof Error ? e.message : String(e)}`);
+          process.exit(1);
+        }
+        return;
+      }
+
+      // 离线
+      await discover();
+      const meta = registryGetWorkflow(name);
+      if (!meta) {
+        console.error(`查询失败：工作流 ${name} 不存在`);
         process.exit(1);
       }
+      let source: "db" | "file" = "file";
+      let derivesFrom: string | null = null;
+      try {
+        const row = listWorkflowsInDb().find((r) => r.name === name);
+        if (row) {
+          source = row.source;
+          derivesFrom = row.derives_from;
+        }
+      } catch {
+        /* DB 不可用时按 file 处理 */
+      }
+      const yamlStr = registryGetWorkflowYaml(name);
+      console.log(`# ${meta.name}`);
+      console.log(`source: ${source}`);
+      if (derivesFrom) console.log(`derives_from: ${derivesFrom}`);
+      if (meta.description) console.log(`description: ${meta.description}`);
+      console.log("\n--- yaml ---\n");
+      console.log(yamlStr ?? "(无 yaml 内容)");
     });
 
   // ── create ──
