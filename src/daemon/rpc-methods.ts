@@ -19,6 +19,7 @@ import {
   listTaskPhaseEvents,
   getWorkflowPhaseStats,
 } from "../core/db";
+import { existsSync } from "node:fs";
 import {
   listWorkflows,
   getWorkflowYaml as registryGetWorkflowYaml,
@@ -1583,7 +1584,7 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
-      return { codebases: listCodebases({ projectId: p.id }) };
+      return { codebases: listCodebases({ projectId: p.id }).map((cb) => ({ ...cb, path_exists: existsSync(cb.path) })) };
     },
   });
 
@@ -1646,7 +1647,7 @@ export function registerCoreRpcMethods(): void {
   registerRpcMethod({
     method: "codebases.list",
     description: "列出所有 codebase（与 GET /api/codebases 等价；返回数组，无 envelope）",
-    handler: () => listCodebases(),
+    handler: () => listCodebases().map((cb) => ({ ...cb, path_exists: existsSync(cb.path) })),
   });
 
   registerRpcMethod({

@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw, ExternalLink,
-  FolderOpen, Trash2, Pencil, Activity,
+  FolderOpen, Trash2, Pencil,
 } from "lucide-react";
-import { api, type Project, type Codebase, type Requirement, type CodebaseHealthResult } from "@/hooks/useApi";
+import { api, type Project, type Codebase, type Requirement } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -75,7 +75,6 @@ function folderName(p: string): string {
   return trimmed.split(/[\\/]/).pop() ?? "";
 }
 
-type HealthState = "loading" | CodebaseHealthResult;
 
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const navigate = useNavigate();
@@ -108,23 +107,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [deletingCbId, setDeletingCbId] = useState<string | null>(null);
 
-  // 健康检查
-  const [healthMap, setHealthMap] = useState<Record<string, HealthState>>({});
-
-  const autoCheckHealth = useCallback((cbs: Codebase[]) => {
-    if (cbs.length === 0) return;
-    setHealthMap((prev) => {
-      const next = { ...prev };
-      for (const cb of cbs) next[cb.id] = "loading";
-      return next;
-    });
-    for (const cb of cbs) {
-      api.healthcheckCodebase(cb.id)
-        .then((result) => setHealthMap((prev) => ({ ...prev, [cb.id]: result })))
-        .catch(() => setHealthMap((prev) => { const n = { ...prev }; delete n[cb.id]; return n; }));
-    }
-  }, []);
-
   const refresh = useCallback(() => {
     setLoading(true);
     setLoadError(null);
@@ -137,11 +119,10 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         setProject(proj);
         setCodebases(cbs);
         setRequirements(reqs);
-        autoCheckHealth(cbs);
       })
       .catch((e: unknown) => setLoadError((e as Error)?.message ?? String(e)))
       .finally(() => setLoading(false));
-  }, [projectId, autoCheckHealth]);
+  }, [projectId]);
 
   useEffect(() => {
     refresh();
@@ -346,29 +327,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     }
   };
 
-  const checkHealth = async (cb: Codebase) => {
-    setHealthMap((prev) => ({ ...prev, [cb.id]: "loading" }));
-    try {
-      const result = await api.healthcheckCodebase(cb.id);
-      setHealthMap((prev) => ({ ...prev, [cb.id]: result }));
-    } catch (e: unknown) {
-      toast.error("健康检查失败", (e as Error)?.message ?? String(e));
-      setHealthMap((prev) => { const n = { ...prev }; delete n[cb.id]; return n; });
-    }
-  };
-
-  const renderHealth = (cb: Codebase) => {
-    const h = healthMap[cb.id];
-    if (!h) return null;
-    if (h === "loading") return <span className="text-[11px] text-muted-foreground animate-pulse">检查中…</span>;
-    if (h.healthy) return <span className="font-mono text-[11px] text-success font-medium ">✓ OK</span>;
-    return (
-      <span className="text-[11px] text-destructive" title={h.issues.join("\n")}>
-        ✗ {h.issues[0] ?? "异常"}
-      </span>
-    );
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -488,7 +446,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                     <th className="px-4 py-2.5 font-semibold">别名</th>
                     <th className="hidden px-4 py-2.5 font-semibold md:table-cell">路径</th>
                     <th className="hidden px-4 py-2.5 font-semibold sm:table-cell">分支</th>
-                    <th className="px-4 py-2.5 font-semibold">健康</th>
                     <th className="px-4 py-2.5 font-semibold text-right">操作</th>
                   </tr>
                 </thead>
@@ -508,6 +465,9 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                           >
                             {cb.path}
                           </span>
+                          {cb.path_exists === false && (
+                            <span className="text-[10px] font-normal text-destructive md:hidden">路径不存在</span>
+                          )}
                         </div>
                       </td>
                       <td className="hidden max-w-[240px] px-4 py-2.5 md:table-cell">
@@ -517,24 +477,17 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                         >
                           {cb.path}
                         </span>
+                        {cb.path_exists === false && (
+                          <span className="mt-0.5 block font-mono text-[10px] text-destructive" title="本地路径当前不存在（可能已被删除或移动）">
+                            ⚠ 路径不存在
+                          </span>
+                        )}
                       </td>
                       <td className="hidden px-4 py-2.5 sm:table-cell">
                         <Badge variant="secondary">{cb.default_branch}</Badge>
                       </td>
-                      <td className="px-4 py-2.5">
-                        {renderHealth(cb) ?? <span className="font-mono text-[10px] text-muted-foreground">—</span>}
-                      </td>
                       <td className="px-4 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-0.5">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => void checkHealth(cb)}
-                            disabled={healthMap[cb.id] === "loading" || deletingCbId === cb.id}
-                            title="健康检查"
-                          >
-                            <Activity className={cn("h-3.5 w-3.5", healthMap[cb.id] === "loading" && "animate-pulse")} />
-                          </Button>
                           <Button
                             variant="ghost"
                             size="icon"

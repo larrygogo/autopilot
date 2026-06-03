@@ -924,6 +924,8 @@ export interface Codebase {
   submodule_path: string | null;
   created_at: number;
   updated_at: number;
+  /** 列表接口运行时计算：本地路径当前是否存在（用于自动无感提示路径失效） */
+  path_exists?: boolean;
 }
 
 export interface Comment {
