@@ -5,9 +5,9 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * 蓝图风 Sheet（侧抽屉）：
- * - 全方角 + 2px 厚边框
- * - 标题用 display 字体大写
+ * Claude 风 Sheet（侧抽屉）：
+ * - 1px 淡边框
+ * - 标题用 display 字体
  */
 export const Sheet = DialogPrimitive.Root;
 export const SheetTrigger = DialogPrimitive.Trigger;
@@ -34,12 +34,12 @@ const sheetVariants = cva(
   {
     variants: {
       side: {
-        top: "inset-x-0 top-0 border-b-[2px] border-foreground data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+        top: "inset-x-0 top-0 border-b border-border shadow-md data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
         bottom:
-          "inset-x-0 bottom-0 border-t-[2px] border-foreground data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-        left: "inset-y-0 left-0 h-full w-3/4 border-r-[2px] border-foreground data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm",
+          "inset-x-0 bottom-0 border-t border-border shadow-md data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+        left: "inset-y-0 left-0 h-full w-3/4 border-r border-border shadow-md data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm",
         right:
-          "inset-y-0 right-0 h-full w-3/4 border-l-[2px] border-foreground data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
+          "inset-y-0 right-0 h-full w-3/4 border-l border-border shadow-md data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
       },
     },
     defaultVariants: { side: "right" },
@@ -59,7 +59,7 @@ export const SheetContent = React.forwardRef<React.ElementRef<typeof DialogPrimi
       <DialogPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
         {children}
         {!hideClose && (
-          <DialogPrimitive.Close className="absolute right-4 top-4 rounded-none border border-transparent p-1 opacity-70 transition-all hover:border-foreground hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+          <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm border border-transparent p-1 opacity-70 transition-all hover:border-border hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
@@ -74,7 +74,7 @@ export function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDi
   return (
     <div
       className={cn(
-        "flex flex-col space-y-2 text-left pb-3 border-b border-dashed border-foreground/30",
+        "flex flex-col space-y-2 text-left pb-3 border-b border-border",
         className,
       )}
       {...props}
@@ -86,7 +86,7 @@ export function SheetFooter({ className, ...props }: React.HTMLAttributes<HTMLDi
   return (
     <div
       className={cn(
-        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end pt-3 border-t border-dashed border-foreground/30",
+        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end pt-3 border-t border-border",
         className,
       )}
       {...props}
@@ -101,7 +101,7 @@ export const SheetTitle = React.forwardRef<
   <DialogPrimitive.Title
     ref={ref}
     className={cn(
-      "font-display text-lg font-bold uppercase tracking-wide text-foreground",
+      "font-display text-lg font-bold text-foreground",
       className,
     )}
     {...props}

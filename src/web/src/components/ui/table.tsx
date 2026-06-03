@@ -2,14 +2,14 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * 蓝图风 Table：
- * - 边框用点划线（虚线分隔）
- * - 表头：mono + 大写 + 字距，像图纸标题栏
- * - hover 行：底色微染锈红，不喧宾夺主
+ * Claude 风 Table：
+ * - 边框用 1px 淡实线分隔
+ * - 表头：普通小字
+ * - hover 行：底色微染，不喧宾夺主
  */
 export const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-auto border border-foreground/25">
+    <div className="relative w-full overflow-auto rounded-md border border-border">
       <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
     </div>
   ),
@@ -20,7 +20,7 @@ export const TableHeader = React.forwardRef<HTMLTableSectionElement, React.HTMLA
   ({ className, ...props }, ref) => (
     <thead
       ref={ref}
-      className={cn("border-b-[1.5px] border-foreground bg-secondary/50", className)}
+      className={cn("border-b border-border bg-secondary/50", className)}
       {...props}
     />
   ),
@@ -38,7 +38,7 @@ export const TableFooter = React.forwardRef<HTMLTableSectionElement, React.HTMLA
   ({ className, ...props }, ref) => (
     <tfoot
       ref={ref}
-      className={cn("border-t-[1.5px] border-foreground bg-secondary/40 font-medium [&>tr]:last:border-b-0", className)}
+      className={cn("border-t border-border bg-secondary/40 font-medium [&>tr]:last:border-b-0", className)}
       {...props}
     />
   ),
@@ -50,7 +50,7 @@ export const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttribut
     <tr
       ref={ref}
       className={cn(
-        "border-b border-dashed border-foreground/25 transition-colors hover:bg-accent/8 data-[state=selected]:bg-accent/15",
+        "border-b border-border transition-colors hover:bg-accent/8 data-[state=selected]:bg-accent/15",
         className,
       )}
       {...props}
@@ -64,7 +64,7 @@ export const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttr
     <th
       ref={ref}
       className={cn(
-        "h-10 px-3 text-left align-middle font-mono text-[10px] uppercase tracking-[0.2em] font-semibold text-foreground/70 [&:has([role=checkbox])]:pr-0",
+        "h-10 px-3 text-left align-middle text-xs font-semibold text-foreground/70 [&:has([role=checkbox])]:pr-0",
         className,
       )}
       {...props}
@@ -84,7 +84,7 @@ export const TableCaption = React.forwardRef<HTMLTableCaptionElement, React.HTML
   ({ className, ...props }, ref) => (
     <caption
       ref={ref}
-      className={cn("mt-4 font-mono text-xs text-muted-foreground tracking-wider", className)}
+      className={cn("mt-4 text-xs text-muted-foreground", className)}
       {...props}
     />
   ),

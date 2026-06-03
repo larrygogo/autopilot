@@ -4,11 +4,11 @@ import { Check, ChevronRight, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * 蓝图风 DropdownMenu：
- * - Content 方角厚边框 + 3px 硬阴影
- * - Item 高度 h-8（菜单内更紧凑）
- * - Label 用 mono + 大写 + 字距（技术注记）
- * - Separator 改虚线
+ * Claude 风 DropdownMenu：
+ * - Content 圆角淡边框 + 柔投影
+ * - Item 高度 h-8（菜单内更紧凑），圆角
+ * - Label 普通小字
+ * - Separator 实线
  */
 export const DropdownMenu = DropdownMenuPrimitive.Root;
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
@@ -26,7 +26,7 @@ export const DropdownMenuContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-[10rem] overflow-hidden rounded-none border-[1.5px] border-foreground bg-popover p-1 text-popover-foreground shadow-[3px_3px_0_0_var(--color-foreground)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        "z-50 min-w-[10rem] overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className,
       )}
       {...props}
@@ -42,7 +42,7 @@ export const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex h-8 cursor-default select-none items-center gap-2 rounded-none px-2 text-sm outline-none transition-colors focus:bg-accent/15 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 text-sm outline-none transition-colors focus:bg-accent/15 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       inset && "pl-8",
       className,
     )}
@@ -59,7 +59,7 @@ export const DropdownMenuCheckboxItem = React.forwardRef<
     ref={ref}
     checked={checked}
     className={cn(
-      "relative flex h-8 cursor-default select-none items-center rounded-none pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent/15 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex h-8 cursor-default select-none items-center rounded-sm pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent/15 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}
@@ -81,7 +81,7 @@ export const DropdownMenuRadioItem = React.forwardRef<
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
-      "relative flex h-8 cursor-default select-none items-center rounded-none pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent/15 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex h-8 cursor-default select-none items-center rounded-sm pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent/15 focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}
@@ -103,7 +103,7 @@ export const DropdownMenuLabel = React.forwardRef<
   <DropdownMenuPrimitive.Label
     ref={ref}
     className={cn(
-      "px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] font-medium text-muted-foreground",
+      "px-2 py-1.5 text-xs font-medium text-muted-foreground",
       inset && "pl-8",
       className,
     )}
@@ -118,7 +118,7 @@ export const DropdownMenuSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DropdownMenuPrimitive.Separator
     ref={ref}
-    className={cn("-mx-1 my-1 h-0 border-t border-dashed border-border", className)}
+    className={cn("-mx-1 my-1 h-0 border-t border-border", className)}
     {...props}
   />
 ));
@@ -128,7 +128,7 @@ export function DropdownMenuShortcut({ className, ...props }: React.HTMLAttribut
   return (
     <span
       className={cn(
-        "ml-auto font-mono text-[10px] tracking-widest text-muted-foreground",
+        "ml-auto text-[10px] text-muted-foreground",
         className,
       )}
       {...props}
@@ -143,7 +143,7 @@ export const DropdownMenuSubTrigger = React.forwardRef<
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      "flex h-8 cursor-default select-none items-center gap-2 rounded-none px-2 text-sm outline-none focus:bg-accent/15 data-[state=open]:bg-accent/15",
+      "flex h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 text-sm outline-none focus:bg-accent/15 data-[state=open]:bg-accent/15",
       inset && "pl-8",
       className,
     )}
@@ -162,7 +162,7 @@ export const DropdownMenuSubContent = React.forwardRef<
   <DropdownMenuPrimitive.SubContent
     ref={ref}
     className={cn(
-      "z-50 min-w-[8rem] overflow-hidden rounded-none border-[1.5px] border-foreground bg-popover p-1 text-popover-foreground shadow-[3px_3px_0_0_var(--color-foreground)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+      "z-50 min-w-[8rem] overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
       className,
     )}
     {...props}
