@@ -87,6 +87,11 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // 编辑项目 dialog
+  const [projDialogOpen, setProjDialogOpen] = useState(false);
+  const [projForm, setProjForm] = useState<{ name: string; description: string }>({ name: "", description: "" });
+  const [savingProj, setSavingProj] = useState(false);
+
   // 新建需求 dialog
   const [reqDialogOpen, setReqDialogOpen] = useState(false);
   const [reqDesc, setReqDesc] = useState("");
@@ -173,6 +178,29 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       toast.error("创建失败", (e as Error)?.message ?? String(e));
     } finally {
       setSavingReq(false);
+    }
+  };
+
+  // ── 项目 ────────────────────────────────────
+
+  const openProjDialog = () => {
+    setProjForm({ name: project?.name ?? "", description: project?.description ?? "" });
+    setProjDialogOpen(true);
+  };
+
+  const saveProject = async () => {
+    const name = projForm.name.trim();
+    if (!name) { toast.error("验证失败", "项目名称不能为空"); return; }
+    setSavingProj(true);
+    try {
+      await api.updateProject(projectId, { name, description: projForm.description.trim() || null });
+      toast.success("已更新项目");
+      setProjDialogOpen(false);
+      refresh();
+    } catch (e: unknown) {
+      toast.error("更新失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setSavingProj(false);
     }
   };
 
@@ -389,6 +417,17 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <h1 className="font-display text-3xl font-bold uppercase tracking-wider leading-[1.05] sm:text-4xl">
               {project?.name}
             </h1>
+            {project && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                title="编辑项目"
+                onClick={openProjDialog}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+            )}
           </div>
           {project?.description && (
             <p className="mt-3 max-w-xl text-sm text-muted-foreground">{project.description}</p>
@@ -577,6 +616,46 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           </Card>
         )}
       </section>
+
+      {/* 编辑项目 Dialog */}
+      <Dialog open={projDialogOpen} onOpenChange={(open) => { if (!open && !savingProj) setProjDialogOpen(false); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>编辑项目</DialogTitle>
+            <DialogDescription>修改项目名称与描述。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="proj-name">
+                名称 <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="proj-name"
+                placeholder="项目名称"
+                value={projForm.name}
+                autoFocus
+                onChange={(e) => setProjForm((f) => ({ ...f, name: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") void saveProject(); }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="proj-desc">描述（可选）</Label>
+              <Textarea
+                id="proj-desc"
+                placeholder="一句话描述这个项目"
+                value={projForm.description}
+                onChange={(e) => setProjForm((f) => ({ ...f, description: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProjDialogOpen(false)} disabled={savingProj}>取消</Button>
+            <Button onClick={() => void saveProject()} disabled={savingProj}>
+              {savingProj ? "保存中…" : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 新建需求 Dialog */}
       <Dialog open={reqDialogOpen} onOpenChange={(open) => { if (!open) closeReqDialog(); }}>
