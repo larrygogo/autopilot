@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 /**
  * Claude 风 Dialog：
  * - 圆角弹层 + 1px 淡边框 + 柔投影
- * - 内嵌四角对齐标记（registration marks）
  * - 标题 sans 半粗
  */
 export const Dialog = DialogPrimitive.Root;
@@ -29,37 +28,10 @@ export const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
-/** 四角对齐标记（registration marks）—— 蓝图标志元素。mobile 下隐藏让出内容宽。 */
-function RegMarks() {
-  const base = "hidden sm:block absolute w-3.5 h-3.5 opacity-60 pointer-events-none";
-  const v = "absolute left-1/2 top-0 bottom-0 w-px bg-foreground -translate-x-1/2";
-  const h = "absolute top-1/2 left-0 right-0 h-px bg-foreground -translate-y-1/2";
-  return (
-    <>
-      <span className={cn(base, "top-2 left-2")}>
-        <span className={v} />
-        <span className={h} />
-      </span>
-      <span className={cn(base, "top-2 right-2")}>
-        <span className={v} />
-        <span className={h} />
-      </span>
-      <span className={cn(base, "bottom-2 left-2")}>
-        <span className={v} />
-        <span className={h} />
-      </span>
-      <span className={cn(base, "bottom-2 right-2")}>
-        <span className={v} />
-        <span className={h} />
-      </span>
-    </>
-  );
-}
-
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean; hideRegMarks?: boolean }
->(({ className, children, hideClose, hideRegMarks, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean }
+>(({ className, children, hideClose, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -72,7 +44,6 @@ export const DialogContent = React.forwardRef<
       )}
       {...props}
     >
-      {!hideRegMarks && <RegMarks />}
       {children}
       {!hideClose && (
         <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm p-1 border border-transparent opacity-70 transition-all hover:opacity-100 hover:border-border focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
