@@ -3,24 +3,22 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 /**
- * 蓝图风 Badge：
- * - 全方角 + 实色或细描边
- * - mono 字体 + 大写 + 字距，像工程图上的注记标签
+ * Claude 风 Badge：圆角 + 淡 tint + 正常大小写
  */
 const badgeVariants = cva(
-  "inline-flex items-center rounded-none border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.15em] font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1",
+  "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1",
   {
     variants: {
       variant: {
-        default: "border-foreground bg-foreground text-background",
-        secondary: "border-foreground/30 bg-secondary text-secondary-foreground",
-        outline: "border-foreground/40 bg-transparent text-foreground",
-        success: "border-success bg-success/15 text-success",
-        warning: "border-warning bg-warning/15 text-warning",
-        info: "border-info bg-info/15 text-info",
-        accent: "border-accent bg-accent/15 text-accent",
-        destructive: "border-destructive bg-destructive/15 text-destructive",
-        muted: "border-foreground/20 bg-muted text-muted-foreground",
+        default: "border-transparent bg-primary text-primary-foreground",
+        secondary: "border-transparent bg-secondary text-secondary-foreground",
+        outline: "border-border bg-transparent text-foreground",
+        success: "border-transparent bg-success/12 text-success",
+        warning: "border-transparent bg-warning/15 text-warning",
+        info: "border-transparent bg-info/12 text-info",
+        accent: "border-transparent bg-accent/12 text-accent",
+        destructive: "border-transparent bg-destructive/12 text-destructive",
+        muted: "border-transparent bg-muted text-muted-foreground",
       },
     },
     defaultVariants: {
