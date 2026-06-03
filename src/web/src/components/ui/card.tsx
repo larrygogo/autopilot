@@ -2,17 +2,14 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * 蓝图风卡片：
- * - 全方角 + 1.5px 实线边框
- * - 略亮米黄底（light）/ 略亮藏青（dark）
- * - hover 不强制变化（业务卡片可自行加 bp-lift）
+ * Claude 风卡片：圆角 + 1px 淡边 + 柔投影
  */
 export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
       className={cn(
-        "rounded-none border-[1.5px] border-foreground/30 bg-card text-card-foreground",
+        "rounded-lg border border-border bg-card text-card-foreground shadow-[0_1px_2px_rgb(0_0_0/0.05),0_2px_6px_rgb(0_0_0/0.05)]",
         className,
       )}
       {...props}
@@ -26,7 +23,7 @@ export const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<
     <div
       ref={ref}
       className={cn(
-        "flex flex-col space-y-1.5 p-5 border-b border-dashed border-foreground/25",
+        "flex flex-col space-y-1.5 p-5 border-b border-border",
         className,
       )}
       {...props}
@@ -40,7 +37,7 @@ export const CardTitle = React.forwardRef<HTMLDivElement, React.HTMLAttributes<H
     <div
       ref={ref}
       className={cn(
-        "font-display font-bold uppercase tracking-wide text-lg leading-none",
+        "font-semibold text-lg leading-none tracking-tight",
         className,
       )}
       {...props}
@@ -69,7 +66,7 @@ export const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("flex items-center p-5 pt-0 border-t border-dashed border-foreground/25", className)}
+      className={cn("flex items-center p-5 pt-0 border-t border-border", className)}
       {...props}
     />
   ),
