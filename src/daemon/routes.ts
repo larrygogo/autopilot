@@ -581,9 +581,11 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
 
     // GET /api/fs/list?path=<absolute>&show_hidden=1
     if (method === "GET" && path === "/api/fs/list") {
-      // 防局域网泄露本机文件树：非 loopback 绑定时禁用
-      const host = CURRENT_LISTEN_HOST ?? "127.0.0.1";
-      if (!isLoopbackHost(host)) {
+      // 防局域网泄露本机文件树：按「请求来源 socket IP」判断，而非绑定地址。
+      // 本机（loopback）访问放行——即使 daemon 绑 0.0.0.0；只挡真正从局域网远程
+      // 发来的请求。与 token 鉴权同款 isLoopbackSocket 模型一致（socket peer IP
+      // 由内核给出，不可伪造、不看 Host 头）。
+      if (!isLoopbackSocket(server, req)) {
         return error("fs-browser-disabled-on-public-bind", 403);
       }
       const reqPath = url.searchParams.get("path") ?? null;
@@ -1958,13 +1960,4 @@ async function handleChat(body: ChatRequestBody): Promise<ChatResponsePayload> {
   catch (ee: unknown) { log.warn("emit chat:complete 失败 session=%s: %s", sid, (ee as Error)?.message ?? String(ee)); }
 
   return { session_id: manifest.id, message: assistantMsg };
-}
-
-// loopback host 判定：用于 /api/fs/list 等本机敏感接口的来源校验
-function isLoopbackHost(host: string): boolean {
-  const h = host.toLowerCase();
-  if (h === "localhost") return true;
-  if (h === "127.0.0.1" || h.startsWith("127.")) return true;
-  if (h === "::1" || h === "[::1]") return true;
-  return false;
 }
