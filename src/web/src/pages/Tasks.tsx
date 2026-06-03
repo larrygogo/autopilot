@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, Hand, AlertCircle, CheckCircle2, XCircle, Clock, Search, X, FileText } from "lucide-react";
+import { Loader2, Hand, AlertCircle, CheckCircle2, XCircle, Clock, Search, X, FileText, List } from "lucide-react";
 import { api, type Requirement } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -58,8 +58,8 @@ export function Tasks() {
   const [workflowFilter, setWorkflowFilter] = useState<string | null>(null);
   /** 终态组（done/cancelled）独立的"展开全部"开关 */
   const [expandedTerminal, setExpandedTerminal] = useState<Record<string, boolean>>({});
-  /** 当前激活的状态 tab */
-  const [tab, setTab] = useState<string>("running");
+  /** 当前激活的状态 tab（默认「全部」总览） */
+  const [tab, setTab] = useState<string>("all");
 
   const refresh = () => {
     setLoading(true);
@@ -307,6 +307,13 @@ export function Tasks() {
       {!loading && !error && filteredAny && (
         <Tabs value={tab} onValueChange={setTab} className="mt-6">
           <TabsList className="w-full justify-start overflow-x-auto overflow-y-hidden">
+            <TabsTrigger value="all" className="gap-1.5">
+              <List className="h-3.5 w-3.5 text-foreground/70" />
+              全部
+              <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
+                {groups.reduce((n, g) => n + groupCount(g), 0)}
+              </span>
+            </TabsTrigger>
             {groups.map((g) => {
               const Icon = g.icon;
               return (
@@ -320,6 +327,25 @@ export function Tasks() {
               );
             })}
           </TabsList>
+
+          {/* 全部：所有需求 + 任务行，按阶段顺序平铺 */}
+          <TabsContent value="all">
+            <ul className="space-y-1.5">
+              {groups.flatMap((g) =>
+                g.kind === "req"
+                  ? (g.reqs ?? []).map((r) => (
+                      <li key={`r-${r.id}`}>
+                        <RequirementRow req={r} borderClass={g.borderClass} />
+                      </li>
+                    ))
+                  : (g.tasks ?? []).map((t) => (
+                      <li key={`t-${t.id}`}>
+                        <TaskRow task={t} borderClass={g.borderClass} />
+                      </li>
+                    )),
+              )}
+            </ul>
+          </TabsContent>
           {groups.map((g) => {
             const total = terminalTotalCount[g.key];
             const truncated = (g.key === "done" || g.key === "cancelled") && typeof total === "number" && total > (g.tasks?.length ?? 0);
