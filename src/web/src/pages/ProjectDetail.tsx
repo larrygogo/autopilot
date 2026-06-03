@@ -93,6 +93,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [savingCb, setSavingCb] = useState(false);
   const [detectingCb, setDetectingCb] = useState(false);
   const [cbDetectHint, setCbDetectHint] = useState<string | null>(null);
+  const [lastDetectedPath, setLastDetectedPath] = useState("");
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [deletingCbId, setDeletingCbId] = useState<string | null>(null);
 
@@ -185,6 +186,8 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       setEditingCb(null);
       setCbForm(EMPTY_CB);
     }
+    // 编辑时以已存路径为基线（同路径失焦不重识别、不覆盖已存值）；新建从空开始
+    setLastDetectedPath(cb?.path ?? "");
     setCbDetectHint(null);
     setCbDialogOpen(true);
   };
@@ -198,11 +201,13 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
   /**
    * 从路径自动识别 git 信息，回填默认分支 / GitHub。
-   * 仅新建时触发；只补「空或仍是默认 main」的字段，不覆盖用户已手填的值。
+   * 仅在「路径相对上次识别变化」时触发——换目录就用新仓库的值覆盖（分支/GitHub
+   * 跟随当前目录，不残留上一个仓库）；同一路径重复失焦不重识别，避免覆盖手动微调。
    */
   const detectCbFromPath = async (rawPath: string) => {
     const path = rawPath.trim();
-    if (editingCb || !path) return;
+    if (!path || path === lastDetectedPath) return;
+    setLastDetectedPath(path);
     setDetectingCb(true);
     setCbDetectHint(null);
     try {
@@ -211,16 +216,12 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         setCbDetectHint("该路径不是 git 仓库，未能自动识别。");
         return;
       }
+      // 换了目录 → 用新仓库的值覆盖（识别不到则回退 main / 清空 GitHub）
       setCbForm((f) => ({
         ...f,
-        default_branch:
-          info.default_branch && (!f.default_branch.trim() || f.default_branch.trim() === "main")
-            ? info.default_branch
-            : f.default_branch,
-        github_owner:
-          !f.github_owner.trim() && info.github_owner ? info.github_owner : f.github_owner,
-        github_repo:
-          !f.github_repo.trim() && info.github_repo ? info.github_repo : f.github_repo,
+        default_branch: info.default_branch ?? "main",
+        github_owner: info.github_owner ?? "",
+        github_repo: info.github_repo ?? "",
       }));
       const parts: string[] = [];
       if (info.default_branch) parts.push(`默认分支 ${info.default_branch}`);
@@ -657,7 +658,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                 value={cbForm.default_branch}
                 onChange={(e) => setCbForm((f) => ({ ...f, default_branch: e.target.value }))}
               />
-              {!editingCb && (detectingCb || cbDetectHint) && (
+              {(detectingCb || cbDetectHint) && (
                 <p className="text-xs text-muted-foreground">
                   {detectingCb ? "正在从 Git 识别…" : cbDetectHint}
                 </p>
