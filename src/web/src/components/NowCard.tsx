@@ -68,25 +68,25 @@ export function NowCard({ card, now }: Props) {
         "border border-l-4 rounded-lg",
         "border-border bg-card",
         PRIORITY_BAR[card.priority],
-        "px-4 py-3 flex gap-4",
+        "px-4 py-3 flex flex-col gap-3 sm:flex-row sm:gap-4",
       )}
       data-card-id={card.id}
     >
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2 mb-1">
-          <span className="font-mono text-[10px] text-muted-foreground">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mb-1">
+          <span className="whitespace-nowrap font-mono text-[10px] text-muted-foreground">
             {card.priority} · {PRIORITY_LABEL[card.priority]}
           </span>
           {card.related && (
-            <span className="font-mono text-[10px] text-muted-foreground">
+            <span className="whitespace-nowrap font-mono text-[10px] text-muted-foreground">
               {card.related.type} · {card.related.id}
             </span>
           )}
-          <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+          <span className="ml-auto whitespace-nowrap font-mono text-[10px] text-muted-foreground">
             等候 {formatWaited(waitedSec)}
           </span>
         </div>
-        <h3 className="text-sm font-bold tracking-wide text-foreground truncate">
+        <h3 className="text-sm font-bold text-foreground truncate">
           {card.title}
         </h3>
         <p className="text-sm text-muted-foreground mt-0.5 truncate">{card.subtitle}</p>
@@ -95,7 +95,7 @@ export function NowCard({ card, now }: Props) {
         )}
       </div>
 
-      <div className="flex flex-col gap-1.5 shrink-0 items-stretch">
+      <div className="flex flex-row sm:flex-col gap-1.5 shrink-0 items-stretch">
         {card.actions.map((action, idx) => {
           const variant =
             action.kind === "primary"
