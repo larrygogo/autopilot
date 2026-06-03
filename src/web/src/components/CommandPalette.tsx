@@ -183,8 +183,8 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
                   onSelect={run(() => onSelectTask(t.id))}
                 >
                   <FileText className="h-4 w-4" />
-                  <span className="font-mono text-xs text-muted-foreground">{t.id}</span>
-                  <span className="truncate">{t.title}</span>
+                  <span className="font-mono text-xs text-muted-foreground shrink-0 whitespace-nowrap">{t.id}</span>
+                  <span className="truncate min-w-0 flex-1">{t.title}</span>
                   <CommandShortcut>{t.status}</CommandShortcut>
                 </CommandItem>
               ))}
@@ -203,8 +203,8 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
                   onSelect={run(() => onNavigate(`/requirements/${r.id}`))}
                 >
                   <MessageCircle className="h-4 w-4" />
-                  <span className="font-mono text-xs text-muted-foreground">{r.id}</span>
-                  <span className="truncate">{r.title}</span>
+                  <span className="font-mono text-xs text-muted-foreground shrink-0 whitespace-nowrap">{r.id}</span>
+                  <span className="truncate min-w-0 flex-1">{r.title}</span>
                   <CommandShortcut>{r.status}</CommandShortcut>
                 </CommandItem>
               ))}
@@ -223,8 +223,8 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
                   onSelect={run(() => onNavigate(`/projects/${p.id}`))}
                 >
                   <Folder className="h-4 w-4" />
-                  <span className="font-mono text-xs text-muted-foreground">{p.id}</span>
-                  <span className="truncate">{p.name}</span>
+                  <span className="font-mono text-xs text-muted-foreground shrink-0 whitespace-nowrap">{p.id}</span>
+                  <span className="truncate min-w-0 flex-1">{p.name}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

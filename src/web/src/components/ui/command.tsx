@@ -134,7 +134,7 @@ export function CommandShortcut({ className, ...props }: React.HTMLAttributes<HT
   return (
     <span
       className={cn(
-        "ml-auto text-[10px] text-muted-foreground",
+        "ml-auto shrink-0 whitespace-nowrap text-[10px] text-muted-foreground",
         className,
       )}
       {...props}
