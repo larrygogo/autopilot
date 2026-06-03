@@ -271,7 +271,7 @@ export function Tasks() {
       {/* 看板：状态 tab 分类，每类下任务整行列表 */}
       {!loading && !error && filteredTasks.length > 0 && (
         <Tabs value={tab} onValueChange={setTab} className="mt-6">
-          <TabsList className="w-full justify-start overflow-x-auto">
+          <TabsList className="w-full justify-start overflow-x-auto overflow-y-hidden">
             {groups.map((g) => {
               const Icon = g.icon;
               const count = terminalTotalCount[g.key] ?? g.tasks.length;
