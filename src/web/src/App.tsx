@@ -89,7 +89,7 @@ const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { path: "/now", label: "现在", icon: Sparkles, end: true },
       { path: "/start", label: "开始", icon: FilePlus, end: true },
-      { path: "/tasks", label: "任务", icon: ListChecks, end: true },
+      { path: "/tasks", label: "看板", icon: ListChecks, end: true },
       { path: "/library", label: "项目", icon: FolderOpen, expandable: "projects" },
     ],
   },
