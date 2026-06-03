@@ -205,7 +205,7 @@ function ProjectsTab() {
                 </p>
               )}
               {/* 底部 footer：创建时间 + 永远可见的 edit / delete（不依赖 hover，键盘 / 触屏均可达） */}
-              <div className="mt-3 flex items-center justify-between border-t border-border pt-2">
+              <div className="mt-auto flex items-center justify-between border-t border-border pt-2">
                 <span className="text-[11px] text-muted-foreground">
                   创建于 {new Date(project.created_at).toLocaleDateString("zh-CN")}
                 </span>
