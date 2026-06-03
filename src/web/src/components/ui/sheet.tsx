@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 /**
  * Claude 风 Sheet（侧抽屉）：
  * - 1px 淡边框
- * - 标题用 display 字体
+ * - 标题用 sans 半粗
  */
 export const Sheet = DialogPrimitive.Root;
 export const SheetTrigger = DialogPrimitive.Trigger;

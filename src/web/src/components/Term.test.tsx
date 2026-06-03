@@ -14,7 +14,7 @@ test("withSubtitle variant: 业务标签 + mono 副标内核名", () => {
   expect(html).toContain("废弃函数");
   expect(html).toContain("orphan function");
   expect(html).toContain("font-mono");
-  expect(html).toContain("uppercase");
+  expect(html).not.toContain("uppercase");
 });
 
 test("inline variant: trigger 含业务标签 + 虚线下划线", () => {

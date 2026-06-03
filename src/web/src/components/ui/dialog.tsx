@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
  * Claude 风 Dialog：
  * - 圆角弹层 + 1px 淡边框 + 柔投影
  * - 内嵌四角对齐标记（registration marks）
- * - 标题 display 字体
+ * - 标题 sans 半粗
  */
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;

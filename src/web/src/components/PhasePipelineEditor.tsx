@@ -1255,7 +1255,7 @@ function PhaseTsEditor({
       <Textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder={`export async function run_${phaseName}(taskId: string): Promise<void> {\n // TODO\n}`}
+        placeholder={`export async function run_${phaseName}(taskId: string): Promise<void> {\n  // TODO\n}`}
         className="scrollbar-thin h-56 resize-none border border-border bg-card p-3 font-mono text-[11px] leading-relaxed"
         spellCheck={false}
         disabled={saving}

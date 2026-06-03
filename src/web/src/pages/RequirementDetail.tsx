@@ -168,7 +168,7 @@ function ClarifierOverrideDialog({
                 "flex-1 border px-3 py-2 font-mono text-xs ",
                 mode === "inherit"
                   ? "border-accent bg-accent/10 text-foreground"
-                  : "border-border text-muted-foreground hover:border-border",
+                  : "border-border text-muted-foreground hover:border-foreground/40",
               )}
             >
               继承全局默认
@@ -180,7 +180,7 @@ function ClarifierOverrideDialog({
                 "flex-1 border px-3 py-2 font-mono text-xs ",
                 mode === "override"
                   ? "border-accent bg-accent/10 text-foreground"
-                  : "border-border text-muted-foreground hover:border-border",
+                  : "border-border text-muted-foreground hover:border-foreground/40",
               )}
             >
               为此需求 override
