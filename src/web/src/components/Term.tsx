@@ -33,7 +33,7 @@ export function Term({ name, variant = "inline", className }: TermProps) {
     return (
       <span className={cn("inline-flex flex-col leading-tight", className)}>
         <span>{term.label}</span>
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <span className="font-mono text-[10px] text-muted-foreground">
           {term.internalName}
         </span>
       </span>

@@ -39,7 +39,7 @@ export function QuickCreateMenu() {
                 aria-label="新建"
               >
                 <Plus className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline font-mono text-[11px] uppercase tracking-[0.12em]">
+                <span className="hidden sm:inline text-[11px]">
                   新建
                 </span>
               </Button>

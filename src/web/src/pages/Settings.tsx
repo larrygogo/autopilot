@@ -75,7 +75,7 @@ export function Settings(_props: { embedded?: boolean } = {}) {
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
       <PageHero
-        eyebrow="SHEET · SETTINGS · GLOBAL"
+        eyebrow="设置 · 全局"
         title="通用设置"
         subtitle="常规偏好 · 高级 YAML"
         description="改后立即写入 AUTOPILOT_HOME/config.yaml；涉及 daemon 重启的项需自行重启。"
@@ -419,7 +419,7 @@ function NetworkAccessCard(): React.ReactElement {
       </div>
 
       {/* Toggle: 仅本机 / 局域网 */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-4 border border-foreground/15 bg-card px-3 py-2.5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-md border border-border bg-card px-3 py-2.5">
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium">
             {isExposed ? "局域网开放" : "仅本机访问"}
@@ -457,7 +457,7 @@ function NetworkAccessCard(): React.ReactElement {
               {info.lan_ips.map((ip) => (
                 <code
                   key={ip}
-                  className="border border-foreground/20 bg-muted/40 px-1.5 py-0.5 font-mono text-xs"
+                  className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-xs"
                 >
                   http://{ip}:{info.port}
                 </code>
@@ -479,11 +479,11 @@ function NetworkAccessCard(): React.ReactElement {
       </div>
 
       {/* Token 区：服务端 token + 本浏览器副本 */}
-      <div className="border border-foreground/15 bg-card px-3 py-2.5">
+      <div className="rounded-md border border-border bg-card px-3 py-2.5">
         <div className="mb-2 flex items-center justify-between">
           <div className="text-sm font-medium">API 安全令牌</div>
           {tokenLocked && (
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="font-mono text-[10px] text-muted-foreground">
               来自环境变量
             </span>
           )}
@@ -564,7 +564,7 @@ function NetworkAccessCard(): React.ReactElement {
 
         {/* 本浏览器 token 副本 —— 仅从局域网 IP 访问时显示。本机回环 daemon 自动豁免，无需配 */}
         {isLanBrowser && (
-          <div className="mt-3 border-t border-dashed border-foreground/15 pt-3">
+          <div className="mt-3 border-t border-dashed border-border pt-3">
             <div className="mb-1 text-xs font-medium">本浏览器副本</div>
             <p className="mb-2 text-[11px] text-muted-foreground">
               你从局域网 <code className="font-mono">{location.host}</code> 访问 daemon，
@@ -633,7 +633,7 @@ function NetworkAccessCard(): React.ReactElement {
             <DialogTitle>
               <span className="inline-flex flex-col leading-tight">
                 <span>开启局域网访问</span>
-                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                <span className="font-mono text-[10px] text-muted-foreground">
                   expose to 0.0.0.0
                 </span>
               </span>
@@ -642,7 +642,7 @@ function NetworkAccessCard(): React.ReactElement {
               对外暴露前必须先设置 API 安全令牌。生成后会立即切到"局域网开放"。
             </DialogDescription>
           </DialogHeader>
-          <div className="border-l-[2px] border-warning bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
+          <div className="rounded-md border-l-4 border-warning bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
             <AlertTriangle className="mb-1 inline h-3.5 w-3.5 text-warning" />{" "}
             同网段的所有人将能尝试访问你的 daemon。本机浏览器和 CLI 不需要令牌；
             其他机器访问时必须在 <code className="font-mono">Authorization: Bearer</code> 头里带令牌。
@@ -661,7 +661,7 @@ function NetworkAccessCard(): React.ReactElement {
             <DialogTitle>
               <span className="inline-flex flex-col leading-tight">
                 <span>令牌已生成</span>
-                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                <span className="font-mono text-[10px] text-muted-foreground">
                   api token rotated
                 </span>
               </span>
@@ -672,7 +672,7 @@ function NetworkAccessCard(): React.ReactElement {
           </DialogHeader>
           {showNewToken && (
             <div className="space-y-2">
-              <code className="block break-all border border-foreground/30 bg-muted/40 p-2 font-mono text-xs">
+              <code className="block break-all rounded-md border border-border bg-muted/40 p-2 font-mono text-xs">
                 {showNewToken}
               </code>
               <Button size="sm" variant="secondary" onClick={() => copyToken(showNewToken)}>
@@ -722,14 +722,14 @@ function NetworkAccessCard(): React.ReactElement {
           </DialogHeader>
           <div className="flex flex-col items-center gap-3 py-2">
             {qrDataUrl ? (
-              <img src={qrDataUrl} alt="qrcode" className="border-[1.5px] border-foreground/20 bg-white p-2" />
+              <img src={qrDataUrl} alt="qrcode" className="rounded-md border border-border bg-white p-2" />
             ) : (
               <div className="flex h-[240px] w-[240px] items-center justify-center text-xs text-muted-foreground">
                 生成中…
               </div>
             )}
             {qrTargetUrl && (
-              <code className="break-all border border-foreground/15 bg-muted/40 px-2 py-1 font-mono text-[10px]">
+              <code className="break-all rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-[10px]">
                 {qrTargetUrl}
               </code>
             )}
@@ -830,11 +830,11 @@ function DaemonLogCard(): React.ReactElement {
       {loading && !content ? (
         <p className="text-sm text-muted-foreground">加载中…</p>
       ) : filtered.length === 0 ? (
-        <p className="rounded-none border bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
+        <p className="rounded-md border bg-muted/40 px-3 py-4 text-xs text-muted-foreground">
           {content ? "（当前过滤下无匹配）" : "（空）"}
         </p>
       ) : (
-        <pre className="scrollbar-thin max-h-[400px] overflow-auto rounded-none border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
+        <pre className="scrollbar-thin max-h-[400px] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
           {filtered.map((line, i) => {
             const lvl = extractLevel(line);
             return (
@@ -890,7 +890,7 @@ function DesktopNotifyCard(): React.ReactElement {
         <p className="text-sm text-muted-foreground">当前浏览器不支持桌面通知。</p>
       )}
       {permission === "granted" && (
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-success">✓ 已启用</p>
+        <p className="text-xs text-success">✓ 已启用</p>
       )}
       {permission === "denied" && (
         <p className="text-sm text-muted-foreground">
@@ -898,7 +898,7 @@ function DesktopNotifyCard(): React.ReactElement {
         </p>
       )}
       {permission === "default" && (
-        <Button size="sm" onClick={enable} className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]">
+        <Button size="sm" onClick={enable}>
           启用桌面通知
         </Button>
       )}

@@ -107,20 +107,20 @@ export function Start() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
-      <header className="mb-4 border-b-[1.5px] border-foreground/30 pb-3">
-        <h1 className="font-display text-2xl font-bold uppercase tracking-wider">开始 · START</h1>
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground mt-1">
+      <header className="mb-4 border-b border-border pb-3">
+        <h1 className="font-display text-2xl font-bold">开始 · START</h1>
+        <p className="text-xs text-muted-foreground mt-1">
           说说你想做什么，AI 帮你整理成需求
         </p>
       </header>
 
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="project" className="font-mono text-[10px] uppercase tracking-[0.18em]">项目 *</Label>
+          <Label htmlFor="project" className="bp-label">项目 *</Label>
           {!loadingProjects && projects.length === 0 ? (
             // 首跑空项目兜底：inline 一行创建，避免把用户卡死在 disabled select
-            <div className="space-y-2 border-[1.5px] border-accent/40 bg-accent/5 p-3">
-              <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-accent">
+            <div className="space-y-2 rounded-lg border border-accent/40 bg-accent/5 p-3">
+              <p className="text-xs font-medium text-accent">
                 还没有项目 · 先建一个
               </p>
               <div className="flex gap-2">
@@ -133,7 +133,7 @@ export function Start() {
                   }}
                   placeholder="项目名（如 我的副业 / autopilot-demo）"
                   disabled={creatingProject}
-                  className="flex-1 rounded-none border-[1.5px] border-foreground/25 bg-background px-2.5 py-1.5 font-mono text-sm focus:border-accent focus:outline-none"
+                  className="flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm focus:border-accent focus:outline-none"
                   autoFocus
                 />
                 <Button
@@ -141,7 +141,7 @@ export function Start() {
                   size="sm"
                   disabled={creatingProject || !newProjectName.trim()}
                   onClick={() => void handleCreateProject()}
-                  className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+                  className="rounded-md text-[11px]"
                 >
                   {creatingProject ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                   {creatingProject ? "创建中..." : "创建并继续"}
@@ -165,7 +165,7 @@ export function Start() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="codebase" className="font-mono text-[10px] uppercase tracking-[0.18em]">代码库（可选）</Label>
+          <Label htmlFor="codebase" className="bp-label">代码库（可选）</Label>
           <Select value={codebaseId} onValueChange={setCodebaseId} disabled={!projectId || loadingCodebases}>
             <SelectTrigger id="codebase">
               <SelectValue placeholder={!projectId ? "请先选项目" : loadingCodebases ? "加载中..." : "不绑定代码库"} />
@@ -182,14 +182,14 @@ export function Start() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="raw" className="font-mono text-[10px] uppercase tracking-[0.18em]">说说你想做什么</Label>
+          <Label htmlFor="raw" className="bp-label">说说你想做什么</Label>
           <textarea
             id="raw"
             value={rawText}
             onChange={(e) => setRawText(e.target.value)}
             rows={12}
             placeholder="例如：给登录页加忘记密码功能。需要邮件重置..."
-            className="w-full font-mono text-sm border-[1.5px] border-foreground/30 bg-background px-3 py-2 rounded-none focus:outline-none focus:border-accent"
+            className="w-full text-sm border border-border bg-background px-3 py-2 rounded-md focus:outline-none focus:border-accent"
           />
         </div>
 
@@ -199,7 +199,7 @@ export function Start() {
             size="default"
             disabled={!canSubmit}
             onClick={handleSubmit}
-            className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+            className="rounded-md text-[11px]"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
             {submitting ? "AI 整理中..." : "生成需求 →"}

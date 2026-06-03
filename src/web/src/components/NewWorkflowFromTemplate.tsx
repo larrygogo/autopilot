@@ -129,20 +129,20 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
 
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">选择模板</Label>
+            <Label className="bp-label">选择模板</Label>
             <div className="max-h-72 space-y-1.5 overflow-y-auto">
               {/* AI 生成入口放最前面，最显眼 */}
               <button
                 type="button"
                 onClick={() => setSelected(FROM_AI)}
                 className={cn(
-                  "block w-full rounded-none border-[1.5px] px-3 py-2 text-left transition-colors",
+                  "block w-full rounded-md border px-3 py-2 text-left transition-colors",
                   selected === FROM_AI
                     ? "border-accent bg-accent/5"
-                    : "border-foreground/30 hover:border-foreground/60",
+                    : "border-border hover:border-foreground/60",
                 )}
               >
-                <span className="font-mono text-sm font-bold">✨ 用 AI 描述（推荐）</span>
+                <span className="text-sm font-bold">✨ 用 AI 描述（推荐）</span>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   自然语言告诉 AI 你要的流程，AI 生成 yaml + ts
                 </p>
@@ -150,11 +150,11 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
 
               <label
                 className={cn(
-                  "block w-full cursor-pointer rounded-none border-[1.5px] px-3 py-2 text-left transition-colors",
-                  "border-foreground/30 hover:border-foreground/60",
+                  "block w-full cursor-pointer rounded-md border px-3 py-2 text-left transition-colors",
+                  "border-border hover:border-foreground/60",
                 )}
               >
-                <span className="font-mono text-sm font-bold">📦 从 JSON 文件导入</span>
+                <span className="text-sm font-bold">📦 从 JSON 文件导入</span>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   导入别人导出的 .workflow.json 文件（含 yaml + ts）
                 </p>
@@ -176,15 +176,15 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
                   type="button"
                   onClick={() => setSelected(t.name)}
                   className={cn(
-                    "block w-full rounded-none border-[1.5px] px-3 py-2 text-left transition-colors",
+                    "block w-full rounded-md border px-3 py-2 text-left transition-colors",
                     selected === t.name
                       ? "border-accent bg-accent/5"
-                      : "border-foreground/30 hover:border-foreground/60",
+                      : "border-border hover:border-foreground/60",
                   )}
                 >
                   <div className="flex items-baseline justify-between gap-2">
                     <div className="flex items-baseline gap-2 min-w-0">
-                      <span className="font-mono text-sm font-bold truncate">{t.label || t.name}</span>
+                      <span className="text-sm font-bold truncate">{t.label || t.name}</span>
                       {t.label && (
                         <span className="font-mono text-[10px] text-muted-foreground truncate">
                           {t.name}
@@ -203,13 +203,13 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
                 type="button"
                 onClick={() => setSelected(FROM_SCRATCH)}
                 className={cn(
-                  "block w-full rounded-none border-[1.5px] border-dashed px-3 py-2 text-left transition-colors",
+                  "block w-full rounded-md border border-dashed px-3 py-2 text-left transition-colors",
                   selected === FROM_SCRATCH
                     ? "border-accent bg-accent/5"
-                    : "border-foreground/30 hover:border-foreground/60",
+                    : "border-border hover:border-foreground/60",
                 )}
               >
-                <span className="font-mono text-sm font-bold">⊕ 从零开始（高级）</span>
+                <span className="text-sm font-bold">⊕ 从零开始（高级）</span>
                 <p className="mt-0.5 text-xs text-muted-foreground">不基于模板，手工写所有 phases / agents</p>
               </button>
             </div>
@@ -217,7 +217,7 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
 
           {selected && selected !== FROM_SCRATCH && selected !== FROM_AI && (
             <div className="space-y-1.5">
-              <Label htmlFor="wf-name" className="font-mono text-[10px] uppercase tracking-[0.18em]">
+              <Label htmlFor="wf-name" className="bp-label">
                 新工作流名字
               </Label>
               <Input

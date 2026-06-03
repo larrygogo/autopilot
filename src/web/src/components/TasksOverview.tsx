@@ -81,8 +81,8 @@ export function TasksOverview({
       </div>
 
       {dangling.length > 0 && (
-        <div className="border-[1.5px] border-destructive bg-destructive/8 p-3 text-sm">
-          <div className="mb-2 flex items-center gap-2 font-display font-bold uppercase tracking-wider text-destructive">
+        <div className="rounded-lg border border-destructive bg-destructive/8 p-3 text-sm">
+          <div className="mb-2 flex items-center gap-2 font-bold text-destructive">
             <Skull className="h-4 w-4" />
             <span>{dangling.length} 个任务失效（daemon 重启时 agent 进程已死）</span>
           </div>
@@ -95,7 +95,7 @@ export function TasksOverview({
               >
                 <span className="text-muted-foreground">{t.id}</span>
                 <span className="truncate font-sans">{t.title}</span>
-                <span className="ml-auto uppercase tracking-wider text-muted-foreground">点击进入并取消</span>
+                <span className="ml-auto text-muted-foreground">点击进入并取消</span>
               </li>
             ))}
           </ul>
@@ -103,8 +103,8 @@ export function TasksOverview({
       )}
 
       {stale.length > 0 && (
-        <div className="border-[1.5px] border-warning bg-warning/8 p-3 text-sm">
-          <div className="mb-2 flex items-center gap-2 font-display font-bold uppercase tracking-wider text-warning">
+        <div className="rounded-lg border border-warning bg-warning/8 p-3 text-sm">
+          <div className="mb-2 flex items-center gap-2 font-bold text-warning">
             <AlertTriangle className="h-4 w-4" />
             <span>{stale.length} 个任务超过 30 分钟未更新</span>
           </div>
@@ -117,7 +117,7 @@ export function TasksOverview({
               >
                 <span className="text-muted-foreground">{t.id}</span>
                 <span className="truncate font-sans">{t.title}</span>
-                <span className="ml-auto uppercase tracking-wider text-muted-foreground">
+                <span className="ml-auto text-muted-foreground">
                   {formatAgo(now - new Date(t.updated_at).getTime())} 前
                 </span>
               </li>
@@ -127,9 +127,9 @@ export function TasksOverview({
       )}
 
       {diskTotal !== null && diskTotal > 0 && (
-        <div className="flex flex-wrap items-center gap-2 border border-foreground/25 bg-card px-3 py-2 font-mono text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 font-mono text-xs text-muted-foreground">
           <Database className="h-3.5 w-3.5" />
-          <span className="uppercase tracking-wider">
+          <span>
             {diskTaskCount} 个 workspace · 共{" "}
             <strong className="text-foreground">{formatBytes(diskTotal)}</strong>
           </span>
@@ -163,8 +163,8 @@ function Stat({
   }[tone];
 
   return (
-    <div className="border-[1.5px] border-foreground/30 bg-card px-4 py-3 transition-all hover:border-foreground hover:shadow-[3px_3px_0_0_var(--color-foreground)] hover:-translate-x-[2px] hover:-translate-y-[2px]">
-      <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+    <div className="bp-lift rounded-lg border border-border bg-card px-4 py-3 hover:border-foreground/40">
+      <div className="bp-label flex items-center justify-between">
         <span>{label}</span>
         <Icon className={cn("h-3.5 w-3.5", toneClass)} />
       </div>

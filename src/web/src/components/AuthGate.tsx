@@ -15,7 +15,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground animate-pulse">
+        <span className="text-[11px] text-muted-foreground animate-pulse">
           验证中…
         </span>
       </div>

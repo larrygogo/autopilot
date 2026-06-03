@@ -39,8 +39,8 @@ export function NowEmptyGuide() {
   if (!counts) {
     return (
       <div className="mt-12 flex flex-col items-center text-muted-foreground">
-        <p className="font-display text-lg">🎉 全部清空</p>
-        <p className="mt-1 font-mono text-xs uppercase tracking-[0.12em]">
+        <p className="text-lg">🎉 全部清空</p>
+        <p className="mt-1 text-xs">
           没有需要关注的事
         </p>
       </div>
@@ -126,8 +126,8 @@ function Guide({
   return (
     <Card className="mt-8 px-6 py-8 text-center">
       <div className="mb-3 flex justify-center text-3xl">{emoji}</div>
-      <h2 className="font-display text-xl font-bold uppercase tracking-wider">{title}</h2>
-      <p className="mt-2 font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+      <h2 className="text-xl font-bold">{title}</h2>
+      <p className="mt-2 text-xs text-muted-foreground">
         {sub}
       </p>
       <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
@@ -137,8 +137,8 @@ function Guide({
             to={a.to}
             className={
               a.primary
-                ? "inline-flex items-center gap-1.5 border-[1.5px] border-accent bg-accent px-3 py-1.5 font-mono text-xs uppercase tracking-[0.12em] text-accent-foreground transition-colors hover:bg-accent/85"
-                : "inline-flex items-center gap-1.5 border-[1.5px] border-foreground/30 bg-card px-3 py-1.5 font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+                ? "inline-flex items-center gap-1.5 rounded-md border border-accent bg-accent px-3 py-1.5 text-xs text-accent-foreground transition-colors hover:bg-accent/85"
+                : "inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
             }
           >
             <a.icon className="h-3.5 w-3.5" />

@@ -20,7 +20,7 @@ export function FloatingChat() {
       aria-label="打开 Chat"
       className={cn(
         "fixed bottom-6 right-6 z-40 flex h-12 w-12 items-center justify-center",
-        "border-[1.5px] border-foreground/40 bg-card text-foreground shadow-lg rounded-none",
+        "border border-border bg-card text-foreground shadow-lg rounded-md",
         "hover:border-accent hover:text-accent transition-colors",
       )}
     >

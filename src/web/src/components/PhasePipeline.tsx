@@ -167,12 +167,12 @@ export function PhasePipeline({ phases, highlight, onHoverPhase, currentState, o
       </div>
 
       {rejects.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-dashed border-foreground/25 pt-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border pt-3">
           <span className="bp-label">驳回规则 · REJECT</span>
           {rejects.map((r, i) => (
             <span
               key={i}
-              className="inline-flex items-center gap-1.5 rounded-none border-[1.5px] border-warning bg-warning/10 px-2 py-0.5 font-mono text-[11px]"
+              className="inline-flex items-center gap-1.5 rounded-md border border-warning bg-warning/10 px-2 py-0.5 font-mono text-[11px]"
             >
               <code className="font-mono text-foreground">{r.from}</code>
               <RotateCcw className="h-3 w-3 text-warning" aria-hidden="true" />
@@ -209,10 +209,10 @@ function PhaseNode({
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
       className={cn(
-        "group relative flex min-w-[7rem] shrink-0 flex-col items-center justify-center gap-1 rounded-none border-[1.5px] border-foreground/30 bg-card px-3 py-2 text-center transition-all",
+        "group relative flex min-w-[7rem] shrink-0 flex-col items-center justify-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-center transition-all",
         clickable ? "cursor-pointer hover:border-foreground hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-accent" : "cursor-default hover:border-foreground hover:bg-secondary",
         highlight && "border-foreground bg-secondary",
-        current && "border-accent bg-accent/12 shadow-[3px_3px_0_0_var(--color-accent)]",
+        current && "border-accent bg-accent/12 bp-shadow",
         statusBorder,
       )}
       onMouseEnter={() => onHover?.(phase.name)}
@@ -229,7 +229,7 @@ function PhaseNode({
       <PhaseStatusBadge status={runStatus} />
       <div
         className={cn(
-          "max-w-[10rem] truncate font-display text-xs font-bold uppercase tracking-wider",
+          "max-w-[10rem] truncate text-xs font-bold",
           current ? "text-accent" : runStatus === "failed" ? "text-destructive" : "text-foreground",
         )}
       >
@@ -246,7 +246,7 @@ function PhaseNode({
           {phase.agent && (
             <span
               title={`智能体：${phase.agent}`}
-              className="inline-flex items-center gap-0.5 rounded-none border border-foreground/20 bg-muted/50 px-1 font-mono text-[9px] text-muted-foreground"
+              className="inline-flex items-center gap-0.5 rounded-md border border-border bg-muted/50 px-1 font-mono text-[9px] text-muted-foreground"
             >
               <Bot className="h-2.5 w-2.5" />
               {phase.agent}
@@ -255,7 +255,7 @@ function PhaseNode({
           {phase.gate && (
             <span
               title="需要人工审批"
-              className="inline-flex items-center rounded-none border border-warning/40 bg-warning/10 px-1 font-mono text-[9px] text-warning"
+              className="inline-flex items-center rounded-md border border-warning/40 bg-warning/10 px-1 font-mono text-[9px] text-warning"
             >
               <Hand className="h-2.5 w-2.5" />
             </span>
@@ -311,12 +311,12 @@ function ParallelNode({
   const headHighlight = highlight === name;
   const clickable = !!onClick;
   return (
-    <div className="flex shrink-0 flex-col gap-1.5 rounded-none border border-dashed border-foreground/40 bg-muted/30 p-2">
+    <div className="flex shrink-0 flex-col gap-1.5 rounded-lg border border-border bg-muted/30 p-2">
       <div
         role={clickable ? "button" : undefined}
         tabIndex={clickable ? 0 : undefined}
         className={cn(
-          "flex items-center gap-1.5 rounded-none px-1.5 py-0.5 transition-colors",
+          "flex items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors",
           clickable ? "cursor-pointer hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-accent" : "cursor-default",
           headHighlight && "bg-secondary",
         )}
@@ -332,7 +332,7 @@ function ParallelNode({
         }}
       >
         <Badge variant="info">并行</Badge>
-        <span className="font-display text-xs font-bold uppercase tracking-wider">
+        <span className="text-xs font-bold">
           {pickPhaseLabel({ name, label })}
         </span>
         {failStrategy && (

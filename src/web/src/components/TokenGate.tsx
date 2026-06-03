@@ -61,16 +61,16 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md border-[1.5px] border-foreground/30 bg-card p-6">
-        <h1 className="font-display text-base font-bold uppercase tracking-wider mb-2">
+      <div className="w-full max-w-md border border-border bg-card p-6 rounded-lg">
+        <h1 className="text-base font-bold mb-2">
           需要 API Token
         </h1>
         <p className="text-xs text-muted-foreground leading-relaxed mb-4">
           你正在从局域网（<span className="font-mono">{typeof location !== "undefined" ? location.host : ""}</span>）访问 autopilot daemon。
           daemon 启用了 API token 鉴权，请在本机查看 token 后贴入此处。
         </p>
-        <div className="mb-4 border-[1.5px] border-dashed border-foreground/20 bg-muted/40 p-3 text-[11px] leading-relaxed text-muted-foreground">
-          <div className="mb-1 font-display font-bold uppercase tracking-wider text-foreground">
+        <div className="mb-4 border border-dashed border-border bg-muted/40 p-3 text-[11px] leading-relaxed text-muted-foreground rounded-md">
+          <div className="mb-1 font-bold text-foreground">
             查看 token
           </div>
           <p>在装 daemon 的本机执行：</p>
@@ -84,7 +84,7 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
             placeholder="粘贴 token"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            className="w-full border-[1.5px] border-foreground/30 bg-background px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none rounded-none"
+            className="w-full border border-border bg-background px-3 py-2 font-mono text-sm focus:border-accent focus:outline-none rounded-md"
           />
           {touched && !input.trim() && (
             <p className="text-xs text-destructive">请粘贴 token</p>
@@ -99,13 +99,13 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={() => void testConnection()}
               disabled={testing || !input.trim()}
-              className="flex-1 border-[1.5px] border-foreground/30 bg-background px-3 py-2 font-display text-xs font-bold uppercase tracking-wider text-foreground hover:border-accent hover:text-accent disabled:opacity-50 rounded-none"
+              className="flex-1 border border-border bg-background px-3 py-2 text-xs font-bold text-foreground hover:border-accent hover:text-accent disabled:opacity-50 rounded-md"
             >
               {testing ? "测试中…" : "测试连接"}
             </button>
             <button
               type="submit"
-              className="flex-[2] border-[1.5px] border-foreground bg-foreground px-3 py-2 font-display text-xs font-bold uppercase tracking-wider text-background hover:bg-accent hover:border-accent rounded-none"
+              className="flex-[2] border border-foreground bg-foreground px-3 py-2 text-xs font-bold text-background hover:bg-accent hover:border-accent rounded-md"
             >
               保存并继续
             </button>

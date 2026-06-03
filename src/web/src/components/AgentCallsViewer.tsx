@@ -95,7 +95,7 @@ export function AgentCallsViewer({ taskId }: Props) {
 
   return (
     <Card>
-      <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
         <span className="bp-label">Agent 调用 · AGENT CALLS</span>
         <Button variant="ghost" size="sm" onClick={refresh} disabled={loading}>
           <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
@@ -105,13 +105,13 @@ export function AgentCallsViewer({ taskId }: Props) {
 
       <div className="p-4">
         {loading && calls.length === 0 ? (
-          <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          <p className="font-mono text-xs text-muted-foreground">
             加载中…
           </p>
         ) : calls.length === 0 ? (
-          <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          <p className="font-mono text-xs text-muted-foreground">
             尚未记录 agent 调用。阶段函数里调用{" "}
-            <code className="border border-foreground/20 bg-muted px-1 normal-case tracking-normal">
+            <code className="border border-border bg-muted px-1">
               agent.run()
             </code>{" "}
             后会自动记录 prompt / 响应 / token 用量。
@@ -119,7 +119,7 @@ export function AgentCallsViewer({ taskId }: Props) {
         ) : (
           <>
             {/* 统计条：metadata 风格 */}
-            <div className="mb-3 grid grid-cols-2 gap-0 border border-foreground/25 font-mono text-[11px] sm:grid-cols-5">
+            <div className="mb-3 grid grid-cols-2 gap-0 border border-border font-mono text-[11px] sm:grid-cols-5">
               <StatCell label="CALLS" value={total} />
               <StatCell
                 label="ERRORS"
@@ -139,9 +139,9 @@ export function AgentCallsViewer({ taskId }: Props) {
                   <div
                     key={c.seq}
                     className={cn(
-                      "border-[1.5px] border-foreground/25 bg-card text-sm transition-all",
+                      "border border-border bg-card text-sm transition-all rounded-lg",
                       c.error && "border-destructive",
-                      isOpen && "border-accent shadow-[3px_3px_0_0_var(--color-accent)]",
+                      isOpen && "border-accent bp-shadow",
                     )}
                   >
                     <button
@@ -184,14 +184,14 @@ export function AgentCallsViewer({ taskId }: Props) {
                       </div>
                     </button>
 
-                    <div className="border-t border-dashed border-foreground/20 bg-muted/20 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                    <div className="border-t border-border bg-muted/20 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
                       <span className="line-clamp-1">→ {c.prompt_preview || "（空提示词）"}</span>
                     </div>
 
                     {isOpen && (
-                      <div className="space-y-3 border-t border-dashed border-foreground/25 p-3">
+                      <div className="space-y-3 border-t border-border p-3">
                         {!expanded ? (
-                          <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                          <p className="font-mono text-xs text-muted-foreground">
                             加载详情中…
                           </p>
                         ) : expanded.seq === c.seq ? (
@@ -225,7 +225,7 @@ export function AgentCallsViewer({ taskId }: Props) {
                                 onCopy={copy}
                               />
                             )}
-                            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                            <p className="font-mono text-[10px] text-muted-foreground">
                               {new Date(expanded.ts).toLocaleString()}
                               {expanded.provider && ` · ${expanded.provider}`}
                             </p>
@@ -258,16 +258,16 @@ function StatCell({
   return (
     <div
       className={cn(
-        "flex flex-col gap-0.5 px-3 py-2 border-r border-dashed border-foreground/20 last:border-r-0",
+        "flex flex-col gap-0.5 px-3 py-2 border-r border-border last:border-r-0",
         last && "border-r-0",
       )}
     >
-      <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+      <span className="font-mono text-[10px] text-muted-foreground">
         {label}
       </span>
       <span
         className={cn(
-          "font-display text-lg font-bold leading-none tabular-nums",
+          "text-lg font-bold leading-none tabular-nums",
           tone === "destructive" ? "text-destructive" : "text-foreground",
         )}
       >
@@ -289,9 +289,9 @@ function AgentCallBlock({
   onCopy: (s: string) => void;
 }) {
   return (
-    <div className="border border-foreground/25 bg-card">
-      <div className="flex items-center justify-between border-b border-dashed border-foreground/25 bg-muted/30 px-2.5 py-1.5">
-        <strong className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+    <div className="border border-border bg-card rounded-lg">
+      <div className="flex items-center justify-between border-b border-border bg-muted/30 px-2.5 py-1.5">
+        <strong className="font-mono text-[10px] font-semibold text-muted-foreground">
           {label}
         </strong>
         <Button

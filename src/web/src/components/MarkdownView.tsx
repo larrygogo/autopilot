@@ -19,13 +19,13 @@ export function MarkdownView({
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ node, ...props }) => (
-            <h1 className="mt-2 mb-3 font-display text-xl font-bold uppercase tracking-wide text-foreground border-b border-foreground/30 pb-2" {...props} />
+            <h1 className="mt-2 mb-3 text-xl font-bold text-foreground border-b border-border pb-2" {...props} />
           ),
           h2: ({ node, ...props }) => (
-            <h2 className="mt-5 mb-2 font-display text-base font-bold uppercase tracking-wide text-foreground" {...props} />
+            <h2 className="mt-5 mb-2 text-base font-bold text-foreground" {...props} />
           ),
           h3: ({ node, ...props }) => (
-            <h3 className="mt-4 mb-1.5 font-display text-sm font-bold uppercase tracking-wide text-foreground" {...props} />
+            <h3 className="mt-4 mb-1.5 text-sm font-bold text-foreground" {...props} />
           ),
           p: ({ node, ...props }) => (
             <p className="my-2 text-sm leading-relaxed text-foreground" {...props} />
@@ -44,7 +44,7 @@ export function MarkdownView({
             if (isInline) {
               return (
                 <code
-                  className="rounded-none border border-foreground/25 bg-muted/50 px-1 py-0.5 font-mono text-[12px] text-foreground"
+                  className="rounded-md border border-border bg-muted/50 px-1 py-0.5 font-mono text-[12px] text-foreground"
                   {...props}
                 >
                   {children}
@@ -59,7 +59,7 @@ export function MarkdownView({
           },
           pre: ({ node, ...props }) => (
             <pre
-              className="my-3 overflow-x-auto border border-foreground/25 bg-muted/30 p-3 font-mono text-xs leading-relaxed scrollbar-thin"
+              className="my-3 overflow-x-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-xs leading-relaxed scrollbar-thin"
               {...props}
             />
           ),
@@ -73,18 +73,18 @@ export function MarkdownView({
             <a className="text-accent underline hover:no-underline" target="_blank" rel="noreferrer" {...props} />
           ),
           hr: ({ node, ...props }) => (
-            <hr className="my-4 border-t border-dashed border-foreground/30" {...props} />
+            <hr className="my-4 border-t border-dashed border-border" {...props} />
           ),
           table: ({ node, ...props }) => (
             <div className="my-3 overflow-x-auto">
-              <table className="w-full border-collapse border border-foreground/25 text-sm" {...props} />
+              <table className="w-full border-collapse border border-border text-sm" {...props} />
             </div>
           ),
           th: ({ node, ...props }) => (
-            <th className="border border-foreground/25 bg-muted/40 px-3 py-1.5 text-left font-mono text-[11px] uppercase tracking-wider" {...props} />
+            <th className="border border-border bg-muted/40 px-3 py-1.5 text-left text-[11px] font-semibold" {...props} />
           ),
           td: ({ node, ...props }) => (
-            <td className="border border-foreground/25 px-3 py-1.5 text-sm" {...props} />
+            <td className="border border-border px-3 py-1.5 text-sm" {...props} />
           ),
           strong: ({ node, ...props }) => (
             <strong className="font-semibold text-foreground" {...props} />

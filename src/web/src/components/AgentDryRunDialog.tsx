@@ -207,7 +207,7 @@ export function AgentDryRunDialog({ open, onClose, agent, title }: Props) {
 
           {running && (
             <Card className="bg-muted/40 px-4 py-5 text-center">
-              <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <p className="font-mono text-xs text-muted-foreground">
                 运行中… CLI 可能会弹出权限确认
               </p>
             </Card>
@@ -215,10 +215,10 @@ export function AgentDryRunDialog({ open, onClose, agent, title }: Props) {
 
           {result && (
             <Card className="overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-dashed border-border px-4 py-2.5">
                 <span className="bp-label">结果</span>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <span className="font-mono text-[10px] text-muted-foreground">
                     耗时 {Math.round(result.elapsed_ms / 100) / 10}s
                     {result.usage?.input_tokens != null && ` · in ${result.usage.input_tokens}t`}
                     {result.usage?.output_tokens != null &&

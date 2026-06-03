@@ -28,7 +28,7 @@ export function Now() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8">
       {showSetupBanner && (
-        <div className="mb-4 border-[1.5px] border-foreground/30 p-3 font-mono text-sm">
+        <div className="mb-4 border border-border rounded-md p-3 text-sm">
           ⚠ 未完成首跑配置
           <Link to="/setup" className="ml-2 underline">开始 ▸</Link>
         </div>
@@ -46,7 +46,7 @@ export function Now() {
             size="sm"
             onClick={() => refresh()}
             disabled={loading}
-            className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+            className="text-[11px]"
           >
             <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`} />
             刷新
@@ -55,8 +55,8 @@ export function Now() {
       />
 
       {error && (
-        <div className="mt-4 border-[1.5px] border-l-4 border-foreground/30 border-l-destructive bg-card px-4 py-3 rounded-none">
-          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-destructive mb-1">
+        <div className="mt-4 border border-l-4 border-border border-l-destructive bg-card px-4 py-3 rounded-lg">
+          <p className="text-[10px] text-destructive mb-1">
             ERROR
           </p>
           <p className="text-sm text-foreground">{error}</p>
@@ -66,7 +66,7 @@ export function Now() {
       {loading && cards.length === 0 && (
         <div className="mt-12 flex flex-col items-center text-muted-foreground">
           <Loader2 className="h-6 w-6 animate-spin" />
-          <p className="mt-2 font-mono text-xs uppercase tracking-[0.12em]">加载快照...</p>
+          <p className="mt-2 text-xs">加载快照...</p>
         </div>
       )}
 
@@ -80,10 +80,10 @@ export function Now() {
 
       {/* 跳转任务看板看完整任务列表（在跑 / 完成 / 失败 都在那里） */}
       {cards.length > 0 && (
-        <div className="mt-8 flex justify-center border-t border-dashed border-foreground/25 pt-4">
+        <div className="mt-8 flex justify-center border-t border-dashed border-border pt-4">
           <Link
             to="/tasks"
-            className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground"
+            className="inline-flex items-center gap-2 text-[11px] text-muted-foreground hover:text-foreground"
           >
             <ListChecks className="h-3.5 w-3.5" />
             看所有任务（进行中 / 完成 / 失败）→

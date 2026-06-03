@@ -640,7 +640,7 @@ export function PhaseEditor({
 
       {/* 草稿模式不显示孤儿警告（孤儿是 yaml/ts 不一致问题，草稿没文件） */}
       {!draftMode && orphans.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-[1.5px] border-warning bg-warning/8 px-3.5 py-2.5 text-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-warning bg-warning/8 px-3.5 py-2.5 text-sm">
           <span className="flex flex-wrap items-center gap-1.5">
             <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
             <span>
@@ -649,7 +649,7 @@ export function PhaseEditor({
             {orphans.map((n) => (
               <code
                 key={n}
-                className="border border-foreground/20 bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground"
+                className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground"
               >
                 run_{n}
               </code>
@@ -663,7 +663,7 @@ export function PhaseEditor({
       )}
 
       {items.length === 0 ? (
-        <div className="border border-dashed border-foreground/30 bg-card/50 px-6 py-10 text-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
+        <div className="rounded-lg border border-dashed border-border bg-card/50 px-6 py-10 text-center text-xs text-muted-foreground">
           暂无阶段，点击右上角「新增阶段」开始
         </div>
       ) : (
@@ -798,7 +798,7 @@ export function PhaseEditor({
             )}
           </div>
           {hasErrors && (
-            <div className="rounded-none border border-destructive/40 bg-destructive/5 px-3.5 py-2.5 text-sm">
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3.5 py-2.5 text-sm">
               <div className="flex items-center gap-1.5 text-destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <strong className="font-semibold">
@@ -843,7 +843,7 @@ export function PhaseEditor({
         title={
           <span className="inline-flex flex-col leading-tight">
             <span>清理废弃函数</span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            <span className="font-mono text-[10px] text-muted-foreground">
               orphan function
             </span>
           </span>
@@ -851,7 +851,7 @@ export function PhaseEditor({
         message={
           <div className="space-y-2">
             <p>将从 workflow.ts 中删除以下 {orphans.length} 个函数：</p>
-            <ul className="space-y-0.5 rounded-none border bg-muted/40 p-2 pl-5 font-mono text-xs">
+            <ul className="space-y-0.5 rounded-md border bg-muted/40 p-2 pl-5 font-mono text-xs">
               {orphans.map((n) => (
                 <li key={n} className="list-disc">
                   run_{n}
@@ -1001,7 +1001,7 @@ function PhaseRow({
   return (
     <div
       className={cn(
-        "rounded-none border bg-card px-3 py-2.5 shadow-sm transition-colors",
+        "rounded-md border bg-card px-3 py-2.5 shadow-sm transition-colors",
         isHighlight && "border-accent/40 ring-1 ring-accent/20",
         dragHandlers.isDragging && "opacity-40",
         dragHandlers.isDropTarget && "border-accent ring-2 ring-accent",
@@ -1272,7 +1272,7 @@ function ParallelRow(props: ParallelRowProps) {
   return (
     <div
       className={cn(
-        "rounded-none border border-accent/30 bg-accent/5 px-3 py-2.5 transition-colors",
+        "rounded-md border border-accent/30 bg-accent/5 px-3 py-2.5 transition-colors",
         headHighlight && "border-accent ring-1 ring-accent/20",
         dragHandlers.isDragging && "opacity-40",
         dragHandlers.isDropTarget && "border-accent ring-2 ring-accent",
@@ -1488,7 +1488,7 @@ function ParallelChildRow({
   return (
     <div
       className={cn(
-        "rounded-none border bg-card px-2.5 py-2 shadow-sm transition-colors",
+        "rounded-md border bg-card px-2.5 py-2 shadow-sm transition-colors",
         isHighlight && "border-accent/40 ring-1 ring-accent/20",
         dragHandlers.isDragging && "opacity-40",
         dragHandlers.isDropTarget && "border-accent ring-2 ring-accent",

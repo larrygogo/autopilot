@@ -231,7 +231,7 @@ export function NewTaskDialog({ open, onClose, onCreated, onScheduled }: Props) 
           </div>
 
           {/* 定时任务区块 */}
-          <div className="rounded-none border bg-muted/30 p-3 space-y-3">
+          <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-muted-foreground" />
@@ -325,7 +325,7 @@ export function NewTaskDialog({ open, onClose, onCreated, onScheduled }: Props) 
           </div>
 
           <p className="text-xs text-muted-foreground">
-            提示：<kbd className="border border-foreground/40 bg-muted px-1.5 py-0.5 font-mono text-[10px]">{modShortcut("Enter")}</kbd> 快速提交
+            提示：<kbd className="border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">{modShortcut("Enter")}</kbd> 快速提交
           </p>
         </div>
 

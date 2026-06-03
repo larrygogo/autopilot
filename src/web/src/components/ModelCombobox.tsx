@@ -33,7 +33,6 @@ interface Props {
  * - 触发按钮显示当前值或 placeholder
  * - 弹出层顶部搜索框；列表展示 catalog 选项
  * - 输入串不在 catalog 中且非空时，列表底部出现 "+ 使用 \"<input>\"" 行允许自定义
- * - 蓝图风：方角、厚边框、硬阴影
  */
 export function ModelCombobox({
   value,
@@ -80,7 +79,7 @@ export function ModelCombobox({
           aria-expanded={open}
           aria-haspopup="listbox"
           className={cn(
-            "flex h-9 w-full items-center justify-between rounded-none border-[1.5px] border-foreground/35 bg-background px-3 py-2 text-sm font-mono transition-colors focus:outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50",
+            "flex h-9 w-full items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-sm font-mono transition-colors focus:outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50",
             !value && "text-muted-foreground font-sans",
             className,
           )}

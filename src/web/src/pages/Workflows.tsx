@@ -201,9 +201,9 @@ export function Workflows() {
       {/* 工作流目录健康检查：孤儿 / 重名碰撞 → 顶部警告条 + 修复 dialog */}
       {/* 从失败任务跳过来修复 prompt 的上下文 banner */}
       {fromTaskId && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 border-[1.5px] border-accent/40 bg-accent/5 px-3 py-2.5">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2.5">
           <div className="flex-1 text-sm">
-            <span className="font-display font-bold uppercase tracking-wider text-accent">
+            <span className="font-bold text-accent">
               修复来自任务 {fromTaskId}
             </span>
             <span className="ml-2 text-muted-foreground">
@@ -220,7 +220,7 @@ export function Workflows() {
             size="sm"
             onClick={handleReturnAndRetry}
             disabled={retryingFromTask}
-            className="font-mono text-[11px] uppercase tracking-[0.12em]"
+            className="text-[11px]"
           >
             {retryingFromTask ? "重启中…" : `回任务 & 重跑 →`}
           </Button>
@@ -344,7 +344,7 @@ export function Workflows() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
-            <Label htmlFor="clone-name" className="font-mono text-[10px] uppercase tracking-[0.18em]">新名字</Label>
+            <Label htmlFor="clone-name" className="bp-label">新名字</Label>
             <Input
               id="clone-name"
               value={cloneName}
@@ -395,7 +395,7 @@ export function Workflows() {
               确认删除工作流{" "}
               <code className="rounded bg-muted px-1 font-mono">{pendingDelete}</code>？
             </p>
-            <div className="rounded-none border border-destructive/30 bg-destructive/5 px-3 py-2.5">
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
               <p className="text-xs text-destructive">
                 ⚠ 将永久删除整个目录：
                 <br />
@@ -450,7 +450,7 @@ function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-none border border-dashed bg-card/50 px-6 py-12 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/50 px-6 py-12 text-center">
       <div className="text-sm font-medium">{title}</div>
       {hint && <p className="max-w-sm text-xs text-muted-foreground">{hint}</p>}
       {action}

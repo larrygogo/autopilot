@@ -196,13 +196,13 @@ export function TaskProgressCard({
 
   return (
     <Card className="mb-6">
-      <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-5 py-3">
+      <div className="flex items-center justify-between gap-2 border-b border-dashed border-border px-5 py-3">
         <div className="flex items-center gap-2.5">
           {isRunning && <Loader2 className="h-4 w-4 animate-spin text-accent" />}
           {isDone && <CheckCircle2 className="h-4 w-4 text-success" />}
           {(isFailed || isDangling) && <AlertCircle className="h-4 w-4 text-destructive" />}
           {isCancelled && <XCircle className="h-4 w-4 text-muted-foreground" />}
-          <h2 className="font-display text-sm font-bold uppercase tracking-wider">任务进度</h2>
+          <h2 className="text-sm font-bold">任务进度</h2>
           {phaseLabel && (
             <Badge variant={(isFailed || isDangling) ? "destructive" : isRunning ? "default" : "secondary"}>
               {phaseLabel}
@@ -216,7 +216,7 @@ export function TaskProgressCard({
             asChild
             variant={isRunning ? "default" : "outline"}
             size="sm"
-            className="rounded-none font-mono text-[10px] uppercase tracking-[0.14em]"
+            className="rounded-md text-[10px]"
           >
             <Link to={`/tasks/${taskId}`}>
               <ExternalLink className="mr-1 h-3 w-3" />
@@ -228,8 +228,8 @@ export function TaskProgressCard({
 
       <div className="space-y-3 p-5">
         {isDangling && (
-          <div className="border-[1.5px] border-destructive bg-destructive/10 p-3 text-xs text-destructive">
-            <div className="mb-1 font-display font-bold uppercase tracking-wider">⚠ 任务已失联</div>
+          <div className="border border-destructive bg-destructive/10 p-3 text-xs text-destructive">
+            <div className="mb-1 font-bold">⚠ 任务已失联</div>
             <p className="leading-relaxed opacity-90">
               daemon 在该任务执行 <span className="font-semibold">{phaseLabel ?? task.status}</span> 阶段时被重启，
               内存中的执行流已丢失。task 的产出（如已完成的方案设计 / 部分代码）仍保留，
@@ -239,33 +239,33 @@ export function TaskProgressCard({
         )}
 
         {isRunning && (
-          <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+          <div className="text-[11px] text-muted-foreground">
             正在执行 <span className="font-semibold text-foreground">{phaseLabel}</span> 阶段
             {startedMs && <span className="ml-1">· 已耗时 {formatElapsed(elapsedMs)}</span>}
           </div>
         )}
 
         {parsed.kind === "pending" && phaseLabel && (
-          <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+          <div className="text-[11px] text-muted-foreground">
             准备进入 <span className="font-semibold text-foreground">{phaseLabel}</span> 阶段…
           </div>
         )}
 
         {isDone && (
-          <div className="font-mono text-[11px] uppercase tracking-wider text-success">
+          <div className="text-[11px] text-success">
             ✓ 任务已完成
           </div>
         )}
 
         {isCancelled && (
-          <div className="border-[1.5px] border-foreground/30 bg-muted/40 p-3 font-mono text-xs tracking-wider text-muted-foreground">
+          <div className="border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
             任务已取消
           </div>
         )}
 
         {isFailed && recentError && (
-          <div className="border-[1.5px] border-destructive bg-destructive/10 p-3 text-xs text-destructive">
-            <div className="mb-1 font-display font-bold uppercase tracking-wider">执行失败</div>
+          <div className="border border-destructive bg-destructive/10 p-3 text-xs text-destructive">
+            <div className="mb-1 font-bold">执行失败</div>
             <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed opacity-90">
               {recentError.length > 400 ? recentError.slice(0, 400) + "…" : recentError}
             </pre>

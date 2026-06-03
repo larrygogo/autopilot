@@ -190,7 +190,7 @@ export function Chat({ subscribe }: ChatProps) {
       {/* Main */}
       <main className="flex min-w-0 flex-1 flex-col bg-background">
         {/* Header */}
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b-[1.5px] border-foreground/30 px-3 md:px-5">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-5">
           <Button
             variant="ghost"
             size="icon"
@@ -201,7 +201,7 @@ export function Chat({ subscribe }: ChatProps) {
             <Menu className="h-4 w-4" />
           </Button>
 
-          <h2 className="truncate font-display text-sm font-bold uppercase tracking-wider">
+          <h2 className="truncate text-sm font-bold">
             {currentTitle}
           </h2>
 
@@ -281,7 +281,7 @@ export function Chat({ subscribe }: ChatProps) {
         </div>
 
         {/* Input */}
-        <div className="shrink-0 border-t-[1.5px] border-foreground/30 bg-background px-4 py-3 md:px-6">
+        <div className="shrink-0 border-t bg-background px-4 py-3 md:px-6">
           <div className="relative mx-auto max-w-3xl">
             <Textarea
               ref={inputRef}
@@ -320,7 +320,7 @@ export function Chat({ subscribe }: ChatProps) {
               <Send className="h-4 w-4" />
             </Button>
           </div>
-          <p className="mt-2 text-center font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          <p className="mt-2 text-center bp-label">
             ENTER 发送 · SHIFT+ENTER 换行
           </p>
         </div>
@@ -346,7 +346,7 @@ function SessionList({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b-[1.5px] border-foreground/30 px-3">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
         <Button size="sm" className="w-full gap-1.5" onClick={onNew}>
           <Plus className="h-4 w-4" />
           新对话
@@ -354,7 +354,7 @@ function SessionList({
       </div>
       <div className="scrollbar-thin flex-1 overflow-y-auto p-2">
         {sessions.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 px-3 py-10 text-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          <div className="flex flex-col items-center gap-2 px-3 py-10 text-center text-xs text-muted-foreground">
             <MessageSquare className="h-6 w-6 opacity-40" />
             <span>暂无对话</span>
           </div>
@@ -371,13 +371,13 @@ function SessionList({
                       "flex w-full flex-col items-start gap-0.5 border-l-2 border-transparent px-2.5 py-2 text-left transition-colors",
                       active
                         ? "border-accent bg-accent/12 text-foreground"
-                        : "text-muted-foreground hover:border-foreground/40 hover:bg-secondary/50 hover:text-foreground",
+                        : "text-muted-foreground hover:border-border hover:bg-secondary/50 hover:text-foreground",
                     )}
                   >
                     <span className="w-full truncate text-sm font-medium">
                       {s.title || s.id.slice(0, 8)}
                     </span>
-                    <span className="w-full truncate font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <span className="w-full truncate text-[10px] text-muted-foreground">
                       {s.agent}
                       {s.workflow ? ` · ${s.workflow}` : ""} · {s.message_count} 条
                     </span>
@@ -406,7 +406,7 @@ function MessageItem({
   const isUser = message.role === "user";
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground">
         {isUser ? (
           <>
             <span className="inline-block h-2 w-2 bg-accent" aria-hidden="true" />
@@ -421,10 +421,10 @@ function MessageItem({
       </div>
       <div
         className={cn(
-          "whitespace-pre-wrap break-words border-[1.5px] px-3.5 py-2.5 text-sm leading-relaxed",
+          "whitespace-pre-wrap break-words border px-3.5 py-2.5 text-sm leading-relaxed",
           isUser
             ? "border-accent bg-accent/10 text-foreground"
-            : "border-foreground/25 bg-card text-card-foreground",
+            : "border-border bg-card text-card-foreground",
         )}
       >
         {message.content}
@@ -432,7 +432,7 @@ function MessageItem({
           <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-accent align-middle" />
         )}
         {message.usage && (
-          <div className="mt-2 border-t border-dashed border-foreground/25 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          <div className="mt-2 border-t border-dashed border-border pt-2 font-mono text-[10px] text-muted-foreground">
             {message.usage.input_tokens}+{message.usage.output_tokens} tok · $
             {message.usage.total_cost_usd?.toFixed(4)}
           </div>
@@ -448,11 +448,11 @@ function MessageItem({
 
 function EmptyChat() {
   return (
-    <div className="flex flex-col items-center gap-3 border border-dashed border-foreground/30 bg-card/40 px-6 py-16 text-center">
-      <div className="flex h-12 w-12 items-center justify-center border-[1.5px] border-accent bg-accent/12 text-accent">
+    <div className="flex flex-col items-center gap-3 border border-dashed border-border bg-card/40 px-6 py-16 text-center">
+      <div className="flex h-12 w-12 items-center justify-center border border-accent bg-accent/12 text-accent">
         <MessageSquare className="h-6 w-6" />
       </div>
-      <div className="font-display text-base font-bold uppercase tracking-wider">
+      <div className="text-base font-bold">
         开始一段新对话
       </div>
       <p className="max-w-sm text-xs text-muted-foreground">

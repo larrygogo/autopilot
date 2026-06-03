@@ -43,9 +43,9 @@ export function SpecRevisionsSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full max-w-full sm:w-[640px] sm:max-w-[90vw] p-0 flex flex-col">
-        <header className="border-b-[1.5px] border-foreground/30 px-5 py-3.5 pr-12 shrink-0">
-          <h2 className="font-display text-base font-bold uppercase tracking-wider">修订历史</h2>
-          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mt-0.5">
+        <header className="border-b border-border px-5 py-3.5 pr-12 shrink-0">
+          <h2 className="text-base font-bold">修订历史</h2>
+          <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
             共 {revisions.length} 条 · 最新在上
           </p>
         </header>
@@ -54,14 +54,14 @@ export function SpecRevisionsSheet({
           {loading && (
             <div className="flex items-center justify-center py-12 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              <span className="font-mono text-xs uppercase tracking-[0.12em]">加载中…</span>
+              <span className="font-mono text-xs">加载中…</span>
             </div>
           )}
 
           {!loading && revisions.length === 0 && (
             <div className="py-12 text-center text-muted-foreground">
-              <p className="font-display text-lg">暂无修订</p>
-              <p className="mt-1 font-mono text-xs uppercase tracking-[0.12em]">
+              <p className="text-lg">暂无修订</p>
+              <p className="mt-1 font-mono text-xs">
                 AI 澄清和手动编辑都会留下记录
               </p>
             </div>
@@ -70,7 +70,7 @@ export function SpecRevisionsSheet({
           {!loading && revisions.map((rev) => {
             const isExpanded = expandedId === rev.id;
             return (
-              <div key={rev.id} className="border-[1.5px] border-foreground/30 bg-card/40 rounded-none">
+              <div key={rev.id} className="border border-border bg-card/40 rounded-lg">
                 <button
                   type="button"
                   onClick={() => setExpandedId(isExpanded ? null : rev.id)}
@@ -81,7 +81,7 @@ export function SpecRevisionsSheet({
                     isExpanded && "rotate-90"
                   )} />
                   <div className="flex-1 min-w-0 space-y-1">
-                    <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    <div className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
                       <span>#{rev.id}</span>
                       <span>·</span>
                       <span>{SOURCE_LABEL[rev.source]}</span>
@@ -98,15 +98,15 @@ export function SpecRevisionsSheet({
                 </button>
 
                 {isExpanded && (
-                  <div className="border-t border-dashed border-foreground/25 grid grid-cols-1 md:grid-cols-2 gap-0 md:divide-x divide-foreground/25">
+                  <div className="border-t border-dashed border-border grid grid-cols-1 md:grid-cols-2 gap-0 md:divide-x divide-border">
                     <div className="p-3 space-y-1.5 min-w-0">
-                      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">修订前</div>
+                      <div className="font-mono text-[10px] text-muted-foreground">修订前</div>
                       <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground bg-muted/20 p-2 max-h-[400px] overflow-y-auto">
                         {rev.before_md || "（空）"}
                       </pre>
                     </div>
                     <div className="p-3 space-y-1.5 min-w-0">
-                      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">修订后</div>
+                      <div className="font-mono text-[10px] text-accent">修订后</div>
                       <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground bg-accent/5 p-2 max-h-[400px] overflow-y-auto">
                         {rev.after_md || "（空）"}
                       </pre>
@@ -118,8 +118,8 @@ export function SpecRevisionsSheet({
           })}
         </div>
 
-        <footer className="border-t-[1.5px] border-foreground/30 px-5 py-3 shrink-0">
-          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <footer className="border-t border-border px-5 py-3 shrink-0">
+          <p className="font-mono text-[10px] text-muted-foreground">
             点条目展开看前后对比
           </p>
         </footer>

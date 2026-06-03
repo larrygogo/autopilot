@@ -88,7 +88,7 @@ export function Providers(_props: { embedded?: boolean } = {}) {
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
       <PageHero
-        eyebrow="SHEET · PROVIDERS · LLM"
+        eyebrow="提供商 · LLM"
         title="模型提供商"
         subtitle="全局默认 · CLI 凭证"
         description="通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。"
@@ -235,14 +235,14 @@ function ProviderStatusDetail({ status, loginCmd }: { status?: ProviderStatus; l
 
   if (!status.cli_installed) {
     return (
-      <div className="border-[1.5px] border-destructive bg-destructive/8 p-3 text-xs">
-        <div className="flex items-center gap-1.5 font-display font-bold uppercase tracking-wider text-destructive">
+      <div className="rounded-md border border-destructive bg-destructive/8 p-3 text-xs">
+        <div className="flex items-center gap-1.5 font-bold text-destructive">
           <AlertTriangle className="h-3.5 w-3.5" />
           {status.error ?? "CLI 未安装"}
         </div>
         {status.install_hint && (
           <div className="mt-1.5 text-muted-foreground">
-            安装：<code className="border border-foreground/20 bg-muted px-1 py-0.5 font-mono text-foreground">{status.install_hint}</code>
+            安装：<code className="border border-border bg-muted px-1 py-0.5 font-mono text-foreground">{status.install_hint}</code>
           </div>
         )}
       </div>
@@ -253,12 +253,12 @@ function ProviderStatusDetail({ status, loginCmd }: { status?: ProviderStatus; l
     <div className="space-y-1 text-xs">
       <div>
         <span className="text-muted-foreground">CLI：</span>
-        <code className="border border-foreground/20 bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_path}</code>
+        <code className="border border-border bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_path}</code>
       </div>
       {status.cli_version && (
         <div>
           <span className="text-muted-foreground">版本：</span>
-          <code className="border border-foreground/20 bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_version}</code>
+          <code className="border border-border bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_version}</code>
         </div>
       )}
       {status.error && (

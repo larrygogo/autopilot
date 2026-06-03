@@ -18,7 +18,7 @@ interface LogEntry {
 export function LogTimeline({ logs }: { logs: LogEntry[] }) {
   if (logs.length === 0) {
     return (
-      <div className="px-3 py-4 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+      <div className="px-3 py-4 text-xs text-muted-foreground">
         暂无日志 · NO ENTRIES
       </div>
     );
@@ -28,7 +28,7 @@ export function LogTimeline({ logs }: { logs: LogEntry[] }) {
     <div className="relative pl-6 font-mono text-xs">
       {/* 左侧时间轴线（虚线） */}
       <div
-        className="absolute left-2 top-2 bottom-2 w-px border-l border-dashed border-foreground/30"
+        className="absolute left-2 top-2 bottom-2 w-px border-l border-dashed border-border"
         aria-hidden="true"
       />
       {logs.map((log, i) => (
@@ -36,15 +36,15 @@ export function LogTimeline({ logs }: { logs: LogEntry[] }) {
           key={log.id}
           className={
             "relative flex flex-wrap items-baseline gap-x-3 gap-y-1 break-words py-1.5 " +
-            (i !== logs.length - 1 ? "border-b border-dashed border-foreground/15" : "")
+            (i !== logs.length - 1 ? "border-b border-dashed border-border" : "")
           }
         >
           {/* 节点圆点 */}
           <span
-            className="absolute -left-[18px] top-2.5 h-1.5 w-1.5 rounded-none bg-accent"
+            className="absolute -left-[18px] top-2.5 h-1.5 w-1.5 rounded-full bg-accent"
             aria-hidden="true"
           />
-          <span className="whitespace-nowrap tracking-wider text-muted-foreground">
+          <span className="whitespace-nowrap text-muted-foreground">
             {new Date(log.created_at).toLocaleTimeString()}
           </span>
           <span className="text-info">

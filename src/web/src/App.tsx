@@ -172,7 +172,7 @@ function AppInner() {
   return (
     <TooltipProvider delayDuration={150}>
       <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
-        <aside className="hidden w-60 shrink-0 flex-col border-r-[1.5px] border-foreground/30 bg-sidebar text-sidebar-foreground lg:flex">
+        <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground lg:flex">
           <SidebarContent wsState={wsState} activeCount={activeCount} />
         </aside>
 
@@ -183,7 +183,7 @@ function AppInner() {
         </Sheet>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center gap-2 border-b-[1.5px] border-foreground/30 bg-background px-3 md:px-5">
+          <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 md:px-5">
             <Button
               variant="ghost"
               size="icon"
@@ -193,7 +193,7 @@ function AppInner() {
             >
               <Menu className="h-5 w-5" />
             </Button>
-            <h1 className="truncate font-display text-base font-bold uppercase tracking-wider">
+            <h1 className="truncate text-base font-bold">
               {headerTitle}
             </h1>
             <div className="ml-3 hidden md:block">
@@ -208,8 +208,8 @@ function AppInner() {
                 onClick={() => setCmdOpen(true)}
               >
                 <Search className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline tracking-wider">搜索 / 命令</span>
-                <kbd className="ml-2 hidden items-center rounded-none border border-foreground/40 bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground sm:inline-flex">
+                <span className="hidden sm:inline">搜索 / 命令</span>
+                <kbd className="ml-2 hidden items-center rounded-md border border-border bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground sm:inline-flex">
                   {modShortcut("K")}
                 </kbd>
               </Button>
@@ -351,14 +351,14 @@ function SidebarContent({
 
   return (
     <div className="flex h-full flex-col">
-      {/* 蓝图风 logo block：方块编号 + display 字体品牌名 */}
-      <div className="flex h-12 shrink-0 items-center gap-2.5 border-b-[1.5px] border-foreground/30 px-4">
+      {/* logo block：圆角徽标 + 衬线品牌名 */}
+      <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
         <div className="bp-num-block h-7 w-7 text-sm">A</div>
         <div className="flex flex-col leading-none">
-          <span className="font-display text-base font-bold uppercase tracking-wider">
+          <span className="text-base font-bold">
             Autopilot
           </span>
-          <span className="font-mono text-[9px] uppercase tracking-[0.25em] text-muted-foreground mt-0.5">
+          <span className="bp-label mt-0.5">
             CTRL · v1.0
           </span>
         </div>
@@ -367,7 +367,7 @@ function SidebarContent({
       <nav className="flex-1 space-y-4 overflow-y-auto scrollbar-thin p-3">
         {NAV_GROUPS.map((group) => (
           <div key={group.title}>
-            <div className="mb-1.5 px-2.5 font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground/70">
+            <div className="mb-1.5 px-2.5 bp-label text-muted-foreground/70">
               {group.title}
             </div>
             <NavGroup items={group.items} badges={{ "/now": activeCount }} projects={projects} />
@@ -375,9 +375,9 @@ function SidebarContent({
         ))}
       </nav>
 
-      <div className="border-t border-dashed border-foreground/30" />
+      <div className="border-t border-border" />
 
-      <div className="flex h-10 shrink-0 items-center gap-2 px-4 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+      <div className="flex h-10 shrink-0 items-center gap-2 px-4 bp-label">
         <Circle className={cn("h-2 w-2 fill-current", wsColor)} />
         <span>{wsLabel}</span>
       </div>
@@ -422,10 +422,10 @@ function NavLinkItem({ item, badgeCount }: { item: NavItem; badgeCount: number }
       end={item.end}
       className={({ isActive }) =>
         cn(
-          "group relative flex w-full items-center gap-2.5 rounded-none border-l-2 px-2.5 py-2 font-mono text-xs uppercase tracking-[0.12em] font-medium transition-all",
+          "group relative flex w-full items-center gap-2.5 rounded-md border-l-2 px-2.5 py-2 text-sm font-medium transition-all",
           isActive
             ? "border-accent bg-sidebar-accent text-foreground"
-            : "border-transparent text-muted-foreground hover:border-foreground/40 hover:bg-sidebar-accent/50 hover:text-foreground",
+            : "border-transparent text-muted-foreground hover:border-border hover:bg-sidebar-accent/50 hover:text-foreground",
         )
       }
     >
@@ -476,10 +476,10 @@ function ExpandableNavItem({ item, children }: { item: NavItem; children: Projec
     <div>
       <div
         className={cn(
-          "relative flex w-full items-center gap-2.5 rounded-none border-l-2 pr-1 font-mono text-xs uppercase tracking-[0.12em] font-medium transition-all",
+          "relative flex w-full items-center gap-2.5 rounded-md border-l-2 pr-1 text-sm font-medium transition-all",
           parentActive
             ? "border-accent bg-sidebar-accent text-foreground"
-            : "border-transparent text-muted-foreground hover:border-foreground/40 hover:bg-sidebar-accent/50 hover:text-foreground",
+            : "border-transparent text-muted-foreground hover:border-border hover:bg-sidebar-accent/50 hover:text-foreground",
         )}
       >
         <NavLink
@@ -512,10 +512,10 @@ function ExpandableNavItem({ item, children }: { item: NavItem; children: Projec
                   to={`/projects/${p.id}`}
                   className={({ isActive }) =>
                     cn(
-                      "flex items-center gap-2 rounded-none border-l-2 px-2 py-1.5 font-mono text-[11px] transition-colors",
+                      "flex items-center gap-2 rounded-md border-l-2 px-2 py-1.5 font-mono text-[11px] transition-colors",
                       isActive
                         ? "border-accent bg-sidebar-accent text-foreground"
-                        : "border-transparent text-muted-foreground hover:border-foreground/40 hover:bg-sidebar-accent/50 hover:text-foreground",
+                        : "border-transparent text-muted-foreground hover:border-border hover:bg-sidebar-accent/50 hover:text-foreground",
                     )
                   }
                   title={p.description ?? p.name}

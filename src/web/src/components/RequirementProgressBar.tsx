@@ -58,12 +58,12 @@ export function RequirementProgressBar({ status }: { status: string }) {
   const isFailed = status === "failed";
 
   return (
-    <div className="my-4 border-[1.5px] border-foreground/30 bg-card p-3">
+    <div className="my-4 rounded-lg border border-border bg-card p-3">
       <div className="mb-2 flex items-center justify-between">
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <span className="bp-label text-muted-foreground">
           流程
         </span>
-        <span className="font-mono text-[10px] tracking-wider text-muted-foreground">
+        <span className="text-[11px] text-muted-foreground">
           {STEPS[currentStep - 1]?.label}
         </span>
       </div>
@@ -74,7 +74,7 @@ export function RequirementProgressBar({ status }: { status: string }) {
         })}
       </ol>
       {(isCancelled || isFailed) && (
-        <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-destructive">
+        <p className="mt-2 text-[11px] text-destructive">
           {isCancelled ? "已取消" : "执行失败 — 可重启或调 prompt"}
         </p>
       )}
@@ -97,12 +97,12 @@ function StepCell({ def, state }: { def: StepDef; state: StepState }) {
   return (
     <li
       className={cn(
-        "flex flex-1 items-center gap-2 border-[1.5px] px-2.5 py-1.5 transition-colors",
+        "flex flex-1 items-center gap-2 rounded-md border px-2.5 py-1.5 transition-colors",
         state === "done" && "border-success/50 bg-success/8 text-success",
         state === "current" && "border-accent bg-accent/10 text-accent",
-        state === "pending" && "border-foreground/20 bg-card text-muted-foreground",
+        state === "pending" && "border-border bg-card text-muted-foreground",
         state === "failed" && "border-destructive bg-destructive/8 text-destructive",
-        state === "cancelled" && "border-foreground/20 bg-muted/30 text-muted-foreground line-through",
+        state === "cancelled" && "border-border bg-muted/30 text-muted-foreground line-through",
       )}
     >
       {Icon ? (
@@ -113,10 +113,10 @@ function StepCell({ def, state }: { def: StepDef; state: StepState }) {
         </span>
       )}
       <div className="min-w-0">
-        <div className="font-display text-[11px] font-bold uppercase tracking-wider">
+        <div className="text-[11px] font-bold">
           {def.label}
         </div>
-        <div className="font-mono text-[9px] uppercase tracking-[0.12em] opacity-70 truncate">
+        <div className="text-[9px] opacity-70 truncate">
           {def.sublabel}
         </div>
       </div>

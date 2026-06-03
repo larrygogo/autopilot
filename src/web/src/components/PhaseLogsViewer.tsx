@@ -170,12 +170,12 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
 
   return (
     <Card>
-      <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-3">
           <span className="bp-label">阶段日志 · PHASE LOGS</span>
           {/* 实时状态指示器 — 选中 phase 还在跑时显示呼吸点 + "LIVE"，否则显示快照时间 */}
           {isLive ? (
-            <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
+            <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-accent">
               <span className="relative inline-flex h-1.5 w-1.5">
                 <span className="absolute inset-0 animate-ping rounded-full bg-accent opacity-75" />
                 <span className="relative inline-block h-1.5 w-1.5 rounded-full bg-accent" />
@@ -184,7 +184,7 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
             </span>
           ) : (
             lastFetchAt && (
-              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              <span className="font-mono text-[10px] text-muted-foreground">
                 快照于 {new Date(lastFetchAt).toLocaleTimeString()}
               </span>
             )
@@ -194,13 +194,13 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
 
       <div className="p-4">
         {phases.length === 0 ? (
-          <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             尚无阶段日志。任务开始执行阶段后会自动落盘。
           </p>
         ) : (
           <>
-            {/* 阶段切换 — 蓝图风方角下划线 tab */}
-            <div className="scrollbar-thin mb-3 flex gap-0 overflow-x-auto border-b border-foreground/25">
+            {/* 阶段切换 — 下划线 tab */}
+            <div className="scrollbar-thin mb-3 flex gap-0 overflow-x-auto border-b border-border">
               {phases.map((p) => {
                 const active = selected === p.phase;
                 return (
@@ -208,16 +208,16 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
                     key={p.phase}
                     type="button"
                     className={cn(
-                      "shrink-0 -mb-px border-b-2 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] transition-colors",
+                      "shrink-0 -mb-px border-b-2 px-3 py-2 font-mono text-[11px] transition-colors",
                       active
                         ? "border-accent text-foreground"
-                        : "border-transparent text-muted-foreground hover:text-foreground hover:border-foreground/40",
+                        : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
                     )}
                     onClick={() => setSelected(p.phase)}
                     title={`${formatSize(p.size)} · ${new Date(p.mtime).toLocaleString()}`}
                   >
                     <span>{p.phase}</span>
-                    <span className="ml-1.5 text-[10px] normal-case text-muted-foreground">
+                    <span className="ml-1.5 text-[10px] text-muted-foreground">
                       {formatSize(p.size)}
                     </span>
                   </button>
@@ -225,7 +225,7 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
               })}
             </div>
 
-            {/* 工具栏：搜索 + 级别筛选（蓝图风方角） */}
+            {/* 工具栏：搜索 + 级别筛选 */}
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -237,7 +237,7 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
                   className="pl-8"
                 />
               </div>
-              <div className="flex shrink-0 items-center gap-0 border border-foreground/30">
+              <div className="flex shrink-0 items-center gap-0 border border-border">
                 {ALL_LEVELS.map((lvl) => {
                   const on = levels.has(lvl);
                   return (
@@ -246,7 +246,7 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
                       type="button"
                       onClick={() => toggleLevel(lvl)}
                       className={cn(
-                        "inline-flex h-9 items-center border-r border-foreground/20 px-2.5 font-mono text-[10px] uppercase tracking-[0.15em] font-medium transition-colors last:border-r-0",
+                        "inline-flex h-9 items-center border-r border-border px-2.5 font-mono text-[10px] font-medium transition-colors last:border-r-0",
                         on
                           ? cn("bg-foreground/5", LEVEL_TEXT[lvl])
                           : "text-muted-foreground opacity-40 hover:opacity-100",
@@ -261,21 +261,21 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
             </div>
 
             {err && (
-              <p className="mb-2 border-[1.5px] border-destructive bg-destructive/10 px-3 py-2 font-mono text-xs text-destructive">
+              <p className="mb-2 border border-destructive bg-destructive/10 px-3 py-2 font-mono text-xs text-destructive">
                 {err}
               </p>
             )}
 
             {loading ? (
-              <p className="px-1 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <p className="px-1 py-2 text-xs text-muted-foreground">
                 加载中…
               </p>
             ) : filtered.length === 0 ? (
-              <p className="px-1 py-2 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <p className="px-1 py-2 text-xs text-muted-foreground">
                 {content ? "（当前过滤条件下无匹配日志）" : "（空）"}
               </p>
             ) : (
-              <pre className="scrollbar-thin max-h-[26rem] overflow-auto border border-foreground/25 bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
+              <pre className="scrollbar-thin max-h-[26rem] overflow-auto border border-border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed">
                 {filtered.map((line, i) => {
                   const lvl = extractLevel(line);
                   return (
@@ -293,9 +293,9 @@ export function PhaseLogsViewer({ taskId, taskStatus }: Props) {
               </pre>
             )}
 
-            <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <p className="mt-2 text-[10px] text-muted-foreground">
               显示 {filtered.length} / 总 {totalLines} 行（最多 2000 行，更早用{" "}
-              <code className="border border-foreground/20 bg-muted px-1 normal-case tracking-normal">{`~/.autopilot/runtime/tasks/${taskId}/logs/phase-${selected}.log`}</code>
+              <code className="border border-border bg-muted px-1 font-mono">{`~/.autopilot/runtime/tasks/${taskId}/logs/phase-${selected}.log`}</code>
               ）
             </p>
           </>

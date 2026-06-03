@@ -101,7 +101,7 @@ export function WorkspaceBrowser({ taskId }: Props) {
   return (
     <Card>
       {/* Header */}
-      <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
         <span className="bp-label">Workspace · FILES</span>
         <div className="flex items-center gap-1.5">
           <Button
@@ -138,10 +138,10 @@ export function WorkspaceBrowser({ taskId }: Props) {
 
       <div className="p-4">
         {/* 面包屑 */}
-        <div className="scrollbar-thin mb-3 flex flex-nowrap items-center gap-1 overflow-x-auto border border-foreground/25 bg-muted/40 px-2 py-1.5 font-mono text-xs">
+        <div className="scrollbar-thin mb-3 flex flex-nowrap items-center gap-1 overflow-x-auto border border-border bg-muted/40 px-2 py-1.5 font-mono text-xs">
           <button
             type="button"
-            className="shrink-0 px-1.5 py-0.5 uppercase tracking-wider text-muted-foreground transition-colors hover:text-accent"
+            className="shrink-0 px-1.5 py-0.5 text-muted-foreground transition-colors hover:text-accent"
             onClick={() => {
               setFile(null);
               loadTree("");
@@ -170,24 +170,24 @@ export function WorkspaceBrowser({ taskId }: Props) {
         </div>
 
         {err && (
-          <p className="mb-2 border-[1.5px] border-destructive bg-destructive/10 px-3 py-2 font-mono text-xs text-destructive">
+          <p className="mb-2 border border-destructive bg-destructive/10 px-3 py-2 font-mono text-xs text-destructive">
             {err}
           </p>
         )}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
           {/* 左：列表 */}
-          <div className="scrollbar-thin max-h-[28rem] overflow-auto border border-foreground/25 bg-card">
+          <div className="scrollbar-thin max-h-[28rem] overflow-auto border border-border bg-card">
             {loading ? (
-              <p className="p-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <p className="p-3 font-mono text-xs text-muted-foreground">
                 加载中…
               </p>
             ) : entries.length === 0 && !err ? (
-              <p className="p-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <p className="p-3 font-mono text-xs text-muted-foreground">
                 {cwd ? "（空目录）" : "（workspace 为空，任务尚未产生文件）"}
               </p>
             ) : (
-              <ul className="divide-y divide-dashed divide-foreground/20">
+              <ul className="divide-y divide-border">
                 {cwd && (
                   <li>
                     <button
@@ -232,25 +232,25 @@ export function WorkspaceBrowser({ taskId }: Props) {
           </div>
 
           {/* 右：文件预览 */}
-          <div className="min-w-0 border border-foreground/25 bg-card">
+          <div className="min-w-0 border border-border bg-card">
             {loadingFile && (
-              <p className="p-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <p className="p-3 font-mono text-xs text-muted-foreground">
                 加载文件…
               </p>
             )}
             {!loadingFile && !file && (
-              <p className="p-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <p className="p-3 font-mono text-xs text-muted-foreground">
                 点击左侧文件预览内容；点击目录进入
               </p>
             )}
             {!loadingFile && file && (
               <div className="flex min-w-0 flex-col">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-dashed border-foreground/25 bg-muted/30 px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-3 py-2">
                   <code className="min-w-0 break-all font-mono text-[11px] text-foreground">
                     {file.path}
                   </code>
                   <div className="flex shrink-0 items-center gap-2">
-                    <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <span className="font-mono text-[10px] text-muted-foreground">
                       {formatSize(file.size)}
                     </span>
                     <Button asChild size="sm" variant="ghost">
@@ -267,11 +267,11 @@ export function WorkspaceBrowser({ taskId }: Props) {
                 </div>
                 <div className="min-w-0 p-3">
                   {file.truncated ? (
-                    <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       文件 &gt; 1 MB，未加载预览。点击「下载」保存到本地查看。
                     </p>
                   ) : file.binary ? (
-                    <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       二进制文件，无法文本预览。点击「下载」。
                     </p>
                   ) : (
@@ -290,7 +290,7 @@ export function WorkspaceBrowser({ taskId }: Props) {
         message={
           <div className="space-y-2">
             <p>将删除此任务的 workspace 目录：</p>
-            <pre className="overflow-x-auto border border-foreground/25 bg-muted/40 px-2 py-1.5 font-mono text-[11px]">
+            <pre className="overflow-x-auto border border-border bg-muted/40 px-2 py-1.5 font-mono text-[11px]">
               {`~/.autopilot/runtime/tasks/${taskId}/workspace`}
             </pre>
             <p className="text-xs text-muted-foreground">

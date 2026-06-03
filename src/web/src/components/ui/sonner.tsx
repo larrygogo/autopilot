@@ -9,7 +9,7 @@ import { Toaster as Sonner, type ToasterProps } from "sonner";
  *  ┃ [Action] [Cancel]
  *  ─ 主体：纯色 popover 背景 + 1px 淡边框 + 柔投影 + 圆角
  *  ─ 语义：左侧 4px 色条按 data-type（success/info/warning/error）区分
- *  ─ 标题：font-display
+ *  ─ 标题：sans semibold
  *  ─ 描述：sans sm
  *
  *  关键点：不使用 sonner 的 `richColors`——它会强行注入彩色背景，
@@ -38,7 +38,7 @@ export function Toaster(props: ToasterProps) {
             "data-[type=error]:before:bg-destructive",
           ].join(" "),
           title:
-            "group-[.toast]:font-display group-[.toast]:font-bold group-[.toast]:text-foreground",
+            "group-[.toast]:font-semibold group-[.toast]:text-foreground",
           description:
             "group-[.toast]:text-muted-foreground group-[.toast]:text-sm",
           icon: [

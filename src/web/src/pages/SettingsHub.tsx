@@ -31,9 +31,9 @@ export function SettingsHub() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
-      <header className="mb-4 border-b-[1.5px] border-foreground/30 pb-3">
-        <h1 className="font-display text-2xl font-bold uppercase tracking-wider">设置 · SETTINGS</h1>
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground mt-1">
+      <header className="mb-4 border-b border-border pb-3">
+        <h1 className="font-display text-2xl font-bold">设置 · SETTINGS</h1>
+        <p className="text-xs text-muted-foreground mt-1">
           通用
         </p>
       </header>

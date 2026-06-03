@@ -86,8 +86,8 @@ export function RunningTasksIndicator() {
       onClick={handleClick}
       className={
         stale
-          ? "hidden md:inline-flex h-8 items-center gap-1.5 border-[1.5px] border-foreground/30 bg-muted/40 px-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:bg-muted/60"
-          : "hidden md:inline-flex h-8 items-center gap-1.5 border-[1.5px] border-accent/40 bg-accent/8 px-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/15"
+          ? "hidden md:inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted/60"
+          : "hidden md:inline-flex h-8 items-center gap-1.5 rounded-md border border-accent/40 bg-accent/8 px-2.5 font-mono text-[11px] text-accent transition-colors hover:bg-accent/15"
       }
       title={title}
     >

@@ -129,33 +129,33 @@ function PreviewBody({
       {/* prompt 优先显示 — 零代码模式下这才是 phase 的核心配置 */}
       {hasPrompt && (
         <section>
-          <div className="mb-1.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          <div className="mb-1.5 flex items-center gap-2 bp-label text-muted-foreground">
             <span>提示词 · prompt</span>
-            <span className="rounded-none border border-accent/40 bg-accent/5 px-1 py-px text-[9px] text-accent">
+            <span className="rounded-md border border-accent/40 bg-accent/5 px-1 py-px text-[9px] text-accent">
               零代码
             </span>
           </div>
-          <pre className="scrollbar-thin max-h-72 overflow-auto whitespace-pre-wrap break-words border-[1.5px] border-foreground/30 bg-card p-3 font-mono text-[11px] leading-relaxed">
+          <pre className="scrollbar-thin max-h-72 overflow-auto whitespace-pre-wrap break-words border border-border bg-card p-3 font-mono text-[11px] leading-relaxed">
             {phase.prompt}
           </pre>
         </section>
       )}
       {hasTs && (
         <section>
-          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          <div className="mb-1.5 bp-label text-muted-foreground">
             执行函数 · workflow.ts
           </div>
-          <pre className="scrollbar-thin max-h-72 overflow-auto border-[1.5px] border-foreground/30 bg-card p-3 font-mono text-[11px] leading-relaxed">
+          <pre className="scrollbar-thin max-h-72 overflow-auto border border-border bg-card p-3 font-mono text-[11px] leading-relaxed">
             {tsFunctionCode}
           </pre>
         </section>
       )}
       {!hasPrompt && !hasTs && (
         <section>
-          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          <div className="mb-1.5 bp-label text-muted-foreground">
             执行函数 · workflow.ts
           </div>
-          <p className="border-[1.5px] border-dashed border-foreground/30 bg-muted/30 p-3 text-xs text-muted-foreground">
+          <p className="border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
             未找到名为 <code className="font-mono">{phase.name}</code> 的导出函数；
             保存阶段时框架会自动追加 stub。
           </p>
@@ -211,7 +211,7 @@ function FieldGrid({ phase }: { phase: DrawerPhaseInfo }) {
 
   return (
     <section>
-      <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+      <div className="mb-1.5 bp-label text-muted-foreground">
         配置
       </div>
       <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm">
@@ -221,7 +221,7 @@ function FieldGrid({ phase }: { phase: DrawerPhaseInfo }) {
               className={cn(
                 "pt-0.5",
                 typeof it.label === "string"
-                  ? "font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
+                  ? "bp-label text-muted-foreground"
                   : "",
               )}
             >
@@ -232,7 +232,7 @@ function FieldGrid({ phase }: { phase: DrawerPhaseInfo }) {
         ))}
       </dl>
       {phase.gate && phase.gate_message && (
-        <p className="mt-2 border-l-[2px] border-warning bg-warning/5 px-2 py-1 text-xs text-muted-foreground">
+        <p className="mt-2 border-l-4 border-warning bg-warning/5 px-2 py-1 text-xs text-muted-foreground">
           {phase.gate_message}
         </p>
       )}
@@ -261,10 +261,10 @@ function StatusBody({
       <FieldGrid phase={phase} />
       {runStatus === "failed" && errorMessage && (
         <section>
-          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          <div className="mb-1.5 bp-label text-muted-foreground">
             错误信息
           </div>
-          <pre className="scrollbar-thin max-h-48 overflow-auto whitespace-pre-wrap break-words border-[1.5px] border-destructive bg-destructive/8 p-3 font-mono text-[11px] leading-relaxed text-destructive">
+          <pre className="scrollbar-thin max-h-48 overflow-auto whitespace-pre-wrap break-words border border-destructive bg-destructive/8 p-3 font-mono text-[11px] leading-relaxed text-destructive">
             {errorMessage}
           </pre>
         </section>
@@ -279,13 +279,13 @@ function StatusHero({ status, elapsedMs }: { status: PhaseRunStatus; elapsedMs?:
   return (
     <div
       className={cn(
-        "flex items-center gap-3 border-[1.5px] p-3",
+        "flex items-center gap-3 border p-3",
         meta.containerClass,
       )}
     >
       <Icon className={cn("h-5 w-5 shrink-0", meta.iconClass, status === "running" && "animate-spin")} />
       <div className="min-w-0 flex-1">
-        <div className={cn("font-display text-sm font-bold uppercase tracking-wider", meta.titleClass)}>
+        <div className={cn("text-sm font-bold", meta.titleClass)}>
           {meta.title}
         </div>
         {status === "running" && elapsedMs != null && (
@@ -334,7 +334,7 @@ function statusMeta(status: PhaseRunStatus): {
       return {
         title: "已跳过",
         icon: XCircle,
-        containerClass: "border-foreground/30 bg-muted/40",
+        containerClass: "border-border bg-muted/40",
         iconClass: "text-muted-foreground",
         titleClass: "text-muted-foreground",
       };
@@ -342,7 +342,7 @@ function statusMeta(status: PhaseRunStatus): {
       return {
         title: "等待中",
         icon: Clock,
-        containerClass: "border-foreground/30 bg-muted/40",
+        containerClass: "border-border bg-muted/40",
         iconClass: "text-muted-foreground",
         titleClass: "text-foreground",
       };
@@ -351,7 +351,7 @@ function statusMeta(status: PhaseRunStatus): {
       return {
         title: "未开始",
         icon: Circle,
-        containerClass: "border-foreground/20 bg-muted/30",
+        containerClass: "border-border bg-muted/30",
         iconClass: "text-muted-foreground",
         titleClass: "text-muted-foreground",
       };

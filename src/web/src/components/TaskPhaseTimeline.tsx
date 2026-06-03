@@ -87,17 +87,17 @@ export function TaskPhaseTimeline({ workflowPhases, events, phaseStats }: TaskPh
   if (workflowPhases.length === 0) return null;
 
   return (
-    <section className="mb-4 border-[1.5px] border-foreground/30 bg-card">
-      <header className="flex items-center justify-between border-b-[1.5px] border-foreground/30 px-3 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+    <section className="mb-4 rounded-lg border border-border bg-card">
+      <header className="flex items-center justify-between border-b border-border px-3 py-1.5">
+        <span className="bp-label text-[10px] text-muted-foreground">
           阶段进度
         </span>
         {/* 当前 / 总数 — 让长任务能看到"还差几步" */}
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <span className="bp-label text-[10px] text-muted-foreground">
           {currentIndex > 0 ? `${currentIndex} / ${workflowPhases.length}` : `${workflowPhases.length} 步`}
         </span>
       </header>
-      <ul className="divide-y divide-foreground/10">
+      <ul className="divide-y divide-border">
         {summaries.map((s, idx) => {
           const runningMs = s.runningStartedAt !== null ? now - s.runningStartedAt : 0;
           const displayMs = s.totalMs + runningMs;
@@ -106,7 +106,7 @@ export function TaskPhaseTimeline({ workflowPhases, events, phaseStats }: TaskPh
           // 仅当历史样本 >= 2 且此 phase 已开跑（有任何事件或正在跑）时显示参考耗时
           const showRef = ref && ref.count >= 2 && (displayMs > 0 || isActive);
           return (
-            <li key={s.phase} className={cn("flex items-center gap-3 px-3 py-2 font-mono text-xs", isActive && "bg-accent/5")}>
+            <li key={s.phase} className={cn("flex items-center gap-3 px-3 py-2 text-xs", isActive && "bg-accent/5")}>
               <span className="w-6 shrink-0 text-right text-[10px] text-muted-foreground tabular-nums">
                 {idx + 1}.
               </span>
@@ -115,7 +115,7 @@ export function TaskPhaseTimeline({ workflowPhases, events, phaseStats }: TaskPh
               </span>
               <span className="flex-1 truncate">{s.phase}</span>
               {s.retryCount > 1 && (
-                <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground">
+                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
                   ×{s.retryCount}
                 </span>
               )}
@@ -137,7 +137,7 @@ export function TaskPhaseTimeline({ workflowPhases, events, phaseStats }: TaskPh
                 {displayMs > 0 ? formatDuration(displayMs) : "—"}
               </span>
               {/* 状态文字在窄屏隐藏（已经有 StatusIcon 一目了然），仅 lg 显示 */}
-              <span className="hidden w-28 text-right text-[10px] uppercase tracking-[0.12em] text-muted-foreground lg:inline-block">
+              <span className="hidden w-28 text-right text-[10px] text-muted-foreground lg:inline-block">
                 <StatusText status={s.latestStatus} />
               </span>
             </li>

@@ -96,7 +96,7 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
       {workflows.length === 0 ? (
         <Card className="p-6 text-center">
           <p className="text-sm text-muted-foreground">还没有工作流</p>
-          <Button onClick={onNew} className="mt-3 rounded-none font-mono text-[11px] uppercase tracking-[0.12em]">
+          <Button onClick={onNew} className="mt-3 rounded-md text-[11px]">
             <Plus className="mr-1 h-3.5 w-3.5" /> 从模板创建第一个
           </Button>
         </Card>
@@ -120,7 +120,7 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
                 <p className="text-xs text-muted-foreground">
                   {wf.description || "（无描述）"}
                 </p>
-                <div className="mt-3 flex items-center gap-3 font-mono text-[11px] text-muted-foreground">
+                <div className="mt-3 flex items-center gap-3 text-[11px] text-muted-foreground">
                   <span>被 {stat?.count ?? 0} 个任务用过</span>
                   {stat?.latestAt && (
                     <>
@@ -140,7 +140,7 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
                     size="sm"
                     onClick={() => exportBundle(wf.name)}
                     title="导出 JSON 文件（包含 yaml + ts，便于分享 / 备份）"
-                    className="rounded-none font-mono text-[10px] uppercase tracking-[0.12em]"
+                    className="rounded-md text-[10px]"
                   >
                     <Download className="h-3 w-3" />
                     导出
@@ -149,7 +149,7 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
                     variant="outline"
                     size="sm"
                     onClick={() => onClone(wf.name)}
-                    className="rounded-none font-mono text-[10px] uppercase tracking-[0.12em]"
+                    className="rounded-md text-[10px]"
                   >
                     克隆
                   </Button>
@@ -157,7 +157,7 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
                     variant="default"
                     size="sm"
                     onClick={() => onSelect(wf.name)}
-                    className="rounded-none font-mono text-[10px] uppercase tracking-[0.12em]"
+                    className="rounded-md text-[10px]"
                   >
                     查看详情 →
                   </Button>

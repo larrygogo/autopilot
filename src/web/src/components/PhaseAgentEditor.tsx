@@ -111,11 +111,11 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
   }
 
   return (
-    <section className="border-t border-dashed border-foreground/25 pt-3">
+    <section className="border-t border-dashed border-border pt-3">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground"
+        className="bp-label flex w-full items-center gap-2 text-[10px] text-muted-foreground hover:text-foreground"
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         <Bot className="h-3.5 w-3.5" />
@@ -123,8 +123,8 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
         <span
           className={
             configured
-              ? "ml-auto rounded-none border border-accent/40 bg-accent/5 px-1 py-px text-[9px] normal-case tracking-normal text-accent"
-              : "ml-auto rounded-none border border-foreground/25 bg-muted/40 px-1 py-px text-[9px] normal-case tracking-normal text-muted-foreground"
+              ? "ml-auto rounded-md border border-accent/40 bg-accent/5 px-1 py-px text-[9px] normal-case tracking-normal text-accent"
+              : "ml-auto rounded-md border border-border bg-muted/40 px-1 py-px text-[9px] normal-case tracking-normal text-muted-foreground"
           }
         >
           {configured ? "已自定义" : "默认 agent"}
@@ -141,7 +141,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
       {expanded && (
         <div className="mt-2 space-y-3">
           {!configured ? (
-            <div className="border-[1.5px] border-dashed border-foreground/30 bg-muted/30 p-3">
+            <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3">
               <p className="text-[11px] text-muted-foreground">
                 本阶段未配置内联 agent，运行时使用默认 agent（DEFAULT_AGENT）。
                 点下方按钮开始为本阶段单独配置。
@@ -155,7 +155,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
             <>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  <Label className="bp-label text-[10px] text-muted-foreground">
                     提供商 (provider)
                   </Label>
                   <Select
@@ -175,7 +175,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  <Label className="bp-label text-[10px] text-muted-foreground">
                     最大轮数 (max_turns)
                   </Label>
                   <Input
@@ -191,7 +191,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  <Label className="bp-label text-[10px] text-muted-foreground">
                     模型 (model)
                   </Label>
                   <ModelCombobox
@@ -210,7 +210,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  <Label className="bp-label text-[10px] text-muted-foreground">
                     权限模式 (permission_mode)
                   </Label>
                   <Select
@@ -233,7 +233,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                <Label className="bp-label text-[10px] text-muted-foreground">
                   系统提示词 (system_prompt)
                 </Label>
                 <Textarea

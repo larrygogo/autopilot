@@ -147,7 +147,7 @@ function ProjectsTab() {
   return (
     <div className="space-y-4 pt-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <p className="bp-label text-muted-foreground">
           共 {projects.length} 个项目
         </p>
         <div className="flex items-center gap-2">
@@ -192,11 +192,11 @@ function ProjectsTab() {
               onClick={() => navigate("/projects/" + project.id)}
             >
               {/* eyebrow + 项目 id（蓝图风） */}
-              <div className="mb-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              <div className="mb-2 flex items-center gap-2 bp-label text-muted-foreground">
                 <Layers className="h-3 w-3" />
-                <span>PROJECT · {project.id}</span>
+                <span className="font-mono">{project.id}</span>
               </div>
-              <h3 className="font-display text-base font-bold uppercase tracking-wider leading-tight line-clamp-2">
+              <h3 className="text-base font-bold leading-tight line-clamp-2">
                 {project.name}
               </h3>
               {project.description && (
@@ -205,8 +205,8 @@ function ProjectsTab() {
                 </p>
               )}
               {/* 底部 footer：创建时间 + 永远可见的 edit / delete（不依赖 hover，键盘 / 触屏均可达） */}
-              <div className="mt-3 flex items-center justify-between border-t border-dashed border-foreground/20 pt-2">
-                <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <div className="mt-3 flex items-center justify-between border-t border-border pt-2">
+                <span className="text-[11px] text-muted-foreground">
                   创建于 {new Date(project.created_at).toLocaleDateString("zh-CN")}
                 </span>
                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -343,9 +343,9 @@ export function Library() {
   // 历史 tab 已并入「现在」页，本页只剩项目列表
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
-      <header className="mb-4 border-b-[1.5px] border-foreground/30 pb-3">
-        <h1 className="font-display text-2xl font-bold uppercase tracking-wider">项目 · PROJECTS</h1>
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground mt-1">
+      <header className="mb-4 border-b border-border pb-3">
+        <h1 className="font-display text-2xl font-bold">项目</h1>
+        <p className="text-xs text-muted-foreground mt-1">
           按项目维度查看 / 新建 / 进入工作台
         </p>
       </header>

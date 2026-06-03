@@ -57,11 +57,11 @@ export function DaemonOfflineBanner({ wsState }: { wsState: ConnectionState }) {
   return (
     <div
       role="status"
-      className="flex shrink-0 flex-wrap items-center gap-3 border-b-[1.5px] border-destructive/60 bg-destructive/10 px-4 py-2 text-destructive"
+      className="flex shrink-0 flex-wrap items-center gap-3 border-b border-destructive/60 bg-destructive/10 px-4 py-2 text-destructive"
     >
       <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
       <div className="min-w-0 flex-1 font-mono text-xs">
-        <span className="font-bold uppercase tracking-[0.14em]">Daemon 失联</span>
+        <span className="font-bold">Daemon 失联</span>
         <span className="ml-2 text-destructive/80">
           · 数据可能已过期，所有操作会失败
         </span>
@@ -70,7 +70,7 @@ export function DaemonOfflineBanner({ wsState }: { wsState: ConnectionState }) {
         <button
           type="button"
           onClick={handleCopyCmd}
-          className="inline-flex items-center gap-1.5 border-[1.5px] border-destructive/60 bg-background px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-destructive hover:bg-destructive/5"
+          className="inline-flex items-center gap-1.5 rounded-md border border-destructive/60 bg-background px-2 py-1 font-mono text-[10px] text-destructive hover:bg-destructive/5"
           title="复制启动命令"
         >
           {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -79,7 +79,7 @@ export function DaemonOfflineBanner({ wsState }: { wsState: ConnectionState }) {
         <button
           type="button"
           onClick={handleReconnect}
-          className="inline-flex items-center gap-1.5 bg-destructive px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-destructive-foreground hover:bg-destructive/85"
+          className="inline-flex items-center gap-1.5 rounded-md bg-destructive px-2 py-1 text-[10px] text-destructive-foreground hover:bg-destructive/85"
         >
           <RotateCcw className="h-3 w-3" />
           重新连接

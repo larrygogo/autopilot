@@ -101,7 +101,7 @@ export const SheetTitle = React.forwardRef<
   <DialogPrimitive.Title
     ref={ref}
     className={cn(
-      "font-display text-lg font-bold text-foreground",
+      "text-lg font-semibold text-foreground tracking-tight",
       className,
     )}
     {...props}

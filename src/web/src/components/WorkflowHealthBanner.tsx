@@ -82,11 +82,11 @@ export function WorkflowHealthBanner({ onFixed }: { onFixed?: () => void }) {
 
   return (
     <>
-      <div className="mb-4 border-[1.5px] border-warning bg-warning/8 p-3">
+      <div className="mb-4 rounded-lg border border-warning bg-warning/8 p-3">
         <div className="flex items-center gap-3">
           <AlertTriangle className="h-5 w-5 shrink-0 text-warning" />
           <div className="flex-1 text-sm">
-            <span className="font-display font-bold uppercase tracking-wider text-warning">
+            <span className="font-bold text-warning">
               工作流目录检测到问题
             </span>
             <span className="ml-2 text-muted-foreground">
@@ -121,7 +121,7 @@ export function WorkflowHealthBanner({ onFixed }: { onFixed?: () => void }) {
             {report.orphans.length > 0 && (
               <section>
                 <div className="mb-2 flex items-center justify-between">
-                  <h3 className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <h3 className="bp-label text-muted-foreground">
                     失联目录 · orphan directory（{report.orphans.length}）
                   </h3>
                   <Button
@@ -138,7 +138,7 @@ export function WorkflowHealthBanner({ onFixed }: { onFixed?: () => void }) {
                   {report.orphans.map((o) => (
                     <li
                       key={o.dir}
-                      className="flex items-center gap-2 border-[1.5px] border-foreground/20 bg-card px-3 py-2"
+                      className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2"
                     >
                       <div className="min-w-0 flex-1 text-xs">
                         <div className="font-mono font-bold">{o.dir}/</div>
@@ -168,14 +168,14 @@ export function WorkflowHealthBanner({ onFixed }: { onFixed?: () => void }) {
 
             {report.collisions.length > 0 && (
               <section>
-                <h3 className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                <h3 className="mb-2 bp-label text-muted-foreground">
                   重名碰撞（{report.collisions.length}）
                 </h3>
                 <ul className="space-y-1.5">
                   {report.collisions.map((c) => (
                     <li
                       key={c.name}
-                      className="border-[1.5px] border-foreground/20 bg-card px-3 py-2 text-xs"
+                      className="rounded-md border border-border bg-card px-3 py-2 text-xs"
                     >
                       <div className="mb-0.5 font-mono font-bold">name: {c.name}</div>
                       <div className="text-muted-foreground">

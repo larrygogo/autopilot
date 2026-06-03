@@ -133,11 +133,11 @@ export function NextStepCTA(props: NextStepCTAProps) {
 
   return (
     <div
-      className={`mb-6 flex flex-col gap-3 border-[1.5px] ${containerClass} p-4 sm:flex-row sm:items-center sm:justify-between`}
+      className={`mb-6 flex flex-col gap-3 rounded-lg border ${containerClass} p-4 sm:flex-row sm:items-center sm:justify-between`}
     >
       <div className="flex min-w-0 items-center gap-3">
         <span
-          className={`shrink-0 border-[1.5px] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] ${tagClass}`}
+          className={`shrink-0 rounded-md border px-2 py-1 text-[10px] ${tagClass}`}
         >
           下一步
         </span>
@@ -148,7 +148,7 @@ export function NextStepCTA(props: NextStepCTAProps) {
         variant={isDanger ? "destructive" : "default"}
         disabled={props.busy}
         onClick={handler}
-        className="shrink-0 rounded-none font-mono text-xs uppercase tracking-[0.14em]"
+        className="shrink-0 rounded-md text-xs"
       >
         {props.busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Icon className="mr-1.5 h-4 w-4" />}
         {props.busy ? "处理中…" : cfg.cta}

@@ -142,8 +142,8 @@ export function NewWorkflowDialog({ open, onClose, onCreated }: Props) {
             </p>
           </div>
 
-          <div className="border border-foreground/25 bg-muted/40 px-3 py-2.5">
-            <p className="mb-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          <div className="border border-border bg-muted/40 px-3 py-2.5">
+            <p className="bp-label mb-1">
               将生成文件：
             </p>
             <ul className="space-y-0.5 font-mono text-xs leading-relaxed">
@@ -160,7 +160,7 @@ export function NewWorkflowDialog({ open, onClose, onCreated }: Props) {
 
           <p className="text-xs text-muted-foreground">
             提示：
-            <kbd className="border border-foreground/40 bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+            <kbd className="border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
               {modShortcut("Enter")}
             </kbd>{" "}
             快速提交。创建后可在「高级 (YAML)」中继续编辑。

@@ -90,9 +90,9 @@ export function Setup() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
-      <header className="mb-4 border-b-[1.5px] border-foreground/30 pb-3">
-        <h1 className="font-display text-2xl font-bold uppercase tracking-wider">首跑向导 · SETUP</h1>
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground mt-1">
+      <header className="mb-4 border-b border-border pb-3">
+        <h1 className="font-display text-2xl font-bold">首跑向导 · SETUP</h1>
+        <p className="text-xs text-muted-foreground mt-1">
           完成 3 步即可开始使用 autopilot
         </p>
       </header>
@@ -100,14 +100,14 @@ export function Setup() {
       <SetupProgress current={step} labels={["Provider", "Codebase"]} />
 
       {step === 2 && minimumReady && (
-        <div className="mb-4 border-[1.5px] border-foreground/30 px-3 py-2 font-mono text-xs">
+        <div className="mb-4 rounded-md border border-border px-3 py-2 text-xs">
           ✓ 核心配置已就绪 · 第 2 步可选
         </div>
       )}
 
       {step === 1 && (
         <section className="space-y-4">
-          <h2 className="font-mono text-sm font-bold uppercase">1/2 · 启用 Provider</h2>
+          <h2 className="text-sm font-bold">1/2 · 启用 Provider</h2>
           {ALL_PROVIDERS.map((p) => (
             <div key={p.name} className="flex items-center gap-3">
               <Checkbox
@@ -140,7 +140,7 @@ export function Setup() {
 
       {step === 2 && (
         <section className="space-y-4">
-          <h2 className="font-mono text-sm font-bold uppercase">2/2 · 添加 Codebase（可选）</h2>
+          <h2 className="text-sm font-bold">2/2 · 添加 Codebase（可选）</h2>
           <div>
             <Label htmlFor="cb-name">名称</Label>
             <Input id="cb-name" value={cbName} onChange={(e) => setCbName(e.target.value)} placeholder="my-project" />

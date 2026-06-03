@@ -65,8 +65,8 @@ export function NowCard({ card, now }: Props) {
   return (
     <article
       className={cn(
-        "border-[1.5px] border-l-4 rounded-none",
-        "border-foreground/30 bg-card",
+        "border border-l-4 rounded-lg",
+        "border-border bg-card",
         PRIORITY_BAR[card.priority],
         "px-4 py-3 flex gap-4",
       )}
@@ -74,19 +74,19 @@ export function NowCard({ card, now }: Props) {
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 mb-1">
-          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          <span className="font-mono text-[10px] text-muted-foreground">
             {card.priority} · {PRIORITY_LABEL[card.priority]}
           </span>
           {card.related && (
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <span className="font-mono text-[10px] text-muted-foreground">
               {card.related.type} · {card.related.id}
             </span>
           )}
-          <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          <span className="ml-auto font-mono text-[10px] text-muted-foreground">
             等候 {formatWaited(waitedSec)}
           </span>
         </div>
-        <h3 className="font-display text-sm font-bold tracking-wide text-foreground truncate">
+        <h3 className="text-sm font-bold tracking-wide text-foreground truncate">
           {card.title}
         </h3>
         <p className="text-sm text-muted-foreground mt-0.5 truncate">{card.subtitle}</p>
@@ -110,7 +110,7 @@ export function NowCard({ card, now }: Props) {
                 asChild
                 variant={variant}
                 size="sm"
-                className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em] min-w-[80px]"
+                className="rounded-md text-[11px] min-w-[80px]"
               >
                 <Link to={action.href}>{action.label}</Link>
               </Button>
@@ -121,7 +121,7 @@ export function NowCard({ card, now }: Props) {
               key={idx}
               variant={variant}
               size="sm"
-              className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em] min-w-[80px]"
+              className="rounded-md text-[11px] min-w-[80px]"
               disabled={invoking === idx}
               onClick={() =>
                 void handleInvoke(
