@@ -1,14 +1,14 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@import url("https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;900&family=JetBrains+Mono:wght@400;500;700&family=Manrope:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600&display=swap");
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
   --font-sans: "Manrope", "Noto Sans SC", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Noto Sans SC", "Cascadia Code", ui-monospace, monospace;
-  --font-display: "Big Shoulders Display", "Noto Sans SC", sans-serif;
+  --font-display: "Source Serif 4", "Noto Sans SC", Georgia, serif;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -45,89 +45,89 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  /* 蓝图风：全方角 */
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 2px;
+  /* Claude 风：柔和圆角 */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
 }
 
 :root {
-  --radius: 0px;
+  --radius: 0.5rem;
 
-  /* Light mode = 老蓝图工程图纸（米黄做旧纸 + 深蓝墨水印） */
-  --background: oklch(0.92 0.045 85);
-  --foreground: oklch(0.30 0.08 250);
-  --card: oklch(0.945 0.04 85);
-  --card-foreground: oklch(0.30 0.08 250);
-  --popover: oklch(0.945 0.04 85);
-  --popover-foreground: oklch(0.30 0.08 250);
-  --primary: oklch(0.30 0.08 250);
-  --primary-foreground: oklch(0.945 0.04 85);
-  --secondary: oklch(0.88 0.05 85);
-  --secondary-foreground: oklch(0.30 0.08 250);
-  --muted: oklch(0.88 0.05 85);
-  --muted-foreground: oklch(0.30 0.08 250 / 0.55);
-  --accent: oklch(0.58 0.18 35);
-  --accent-foreground: oklch(0.945 0.04 85);
-  --destructive: oklch(0.58 0.18 35);
-  --destructive-foreground: oklch(0.945 0.04 85);
-  --success: oklch(0.45 0.07 145);
-  --success-foreground: oklch(0.945 0.04 85);
-  --warning: oklch(0.58 0.12 75);
-  --warning-foreground: oklch(0.945 0.04 85);
-  --info: oklch(0.55 0.10 250);
-  --info-foreground: oklch(0.945 0.04 85);
-  --border: oklch(0.30 0.08 250 / 0.28);
-  --input: oklch(0.30 0.08 250 / 0.4);
-  --ring: oklch(0.58 0.18 35 / 0.5);
+  /* Light = 暖象牙奶油底 + 珊瑚橘墨 */
+  --background: oklch(0.97 0.008 90);
+  --foreground: oklch(0.27 0.006 60);
+  --card: oklch(0.99 0.005 90);
+  --card-foreground: oklch(0.27 0.006 60);
+  --popover: oklch(0.99 0.005 90);
+  --popover-foreground: oklch(0.27 0.006 60);
+  --primary: oklch(0.64 0.13 42);
+  --primary-foreground: oklch(0.99 0.005 90);
+  --secondary: oklch(0.94 0.008 85);
+  --secondary-foreground: oklch(0.27 0.006 60);
+  --muted: oklch(0.94 0.008 85);
+  --muted-foreground: oklch(0.27 0.006 60 / 0.55);
+  --accent: oklch(0.64 0.13 42);
+  --accent-foreground: oklch(0.99 0.005 90);
+  --destructive: oklch(0.55 0.18 27);
+  --destructive-foreground: oklch(0.99 0.005 90);
+  --success: oklch(0.55 0.10 150);
+  --success-foreground: oklch(0.99 0.005 90);
+  --warning: oklch(0.70 0.13 70);
+  --warning-foreground: oklch(0.27 0.006 60);
+  --info: oklch(0.60 0.10 240);
+  --info-foreground: oklch(0.99 0.005 90);
+  --border: oklch(0.27 0.006 60 / 0.12);
+  --input: oklch(0.27 0.006 60 / 0.18);
+  --ring: oklch(0.64 0.13 42 / 0.4);
 
-  --sidebar: oklch(0.945 0.04 85);
-  --sidebar-foreground: oklch(0.30 0.08 250);
-  --sidebar-primary: oklch(0.30 0.08 250);
-  --sidebar-primary-foreground: oklch(0.945 0.04 85);
-  --sidebar-accent: oklch(0.88 0.05 85);
-  --sidebar-accent-foreground: oklch(0.30 0.08 250);
-  --sidebar-border: oklch(0.30 0.08 250 / 0.22);
-  --sidebar-ring: oklch(0.58 0.18 35 / 0.5);
+  --sidebar: oklch(0.955 0.008 88);
+  --sidebar-foreground: oklch(0.27 0.006 60);
+  --sidebar-primary: oklch(0.64 0.13 42);
+  --sidebar-primary-foreground: oklch(0.99 0.005 90);
+  --sidebar-accent: oklch(0.94 0.008 85);
+  --sidebar-accent-foreground: oklch(0.27 0.006 60);
+  --sidebar-border: oklch(0.27 0.006 60 / 0.10);
+  --sidebar-ring: oklch(0.64 0.13 42 / 0.4);
 }
 
 .dark {
-  /* Dark mode = 深藏青古典蓝图（深底 + 淡青蓝线 + 暖白墨） */
-  --background: oklch(0.18 0.04 250);
-  --foreground: oklch(0.93 0.015 85);
-  --card: oklch(0.22 0.04 250);
-  --card-foreground: oklch(0.93 0.015 85);
-  --popover: oklch(0.22 0.04 250);
-  --popover-foreground: oklch(0.93 0.015 85);
-  --primary: oklch(0.85 0.10 220);
-  --primary-foreground: oklch(0.18 0.04 250);
-  --secondary: oklch(0.26 0.04 250);
-  --secondary-foreground: oklch(0.93 0.015 85);
-  --muted: oklch(0.26 0.04 250);
-  --muted-foreground: oklch(0.93 0.015 85 / 0.6);
-  --accent: oklch(0.78 0.15 65);
-  --accent-foreground: oklch(0.18 0.04 250);
-  --destructive: oklch(0.72 0.18 25);
-  --destructive-foreground: oklch(0.18 0.04 250);
-  --success: oklch(0.75 0.15 145);
-  --success-foreground: oklch(0.18 0.04 250);
-  --warning: oklch(0.85 0.13 80);
-  --warning-foreground: oklch(0.18 0.04 250);
-  --info: oklch(0.78 0.12 220);
-  --info-foreground: oklch(0.18 0.04 250);
-  --border: oklch(0.85 0.10 220 / 0.25);
-  --input: oklch(0.85 0.10 220 / 0.35);
-  --ring: oklch(0.78 0.15 65 / 0.55);
+  /* Dark = 暖炭灰底 + 珊瑚橘（非纯黑） */
+  --background: oklch(0.20 0.004 60);
+  --foreground: oklch(0.93 0.005 80);
+  --card: oklch(0.24 0.004 60);
+  --card-foreground: oklch(0.93 0.005 80);
+  --popover: oklch(0.24 0.004 60);
+  --popover-foreground: oklch(0.93 0.005 80);
+  --primary: oklch(0.70 0.13 42);
+  --primary-foreground: oklch(0.20 0.004 60);
+  --secondary: oklch(0.28 0.004 60);
+  --secondary-foreground: oklch(0.93 0.005 80);
+  --muted: oklch(0.28 0.004 60);
+  --muted-foreground: oklch(0.93 0.005 80 / 0.55);
+  --accent: oklch(0.70 0.13 42);
+  --accent-foreground: oklch(0.20 0.004 60);
+  --destructive: oklch(0.65 0.17 25);
+  --destructive-foreground: oklch(0.20 0.004 60);
+  --success: oklch(0.70 0.13 150);
+  --success-foreground: oklch(0.20 0.004 60);
+  --warning: oklch(0.78 0.13 75);
+  --warning-foreground: oklch(0.20 0.004 60);
+  --info: oklch(0.70 0.10 240);
+  --info-foreground: oklch(0.20 0.004 60);
+  --border: oklch(0.93 0.005 80 / 0.12);
+  --input: oklch(0.93 0.005 80 / 0.18);
+  --ring: oklch(0.70 0.13 42 / 0.45);
 
-  --sidebar: oklch(0.20 0.04 250);
-  --sidebar-foreground: oklch(0.93 0.015 85);
-  --sidebar-primary: oklch(0.85 0.10 220);
-  --sidebar-primary-foreground: oklch(0.18 0.04 250);
-  --sidebar-accent: oklch(0.26 0.04 250);
-  --sidebar-accent-foreground: oklch(0.93 0.015 85);
-  --sidebar-border: oklch(0.85 0.10 220 / 0.22);
-  --sidebar-ring: oklch(0.78 0.15 65 / 0.5);
+  --sidebar: oklch(0.18 0.004 60);
+  --sidebar-foreground: oklch(0.93 0.005 80);
+  --sidebar-primary: oklch(0.70 0.13 42);
+  --sidebar-primary-foreground: oklch(0.20 0.004 60);
+  --sidebar-accent: oklch(0.28 0.004 60);
+  --sidebar-accent-foreground: oklch(0.93 0.005 80);
+  --sidebar-border: oklch(0.93 0.005 80 / 0.10);
+  --sidebar-ring: oklch(0.70 0.13 42 / 0.45);
 }
 
 @layer base {
@@ -142,22 +142,9 @@
   body {
     @apply bg-background text-foreground font-sans;
     font-feature-settings: "rlig" 1, "calt" 1;
-    /* mobile 兜底：长 URL / 文件路径 / 任务 ID 等无空格串不撑爆父容器。
-       overflow-wrap: anywhere 比 break-word 更激进，能在任意字符断；
-       对正常英文阅读几乎无影响（只在没空格的超长串才生效），中文本来就字字可断。 */
+    /* mobile 兜底：长 URL / 文件路径 / 任务 ID 等无空格串不撑爆父容器 */
     overflow-wrap: anywhere;
-    background-image:
-      linear-gradient(rgba(29, 53, 87, 0.06) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(29, 53, 87, 0.06) 1px, transparent 1px),
-      url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' /><feColorMatrix values='0 0 0 0 0.114  0 0 0 0 0.208  0 0 0 0 0.341  0 0 0 0.05 0' /></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-    background-size: 24px 24px, 24px 24px, 200px 200px;
-    background-attachment: fixed;
-  }
-  .dark body {
-    background-image:
-      linear-gradient(rgba(125, 211, 252, 0.045) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(125, 211, 252, 0.045) 1px, transparent 1px);
-    background-size: 24px 24px, 24px 24px;
+    /* Claude 风：纯净底色，去网格 + 去噪点 */
   }
   *:focus-visible {
     @apply outline-ring outline-2 outline-offset-2;
@@ -167,25 +154,21 @@
     color: var(--accent-foreground);
   }
 
-  /* 蓝图风排印：标题用 display 字体 + 大写 + 字距 */
+  /* 标题：正常大小写 sans，靠字重/字号分层；不再强制 display 字体 + 大写 */
   h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-display);
-    letter-spacing: 0.01em;
-    text-transform: uppercase;
     font-weight: 700;
+    letter-spacing: -0.01em;
   }
   code, kbd, pre, samp {
     font-family: var(--font-mono);
   }
 }
 
-/* ──────────── 全局滚动条样式（蓝图风） ──────────── */
-/* Firefox */
+/* ──────────── 全局滚动条样式（柔和） ──────────── */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
-/* WebKit (Chrome / Safari / Edge) */
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -195,7 +178,7 @@
 }
 *::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 0;
+  border-radius: 6px;
   border: 2px solid transparent;
   background-clip: padding-box;
   transition: background-color 0.15s;
@@ -213,8 +196,7 @@
 }
 
 @layer utilities {
-  /* 保留 .scrollbar-thin 作为兼容 alias（现有 16 个文件还在用）；
-     全局样式已经统一，此 class 现在只是显式表意 */
+  /* .scrollbar-thin 兼容 alias（现有多文件引用），统一柔和样式 */
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
@@ -228,58 +210,53 @@
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
     background: var(--border);
-    border-radius: 0;
+    border-radius: 6px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     background: var(--muted-foreground);
   }
 
-  /* ──────────── 蓝图风工具类 ──────────── */
+  /* ──────────── 兼容工具类（原 bp-*，已软化为 Claude 等价物） ──────────── */
+  /* 类名保留作为兼容 alias，避免改动 62 个引用文件；语义改为柔和 */
 
-  /* 硬阴影（蓝图标志风格）：4px 实色偏移 */
+  /* 柔和投影（替代原硬阴影） */
   .bp-shadow {
-    box-shadow: 4px 4px 0 0 var(--foreground);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 2px 6px rgb(0 0 0 / 0.06);
   }
   .bp-shadow-sm {
-    box-shadow: 2px 2px 0 0 var(--foreground);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
   }
-  /* hover 时硬阴影 + 微抬升 */
+  /* hover 微抬升（去平移，去硬阴影） */
   .bp-lift {
     transition: transform 0.18s ease, box-shadow 0.18s ease;
   }
   .bp-lift:hover {
-    transform: translate(-2px, -2px);
-    box-shadow: 4px 4px 0 0 var(--foreground);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
   }
 
-  /* 网格底纹（仅装饰，叠在容器内部） */
+  /* 网格底纹：软化为 no-op（保留类名兼容） */
   .bp-grid {
-    background-image:
-      linear-gradient(var(--border) 1px, transparent 1px),
-      linear-gradient(90deg, var(--border) 1px, transparent 1px);
-    background-size: 24px 24px;
+    background-image: none;
   }
 
-  /* 切角（HUD 风右上 / 左下三角切口） */
+  /* 切角：移除 HUD 切口，改圆角 */
   .bp-clip-corner {
-    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+    border-radius: var(--radius);
   }
 
-  /* 章节分割线：点划线 */
+  /* 分割线：点划线 → 实线低对比 */
   .bp-divider {
-    border-top: 1px dashed var(--border);
+    border-top: 1px solid var(--border);
   }
 
-  /* 标签：mono + 字距 + 大写 + 灰色（蓝图技术注记常用） */
+  /* 小标签（eyebrow）：mono 小字灰，去大写、降字距（Claude 风小写灰标签） */
   .bp-label {
     font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.04em;
     color: var(--muted-foreground);
   }
-
-  /* mono 标签的链接色（保留可读性） */
   .bp-label-accent {
     color: var(--accent);
   }
@@ -290,31 +267,30 @@
     font-variant-ligatures: none;
   }
 
-  /* MarkdownView 容器：显式兜底（虽然 body 已继承 overflow-wrap，
-     某些 prose 风库可能覆盖，这里 belt-and-suspenders）。 */
-  .prose-bp {
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-  .prose-bp pre {
-    /* pre 块自己有 overflow-x-auto，不应触发 wrap（破坏代码格式） */
-    overflow-wrap: normal;
-    word-break: normal;
-  }
-
-  /* 编号块（L1 / L2 那种厚边框 + 单色填充） */
+  /* 编号块：实色方块 → 圆角柔和徽标 */
   .bp-num-block {
     font-family: var(--font-display);
-    font-weight: 900;
-    background: var(--foreground);
-    color: var(--background);
+    font-weight: 600;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     line-height: 1;
   }
 
-  /* 蓝图风 checkbox：方角 + 1.5px 描边，选中后填 accent + 白对勾 */
+  /* MarkdownView 容器：长串断行兜底 */
+  .prose-bp {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .prose-bp pre {
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  /* Checkbox：圆角 + 淡描边，选中态橘 */
   .bp-checkbox {
     -webkit-appearance: none;
     appearance: none;
@@ -322,9 +298,9 @@
     width: 1rem;
     flex-shrink: 0;
     cursor: pointer;
-    border: 1.5px solid color-mix(in oklch, var(--foreground) 40%, transparent);
+    border: 1.5px solid color-mix(in oklch, var(--foreground) 25%, transparent);
     background-color: transparent;
-    border-radius: 0;
+    border-radius: 0.25rem;
     transition: background-color 0.15s ease, border-color 0.15s ease;
   }
   .bp-checkbox:hover:not(:disabled) {
@@ -333,18 +309,18 @@
   .bp-checkbox:checked {
     background-color: var(--accent);
     border-color: var(--accent);
-    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'><path fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='square' stroke-linejoin='miter' d='M3 8.5 L6.5 12 L13 5'/></svg>");
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'><path fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' d='M3 8.5 L6.5 12 L13 5'/></svg>");
     background-repeat: no-repeat;
     background-position: center;
-    background-size: 90%;
+    background-size: 88%;
   }
   .bp-checkbox:indeterminate {
     background-color: var(--accent);
     border-color: var(--accent);
-    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'><path stroke='%23fff' stroke-width='2.5' stroke-linecap='square' d='M3.5 8 L12.5 8'/></svg>");
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'><path stroke='%23fff' stroke-width='2.5' stroke-linecap='round' d='M3.5 8 L12.5 8'/></svg>");
     background-repeat: no-repeat;
     background-position: center;
-    background-size: 90%;
+    background-size: 88%;
   }
   .bp-checkbox:focus-visible {
     outline: 2px solid var(--ring);
