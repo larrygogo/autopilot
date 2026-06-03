@@ -422,10 +422,10 @@ function NavLinkItem({ item, badgeCount }: { item: NavItem; badgeCount: number }
       end={item.end}
       className={({ isActive }) =>
         cn(
-          "group relative flex w-full items-center gap-2.5 rounded-md border-l-2 px-2.5 py-2 text-sm font-medium transition-all",
+          "group relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-all",
           isActive
-            ? "border-accent bg-sidebar-accent text-foreground"
-            : "border-transparent text-muted-foreground hover:border-border hover:bg-sidebar-accent/50 hover:text-foreground",
+            ? "bg-sidebar-accent text-foreground"
+            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
         )
       }
     >
@@ -476,10 +476,10 @@ function ExpandableNavItem({ item, children }: { item: NavItem; children: Projec
     <div>
       <div
         className={cn(
-          "relative flex w-full items-center gap-2.5 rounded-md border-l-2 pr-1 text-sm font-medium transition-all",
+          "relative flex w-full items-center gap-2.5 rounded-md pr-1 text-sm font-medium transition-all",
           parentActive
-            ? "border-accent bg-sidebar-accent text-foreground"
-            : "border-transparent text-muted-foreground hover:border-border hover:bg-sidebar-accent/50 hover:text-foreground",
+            ? "bg-sidebar-accent text-foreground"
+            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
         )}
       >
         <NavLink
@@ -512,10 +512,10 @@ function ExpandableNavItem({ item, children }: { item: NavItem; children: Projec
                   to={`/projects/${p.id}`}
                   className={({ isActive }) =>
                     cn(
-                      "flex items-center gap-2 rounded-md border-l-2 px-2 py-1.5 font-mono text-[11px] transition-colors",
+                      "flex items-center gap-2 rounded-md px-2 py-1.5 font-mono text-[11px] transition-colors",
                       isActive
-                        ? "border-accent bg-sidebar-accent text-foreground"
-                        : "border-transparent text-muted-foreground hover:border-border hover:bg-sidebar-accent/50 hover:text-foreground",
+                        ? "bg-sidebar-accent text-foreground"
+                        : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
                     )
                   }
                   title={p.description ?? p.name}

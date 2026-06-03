@@ -406,10 +406,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
               <div className="px-3 py-1.5 text-foreground">{requirements.length}</div>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={refresh}>
-            <RefreshCw className="h-4 w-4" />
-            刷新
-          </Button>
         </div>
       </header>
 

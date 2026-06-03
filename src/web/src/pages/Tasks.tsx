@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, RefreshCw, Hand, AlertCircle, CheckCircle2, XCircle, Clock, Search, X } from "lucide-react";
+import { Loader2, Hand, AlertCircle, CheckCircle2, XCircle, Clock, Search, X } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -154,12 +154,6 @@ export function Tasks() {
           { k: "总数", v: tasks.length },
           ...(filterActive ? [{ k: "匹配", v: filteredTasks.length }] : []),
         ]}
-        actions={
-          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-            <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", loading && "animate-spin")} />
-            刷新
-          </Button>
-        }
       />
 
       {/* P0 工具栏：搜索框 + workflow chip 过滤 — 只在有任务时显示，新用户看不到 */}

@@ -4,12 +4,11 @@ import { useNowCards } from "@/hooks/useNowCards";
 import { NowCard } from "@/components/NowCard";
 import { NowEmptyGuide } from "@/components/NowEmptyGuide";
 import { PageHero } from "@/components/PageHero";
-import { Loader2, RefreshCw, ListChecks } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Loader2, ListChecks } from "lucide-react";
 import { api, type DoctorReportWithDismiss } from "@/hooks/useApi";
 
 export function Now() {
-  const { cards, loading, error, refresh } = useNowCards();
+  const { cards, loading, error } = useNowCards();
   const [now, setNow] = useState(Date.now());
   const [setupReport, setSetupReport] = useState<DoctorReportWithDismiss | null>(null);
 
@@ -39,18 +38,6 @@ export function Now() {
           loading
             ? "加载中..."
             : `共 ${cards.length} 件事需要关注`
-        }
-        actions={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refresh()}
-            disabled={loading}
-            className="text-[11px]"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`} />
-            刷新
-          </Button>
         }
       />
 

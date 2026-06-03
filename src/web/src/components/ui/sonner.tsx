@@ -2,15 +2,10 @@ import { useTheme } from "@/lib/theme";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 
 /**
- * Claude 风 Toast（基于 sonner）：
- *
- *  ┃ Title                              ×
- *  ┃ description…
- *  ┃ [Action] [Cancel]
+ * Claude 风 Toast（基于 sonner）：简洁卡片。
  *  ─ 主体：纯色 popover 背景 + 1px 淡边框 + 柔投影 + 圆角
- *  ─ 语义：左侧 4px 色条按 data-type（success/info/warning/error）区分
- *  ─ 标题：sans semibold
- *  ─ 描述：sans sm
+ *  ─ 图标按 data-type（success/info/warning/error）着语义色
+ *  ─ 标题 sans semibold / 描述 sans sm
  *
  *  关键点：不使用 sonner 的 `richColors`——它会强行注入彩色背景，
  *         覆盖我们的自定义 classNames。
@@ -25,17 +20,10 @@ export function Toaster(props: ToasterProps) {
         unstyled: false,
         classNames: {
           toast: [
-            "group toast relative pl-4",
+            "group toast",
             "!bg-popover !text-popover-foreground",
             "!border !border-border !rounded-lg",
             "!shadow-md",
-            // 左侧色条（默认 muted；按 data-type 覆盖）
-            "before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[4px]",
-            "before:bg-foreground/40 before:content-['']",
-            "data-[type=success]:before:bg-success",
-            "data-[type=info]:before:bg-accent",
-            "data-[type=warning]:before:bg-warning",
-            "data-[type=error]:before:bg-destructive",
           ].join(" "),
           title:
             "group-[.toast]:font-semibold group-[.toast]:text-foreground",
