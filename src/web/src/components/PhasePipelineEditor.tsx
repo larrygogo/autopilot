@@ -71,7 +71,7 @@ export function PhasePipelineEditor({
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
 
   // ── rename 追踪：保存时把 oldName→newName 一起传给后端，让 workflow.ts 里
-  //   run_<old> 函数也一并 rename，避免产生孤儿 ──
+  // run_<old> 函数也一并 rename，避免产生孤儿 ──
   const renamesRef = useRef<Map<string, string>>(new Map());
   // 本次编辑会话内新建的阶段名（rename 时不必登记 renames，因为后端没有对应的 run_<old>）
   const newlyAddedRef = useRef<Set<string>>(new Set());
@@ -156,9 +156,9 @@ export function PhasePipelineEditor({
   }, [phases]);
 
   // 当前 drawer 选中阶段的 raw 对象引用 + 在 phases 树中的"路径"。三种情况：
-  //   - top: 顶层普通 phase（最常见）
-  //   - parallel-child: 并行块内的子 phase
-  //   - parallel-block: 并行块"容器"本身（点击并行块 header 触发）
+  // - top: 顶层普通 phase（最常见）
+  // - parallel-child: 并行块内的子 phase
+  // - parallel-block: 并行块"容器"本身（点击并行块 header 触发）
   const drawerPhaseLocation = useMemo(() => {
     if (!drawerPhase) return null;
     for (let i = 0; i < phases.length; i += 1) {
@@ -639,7 +639,7 @@ export function PhasePipelineEditor({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+        <div className="font-mono text-[11px] text-muted-foreground">
           流水线编辑 · 点击节点编辑
           {dirty && <span className="ml-2 text-warning">· 未保存（{navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl"}+S 快捷保存）</span>}
         </div>
@@ -726,7 +726,7 @@ export function PhasePipelineEditor({
               {/* 位置调整：顶层 phase / 并行块本身支持；并行块内子项不能在此调换 */}
               {!drawerTopIdx.isParallelChild && (
                 <section className="mt-4">
-                  <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
                     位置
                   </div>
                   <div className="flex items-center gap-2">
@@ -965,10 +965,10 @@ function ParallelBlockEditForm({
       </FormRow>
 
       <section>
-        <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
           包含的子阶段（{subs.length}）
         </div>
-        <ul className="space-y-1 border-[1.5px] border-foreground/20 bg-muted/30 p-2">
+        <ul className="space-y-1 border border-border bg-muted/30 p-2">
           {subs.length === 0 ? (
             <li className="font-mono text-[10px] text-muted-foreground">（空）</li>
           ) : (
@@ -1006,7 +1006,7 @@ function ParallelBlockEditForm({
 
       {movableTopPhases.length > 0 && (
         <section>
-          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
             或：移入已有的顶层阶段
           </div>
           <Select
@@ -1053,7 +1053,7 @@ function ParallelChildAdder({ onAdd }: { onAdd: (name: string, timeout: number) 
 
   return (
     <section>
-      <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+      <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
         新增子阶段
       </div>
       <div className="flex items-center gap-2">
@@ -1137,9 +1137,9 @@ function PromptDryRunner({
   }
 
   return (
-    <div className="mt-2 border-[1.5px] border-dashed border-foreground/30 bg-muted/20 p-2">
+    <div className="mt-2 border border-dashed border-border bg-muted/20 p-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <span className="font-mono text-[10px] text-muted-foreground">
           试跑 · 用当前 prompt 直接调一次 {agentLabel}
         </span>
         <Button
@@ -1164,11 +1164,11 @@ function PromptDryRunner({
             </div>
           )}
           {errorMsg !== null ? (
-            <pre className="scrollbar-thin max-h-48 overflow-auto whitespace-pre-wrap border-[1.5px] border-destructive bg-destructive/8 p-2 font-mono text-[10px] leading-relaxed text-destructive">
+            <pre className="scrollbar-thin max-h-48 overflow-auto whitespace-pre-wrap border border-destructive bg-destructive/8 p-2 font-mono text-[10px] leading-relaxed text-destructive">
               {errorMsg}
             </pre>
           ) : (
-            <pre className="scrollbar-thin max-h-48 overflow-auto whitespace-pre-wrap border-[1.5px] border-foreground/30 bg-card p-2 font-mono text-[10px] leading-relaxed">
+            <pre className="scrollbar-thin max-h-48 overflow-auto whitespace-pre-wrap border border-border bg-card p-2 font-mono text-[10px] leading-relaxed">
               {output}
             </pre>
           )}
@@ -1222,7 +1222,7 @@ function PhaseTsEditor({
   return (
     <section className="mt-4">
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <span className="font-mono text-[10px] text-muted-foreground">
           执行函数 · workflow.ts
           {dirty && <span className="ml-2 text-warning">· 未保存</span>}
         </span>
@@ -1238,25 +1238,25 @@ function PhaseTsEditor({
         </Button>
       </div>
       {hasPrompt && initialCode === null && (
-        <p className="mb-1 border-[1.5px] border-dashed border-success/40 bg-success/5 p-2 text-[11px] text-success">
+        <p className="mb-1 border border-dashed border-success/40 bg-success/5 p-2 text-[11px] text-success">
           该阶段由 prompt 驱动（yaml 里有 prompt 字段），框架自动调 agent.run；无需 ts 函数
         </p>
       )}
       {hasPrompt && initialCode !== null && (
-        <p className="mb-1 border-[1.5px] border-dashed border-warning/40 bg-warning/5 p-2 text-[11px] text-warning">
+        <p className="mb-1 border border-dashed border-warning/40 bg-warning/5 p-2 text-[11px] text-warning">
           该阶段同时有 prompt 字段和 ts 函数；框架会优先调用 ts 函数（prompt 字段被忽略）
         </p>
       )}
       {!hasPrompt && initialCode === null && draft === "" && (
-        <p className="mb-1 border-[1.5px] border-dashed border-foreground/30 bg-muted/30 p-2 text-[11px] text-muted-foreground">
+        <p className="mb-1 border border-dashed border-border bg-muted/30 p-2 text-[11px] text-muted-foreground">
           未找到 <code className="font-mono">run_{phaseName}</code> 函数；上面填 prompt 即可零代码运行，或在下方编写完整 ts 函数
         </p>
       )}
       <Textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder={`export async function run_${phaseName}(taskId: string): Promise<void> {\n  // TODO\n}`}
-        className="scrollbar-thin h-56 resize-none border-[1.5px] border-foreground/30 bg-card p-3 font-mono text-[11px] leading-relaxed"
+        placeholder={`export async function run_${phaseName}(taskId: string): Promise<void> {\n // TODO\n}`}
+        className="scrollbar-thin h-56 resize-none border border-border bg-card p-3 font-mono text-[11px] leading-relaxed"
         spellCheck={false}
         disabled={saving}
       />
@@ -1459,8 +1459,8 @@ function PhaseEditForm({
 
       {/* 分组操作：顶层 phase 可以移入并行块；并行子项可以移出 */}
       {isTopLevel && parallelBlockNames.length > 0 && (
-        <section className="mt-4 border-t border-dashed border-foreground/25 pt-3">
-          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <section className="mt-4 border-t border-dashed border-border pt-3">
+          <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
             分组
           </div>
           <div className="flex items-center gap-2">
@@ -1486,8 +1486,8 @@ function PhaseEditForm({
         </section>
       )}
       {!isTopLevel && (
-        <section className="mt-4 border-t border-dashed border-foreground/25 pt-3">
-          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        <section className="mt-4 border-t border-dashed border-border pt-3">
+          <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
             分组
           </div>
           <Button
@@ -1510,7 +1510,7 @@ function PhaseEditForm({
 function FormRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <Label className="mb-1 block font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <Label className="mb-1 block font-mono text-[10px] text-muted-foreground">
         {label}
       </Label>
       {children}

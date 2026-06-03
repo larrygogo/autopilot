@@ -79,9 +79,9 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
   }
 
   return (
-    <section className="mb-4 border-[1.5px] border-foreground/30 bg-card">
-      <header className="border-b-[1.5px] border-foreground/30 px-3 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">产出物</span>
+    <section className="mb-4 border border-border bg-card">
+      <header className="border-b border-border px-3 py-1.5">
+        <span className="font-mono text-[10px] text-muted-foreground">产出物</span>
       </header>
       <div className="space-y-3 px-3 py-3 text-sm">
         <div className={"flex items-center gap-2 font-mono " + statusColor}>
@@ -92,12 +92,12 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
         </div>
 
         {outcome.status === "failed" && failureProfile && (
-          <div className="space-y-2 border-[1.5px] border-destructive/40 bg-destructive/5 p-2.5">
+          <div className="space-y-2 border border-destructive/40 bg-destructive/5 p-2.5">
             <div className="flex items-center gap-2">
-              <span className="border-[1.5px] border-destructive/60 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-destructive">
+              <span className="border border-destructive/60 px-1.5 py-0.5 font-mono text-[9px] text-destructive">
                 {failureProfile.label}
               </span>
-              <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
+              <span className="font-mono text-[9px] text-muted-foreground">
                 自动识别 · 仅供参考
               </span>
             </div>
@@ -112,7 +112,7 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
 
         {outcome.pr_url && (
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">PR</div>
+            <div className="font-mono text-[10px] text-muted-foreground">PR</div>
             <a href={outcome.pr_url} target="_blank" rel="noreferrer" className="text-accent underline break-all">
               #{outcome.pr_number ?? "?"} {outcome.pr_url}
             </a>
@@ -121,7 +121,7 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
 
         {outcome.diff_stat && (
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">改动统计</div>
+            <div className="font-mono text-[10px] text-muted-foreground">改动统计</div>
             <div className="font-mono">
               {outcome.diff_stat.files} files changed · <span className="text-success">+{outcome.diff_stat.insertions}</span> / <span className="text-destructive">-{outcome.diff_stat.deletions}</span>
             </div>
@@ -130,7 +130,7 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
 
         {outcome.top_phases.length > 0 && (
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">耗时分布（top 3）</div>
+            <div className="font-mono text-[10px] text-muted-foreground">耗时分布（top 3）</div>
             <ul className="font-mono">
               {outcome.top_phases.map((p) => (
                 <li key={p.phase} className="flex justify-between">
@@ -144,7 +144,7 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
 
         <div className="flex flex-wrap justify-end gap-2 pt-1">
           {outcome.pr_url && (
-            <Button variant="outline" size="sm" onClick={() => window.open(outcome.pr_url!, "_blank")} className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]">
+            <Button variant="outline" size="sm" onClick={() => window.open(outcome.pr_url!, "_blank")} className="rounded-md font-mono text-[11px] ">
               <ExternalLink className="mr-1 h-3.5 w-3.5" /> 看 PR
             </Button>
           )}
@@ -154,7 +154,7 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
               variant="default"
               size="sm"
               onClick={() => navigate("/setup")}
-              className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+              className="rounded-md font-mono text-[11px] "
             >
               <ShieldAlert className="mr-1 h-3.5 w-3.5" /> 去 SETUP 检查
             </Button>
@@ -169,7 +169,7 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
                 const phase = parseFailedPhase(taskStatus);
                 navigate(`/workflows?wf=${encodeURIComponent(workflow)}&phase=${encodeURIComponent(phase!)}&fromTask=${encodeURIComponent(taskId)}`);
               }}
-              className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+              className="rounded-md font-mono text-[11px] "
             >
               <Wrench className="mr-1 h-3.5 w-3.5" /> 去工作流修复
             </Button>
@@ -186,7 +186,7 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
               size="sm"
               disabled={retrying}
               onClick={handleRetry}
-              className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+              className="rounded-md font-mono text-[11px] "
             >
               <RotateCcw className="mr-1 h-3.5 w-3.5" /> {retrying ? "重跑中..." : "重跑"}
             </Button>

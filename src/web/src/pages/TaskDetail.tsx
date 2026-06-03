@@ -282,13 +282,13 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
       {/* Header — task.id 是主标识（大字 mono），eyebrow 缩到 bp-label，状态推到行尾跟操作组一起 */}
-      <div className="mb-5 flex flex-wrap items-center gap-3 border-b border-dashed border-foreground/25 pb-4">
+      <div className="mb-5 flex flex-wrap items-center gap-3 border-b border-dashed border-border pb-4">
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
           <ArrowLeft className="h-4 w-4" />
           返回
         </Button>
         <div className="flex min-w-0 flex-col">
-          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+          <span className="font-mono text-[10px] text-muted-foreground">
             TASK
           </span>
           <h2 className="truncate font-mono text-xl font-bold text-foreground sm:text-2xl">
@@ -342,7 +342,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
         <Card className="mb-3 border-l-4 border-l-accent/60 px-4 py-2.5">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              <span className="font-mono text-[10px] text-muted-foreground">
                 来自需求
               </span>
               <Link
@@ -354,7 +354,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
             </div>
             <Link
               to={`/requirements/${task.requirement_id}`}
-              className="font-mono text-[10px] uppercase tracking-wider text-accent hover:underline"
+              className="font-mono text-[10px] text-accent hover:underline"
             >
               看完整需求 →
             </Link>
@@ -391,7 +391,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
 
       {/* 基本信息 — metadata block 风 */}
       <Card className="mb-4">
-        <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">
+        <div className="border-b border-dashed border-border px-4 py-2.5">
           <span className="bp-label">基本信息 · METADATA</span>
         </div>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-2">
@@ -418,20 +418,20 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
           <Field label="更新时间">{new Date(task.updated_at).toLocaleString()}</Field>
         </dl>
         {task.requirement && (
-          <details className="mx-4 mb-4 border-t border-dashed border-foreground/25 pt-3 text-sm">
+          <details className="mx-4 mb-4 border-t border-dashed border-border pt-3 text-sm">
             <summary className="cursor-pointer select-none bp-label">
               需求详情（{task.requirement.length} 字符）
             </summary>
-            <pre className="scrollbar-thin mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words border border-foreground/20 bg-muted/40 p-3 font-mono text-xs">
+            <pre className="scrollbar-thin mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words border border-border bg-muted/40 p-3 font-mono text-xs">
               {task.requirement}
             </pre>
           </details>
         )}
         {task.workspace && (
-          <div className="mx-4 mb-4 flex flex-wrap items-center gap-2 border-t border-dashed border-foreground/25 pt-3 text-xs">
+          <div className="mx-4 mb-4 flex flex-wrap items-center gap-2 border-t border-dashed border-border pt-3 text-xs">
             <span className="bp-label">Workspace</span>
             <code
-              className="flex-1 cursor-pointer break-all border border-foreground/25 bg-muted px-2 py-1 font-mono text-foreground"
+              className="flex-1 cursor-pointer break-all border border-border bg-muted px-2 py-1 font-mono text-foreground"
               title="点击复制"
               onClick={copyWorkspace}
             >
@@ -447,7 +447,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       {/* 流水线（点击节点弹详情） */}
       {workflowDetail?.phases && (
         <Card className="mb-4">
-          <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+          <div className="flex items-center justify-between gap-2 border-b border-dashed border-border px-4 py-2.5">
             <span className="bp-label">流水线 · PIPELINE</span>
             <span className="inline-flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
               <MousePointerClick className="h-3 w-3" />
@@ -479,9 +479,9 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       />
 
       {/* 危险操作区 */}
-      <Card className="mt-4 border-[1.5px] border-destructive bg-destructive/8">
+      <Card className="mt-4 border border-destructive bg-destructive/8">
         <div className="border-b border-dashed border-destructive/40 px-4 py-2.5">
-          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-destructive font-semibold">
+          <span className="font-mono text-[10px] text-destructive font-semibold">
             ⚠ 危险操作 · DANGER ZONE
           </span>
         </div>
@@ -560,7 +560,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <dt className="w-20 shrink-0 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+      <dt className="w-20 shrink-0 font-mono text-[10px] text-muted-foreground">
         {label}
       </dt>
       <dd className="min-w-0 flex-1 truncate">{children}</dd>
@@ -671,7 +671,7 @@ function TaskDetailTabs({
 
       <TabsContent value="transitions" className="mt-0">
         <Card>
-          <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">
+          <div className="border-b border-dashed border-border px-4 py-2.5">
             <span className="bp-label">状态日志 · TRANSITIONS</span>
           </div>
           <div className="p-4">
@@ -682,9 +682,9 @@ function TaskDetailTabs({
 
       <TabsContent value="live" className="mt-0">
         <Card>
-          <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+          <div className="flex items-center justify-between gap-2 border-b border-dashed border-border px-4 py-2.5">
             <span className="bp-label">实时日志 · LIVE STREAM</span>
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="font-mono text-[10px] text-muted-foreground">
               {liveLogs.length === 0
                 ? "暂无；运行中任务会推送到此"
                 : stickToTopRef.current
@@ -696,7 +696,7 @@ function TaskDetailTabs({
             <div
               ref={liveLogRef}
               onScroll={onLogScroll}
-              className="scrollbar-thin max-h-80 overflow-auto border border-foreground/25 bg-muted/40 p-3 font-mono text-xs leading-relaxed"
+              className="scrollbar-thin max-h-80 overflow-auto border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed"
             >
               {liveLogs.length === 0 ? (
                 <p className="text-muted-foreground">等待中…</p>
@@ -756,17 +756,17 @@ function DanglingBanner({
   };
 
   return (
-    <Card className="mb-4 border-[1.5px] border-destructive bg-destructive/8">
+    <Card className="mb-4 border border-destructive bg-destructive/8">
       <div className="flex flex-wrap items-start gap-3 p-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[1.5px] border-destructive bg-destructive/15 text-destructive">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-destructive bg-destructive/15 text-destructive">
           <AlertTriangle className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="font-display text-sm font-bold uppercase tracking-wider text-destructive">
+          <h3 className="text-sm font-bold text-destructive">
             ⚠ 这个任务已死（daemon 重启）
           </h3>
           <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-            任务在 <code className="border border-foreground/20 bg-muted px-1 font-mono">ask_user</code> 等待回答时 daemon 重启了。
+            任务在 <code className="border border-border bg-muted px-1 font-mono">ask_user</code> 等待回答时 daemon 重启了。
             agent 进程的等待 promise 在内存中丢失，即使你现在回答 agent 也收不到。
             可以选择：<strong className="text-foreground">重新执行</strong>当前阶段（沿用原 workspace 历史从头跑），或
             <strong className="text-foreground">取消任务</strong>新建一个。
@@ -838,20 +838,20 @@ function AskBanner({
   };
 
   return (
-    <Card className="mb-4 border-[1.5px] border-info bg-info/8">
+    <Card className="mb-4 border border-info bg-info/8">
       <div className="flex flex-wrap items-start gap-3 p-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[1.5px] border-info bg-info/15 text-info">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-info bg-info/15 text-info">
           <MessageCircleQuestion className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1 space-y-3">
           <div>
-            <h3 className="font-display text-sm font-bold uppercase tracking-wider text-info">
+            <h3 className="text-sm font-bold text-info">
               Agent 在等你回答
             </h3>
             <p className="mt-1.5 whitespace-pre-wrap text-sm text-foreground">{parsed.question}</p>
             {parsed.phase && (
-              <p className="mt-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                来自阶段 <code className="border border-foreground/20 bg-muted px-1">{parsed.phase}</code>
+              <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
+                来自阶段 <code className="border border-border bg-muted px-1">{parsed.phase}</code>
               </p>
             )}
           </div>
@@ -943,7 +943,7 @@ function GateBanner({
       const verb = decision === "pass" ? "通过" : decision === "reject" ? "驳回" : "取消";
       // 业务标签 + 内核 trigger 同时显示，让放松的自己读得顺、懂行的自己能反查
       toast.success(
-        `已${verb} · ${decisionLabelOf(r.from)} → ${decisionLabelOf(r.to)}  (${r.from} → ${r.to})`,
+        `已${verb} · ${decisionLabelOf(r.from)} → ${decisionLabelOf(r.to)} (${r.from} → ${r.to})`,
       );
       setNote("");
     } catch (e: unknown) {
@@ -954,14 +954,14 @@ function GateBanner({
   };
 
   return (
-    <Card className="mb-4 border-[1.5px] border-warning bg-warning/8">
+    <Card className="mb-4 border border-warning bg-warning/8">
       <div className="flex flex-wrap items-start gap-3 p-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[1.5px] border-warning bg-warning/15 text-warning">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-warning bg-warning/15 text-warning">
           <Hand className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1 space-y-2.5">
           <div>
-            <h3 className="font-display text-sm font-bold uppercase tracking-wider text-warning">
+            <h3 className="text-sm font-bold text-warning">
               ✋ 等待你拍板{phaseLabel ? `：${phaseLabel}` : ""}
             </h3>
             <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
@@ -969,11 +969,11 @@ function GateBanner({
                 <>
                   <span className="font-semibold text-foreground">{phaseLabel}</span>
                   <span className="ml-1 opacity-60">(</span>
-                  <code className="border border-foreground/20 bg-muted px-1 font-mono">{phase}</code>
+                  <code className="border border-border bg-muted px-1 font-mono">{phase}</code>
                   <span className="opacity-60">)</span>
                 </>
               ) : (
-                <code className="border border-foreground/20 bg-muted px-1 font-mono">{phase}</code>
+                <code className="border border-border bg-muted px-1 font-mono">{phase}</code>
               )} 已完成。
               {gateMessage ? (
                 <> {gateMessage}</>

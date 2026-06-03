@@ -113,11 +113,11 @@ export function NewWorkflowWithAI() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8">
-      <header className="mb-4 border-b-[1.5px] border-foreground/30 pb-3">
-        <h1 className="font-display text-2xl font-bold uppercase tracking-wider">
+      <header className="mb-4 border-b border-border pb-3">
+        <h1 className="font-display text-2xl font-bold">
           ✨ AI 生成工作流
         </h1>
-        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground mt-1">
+        <p className="font-mono text-xs text-muted-foreground mt-1">
           描述你想要的流程，AI 生成 yaml + ts；可继续追问调整
         </p>
       </header>
@@ -125,7 +125,7 @@ export function NewWorkflowWithAI() {
       {/* 描述区 */}
       <Card className="mb-4 p-4">
         <div className="space-y-2">
-          <Label htmlFor="desc" className="font-mono text-[10px] uppercase tracking-[0.18em]">
+          <Label htmlFor="desc" className="font-mono text-[10px] ">
             描述你要的工作流
           </Label>
           <Textarea
@@ -141,7 +141,7 @@ export function NewWorkflowWithAI() {
             <Button
               onClick={() => generate(description, false)}
               disabled={generating || saving || !description.trim()}
-              className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+              className="rounded-md font-mono text-[11px] "
             >
               {generating ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
               {generating ? "AI 整理中..." : authored ? "重新生成" : "✨ 生成工作流"}
@@ -171,7 +171,7 @@ export function NewWorkflowWithAI() {
 
           <Card className="mb-4 p-4">
             <div className="mb-3 space-y-1.5">
-              <Label htmlFor="wf-name" className="font-mono text-[10px] uppercase tracking-[0.18em]">
+              <Label htmlFor="wf-name" className="font-mono text-[10px] ">
                 工作流名字
               </Label>
               <Input
@@ -188,7 +188,7 @@ export function NewWorkflowWithAI() {
             </div>
 
             <div className="space-y-2">
-              <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">
+              <Label className="font-mono text-[10px] ">
                 阶段（可直接编辑）
               </Label>
               {parsedPhases.length > 0 ? (
@@ -202,7 +202,7 @@ export function NewWorkflowWithAI() {
                   onItemsChange={applyPhasesToYaml}
                 />
               ) : (
-                <p className="border-[1.5px] border-dashed border-foreground/30 bg-muted/30 p-3 text-xs text-muted-foreground">
+                <p className="border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
                   yaml 解析失败或没有 phases；请检查警告区，或追问让 AI 调整。
                 </p>
               )}
@@ -215,11 +215,11 @@ export function NewWorkflowWithAI() {
             <button
               type="button"
               onClick={() => setEditorOpen((v) => !v)}
-              className="flex w-full items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5 text-left transition-colors hover:bg-muted/30"
+              className="flex w-full items-center gap-2 border-b border-dashed border-border px-4 py-2.5 text-left transition-colors hover:bg-muted/30"
               aria-expanded={editorOpen}
             >
               {editorOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              <span className="font-mono text-[10px] text-muted-foreground">
                 直接编辑 YAML / TS · 高级
               </span>
               <span className="ml-2 font-mono text-[10px] text-muted-foreground/70">
@@ -229,7 +229,7 @@ export function NewWorkflowWithAI() {
             {editorOpen && (
               <div className="space-y-3 p-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="edit-yaml" className="font-mono text-[10px] uppercase tracking-[0.18em]">
+                  <Label htmlFor="edit-yaml" className="font-mono text-[10px] ">
                     workflow.yaml
                   </Label>
                   <Textarea
@@ -242,7 +242,7 @@ export function NewWorkflowWithAI() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="edit-ts" className="font-mono text-[10px] uppercase tracking-[0.18em]">
+                  <Label htmlFor="edit-ts" className="font-mono text-[10px] ">
                     workflow.ts <span className="ml-1 text-muted-foreground">（零代码模式留空）</span>
                   </Label>
                   <Textarea
@@ -259,7 +259,7 @@ export function NewWorkflowWithAI() {
           </Card>
 
           <Card className="mb-4 p-4">
-            <Label htmlFor="followup" className="font-mono text-[10px] uppercase tracking-[0.18em]">
+            <Label htmlFor="followup" className="font-mono text-[10px] ">
               继续调整（追问）
             </Label>
             <Textarea
@@ -284,7 +284,7 @@ export function NewWorkflowWithAI() {
                   variant="outline"
                   onClick={() => generate(followup, true)}
                   disabled={generating || saving || !followup.trim()}
-                  className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+                  className="rounded-md font-mono text-[11px] "
                 >
                   {generating ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
                   {generating ? "调整中..." : "应用追问"}
@@ -293,7 +293,7 @@ export function NewWorkflowWithAI() {
                   onClick={save}
                   disabled={generating || saving || !editName.trim() || isFallback}
                   title={isFallback ? "AI 生成失败，请先重新生成或追问让 AI 重出方案" : undefined}
-                  className="rounded-none font-mono text-[11px] uppercase tracking-[0.12em]"
+                  className="rounded-md font-mono text-[11px] "
                 >
                   {saving ? "保存中..." : isFallback ? "✗ AI 失败，请重试" : "✓ 确认创建"}
                 </Button>

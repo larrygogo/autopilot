@@ -66,10 +66,10 @@ function MetaRow({
     <div
       className={cn(
         "grid grid-cols-[100px_1fr]",
-        !last && "border-b border-dashed border-foreground/25",
+        !last && "border-b border-dashed border-border",
       )}
     >
-      <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 uppercase tracking-[0.18em] text-muted-foreground">
+      <div className="border-r border-dashed border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
         {k}
       </div>
       <div className="px-3 py-1.5 text-foreground">{v}</div>
@@ -151,7 +151,7 @@ function ClarifierOverrideDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="rounded-none sm:max-w-md">
+      <DialogContent className="rounded-md sm:max-w-md">
         <DialogHeader>
           <DialogTitle>此需求的澄清模型</DialogTitle>
           <DialogDescription>
@@ -165,10 +165,10 @@ function ClarifierOverrideDialog({
               type="button"
               onClick={() => setMode("inherit")}
               className={cn(
-                "flex-1 border-[1.5px] px-3 py-2 font-mono text-xs uppercase tracking-[0.12em]",
+                "flex-1 border px-3 py-2 font-mono text-xs ",
                 mode === "inherit"
                   ? "border-accent bg-accent/10 text-foreground"
-                  : "border-foreground/30 text-muted-foreground hover:border-foreground/60",
+                  : "border-border text-muted-foreground hover:border-border",
               )}
             >
               继承全局默认
@@ -177,10 +177,10 @@ function ClarifierOverrideDialog({
               type="button"
               onClick={() => setMode("override")}
               className={cn(
-                "flex-1 border-[1.5px] px-3 py-2 font-mono text-xs uppercase tracking-[0.12em]",
+                "flex-1 border px-3 py-2 font-mono text-xs ",
                 mode === "override"
                   ? "border-accent bg-accent/10 text-foreground"
-                  : "border-foreground/30 text-muted-foreground hover:border-foreground/60",
+                  : "border-border text-muted-foreground hover:border-border",
               )}
             >
               为此需求 override
@@ -190,9 +190,9 @@ function ClarifierOverrideDialog({
           {mode === "override" && (
             <>
               <div className="space-y-1.5">
-                <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">供应商</Label>
+                <Label className="font-mono text-[10px] ">供应商</Label>
                 <Select value={provider} onValueChange={(v) => { setProvider(v); setModel(""); }}>
-                  <SelectTrigger className="rounded-none">
+                  <SelectTrigger className="rounded-md">
                     <SelectValue placeholder="选择供应商" />
                   </SelectTrigger>
                   <SelectContent>
@@ -203,9 +203,9 @@ function ClarifierOverrideDialog({
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label className="font-mono text-[10px] uppercase tracking-[0.18em]">模型（可选）</Label>
+                <Label className="font-mono text-[10px] ">模型（可选）</Label>
                 <Select value={model} onValueChange={setModel} disabled={!provider || loadingModels}>
-                  <SelectTrigger className="rounded-none">
+                  <SelectTrigger className="rounded-md">
                     <SelectValue placeholder={
                       !provider ? "先选供应商" :
                       loadingModels ? "加载中…" :
@@ -245,7 +245,7 @@ function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode 
         <div className="bp-num-block h-7 w-7 text-[10px]">AI</div>
         <div className="flex-1 space-y-2">
           <div className={cn(
-            "border-[1.5px] border-foreground/30 bg-muted/50 px-4 py-3 text-sm leading-relaxed",
+            "border border-border bg-muted/50 px-4 py-3 text-sm leading-relaxed",
             q.status === "resolved" && "opacity-60"
           )}>
             {q.agent_text}
@@ -257,7 +257,7 @@ function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode 
                   key={s}
                   type="button"
                   onClick={() => setReplyDrafts(d => ({ ...d, [q.id]: s }))}
-                  className="border border-foreground/30 bg-background px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-accent hover:text-accent"
+                  className="border border-border bg-background px-3 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:border-accent hover:text-accent"
                 >
                   {s}
                 </button>
@@ -271,12 +271,12 @@ function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode 
       {(q.replies ?? []).filter(r => r.author_role === "user").map((reply) => (
         <div key={reply.id} className="flex items-start justify-end gap-2.5">
           <div className={cn(
-            "max-w-[80%] border-[1.5px] border-accent bg-accent/12 px-4 py-3 text-sm leading-relaxed text-foreground",
+            "max-w-[80%] border border-accent bg-accent/12 px-4 py-3 text-sm leading-relaxed text-foreground",
             q.status === "resolved" && "opacity-70"
           )}>
             {reply.text}
           </div>
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center border-[1.5px] border-accent bg-accent text-[10px] font-mono font-bold text-accent-foreground">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center border border-accent bg-accent text-[10px] font-mono font-bold text-accent-foreground">
             你
           </div>
         </div>
@@ -345,10 +345,10 @@ function ClarifierProgressCard({
       <div className="flex items-center gap-3">
         <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
         <div className="flex-1 min-w-0">
-          <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+          <div className="font-mono text-xs text-muted-foreground">
             AI 正在思考…
           </div>
-          <div className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80">
+          <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/80">
             {attemptLabel} LLM 调用 · 阶段：{PHASE_LABEL[round.phase]}
           </div>
         </div>
@@ -360,7 +360,7 @@ function ClarifierProgressCard({
       <button
         type="button"
         onClick={onToggleTrace}
-        className="mt-3 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground hover:text-accent"
+        className="mt-3 inline-flex items-center gap-1 font-mono text-[10px] text-muted-foreground hover:text-accent"
       >
         <ChevronRight className={cn("h-3 w-3 transition-transform", traceOpen && "rotate-90")} />
         技术细节
@@ -369,8 +369,8 @@ function ClarifierProgressCard({
       {traceOpen && (
         <div className="mt-3 space-y-3">
           {round.last_parse_error && (
-            <div className="border-[1.5px] border-l-4 border-foreground/30 border-l-destructive bg-card px-3 py-2 rounded-none">
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-destructive mb-1">
+            <div className="border border-l-4 border-border border-l-destructive bg-card px-3 py-2 rounded-md">
+              <p className="font-mono text-[10px] text-destructive mb-1">
                 上次解析失败
               </p>
               <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground">
@@ -380,10 +380,10 @@ function ClarifierProgressCard({
           )}
           {round.prompt && (
             <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-1">
+              <p className="font-mono text-[10px] text-muted-foreground mb-1">
                 本轮 Prompt
               </p>
-              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground bg-muted/20 p-2 max-h-[400px] overflow-y-auto rounded-none border border-dashed border-foreground/25">
+              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground bg-muted/20 p-2 max-h-[400px] overflow-y-auto rounded-md border border-dashed border-border">
                 {round.prompt}
               </pre>
             </div>
@@ -417,8 +417,8 @@ export function RequirementDetail() {
   // React 还没 re-render 前 actionBusy 仍是 false，按钮 disabled 检查不能拦。
   // busyRef.current 是同步赋值的，能在第一次 click 同步拒掉第二次。
   // 每个 mutation 函数遵守模式：
-  //   if (busyRef.current) return; busyRef.current = true; setActionBusy(true);
-  //   try { ... } finally { busyRef.current = false; setActionBusy(false); }
+  // if (busyRef.current) return; busyRef.current = true; setActionBusy(true);
+  // try { ... } finally { busyRef.current = false; setActionBusy(false); }
   const busyRef = useRef(false);
   const [subPrs, setSubPrs] = useState<RequirementSubPr[]>([]);
   // 回复输入状态：qid → 文本
@@ -867,7 +867,7 @@ export function RequirementDetail() {
           <ArrowLeft className="h-4 w-4" />
           {req?.project_id ? "返回项目" : "项目列表"}
         </Button>
-        <div className="ml-auto flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+        <div className="ml-auto flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
           {wsState === "connected" ? (
             <><Wifi className="h-3 w-3 text-success" />实时</>
           ) : (
@@ -877,14 +877,14 @@ export function RequirementDetail() {
       </div>
 
       {/* Hero 区：需求标题 + metadata block */}
-      <header className="mb-6 grid gap-x-8 gap-y-4 border-b-[1.5px] border-foreground/30 pb-5 lg:grid-cols-[1.7fr_1fr]">
+      <header className="mb-6 grid gap-x-8 gap-y-4 border-b border-border pb-5 lg:grid-cols-[1.7fr_1fr]">
         <div className="min-w-0">
-          <div className="mb-3 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.28em] text-muted-foreground">
+          <div className="mb-3 flex items-center gap-3 font-mono text-[10px] text-muted-foreground">
             <span className="h-px w-6 bg-foreground/40" aria-hidden="true" />
             <span>REQUIREMENT · {req.id}</span>
             <span className="h-px flex-1 bg-foreground/20" aria-hidden="true" />
           </div>
-          <h1 className="break-words font-display text-3xl font-bold uppercase tracking-wider leading-[1.05] sm:text-4xl">
+          <h1 className="break-words font-display text-3xl font-bold leading-[1.05] sm:text-4xl">
             {req.title}
           </h1>
           <RequirementProgressBar status={req.status} />
@@ -895,7 +895,7 @@ export function RequirementDetail() {
             {project && (
               <Link
                 to={`/projects/${project.id}`}
-                className="font-mono text-[11px] uppercase tracking-wider text-accent hover:underline"
+                className="font-mono text-[11px] text-accent hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 {project.name}
@@ -906,7 +906,7 @@ export function RequirementDetail() {
                 href={req.pr_url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:underline"
+                className="inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline"
               >
                 PR #{req.pr_number}
                 <ExternalLink className="h-3 w-3" />
@@ -915,13 +915,13 @@ export function RequirementDetail() {
             {req.task_id && (
               <Link
                 to={`/tasks/${req.task_id}`}
-                className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-accent hover:underline"
+                className="inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline"
               >
                 TASK {req.task_id.slice(0, 8)}…
               </Link>
             )}
           </div>
-          <div className="mt-3 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          <div className="mt-3 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
             <Clock className="h-3 w-3" />
             <span>CREATED {new Date(req.created_at).toLocaleString()}</span>
             <span className="mx-1">·</span>
@@ -931,7 +931,7 @@ export function RequirementDetail() {
 
         {/* 右侧 metadata block */}
         <div className="flex flex-col gap-3 lg:items-end">
-          <div className="w-full border-[1.5px] border-foreground/30 bg-card/40 font-mono text-[11px]">
+          <div className="w-full border border-border bg-card/40 font-mono text-[11px]">
             <MetaRow k="ID" v={<code className="text-accent">{req.id}</code>} />
             {project && (
               <MetaRow
@@ -956,7 +956,7 @@ export function RequirementDetail() {
                         setCodebaseDraft(req.codebase_id ?? NONE_VALUE);
                         setCodebaseDialogOpen(true);
                       }}
-                      className="text-[10px] uppercase tracking-[0.18em] text-accent hover:underline"
+                      className="text-[10px] text-accent hover:underline"
                     >
                       修改
                     </button>
@@ -987,7 +987,7 @@ export function RequirementDetail() {
       {/* 关联子模块 PR */}
       {subPrs.length > 0 && (
         <Card className="mb-6">
-          <div className="border-b border-dashed border-foreground/25 px-4 py-2.5 flex items-center justify-between">
+          <div className="border-b border-dashed border-border px-4 py-2.5 flex items-center justify-between">
             <span className="bp-label">关联子 PR · SUB-MODULE PRS</span>
             <Badge variant="secondary">{subPrs.length}</Badge>
           </div>
@@ -1019,7 +1019,7 @@ export function RequirementDetail() {
         <Card className="mb-6 p-5 border-l-4 border-l-destructive">
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-1 min-w-0">
-              <div className="font-mono text-xs uppercase tracking-wider text-destructive font-medium">
+              <div className="font-mono text-xs text-destructive font-medium">
                 ⚠ 澄清出错
               </div>
               <p className="text-sm text-muted-foreground break-words">{req.clarifier_error}</p>
@@ -1071,7 +1071,7 @@ export function RequirementDetail() {
         <Card className="mb-6 p-5">
           <div className="flex items-center gap-3">
             <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
-            <span className="flex-1 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            <span className="flex-1 font-mono text-xs text-muted-foreground">
               AI 正在分析需求，生成澄清问题…
             </span>
             <Button
@@ -1108,13 +1108,13 @@ export function RequirementDetail() {
           PR-B 会重做：把历史问答折叠到 spec 区附近。*/}
       {questions.length > 0 && (req.status === "drafting" || req.status === "clarifying") && (
         <Card className="mb-6" id="clarification-section">
-          <div className="flex items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+          <div className="flex items-center gap-2 border-b border-dashed border-border px-4 py-2.5">
             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="bp-label">需求澄清 · CLARIFICATION</span>
             <button
               type="button"
               onClick={() => setClarifierDialogOpen(true)}
-              className="ml-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground hover:text-accent inline-flex items-center gap-1"
+              className="ml-2 font-mono text-[10px] text-muted-foreground hover:text-accent inline-flex items-center gap-1"
               title="为此需求配置 clarifier 模型"
             >
               <Settings2 className="h-3 w-3" />
@@ -1139,8 +1139,8 @@ export function RequirementDetail() {
 
           {/* 历史问答折叠区 — 默认折叠，点击展开 */}
           {resolvedQuestions.length > 0 && (
-            <details className="group border-t border-dashed border-foreground/25">
-              <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <details className="group border-t border-dashed border-border">
+              <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground [&::-webkit-details-marker]:hidden">
                 <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
                 <span>历史问答 · {resolvedQuestions.length} 条</span>
               </summary>
@@ -1164,9 +1164,9 @@ export function RequirementDetail() {
           */}
           {req.status === "clarifying" && openQuestions.length === 0 &&
            resolvedQuestions.length > 0 && (
-            <div className="mx-5 mb-5 flex items-center gap-3 border-[1.5px] border-dashed border-foreground/30 bg-card/40 px-4 py-3">
+            <div className="mx-5 mb-5 flex items-center gap-3 border border-dashed border-border bg-card/40 px-4 py-3">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
-              <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              <p className="font-mono text-xs text-muted-foreground">
                 AI 正在思考下一个问题…
               </p>
             </div>
@@ -1177,8 +1177,8 @@ export function RequirementDetail() {
             提示用户主动点 [继续澄清] 切到 clarifying，AI 才会基于历史提下一题。
           */}
           {req.status === "drafting" && resolvedQuestions.length > 0 && (
-            <div className="mx-5 mb-5 flex flex-col gap-3 border-[1.5px] border-dashed border-foreground/30 bg-card/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            <div className="mx-5 mb-5 flex flex-col gap-3 border border-dashed border-border bg-card/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="font-mono text-xs text-muted-foreground">
                 草稿状态。点击右侧让 AI 基于以上对话和当前 SPEC 继续澄清。
               </p>
               <Button size="sm" onClick={resumeClarify} disabled={actionBusy} className="shrink-0 self-start sm:self-auto">
@@ -1194,7 +1194,7 @@ export function RequirementDetail() {
         {/* 左：需求规约。min-w-0 防 grid 子项被内部长串撑大 */}
         <div className="lg:col-span-2 space-y-4 min-w-0">
           <Card>
-            <div className="flex items-center justify-between gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+            <div className="flex items-center justify-between gap-2 border-b border-dashed border-border px-4 py-2.5">
               <div className="flex items-center gap-2">
                 <span className="bp-label">需求规约 · SPEC</span>
                 {req.spec_md && (req.status === "clarifying" || req.status === "drafting") && (
@@ -1206,7 +1206,7 @@ export function RequirementDetail() {
                   size="sm"
                   variant="ghost"
                   onClick={() => setRevisionsOpen(true)}
-                  className="font-mono text-[10px] uppercase tracking-[0.18em] gap-1.5"
+                  className="font-mono text-[10px] gap-1.5"
                 >
                   📜 修订历史
                 </Button>
@@ -1252,7 +1252,7 @@ export function RequirementDetail() {
                   </div>
                 </div>
               ) : (
-                <div className="scrollbar-thin max-h-[600px] overflow-auto border border-foreground/20 bg-muted/30 p-4">
+                <div className="scrollbar-thin max-h-[600px] overflow-auto border border-border bg-muted/30 p-4">
                   {req.spec_md ? (
                     <MarkdownView content={req.spec_md} />
                   ) : (
@@ -1268,7 +1268,7 @@ export function RequirementDetail() {
         <div className="space-y-4 min-w-0">
           {/* 操作按钮区 */}
           <Card>
-            <div className="border-b border-dashed border-foreground/25 px-4 py-2.5">
+            <div className="border-b border-dashed border-border px-4 py-2.5">
               <span className="bp-label">操作 · ACTIONS</span>
             </div>
             <div className="space-y-3 p-5">
@@ -1392,7 +1392,7 @@ export function RequirementDetail() {
             req.status === "awaiting_review" ||
             req.status === "fix_revision") && (
             <Card id="feedback-section">
-              <div className="flex items-center gap-2 border-b border-dashed border-foreground/25 px-4 py-2.5">
+              <div className="flex items-center gap-2 border-b border-dashed border-border px-4 py-2.5">
                 <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="bp-label">反馈历史 · FEEDBACK</span>
                 {feedbacks.length > 0 && (
@@ -1403,7 +1403,7 @@ export function RequirementDetail() {
               </div>
               <div className="p-5">
                 {feedbacks.length === 0 ? (
-                  <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                  <p className="font-mono text-xs text-muted-foreground">
                     等待 PR review 反馈…
                   </p>
                 ) : (
@@ -1414,7 +1414,7 @@ export function RequirementDetail() {
                           <Badge variant="outline">
                             {SOURCE_LABEL[fb.source] ?? fb.source}
                           </Badge>
-                          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <span className="font-mono text-[10px] text-muted-foreground">
                             {new Date(fb.created_at).toLocaleString()}
                           </span>
                         </div>
@@ -1450,7 +1450,7 @@ export function RequirementDetail() {
 
       {/* 修改代码库关联 dialog */}
       <Dialog open={codebaseDialogOpen} onOpenChange={setCodebaseDialogOpen}>
-        <DialogContent className="rounded-none">
+        <DialogContent className="rounded-md">
           <DialogHeader>
             <DialogTitle>修改代码库关联</DialogTitle>
             <DialogDescription>
@@ -1459,7 +1459,7 @@ export function RequirementDetail() {
           </DialogHeader>
           <div className="py-2">
             <Select value={codebaseDraft} onValueChange={setCodebaseDraft}>
-              <SelectTrigger className="rounded-none">
+              <SelectTrigger className="rounded-md">
                 <SelectValue placeholder="选择代码库" />
               </SelectTrigger>
               <SelectContent>

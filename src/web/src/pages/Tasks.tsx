@@ -177,7 +177,7 @@ export function Tasks() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="搜任务 ID / 标题 / 工作流 / 需求 ID"
-                className="w-full rounded-none border-[1.5px] border-foreground/25 bg-card py-1.5 pl-8 pr-7 font-mono text-xs focus:border-accent focus:outline-none"
+                className="w-full rounded-md border border-border bg-card py-1.5 pl-8 pr-7 font-mono text-xs focus:border-accent focus:outline-none"
               />
               {searchQuery && (
                 <button
@@ -195,7 +195,7 @@ export function Tasks() {
                 variant="ghost"
                 size="sm"
                 onClick={clearFilters}
-                className="rounded-none font-mono text-[10px] uppercase tracking-[0.12em]"
+                className="rounded-md font-mono text-[10px] "
               >
                 清除筛选
               </Button>
@@ -203,7 +203,7 @@ export function Tasks() {
           </div>
           {allWorkflows.length > 1 && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              <span className="font-mono text-[10px] text-muted-foreground">
                 工作流
               </span>
               {allWorkflows.map((w) => {
@@ -214,10 +214,10 @@ export function Tasks() {
                     type="button"
                     onClick={() => setWorkflowFilter(active ? null : w)}
                     className={cn(
-                      "border-[1.5px] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors",
+                      "border px-2 py-0.5 font-mono text-[10px] transition-colors",
                       active
                         ? "border-accent bg-accent/10 text-accent"
-                        : "border-foreground/25 text-muted-foreground hover:border-accent/60 hover:text-foreground",
+                        : "border-border text-muted-foreground hover:border-accent/60 hover:text-foreground",
                     )}
                   >
                     {w}
@@ -231,7 +231,7 @@ export function Tasks() {
 
       {error && (
         <Card className="mb-4 border-l-4 border-l-destructive px-4 py-3">
-          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-destructive mb-1">
+          <p className="font-mono text-[10px] text-destructive mb-1">
             ERROR
           </p>
           <p className="text-sm">{error}</p>
@@ -241,14 +241,14 @@ export function Tasks() {
       {loading && tasks.length === 0 && (
         <div className="mt-12 flex flex-col items-center text-muted-foreground">
           <Loader2 className="h-6 w-6 animate-spin" />
-          <p className="mt-2 font-mono text-xs uppercase tracking-[0.12em]">加载任务...</p>
+          <p className="mt-2 font-mono text-xs ">加载任务...</p>
         </div>
       )}
 
       {!loading && !error && tasks.length === 0 && (
         <div className="mt-12 flex flex-col items-center text-muted-foreground">
-          <p className="font-display text-lg">还没有任务</p>
-          <p className="mt-1 font-mono text-xs uppercase tracking-[0.12em]">
+          <p className="text-lg font-medium">还没有任务</p>
+          <p className="mt-1 font-mono text-xs ">
             从 <Link to="/start" className="underline">开始</Link> 页创建第一个任务
           </p>
         </div>
@@ -257,15 +257,15 @@ export function Tasks() {
       {/* 有任务但过滤后空 — 引导清除筛选 */}
       {!loading && !error && tasks.length > 0 && filteredTasks.length === 0 && (
         <div className="mt-12 flex flex-col items-center text-muted-foreground">
-          <p className="font-display text-lg">没匹配的任务</p>
-          <p className="mt-1 font-mono text-xs uppercase tracking-[0.12em]">
+          <p className="text-lg font-medium">没匹配的任务</p>
+          <p className="mt-1 font-mono text-xs ">
             当前筛选条件下没有任务
           </p>
           <Button
             variant="outline"
             size="sm"
             onClick={clearFilters}
-            className="mt-3 rounded-none font-mono text-[10px] uppercase tracking-[0.12em]"
+            className="mt-3 rounded-md font-mono text-[10px] "
           >
             清除筛选
           </Button>
@@ -285,10 +285,10 @@ export function Tasks() {
               <button
                 type="button"
                 onClick={() => toggle(g.key)}
-                className="mb-2 flex w-full items-center gap-2 border-b border-dashed border-foreground/30 pb-2 text-left"
+                className="mb-2 flex w-full items-center gap-2 border-b border-dashed border-border pb-2 text-left"
               >
                 <Icon className={cn("h-4 w-4", g.iconClass)} />
-                <h2 className="font-display text-base font-bold uppercase tracking-wider">
+                <h2 className="text-base font-bold">
                   {g.label}
                 </h2>
                 <span className="font-mono text-[11px] text-muted-foreground">
@@ -311,7 +311,7 @@ export function Tasks() {
                 <button
                   type="button"
                   onClick={() => setExpandedTerminal((prev) => ({ ...prev, [g.key]: true }))}
-                  className="mt-2 w-full border border-dashed border-foreground/25 py-1.5 text-center font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground hover:border-accent/60 hover:text-foreground"
+                  className="mt-2 w-full border border-dashed border-border py-1.5 text-center font-mono text-[10px] text-muted-foreground hover:border-accent/60 hover:text-foreground"
                 >
                   看全部 {total} 条 →
                 </button>
@@ -333,21 +333,21 @@ function TaskRow({ task, borderClass }: { task: Task; borderClass: string }) {
     <Link
       to={`/tasks/${task.id}`}
       className={cn(
-        "flex items-center gap-4 border-[1.5px] border-l-4 border-foreground/30 bg-card px-4 py-2.5 transition-colors hover:border-accent",
+        "flex items-center gap-4 border border-l-4 border-border bg-card px-4 py-2.5 transition-colors hover:border-accent",
         borderClass,
       )}
     >
-      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+      <span className="font-mono text-[10px] text-muted-foreground">
         {task.id}
       </span>
-      <span className="font-display text-sm font-medium truncate flex-1">{task.title}</span>
+      <span className="text-sm font-medium truncate flex-1">{task.title}</span>
       <span className="hidden sm:inline font-mono text-[10px] text-muted-foreground shrink-0">
         {task.workflow}
         {phaseFromStatus && <span> · {phaseFromStatus}</span>}
       </span>
       {task.requirement_id && (
         <span
-          className="hidden md:inline font-mono text-[10px] tracking-[0.08em] text-muted-foreground shrink-0"
+          className="hidden md:inline font-mono text-[10px] text-muted-foreground shrink-0"
           title={`关联需求 ${task.requirement_id}`}
         >
           ← {task.requirement_id}

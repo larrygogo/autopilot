@@ -361,7 +361,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     const h = healthMap[cb.id];
     if (!h) return null;
     if (h === "loading") return <span className="text-[11px] text-muted-foreground animate-pulse">检查中…</span>;
-    if (h.healthy) return <span className="font-mono text-[11px] text-success font-medium tracking-wider">✓ OK</span>;
+    if (h.healthy) return <span className="font-mono text-[11px] text-success font-medium ">✓ OK</span>;
     return (
       <span className="text-[11px] text-destructive" title={h.issues.join("\n")}>
         ✗ {h.issues[0] ?? "异常"}
@@ -405,16 +405,16 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       </Button>
 
       {/* Hero 区 */}
-      <header className="grid gap-x-8 gap-y-4 border-b-[1.5px] border-foreground/30 pb-5 lg:grid-cols-[1.7fr_1fr]">
+      <header className="grid gap-x-8 gap-y-4 border-b border-border pb-5 lg:grid-cols-[1.7fr_1fr]">
         <div className="min-w-0">
-          <div className="mb-3 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.28em] text-muted-foreground">
+          <div className="mb-3 flex items-center gap-3 font-mono text-[10px] text-muted-foreground">
             <span className="h-px w-6 bg-foreground/40" aria-hidden="true" />
             <span>PROJECT · {project?.id ?? "—"}</span>
             <span className="h-px flex-1 bg-foreground/20" aria-hidden="true" />
           </div>
           <div className="flex items-center gap-3">
             <Layers className="h-7 w-7 text-accent" />
-            <h1 className="font-display text-3xl font-bold uppercase tracking-wider leading-[1.05] sm:text-4xl">
+            <h1 className="font-display text-3xl font-bold leading-[1.05] sm:text-4xl">
               {project?.name}
             </h1>
             {project && (
@@ -434,15 +434,15 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           )}
         </div>
         <div className="flex flex-col gap-3 lg:items-end">
-          <div className="w-full border-[1.5px] border-foreground/30 bg-card/40 font-mono text-[11px]">
-            <div className="grid grid-cols-[100px_1fr] border-b border-dashed border-foreground/25">
-              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 tracking-[0.18em] text-muted-foreground">
+          <div className="w-full border border-border bg-card/40 font-mono text-[11px]">
+            <div className="grid grid-cols-[100px_1fr] border-b border-dashed border-border">
+              <div className="border-r border-dashed border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
                 代码库
               </div>
               <div className="px-3 py-1.5 text-foreground">{codebases.length}</div>
             </div>
             <div className="grid grid-cols-[100px_1fr]">
-              <div className="border-r border-dashed border-foreground/25 bg-muted/50 px-3 py-1.5 tracking-[0.18em] text-muted-foreground">
+              <div className="border-r border-dashed border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
                 需求
               </div>
               <div className="px-3 py-1.5 text-foreground">{requirements.length}</div>
@@ -469,9 +469,9 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         </div>
 
         {codebases.length === 0 ? (
-          <Card className="border border-dashed border-foreground/30 p-6 text-center">
+          <Card className="border border-dashed border-border p-6 text-center">
             <FolderGit2 className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
-            <p className="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            <p className="mb-3 font-mono text-xs text-muted-foreground">
               暂无代码库，点「添加代码库」关联 Git 仓库。
             </p>
             <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
@@ -484,7 +484,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b-[1.5px] border-foreground bg-secondary/50 text-left font-mono text-[10px] uppercase tracking-[0.2em] text-foreground/70">
+                  <tr className="border-b border-border bg-secondary/50 text-left font-mono text-[10px] text-foreground/70">
                     <th className="px-4 py-2.5 font-semibold">别名</th>
                     <th className="hidden px-4 py-2.5 font-semibold md:table-cell">路径</th>
                     <th className="hidden px-4 py-2.5 font-semibold sm:table-cell">分支</th>
@@ -496,7 +496,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                   {codebases.map((cb) => (
                     <tr
                       key={cb.id}
-                      className="border-b border-dashed border-foreground/20 last:border-0 transition-colors hover:bg-accent/8"
+                      className="border-b border-dashed border-border last:border-0 transition-colors hover:bg-accent/8"
                     >
                       <td className="px-4 py-2.5 font-mono text-sm font-medium">
                         <div className="flex flex-col gap-0.5 md:gap-0">
@@ -522,7 +522,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                         <Badge variant="secondary">{cb.default_branch}</Badge>
                       </td>
                       <td className="px-4 py-2.5">
-                        {renderHealth(cb) ?? <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">—</span>}
+                        {renderHealth(cb) ?? <span className="font-mono text-[10px] text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-0.5">
@@ -581,7 +581,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         {requirements.length === 0 ? (
           <Card className="p-6 text-center">
             <Inbox className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
-            <p className="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+            <p className="mb-3 font-mono text-xs text-muted-foreground">
               暂无需求，点「新建需求」开始。
             </p>
             <Button size="sm" onClick={openReqDialog}>
@@ -600,7 +600,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                 >
                   <div className="min-w-0 flex-1 space-y-0.5">
                     <p className="truncate text-sm font-medium">{req.title}</p>
-                    <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <p className="font-mono text-[10px] text-muted-foreground">
                       {new Date(req.created_at).toLocaleDateString("zh-CN")}
                     </p>
                   </div>
@@ -682,7 +682,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void createRequirement();
                 }}
               />
-              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              <p className="font-mono text-[10px] text-muted-foreground">
                 Ctrl/⌘+Enter 提交 · 标题会自动从首行截取，AI 后续会优化
               </p>
             </div>
