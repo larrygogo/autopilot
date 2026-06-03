@@ -69,6 +69,12 @@ interface CbForm {
 
 const EMPTY_CB: CbForm = { alias: "", path: "", default_branch: "main", github_owner: "", github_repo: "" };
 
+/** 取路径最后一段作为文件夹名（兼容 Windows \ 和 POSIX /，忽略结尾分隔符） */
+function folderName(p: string): string {
+  const trimmed = p.trim().replace(/[\\/]+$/, "");
+  return trimmed.split(/[\\/]/).pop() ?? "";
+}
+
 type HealthState = "loading" | CodebaseHealthResult;
 
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
@@ -207,7 +213,18 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const detectCbFromPath = async (rawPath: string) => {
     const path = rawPath.trim();
     if (!path || path === lastDetectedPath) return;
+    const prevBase = folderName(lastDetectedPath);
     setLastDetectedPath(path);
+    // 别名默认取文件夹名（仅新建）：空、或仍是上个目录的自动名时跟随；用户手填的保留
+    if (!editingCb) {
+      const base = folderName(path);
+      if (base) {
+        setCbForm((f) => ({
+          ...f,
+          alias: !f.alias.trim() || f.alias.trim() === prevBase ? base : f.alias,
+        }));
+      }
+    }
     setDetectingCb(true);
     setCbDetectHint(null);
     try {
@@ -613,19 +630,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="cb-alias">
-                别名 <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="cb-alias"
-                placeholder="例如：frontend"
-                value={cbForm.alias}
-                disabled={!!editingCb}
-                onChange={(e) => setCbForm((f) => ({ ...f, alias: e.target.value }))}
-              />
-              {editingCb && <p className="text-xs text-muted-foreground">别名创建后不可修改。</p>}
-            </div>
-            <div className="space-y-1.5">
               <Label htmlFor="cb-path">
                 路径 <span className="text-destructive">*</span>
               </Label>
@@ -649,6 +653,19 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                   浏览…
                 </Button>
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cb-alias">
+                别名 <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="cb-alias"
+                placeholder="默认取文件夹名，可修改"
+                value={cbForm.alias}
+                disabled={!!editingCb}
+                onChange={(e) => setCbForm((f) => ({ ...f, alias: e.target.value }))}
+              />
+              {editingCb && <p className="text-xs text-muted-foreground">别名创建后不可修改。</p>}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cb-branch">默认分支</Label>
