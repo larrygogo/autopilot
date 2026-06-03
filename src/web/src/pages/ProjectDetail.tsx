@@ -686,60 +686,12 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                 </Button>
               </div>
             </div>
-            {editingCb ? (
-              <>
-                <div className="space-y-1.5">
-                  <Label htmlFor="cb-alias">
-                    别名 <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="cb-alias"
-                    placeholder="默认取文件夹名，可修改"
-                    value={cbForm.alias}
-                    disabled
-                    onChange={(e) => setCbForm((f) => ({ ...f, alias: e.target.value }))}
-                  />
-                  <p className="text-xs text-muted-foreground">别名创建后不可修改。</p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="cb-branch">默认分支</Label>
-                  <Input
-                    id="cb-branch"
-                    placeholder="main"
-                    value={cbForm.default_branch}
-                    onChange={(e) => setCbForm((f) => ({ ...f, default_branch: e.target.value }))}
-                  />
-                  {(detectingCb || cbDetectHint) && (
-                    <p className="text-xs text-muted-foreground">
-                      {detectingCb ? "正在从 Git 识别…" : cbDetectHint}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label>GitHub（可选）</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="owner"
-                      value={cbForm.github_owner}
-                      onChange={(e) => setCbForm((f) => ({ ...f, github_owner: e.target.value }))}
-                      className="flex-1"
-                    />
-                    <span className="self-center text-muted-foreground">/</span>
-                    <Input
-                      placeholder="repo"
-                      value={cbForm.github_repo}
-                      onChange={(e) => setCbForm((f) => ({ ...f, github_repo: e.target.value }))}
-                      className="flex-1"
-                    />
-                  </div>
-                </div>
-              </>
-            ) : (
-              cbForm.path.trim() && (
-                <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
-                  {detectingCb ? (
-                    <p className="text-xs text-muted-foreground">正在从 Git 识别…</p>
-                  ) : (
+            {cbForm.path.trim() && (
+              <div className="space-y-1 rounded-md border border-border bg-muted/30 px-3 py-2">
+                {detectingCb ? (
+                  <p className="text-xs text-muted-foreground">正在从 Git 识别…</p>
+                ) : (
+                  <>
                     <p className="text-xs text-muted-foreground">
                       将采用：别名 <span className="font-mono text-foreground">{cbForm.alias || folderName(cbForm.path)}</span>
                       {" · 默认分支 "}
@@ -751,14 +703,20 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                         </>
                       )}
                     </p>
-                  )}
-                </div>
-              )
+                    {cbDetectHint && (
+                      <p className="text-[11px] text-muted-foreground/80">{cbDetectHint}</p>
+                    )}
+                    {editingCb && (
+                      <p className="text-[11px] text-muted-foreground/80">别名创建后不可修改；分支 / GitHub 随路径自动识别。</p>
+                    )}
+                  </>
+                )}
+              </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeCbDialog} disabled={savingCb}>取消</Button>
-            <Button onClick={() => void saveCb()} disabled={savingCb || (!editingCb && !cbForm.path.trim())}>
+            <Button onClick={() => void saveCb()} disabled={savingCb || !cbForm.path.trim()}>
               {savingCb ? (editingCb ? "保存中…" : "添加中…") : (editingCb ? "保存" : "添加")}
             </Button>
           </DialogFooter>
