@@ -288,6 +288,7 @@ autopilot daemon stop
 autopilot project create <name> [-d desc]
 autopilot project list / delete <id>
 autopilot codebase create <alias> <path> [-b branch] [-p project-id] [--github owner/repo]
+# 缺省 -b / --github 时自动从 path 的 git 仓库识别（默认分支取 origin/HEAD→当前分支→main；GitHub 取 origin 远程）
 autopilot codebase list / delete <id> / health <id>
 autopilot req new --from-prompt "<需求>" [--no-extract] [-p project-id] [-c codebase-id]
 

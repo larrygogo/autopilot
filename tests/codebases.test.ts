@@ -22,7 +22,7 @@ import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
-import { checkCodebaseHealth, parseGithubFromRemote } from "../src/core/codebase-health";
+import { checkCodebaseHealth, parseGithubFromRemote, detectCodebaseGit } from "../src/core/codebase-health";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -193,6 +193,64 @@ describe("checkCodebaseHealth", () => {
     const r = await checkCodebaseHealth(process.cwd());
     // 在 CI 或无远端环境，可能 origin 不可达；这是 OK 的
     expect(r.healthy === true || r.issues.every((i) => i.includes("远端"))).toBe(true);
+  });
+});
+
+describe("detectCodebaseGit", () => {
+  function git(dir: string, args: string[]): void {
+    const r = Bun.spawnSync(["git", ...args], { cwd: dir, stderr: "pipe", stdout: "pipe" });
+    if (r.exitCode !== 0) {
+      throw new Error(`git ${args.join(" ")} 失败：${new TextDecoder().decode(r.stderr)}`);
+    }
+  }
+
+  it("非 git 路径 → is_git=false，全 null", () => {
+    const dir = mkdtempSync(join(tmpdir(), "detect-nogit-"));
+    try {
+      const info = detectCodebaseGit(dir);
+      expect(info.is_git).toBe(false);
+      expect(info.default_branch).toBeNull();
+      expect(info.remote_url).toBeNull();
+      expect(info.github_owner).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("路径不存在 → is_git=false", () => {
+    expect(detectCodebaseGit("/no/such/path/xyz987").is_git).toBe(false);
+  });
+
+  it("本地 git 仓库 → 探测到当前分支（无 origin 时 github 为 null）", () => {
+    const dir = mkdtempSync(join(tmpdir(), "detect-local-"));
+    try {
+      git(dir, ["init", "-b", "develop"]);
+      git(dir, ["config", "user.email", "t@t.io"]);
+      git(dir, ["config", "user.name", "t"]);
+      Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "init"], { cwd: dir });
+      const info = detectCodebaseGit(dir);
+      expect(info.is_git).toBe(true);
+      expect(info.default_branch).toBe("develop"); // 无 origin/HEAD，回退当前分支
+      expect(info.github_owner).toBeNull();
+      expect(info.remote_url).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("配了 github origin → 解析出 owner/repo + remote_url 原文", () => {
+    const dir = mkdtempSync(join(tmpdir(), "detect-remote-"));
+    try {
+      git(dir, ["init", "-b", "main"]);
+      git(dir, ["remote", "add", "origin", "https://github.com/acme/widget.git"]);
+      const info = detectCodebaseGit(dir);
+      expect(info.is_git).toBe(true);
+      expect(info.remote_url).toBe("https://github.com/acme/widget.git");
+      expect(info.github_owner).toBe("acme");
+      expect(info.github_repo).toBe("widget");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

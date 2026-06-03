@@ -65,7 +65,7 @@ import {
 import { listRequirementsByProject } from "../core/requirements";
 import { listCodebases, getCodebaseById, createCodebase, updateCodebase, deleteCodebase, nextCodebaseId } from "../core/codebases";
 import { listSubmodules, discoverSubmodules } from "../core/submodules";
-import { checkCodebaseHealth } from "../core/codebase-health";
+import { checkCodebaseHealth, detectCodebaseGit } from "../core/codebase-health";
 import {
   listSessions as listChatSessions,
   deleteSession as deleteChatSession,
@@ -1441,11 +1441,15 @@ export function registerCoreRpcMethods(): void {
           projectId = proj.id;
         }
       }
+      const detected = detectCodebaseGit(pathField);
       const cb = createCodebase({
         id: nextCodebaseId(),
         project_id: projectId,
         alias: name,
         path: pathField,
+        default_branch: detected.default_branch ?? "main",
+        github_owner: detected.github_owner,
+        github_repo: detected.github_repo,
       });
       return { codebase: cb };
     },
@@ -1605,16 +1609,25 @@ export function registerCoreRpcMethods(): void {
       const alias = typeof p.alias === "string" ? p.alias.trim() : "";
       const pathField = typeof p.path === "string" ? p.path.trim() : "";
       if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
+      // 服务端兜底探测：未显式给的字段自动从 git 仓库识别（显式值优先）
+      const detected = detectCodebaseGit(pathField);
+      const explicitBranch = typeof p.default_branch === "string" && p.default_branch.trim()
+        ? p.default_branch.trim() : null;
+      let gh_owner = (p.github_owner as string | null | undefined) ?? null;
+      let gh_repo = (p.github_repo as string | null | undefined) ?? null;
+      if (!gh_owner && !gh_repo && detected.github_owner && detected.github_repo) {
+        gh_owner = detected.github_owner;
+        gh_repo = detected.github_repo;
+      }
       try {
         const codebase = createCodebase({
           id: nextCodebaseId(),
           project_id: p.id,
           alias,
           path: pathField,
-          default_branch: typeof p.default_branch === "string" && p.default_branch.trim()
-            ? p.default_branch.trim() : "main",
-          github_owner: (p.github_owner as string | null | undefined) ?? null,
-          github_repo: (p.github_repo as string | null | undefined) ?? null,
+          default_branch: explicitBranch ?? detected.default_branch ?? "main",
+          github_owner: gh_owner,
+          github_repo: gh_repo,
         });
         return { codebase };
       } catch (e: unknown) {
@@ -1649,25 +1662,44 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
+    method: "codebases.detect",
+    description: "从本地路径探测 git 信息（默认分支 / 远程地址 / GitHub owner/repo），用于创建表单自动填充；纯读不写库",
+    handler: (params) => {
+      const p = asObj(params);
+      const path = typeof p.path === "string" ? p.path.trim() : "";
+      if (!path) throw new RpcError("INVALID_PARAM", "需要 path");
+      return detectCodebaseGit(path);
+    },
+  });
+
+  registerRpcMethod({
     method: "codebases.create",
-    description: "创建 codebase（与 POST /api/codebases 等价）",
+    description: "创建 codebase（与 POST /api/codebases 等价）；未显式给 default_branch / github 时自动从 path 探测",
     handler: (params) => {
       const p = asObj(params);
       const alias = typeof p.alias === "string" ? p.alias.trim() : "";
       const pathField = typeof p.path === "string" ? p.path.trim() : "";
       if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
       const projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
+      // 服务端兜底探测：CLI/Web 没传的字段自动从 git 仓库识别（显式传值优先）
+      const detected = detectCodebaseGit(pathField);
+      const explicitBranch = typeof p.default_branch === "string" && p.default_branch.trim()
+        ? p.default_branch.trim() : null;
+      let github_owner = (p.github_owner as string | null | undefined) ?? null;
+      let github_repo = (p.github_repo as string | null | undefined) ?? null;
+      if (!github_owner && !github_repo && detected.github_owner && detected.github_repo) {
+        github_owner = detected.github_owner;
+        github_repo = detected.github_repo;
+      }
       try {
         const codebase = createCodebase({
           id: nextCodebaseId(),
           project_id: projectId,
           alias,
           path: pathField,
-          default_branch: typeof p.default_branch === "string" && p.default_branch.trim()
-            ? p.default_branch.trim()
-            : "main",
-          github_owner: (p.github_owner as string | null | undefined) ?? null,
-          github_repo: (p.github_repo as string | null | undefined) ?? null,
+          default_branch: explicitBranch ?? detected.default_branch ?? "main",
+          github_owner,
+          github_repo,
         });
         return codebase;
       } catch (e: unknown) {

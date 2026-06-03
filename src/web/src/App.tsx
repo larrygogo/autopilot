@@ -437,7 +437,7 @@ function NavLinkItem({ item, badgeCount }: { item: NavItem; badgeCount: number }
           <span className="flex-1">{item.label}</span>
           {badgeCount > 0 && (
             <span
-              className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-600 px-1 font-mono text-[10px] font-bold leading-none text-white"
+              className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-red-600 px-1.5 font-mono text-[10px] font-bold leading-none text-white tabular-nums"
               aria-label={`${badgeCount} 件待处理`}
             >
               {badgeCount > 99 ? "99+" : badgeCount}

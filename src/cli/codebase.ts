@@ -74,8 +74,8 @@ export function registerCodebaseCommands(program: Command): void {
 
   cb
     .command("create <alias> <path>")
-    .description("注册本地 git 仓库为 codebase")
-    .option("-b, --branch <name>", "默认分支", "main")
+    .description("注册本地 git 仓库为 codebase（默认分支 / GitHub 远程自动从 path 识别）")
+    .option("-b, --branch <name>", "默认分支（缺省自动探测 origin/HEAD → 当前分支 → main）")
     .option("-p, --project <id>", "归属 project（默认取第一个 project；--no-project 走全局）")
     .option("--no-project", "不挂任何 project（codebase 走 project_id=null）")
     .option("--github <owner/repo>", "GitHub 仓库（可选，用于 submit_pr）")
@@ -85,7 +85,7 @@ export function registerCodebaseCommands(program: Command): void {
       async (
         alias: string,
         rawPath: string,
-        opts: { branch: string; project?: string | false; github?: string; port: string; json?: boolean },
+        opts: { branch?: string; project?: string | false; github?: string; port: string; json?: boolean },
       ) => {
         if (!alias.trim()) {
           console.error("错误：alias 不能为空");
@@ -131,8 +131,9 @@ export function registerCodebaseCommands(program: Command): void {
           const body: Parameters<typeof client.createCodebase>[0] = {
             alias: alias.trim(),
             path: abs,
-            default_branch: opts.branch,
           };
+          // 只在显式 -b 时传 branch；缺省让服务端从 git 探测
+          if (opts.branch && opts.branch.trim()) body.default_branch = opts.branch.trim();
           if (projectId) body.project_id = projectId;
           if (gh) {
             body.github_owner = gh.owner;
@@ -142,10 +143,12 @@ export function registerCodebaseCommands(program: Command): void {
           if (opts.json) {
             console.log(JSON.stringify(codebase, null, 2));
           } else {
+            const autoBranch = !opts.branch || !opts.branch.trim();
+            const autoGithub = !gh && codebase.github_owner && codebase.github_repo;
             console.log(`已注册 codebase：${codebase.id}  alias=${codebase.alias}  path=${codebase.path}`);
-            console.log(`  default_branch=${codebase.default_branch}`);
+            console.log(`  default_branch=${codebase.default_branch}${autoBranch ? "  (自动识别)" : ""}`);
             if (codebase.github_owner && codebase.github_repo) {
-              console.log(`  github=${codebase.github_owner}/${codebase.github_repo}`);
+              console.log(`  github=${codebase.github_owner}/${codebase.github_repo}${autoGithub ? "  (自动识别)" : ""}`);
             }
             console.log(`\n下一步：autopilot req new "需求描述"   # 在 cwd 内会自动推断 codebase`);
             console.log(`     或：autopilot task start "标题" --repo ${codebase.alias} -r "需求详情" -w dev`);

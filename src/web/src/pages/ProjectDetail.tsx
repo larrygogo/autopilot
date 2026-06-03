@@ -91,6 +91,8 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [editingCb, setEditingCb] = useState<Codebase | null>(null);
   const [cbForm, setCbForm] = useState<CbForm>(EMPTY_CB);
   const [savingCb, setSavingCb] = useState(false);
+  const [detectingCb, setDetectingCb] = useState(false);
+  const [cbDetectHint, setCbDetectHint] = useState<string | null>(null);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [deletingCbId, setDeletingCbId] = useState<string | null>(null);
 
@@ -183,6 +185,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       setEditingCb(null);
       setCbForm(EMPTY_CB);
     }
+    setCbDetectHint(null);
     setCbDialogOpen(true);
   };
 
@@ -190,6 +193,44 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     if (savingCb) return;
     setCbDialogOpen(false);
     setEditingCb(null);
+    setCbDetectHint(null);
+  };
+
+  /**
+   * 从路径自动识别 git 信息，回填默认分支 / GitHub。
+   * 仅新建时触发；只补「空或仍是默认 main」的字段，不覆盖用户已手填的值。
+   */
+  const detectCbFromPath = async (rawPath: string) => {
+    const path = rawPath.trim();
+    if (editingCb || !path) return;
+    setDetectingCb(true);
+    setCbDetectHint(null);
+    try {
+      const info = await api.detectCodebase(path);
+      if (!info.is_git) {
+        setCbDetectHint("该路径不是 git 仓库，未能自动识别。");
+        return;
+      }
+      setCbForm((f) => ({
+        ...f,
+        default_branch:
+          info.default_branch && (!f.default_branch.trim() || f.default_branch.trim() === "main")
+            ? info.default_branch
+            : f.default_branch,
+        github_owner:
+          !f.github_owner.trim() && info.github_owner ? info.github_owner : f.github_owner,
+        github_repo:
+          !f.github_repo.trim() && info.github_repo ? info.github_repo : f.github_repo,
+      }));
+      const parts: string[] = [];
+      if (info.default_branch) parts.push(`默认分支 ${info.default_branch}`);
+      if (info.remote_url) parts.push(`远程 ${info.remote_url}`);
+      setCbDetectHint(parts.length ? `已识别：${parts.join("；")}` : "已识别为 git 仓库（无 origin 远程）。");
+    } catch (e: unknown) {
+      setCbDetectHint(null);
+    } finally {
+      setDetectingCb(false);
+    }
   };
 
   const saveCb = async () => {
@@ -593,6 +634,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                   placeholder="例如：/home/user/projects/frontend"
                   value={cbForm.path}
                   onChange={(e) => setCbForm((f) => ({ ...f, path: e.target.value }))}
+                  onBlur={(e) => void detectCbFromPath(e.target.value)}
                   className="flex-1"
                 />
                 <Button
@@ -615,6 +657,11 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                 value={cbForm.default_branch}
                 onChange={(e) => setCbForm((f) => ({ ...f, default_branch: e.target.value }))}
               />
+              {!editingCb && (detectingCb || cbDetectHint) && (
+                <p className="text-xs text-muted-foreground">
+                  {detectingCb ? "正在从 Git 识别…" : cbDetectHint}
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>GitHub（可选）</Label>
@@ -651,6 +698,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         onSelect={(path) => {
           setCbForm((f) => ({ ...f, path }));
           setFolderPickerOpen(false);
+          void detectCbFromPath(path);
         }}
         onCancel={() => setFolderPickerOpen(false)}
       />

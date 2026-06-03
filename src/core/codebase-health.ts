@@ -69,6 +69,71 @@ export async function checkCodebaseHealth(path: string): Promise<CodebaseHealth>
   };
 }
 
+export interface CodebaseGitInfo {
+  /** path 是否是一个 git 工作树 */
+  is_git: boolean;
+  /** 默认分支：优先 origin/HEAD 指向，回退当前分支；探测不到为 null（创建时再兜底 main） */
+  default_branch: string | null;
+  /** origin 远程地址原文（任意 host；非 github 也返回，仅 github 才解析 owner/repo） */
+  remote_url: string | null;
+  github_owner: string | null;
+  github_repo: string | null;
+}
+
+function decodeOut(buf: Uint8Array | undefined): string {
+  return new TextDecoder().decode(buf ?? new Uint8Array()).trim();
+}
+
+/**
+ * 从本地路径探测 git 信息，供「添加代码库」时自动识别默认分支 + 远程地址。
+ *
+ * 默认分支解析顺序：
+ *   1. `git symbolic-ref refs/remotes/origin/HEAD` → refs/remotes/origin/<branch>（最准，反映远端默认分支）
+ *   2. 回退 `git rev-parse --abbrev-ref HEAD`（当前分支；detached HEAD 返回 "HEAD" 时跳过）
+ *   3. 都拿不到 → null（调用方创建时兜底 "main"）
+ *
+ * 远程地址：`git remote get-url origin`，原文返回；github.com 域再解析 owner/repo。
+ * 所有外部命令走 Bun.spawnSync argv，不拼 shell 字符串。纯读，不改仓库。
+ */
+export function detectCodebaseGit(path: string): CodebaseGitInfo {
+  const none: CodebaseGitInfo = {
+    is_git: false, default_branch: null, remote_url: null, github_owner: null, github_repo: null,
+  };
+  if (!existsSync(path)) return none;
+  try { if (!statSync(path).isDirectory()) return none; } catch (e: unknown) { return none; }
+
+  const isGit = Bun.spawnSync(["git", "rev-parse", "--is-inside-work-tree"], { cwd: path, stderr: "pipe" });
+  if (isGit.exitCode !== 0) return none;
+
+  // 远程地址 + github owner/repo
+  let remote_url: string | null = null;
+  let owner: string | null = null;
+  let repo: string | null = null;
+  const remoteProc = Bun.spawnSync(["git", "remote", "get-url", "origin"], { cwd: path, stderr: "pipe" });
+  if (remoteProc.exitCode === 0) {
+    remote_url = decodeOut(remoteProc.stdout) || null;
+    const parsed = remote_url ? parseGithubFromRemote(remote_url) : null;
+    if (parsed) { owner = parsed.owner; repo = parsed.repo; }
+  }
+
+  // 默认分支
+  let branch: string | null = null;
+  const headRef = Bun.spawnSync(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: path, stderr: "pipe" });
+  if (headRef.exitCode === 0) {
+    const m = decodeOut(headRef.stdout).match(/^refs\/remotes\/origin\/(.+)$/);
+    if (m) branch = m[1];
+  }
+  if (!branch) {
+    const cur = Bun.spawnSync(["git", "rev-parse", "--abbrev-ref", "HEAD"], { cwd: path, stderr: "pipe" });
+    if (cur.exitCode === 0) {
+      const b = decodeOut(cur.stdout);
+      if (b && b !== "HEAD") branch = b; // 跳过 detached HEAD
+    }
+  }
+
+  return { is_git: true, default_branch: branch, remote_url, github_owner: owner, github_repo: repo };
+}
+
 /**
  * 从 git remote URL 解析 GitHub owner/repo，只识别 github.com 域。
  * 支持：

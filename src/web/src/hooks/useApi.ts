@@ -568,6 +568,15 @@ export const api = {
     project_id?: string;
   }) =>
     requestRpc<Codebase>("codebases.create", body),
+  // [WS-RPC] codebases.detect —— 从本地路径探测 git 信息，用于创建表单自动填充
+  detectCodebase: (path: string) =>
+    requestRpc<{
+      is_git: boolean;
+      default_branch: string | null;
+      remote_url: string | null;
+      github_owner: string | null;
+      github_repo: string | null;
+    }>("codebases.detect", { path }),
   // [WS-RPC] codebases.update
   updateCodebase: (id: string, body: Partial<{
     alias: string;
