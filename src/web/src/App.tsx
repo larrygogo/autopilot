@@ -89,7 +89,7 @@ const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { path: "/now", label: "现在", icon: Sparkles, end: true },
       { path: "/start", label: "开始", icon: FilePlus, end: true },
-      { path: "/tasks", label: "看板", icon: ListChecks, end: true },
+      { path: "/tasks", label: "流水线", icon: ListChecks, end: true },
       { path: "/library", label: "项目", icon: FolderOpen, expandable: "projects" },
     ],
   },
@@ -111,10 +111,10 @@ const NAV_GROUPS: NavGroupDef[] = [
 function titleForPath(pathname: string): string {
   if (pathname.startsWith("/now")) return "现在";
   if (pathname.startsWith("/start")) return "开始";
-  if (pathname === "/tasks") return "任务看板";
+  if (pathname === "/tasks") return "流水线";
   if (pathname.startsWith("/tasks/")) {
     const id = pathname.slice("/tasks/".length);
-    return id ? `任务 · ${id}` : "任务看板";
+    return id ? `任务 · ${id}` : "流水线";
   }
   if (pathname.startsWith("/library")) return "项目";
   if (pathname.startsWith("/chat")) return "对话";
