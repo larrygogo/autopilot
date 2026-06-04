@@ -475,8 +475,8 @@ export function createSubTask(opts: CreateSubTaskOpts): void {
   db.run(
     "INSERT OR IGNORE INTO tasks" +
     " (id, title, workflow, status, channel, notify_target, extra," +
-    "  created_at, updated_at, parent_task_id, parallel_index, parallel_group)" +
-    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "  created_at, updated_at, parent_task_id, parallel_index, parallel_group, requirement_id)" +
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       opts.subTaskId,
       opts.phaseName,
@@ -490,6 +490,8 @@ export function createSubTask(opts: CreateSubTaskOpts): void {
       opts.parentTaskId,
       opts.parallelIndex,
       opts.parallelGroup,
+      // 子任务不是独立的"工作"，继承父任务的 requirement_id（每个任务必有需求）
+      parent.requirement_id ?? null,
     ]
   );
 }
