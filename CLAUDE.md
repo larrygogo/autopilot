@@ -41,7 +41,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **HTTP REST API**：`/api/tasks`、`/api/workflows`、`/api/status` 等 CRUD 端点
 - **WebSocket 实时推送**：频道订阅模式（`task:*`、`log:{taskId}` 等）推送状态变化和日志
 - **TUI**：ink (React for CLI) 终端 UI，WebSocket 连接 daemon
-- **Web UI**：React + Vite SPA，daemon 自身 serve 静态资源
+- **Web UI**：React + Vite SPA，daemon 自身 serve 静态资源。**视觉风格 = claude.ai 质感**（暖象牙奶油底 / 深色暖炭灰、珊瑚橘 `#D97757` 强调、圆角、柔阴影、去大写去虚线）——token 在 `src/web/src/index.css`。早期的「蓝图工程图纸」风（直角/硬阴影/网格/大写压缩体）**已废弃，勿重新引入**
 - **插件化工作流**：`AUTOPILOT_HOME/workflows/`（用户）工作流自动发现
 - **YAML 工作流定义**：`workflow.yaml` 定义结构，`workflow.ts` 只写阶段函数
 - **工作流注册中心**：`src/core/registry.ts` 自动发现、注册、查询工作流
@@ -55,6 +55,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **Phase 内联 Agent**：每个 phase 在 `workflow.yaml` 里内联配置自己的 agent（`agent: {provider, model, system_prompt, max_turns, permission_mode}`）；省略则用 `DEFAULT_AGENT` 兜底。无"全局命名可复用 agent"概念（已于 2026-06 移除）。model 缺省时回退到 `providers.<provider>.default_model`
 - **Web UI 工作流编辑器**：阶段 CRUD / 并行块 / 驳回 / **phase 内联 agent 编辑**全图形化，`workflow.ts` 自动同步（改名重命名函数、追加缺失、孤儿清理）
 - **项目工作台**：两层数据模型 `Project ⊃ Codebase`，需求挂项目维度，支持 AI 调查 + 评论线程 + 用户审批流
+- **流水线（原"看板"）**：Web 的 `/tasks` 页（导航名「流水线」）把**需求 + 任务**合到一处看全生命周期，4 段 tab（全部 / 等待人工 / 运行中 / 归档），列表内按时间分组（今天/昨天/…），行是 Claude Code 风卡片。**「现在(Now)」独立保留**为决策收件箱，不并入
 - **评论线程**：`requirement_questions` + `requirement_question_replies`，Agent 调查期主动提问，用户回复后继续
 - **框架零业务知识**：核心模块不含任何工作流专属常量或逻辑
 - **用户空间分离**：`AUTOPILOT_HOME`（默认 `~/.autopilot/`）存放用户配置、工作流和运行时数据
@@ -152,12 +153,19 @@ autopilot/
 
 | 实体 | 表 | ID 前缀 | 说明 |
 |------|-----|---------|------|
-| Project | `projects` | `proj-NNN` | 顶层工作空间 |
+| Project | `projects` | `proj-NNN` | 顶层工作空间。`proj-default` 是兜底项目（无归属的快捷任务挂这里） |
 | Codebase | `codebases` | `cb-NNN` | 物理 Git 目录，归属某 Project |
-| Requirement | `requirements` | — | 挂 project_id + codebase_id（多对多 via requirement_codebases） |
+| Requirement | `requirements` | `req-NNN` | 挂 project_id + codebase_id（多对多 via requirement_codebases）。**是每个 Task 的前置** |
+| Task | `tasks` | 8 位短 id | 执行单元。**必有 `requirement_id`（非空）**，由某需求衍生 |
 | Question | `requirement_questions` | `qst-NNN` | Agent 调查期提问，含多轮回复 |
 
-状态流：`draft` → `investigating` → `awaiting_approval` → `queued` → `running` → `done`/`failed`
+**核心不变式：每个 Task 必有一个 Requirement 作为前置**（不存在游离任务）。需求+任务是「一件工作」的前后两段。
+- Requirement 真实状态机（见 `src/core/requirements.ts` ALLOWED_TRANSITIONS）：
+  `drafting → clarifying → ready → (awaiting_approval) → queued → running → awaiting_review ⇄ fix_revision → done`，另有 `cancelled` / `failed`（failed 可回 queued/awaiting_approval 重试）。
+  ⚠️ 不是早期文档写的 `draft/investigating` —— 那是过期简化，别照它写过滤逻辑。
+- Task 状态机：`pending_* → running_* → running_await_review → done/failed/cancelled`（phase 名内联在 status 里）。
+- 快捷起任务（`task start "<描述>"` / 一句话发包 `startAdHoc`）也**先建真需求**：`runClarifierExtract` 把描述抽成 title+spec → 建需求（进需求池）→ 有 codebase 走调度器（`requirement-scheduler`，同仓库串行）、纯 adhoc 直接起。CLI 参数/退出码不变。helper 在 `src/daemon/start-from-prompt.ts`。
+- 当前为 Phase 1（应用层强制 `requirement_id` 非空 + 迁移 023 回填历史游离任务，可回退）。**Phase 2 未做**：DB 列改 NOT NULL + FK（表重建、不可逆），dogfood 确认无新游离任务再单独上。
 
 向后兼容：`/api/repos` 路由别名保留至 P6 清理（≈90 天）；`Requirement.repo_id` 已于 P1 正式改名 `codebase_id`。
 
@@ -293,6 +301,7 @@ autopilot codebase list / delete <id> / health <id>
 autopilot req new --from-prompt "<需求>" [--no-extract] [-p project-id] [-c codebase-id]
 
 # 任务管理（通过 daemon API）
+# 注：每个任务必有需求。task start 只给 title 时会自动抽成一条真需求再起任务（无游离任务）
 autopilot task start <title> [-w workflow] [-r "<需求>"] [--repo alias]
 autopilot task status [task-id] [--json]
 autopilot task cancel <task-id>
