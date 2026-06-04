@@ -30,6 +30,7 @@ const ALLOWLIST = new Set([
   "src/migrations/008-projects.ts", // P1 项目工作台改造：codebases 表重建需 INSERT 数据 copy（DDL+一次性数据迁移，无 manifest 同步需求）
   "src/migrations/009-nullable-codebase.ts", // requirements.codebase_id NOT NULL → NULLable 需表重建（DDL+一次性数据迁移）
   "src/migrations/021-requirement-comments.ts", // Phase 2 合并：把 questions+replies+feedbacks 迁移到 requirement_comments（一次性数据迁移）
+  "src/migrations/023-backfill-orphan-task-requirements.ts", // 每个任务必有需求 Phase 1：回填历史游离 task 的 requirement（一次性数据迁移）
   "src/core/now-dismiss.ts",       // now_dismissed_cards 表：SQLite 即权威源，dismiss 状态无 manifest 同步需求
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
 ]);

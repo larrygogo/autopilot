@@ -13,6 +13,7 @@ import { up as migrate019 } from "../src/migrations/019-task-requirement-id";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { createCodebase } from "../src/core/codebases";
 import { createProject } from "../src/core/projects";
+import { createRequirement } from "../src/core/requirements";
 import { startTaskFromTemplate } from "../src/core/task-factory";
 import { setup_req_dev_task } from "../examples/workflows/req_dev/workflow";
 import type { WorkflowDefinition } from "../src/core/registry";
@@ -46,6 +47,10 @@ describe("req_dev e2e smoke", () => {
       github_owner: "larrygogo",
       github_repo: "autopilot",
     });
+
+    // 每个任务必有需求：建两条供下面两个用例当 FK link
+    createRequirement({ id: "req-001", project_id: "proj-001", codebase_id: "cb-001", title: "smoke req 1" });
+    createRequirement({ id: "req-002", project_id: "proj-001", codebase_id: "cb-001", title: "smoke req 2" });
 
     // 手动注册 req_dev workflow（避免文件系统依赖）
     _clearRegistry();
@@ -149,6 +154,7 @@ describe("req_dev e2e smoke", () => {
       workflow: "req_dev",
       title: "smoke test requirement",
       requirement: "test requirement content",
+      requirement_id: "req-001",
       codebase_id: "cb-001", // 额外工作流参数，转发给 setup_func
     });
 
@@ -185,6 +191,7 @@ describe("req_dev e2e smoke", () => {
     const task = await startTaskFromTemplate({
       workflow: "req_dev",
       title: "no requirement",
+      requirement_id: "req-002",
       codebase_id: "cb-001", // 额外工作流参数
       // requirement 未传
     });
