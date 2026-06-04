@@ -3,10 +3,10 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-import { getTaskWorkspace, ensureTaskWorkspace, resolveWorkspacePath } from "../src/core/workspace";
+import { getTaskSandbox, ensureTaskSandbox, resolveSandboxPath } from "../src/core/sandbox";
 
 // workspace 模块路径：用正斜杠避免 Windows 反斜杠在 JS 字符串字面量里被当作转义字符吃掉
-const WORKSPACE_MODULE = join(import.meta.dir, "..", "src", "core", "workspace").replace(/\\/g, "/");
+const WORKSPACE_MODULE = join(import.meta.dir, "..", "src", "core", "sandbox").replace(/\\/g, "/");
 
 let tmpHome: string;
 
@@ -24,59 +24,59 @@ afterEach(() => {
 
 // 由于 AUTOPILOT_HOME 在 src/index.ts 启动时被 freeze，这里不能通过 env 注入
 // 改为直接测试函数输入输出的纯逻辑（路径 / copy 行为）。
-// 但 getTaskWorkspace / ensureTaskWorkspace 硬编码用 AUTOPILOT_HOME，不方便注入。
+// 但 getTaskSandbox / ensureTaskSandbox 硬编码用 AUTOPILOT_HOME，不方便注入。
 // 因此这里用一次性 spawn 子进程跑，避免污染主进程状态 —— 或者用一个更简单的替代：
-// 直接跑 getTaskWorkspace 只断言结构性（包含 "workspace" 子目录）。
+// 直接跑 getTaskSandbox 只断言结构性（包含 "workspace" 子目录）。
 
-describe("getTaskWorkspace 路径结构", () => {
+describe("getTaskSandbox 路径结构", () => {
   it("返回形如 <HOME>/runtime/tasks/<id>/workspace", () => {
-    const ws = getTaskWorkspace("demo-task-001");
+    const ws = getTaskSandbox("demo-task-001");
     expect(ws).toMatch(/[/\\]runtime[/\\]tasks[/\\]demo-task-001[/\\]workspace$/);
   });
 
   it("拒绝非法 taskId", () => {
-    expect(() => getTaskWorkspace("bad id!")).toThrow(/非法/);
+    expect(() => getTaskSandbox("bad id!")).toThrow(/非法/);
   });
 });
 
-describe("resolveWorkspacePath 路径穿越防护", () => {
+describe("resolveSandboxPath 路径穿越防护", () => {
   it("合法相对路径返回绝对路径", () => {
-    const p = resolveWorkspacePath("t1", "src/index.ts");
+    const p = resolveSandboxPath("t1", "src/index.ts");
     expect(p).not.toBeNull();
     expect(p).toMatch(/[/\\]workspace[/\\]src[/\\]index\.ts$/);
   });
 
   it("空路径返回 workspace 根", () => {
-    const p = resolveWorkspacePath("t1", "");
+    const p = resolveSandboxPath("t1", "");
     expect(p).not.toBeNull();
     // 跨平台：Windows 用反斜杠，Unix 用正斜杠
     expect(p).toMatch(/[/\\]workspace$/);
   });
 
   it("拒绝 .. 穿越", () => {
-    const p = resolveWorkspacePath("t1", "../../../etc/passwd");
+    const p = resolveSandboxPath("t1", "../../../etc/passwd");
     expect(p).toBeNull();
   });
 
   it("拒绝含 NUL 字符", () => {
-    const p = resolveWorkspacePath("t1", "foo\0bar");
+    const p = resolveSandboxPath("t1", "foo\0bar");
     expect(p).toBeNull();
   });
 
   it("根目录开头的 / 被剥离", () => {
-    const p = resolveWorkspacePath("t1", "/absolute/looking");
+    const p = resolveSandboxPath("t1", "/absolute/looking");
     expect(p).not.toBeNull();
     expect(p).toMatch(/[/\\]workspace[/\\]absolute[/\\]looking$/);
   });
 });
 
-describe("ensureTaskWorkspace 拷贝 template", () => {
+describe("ensureTaskSandbox 拷贝 template", () => {
   // 这些用例直接通过子进程跑，确保拿到新的 AUTOPILOT_HOME
   it("能创建空 workspace（无 template）", async () => {
     const script = `
-import { ensureTaskWorkspace } from "${WORKSPACE_MODULE}";
+import { ensureTaskSandbox } from "${WORKSPACE_MODULE}";
 import { existsSync } from "fs";
-const ws = ensureTaskWorkspace("t001", "wf_a");
+const ws = ensureTaskSandbox("t001", "wf_a");
 console.log(JSON.stringify({ ws, exists: existsSync(ws) }));
 `;
     const proc = Bun.spawn(["bun", "-e", script], {
@@ -97,10 +97,10 @@ console.log(JSON.stringify({ ws, exists: existsSync(ws) }));
     writeFileSync(join(wfDir, "workspace_template", "src", "index.ts"), "export {}");
 
     const script = `
-import { ensureTaskWorkspace } from "${WORKSPACE_MODULE}";
+import { ensureTaskSandbox } from "${WORKSPACE_MODULE}";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-const ws = ensureTaskWorkspace("t002", "wf_b", { template: "workspace_template" });
+const ws = ensureTaskSandbox("t002", "wf_b", { template: "workspace_template" });
 console.log(JSON.stringify({
   readme: readFileSync(join(ws, "README.md"), "utf-8"),
   hasIndex: existsSync(join(ws, "src", "index.ts")),
@@ -119,9 +119,9 @@ console.log(JSON.stringify({
 
   it("拒绝 template 路径穿越", async () => {
     const script = `
-import { ensureTaskWorkspace } from "${WORKSPACE_MODULE}";
+import { ensureTaskSandbox } from "${WORKSPACE_MODULE}";
 import { readdirSync } from "fs";
-const ws = ensureTaskWorkspace("t003", "wf_c", { template: "../../../etc" });
+const ws = ensureTaskSandbox("t003", "wf_c", { template: "../../../etc" });
 console.log(JSON.stringify({ empty: readdirSync(ws).length === 0 }));
 `;
     const proc = Bun.spawn(["bun", "-e", script], {

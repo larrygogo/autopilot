@@ -4,16 +4,16 @@ import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
 
 // ──────────────────────────────────────────────
-// 任务 workspace —— 每次任务独立的沙盒目录
+// 任务 sandbox —— 每次任务独立的沙盒目录
 //
 // 布局：
 //   AUTOPILOT_HOME/
 //     runtime/tasks/<task-id>/
-//       ├── workspace/         ← 阶段函数的工作区（本模块管理）
-//       └── .worktree.json     ← git worktree 元数据（仅 workspace.git=true 时）
+//       ├── workspace/         ← 阶段函数的沙盒目录（本模块管理；物理目录名保持 workspace 不变）
+//       └── .worktree.json     ← git worktree 元数据（仅 sandbox.git=true 时）
 //
 // 工作流可在 workflow.yaml 声明：
-//   workspace:
+//   sandbox:
 //     template: workspace_template   # 可选，相对于工作流目录
 //     git: true                      # 启用 git worktree 模式（基于 codebase 临时分支）
 //     branch_prefix: "autopilot/"    # worktree 分支名前缀（默认 autopilot/）
@@ -25,8 +25,8 @@ import { log } from "./logger";
 const TASK_ID_RE = /^[\w.\-]+$/;
 const WORKTREE_MANIFEST = ".worktree.json";
 
-export interface WorkspaceConfig {
-  /** 模板目录名（相对于 workflow 目录），默认 undefined = 空 workspace */
+export interface SandboxConfig {
+  /** 模板目录名（相对于 workflow 目录），默认 undefined = 空 sandbox */
   template?: string;
   /** 启用 git worktree 模式（基于 codebase 临时分支沙盒） */
   git?: boolean;
@@ -36,14 +36,14 @@ export interface WorkspaceConfig {
   base?: string;
 }
 
-/** 创建 worktree 时传入的 codebase 信息（caller 反查后传入，workspace.ts 不依赖 codebases.ts） */
+/** 创建 worktree 时传入的 codebase 信息（caller 反查后传入，sandbox.ts 不依赖 codebases.ts） */
 export interface CodebaseRef {
   id: string;
   path: string;
   default_branch: string;
 }
 
-/** task workspace 走 git worktree 时记录在 .worktree.json 的元数据 */
+/** task sandbox 走 git worktree 时记录在 .worktree.json 的元数据 */
 export interface WorktreeMeta {
   codebase_id: string;
   codebase_path: string;
@@ -54,9 +54,10 @@ export interface WorktreeMeta {
 
 
 /**
- * 获取任务 workspace 的绝对路径（不保证存在）。
+ * 获取任务 sandbox 的绝对路径（不保证存在）。
+ * 物理目录名保持 `workspace`，与历史磁盘布局兼容。
  */
-export function getTaskWorkspace(taskId: string): string {
+export function getTaskSandbox(taskId: string): string {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
   }
@@ -64,40 +65,40 @@ export function getTaskWorkspace(taskId: string): string {
 }
 
 /**
- * 确保 workspace 目录存在；按 workspace.yaml 配置选择初始化方式：
+ * 确保 sandbox 目录存在；按 workflow.yaml 的 sandbox 段配置选择初始化方式：
  *   - git=true + 提供 codebase 信息 → git worktree 模式（在 codebase 临时分支上工作）
  *   - template=xxx → 拷贝模板目录
  *   - 其余 → 空目录
  *
- * 幂等：已存在非空 workspace 时不会覆盖用户数据。
+ * 幂等：已存在非空 sandbox 时不会覆盖用户数据。
  * 退化策略：worktree 创建失败（codebase 非 git / 命令失败）→ warn + 空目录，不抛错。
  *
  * @param taskId 任务 ID
  * @param workflowName 工作流名（决定 template 查找路径）
- * @param workspaceConfig 工作流 workflow.yaml 里的 workspace 段（可选）
+ * @param sandboxConfig 工作流 workflow.yaml 里的 sandbox 段（可选）
  * @param codebase git worktree 模式所需的 codebase 信息（caller 反查后传入；不传 + git=true 时退化）
- * @returns workspace 绝对路径（无论 worktree 是否成功 — 失败会退化为空目录）。
+ * @returns sandbox 绝对路径（无论 worktree 是否成功 — 失败会退化为空目录）。
  *   worktree 元数据通过 getTaskWorktreeMeta(taskId) 单独读取。
  */
-export function ensureTaskWorkspace(
+export function ensureTaskSandbox(
   taskId: string,
   workflowName: string,
-  workspaceConfig?: WorkspaceConfig,
+  sandboxConfig?: SandboxConfig,
   codebase?: CodebaseRef,
 ): string {
-  const wsPath = getTaskWorkspace(taskId);
+  const wsPath = getTaskSandbox(taskId);
 
-  // 幂等：已存在非空 workspace 直接返回
+  // 幂等：已存在非空 sandbox 直接返回
   const alreadyPopulated = existsSync(wsPath) && readdirSync(wsPath).length > 0;
   if (alreadyPopulated) return wsPath;
 
   // git worktree 模式优先（template 与 git 互斥，git=true 时忽略 template）
-  if (workspaceConfig?.git) {
-    if (workspaceConfig.template) {
-      log.warn("workspace.git=true 与 template=%s 互斥，忽略 template [task=%s]",
-        workspaceConfig.template, taskId);
+  if (sandboxConfig?.git) {
+    if (sandboxConfig.template) {
+      log.warn("sandbox.git=true 与 template=%s 互斥，忽略 template [task=%s]",
+        sandboxConfig.template, taskId);
     }
-    const wt = tryCreateWorktree(taskId, workspaceConfig, codebase, wsPath);
+    const wt = tryCreateWorktree(taskId, sandboxConfig, codebase, wsPath);
     if (wt) return wsPath;
     // 退化：worktree 创建失败 → 空目录
     if (!existsSync(wsPath)) mkdirSync(wsPath, { recursive: true });
@@ -107,15 +108,15 @@ export function ensureTaskWorkspace(
   mkdirSync(wsPath, { recursive: true });
 
   // 处理 template
-  const templateName = workspaceConfig?.template;
+  const templateName = sandboxConfig?.template;
   if (templateName) {
     const templateDir = resolveTemplate(workflowName, templateName);
     if (templateDir) {
       copyDirRecursive(templateDir, wsPath);
-      log.info("已从 template %s 初始化 workspace [task=%s path=%s]",
+      log.info("已从 template %s 初始化 sandbox [task=%s path=%s]",
         templateName, taskId, wsPath);
     } else {
-      log.warn("workflow.yaml 指定 template=%s 但未找到目录；workspace 为空 [task=%s]",
+      log.warn("workflow.yaml 指定 template=%s 但未找到目录；sandbox 为空 [task=%s]",
         templateName, taskId);
     }
   }
@@ -139,16 +140,16 @@ export function getTaskWorktreeMeta(taskId: string): WorktreeMeta | null {
  */
 function tryCreateWorktree(
   taskId: string,
-  cfg: WorkspaceConfig,
+  cfg: SandboxConfig,
   codebase: CodebaseRef | undefined,
   wsPath: string,
 ): WorktreeMeta | null {
   if (!codebase) {
-    log.warn("workspace.git=true 但未提供 codebase（task.extra 无 codebase_id？）；退化空目录 [task=%s]", taskId);
+    log.warn("sandbox.git=true 但未提供 codebase（task.extra 无 codebase_id？）；退化空目录 [task=%s]", taskId);
     return null;
   }
   if (!existsSync(join(codebase.path, ".git"))) {
-    log.warn("workspace.git=true 但 codebase %s 不是 git 仓库（%s/.git 不存在）；退化空目录 [task=%s]",
+    log.warn("sandbox.git=true 但 codebase %s 不是 git 仓库（%s/.git 不存在）；退化空目录 [task=%s]",
       codebase.id, codebase.path, taskId);
     return null;
   }
@@ -233,7 +234,7 @@ function writeWorktreeMeta(taskId: string, meta: WorktreeMeta): void {
 export function removeTaskWorktree(taskId: string): boolean {
   const meta = readWorktreeMeta(taskId);
   if (!meta) return false;
-  const wsPath = getTaskWorkspace(taskId);
+  const wsPath = getTaskSandbox(taskId);
 
   const proc = Bun.spawnSync(
     ["git", "-C", meta.codebase_path, "worktree", "remove", "--force", wsPath],
@@ -275,10 +276,10 @@ function resolveTemplate(workflowName: string, templateName: string): string | n
 }
 
 // ──────────────────────────────────────────────
-// Workspace 浏览 API —— 用于 UI 文件树 / 预览 / 下载
+// Sandbox 浏览 API —— 用于 UI 文件树 / 预览 / 下载
 // ──────────────────────────────────────────────
 
-export interface WorkspaceEntry {
+export interface SandboxEntry {
   name: string;
   type: "file" | "dir";
   size?: number;
@@ -286,12 +287,12 @@ export interface WorkspaceEntry {
 }
 
 /**
- * 把用户传入的相对路径安全解析到 workspace 下的绝对路径。
- * 防越界：解析后必须仍位于 workspace 根目录下；拒绝含 NUL 字符的路径。
+ * 把用户传入的相对路径安全解析到 sandbox 下的绝对路径。
+ * 防越界：解析后必须仍位于 sandbox 根目录下；拒绝含 NUL 字符的路径。
  * @returns 绝对路径或 null（路径非法）
  */
-export function resolveWorkspacePath(taskId: string, relPath: string): string | null {
-  const ws = getTaskWorkspace(taskId);
+export function resolveSandboxPath(taskId: string, relPath: string): string | null {
+  const ws = getTaskSandbox(taskId);
   const root = resolve(ws);
   if (relPath.includes("\0")) return null;
   const trimmed = relPath.replace(/^[/\\]+/, "");
@@ -303,14 +304,14 @@ export function resolveWorkspacePath(taskId: string, relPath: string): string | 
 /**
  * 列目录直接子项（单层，按名称字典序）。目录不存在时抛错。
  */
-export function listWorkspaceDir(taskId: string, relPath: string): WorkspaceEntry[] {
-  const abs = resolveWorkspacePath(taskId, relPath);
+export function listSandboxDir(taskId: string, relPath: string): SandboxEntry[] {
+  const abs = resolveSandboxPath(taskId, relPath);
   if (!abs) throw new Error("非法路径");
   if (!existsSync(abs)) throw new Error("路径不存在");
   const info = statSync(abs);
   if (!info.isDirectory()) throw new Error("不是目录");
 
-  const entries: WorkspaceEntry[] = [];
+  const entries: SandboxEntry[] = [];
   for (const name of readdirSync(abs)) {
     const full = join(abs, name);
     try {
@@ -331,7 +332,7 @@ export function listWorkspaceDir(taskId: string, relPath: string): WorkspaceEntr
   return entries;
 }
 
-export interface WorkspaceFileInfo {
+export interface SandboxFileInfo {
   content: string;
   /** 若为二进制（非 UTF-8 可解码）则为 true，content 为空 */
   binary: boolean;
@@ -345,8 +346,8 @@ export const MAX_PREVIEW_BYTES = 1024 * 1024; // 1 MB
 /**
  * 读取文件供 UI 预览。超过上限不读内容；二进制检测失败返回空 content。
  */
-export function readWorkspaceFile(taskId: string, relPath: string): WorkspaceFileInfo {
-  const abs = resolveWorkspacePath(taskId, relPath);
+export function readSandboxFile(taskId: string, relPath: string): SandboxFileInfo {
+  const abs = resolveSandboxPath(taskId, relPath);
   if (!abs) throw new Error("非法路径");
   if (!existsSync(abs)) throw new Error("文件不存在");
   const info = statSync(abs);
@@ -369,12 +370,12 @@ export function readWorkspaceFile(taskId: string, relPath: string): WorkspaceFil
 }
 
 /**
- * 用 `zip` 命令流式压缩整个 workspace。
+ * 用 `zip` 命令流式压缩整个 sandbox。
  * 没装 zip 命令时抛错。调用方负责把 stdout 流包装成 Response。
  */
-export function spawnWorkspaceZip(taskId: string): ReturnType<typeof Bun.spawn> {
-  const ws = getTaskWorkspace(taskId);
-  if (!existsSync(ws)) throw new Error("workspace 不存在");
+export function spawnSandboxZip(taskId: string): ReturnType<typeof Bun.spawn> {
+  const ws = getTaskSandbox(taskId);
+  if (!existsSync(ws)) throw new Error("sandbox 不存在");
   return Bun.spawn(["zip", "-r", "-q", "-", "."], {
     cwd: ws,
     stdout: "pipe",
@@ -383,11 +384,11 @@ export function spawnWorkspaceZip(taskId: string): ReturnType<typeof Bun.spawn> 
 }
 
 /**
- * 计算任务 workspace 磁盘占用（递归）。
+ * 计算任务 sandbox 磁盘占用（递归）。
  * 跳过不可 stat 项，静默忽略错误。
  */
-export function workspaceSize(taskId: string): number {
-  const ws = getTaskWorkspace(taskId);
+export function sandboxSize(taskId: string): number {
+  const ws = getTaskSandbox(taskId);
   if (!existsSync(ws)) return 0;
   return dirSizeBytes(ws);
 }
@@ -408,15 +409,15 @@ function dirSizeBytes(dir: string): number {
 }
 
 /**
- * 删除任务 workspace 目录。返回是否真的删除过。
+ * 删除任务 sandbox 目录。返回是否真的删除过。
  * 若 task 走的是 git worktree，先调 git worktree remove --force 让 codebase 干净，再 rmSync 兜底。
  * logs / agent-calls.jsonl 等元数据不受影响（保留在 runtime/tasks/<id>/ 顶层）。
  */
-export function deleteTaskWorkspace(taskId: string): boolean {
+export function deleteTaskSandbox(taskId: string): boolean {
   // 先尝试 worktree 移除（若是 worktree task；非 worktree 直接 no-op 返回 false）
   // worktree 模式下 git worktree remove 会同步删 ws 目录，无需再 rmSync。
   const removedWorktree = removeTaskWorktree(taskId);
-  const ws = getTaskWorkspace(taskId);
+  const ws = getTaskSandbox(taskId);
   if (existsSync(ws)) {
     rmSync(ws, { recursive: true, force: true });
     return true;
@@ -425,7 +426,7 @@ export function deleteTaskWorkspace(taskId: string): boolean {
 }
 
 /**
- * 彻底删除任务运行时目录（`runtime/tasks/<task-id>/` 全部内容，包括 workspace、
+ * 彻底删除任务运行时目录（`runtime/tasks/<task-id>/` 全部内容，包括 sandbox、
  * logs、events、agent-calls、task-manifest.json）。用于"删除任务"路径。
  * 若 task 走 worktree，先清 worktree 让 codebase 干净。
  */
@@ -441,10 +442,10 @@ export function deleteTaskRuntimeDir(taskId: string): boolean {
 }
 
 /**
- * 扫描所有任务的 workspace 目录，返回每个任务的占用信息。
+ * 扫描所有任务的 sandbox 目录，返回每个任务的占用信息。
  * 用于 Dashboard 汇总 + 清理规则判断。
  */
-export interface TaskWorkspaceUsage {
+export interface TaskSandboxUsage {
   taskId: string;
   size: number;
   mtime: number;
@@ -452,30 +453,39 @@ export interface TaskWorkspaceUsage {
 }
 
 export interface RetentionPolicy {
-  /** 终态任务 workspace 保留天数；<=0 表示永久保留 */
+  /** 终态任务 sandbox 保留天数；<=0 表示永久保留 */
   days?: number;
   /** 保留磁盘占用上限 MB；超出则按 mtime 从旧到新删，直到低于上限 */
   max_total_mb?: number;
 }
 
 /**
- * 从全局 config 读 workspace_retention 段。
+ * 从全局 config 读 sandbox_retention 段。
+ * 兼容：优先读 sandbox_retention，回退老字段 workspace_retention 并打 deprecation warning。
  */
 export function loadRetentionPolicy(): RetentionPolicy {
   try {
     // 延迟 import 避免循环
     const { loadConfig } = require("./config") as typeof import("./config");
     const raw = loadConfig();
-    const section = raw["workspace_retention"];
+    let section = raw["sandbox_retention"];
+    if (
+      (!section || typeof section !== "object") &&
+      raw["workspace_retention"] &&
+      typeof raw["workspace_retention"] === "object"
+    ) {
+      log.warn("config.yaml 的 `workspace_retention` 已更名为 `sandbox_retention`，请尽快迁移（本次回退读老字段）");
+      section = raw["workspace_retention"];
+    }
     if (!section || typeof section !== "object") return {};
     return section as RetentionPolicy;
   } catch { return {}; }
 }
 
 /**
- * 应用保留策略清理 workspace：按 (a) 超过 days 的任务 (b) 总占用超 max_total_mb
- * 的老任务清 workspace。返回被清理的 taskId 列表。
- * 仅清 workspace 目录，不动 logs / agent-calls / DB 记录。
+ * 应用保留策略清理 sandbox：按 (a) 超过 days 的任务 (b) 总占用超 max_total_mb
+ * 的老任务清 sandbox。返回被清理的 taskId 列表。
+ * 仅清 sandbox 目录，不动 logs / agent-calls / DB 记录。
  *
  * 可注入 opts.tasksRoot 让测试用 tmpdir 模拟 AUTOPILOT_HOME；生产路径不传走默认。
  */
@@ -490,12 +500,12 @@ export function applyRetentionPolicy(
 ): { removed: string[]; reclaimedBytes: number } {
   const now = opts?.now ?? Date.now();
   const tasksRoot = opts?.tasksRoot ?? join(AUTOPILOT_HOME, "runtime", "tasks");
-  const all = scanTaskWorkspaces(tasksRoot).filter((u) => u.exists && u.size > 0);
+  const all = scanTaskSandboxes(tasksRoot).filter((u) => u.exists && u.size > 0);
 
   const removed: string[] = [];
   let reclaimed = 0;
 
-  const doRemove = (u: TaskWorkspaceUsage) => {
+  const doRemove = (u: TaskSandboxUsage) => {
     const ws = join(tasksRoot, u.taskId, "workspace");
     if (!existsSync(ws)) return;
     // 若是 worktree task，先 git worktree remove --force 让 codebase 干净（spec §3.4：
@@ -544,13 +554,13 @@ export function applyRetentionPolicy(
 }
 
 /**
- * 扫所有任务 workspace 大小 + mtime。
+ * 扫所有任务 sandbox 大小 + mtime。
  * 可注入 root 让测试用 tmpdir；默认 AUTOPILOT_HOME/runtime/tasks。
  */
-export function scanTaskWorkspaces(rootOverride?: string): TaskWorkspaceUsage[] {
+export function scanTaskSandboxes(rootOverride?: string): TaskSandboxUsage[] {
   const root = rootOverride ?? join(AUTOPILOT_HOME, "runtime", "tasks");
   if (!existsSync(root)) return [];
-  const out: TaskWorkspaceUsage[] = [];
+  const out: TaskSandboxUsage[] = [];
   for (const taskId of readdirSync(root)) {
     const ws = join(root, taskId, "workspace");
     if (!existsSync(ws)) {

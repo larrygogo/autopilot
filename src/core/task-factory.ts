@@ -2,7 +2,7 @@ import { getTask, createTask } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { ensureTaskWorkspace, type CodebaseRef } from "./workspace";
+import { ensureTaskSandbox, type CodebaseRef } from "./sandbox";
 import { getCodebaseById } from "./codebases";
 import { executePhase } from "./runner";
 
@@ -139,9 +139,9 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
   });
 
   try {
-    // workspace.git=true 时反查 codebase 传给 ensureTaskWorkspace，让它能起 git worktree
+    // sandbox.git=true 时反查 codebase 传给 ensureTaskSandbox，让它能起 git worktree
     let codebase: CodebaseRef | undefined;
-    if (wf.workspace?.git) {
+    if (wf.sandbox?.git) {
       const codebaseId = typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined;
       if (codebaseId) {
         const cb = getCodebaseById(codebaseId);
@@ -150,9 +150,9 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
         }
       }
     }
-    ensureTaskWorkspace(taskId, workflowName, wf.workspace, codebase);
+    ensureTaskSandbox(taskId, workflowName, wf.sandbox, codebase);
   } catch (e: unknown) {
-    console.warn("ensureTaskWorkspace 失败：", e instanceof Error ? e.message : e);
+    console.warn("ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
   }
 
   executePhase(taskId, firstPhaseName).catch(() => {});

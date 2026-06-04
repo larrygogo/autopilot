@@ -7,7 +7,7 @@
  *   - 非 git 仓库 → warn 退化空目录（不抛错）
  *   - 缺 codebase → 退化空目录
  *   - removeTaskWorktree → git worktree remove + 清 .worktree.json
- *   - deleteTaskWorkspace 自动调 removeTaskWorktree
+ *   - deleteTaskSandbox 自动调 removeTaskWorktree
  *
  * 复用 workspace.test.ts 的 spawn 子进程模式：用 AUTOPILOT_HOME env 注入 tmpdir 避免污染。
  */
@@ -17,7 +17,7 @@ import { mkdirSync, writeFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-const WORKSPACE_MODULE = join(import.meta.dir, "..", "src", "core", "workspace").replace(/\\/g, "/");
+const WORKSPACE_MODULE = join(import.meta.dir, "..", "src", "core", "sandbox").replace(/\\/g, "/");
 
 let tmpHome: string;
 let codebasePath: string;
@@ -54,16 +54,16 @@ afterEach(() => {
   if (existsSync(codebasePath)) rmSync(codebasePath, { recursive: true, force: true });
 });
 
-describe("ensureTaskWorkspace git worktree 模式", () => {
+describe("ensureTaskSandbox git worktree 模式", () => {
   it("git=true + 真实 git 仓库 → worktree add 成功 + 写 .worktree.json", async () => {
     initGitRepo(codebasePath, "main");
 
     const script = `
-import { ensureTaskWorkspace, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
+import { ensureTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync } from "fs";
 const cfg = { git: true, branch_prefix: "autopilot/" };
 const codebase = { id: "cb-1", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
-const ws = ensureTaskWorkspace("t-wt-1", "wf", cfg, codebase);
+const ws = ensureTaskSandbox("t-wt-1", "wf", cfg, codebase);
 const meta = getTaskWorktreeMeta("t-wt-1");
 console.log(JSON.stringify({ ws, exists: existsSync(ws), hasGit: existsSync(ws + "/.git"), meta }));
 `;
@@ -89,9 +89,9 @@ console.log(JSON.stringify({ ws, exists: existsSync(ws), hasGit: existsSync(ws +
     Bun.spawnSync(["git", "-C", codebasePath, "branch", "autopilot/t-wt-2"], { stdout: "pipe", stderr: "pipe" });
 
     const script = `
-import { ensureTaskWorkspace, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
+import { ensureTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 const codebase = { id: "cb-1", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
-ensureTaskWorkspace("t-wt-2", "wf", { git: true }, codebase);
+ensureTaskSandbox("t-wt-2", "wf", { git: true }, codebase);
 console.log(JSON.stringify({ meta: getTaskWorktreeMeta("t-wt-2") }));
 `;
     const proc = Bun.spawn(["bun", "-e", script], {
@@ -109,11 +109,11 @@ console.log(JSON.stringify({ meta: getTaskWorktreeMeta("t-wt-2") }));
     mkdirSync(codebasePath, { recursive: true });
 
     const script = `
-import { ensureTaskWorkspace, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
+import { ensureTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync, readdirSync } from "fs";
 const cfg = { git: true };
 const codebase = { id: "cb-non-git", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
-const ws = ensureTaskWorkspace("t-wt-3", "wf", cfg, codebase);
+const ws = ensureTaskSandbox("t-wt-3", "wf", cfg, codebase);
 console.log(JSON.stringify({
   exists: existsSync(ws),
   empty: readdirSync(ws).length === 0,
@@ -134,9 +134,9 @@ console.log(JSON.stringify({
 
   it("缺 codebase 参数 → 退化空目录", async () => {
     const script = `
-import { ensureTaskWorkspace, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
+import { ensureTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync, readdirSync } from "fs";
-const ws = ensureTaskWorkspace("t-wt-4", "wf", { git: true });
+const ws = ensureTaskSandbox("t-wt-4", "wf", { git: true });
 console.log(JSON.stringify({
   exists: existsSync(ws),
   empty: readdirSync(ws).length === 0,
@@ -159,10 +159,10 @@ console.log(JSON.stringify({
     initGitRepo(codebasePath, "main");
 
     const script = `
-import { ensureTaskWorkspace, removeTaskWorktree, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
+import { ensureTaskSandbox, removeTaskWorktree, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync } from "fs";
 const codebase = { id: "cb-1", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
-const ws = ensureTaskWorkspace("t-wt-5", "wf", { git: true }, codebase);
+const ws = ensureTaskSandbox("t-wt-5", "wf", { git: true }, codebase);
 const before = getTaskWorktreeMeta("t-wt-5");
 const removed = removeTaskWorktree("t-wt-5");
 const after = getTaskWorktreeMeta("t-wt-5");
@@ -201,16 +201,16 @@ console.log(JSON.stringify({ removed: removeTaskWorktree("t-no-wt") }));
     expect(r.removed).toBe(false);
   });
 
-  it("deleteTaskWorkspace 自动调 removeTaskWorktree", async () => {
+  it("deleteTaskSandbox 自动调 removeTaskWorktree", async () => {
     initGitRepo(codebasePath, "main");
 
     const script = `
-import { ensureTaskWorkspace, deleteTaskWorkspace, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
+import { ensureTaskSandbox, deleteTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync } from "fs";
 const codebase = { id: "cb-1", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
-const ws = ensureTaskWorkspace("t-wt-6", "wf", { git: true }, codebase);
+const ws = ensureTaskSandbox("t-wt-6", "wf", { git: true }, codebase);
 const created = getTaskWorktreeMeta("t-wt-6") !== null;
-const deleted = deleteTaskWorkspace("t-wt-6");
+const deleted = deleteTaskSandbox("t-wt-6");
 const afterMeta = getTaskWorktreeMeta("t-wt-6");
 console.log(JSON.stringify({ created, deleted, afterMeta, wsExists: existsSync(ws) }));
 `;
@@ -234,12 +234,12 @@ console.log(JSON.stringify({ created, deleted, afterMeta, wsExists: existsSync(w
     writeFileSync(join(wfDir, "tpl", "README.md"), "# from template");
 
     const script = `
-import { ensureTaskWorkspace, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
+import { ensureTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync } from "fs";
 import { join } from "path";
 const cfg = { git: true, template: "tpl" };
 const codebase = { id: "cb-1", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
-const ws = ensureTaskWorkspace("t-wt-7", "wf-mix", cfg, codebase);
+const ws = ensureTaskSandbox("t-wt-7", "wf-mix", cfg, codebase);
 console.log(JSON.stringify({
   meta: getTaskWorktreeMeta("t-wt-7"),
   // template 应被忽略，所以 README.md 不存在

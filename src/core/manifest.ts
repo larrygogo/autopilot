@@ -3,7 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { atomicWriteSync } from "./atomic-write";
 import { log } from "./logger";
-import { isParallelPhase, type WorkflowDefinition, type PhaseDefinition, type ParallelDefinition, type WorkflowWorkspaceSpec } from "./registry";
+import { isParallelPhase, type WorkflowDefinition, type PhaseDefinition, type ParallelDefinition, type WorkflowSandboxSpec } from "./registry";
 import type { TransitionTable } from "./state-machine";
 
 /** 动态读取 AUTOPILOT_HOME，支持测试中修改 env */
@@ -42,7 +42,7 @@ export interface WorkflowSnapshot {
   terminal_states: string[];
   phases: (PhaseDefinition | { parallel: ParallelDefinition })[];
   transitions?: TransitionTable;
-  workspace?: WorkflowWorkspaceSpec;
+  sandbox?: WorkflowSandboxSpec;
   config?: Record<string, unknown>;
   /** rebuild-manifest 给老任务补的结构性占位标记 */
   _legacy?: boolean;
@@ -92,7 +92,7 @@ export function snapshotWorkflow(wf: WorkflowDefinition): WorkflowSnapshot {
   };
   if (wf.description !== undefined) snap.description = wf.description;
   if (wf.transitions !== undefined) snap.transitions = wf.transitions;
-  if (wf.workspace !== undefined) snap.workspace = wf.workspace;
+  if (wf.sandbox !== undefined) snap.sandbox = wf.sandbox;
   if (wf.config !== undefined) snap.config = wf.config;
   return snap;
 }

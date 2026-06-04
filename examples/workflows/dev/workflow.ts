@@ -17,7 +17,7 @@ import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
 import { runInBackground } from "@autopilot/core/runner";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
-import { getTaskWorkspace } from "@autopilot/core/workspace";
+import { getTaskSandbox } from "@autopilot/core/sandbox";
 import { notify } from "@autopilot/core/notify";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
@@ -67,7 +67,7 @@ function phaseDir(taskId: string, workflowName: string, phaseName: string): stri
   if (!wf) throw new Error(`workflow not found: ${workflowName}`);
   const idx = getPhaseIndex(wf, phaseName);
   if (idx < 0) throw new Error(`phase not found in workflow: ${phaseName}`);
-  const dir = join(getTaskWorkspace(taskId), `${String(idx).padStart(2, "0")}-${phaseName}`);
+  const dir = join(getTaskSandbox(taskId), `${String(idx).padStart(2, "0")}-${phaseName}`);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }

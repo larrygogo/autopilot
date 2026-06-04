@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { agentForPhase } from "../agents/registry";
 import type { InlineAgentConfig } from "./agent-defaults";
 import { getTask } from "./db";
-import { getTaskWorkspace } from "./workspace";
+import { getTaskSandbox } from "./sandbox";
 import { getPhaseIndex } from "./artifacts";
 import { getWorkflow, type PhaseDefinition, type WorkflowDefinition } from "./registry";
 import { createLogger } from "./logger";
@@ -77,11 +77,11 @@ export function expandPromptTemplate(
     phase: string;
     task: Record<string, unknown>;
     workflow?: WorkflowDefinition | null;
-    /** 测试用：显式 workspace 路径，覆盖 getTaskWorkspace 默认值 */
+    /** 测试用：显式 sandbox 路径，覆盖 getTaskSandbox 默认值 */
     workspaceRoot?: string;
   },
 ): string {
-  const workspaceRoot = ctx.workspaceRoot ?? getTaskWorkspace(ctx.taskId);
+  const workspaceRoot = ctx.workspaceRoot ?? getTaskSandbox(ctx.taskId);
   const builtins: Record<string, string> = {
     TASK_ID: ctx.taskId,
     PHASE: ctx.phase,
@@ -118,7 +118,7 @@ export function expandPromptTemplate(
 /**
  * 读取单个 phase 的 handoff.md 内容。phase 未启用 handoff 或文件不存在时返回 null。
  *
- * @param workspaceRoot 任务 workspace 根目录（默认从 getTaskWorkspace(taskId) 计算；
+ * @param workspaceRoot 任务 workspace 根目录（默认从 getTaskSandbox(taskId) 计算；
  *   测试可显式传 tmp 路径绕过 AUTOPILOT_HOME 全局常量）
  */
 export function readPhaseHandoff(
@@ -129,7 +129,7 @@ export function readPhaseHandoff(
 ): string | null {
   const idx = getPhaseIndex(workflow, phaseName);
   const dirName = idx >= 0 ? `${String(idx).padStart(2, "0")}-${phaseName}` : phaseName;
-  const root = workspaceRoot ?? getTaskWorkspace(taskId);
+  const root = workspaceRoot ?? getTaskSandbox(taskId);
   const handoffPath = join(root, dirName, "handoff.md");
   if (!existsSync(handoffPath)) return null;
   try {
@@ -276,7 +276,7 @@ export function makePromptRunner(
     // 输出目录预备
     const idx = getPhaseIndex(wf, phaseName);
     const dirName = idx >= 0 ? `${String(idx).padStart(2, "0")}-${phaseName}` : phaseName;
-    const dir = join(getTaskWorkspace(taskId), dirName);
+    const dir = join(getTaskSandbox(taskId), dirName);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     // 第一轮：用解析后的 phase prompt 跑
@@ -287,7 +287,7 @@ export function makePromptRunner(
     while (turn < MAX_PROMPT_TURNS) {
       turn++;
       const result = await agent.run(currentPrompt, {
-        cwd: getTaskWorkspace(taskId),
+        cwd: getTaskSandbox(taskId),
         timeout: (options.timeoutSec ?? 900) * 1000,
       });
 

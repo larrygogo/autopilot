@@ -6,19 +6,19 @@ import { forceTransition } from "./state-machine";
 import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./registry";
 import type { PhaseDefinition, ParallelDefinition } from "./registry";
 import { emit } from "./event-bus";
-import { applyRetentionPolicy, loadRetentionPolicy, getTaskWorkspace } from "./workspace";
+import { applyRetentionPolicy, loadRetentionPolicy, getTaskSandbox } from "./sandbox";
 import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 
 /**
- * 递归扫 task workspace 拿到最新文件 mtime（毫秒）。
+ * 递归扫 task sandbox 拿到最新文件 mtime（毫秒）。
  * 用于 watcher 判断卡死：task.updated_at 只在状态切换时更新，
- * 但 agent 长跑（develop / design 阶段）期间会持续在 workspace 写文件，
+ * 但 agent 长跑（develop / design 阶段）期间会持续在 sandbox 写文件，
  * 取这两者中较新的作为"实际活跃时间"。
  */
-function getWorkspaceLatestMtime(taskId: string): number {
+function getSandboxLatestMtime(taskId: string): number {
   try {
-    const root = getTaskWorkspace(taskId);
+    const root = getTaskSandbox(taskId);
     if (!existsSync(root)) return 0;
     let latest = 0;
     const stack: string[] = [root];
@@ -166,13 +166,13 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
     // 已持有活跃锁 → 正在执行，跳过
     if (isLocked(task.id)) continue;
 
-    // 检查超时：task.updated_at 与 workspace 文件最新 mtime 取较新者
-    // 因为 develop / design 等长跑阶段期间 task 状态不变但 workspace 持续在写
+    // 检查超时：task.updated_at 与 sandbox 文件最新 mtime 取较新者
+    // 因为 develop / design 等长跑阶段期间 task 状态不变但 sandbox 持续在写
     const updatedAt = new Date(task.updated_at).getTime();
     if (isNaN(updatedAt)) continue;
 
-    const workspaceMtime = getWorkspaceLatestMtime(task.id);
-    const lastActive = Math.max(updatedAt, workspaceMtime);
+    const sandboxMtime = getSandboxLatestMtime(task.id);
+    const lastActive = Math.max(updatedAt, sandboxMtime);
 
     const elapsedMs = nowMs - lastActive;
     if (elapsedMs < thresholdMs) continue;
@@ -276,7 +276,7 @@ export function forgetTaskRecoveryState(taskId: string): void {
 }
 
 // ──────────────────────────────────────────────
-// Workspace 保留策略清理（由 daemon 定期触发）
+// Sandbox 保留策略清理（由 daemon 定期触发）
 // ──────────────────────────────────────────────
 
 const terminalStateCache = new Map<string, boolean>();
@@ -294,11 +294,11 @@ function isTaskTerminal(taskId: string): boolean {
 }
 
 /**
- * 按全局 retention 配置清理老 workspace。安全项：只清终态任务，永远不动
- * 运行中 / 待处理任务的 workspace。
+ * 按全局 retention 配置清理老 sandbox。安全项：只清终态任务，永远不动
+ * 运行中 / 待处理任务的 sandbox。
  * Daemon 每隔固定周期调一次，无配置 / 空配置直接跳过。
  */
-export function pruneWorkspacesByPolicy(): void {
+export function pruneSandboxesByPolicy(): void {
   const policy = loadRetentionPolicy();
   if (!policy.days && !policy.max_total_mb) return;
 
@@ -308,7 +308,7 @@ export function pruneWorkspacesByPolicy(): void {
   if (result.removed.length > 0) {
     const mb = (result.reclaimedBytes / 1024 / 1024).toFixed(1);
     log.info(
-      "workspace 保留策略清理了 %d 个任务目录（回收 %s MB）",
+      "sandbox 保留策略清理了 %d 个任务目录（回收 %s MB）",
       result.removed.length,
       mb,
     );

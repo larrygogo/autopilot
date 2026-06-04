@@ -2,7 +2,7 @@
  * workspace_retention 策略测试。
  *
  * CLAUDE.md 写了 workspace_retention.days / max_total_mb 配置，daemon 每小时
- * 调一次 pruneWorkspacesByPolicy → applyRetentionPolicy，但完全无单测。客户
+ * 调一次 pruneSandboxesByPolicy → applyRetentionPolicy，但完全无单测。客户
  * 跑一段时间后磁盘会涨，retention 不工作就是个真痛点。
  *
  * 覆盖：
@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, existsSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { applyRetentionPolicy } from "../src/core/workspace";
+import { applyRetentionPolicy } from "../src/core/sandbox";
 
 let tmpRoot: string; // 模拟 AUTOPILOT_HOME/runtime/tasks
 

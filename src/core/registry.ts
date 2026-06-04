@@ -63,10 +63,10 @@ export interface ParallelDefinition {
   phases: PhaseDefinition[];
 }
 
-export interface WorkflowWorkspaceSpec {
-  /** 模板目录名（相对工作流目录），创建任务时 copy 到 workspace/ */
+export interface WorkflowSandboxSpec {
+  /** 模板目录名（相对工作流目录），创建任务时 copy 到 sandbox 目录 */
   template?: string;
-  /** 是否在 workspace 里 git init（保留给后续版本，当前未实现） */
+  /** 是否在 sandbox 里 git init（保留给后续版本，当前未实现） */
   git?: boolean;
 }
 
@@ -76,7 +76,7 @@ export interface WorkflowDefinition {
   label?: string;
   description?: string;
   config?: Record<string, unknown>;
-  workspace?: WorkflowWorkspaceSpec;
+  sandbox?: WorkflowSandboxSpec;
   phases: (PhaseDefinition | { parallel: ParallelDefinition })[];
   initial_state: string;
   terminal_states: string[];
@@ -217,6 +217,8 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
     wfDef = parsed as Record<string, unknown>;
     // Schema 级归一化：允许字段类型宽松但会转为正确类型并记警告
     normalizeWorkflowFields(wfDef, yamlPath);
+    // `workspace:` 段已更名为 `sandbox:`；优先读 sandbox，回退老字段并 warn
+    normalizeSandboxSection(wfDef, yamlPath);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
     log.error("解析 YAML 工作流 %s 失败：%s", yamlPath, message);
@@ -734,7 +736,7 @@ function composeDbWorkflow(
     initial_state: base.initial_state,
     terminal_states: base.terminal_states,
   };
-  if (base.workspace !== undefined) composed.workspace = base.workspace;
+  if (base.sandbox !== undefined) composed.sandbox = base.sandbox;
   if (base.setup_func !== undefined) composed.setup_func = base.setup_func;
   if (base.notify_func !== undefined) composed.notify_func = base.notify_func;
   if (base.config !== undefined) composed.config = base.config;
@@ -1109,15 +1111,35 @@ function normalizeWorkflowFields(wfDef: Record<string, unknown>, yamlPath: strin
   }
 }
 
+/**
+ * `workspace:` 段已更名为 `sandbox:`。归一化：
+ *   - 若存在 sandbox 段 → 原样用（删掉残留的 workspace 段，避免 spread 时覆盖）
+ *   - 否则若存在老 workspace 段 → 搬到 sandbox 并打 deprecation warning
+ */
+function normalizeSandboxSection(wfDef: Record<string, unknown>, yamlPath: string): void {
+  if ("sandbox" in wfDef && wfDef.sandbox && typeof wfDef.sandbox === "object") {
+    delete wfDef.workspace;
+    return;
+  }
+  if ("workspace" in wfDef && wfDef.workspace && typeof wfDef.workspace === "object") {
+    log.warn(
+      "workflow.yaml %s：`workspace:` 段已更名为 `sandbox:`，请尽快迁移（本次回退读老字段）",
+      yamlPath,
+    );
+    wfDef.sandbox = wfDef.workspace;
+    delete wfDef.workspace;
+  }
+}
+
 function renderWorkflowYamlTemplate(name: string, description: string | undefined, firstPhase: string): string {
   const desc = description?.trim() ? description.trim() : "请补充描述";
   return `name: ${name}
 description: ${desc}
 
-# 可选：每个任务自动创建一个独立的 workspace 沙盒
+# 可选：每个任务自动创建一个独立的 sandbox 沙盒
 # （runtime/tasks/<task-id>/workspace/），阶段函数在这里工作
-# workspace:
-#   template: workspace_template   # 工作流目录下的模板文件夹，任务启动时 cp -r 到 workspace
+# sandbox:
+#   template: workspace_template   # 工作流目录下的模板文件夹，任务启动时 cp -r 到 sandbox
 
 # 工作流阶段列表。最简写法：只写 name 和 timeout，状态机将自动推导：
 #   pending_<name> / running_<name> / start_<name> / complete_<name>
@@ -1138,27 +1160,27 @@ function renderWorkflowTsTemplate(firstPhase: string): string {
   return `// 每个 phase 函数接收 taskId: string 参数；抛错则该阶段失败，
 // 可被状态机重试或驳回。详见 docs/workflow-development.md
 //
-// 每次任务自动获得一个独立的 workspace 目录：
+// 每次任务自动获得一个独立的 sandbox 目录：
 //   \${AUTOPILOT_HOME}/runtime/tasks/\${taskId}/workspace
 // 阶段函数应把所有产出 / 读写都放在这里，保持任务之间隔离。
-// 如需把 workspace 传给 agent，调用 agent.run(prompt, { cwd: wsPath })。
+// 如需把 sandbox 传给 agent，调用 agent.run(prompt, { cwd: wsPath })。
 //
 // 常见 import（按需启用）：
 //   import { getTask } from "@autopilot/db";                  // 取任务对象
 //   import { agentForPhase } from "@autopilot/agents";        // 按 phase 取内联配置 agent
-//   import { getTaskWorkspace } from "@autopilot/core";       // 取 workspace 路径
+//   import { getTaskSandbox } from "@autopilot/core";         // 取 sandbox 路径
 
 import { homedir } from "os";
 import { join } from "path";
 
-function taskWorkspace(taskId: string): string {
+function taskSandbox(taskId: string): string {
   const home = process.env.AUTOPILOT_HOME ?? join(homedir(), ".autopilot");
   return join(home, "runtime", "tasks", taskId, "workspace");
 }
 
 export async function ${fn}(taskId: string): Promise<void> {
-  const ws = taskWorkspace(taskId);
-  console.log(\`[\${taskId}] 执行阶段 ${firstPhase}，workspace=\${ws}\`);
+  const ws = taskSandbox(taskId);
+  console.log(\`[\${taskId}] 执行阶段 ${firstPhase}，sandbox=\${ws}\`);
   // TODO: 在这里实现阶段业务逻辑。例如：
   //   const agent = agentForPhase("<工作流名>", "${firstPhase}");
   //   await agent.run("修改 src/index.ts 添加 hello 函数", { cwd: ws });

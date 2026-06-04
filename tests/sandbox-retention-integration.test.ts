@@ -5,8 +5,8 @@
  * 纯函数路径。本测试用 spawnSync 起子进程完整跑：
  *   - 真 config.yaml.workspace_retention 加载
  *   - 真 DB 里查 isTaskTerminal
- *   - 真 scanTaskWorkspaces 扫文件系统
- *   - 真 pruneWorkspacesByPolicy 删 workspace
+ *   - 真 scanTaskSandboxes 扫文件系统
+ *   - 真 pruneSandboxesByPolicy 删 workspace
  *
  * 验证 bug25 fix：daemon 启动时立即跑 retention（之前 setInterval 1 小时后才第一次）。
  */
@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 function setupConfig(retention: { days?: number; max_total_mb?: number }): void {
-  const lines = ["workspace_retention:"];
+  const lines = ["sandbox_retention:"];
   if (typeof retention.days === "number") lines.push(`  days: ${retention.days}`);
   if (typeof retention.max_total_mb === "number") lines.push(`  max_total_mb: ${retention.max_total_mb}`);
   writeFileSync(join(tmpHome, "config.yaml"), lines.join("\n") + "\n", "utf-8");
@@ -49,7 +49,7 @@ function seedWorkspace(taskId: string, opts: { mtimeMs?: number } = {}): void {
 }
 
 /**
- * 子进程跑 db.run 插 task + 调 pruneWorkspacesByPolicy，把结果以 JSON 写 stdout。
+ * 子进程跑 db.run 插 task + 调 pruneSandboxesByPolicy，把结果以 JSON 写 stdout。
  */
 function runRetentionInChild(tasks: Array<{ id: string; status: string }>): {
   exitCode: number;
@@ -60,7 +60,7 @@ function runRetentionInChild(tasks: Array<{ id: string; status: string }>): {
     process.env.AUTOPILOT_HOME = ${JSON.stringify(tmpHome)};
     const { initDb, getDb } = await import("${REPO.replace(/\\/g, "\\\\")}/src/core/db");
     const { runPendingMigrations } = await import("${REPO.replace(/\\/g, "\\\\")}/src/core/migrate");
-    const { pruneWorkspacesByPolicy } = await import("${REPO.replace(/\\/g, "\\\\")}/src/core/watcher");
+    const { pruneSandboxesByPolicy } = await import("${REPO.replace(/\\/g, "\\\\")}/src/core/watcher");
     const { existsSync } = await import("fs");
     const { join } = await import("path");
     initDb();
@@ -73,7 +73,7 @@ function runRetentionInChild(tasks: Array<{ id: string; status: string }>): {
         [t.id, "e2e " + t.id, t.status],
       );
     }
-    pruneWorkspacesByPolicy();
+    pruneSandboxesByPolicy();
     const tasksRoot = join(${JSON.stringify(tmpHome)}, "runtime", "tasks");
     const { readdirSync } = await import("fs");
     // 扫整个 tasksRoot 找剩下的 workspace（包括 DB 里没记录的孤儿）

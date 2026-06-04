@@ -27,7 +27,7 @@ import { listSessions, readManifest as readSessionManifest } from "../core/sessi
 import { VERSION } from "../index";
 import { transition, canTransition } from "../core/state-machine";
 import { buildTransitions } from "../core/registry";
-import { ensureTaskWorkspace } from "../core/workspace";
+import { ensureTaskSandbox } from "../core/sandbox";
 import { createTask } from "../core/db";
 import { snapshotWorkflow } from "../core/manifest";
 import { executePhase } from "../core/runner";
@@ -388,18 +388,18 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
             workflowSnapshot: snapshotWorkflow(wf),
           });
           try {
-            // workspace.git=true 时反查 codebase 让 ensureTaskWorkspace 起 git worktree
+            // sandbox.git=true 时反查 codebase 让 ensureTaskSandbox 起 git worktree
             let codebase;
-            if (wf.workspace?.git) {
+            if (wf.sandbox?.git) {
               const codebaseId = typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined;
               if (codebaseId) {
                 const cb = getCodebaseById(codebaseId);
                 if (cb) codebase = { id: cb.id, path: cb.path, default_branch: cb.default_branch };
               }
             }
-            ensureTaskWorkspace(taskId, workflowName, wf.workspace, codebase);
+            ensureTaskSandbox(taskId, workflowName, wf.sandbox, codebase);
           } catch (e: unknown) {
-            log.warn("start_task: ensureTaskWorkspace 失败 [task=%s]: %s",
+            log.warn("start_task: ensureTaskSandbox 失败 [task=%s]: %s",
               taskId, e instanceof Error ? e.message : String(e));
           }
           // 异步执行第一阶段
