@@ -432,9 +432,11 @@ function RowCard({
             {secondary && <span className="truncate font-mono text-[11px]">· {secondary}</span>}
           </div>
           {preview && (
-            <p className="mt-2.5 line-clamp-2 rounded-lg bg-muted/50 px-3 py-2 text-[13px] leading-relaxed text-muted-foreground">
-              {preview}
-            </p>
+            <div className="mt-2.5 rounded-lg bg-muted/50 px-3 py-2">
+              <p className="line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">
+                {preview}
+              </p>
+            </div>
           )}
         </div>
       </div>
