@@ -15,11 +15,11 @@ import { log } from "./logger";
 // 工作流可在 workflow.yaml 声明：
 //   sandbox:
 //     template: workspace_template   # 可选，相对于工作流目录
-//     git: true                      # 启用 git worktree 模式（基于 codebase 临时分支）
+//     git: true                      # 启用 git worktree 模式（基于 workspace 临时分支）
 //     branch_prefix: "autopilot/"    # worktree 分支名前缀（默认 autopilot/）
-//     base: "main"                   # 派生 base 分支（默认 codebase.default_branch）
+//     base: "main"                   # 派生 base 分支（默认 workspace.default_branch）
 // template 与 git 互斥：同时配置时 git 优先，template 忽略 + warn。
-// 非 git 仓库 codebase / 缺 codebase → warn 退化空目录，不阻塞任务启动。
+// 非 git 仓库 workspace / 缺 workspace → warn 退化空目录，不阻塞任务启动。
 // ──────────────────────────────────────────────
 
 const TASK_ID_RE = /^[\w.\-]+$/;
@@ -28,11 +28,11 @@ const WORKTREE_MANIFEST = ".worktree.json";
 export interface SandboxConfig {
   /** 模板目录名（相对于 workflow 目录），默认 undefined = 空 sandbox */
   template?: string;
-  /** 启用 git worktree 模式（基于 codebase 临时分支沙盒） */
+  /** 启用 git worktree 模式（基于 workspace 临时分支沙盒） */
   git?: boolean;
   /** worktree 分支名前缀，默认 "autopilot/" */
   branch_prefix?: string;
-  /** 派生 base 分支，默认 codebase.default_branch */
+  /** 派生 base 分支，默认 workspace.default_branch */
   base?: string;
 }
 
@@ -433,7 +433,7 @@ function dirSizeBytes(dir: string): number {
 
 /**
  * 删除任务 sandbox 目录。返回是否真的删除过。
- * 若 task 走的是 git worktree，先调 git worktree remove --force 让 codebase 干净，再 rmSync 兜底。
+ * 若 task 走的是 git worktree，先调 git worktree remove --force 让 workspace 干净，再 rmSync 兜底。
  * logs / agent-calls.jsonl 等元数据不受影响（保留在 runtime/tasks/<id>/ 顶层）。
  */
 export function deleteTaskSandbox(taskId: string): boolean {
@@ -451,7 +451,7 @@ export function deleteTaskSandbox(taskId: string): boolean {
 /**
  * 彻底删除任务运行时目录（`runtime/tasks/<task-id>/` 全部内容，包括 sandbox、
  * logs、events、agent-calls、task-manifest.json）。用于"删除任务"路径。
- * 若 task 走 worktree，先清 worktree 让 codebase 干净。
+ * 若 task 走 worktree，先清 worktree 让 workspace 干净。
  */
 export function deleteTaskRuntimeDir(taskId: string): boolean {
   if (!TASK_ID_RE.test(taskId)) {
@@ -531,7 +531,7 @@ export function applyRetentionPolicy(
   const doRemove = (u: TaskSandboxUsage) => {
     const ws = join(tasksRoot, u.taskId, "workspace");
     if (!existsSync(ws)) return;
-    // 若是 worktree task，先 git worktree remove --force 让 codebase 干净（spec §3.4：
+    // 若是 worktree task，先 git worktree remove --force 让 workspace 干净（spec §3.4：
     // 超过保留期还没提交就是垃圾，直接 force 干掉）。测试场景 tasksRoot 是 tmpdir 时
     // .worktree.json 不存在，removeTaskWorktree 是 no-op，不影响。
     if (tasksRoot === join(AUTOPILOT_HOME, "runtime", "tasks")) {
