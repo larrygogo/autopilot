@@ -416,10 +416,13 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <FolderGit2 className="h-4 w-4 text-muted-foreground" />
             <span className="bp-label">工作区 · WORKSPACES（{codebases.length}）</span>
           </div>
-          <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
-            <Plus className="h-4 w-4" />
-            添加工作区
-          </Button>
+          {/* 每个项目仅一个工作区：已有则不再显示添加 */}
+          {codebases.length === 0 && (
+            <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
+              <Plus className="h-4 w-4" />
+              添加工作区
+            </Button>
+          )}
         </div>
 
         {codebases.length === 0 ? (

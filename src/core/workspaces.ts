@@ -48,6 +48,21 @@ function nowMs(): number {
 // CRUD
 // ──────────────────────────────────────────────
 
+/**
+ * 项目是否已有顶层工作区（submodule 不计入）。
+ * 1:1 约束是产品/UX 规则，放在用户面 RPC 入口校验，不污染 core 原语
+ * （测试夹具/内部仍可用 createWorkspace 自由建多顶层）。DB 部分唯一索引（迁移 025）兜底。
+ */
+export function projectHasTopWorkspace(projectId: string): boolean {
+  const db = getDb();
+  const row = db
+    .query<{ id: string }, [string]>(
+      "SELECT id FROM workspaces WHERE project_id = ? AND parent_workspace_id IS NULL LIMIT 1",
+    )
+    .get(projectId);
+  return row != null;
+}
+
 export function createWorkspace(opts: CreateWorkspaceOpts): Workspace {
   const db = getDb();
   const ts = nowMs();

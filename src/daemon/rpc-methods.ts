@@ -64,7 +64,7 @@ import {
   nextProjectId,
 } from "../core/projects";
 import { listRequirementsByProject } from "../core/requirements";
-import { listWorkspaces, getWorkspaceById, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId } from "../core/workspaces";
+import { listWorkspaces, getWorkspaceById, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, projectHasTopWorkspace } from "../core/workspaces";
 import { listSubmodules, discoverSubmodules } from "../core/submodules";
 import { checkWorkspaceHealth, detectWorkspaceGit } from "../core/workspace-health";
 import {
@@ -1650,6 +1650,10 @@ export function registerCoreRpcMethods(): void {
       const alias = typeof p.alias === "string" ? p.alias.trim() : "";
       const pathField = typeof p.path === "string" ? p.path.trim() : "";
       if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
+      // 1:1：每个项目仅允许一个工作区（submodule 不计入）
+      if (projectHasTopWorkspace(p.id)) {
+        throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
+      }
       // 服务端兜底探测：未显式给的字段自动从 git 仓库识别（显式值优先）
       const detected = detectWorkspaceGit(pathField);
       const explicitBranch = typeof p.default_branch === "string" && p.default_branch.trim()
@@ -1722,6 +1726,10 @@ export function registerCoreRpcMethods(): void {
       const pathField = typeof p.path === "string" ? p.path.trim() : "";
       if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
       const projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
+      // 1:1：每个项目仅允许一个工作区（submodule 不计入）
+      if (projectId && projectHasTopWorkspace(projectId)) {
+        throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
+      }
       // 服务端兜底探测：CLI/Web 没传的字段自动从 git 仓库识别（显式传值优先）
       const detected = detectWorkspaceGit(pathField);
       const explicitBranch = typeof p.default_branch === "string" && p.default_branch.trim()
