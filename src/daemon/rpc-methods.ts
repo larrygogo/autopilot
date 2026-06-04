@@ -503,8 +503,8 @@ export function registerCoreRpcMethods(): void {
 
         const workflow = typeof p.workflow === "string" && p.workflow.trim() ? p.workflow.trim() : undefined;
         const result = await startTaskFromPrompt({ rawText, workspace_id: workspaceId, workflow });
-        // 返回兼容：adhoc 直接返回 task；串行入队返回 requirement（task 异步起）
-        return result.task ?? result.requirement ?? {};
+        // 返回 requirement；task 由 scheduler 异步起（必有工作区，无则上面已抛 NO_WORKSPACE）
+        return result.requirement;
       } catch (e: unknown) {
         rethrowAsRpc(e);
       }
@@ -555,8 +555,8 @@ export function registerCoreRpcMethods(): void {
 
       try {
         const result = await startTaskFromPrompt({ rawText: prompt, workspace_id: workspaceId, workflow });
-        // 兼容两种返回：adhoc 同步起好 task；有 workspace 时 task 异步起，返回 requirement
-        return result.task ?? result.requirement ?? {};
+        // 返回 requirement；task 由 scheduler 异步起（必有工作区，无则上面已抛 NO_WORKSPACE）
+        return result.requirement;
       } catch (e: unknown) {
         rethrowAsRpc(e);
       }
@@ -903,6 +903,10 @@ export function registerCoreRpcMethods(): void {
       }
       if (!projectId) {
         throw new RpcError("INVALID_PARAM", "project_id 必填（或提供 workspace_id 由 daemon 反查）");
+      }
+      // 强制：项目必须关联工作区才能创建/运行需求
+      if (!projectHasTopWorkspace(projectId)) {
+        throw new RpcError("PRECONDITION_FAILED", "项目未关联工作区，请先添加工作区再创建需求");
       }
       const id = nextRequirementId();
       coreCreateRequirement({

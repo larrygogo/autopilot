@@ -524,7 +524,12 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <Inbox className="h-4 w-4 text-muted-foreground" />
             <span className="bp-label">需求 · REQUIREMENTS（{requirements.length}）</span>
           </div>
-          <Button size="sm" onClick={openReqDialog}>
+          <Button
+            size="sm"
+            onClick={openReqDialog}
+            disabled={codebases.length === 0}
+            title={codebases.length === 0 ? "请先为项目添加工作区" : undefined}
+          >
             <Plus className="h-4 w-4" />
             新建需求
           </Button>
@@ -533,13 +538,21 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         {requirements.length === 0 ? (
           <Card className="p-6 text-center">
             <Inbox className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
-            <p className="mb-3 font-mono text-xs text-muted-foreground">
-              暂无需求，点「新建需求」开始。
-            </p>
-            <Button size="sm" onClick={openReqDialog}>
-              <Plus className="h-4 w-4" />
-              新建需求
-            </Button>
+            {codebases.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                需先关联工作区才能创建/运行需求 —— 请先在上方「添加工作区」。
+              </p>
+            ) : (
+              <>
+                <p className="mb-3 font-mono text-xs text-muted-foreground">
+                  暂无需求，点「新建需求」开始。
+                </p>
+                <Button size="sm" onClick={openReqDialog}>
+                  <Plus className="h-4 w-4" />
+                  新建需求
+                </Button>
+              </>
+            )}
           </Card>
         ) : (
           <Card className="overflow-hidden">
