@@ -29,37 +29,37 @@ function parseGithub(spec: string | undefined): { owner: string; repo: string } 
   return { owner: m[1]!, repo: m[2]! };
 }
 
-export function registerCodebaseCommands(program: Command): void {
-  const cb = program.command("codebase").description("Codebase 管理（CLI 自包含注册本地 git 仓库，不必依赖 web UI）");
+export function registerWorkspaceCommands(program: Command): void {
+  const ws = program.command("workspace").description("Workspace 管理（CLI 自包含注册本地 git 仓库，不必依赖 web UI）");
 
-  cb
+  ws
     .command("list")
-    .description("列出所有 codebase")
+    .description("列出所有 workspace")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
     .option("--json", "原始 JSON 输出")
     .action(async (opts: { port: string; json?: boolean }) => {
       const client = getClient(opts.port);
       await ensureDaemon(client);
-      const { codebases } = await client.listCodebases();
+      const { workspaces } = await client.listWorkspaces();
 
       if (opts.json) {
-        console.log(JSON.stringify(codebases, null, 2));
+        console.log(JSON.stringify(workspaces, null, 2));
         return;
       }
-      if (codebases.length === 0) {
-        console.log("暂无 codebase。用 `autopilot codebase create <alias> <path>` 注册一个。");
+      if (workspaces.length === 0) {
+        console.log("暂无 workspace。用 `autopilot workspace create <alias> <path>` 注册一个。");
         return;
       }
 
       const cols = ["id", "alias", "path", "default_branch", "project_id"] as const;
       const widths = cols.map((c) =>
-        Math.max(c.length, ...codebases.map((cb) => String((cb as unknown as Record<string, unknown>)[c] ?? "").length)),
+        Math.max(c.length, ...workspaces.map((ws) => String((ws as unknown as Record<string, unknown>)[c] ?? "").length)),
       );
       // path 列截到 50
       const truncated = widths.map((w, i) => (cols[i] === "path" ? Math.min(w, 50) : w));
       console.log(cols.map((c, i) => c.padEnd(truncated[i]!)).join("  "));
       console.log(truncated.map((w) => "-".repeat(w)).join("  "));
-      for (const c of codebases) {
+      for (const c of workspaces) {
         const row = cols
           .map((col, i) => {
             let v = String((c as unknown as Record<string, unknown>)[col] ?? "");
@@ -69,15 +69,15 @@ export function registerCodebaseCommands(program: Command): void {
           .join("  ");
         console.log(row);
       }
-      console.log(`\n共 ${codebases.length} 个。`);
+      console.log(`\n共 ${workspaces.length} 个。`);
     });
 
-  cb
+  ws
     .command("create <alias> <path>")
-    .description("注册本地 git 仓库为 codebase（默认分支 / GitHub 远程自动从 path 识别）")
+    .description("注册本地 git 仓库为 workspace（默认分支 / GitHub 远程自动从 path 识别）")
     .option("-b, --branch <name>", "默认分支（缺省自动探测 origin/HEAD → 当前分支 → main）")
     .option("-p, --project <id>", "归属 project（默认取第一个 project；--no-project 走全局）")
-    .option("--no-project", "不挂任何 project（codebase 走 project_id=null）")
+    .option("--no-project", "不挂任何 project（workspace 走 project_id=null）")
     .option("--github <owner/repo>", "GitHub 仓库（可选，用于 submit_pr）")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
     .option("--json", "原始 JSON 输出")
@@ -110,7 +110,7 @@ export function registerCodebaseCommands(program: Command): void {
           try {
             const { projects } = await client.listProjects();
             if (projects.length === 0) {
-              console.error("错误：未找到任何 project。请先 `autopilot project create <name>`，或加 --no-project 走全局 codebase。");
+              console.error("错误：未找到任何 project。请先 `autopilot project create <name>`，或加 --no-project 走全局 workspace。");
               process.exit(2);
             }
             projectId = projects[0]!.id;
@@ -128,7 +128,7 @@ export function registerCodebaseCommands(program: Command): void {
         }
 
         try {
-          const body: Parameters<typeof client.createCodebase>[0] = {
+          const body: Parameters<typeof client.createWorkspace>[0] = {
             alias: alias.trim(),
             path: abs,
           };
@@ -139,19 +139,19 @@ export function registerCodebaseCommands(program: Command): void {
             body.github_owner = gh.owner;
             body.github_repo = gh.repo;
           }
-          const { codebase } = await client.createCodebase(body);
+          const { workspace } = await client.createWorkspace(body);
           if (opts.json) {
-            console.log(JSON.stringify(codebase, null, 2));
+            console.log(JSON.stringify(workspace, null, 2));
           } else {
             const autoBranch = !opts.branch || !opts.branch.trim();
-            const autoGithub = !gh && codebase.github_owner && codebase.github_repo;
-            console.log(`已注册 codebase：${codebase.id}  alias=${codebase.alias}  path=${codebase.path}`);
-            console.log(`  default_branch=${codebase.default_branch}${autoBranch ? "  (自动识别)" : ""}`);
-            if (codebase.github_owner && codebase.github_repo) {
-              console.log(`  github=${codebase.github_owner}/${codebase.github_repo}${autoGithub ? "  (自动识别)" : ""}`);
+            const autoGithub = !gh && workspace.github_owner && workspace.github_repo;
+            console.log(`已注册 workspace：${workspace.id}  alias=${workspace.alias}  path=${workspace.path}`);
+            console.log(`  default_branch=${workspace.default_branch}${autoBranch ? "  (自动识别)" : ""}`);
+            if (workspace.github_owner && workspace.github_repo) {
+              console.log(`  github=${workspace.github_owner}/${workspace.github_repo}${autoGithub ? "  (自动识别)" : ""}`);
             }
-            console.log(`\n下一步：autopilot req new "需求描述"   # 在 cwd 内会自动推断 codebase`);
-            console.log(`     或：autopilot task start "标题" --repo ${codebase.alias} -r "需求详情" -w dev`);
+            console.log(`\n下一步：autopilot req new "需求描述"   # 在 cwd 内会自动推断 workspace`);
+            console.log(`     或：autopilot task start "标题" --repo ${workspace.alias} -r "需求详情" -w dev`);
           }
         } catch (e: unknown) {
           console.error(`注册失败：${e instanceof Error ? e.message : String(e)}`);
@@ -160,23 +160,23 @@ export function registerCodebaseCommands(program: Command): void {
       },
     );
 
-  cb
+  ws
     .command("delete <id>")
-    .description("删除 codebase（仅当没有 requirement 依赖它）")
+    .description("删除 workspace（仅当没有 requirement 依赖它）")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
     .action(async (id: string, opts: { port: string }) => {
       const client = getClient(opts.port);
       await ensureDaemon(client);
       try {
-        await client.deleteCodebase(id);
-        console.log(`已删除 codebase：${id}`);
+        await client.deleteWorkspace(id);
+        console.log(`已删除 workspace：${id}`);
       } catch (e: unknown) {
         console.error(`删除失败：${e instanceof Error ? e.message : String(e)}`);
         process.exit(1);
       }
     });
 
-  cb
+  ws
     .command("health <id>")
     .description("跑健康检查（路径存在性、git 仓库、远端可达）")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
@@ -185,7 +185,7 @@ export function registerCodebaseCommands(program: Command): void {
       const client = getClient(opts.port);
       await ensureDaemon(client);
       try {
-        const result = await client.healthcheckCodebase(id);
+        const result = await client.healthcheckWorkspace(id);
         if (opts.json) {
           console.log(JSON.stringify(result, null, 2));
         } else {

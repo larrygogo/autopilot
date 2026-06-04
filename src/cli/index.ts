@@ -14,7 +14,7 @@ import { registerWorkflowCommands } from "./workflow";
 import { registerConfigCommands, printReport as printDoctorReport } from "./config";
 import { registerRequirementCommands } from "./requirements-cli";
 import { registerProjectCommands } from "./project";
-import { registerCodebaseCommands } from "./codebase";
+import { registerWorkspaceCommands } from "./workspace";
 import { runChecks as runDoctorChecks } from "../core/doctor";
 import {
   readPid,
@@ -431,9 +431,9 @@ task
   .description("创建并启动任务（task ID 自动生成）")
   .option("-w, --workflow <name>", "工作流名称")
   .option("-r, --requirement <text>", "需求详情；以 @ 开头则从文件读，例如 -r @./req.md")
-  .option("--codebase <alias>", "绑定 codebase 别名（用于 req_dev 等需要 codebase 的工作流）")
+  .option("--repo <alias>", "绑定 workspace 别名（用于 req_dev 等需要 workspace 的工作流）")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (title: string, opts: { workflow?: string; requirement?: string; codebase?: string; port: string }) => {
+  .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
     try {
       const preflight = await runDoctorChecks({ level: 2 });
       if (preflight.status === "error") {
@@ -465,9 +465,9 @@ task
         title?: string;
         requirement?: string;
         workflow?: string;
-        codebase_alias?: string;
+        workspace_alias?: string;
       } = { title, requirement, workflow: opts.workflow };
-      if (opts.codebase) startOpts.codebase_alias = opts.codebase;
+      if (opts.repo) startOpts.workspace_alias = opts.repo;
       const t = await client.startTask(startOpts);
       console.log(`任务已创建 [id=${t.id} workflow=${t.workflow} status=${t.status}]`);
     } catch (e: unknown) {
@@ -676,11 +676,11 @@ task
 program
   .command("run <prompt>")
   .description("一句话发包：跳过项目/需求/工作流选择，直接跑 ad-hoc 工作流")
-  .option("-c, --codebase <alias>", "绑定 codebase 别名（启用 git worktree 模式）")
+  .option("-c, --workspace <alias>", "绑定 workspace 别名（启用 git worktree 模式）")
   .option("-w, --workflow <name>", "覆盖默认 ad-hoc workflow")
   .option("--no-follow", "不跟踪实时日志，仅返回 task id")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (prompt: string, opts: { codebase?: string; workflow?: string; follow?: boolean; port: string }) => {
+  .action(async (prompt: string, opts: { workspace?: string; workflow?: string; follow?: boolean; port: string }) => {
     const client = getClient(opts);
     await ensureDaemon(client);
 
@@ -688,7 +688,7 @@ program
     try {
       task = await client.startAdHocTask({
         prompt,
-        codebase_alias: opts.codebase,
+        workspace_alias: opts.workspace,
         workflow: opts.workflow,
       });
     } catch (e: unknown) {
@@ -744,7 +744,7 @@ registerWorkflowCommands(program, {
 registerConfigCommands(program);
 registerRequirementCommands(program);
 registerProjectCommands(program);
-registerCodebaseCommands(program);
+registerWorkspaceCommands(program);
 
 program
   .command("doctor")
@@ -1028,9 +1028,9 @@ program
   .description("快捷创建并启动任务（task start 的顶层别名）")
   .option("-w, --workflow <name>", "工作流名称")
   .option("-r, --requirement <text>", "需求详情；以 @ 开头则从文件读")
-  .option("--codebase <alias>", "绑定 codebase 别名")
+  .option("--repo <alias>", "绑定 workspace 别名")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (title: string, opts: { workflow?: string; requirement?: string; codebase?: string; port: string }) => {
+  .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
     try {
       const preflight = await runDoctorChecks({ level: 2 });
       if (preflight.status === "error") {
@@ -1062,9 +1062,9 @@ program
         title?: string;
         requirement?: string;
         workflow?: string;
-        codebase_alias?: string;
+        workspace_alias?: string;
       } = { title, requirement, workflow: opts.workflow };
-      if (opts.codebase) startOpts.codebase_alias = opts.codebase;
+      if (opts.repo) startOpts.workspace_alias = opts.repo;
       const t = await client.startTask(startOpts);
       console.log(`任务已创建 [id=${t.id} workflow=${t.workflow} status=${t.status}]`);
     } catch (e: unknown) {

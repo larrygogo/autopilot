@@ -19,7 +19,7 @@ export type { NowCard };
 // 类型定义（保留 HttpClient 历史 shape，不破坏 CLI / 测试调用方）
 // ──────────────────────────────────────────────
 
-export interface CodebaseHealthResult {
+export interface WorkspaceHealthResult {
   healthy: boolean;
   issues: string[];
 }
@@ -32,7 +32,7 @@ export interface Project {
   updated_at: number;
 }
 
-export interface Codebase {
+export interface Workspace {
   id: string;
   project_id: string;
   alias: string;
@@ -40,7 +40,7 @@ export interface Codebase {
   default_branch: string;
   github_owner: string | null;
   github_repo: string | null;
-  parent_codebase_id: string | null;
+  parent_workspace_id: string | null;
   submodule_path: string | null;
   created_at: number;
   updated_at: number;
@@ -103,12 +103,12 @@ export class HttpClient {
 
   /**
    * 一句话发包：跳过项目/需求/工作流选择，直接跑 ad-hoc 工作流。
-   * 接 codebase_id 或 codebase_alias 任一（daemon 端解析）；workflow 默认 "ad-hoc"。
+   * 接 workspace_id 或 workspace_alias 任一（daemon 端解析）；workflow 默认 "ad-hoc"。
    */
   async startAdHocTask(opts: {
     prompt: string;
-    codebase_id?: string;
-    codebase_alias?: string;
+    workspace_id?: string;
+    workspace_alias?: string;
     workflow?: string;
   }): Promise<Task> {
     return this.call("tasks.startAdHoc", opts, { timeoutMs: 300_000 });
@@ -255,66 +255,66 @@ export class HttpClient {
     return this.call("projects.delete", { id });
   }
 
-  async listProjectCodebases(projectId: string): Promise<{ codebases: Codebase[] }> {
-    return this.call("projects.codebases", { id: projectId });
+  async listProjectWorkspaces(projectId: string): Promise<{ workspaces: Workspace[] }> {
+    return this.call("projects.workspaces", { id: projectId });
   }
 
-  async createProjectCodebase(projectId: string, body: {
+  async createProjectWorkspace(projectId: string, body: {
     alias: string;
     path: string;
     default_branch?: string;
     github_owner?: string | null;
     github_repo?: string | null;
-  }): Promise<{ codebase: Codebase }> {
-    return this.call("projects.addCodebase", { id: projectId, ...body });
+  }): Promise<{ workspace: Workspace }> {
+    return this.call("projects.addWorkspace", { id: projectId, ...body });
   }
 
   async listProjectRequirements(projectId: string): Promise<{ requirements: Requirement[] }> {
     return this.call("projects.requirements", { id: projectId });
   }
 
-  // ── Codebases ── （走 WS RPC codebases.*，响应是裸数据无 envelope）
+  // ── Workspaces ── （走 WS RPC workspaces.*，响应是裸数据无 envelope）
 
-  async listCodebases(): Promise<{ codebases: Codebase[] }> {
-    const list = await this.call<Codebase[]>("codebases.list", {});
-    // 保持薄客户端旧签名（CLI 解构 { codebases }），envelope 在此还原
-    return { codebases: list };
+  async listWorkspaces(): Promise<{ workspaces: Workspace[] }> {
+    const list = await this.call<Workspace[]>("workspaces.list", {});
+    // 保持薄客户端旧签名（CLI 解构 { workspaces }），envelope 在此还原
+    return { workspaces: list };
   }
 
-  async getCodebase(id: string): Promise<{ codebase: Codebase }> {
-    const cb = await this.call<Codebase>("codebases.get", { id });
-    return { codebase: cb };
+  async getWorkspace(id: string): Promise<{ workspace: Workspace }> {
+    const ws = await this.call<Workspace>("workspaces.get", { id });
+    return { workspace: ws };
   }
 
-  async createCodebase(body: {
+  async createWorkspace(body: {
     alias: string;
     path: string;
     default_branch?: string;
     github_owner?: string | null;
     github_repo?: string | null;
     project_id?: string;
-  }): Promise<{ codebase: Codebase }> {
-    const cb = await this.call<Codebase>("codebases.create", body);
-    return { codebase: cb };
+  }): Promise<{ workspace: Workspace }> {
+    const ws = await this.call<Workspace>("workspaces.create", body);
+    return { workspace: ws };
   }
 
-  async updateCodebase(id: string, body: Partial<{
+  async updateWorkspace(id: string, body: Partial<{
     alias: string;
     path: string;
     default_branch: string;
     github_owner: string | null;
     github_repo: string | null;
-  }>): Promise<{ codebase: Codebase }> {
-    const cb = await this.call<Codebase>("codebases.update", { id, ...body });
-    return { codebase: cb };
+  }>): Promise<{ workspace: Workspace }> {
+    const ws = await this.call<Workspace>("workspaces.update", { id, ...body });
+    return { workspace: ws };
   }
 
-  async deleteCodebase(id: string): Promise<{ ok: true }> {
-    return this.call<{ ok: true }>("codebases.delete", { id });
+  async deleteWorkspace(id: string): Promise<{ ok: true }> {
+    return this.call<{ ok: true }>("workspaces.delete", { id });
   }
 
-  async healthcheckCodebase(id: string): Promise<CodebaseHealthResult> {
-    return this.call<CodebaseHealthResult>("codebases.healthcheck", { id });
+  async healthcheckWorkspace(id: string): Promise<WorkspaceHealthResult> {
+    return this.call<WorkspaceHealthResult>("workspaces.healthcheck", { id });
   }
 
 
@@ -360,7 +360,7 @@ export class HttpClient {
 
   async createRequirement(body: {
     project_id?: string;
-    codebase_id?: string | null;
+    workspace_id?: string | null;
     title: string;
     spec_md?: string;
     chat_session_id?: string | null;
@@ -371,7 +371,7 @@ export class HttpClient {
   async extractRequirement(input: {
     raw_text: string;
     project_id: string;
-    codebase_id?: string | null;
+    workspace_id?: string | null;
   }): Promise<{ title: string; spec_md: string }> {
     return this.call("requirements.extract", input, { timeoutMs: 300_000 });
   }

@@ -95,7 +95,7 @@ export function registerProjectCommands(program: Command): void {
 
   proj
     .command("delete <id>")
-    .description("删除 project（仅当该 project 下没有 requirement / codebase）")
+    .description("删除 project（仅当该 project 下没有 requirement / workspace）")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
     .action(async (id: string, opts: { port: string }) => {
       const client = getClient(opts.port);

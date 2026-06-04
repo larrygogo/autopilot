@@ -59,11 +59,11 @@ export class AutopilotClient {
   get createProject() { return this.http.createProject.bind(this.http); }
   get updateProject() { return this.http.updateProject.bind(this.http); }
   get deleteProject() { return this.http.deleteProject.bind(this.http); }
-  get listCodebases() { return this.http.listCodebases.bind(this.http); }
-  get getCodebase() { return this.http.getCodebase.bind(this.http); }
-  get createCodebase() { return this.http.createCodebase.bind(this.http); }
-  get deleteCodebase() { return this.http.deleteCodebase.bind(this.http); }
-  get healthcheckCodebase() { return this.http.healthcheckCodebase.bind(this.http); }
+  get listWorkspaces() { return this.http.listWorkspaces.bind(this.http); }
+  get getWorkspace() { return this.http.getWorkspace.bind(this.http); }
+  get createWorkspace() { return this.http.createWorkspace.bind(this.http); }
+  get deleteWorkspace() { return this.http.deleteWorkspace.bind(this.http); }
+  get healthcheckWorkspace() { return this.http.healthcheckWorkspace.bind(this.http); }
 
   // ── 便捷方法：代理 WebSocket ──
 

@@ -2,7 +2,7 @@
  * req_dev workflow 阶段函数
  *
  * 与旧 dev workflow 的本质差别：
- *  - setup_func 接收 codebase_id（从 codebases 表查 path / branch / github_owner / github_repo）
+ *  - setup_func 接收 workspace_id（从 workspaces 表查 path / branch / github_owner / github_repo）
  *    而非读 workflow.config.repo_path
  *  - 阶段函数从 task extra 读 repo_path / github_owner / github_repo，无全局 config 依赖
  *  - submit_pr 阶段写回 pr_url / pr_number 到 task extra（P3 await_review 阶段用）
@@ -20,7 +20,7 @@ import { runInBackground } from "@autopilot/core/runner";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 import { getTaskSandbox } from "@autopilot/core/sandbox";
-import { getCodebaseById } from "@autopilot/core/codebases";
+import { getWorkspaceById } from "@autopilot/core/workspaces";
 import { setRequirementStatus, getRequirementById } from "@autopilot/core/requirements";
 import { forceTransition } from "@autopilot/core/state-machine";
 import { latestFeedback } from "@autopilot/core/requirement-feedbacks";
@@ -102,7 +102,7 @@ function phaseDir(taskId: string, workflowName: string, phaseName: string): stri
 // ──────────────────────────────────────────────
 
 export interface ReqDevSetupArgs {
-  codebase_id: string;
+  workspace_id: string;
   title?: string;
   requirement?: string;
 }
@@ -118,15 +118,17 @@ export interface SubmoduleInfo {
 }
 
 export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknown> {
-  if (!args.codebase_id) throw new Error("setup_req_dev_task: codebase_id 必填");
-  const codebase = getCodebaseById(args.codebase_id);
-  if (!codebase) throw new Error(`setup_req_dev_task: codebase not found: ${args.codebase_id}`);
+  // 兼容旧调用方仍传 codebase_id（未同步的工作流副本）
+  const workspaceArg = args.workspace_id ?? (args as { codebase_id?: string }).codebase_id;
+  if (!workspaceArg) throw new Error("setup_req_dev_task: workspace_id 必填");
+  const workspace = getWorkspaceById(workspaceArg);
+  if (!workspace) throw new Error(`setup_req_dev_task: workspace not found: ${workspaceArg}`);
 
   const title = args.title ?? "untitled";
   const requirement = args.requirement ?? "";
   const branch = `feat/${title.slice(0, 20).replace(/\s+/g, "-").toLowerCase()}`;
 
-  const submodules = listSubmodules(args.codebase_id).map((sm): SubmoduleInfo => ({
+  const submodules = listSubmodules(workspaceArg).map((sm): SubmoduleInfo => ({
     id: sm.id,
     alias: sm.alias,
     path: sm.path,
@@ -139,11 +141,11 @@ export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknow
   return {
     title,
     requirement,
-    codebase_id: codebase.id,
-    repo_path: codebase.path,
-    default_branch: codebase.default_branch,
-    github_owner: codebase.github_owner,
-    github_repo: codebase.github_repo,
+    workspace_id: workspace.id,
+    repo_path: workspace.path,
+    default_branch: workspace.default_branch,
+    github_owner: workspace.github_owner,
+    github_repo: workspace.github_repo,
     branch,
     submodules,
   };
@@ -527,7 +529,7 @@ export async function run_submit_pr(taskId: string): Promise<void> {
     if (reqId) {
       appendSubPr({
         requirement_id: reqId,
-        child_repo_id: sm.id,
+        child_workspace_id: sm.id,
         pr_url: smPrUrl,
         pr_number: smPrNumber,
       });

@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "fs";
 import { createInterface } from "node:readline";
 import { AutopilotClient, DEFAULT_PORT } from "../client/index";
 import { readListenInfo } from "../daemon/pid";
-import type { Codebase } from "../core/codebases";
+import type { Workspace } from "../core/workspaces";
 
 /**
  * 交互式读多行描述。
@@ -30,11 +30,11 @@ async function readRawTextInteractive(): Promise<string> {
   });
 }
 
-/** cwd 命中 codebase 时返回最长 match 的 id；否则 null。 */
-export function inferCodebaseFromCwd(codebases: Codebase[], cwd: string = process.cwd()): string | null {
+/** cwd 命中 workspace 时返回最长 match 的 id；否则 null。 */
+export function inferWorkspaceFromCwd(workspaces: Workspace[], cwd: string = process.cwd()): string | null {
   const normalize = (p: string) => p.replace(/[\\/]+$/, "");
   const ncwd = normalize(cwd);
-  const matches = codebases.filter((c) => ncwd.startsWith(normalize(c.path)));
+  const matches = workspaces.filter((c) => ncwd.startsWith(normalize(c.path)));
   if (matches.length === 0) return null;
   return matches.sort((a, b) => b.path.length - a.path.length)[0]!.id;
 }
@@ -43,7 +43,7 @@ interface ReqNewOpts {
   fromPrompt?: string;
   file?: string;
   project?: string;
-  codebase?: string;
+  workspace?: string;
   /**
    * commander 把 `--no-extract` 解析为 `{ extract: false }`。
    * 之前类型写 noExtract → opts.noExtract 永远 undefined → 走默认 extract 分支
@@ -79,7 +79,7 @@ export function registerRequirementCommands(program: Command): void {
     .option("--from-prompt <text>", "直接传一段描述，跳过交互输入")
     .option("-f, --file <path>", "从文件读取描述（Markdown）")
     .option("-p, --project <id>", "指定 project id（默认取第一个 project）")
-    .option("-c, --codebase <id>", "指定 codebase id（可空）")
+    .option("-c, --workspace <id>", "指定 workspace id（可空）")
     .option("--no-extract", "跳过 AI 抽取，title=前 30 字、spec_md=原文")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
     .action(async (opts: ReqNewOpts) => {
@@ -106,7 +106,7 @@ export function registerRequirementCommands(program: Command): void {
       // 2) 连接 daemon（raw_text 校验通过后再尝试连接，报错更精准）
       await ensureDaemon(client);
 
-      // 3) project / codebase
+      // 3) project / workspace
       let projectId = opts.project;
       if (!projectId) {
         try {
@@ -126,18 +126,18 @@ export function registerRequirementCommands(program: Command): void {
           process.exit(3);
         }
       }
-      let codebaseId = opts.codebase;
-      if (!codebaseId && projectId) {
+      let workspaceId = opts.workspace;
+      if (!workspaceId && projectId) {
         try {
-          const { codebases } = await client.listCodebases();
-          const inProject = codebases.filter((c) => c.project_id === projectId);
-          const inferred = inferCodebaseFromCwd(inProject);
+          const { workspaces } = await client.listWorkspaces();
+          const inProject = workspaces.filter((c) => c.project_id === projectId);
+          const inferred = inferWorkspaceFromCwd(inProject);
           if (inferred) {
-            codebaseId = inferred;
-            console.log(`✓ 默认 codebase: ${codebaseId}（从 cwd 推断）`);
+            workspaceId = inferred;
+            console.log(`✓ 默认 workspace: ${workspaceId}（从 cwd 推断）`);
           }
         } catch {
-          // codebase 推断失败不阻塞流程，让 codebaseId 为 undefined
+          // workspace 推断失败不阻塞流程，让 workspaceId 为 undefined
         }
       }
 
@@ -152,7 +152,7 @@ export function registerRequirementCommands(program: Command): void {
           const r = await client.extractRequirement({
             raw_text: rawText,
             project_id: projectId,
-            codebase_id: codebaseId ?? null,
+            workspace_id: workspaceId ?? null,
           });
           title = r.title;
           specMd = r.spec_md;
@@ -166,7 +166,7 @@ export function registerRequirementCommands(program: Command): void {
       try {
         const result = await client.createRequirement({
           project_id: projectId,
-          codebase_id: codebaseId ?? null,
+          workspace_id: workspaceId ?? null,
           title,
           spec_md: specMd,
         });
