@@ -29,7 +29,7 @@ JSON 转义易错。YAML \`|\` 块完全不需转义。
 export interface ExtractInput {
   raw_text: string;
   project_id: string;
-  codebase_id?: string | null;
+  workspace_id?: string | null;
 }
 
 export interface ExtractResult {

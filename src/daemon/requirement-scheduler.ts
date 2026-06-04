@@ -1,7 +1,7 @@
 import { onEvent, offEvent } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { listRequirements, setRequirementStatus, updateRequirement, getRequirementById } from "../core/requirements";
-import { getCodebaseById } from "../core/codebases";
+import { getWorkspaceById } from "../core/workspaces";
 import { listSubmodules } from "../core/submodules";
 import { listComments } from "../core/requirement-comments";
 import { startTaskFromTemplate } from "../core/task-factory";
@@ -12,52 +12,52 @@ const log = createLogger("requirement-scheduler");
 let _handler: ((event: AutopilotEvent) => void) | null = null;
 
 /**
- * 单组 tick：父 codebase + 所有关联子模块视为一个调度组。
+ * 单组 tick：父 workspace + 所有关联子模块视为一个调度组。
  *
  * 算法（spec §4.3 组级扩展）：
- *   - groupId = codebase.parent_codebase_id ?? codebase.id（即便传子模块 id 也归一化到父）
- *   - groupCodebaseIds = [groupId, ...listSubmodules(groupId).map(r => r.id)]
- *   - active = listRequirements({}) 中 codebase_id ∈ groupCodebaseIds 且 status ∈ {running, fix_revision}
+ *   - groupId = workspace.parent_workspace_id ?? workspace.id（即便传子模块 id 也归一化到父）
+ *   - groupWorkspaceIds = [groupId, ...listSubmodules(groupId).map(r => r.id)]
+ *   - active = listRequirements({}) 中 workspace_id ∈ groupWorkspaceIds 且 status ∈ {running, fix_revision}
  *   - 若 active 非空：do nothing
  *   - 否则取主仓库（父 groupId）上最老 queued requirement → startTaskFromTemplate
  *   - 子模块上的 queued（极端情况，正常 chat 流程不会发生）忽略
  *
  * 失败时回滚 status: queued → ready
  */
-export async function tickRepo(codebaseId: string): Promise<void> {
-  const codebase = getCodebaseById(codebaseId);
-  if (!codebase) {
-    log.error("tickRepo: codebase %s 不存在", codebaseId);
+export async function tickRepo(workspaceId: string): Promise<void> {
+  const workspace = getWorkspaceById(workspaceId);
+  if (!workspace) {
+    log.error("tickRepo: workspace %s 不存在", workspaceId);
     return;
   }
-  const groupId = codebase.parent_codebase_id ?? codebase.id;
+  const groupId = workspace.parent_workspace_id ?? workspace.id;
   const submodules = listSubmodules(groupId);
-  const groupCodebaseIds = new Set<string>([groupId, ...submodules.map((r) => r.id)]);
+  const groupWorkspaceIds = new Set<string>([groupId, ...submodules.map((r) => r.id)]);
 
   // active 检测扩到整组
   const all = listRequirements({});
   const active = all.filter(
     (r) =>
-      r.codebase_id !== null &&
-      groupCodebaseIds.has(r.codebase_id) &&
+      r.workspace_id !== null &&
+      groupWorkspaceIds.has(r.workspace_id) &&
       (r.status === "running" || r.status === "fix_revision"),
   );
   if (active.length > 0) return;
 
   // candidate 仅从主仓库拉（用户在 chat 提需求只会选父）
   const queued = all
-    .filter((r) => r.codebase_id === groupId && r.status === "queued")
+    .filter((r) => r.workspace_id === groupId && r.status === "queued")
     .sort((a, b) => a.created_at - b.created_at);
   if (queued.length === 0) return;
 
   const candidate = queued[0];
-  if (!candidate.codebase_id) {
-    log.error("tickRepo: candidate %s 缺 codebase_id（不应发生）", candidate.id);
+  if (!candidate.workspace_id) {
+    log.error("tickRepo: candidate %s 缺 workspace_id（不应发生）", candidate.id);
     return;
   }
-  const candidateCodebase = getCodebaseById(candidate.codebase_id);
-  if (!candidateCodebase) {
-    log.error("tickRepo: candidate codebase %s 不存在", candidate.codebase_id);
+  const candidateWorkspace = getWorkspaceById(candidate.workspace_id);
+  if (!candidateWorkspace) {
+    log.error("tickRepo: candidate workspace %s 不存在", candidate.workspace_id);
     return;
   }
 
@@ -86,7 +86,7 @@ export async function tickRepo(codebaseId: string): Promise<void> {
       workflow: "dev",
       title: candidate.title,
       requirement,
-      codebase_id: candidateCodebase.id,
+      workspace_id: candidateWorkspace.id,
       requirement_id: candidate.id,
     });
   } catch (e: unknown) {
@@ -103,10 +103,10 @@ export async function tickRepo(codebaseId: string): Promise<void> {
     updateRequirement(candidate.id, { task_id: task.id });
     setRequirementStatus(candidate.id, "running");
     log.info(
-      "tickRepo: 启动 requirement %s → task %s on codebase %s (group=%s, submodules=%d)",
+      "tickRepo: 启动 requirement %s → task %s on workspace %s (group=%s, submodules=%d)",
       candidate.id,
       task.id,
-      candidateCodebase.alias,
+      candidateWorkspace.alias,
       groupId,
       submodules.length,
     );
@@ -131,15 +131,15 @@ export function initRequirementScheduler(): void {
 
     const req = getRequirementById(id);
     if (!req) return;
-    if (!req.codebase_id) {
-      // 高层需求（无 codebase 绑定）不参与调度组逻辑
+    if (!req.workspace_id) {
+      // 高层需求（无 workspace 绑定）不参与调度组逻辑
       return;
     }
 
     try {
-      await tickRepo(req.codebase_id);
+      await tickRepo(req.workspace_id);
     } catch (e: unknown) {
-      log.error("requirement-scheduler: tickRepo 异常 codebase=%s: %s", req.codebase_id, (e as Error).message);
+      log.error("requirement-scheduler: tickRepo 异常 workspace=%s: %s", req.workspace_id, (e as Error).message);
     }
   };
 

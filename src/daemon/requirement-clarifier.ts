@@ -4,7 +4,7 @@ import { onEvent, offEvent, emit } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { getRequirementById, updateRequirement, setActiveQuestionId, setRequirementStatus } from "../core/requirements";
 import { getProjectById } from "../core/projects";
-import { getCodebaseById } from "../core/codebases";
+import { getWorkspaceById } from "../core/workspaces";
 import {
   createComment,
   nextCommentId,
@@ -69,11 +69,11 @@ async function callClaude(prompt: string, reqId: string): Promise<string> {
 // Prompt 构造
 // ──────────────────────────────────────────────
 
-function readCodebaseContext(codebasePath: string): string {
+function readWorkspaceContext(workspacePath: string): string {
   const candidates = ["CLAUDE.md", "README.md", "README"];
   const snippets: string[] = [];
   for (const name of candidates) {
-    const file = join(codebasePath, name);
+    const file = join(workspacePath, name);
     if (existsSync(file)) {
       const content = readFileSync(file, "utf-8").slice(0, 4000);
       snippets.push(`### ${name}\n${content}`);
@@ -85,8 +85,8 @@ function readCodebaseContext(codebasePath: string): string {
 function buildPrompt(opts: {
   projectName: string;
   projectDescription: string | null;
-  codebaseAlias: string | null;
-  codebaseContext: string | null;
+  workspaceAlias: string | null;
+  workspaceContext: string | null;
   title: string;
   specMd: string;
   qaHistory: string;
@@ -94,11 +94,11 @@ function buildPrompt(opts: {
   const ctxLines: string[] = [];
   ctxLines.push(`项目名称：${opts.projectName}`);
   if (opts.projectDescription) ctxLines.push(`项目描述：${opts.projectDescription}`);
-  if (opts.codebaseAlias) ctxLines.push(`关联代码库：${opts.codebaseAlias}`);
-  if (opts.codebaseContext) {
+  if (opts.workspaceAlias) ctxLines.push(`关联工作区：${opts.workspaceAlias}`);
+  if (opts.workspaceContext) {
     ctxLines.push("");
-    ctxLines.push("## 代码库文档");
-    ctxLines.push(opts.codebaseContext);
+    ctxLines.push("## 工作区文档");
+    ctxLines.push(opts.workspaceContext);
   }
 
   return [
@@ -258,7 +258,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     endRound(reqId, "aborted");
     return;
   }
-  const codebase = req.codebase_id ? getCodebaseById(req.codebase_id) : null;
+  const workspace = req.workspace_id ? getWorkspaceById(req.workspace_id) : null;
 
   // 开始新一轮：清除上次的错误（如果有）
   if (req.clarifier_error) {
@@ -277,8 +277,8 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   const prompt = buildPrompt({
     projectName: project.name,
     projectDescription: project.description,
-    codebaseAlias: codebase?.alias ?? null,
-    codebaseContext: codebase?.path ? readCodebaseContext(codebase.path) : null,
+    workspaceAlias: workspace?.alias ?? null,
+    workspaceContext: workspace?.path ? readWorkspaceContext(workspace.path) : null,
     title: req.title,
     specMd: req.spec_md ?? "",
     qaHistory,

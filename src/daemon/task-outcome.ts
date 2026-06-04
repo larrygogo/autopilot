@@ -118,7 +118,7 @@ function resolveBaseBranch(reqId: string | undefined): string {
   try {
     const row = getDb()
       .query<{ default_branch: string | null }, [string]>(
-        "SELECT c.default_branch FROM requirements r JOIN codebases c ON r.codebase_id = c.id WHERE r.id = ?"
+        "SELECT c.default_branch FROM requirements r JOIN workspaces c ON r.workspace_id = c.id WHERE r.id = ?"
       )
       .get(reqId);
     return row?.default_branch ?? "main";

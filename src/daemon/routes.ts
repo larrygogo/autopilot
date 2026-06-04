@@ -35,7 +35,7 @@ import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
 import { cancelTaskAction, restartTaskAction, answerTaskAction, decideTaskAction, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
-import { listCodebases, getCodebaseById } from "../core/codebases";
+import { listWorkspaces, getWorkspaceById } from "../core/workspaces";
 import { listSubPrs } from "../core/requirement-sub-prs";
 import {
   listRequirements,
@@ -543,19 +543,19 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         requirement?: string;
         workflow?: string;
         reqId?: string;
-        /** CLI 传入 codebase 别名，daemon 解析为 codebase_id 透传给 setup_func */
-        codebase_alias?: string;
-        /** 额外工作流参数（如 codebase_id），透传给 setup_func */
+        /** CLI 传入 workspace 别名，daemon 解析为 workspace_id 透传给 setup_func */
+        workspace_alias?: string;
+        /** 额外工作流参数（如 workspace_id），透传给 setup_func */
         [key: string]: unknown;
       };
-      // 如果 caller 传了 codebase_alias，解析为 codebase_id（不覆盖已有 codebase_id）
+      // 如果 caller 传了 workspace_alias，解析为 workspace_id（不覆盖已有 workspace_id）
       // P3 待修：alias 现在 project 内唯一，全局可能多个；目前取首个匹配。
-      if (body.codebase_alias && !body.codebase_id) {
-        const codebase = listCodebases({ includeSubmodules: true }).find(
-          (c) => c.alias === body.codebase_alias,
+      if (body.workspace_alias && !body.workspace_id) {
+        const workspace = listWorkspaces({ includeSubmodules: true }).find(
+          (c) => c.alias === body.workspace_alias,
         );
-        if (!codebase) return error(`找不到别名为 "${body.codebase_alias}" 的 codebase`, 404);
-        body.codebase_id = codebase.id;
+        if (!workspace) return error(`找不到别名为 "${body.workspace_alias}" 的 workspace`, 404);
+        body.workspace_id = workspace.id;
       }
       try {
         const task = await startTaskFromTemplate(body);
@@ -575,7 +575,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     //   POST   /api/schedules/:id/run-now → schedules.runNow
 
     // /api/setup/status 已迁到 WS RPC: setup.status
-    // POST /api/setup/* 已迁到 WS RPC（setup.saveProviders / saveAgents / saveCodebases / setup.dismiss）
+    // POST /api/setup/* 已迁到 WS RPC（setup.saveProviders / saveAgents / saveWorkspaces / setup.dismiss）
 
     // ─────────── 文件系统浏览 ───────────
 
@@ -660,22 +660,22 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     //   GET    /api/projects/:id                → projects.get
     //   PUT    /api/projects/:id                → projects.update
     //   DELETE /api/projects/:id                → projects.delete
-    //   GET    /api/projects/:id/codebases      → projects.codebases
-    //   POST   /api/projects/:id/codebases      → projects.addCodebase
+    //   GET    /api/projects/:id/workspaces      → projects.workspaces
+    //   POST   /api/projects/:id/workspaces      → projects.addWorkspace
     //   GET    /api/projects/:id/requirements   → projects.requirements
 
-    // ─────────── Codebases（主路由已迁 WS RPC：codebases.list/get/create/update/delete/listSubmodules/healthcheck/rediscoverSubmodules） ───────────
-    // 旧 /api/repos/* HTTP 路由已在 Phase 1 清理删除（spec §3.1）。所有 codebase 操作走 WS RPC。
+    // ─────────── Workspaces（主路由已迁 WS RPC：workspaces.list/get/create/update/delete/listSubmodules/healthcheck/rediscoverSubmodules） ───────────
+    // 旧 /api/repos/* HTTP 路由已在 Phase 1 清理删除（spec §3.1）。所有 workspace 操作走 WS RPC。
 
     // ─────────── Requirements ───────────
 
     // GET /api/requirements
     if (method === "GET" && path === "/api/requirements") {
-      const codebaseId = url.searchParams.get("codebase_id") ?? undefined;
+      const workspaceId = url.searchParams.get("workspace_id") ?? undefined;
       const projectId = url.searchParams.get("project_id") ?? undefined;
       const status = url.searchParams.get("status") ?? undefined;
       return json({
-        requirements: listRequirements({ codebase_id: codebaseId, project_id: projectId, status }),
+        requirements: listRequirements({ workspace_id: workspaceId, project_id: projectId, status }),
       });
     }
 
@@ -685,31 +685,31 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     if (method === "POST" && path === "/api/requirements") {
       const body = (await req.json()) as {
         project_id?: string;
-        codebase_id?: string | null;
+        workspace_id?: string | null;
         title?: string;
         spec_md?: string;
         chat_session_id?: string | null;
       };
-      const codebaseId = body.codebase_id ?? null;
+      const workspaceId = body.workspace_id ?? null;
       if (!body.title?.trim()) {
         return error("title 必填");
       }
-      // 必须能确定 project_id：要么调用方直接传，要么从 codebase 反查
+      // 必须能确定 project_id：要么调用方直接传，要么从 workspace 反查
       let projectId = body.project_id?.trim();
-      if (codebaseId) {
-        const cb = getCodebaseById(codebaseId);
-        if (!cb) return error("codebase not found", 404);
-        projectId = projectId ?? cb.project_id;
+      if (workspaceId) {
+        const ws = getWorkspaceById(workspaceId);
+        if (!ws) return error("workspace not found", 404);
+        projectId = projectId ?? ws.project_id;
       }
       if (!projectId) {
-        return error("project_id 必填（或提供 codebase_id 由 daemon 反查）");
+        return error("project_id 必填（或提供 workspace_id 由 daemon 反查）");
       }
       const id = nextRequirementId();
       try {
         createRequirement({
           id,
           project_id: projectId,
-          codebase_id: codebaseId,
+          workspace_id: workspaceId,
           title: body.title.trim(),
           spec_md: body.spec_md ?? "",
           chat_session_id: body.chat_session_id ?? null,
@@ -741,7 +741,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       const id = reqEnqueueMatch;
       const r = getRequirementById(id);
       if (!r) return error("requirement not found", 404);
-      if (!r.codebase_id) return error("请先关联代码库再入队");
+      if (!r.workspace_id) return error("请先关联工作区再入队");
       if (!(r.spec_md ?? "").trim()) {
         return error("需求规约为空，请先完成澄清或手动填写规约");
       }
@@ -891,14 +891,14 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         const body = (await req.json()) as {
           title?: string;
           spec_md?: string;
-          codebase_id?: string | null;
+          workspace_id?: string | null;
           chat_session_id?: string | null;
         };
         if (body.title !== undefined && !body.title.trim()) {
           return error("title 不能为空");
         }
-        if (body.codebase_id !== undefined && body.codebase_id !== null) {
-          if (!getCodebaseById(body.codebase_id)) return error("codebase not found", 404);
+        if (body.workspace_id !== undefined && body.workspace_id !== null) {
+          if (!getWorkspaceById(body.workspace_id)) return error("workspace not found", 404);
         }
         return json({ requirement: updateRequirement(reqDetailMatch, body) });
       }

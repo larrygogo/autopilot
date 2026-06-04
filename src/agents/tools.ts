@@ -33,7 +33,7 @@ import { snapshotWorkflow } from "../core/manifest";
 import { executePhase } from "../core/runner";
 import { randomUUID } from "crypto";
 import { log } from "../core/logger";
-import { listCodebases, getCodebaseById } from "../core/codebases";
+import { listWorkspaces, getWorkspaceById } from "../core/workspaces";
 import {
   listRequirements,
   getRequirementById,
@@ -61,7 +61,7 @@ function err(msg: string): ToolContent {
  * 此处取首个命中。P3/P5 改造 chat tool 强制 projectId 后可移除此 hack。
  */
 function findRepoByAliasGlobal(alias: string) {
-  const all = listCodebases({ includeSubmodules: true });
+  const all = listWorkspaces({ includeSubmodules: true });
   return all.find((c) => c.alias === alias) ?? null;
 }
 
@@ -388,16 +388,18 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
             workflowSnapshot: snapshotWorkflow(wf),
           });
           try {
-            // sandbox.git=true 时反查 codebase 让 ensureTaskSandbox 起 git worktree
-            let codebase;
+            // sandbox.git=true 时反查 workspace 让 ensureTaskSandbox 起 git worktree
+            let workspace;
             if (wf.sandbox?.git) {
-              const codebaseId = typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined;
-              if (codebaseId) {
-                const cb = getCodebaseById(codebaseId);
-                if (cb) codebase = { id: cb.id, path: cb.path, default_branch: cb.default_branch };
+              const workspaceId =
+                (typeof extra["workspace_id"] === "string" ? extra["workspace_id"] : undefined) ??
+                (typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined);
+              if (workspaceId) {
+                const ws = getWorkspaceById(workspaceId);
+                if (ws) workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch };
               }
             }
-            ensureTaskSandbox(taskId, workflowName, wf.sandbox, codebase);
+            ensureTaskSandbox(taskId, workflowName, wf.sandbox, workspace);
           } catch (e: unknown) {
             log.warn("start_task: ensureTaskSandbox 失败 [task=%s]: %s",
               taskId, e instanceof Error ? e.message : String(e));
@@ -453,7 +455,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
       {},
       async () => {
         return ok(
-          listCodebases().map((r) => ({
+          listWorkspaces().map((r) => ({
             alias: r.alias,
             id: r.id,
             path: r.path,
@@ -475,8 +477,8 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
       async (args) => {
         const repo = findRepoByAliasGlobal(args.repo_alias);
         if (!repo) return err(`repo_alias 不存在：${args.repo_alias}（先在 /codebases 注册）`);
-        if (repo.parent_codebase_id) {
-          const parent = getCodebaseById(repo.parent_codebase_id);
+        if (repo.parent_workspace_id) {
+          const parent = getWorkspaceById(repo.parent_workspace_id);
           const parentHint = parent ? `请改用父 repo 别名 "${parent.alias}"` : "请用父 repo 别名";
           return err(
             `"${args.repo_alias}" 是子模块，不能直接提需求。${parentHint}（autopilot 会在执行时自动跨父子操作）`,
@@ -487,7 +489,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
           const r = createRequirement({
             id,
             project_id: repo.project_id,
-            codebase_id: repo.id,
+            workspace_id: repo.id,
             title: args.title.trim(),
             spec_md: args.initial_text ?? "",
           });
@@ -564,20 +566,20 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
         status: z.string().optional(),
       },
       async (args) => {
-        let codebaseId: string | undefined;
+        let workspaceId: string | undefined;
         if (args.repo_alias) {
           const repo = findRepoByAliasGlobal(args.repo_alias);
           if (!repo) return err(`repo_alias 不存在：${args.repo_alias}`);
-          codebaseId = repo.id;
+          workspaceId = repo.id;
         }
-        const list = listRequirements({ codebase_id: codebaseId, status: args.status });
+        const list = listRequirements({ workspace_id: workspaceId, status: args.status });
         return ok(
           list.map((r) => ({
             id: r.id,
             title: r.title,
             status: r.status,
             project_id: r.project_id,
-            codebase_id: r.codebase_id,
+            workspace_id: r.workspace_id,
             pr_url: r.pr_url,
             task_id: r.task_id,
           })),

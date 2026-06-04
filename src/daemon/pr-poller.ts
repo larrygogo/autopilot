@@ -5,7 +5,7 @@ import {
   updateRequirement,
 } from "../core/requirements";
 import { createComment, nextCommentId } from "../core/requirement-comments";
-import { getCodebaseById } from "../core/codebases";
+import { getWorkspaceById } from "../core/workspaces";
 import { loadGithubConfig } from "../core/config";
 import { createLogger } from "../core/logger";
 
@@ -83,14 +83,14 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
     log.warn("requirement %s 无 pr_number，跳过", reqId);
     return;
   }
-  if (!req.codebase_id) {
-    log.warn("requirement %s 未绑定 codebase，跳过", reqId);
+  if (!req.workspace_id) {
+    log.warn("requirement %s 未绑定 workspace，跳过", reqId);
     return;
   }
-  const repo = getCodebaseById(req.codebase_id);
+  const repo = getWorkspaceById(req.workspace_id);
   if (!repo || !repo.github_owner || !repo.github_repo) {
     log.warn(
-      "requirement %s 关联 codebase 缺 github_owner/repo，跳过（请先在 /codebases 健康检查回填）",
+      "requirement %s 关联 workspace 缺 github_owner/repo，跳过（请先在 /workspaces 健康检查回填）",
       reqId,
     );
     return;

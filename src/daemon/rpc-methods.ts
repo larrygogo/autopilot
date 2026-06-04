@@ -64,9 +64,9 @@ import {
   nextProjectId,
 } from "../core/projects";
 import { listRequirementsByProject } from "../core/requirements";
-import { listCodebases, getCodebaseById, createCodebase, updateCodebase, deleteCodebase, nextCodebaseId } from "../core/codebases";
+import { listWorkspaces, getWorkspaceById, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId } from "../core/workspaces";
 import { listSubmodules, discoverSubmodules } from "../core/submodules";
-import { checkCodebaseHealth, detectCodebaseGit } from "../core/codebase-health";
+import { checkWorkspaceHealth, detectWorkspaceGit } from "../core/workspace-health";
 import {
   listSessions as listChatSessions,
   deleteSession as deleteChatSession,
@@ -487,19 +487,22 @@ export function registerCoreRpcMethods(): void {
           "";
         if (!rawText) throw new RpcError("INVALID_PARAM", "需要 title 或 requirement");
 
-        // codebase_alias → codebase_id（startTaskFromPrompt 只认 codebase_id）
-        let codebaseId =
-          typeof p.codebase_id === "string" && p.codebase_id.trim() ? p.codebase_id.trim() : undefined;
-        if (!codebaseId && typeof p.codebase_alias === "string" && p.codebase_alias.trim()) {
-          const alias = p.codebase_alias.trim();
-          const codebases = await import("../core/codebases");
-          const cb = codebases.listCodebases({ includeSubmodules: true }).find((c) => c.alias === alias);
-          if (!cb) throw new RpcError("NOT_FOUND", `找不到别名为 "${alias}" 的 codebase`);
-          codebaseId = cb.id;
+        // workspace_alias → workspace_id（startTaskFromPrompt 只认 workspace_id）；兼容旧 codebase_* 键
+        let workspaceId =
+          (typeof p.workspace_id === "string" && p.workspace_id.trim() ? p.workspace_id.trim() : undefined) ??
+          (typeof p.codebase_id === "string" && p.codebase_id.trim() ? p.codebase_id.trim() : undefined);
+        const aliasParam =
+          (typeof p.workspace_alias === "string" && p.workspace_alias.trim() ? p.workspace_alias.trim() : undefined) ??
+          (typeof p.codebase_alias === "string" && p.codebase_alias.trim() ? p.codebase_alias.trim() : undefined);
+        if (!workspaceId && aliasParam) {
+          const workspaces = await import("../core/workspaces");
+          const ws = workspaces.listWorkspaces({ includeSubmodules: true }).find((c) => c.alias === aliasParam);
+          if (!ws) throw new RpcError("NOT_FOUND", `找不到别名为 "${aliasParam}" 的 workspace`);
+          workspaceId = ws.id;
         }
 
         const workflow = typeof p.workflow === "string" && p.workflow.trim() ? p.workflow.trim() : undefined;
-        const result = await startTaskFromPrompt({ rawText, codebase_id: codebaseId, workflow });
+        const result = await startTaskFromPrompt({ rawText, workspace_id: workspaceId, workflow });
         // 返回兼容：adhoc 直接返回 task；串行入队返回 requirement（task 异步起）
         return result.task ?? result.requirement ?? {};
       } catch (e: unknown) {
@@ -536,20 +539,23 @@ export function registerCoreRpcMethods(): void {
       if (!prompt) throw new RpcError("INVALID_PARAM", "需要 prompt");
       const workflow = typeof p.workflow === "string" && p.workflow.trim() ? p.workflow.trim() : "ad-hoc";
 
-      // 可选 codebase 透传：让 sandbox.git=true 时能起 git worktree
-      let codebaseId =
-        typeof p.codebase_id === "string" && p.codebase_id.trim() ? p.codebase_id.trim() : undefined;
-      if (!codebaseId && typeof p.codebase_alias === "string" && p.codebase_alias.trim()) {
-        const alias = p.codebase_alias.trim();
-        const codebases = await import("../core/codebases");
-        const cb = codebases.listCodebases({ includeSubmodules: true }).find((c) => c.alias === alias);
-        if (!cb) throw new RpcError("NOT_FOUND", `找不到别名为 "${alias}" 的 codebase`);
-        codebaseId = cb.id;
+      // 可选 workspace 透传：让 sandbox.git=true 时能起 git worktree；兼容旧 codebase_* 键
+      let workspaceId =
+        (typeof p.workspace_id === "string" && p.workspace_id.trim() ? p.workspace_id.trim() : undefined) ??
+        (typeof p.codebase_id === "string" && p.codebase_id.trim() ? p.codebase_id.trim() : undefined);
+      const aliasParam =
+        (typeof p.workspace_alias === "string" && p.workspace_alias.trim() ? p.workspace_alias.trim() : undefined) ??
+        (typeof p.codebase_alias === "string" && p.codebase_alias.trim() ? p.codebase_alias.trim() : undefined);
+      if (!workspaceId && aliasParam) {
+        const workspaces = await import("../core/workspaces");
+        const ws = workspaces.listWorkspaces({ includeSubmodules: true }).find((c) => c.alias === aliasParam);
+        if (!ws) throw new RpcError("NOT_FOUND", `找不到别名为 "${aliasParam}" 的 workspace`);
+        workspaceId = ws.id;
       }
 
       try {
-        const result = await startTaskFromPrompt({ rawText: prompt, codebase_id: codebaseId, workflow });
-        // 兼容两种返回：adhoc 同步起好 task；有 codebase 时 task 异步起，返回 requirement
+        const result = await startTaskFromPrompt({ rawText: prompt, workspace_id: workspaceId, workflow });
+        // 兼容两种返回：adhoc 同步起好 task；有 workspace 时 task 异步起，返回 requirement
         return result.task ?? result.requirement ?? {};
       } catch (e: unknown) {
         rethrowAsRpc(e);
@@ -820,14 +826,16 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.list",
-    description: "列出需求，可选 codebase_id / project_id / status 过滤",
+    description: "列出需求，可选 workspace_id / project_id / status 过滤",
     handler: (params) => {
       const p = asObj(params);
-      const codebase_id = typeof p.codebase_id === "string" ? p.codebase_id : undefined;
+      const workspace_id =
+        (typeof p.workspace_id === "string" ? p.workspace_id : undefined) ??
+        (typeof p.codebase_id === "string" ? p.codebase_id : undefined);
       const project_id = typeof p.project_id === "string" ? p.project_id : undefined;
       const status = typeof p.status === "string" ? p.status : undefined;
       return {
-        requirements: coreListRequirements({ codebase_id, project_id, status }),
+        requirements: coreListRequirements({ workspace_id, project_id, status }),
       };
     },
   });
@@ -860,17 +868,18 @@ export function registerCoreRpcMethods(): void {
       }
       const proj = getProjectById(p.project_id);
       if (!proj) throw new RpcError("NOT_FOUND", "project not found");
-      if (p.codebase_id) {
-        const cb = getCodebaseById(p.codebase_id as string);
-        if (!cb) throw new RpcError("NOT_FOUND", "codebase not found");
-        if (cb.project_id !== p.project_id) {
-          throw new RpcError("INVALID_PARAM", "codebase does not belong to project");
+      const workspaceParam = (p.workspace_id ?? p.codebase_id) as string | null | undefined;
+      if (workspaceParam) {
+        const ws = getWorkspaceById(workspaceParam);
+        if (!ws) throw new RpcError("NOT_FOUND", "workspace not found");
+        if (ws.project_id !== p.project_id) {
+          throw new RpcError("INVALID_PARAM", "workspace does not belong to project");
         }
       }
       return await runClarifierExtract({
         raw_text: p.raw_text,
         project_id: p.project_id,
-        codebase_id: (p.codebase_id as string | null | undefined) ?? null,
+        workspace_id: workspaceParam ?? null,
       });
     },
   });
@@ -880,25 +889,26 @@ export function registerCoreRpcMethods(): void {
     description: "创建需求（自动进入 clarifying 触发澄清流程）",
     handler: (params) => {
       const p = asObj(params);
-      const codebaseId = (typeof p.codebase_id === "string" || p.codebase_id === null)
-        ? (p.codebase_id ?? null)
+      const rawWorkspace = p.workspace_id ?? p.codebase_id;
+      const workspaceId = (typeof rawWorkspace === "string" || rawWorkspace === null)
+        ? (rawWorkspace ?? null)
         : null;
       const title = typeof p.title === "string" ? p.title.trim() : "";
       if (!title) throw new RpcError("INVALID_PARAM", "title 必填");
       let projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
-      if (codebaseId) {
-        const cb = getCodebaseById(codebaseId);
-        if (!cb) throw new RpcError("NOT_FOUND", "codebase not found");
-        if (!projectId) projectId = cb.project_id;
+      if (workspaceId) {
+        const ws = getWorkspaceById(workspaceId);
+        if (!ws) throw new RpcError("NOT_FOUND", "workspace not found");
+        if (!projectId) projectId = ws.project_id;
       }
       if (!projectId) {
-        throw new RpcError("INVALID_PARAM", "project_id 必填（或提供 codebase_id 由 daemon 反查）");
+        throw new RpcError("INVALID_PARAM", "project_id 必填（或提供 workspace_id 由 daemon 反查）");
       }
       const id = nextRequirementId();
       coreCreateRequirement({
         id,
         project_id: projectId,
-        codebase_id: codebaseId,
+        workspace_id: workspaceId,
         title,
         spec_md: typeof p.spec_md === "string" ? p.spec_md : "",
         chat_session_id: (p.chat_session_id as string | null | undefined) ?? null,
@@ -910,14 +920,14 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.update",
-    description: "更新需求字段（title / spec_md / codebase_id / clarifier_*）",
+    description: "更新需求字段（title / spec_md / workspace_id / clarifier_*）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const updated = coreUpdateRequirement(p.id, {
         title: typeof p.title === "string" ? p.title : undefined,
         spec_md: typeof p.spec_md === "string" ? p.spec_md : undefined,
-        codebase_id: (p.codebase_id as string | null | undefined),
+        workspace_id: ((p.workspace_id ?? p.codebase_id) as string | null | undefined),
         chat_session_id: (p.chat_session_id as string | null | undefined),
         clarifier_provider: (p.clarifier_provider as string | null | undefined),
         clarifier_model: (p.clarifier_model as string | null | undefined),
@@ -952,13 +962,13 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.enqueue",
-    description: "入队执行（必须已关联 codebase 且 spec_md 非空）",
+    description: "入队执行（必须已关联 workspace 且 spec_md 非空）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const r = getRequirementById(p.id);
       if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
-      if (!r.codebase_id) throw new RpcError("PRECONDITION_FAILED", "请先关联代码库再入队");
+      if (!r.workspace_id) throw new RpcError("PRECONDITION_FAILED", "请先关联工作区再入队");
       if (!(r.spec_md ?? "").trim()) {
         throw new RpcError("PRECONDITION_FAILED", "需求规约为空，请先完成澄清或手动填写规约");
       }
@@ -1455,8 +1465,8 @@ export function registerCoreRpcMethods(): void {
   // setup 流程不再写命名 agent；agent 配置改为工作流 phase 内联。
 
   registerRpcMethod({
-    method: "setup.saveCodebases",
-    description: "新建 codebase（与 POST /api/setup/codebases 等价）；project_id 缺省则用首个 project 或新建 default",
+    method: "setup.saveWorkspaces",
+    description: "新建 workspace（与 POST /api/setup/workspaces 等价）；project_id 缺省则用首个 project 或新建 default",
     handler: (params) => {
       const p = asObj(params);
       const name = typeof p.name === "string" ? p.name.trim() : "";
@@ -1472,9 +1482,9 @@ export function registerCoreRpcMethods(): void {
           projectId = proj.id;
         }
       }
-      const detected = detectCodebaseGit(pathField);
-      const cb = createCodebase({
-        id: nextCodebaseId(),
+      const detected = detectWorkspaceGit(pathField);
+      const ws = createWorkspace({
+        id: nextWorkspaceId(),
         project_id: projectId,
         alias: name,
         path: pathField,
@@ -1482,7 +1492,7 @@ export function registerCoreRpcMethods(): void {
         github_owner: detected.github_owner,
         github_repo: detected.github_repo,
       });
-      return { codebase: cb };
+      return { workspace: ws };
     },
   });
 
@@ -1592,7 +1602,7 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "projects.delete",
-    description: "级联删除 Project（含 requirements + codebases）",
+    description: "级联删除 Project（含 requirements + workspaces）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
@@ -1608,13 +1618,13 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
-    method: "projects.codebases",
-    description: "某 project 下的 codebase 列表",
+    method: "projects.workspaces",
+    description: "某 project 下的 workspace 列表",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
-      return { codebases: listCodebases({ projectId: p.id }).map((cb) => ({ ...cb, path_exists: existsSync(cb.path) })) };
+      return { workspaces: listWorkspaces({ projectId: p.id }).map((ws) => ({ ...ws, path_exists: existsSync(ws.path) })) };
     },
   });
 
@@ -1630,8 +1640,8 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
-    method: "projects.addCodebase",
-    description: "在 project 下新建 codebase",
+    method: "projects.addWorkspace",
+    description: "在 project 下新建 workspace",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
@@ -1641,7 +1651,7 @@ export function registerCoreRpcMethods(): void {
       const pathField = typeof p.path === "string" ? p.path.trim() : "";
       if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
       // 服务端兜底探测：未显式给的字段自动从 git 仓库识别（显式值优先）
-      const detected = detectCodebaseGit(pathField);
+      const detected = detectWorkspaceGit(pathField);
       const explicitBranch = typeof p.default_branch === "string" && p.default_branch.trim()
         ? p.default_branch.trim() : null;
       let gh_owner = (p.github_owner as string | null | undefined) ?? null;
@@ -1651,8 +1661,8 @@ export function registerCoreRpcMethods(): void {
         gh_repo = detected.github_repo;
       }
       try {
-        const codebase = createCodebase({
-          id: nextCodebaseId(),
+        const workspace = createWorkspace({
+          id: nextWorkspaceId(),
           project_id: p.id,
           alias,
           path: pathField,
@@ -1660,7 +1670,7 @@ export function registerCoreRpcMethods(): void {
           github_owner: gh_owner,
           github_repo: gh_repo,
         });
-        return { codebase };
+        return { workspace };
       } catch (e: unknown) {
         const code = (e as { code?: string }).code;
         const msg = e instanceof Error ? e.message : String(e);
@@ -1672,40 +1682,40 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
-  // ── codebases.* —— Codebase CRUD + submodules / healthcheck ──
+  // ── workspaces.* —— Workspace CRUD + submodules / healthcheck ──
 
   registerRpcMethod({
-    method: "codebases.list",
-    description: "列出所有 codebase（与 GET /api/codebases 等价；返回数组，无 envelope）",
-    handler: () => listCodebases().map((cb) => ({ ...cb, path_exists: existsSync(cb.path) })),
+    method: "workspaces.list",
+    description: "列出所有 workspace（与 GET /api/workspaces 等价；返回数组，无 envelope）",
+    handler: () => listWorkspaces().map((ws) => ({ ...ws, path_exists: existsSync(ws.path) })),
   });
 
   registerRpcMethod({
-    method: "codebases.get",
-    description: "按 id 取 codebase；不存在抛 NOT_FOUND",
+    method: "workspaces.get",
+    description: "按 id 取 workspace；不存在抛 NOT_FOUND",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const cb = getCodebaseById(p.id);
-      if (!cb) throw new RpcError("NOT_FOUND", "codebase not found");
-      return cb;
+      const ws = getWorkspaceById(p.id);
+      if (!ws) throw new RpcError("NOT_FOUND", "workspace not found");
+      return ws;
     },
   });
 
   registerRpcMethod({
-    method: "codebases.detect",
+    method: "workspaces.detect",
     description: "从本地路径探测 git 信息（默认分支 / 远程地址 / GitHub owner/repo），用于创建表单自动填充；纯读不写库",
     handler: (params) => {
       const p = asObj(params);
       const path = typeof p.path === "string" ? p.path.trim() : "";
       if (!path) throw new RpcError("INVALID_PARAM", "需要 path");
-      return detectCodebaseGit(path);
+      return detectWorkspaceGit(path);
     },
   });
 
   registerRpcMethod({
-    method: "codebases.create",
-    description: "创建 codebase（与 POST /api/codebases 等价）；未显式给 default_branch / github 时自动从 path 探测",
+    method: "workspaces.create",
+    description: "创建 workspace（与 POST /api/workspaces 等价）；未显式给 default_branch / github 时自动从 path 探测",
     handler: (params) => {
       const p = asObj(params);
       const alias = typeof p.alias === "string" ? p.alias.trim() : "";
@@ -1713,7 +1723,7 @@ export function registerCoreRpcMethods(): void {
       if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
       const projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
       // 服务端兜底探测：CLI/Web 没传的字段自动从 git 仓库识别（显式传值优先）
-      const detected = detectCodebaseGit(pathField);
+      const detected = detectWorkspaceGit(pathField);
       const explicitBranch = typeof p.default_branch === "string" && p.default_branch.trim()
         ? p.default_branch.trim() : null;
       let github_owner = (p.github_owner as string | null | undefined) ?? null;
@@ -1723,8 +1733,8 @@ export function registerCoreRpcMethods(): void {
         github_repo = detected.github_repo;
       }
       try {
-        const codebase = createCodebase({
-          id: nextCodebaseId(),
+        const workspace = createWorkspace({
+          id: nextWorkspaceId(),
           project_id: projectId,
           alias,
           path: pathField,
@@ -1732,7 +1742,7 @@ export function registerCoreRpcMethods(): void {
           github_owner,
           github_repo,
         });
-        return codebase;
+        return workspace;
       } catch (e: unknown) {
         const code = (e as { code?: string }).code;
         const msg = e instanceof Error ? e.message : String(e);
@@ -1745,13 +1755,13 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
-    method: "codebases.update",
-    description: "更新 codebase 字段（与 PUT /api/codebases/:id 等价）",
+    method: "workspaces.update",
+    description: "更新 workspace 字段（与 PUT /api/workspaces/:id 等价）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const existing = getCodebaseById(p.id);
-      if (!existing) throw new RpcError("NOT_FOUND", "codebase not found");
+      const existing = getWorkspaceById(p.id);
+      if (!existing) throw new RpcError("NOT_FOUND", "workspace not found");
       const patch: Record<string, unknown> = {};
       if (p.alias !== undefined) {
         const trimmed = typeof p.alias === "string" ? p.alias.trim() : "";
@@ -1770,8 +1780,8 @@ export function registerCoreRpcMethods(): void {
       if (p.github_owner !== undefined) patch.github_owner = p.github_owner;
       if (p.github_repo !== undefined) patch.github_repo = p.github_repo;
       try {
-        const codebase = updateCodebase(p.id, patch);
-        return codebase;
+        const workspace = updateWorkspace(p.id, patch);
+        return workspace;
       } catch (e: unknown) {
         const code = (e as { code?: string }).code;
         const msg = e instanceof Error ? e.message : String(e);
@@ -1784,63 +1794,63 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
-    method: "codebases.delete",
-    description: "删除 codebase；默认拒绝删有需求关联的 codebase，要求 force=true 才能级联清空 requirements.codebase_id",
+    method: "workspaces.delete",
+    description: "删除 workspace；默认拒绝删有需求关联的 workspace，要求 force=true 才能级联清空 requirements.workspace_id",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const existing = getCodebaseById(p.id);
-      if (!existing) throw new RpcError("NOT_FOUND", "codebase not found");
-      // 默认 in_use 检查 —— 防止 web/CLI 误删带走一批需求的 codebase_id
+      const existing = getWorkspaceById(p.id);
+      if (!existing) throw new RpcError("NOT_FOUND", "workspace not found");
+      // 默认 in_use 检查 —— 防止 web/CLI 误删带走一批需求的 workspace_id
       // 调用方必须显式 force: true 才能继续（前端弹 confirm dialog）
       if (!p.force) {
         const { getDb } = await import("../core/db");
         const row = getDb()
-          .query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM requirements WHERE codebase_id = ?")
+          .query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM requirements WHERE workspace_id = ?")
           .get(p.id);
         const affected = row?.n ?? 0;
         if (affected > 0) {
           throw new RpcError(
             "IN_USE",
-            `${affected} 条需求关联此 codebase；带 force=true 后会把这些 requirement.codebase_id 置 NULL（需求保留）`,
+            `${affected} 条需求关联此 workspace；带 force=true 后会把这些 requirement.workspace_id 置 NULL（需求保留）`,
           );
         }
       }
-      deleteCodebase(p.id);
+      deleteWorkspace(p.id);
       return { ok: true };
     },
   });
 
   registerRpcMethod({
-    method: "codebases.listSubmodules",
-    description: "列出 codebase 的子模块（与 GET /api/codebases/:id/submodules 等价）",
+    method: "workspaces.listSubmodules",
+    description: "列出 workspace 的子模块（与 GET /api/workspaces/:id/submodules 等价）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const cb = getCodebaseById(p.id);
-      if (!cb) throw new RpcError("NOT_FOUND", "codebase not found");
+      const ws = getWorkspaceById(p.id);
+      if (!ws) throw new RpcError("NOT_FOUND", "workspace not found");
       return { submodules: listSubmodules(p.id) };
     },
   });
 
   registerRpcMethod({
-    method: "codebases.healthcheck",
-    description: "检查 codebase 健康状态 + 自动发现子模块（与 POST /api/codebases/:id/healthcheck 等价）",
+    method: "workspaces.healthcheck",
+    description: "检查 workspace 健康状态 + 自动发现子模块（与 POST /api/workspaces/:id/healthcheck 等价）",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const codebase = getCodebaseById(p.id);
-      if (!codebase) throw new RpcError("NOT_FOUND", "codebase not found");
-      const health = await checkCodebaseHealth(codebase.path);
+      const workspace = getWorkspaceById(p.id);
+      if (!workspace) throw new RpcError("NOT_FOUND", "workspace not found");
+      const health = await checkWorkspaceHealth(workspace.path);
       const patch: { github_owner?: string; github_repo?: string } = {};
-      if (health.github_owner && !codebase.github_owner) patch.github_owner = health.github_owner;
-      if (health.github_repo && !codebase.github_repo) patch.github_repo = health.github_repo;
+      if (health.github_owner && !workspace.github_owner) patch.github_owner = health.github_owner;
+      if (health.github_repo && !workspace.github_repo) patch.github_repo = health.github_repo;
       if (patch.github_owner !== undefined || patch.github_repo !== undefined) {
-        updateCodebase(p.id, patch);
+        updateWorkspace(p.id, patch);
       }
-      if (health.healthy && !codebase.parent_codebase_id) {
+      if (health.healthy && !workspace.parent_workspace_id) {
         try {
-          const dr = discoverSubmodules(codebase.id);
+          const dr = discoverSubmodules(workspace.id);
           return {
             healthy: true,
             issues: health.issues,
@@ -1863,14 +1873,14 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
-    method: "codebases.rediscoverSubmodules",
-    description: "重新扫描 codebase 子模块（与 POST /api/codebases/:id/rediscover-submodules 等价）",
+    method: "workspaces.rediscoverSubmodules",
+    description: "重新扫描 workspace 子模块（与 POST /api/workspaces/:id/rediscover-submodules 等价）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const codebase = getCodebaseById(p.id);
-      if (!codebase) throw new RpcError("NOT_FOUND", "codebase not found");
-      if (codebase.parent_codebase_id) {
+      const workspace = getWorkspaceById(p.id);
+      if (!workspace) throw new RpcError("NOT_FOUND", "workspace not found");
+      if (workspace.parent_workspace_id) {
         throw new RpcError("INVALID_PARAM", "子模块自身不能再发现子模块（不支持嵌套）");
       }
       try {
