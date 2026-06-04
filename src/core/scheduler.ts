@@ -9,6 +9,40 @@ import { startTaskFromTemplate } from "./task-factory";
 import { sendPromptToTask } from "./task-send-prompt";
 import { getTask } from "./db";
 import { appendTaskEvent } from "./task-logs";
+import { ensureDefaultProject } from "./projects";
+import {
+  createRequirement,
+  nextRequirementId,
+  setRequirementStatus,
+  updateRequirement,
+} from "./requirements";
+
+/**
+ * 定时任务也必须挂在一个需求下（每个任务必有需求）。schedule 自身已带 title +
+ * requirement 文本，不需要 agent 抽取——直接落一条真需求（挂兜底项目），返回其 id
+ * 供 startTaskFromTemplate 当 FK link。task 起好后由调用方双向回填并置 running。
+ */
+export function createRequirementForSchedule(opts: { title: string; spec_md: string }): string {
+  const projectId = ensureDefaultProject();
+  const reqId = nextRequirementId();
+  createRequirement({
+    id: reqId,
+    project_id: projectId,
+    codebase_id: null,
+    title: opts.title,
+    spec_md: opts.spec_md,
+  });
+  // drafting → ready → queued → running（不能跳级；scheduler 跳过无 codebase 的需求，这里手动推进）
+  setRequirementStatus(reqId, "ready");
+  setRequirementStatus(reqId, "queued");
+  return reqId;
+}
+
+/** task 起好后回填双向关联并把需求置 running。 */
+export function linkRequirementToFiredTask(reqId: string, taskId: string): void {
+  updateRequirement(reqId, { task_id: taskId });
+  setRequirementStatus(reqId, "running");
+}
 
 /**
  * 扫描并触发所有到期的 schedule。由 daemon 定时调用。
@@ -67,12 +101,19 @@ async function fireSchedule(sch: Schedule): Promise<void> {
       return;
     }
 
-    // mode=start_task：原行为
+    // mode=start_task：原行为（先建需求再起任务，保证每个任务必有需求）
+    const reqText = sch.requirement ?? "";
+    const reqId = createRequirementForSchedule({
+      title: sch.title,
+      spec_md: reqText || sch.title,
+    });
     const task = await startTaskFromTemplate({
       workflow: sch.workflow,
       title: sch.title,
-      requirement: sch.requirement ?? undefined,
+      requirement: reqText || undefined,
+      requirement_id: reqId,
     });
+    linkRequirementToFiredTask(reqId, task.id);
 
     const { nextRunAt, disable } = computeNextState(sch);
     markScheduleFired(sch.id, task.id, nextRunAt, disable);

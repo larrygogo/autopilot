@@ -194,7 +194,7 @@ export const api = {
   // [WS-RPC] tasks.get — P3 第一批 PoC
   getTask: (id: string) => requestRpc<any>("tasks.get", { id }),
   // [WS-RPC] tasks.start
-  startTask: (body: { title?: string; requirement?: string; workflow?: string; reqId?: string }) =>
+  startTask: (body: { title?: string; requirement?: string; workflow?: string; reqId?: string; requirement_id?: string }) =>
     requestRpc<any>("tasks.start", body),
   // [WS-RPC] tasks.cancel
   cancelTask: (id: string) => requestRpc<any>("tasks.cancel", { id }),

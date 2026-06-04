@@ -36,7 +36,9 @@ export interface StartTaskOpts {
   workflow?: string;
   title?: string;
   requirement?: string;
-  /** 兼容老接口：可选传入 reqId，不传则生成 */
+  /** 任务必须挂在一个需求下（FK link）。正规路径（scheduler / routes）显式传。 */
+  requirement_id?: string;
+  /** 兼容老接口：可选传入 reqId（既当 task id 种子，也兜底当 FK link） */
   reqId?: string;
   /** 额外工作流参数（如 codebase_id），转发给 setup_func */
   [key: string]: unknown;
@@ -69,6 +71,15 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
 
   const wf = getWorkflow(workflowName);
   if (!wf) throw new StartTaskError(`Workflow "${workflowName}" not found`);
+
+  // FK link 来源：requirement_id 优先（scheduler 传的 key），兜底 reqId。
+  // 注意 reqId 还兼任 "task id 种子"（下方 line），两个语义别搞混：
+  //   - id 种子：仍用 reqId
+  //   - FK link：requirement_id ?? reqId
+  const reqLink = (opts.requirement_id as string | undefined) ?? opts.reqId;
+  if (!reqLink) {
+    throw new StartTaskError("任务必须挂在一个需求下（缺 requirement_id）", 400);
+  }
 
   let taskId: string;
   if (opts.reqId) {
@@ -122,8 +133,8 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     initialStatus: wf.initial_state,
     extra,
     // 双向关联：requirement.task_id 由 requirement-scheduler 写；task.requirement_id 在此写。
-    // 老路径 opts.reqId 可能未传（CLI 手动建 task / Workflow 测试），此时为 null。
-    requirementId: opts.reqId ?? null,
+    // reqLink 上面已强制非空（任务必有需求）。
+    requirementId: reqLink,
     workflowSnapshot: snapshotWorkflow(wf),
   });
 

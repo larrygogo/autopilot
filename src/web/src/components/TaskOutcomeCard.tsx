@@ -70,7 +70,7 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
     }
     setRetrying(true);
     try {
-      const t = await api.startTask({ requirement: requirementId, workflow });
+      const t = await api.startTask({ requirement_id: requirementId, workflow });
       navigate(`/tasks/${t.id}`);
     } catch (e: unknown) {
       toast.error("重跑失败", (e as Error)?.message ?? String(e));

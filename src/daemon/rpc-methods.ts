@@ -129,6 +129,7 @@ import {
   TaskActionError,
 } from "./task-actions";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
+import { startTaskFromPrompt } from "./start-from-prompt";
 import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
 import { registerRpcMethod, hasRpcMethod, RpcError } from "./rpc";
 import { wsManager } from "./ws";
@@ -467,12 +468,40 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "tasks.start",
-    description: "从 workflow + requirement 启动新任务（POST /api/tasks 等价）",
+    description: "启动新任务：带 requirement_id/reqId 走模板路径；只给 prompt/title 无需求时自动抽需求再入队",
     handler: async (params) => {
       const p = asObj(params);
+      const hasReqLink =
+        (typeof p.requirement_id === "string" && p.requirement_id.trim()) ||
+        (typeof p.reqId === "string" && p.reqId.trim());
       try {
-        // body 字段透传给 setup_func；body schema 由调用方负责，这里不再校验
-        return await startTaskFromTemplate(p as Parameters<typeof startTaskFromTemplate>[0]);
+        if (hasReqLink) {
+          // 正规模板路径：调用方已带需求 link，字段透传给 setup_func
+          return await startTaskFromTemplate(p as Parameters<typeof startTaskFromTemplate>[0]);
+        }
+
+        // 无需求 link：把 requirement/title 当一句话描述，先抽需求再起任务（保住一行起活手感）。
+        const rawText =
+          (typeof p.requirement === "string" && p.requirement.trim()) ||
+          (typeof p.title === "string" && p.title.trim()) ||
+          "";
+        if (!rawText) throw new RpcError("INVALID_PARAM", "需要 title 或 requirement");
+
+        // codebase_alias → codebase_id（startTaskFromPrompt 只认 codebase_id）
+        let codebaseId =
+          typeof p.codebase_id === "string" && p.codebase_id.trim() ? p.codebase_id.trim() : undefined;
+        if (!codebaseId && typeof p.codebase_alias === "string" && p.codebase_alias.trim()) {
+          const alias = p.codebase_alias.trim();
+          const codebases = await import("../core/codebases");
+          const cb = codebases.listCodebases({ includeSubmodules: true }).find((c) => c.alias === alias);
+          if (!cb) throw new RpcError("NOT_FOUND", `找不到别名为 "${alias}" 的 codebase`);
+          codebaseId = cb.id;
+        }
+
+        const workflow = typeof p.workflow === "string" && p.workflow.trim() ? p.workflow.trim() : undefined;
+        const result = await startTaskFromPrompt({ rawText, codebase_id: codebaseId, workflow });
+        // 返回兼容：adhoc 直接返回 task；串行入队返回 requirement（task 异步起）
+        return result.task ?? result.requirement ?? {};
       } catch (e: unknown) {
         rethrowAsRpc(e);
       }
@@ -500,32 +529,28 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "tasks.startAdHoc",
-    description: "一句话发包：跳过 project / requirement / workflow 选择，直接跑 ad-hoc workflow（spec §3.7）",
+    description: "一句话发包 = 自动抽需求 + 入队执行（先建真需求进池，再让任务挂其下）",
     handler: async (params) => {
       const p = asObj(params);
       const prompt = typeof p.prompt === "string" ? p.prompt.trim() : "";
       if (!prompt) throw new RpcError("INVALID_PARAM", "需要 prompt");
       const workflow = typeof p.workflow === "string" && p.workflow.trim() ? p.workflow.trim() : "ad-hoc";
-      const opts: Parameters<typeof startTaskFromTemplate>[0] = {
-        workflow,
-        // ad-hoc 工作流通过 prompt-runner 的 ${REQUIREMENT} 占位读 requirement
-        requirement: prompt,
-        // 取 prompt 第一行（不超 60 字）当 task title 方便 UI 显示
-        title: prompt.split("\n")[0].slice(0, 60),
-      };
+
       // 可选 codebase 透传：让 workspace.git=true 时能起 git worktree
-      // alias 在此 handler 解析为 codebase_id（startTaskFromTemplate 不解析 alias）
-      if (typeof p.codebase_id === "string" && p.codebase_id.trim()) {
-        (opts as Record<string, unknown>).codebase_id = p.codebase_id.trim();
-      } else if (typeof p.codebase_alias === "string" && p.codebase_alias.trim()) {
+      let codebaseId =
+        typeof p.codebase_id === "string" && p.codebase_id.trim() ? p.codebase_id.trim() : undefined;
+      if (!codebaseId && typeof p.codebase_alias === "string" && p.codebase_alias.trim()) {
         const alias = p.codebase_alias.trim();
         const codebases = await import("../core/codebases");
-        const cb = codebases.listCodebases({ includeSubmodules: true }).find(c => c.alias === alias);
+        const cb = codebases.listCodebases({ includeSubmodules: true }).find((c) => c.alias === alias);
         if (!cb) throw new RpcError("NOT_FOUND", `找不到别名为 "${alias}" 的 codebase`);
-        (opts as Record<string, unknown>).codebase_id = cb.id;
+        codebaseId = cb.id;
       }
+
       try {
-        return await startTaskFromTemplate(opts);
+        const result = await startTaskFromPrompt({ rawText: prompt, codebase_id: codebaseId, workflow });
+        // 兼容两种返回：adhoc 同步起好 task；有 codebase 时 task 异步起，返回 requirement
+        return result.task ?? result.requirement ?? {};
       } catch (e: unknown) {
         rethrowAsRpc(e);
       }
@@ -1291,11 +1316,16 @@ export function registerCoreRpcMethods(): void {
       const sch = coreGetSchedule(p.id);
       if (!sch) throw new RpcError("NOT_FOUND", "Schedule not found");
       try {
+        const { createRequirementForSchedule, linkRequirementToFiredTask } = await import("../core/scheduler");
+        const reqText = sch.requirement ?? "";
+        const reqId = createRequirementForSchedule({ title: sch.title, spec_md: reqText || sch.title });
         const task = await startTaskFromTemplate({
           workflow: sch.workflow,
           title: sch.title,
-          requirement: sch.requirement ?? undefined,
+          requirement: reqText || undefined,
+          requirement_id: reqId,
         });
+        linkRequirementToFiredTask(reqId, task.id);
         markScheduleFired(sch.id, task.id, sch.next_run_at, sch.enabled === 0);
         return { ok: true, taskId: task.id };
       } catch (e: unknown) {
