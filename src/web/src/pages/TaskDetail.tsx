@@ -6,7 +6,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { LogTimeline } from "@/components/LogTimeline";
 import { PhasePipeline, type PhasePipelineRunStatus } from "@/components/PhasePipeline";
 import { PhaseDetailDrawer, type DrawerPhaseInfo, type PhaseRunStatus } from "@/components/PhaseDetailDrawer";
-import { WorkspaceBrowser } from "@/components/WorkspaceBrowser";
+import { SandboxBrowser } from "@/components/SandboxBrowser";
 import { PhaseLogsViewer } from "@/components/PhaseLogsViewer";
 import { AgentCallsViewer } from "@/components/AgentCallsViewer";
 import { ConfirmDialog } from "@/components/Modal";
@@ -658,7 +658,7 @@ function TaskDetailTabs({
       </TabsList>
 
       <TabsContent value="workspace" className="mt-0">
-        <WorkspaceBrowser taskId={taskId} />
+        <SandboxBrowser taskId={taskId} />
       </TabsContent>
 
       <TabsContent value="phase-logs" className="mt-0">

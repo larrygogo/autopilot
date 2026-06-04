@@ -42,7 +42,7 @@ export function TasksOverview({
   useEffect(() => {
     const loadDisk = () => {
       api
-        .getWorkspaceUsage()
+        .getSandboxUsage()
         .then((r) => {
           setDiskTotal(r.total);
           setDiskTaskCount(r.tasks.filter((t) => t.exists).length);
@@ -130,12 +130,12 @@ export function TasksOverview({
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 font-mono text-xs text-muted-foreground">
           <Database className="h-3.5 w-3.5" />
           <span>
-            {diskTaskCount} 个 workspace · 共{" "}
+            {diskTaskCount} 个 sandbox · 共{" "}
             <strong className="text-foreground">{formatBytes(diskTotal)}</strong>
           </span>
           <span className="ml-auto text-[11px]">
             配置 <code className="text-foreground">config.yaml</code> 的{" "}
-            <code>workspace_retention</code> 自动清理
+            <code>sandbox_retention</code> 自动清理
           </span>
         </div>
       )}

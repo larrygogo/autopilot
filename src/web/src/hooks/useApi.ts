@@ -243,25 +243,25 @@ export const api = {
   // [WS-RPC] tasks.agentCall
   getAgentCall: (id: string, seq: number) =>
     requestRpc<AgentCallRecord>("tasks.agentCall", { id, seq }),
-  // [WS-RPC] workspaces.tree
-  getWorkspaceTree: (id: string, path: string) =>
-    requestRpc<{ path: string; entries: WorkspaceEntry[] }>("workspaces.tree", { id, path }),
-  // [WS-RPC] workspaces.file
-  getWorkspaceFile: (id: string, path: string) =>
+  // [WS-RPC] sandboxes.tree
+  getSandboxTree: (id: string, path: string) =>
+    requestRpc<{ path: string; entries: SandboxEntry[] }>("sandboxes.tree", { id, path }),
+  // [WS-RPC] sandboxes.file
+  getSandboxFile: (id: string, path: string) =>
     requestRpc<{ content: string; binary: boolean; size: number; truncated: boolean }>(
-      "workspaces.file", { id, path },
+      "sandboxes.file", { id, path },
     ),
   // download / zip 走原生 HTTP 流（浏览器需要 URL 触发下载，不能走 WS）
-  workspaceDownloadUrl: (id: string, path: string) =>
-    `/api/tasks/${id}/ws/download?path=${encodeURIComponent(path)}`,
-  workspaceZipUrl: (id: string) => `/api/tasks/${id}/ws/zip`,
-  // [WS-RPC] workspaces.delete
-  deleteWorkspace: (id: string) =>
-    requestRpc<{ ok: boolean; removed: boolean }>("workspaces.delete", { id }),
-  // [WS-RPC] workspaces.usage
-  getWorkspaceUsage: () =>
+  sandboxDownloadUrl: (id: string, path: string) =>
+    `/api/tasks/${id}/sandbox/download?path=${encodeURIComponent(path)}`,
+  sandboxZipUrl: (id: string) => `/api/tasks/${id}/sandbox/zip`,
+  // [WS-RPC] sandboxes.delete
+  deleteSandbox: (id: string) =>
+    requestRpc<{ ok: boolean; removed: boolean }>("sandboxes.delete", { id }),
+  // [WS-RPC] sandboxes.usage
+  getSandboxUsage: () =>
     requestRpc<{ total: number; tasks: Array<{ taskId: string; size: number; mtime: number; exists: boolean }> }>(
-      "workspaces.usage",
+      "sandboxes.usage",
     ),
   // [WS-RPC] workflows.list — P3 第一批 PoC
   listWorkflows: () =>
@@ -854,7 +854,7 @@ export interface AgentCallRecord extends AgentCallSummary {
   result_text?: string;
 }
 
-export interface WorkspaceEntry {
+export interface SandboxEntry {
   name: string;
   type: "file" | "dir";
   size?: number;

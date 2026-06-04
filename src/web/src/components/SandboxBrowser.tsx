@@ -8,7 +8,7 @@ import {
   CornerLeftUp,
   ChevronRight,
 } from "lucide-react";
-import { api, type WorkspaceEntry } from "../hooks/useApi";
+import { api, type SandboxEntry } from "../hooks/useApi";
 import { CodeViewer } from "./CodeViewer";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
@@ -35,10 +35,10 @@ function formatSize(bytes?: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-export function WorkspaceBrowser({ taskId }: Props) {
+export function SandboxBrowser({ taskId }: Props) {
   const toast = useToast();
   const [cwd, setCwd] = useState<string>("");
-  const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
+  const [entries, setEntries] = useState<SandboxEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [file, setFile] = useState<FileView | null>(null);
@@ -49,7 +49,7 @@ export function WorkspaceBrowser({ taskId }: Props) {
     setLoading(true);
     setErr(null);
     try {
-      const res = await api.getWorkspaceTree(taskId, path);
+      const res = await api.getSandboxTree(taskId, path);
       setEntries(res.entries);
       setCwd(res.path);
     } catch (e: unknown) {
@@ -65,11 +65,11 @@ export function WorkspaceBrowser({ taskId }: Props) {
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [taskId]);
 
-  const openFile = async (entry: WorkspaceEntry) => {
+  const openFile = async (entry: SandboxEntry) => {
     const fullPath = cwd ? `${cwd}/${entry.name}` : entry.name;
     setLoadingFile(true);
     try {
-      const res = await api.getWorkspaceFile(taskId, fullPath);
+      const res = await api.getSandboxFile(taskId, fullPath);
       setFile({ path: fullPath, ...res });
     } catch (e: unknown) {
       toast.error("打开失败", (e as Error)?.message ?? String(e));
@@ -116,7 +116,7 @@ export function WorkspaceBrowser({ taskId }: Props) {
           </Button>
           <Button asChild size="sm" variant="secondary">
             <a
-              href={api.workspaceZipUrl(taskId)}
+              href={api.sandboxZipUrl(taskId)}
               target="_blank"
               rel="noreferrer"
             >
@@ -255,7 +255,7 @@ export function WorkspaceBrowser({ taskId }: Props) {
                     </span>
                     <Button asChild size="sm" variant="ghost">
                       <a
-                        href={api.workspaceDownloadUrl(taskId, file.path)}
+                        href={api.sandboxDownloadUrl(taskId, file.path)}
                         target="_blank"
                         rel="noreferrer"
                       >
@@ -302,7 +302,7 @@ export function WorkspaceBrowser({ taskId }: Props) {
         danger
         onConfirm={async () => {
           try {
-            const res = await api.deleteWorkspace(taskId);
+            const res = await api.deleteSandbox(taskId);
             if (res.removed) toast.success("已释放 workspace");
             else toast.info("workspace 不存在或已被清理");
             setFile(null);
