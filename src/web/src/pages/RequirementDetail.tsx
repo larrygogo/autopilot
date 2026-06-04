@@ -590,7 +590,7 @@ export function RequirementDetail() {
   async function enqueue() {
     if (!id || !req) return;
     if (!req.codebase_id) {
-      toast.error("请先关联代码库", "需要绑定代码库才能入队执行，请在下方选择代码库。");
+      toast.error("请先关联工作区", "需要绑定工作区才能入队执行，请在下方选择工作区。");
       return;
     }
     // optimistic：UI 立刻反映 queued 状态，不等服务端响应
@@ -617,7 +617,7 @@ export function RequirementDetail() {
     setReq({ ...req, codebase_id: codebaseId });
     try {
       await api.updateRequirement(id, { codebase_id: codebaseId });
-      toast.success(codebaseId ? "代码库已关联" : "已取消关联代码库");
+      toast.success(codebaseId ? "工作区已关联" : "已取消关联工作区");
     } catch (e: unknown) {
       setReq(prev);
       toast.error("关联失败", (e as Error)?.message ?? String(e));
@@ -938,7 +938,7 @@ export function RequirementDetail() {
               />
             )}
             <MetaRow
-              k="代码库"
+              k="工作区"
               v={
                 <div className="flex items-center gap-2">
                   <span className="text-foreground">
@@ -1446,19 +1446,19 @@ export function RequirementDetail() {
         onSaved={() => void refresh({ silent: true })}
       />
 
-      {/* 修改代码库关联 dialog */}
+      {/* 修改工作区关联 dialog */}
       <Dialog open={codebaseDialogOpen} onOpenChange={setCodebaseDialogOpen}>
         <DialogContent className="rounded-md">
           <DialogHeader>
-            <DialogTitle>修改代码库关联</DialogTitle>
+            <DialogTitle>修改工作区关联</DialogTitle>
             <DialogDescription>
-              切换此需求关联的代码库。提交后不可立即撤销，请确认。
+              切换此需求关联的工作区。提交后不可立即撤销，请确认。
             </DialogDescription>
           </DialogHeader>
           <div className="py-2">
             <Select value={codebaseDraft} onValueChange={setCodebaseDraft}>
               <SelectTrigger className="rounded-md">
-                <SelectValue placeholder="选择代码库" />
+                <SelectValue placeholder="选择工作区" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE_VALUE}>— 未关联 —</SelectItem>

@@ -247,7 +247,7 @@ function ProjectsTab() {
             <DialogDescription>
               {editingProject
                 ? "修改项目名称或描述。"
-                : "填写项目名称和描述，创建后可在项目工作台中关联代码库和需求。"}
+                : "填写项目名称和描述，创建后可在项目工作台中关联工作区和需求。"}
             </DialogDescription>
           </DialogHeader>
 
@@ -294,7 +294,7 @@ function ProjectsTab() {
           <DialogHeader>
             <DialogTitle>删除项目</DialogTitle>
             <DialogDescription>
-              此操作将永久删除项目及其下所有代码库和需求，且不可恢复。
+              此操作将永久删除项目及其下所有工作区和需求，且不可恢复。
             </DialogDescription>
           </DialogHeader>
 

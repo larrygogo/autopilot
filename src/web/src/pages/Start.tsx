@@ -165,10 +165,10 @@ export function Start() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="codebase" className="bp-label">代码库（可选）</Label>
+          <Label htmlFor="codebase" className="bp-label">工作区（可选）</Label>
           <Select value={codebaseId} onValueChange={setCodebaseId} disabled={!projectId || loadingCodebases}>
             <SelectTrigger id="codebase">
-              <SelectValue placeholder={!projectId ? "请先选项目" : loadingCodebases ? "加载中..." : "不绑定代码库"} />
+              <SelectValue placeholder={!projectId ? "请先选项目" : loadingCodebases ? "加载中..." : "不绑定工作区"} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={CODEBASE_NONE}>不绑定</SelectItem>

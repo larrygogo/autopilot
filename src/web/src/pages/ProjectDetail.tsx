@@ -96,7 +96,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [reqDesc, setReqDesc] = useState("");
   const [savingReq, setSavingReq] = useState(false);
 
-  // 新建 / 编辑代码库 dialog
+  // 新建 / 编辑工作区 dialog
   const [cbDialogOpen, setCbDialogOpen] = useState(false);
   const [editingCb, setEditingCb] = useState<Codebase | null>(null);
   const [cbForm, setCbForm] = useState<CbForm>(EMPTY_CB);
@@ -185,7 +185,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     }
   };
 
-  // ── 代码库 ────────────────────────────────────
+  // ── 工作区 ────────────────────────────────────
 
   const openCbDialog = (cb?: Codebase) => {
     if (cb) {
@@ -274,7 +274,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           github_owner: cbForm.github_owner.trim() || null,
           github_repo: cbForm.github_repo.trim() || null,
         });
-        toast.success(`已更新代码库「${alias}」`);
+        toast.success(`已更新工作区「${alias}」`);
       } else {
         await api.createProjectCodebase(projectId, {
           alias,
@@ -283,7 +283,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           github_owner: cbForm.github_owner.trim() || null,
           github_repo: cbForm.github_repo.trim() || null,
         });
-        toast.success(`已添加代码库「${alias}」`);
+        toast.success(`已添加工作区「${alias}」`);
       }
       setCbDialogOpen(false);
       setEditingCb(null);
@@ -296,11 +296,11 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   };
 
   const removeCb = async (cb: Codebase) => {
-    if (!confirm(`确定移除代码库「${cb.alias}」？`)) return;
+    if (!confirm(`确定移除工作区「${cb.alias}」？`)) return;
     setDeletingCbId(cb.id);
     try {
       await api.deleteCodebase(cb.id);
-      toast.success(`已移除代码库「${cb.alias}」`);
+      toast.success(`已移除工作区「${cb.alias}」`);
       refresh();
     } catch (e: unknown) {
       const msg = (e as Error)?.message ?? String(e);
@@ -309,11 +309,11 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         const m = msg.match(/(\d+)/);
         const n = m ? m[1] : "若干";
         if (confirm(
-          `⚠ ${n} 条需求关联此代码库。继续删除会把这些需求的 codebase_id 置 NULL（需求保留，但变成"未关联代码库"）。\n\n确定要级联删除吗？`,
+          `⚠ ${n} 条需求关联此工作区。继续删除会把这些需求的 codebase_id 置 NULL（需求保留，但变成"未关联工作区"）。\n\n确定要级联删除吗？`,
         )) {
           try {
             await api.deleteCodebase(cb.id, true);
-            toast.success(`已移除代码库「${cb.alias}」（${n} 条需求已解关联）`);
+            toast.success(`已移除工作区「${cb.alias}」（${n} 条需求已解关联）`);
             refresh();
           } catch (e2: unknown) {
             toast.error("删除失败", (e2 as Error)?.message ?? String(e2));
@@ -395,7 +395,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           <div className="w-full border border-border bg-card/40 font-mono text-[11px]">
             <div className="grid grid-cols-[100px_1fr] border-b border-border">
               <div className="border-r border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
-                代码库
+                工作区
               </div>
               <div className="px-3 py-1.5 text-foreground">{codebases.length}</div>
             </div>
@@ -409,16 +409,16 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         </div>
       </header>
 
-      {/* 代码库 */}
+      {/* 工作区 */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FolderGit2 className="h-4 w-4 text-muted-foreground" />
-            <span className="bp-label">代码库 · CODEBASES（{codebases.length}）</span>
+            <span className="bp-label">工作区 · CODEBASES（{codebases.length}）</span>
           </div>
           <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
             <Plus className="h-4 w-4" />
-            添加代码库
+            添加工作区
           </Button>
         </div>
 
@@ -426,11 +426,11 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           <Card className="border border-border p-6 text-center">
             <FolderGit2 className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
             <p className="mb-3 font-mono text-xs text-muted-foreground">
-              暂无代码库，点「添加代码库」关联 Git 仓库。
+              暂无工作区，点「添加工作区」关联 Git 仓库。
             </p>
             <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
               <Plus className="h-4 w-4" />
-              添加代码库
+              添加工作区
             </Button>
           </Card>
         ) : (
@@ -499,7 +499,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                             className="text-destructive hover:text-destructive"
                             onClick={() => void removeCb(cb)}
                             disabled={deletingCbId === cb.id}
-                            title="移除代码库"
+                            title="移除工作区"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -645,14 +645,14 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         </DialogContent>
       </Dialog>
 
-      {/* 添加 / 编辑代码库 Dialog */}
+      {/* 添加 / 编辑工作区 Dialog */}
       <Dialog open={cbDialogOpen} onOpenChange={(open) => { if (!open) closeCbDialog(); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingCb ? "编辑代码库" : "添加代码库"}</DialogTitle>
+            <DialogTitle>{editingCb ? "编辑工作区" : "添加工作区"}</DialogTitle>
             <DialogDescription>
               {editingCb
-                ? `修改代码库「${editingCb.alias}」的配置。`
+                ? `修改工作区「${editingCb.alias}」的配置。`
                 : `将一个 Git 仓库目录关联到项目「${project?.name}」。`}
             </DialogDescription>
           </DialogHeader>
