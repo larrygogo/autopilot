@@ -59,19 +59,19 @@ function reqMeta(status: string): { Icon: typeof Loader2; tone: Tone; label: str
   return { Icon: FileText, tone: "muted", label: "草稿" };
 }
 
-/** 相对时间：now / 5m / 21h / 1d / 2w / 3mo */
+/** 相对时间（中文）：刚刚 / N分钟前 / N小时前 / N天前 / N周前 / N个月前 */
 function relTime(ms: number, now: number): string {
   const d = Math.max(0, now - ms);
   const min = Math.floor(d / 60_000);
-  if (min < 1) return "now";
-  if (min < 60) return `${min}m`;
+  if (min < 1) return "刚刚";
+  if (min < 60) return `${min}分钟前`;
   const h = Math.floor(min / 60);
-  if (h < 24) return `${h}h`;
+  if (h < 24) return `${h}小时前`;
   const day = Math.floor(h / 24);
-  if (day < 7) return `${day}d`;
+  if (day < 7) return `${day}天前`;
   const w = Math.floor(day / 7);
-  if (w < 5) return `${w}w`;
-  return `${Math.floor(day / 30)}mo`;
+  if (w < 5) return `${w}周前`;
+  return `${Math.floor(day / 30)}个月前`;
 }
 
 // ──────────── 列表内按时间分组（今天 / 昨天 / 一周内 / 一月内 / 更早） ────────────
@@ -424,7 +424,7 @@ function RowCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
             <p className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-snug">{title}</p>
-            <span className="mt-0.5 shrink-0 font-mono text-[11px] text-muted-foreground">{time}</span>
+            <span className="mt-0.5 shrink-0 text-[11px] text-muted-foreground">{time}</span>
           </div>
           <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
             <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", t.dot)} />
