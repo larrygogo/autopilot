@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, Hand, Search, X, List, Archive } from "lucide-react";
+import { Loader2, Hand, Search, X, List, Archive, AlertCircle, CheckCircle2, XCircle, Clock, FileText } from "lucide-react";
 import { api, type Requirement } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -34,19 +34,44 @@ interface Task {
  * Now 仍独立留给"需要你拍板"的决策收件箱，本页是"所有在途工作"的全景。
  */
 
-// 行左侧色条：按各自状态着色（桶内混排，每行表达自己的状态）
-function taskBar(status: string): string {
-  if (status.startsWith("running_")) return "border-l-accent";
-  if (status.startsWith("awaiting_")) return "border-l-warning";
-  if (status === "failed" || status.startsWith("failed_")) return "border-l-destructive";
-  if (status.startsWith("pending_")) return "border-l-foreground/40";
-  if (status === "done") return "border-l-success";
-  return "border-l-foreground/30"; // cancelled / 其它
+// 卡片状态色调：头像图标色 + 状态点 bg
+const TONE = {
+  accent: { text: "text-accent", dot: "bg-accent" },
+  warning: { text: "text-warning", dot: "bg-warning" },
+  destructive: { text: "text-destructive", dot: "bg-destructive" },
+  success: { text: "text-success", dot: "bg-success" },
+  info: { text: "text-info", dot: "bg-info" },
+  muted: { text: "text-muted-foreground", dot: "bg-muted-foreground" },
+} as const;
+type Tone = keyof typeof TONE;
+
+function taskMeta(status: string): { Icon: typeof Loader2; tone: Tone; label: string } {
+  if (status.startsWith("running_")) return { Icon: Loader2, tone: "accent", label: "运行中" };
+  if (status.startsWith("awaiting_")) return { Icon: Hand, tone: "warning", label: "等待人工" };
+  if (status === "failed" || status.startsWith("failed_")) return { Icon: AlertCircle, tone: "destructive", label: "失败" };
+  if (status.startsWith("pending_")) return { Icon: Clock, tone: "muted", label: "待执行" };
+  if (status === "done") return { Icon: CheckCircle2, tone: "success", label: "已完成" };
+  return { Icon: XCircle, tone: "muted", label: "已取消" };
 }
-function reqBar(status: string): string {
-  if (status === "investigating") return "border-l-info";
-  if (status === "awaiting_approval") return "border-l-warning";
-  return "border-l-foreground/30"; // draft
+function reqMeta(status: string): { Icon: typeof Loader2; tone: Tone; label: string } {
+  if (status === "investigating") return { Icon: Search, tone: "info", label: "调查中" };
+  if (status === "awaiting_approval") return { Icon: Hand, tone: "warning", label: "待审批" };
+  return { Icon: FileText, tone: "muted", label: "草稿" };
+}
+
+/** 相对时间：now / 5m / 21h / 1d / 2w / 3mo */
+function relTime(ms: number, now: number): string {
+  const d = Math.max(0, now - ms);
+  const min = Math.floor(d / 60_000);
+  if (min < 1) return "now";
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  const day = Math.floor(h / 24);
+  if (day < 7) return `${day}d`;
+  const w = Math.floor(day / 7);
+  if (w < 5) return `${w}w`;
+  return `${Math.floor(day / 30)}mo`;
 }
 
 // ──────────── 列表内按时间分组（今天 / 昨天 / 一周内 / 一月内 / 更早） ────────────
@@ -98,7 +123,7 @@ function TimeGroupedList({ rows, now }: { rows: TimedRow[]; now: number }) {
               {BUCKET_LABEL[b]}
               <span className="font-mono text-[10px] text-muted-foreground/60">{items.length}</span>
             </p>
-            <ul className="space-y-1.5">
+            <ul className="space-y-2">
               {items.map((r) => <li key={r.key}>{r.node}</li>)}
             </ul>
           </div>
@@ -208,8 +233,8 @@ export function Tasks() {
   /** 把一个 tab 的需求+任务合成按时间倒序的行列表 */
   const rowsOf = (t: PipelineTab): TimedRow[] =>
     [
-      ...t.reqs.map((r) => ({ key: `r-${r.id}`, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} borderClass={reqBar(r.status)} /> })),
-      ...t.tasks.map((tk) => ({ key: `t-${tk.id}`, ts: tsToMs(tk.updated_at), node: <TaskRow task={tk} borderClass={taskBar(tk.status)} /> })),
+      ...t.reqs.map((r) => ({ key: `r-${r.id}`, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} now={now} /> })),
+      ...t.tasks.map((tk) => ({ key: `t-${tk.id}`, ts: tsToMs(tk.updated_at), node: <TaskRow task={tk} now={now} /> })),
     ].sort((a, b) => b.ts - a.ts);
 
   const allRows = useMemo(() => tabs.flatMap(rowsOf).sort((a, b) => b.ts - a.ts), [tabs]);
@@ -372,54 +397,87 @@ export function Tasks() {
   );
 }
 
-function RequirementRow({ req, borderClass }: { req: Requirement; borderClass: string }) {
+/** Claude Code 风卡片外壳：头像图标 + 标题 + 相对时间 + 状态行 + 可选预览 */
+function RowCard({
+  to, Icon, tone, spin, title, time, statusLabel, secondary, preview,
+}: {
+  to: string;
+  Icon: typeof Loader2;
+  tone: Tone;
+  spin?: boolean;
+  title: string;
+  time: string;
+  statusLabel: string;
+  secondary?: string;
+  preview?: string | null;
+}) {
+  const t = TONE[tone];
   return (
     <Link
-      to={`/requirements/${req.id}`}
-      className={cn(
-        "flex items-center gap-4 rounded-lg border border-l-4 border-border bg-card px-4 py-2.5 transition-colors hover:border-accent",
-        borderClass,
-      )}
+      to={to}
+      className="block rounded-xl border border-border bg-card px-4 py-3.5 transition-colors hover:border-accent"
     >
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{req.id}</span>
-      <span className="min-w-0 flex-1 truncate text-sm font-medium">{req.title}</span>
-      {req.task_id && (
-        <span
-          className="hidden shrink-0 font-mono text-[10px] text-muted-foreground md:inline"
-          title={`已派生任务 ${req.task_id}`}
-        >
-          {req.task_id} →
-        </span>
-      )}
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+          <Icon className={cn("h-[18px] w-[18px]", t.text, spin && "animate-spin")} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-2">
+            <p className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-snug">{title}</p>
+            <span className="mt-0.5 shrink-0 font-mono text-[11px] text-muted-foreground">{time}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", t.dot)} />
+            <span className={cn("shrink-0 font-medium", t.text)}>{statusLabel}</span>
+            {secondary && <span className="truncate font-mono text-[11px]">· {secondary}</span>}
+          </div>
+          {preview && (
+            <p className="mt-2.5 line-clamp-2 rounded-lg bg-muted/50 px-3 py-2 text-[13px] leading-relaxed text-muted-foreground">
+              {preview}
+            </p>
+          )}
+        </div>
+      </div>
     </Link>
   );
 }
 
-function TaskRow({ task, borderClass }: { task: Task; borderClass: string }) {
-  const phaseFromStatus = parsePhase(task.status);
+function RequirementRow({ req, now }: { req: Requirement; now: number }) {
+  const { Icon, tone, label } = reqMeta(req.status);
+  const secondary = [req.id, req.task_id ? `${req.task_id} →` : null].filter(Boolean).join(" · ");
   return (
-    <Link
+    <RowCard
+      to={`/requirements/${req.id}`}
+      Icon={Icon}
+      tone={tone}
+      title={req.title}
+      time={relTime(tsToMs(req.updated_at), now)}
+      statusLabel={label}
+      secondary={secondary}
+    />
+  );
+}
+
+function TaskRow({ task, now }: { task: Task; now: number }) {
+  const { Icon, tone, label } = taskMeta(task.status);
+  const phase = parsePhase(task.status);
+  const secondary = [
+    task.workflow,
+    phase || null,
+    task.requirement_id ? `← ${task.requirement_id}` : null,
+  ].filter(Boolean).join(" · ");
+  return (
+    <RowCard
       to={`/tasks/${task.id}`}
-      className={cn(
-        "flex items-center gap-4 rounded-lg border border-l-4 border-border bg-card px-4 py-2.5 transition-colors hover:border-accent",
-        borderClass,
-      )}
-    >
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{task.id}</span>
-      <span className="min-w-0 flex-1 truncate text-sm font-medium">{task.title}</span>
-      <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground sm:inline">
-        {task.workflow}
-        {phaseFromStatus && <span> · {phaseFromStatus}</span>}
-      </span>
-      {task.requirement_id && (
-        <span
-          className="hidden shrink-0 font-mono text-[10px] text-muted-foreground md:inline"
-          title={`关联需求 ${task.requirement_id}`}
-        >
-          ← {task.requirement_id}
-        </span>
-      )}
-    </Link>
+      Icon={Icon}
+      tone={tone}
+      spin={task.status.startsWith("running_")}
+      title={task.title}
+      time={relTime(tsToMs(task.updated_at), now)}
+      statusLabel={label}
+      secondary={secondary}
+      preview={task.requirement ?? null}
+    />
   );
 }
 
