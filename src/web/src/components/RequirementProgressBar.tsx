@@ -47,6 +47,8 @@ function statusToStep(status: string): Step {
 function classifyStep(currentStep: Step, step: Step, status: string): StepState {
   if (status === "cancelled" && step >= currentStep) return "cancelled";
   if (status === "failed" && step === currentStep) return "failed";
+  // 终态 done：全部步骤打勾（最后一步也是 done 而非 current，否则会一直转圈）
+  if (status === "done") return "done";
   if (step < currentStep) return "done";
   if (step === currentStep) return "current";
   return "pending";
