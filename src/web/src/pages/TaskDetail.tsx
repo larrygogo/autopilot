@@ -25,8 +25,15 @@ import { cn } from "@/lib/utils";
 
 interface TaskDetailProps {
   taskId: string;
-  onBack: () => void;
+  /** 非 embedded（整页）时用于返回；embedded 嵌入需求页时可省略 */
+  onBack?: () => void;
   subscribe: (channel: string, handler: (event: any) => void) => () => void;
+  /**
+   * 嵌入模式：在「需求详情」页里内嵌任务执行视图时为 true。
+   * - 去掉页面级返回头 / 顶部 chrome、来源需求卡片、外层 max-w 容器
+   * - 仅渲染执行内容（outcome / 时间线 / tabs / banners / 取消重启 actions）
+   */
+  embedded?: boolean;
 }
 
 const TERMINAL_STATES = new Set(["done", "cancelled", "failed", "canceled"]);
@@ -37,7 +44,7 @@ function isTerminal(status: string, graphTerminals?: string[]): boolean {
   return false;
 }
 
-export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
+export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: TaskDetailProps) {
   const toast = useToast();
   const [task, setTask] = useState<any>(null);
   const [logs, setLogs] = useState<any[]>([]);
@@ -148,7 +155,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
       const extra = res.deleted.length > 1 ? `（连带子任务 ${res.deleted.length - 1} 个）` : "";
       toast.success(`任务 ${taskId} 已删除${extra}`);
       setConfirmDelete(false);
-      onBack();
+      onBack?.();
     } catch (e: unknown) {
       toast.error("删除失败", (e as Error)?.message ?? String(e));
       setConfirmDelete(false);
@@ -240,7 +247,7 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
 
   if (!task) {
     return (
-      <div className="mx-auto w-full max-w-6xl px-5 py-8 text-sm text-muted-foreground">加载中…</div>
+      <div className={cn("text-sm text-muted-foreground", embedded ? "py-6" : "mx-auto w-full max-w-6xl px-5 py-8")}>加载中…</div>
     );
   }
 
@@ -279,53 +286,65 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
     ? (([...(logs ?? [])].reverse() as Array<{ note?: string }>).find((l) => l?.note)?.note ?? undefined)
     : undefined;
 
+  // 执行操作组（重新执行 / 取消）— 非终态时显示。整页与 embedded 共用。
+  const actionGroup = canCancel ? (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={async () => {
+          try {
+            const r = await api.restartTask(taskId);
+            toast.success(`已重启 · 从 ${r.phase} 阶段重新执行`);
+          } catch (e: unknown) {
+            toast.error("重启失败", (e as Error)?.message ?? String(e));
+          }
+        }}
+        title="把任务从当前阶段重新执行（绕过状态机；用于 dangling / 卡死 救援）"
+      >
+        <RotateCcw className="h-4 w-4" />
+        重新执行
+      </Button>
+      <Button
+        variant="destructive"
+        size="sm"
+        onClick={() => setConfirmCancel(true)}
+      >
+        取消任务
+      </Button>
+    </div>
+  ) : null;
+
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-6">
-      {/* Header — task.id 是主标识（大字 mono），eyebrow 缩到 bp-label，状态推到行尾跟操作组一起 */}
-      <div className="mb-5 flex flex-wrap items-center gap-3 border-b border-border pb-4">
-        <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
-          <ArrowLeft className="h-4 w-4" />
-          返回
-        </Button>
-        <div className="flex min-w-0 flex-col">
-          <span className="font-mono text-[10px] text-muted-foreground">
-            TASK
-          </span>
-          <h2 className="truncate font-mono text-xl font-bold text-foreground sm:text-2xl">
-            {task.id}
-          </h2>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <StatusBadge status={task.status} />
-        </div>
-        {canCancel && (
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                try {
-                  const r = await api.restartTask(taskId);
-                  toast.success(`已重启 · 从 ${r.phase} 阶段重新执行`);
-                } catch (e: unknown) {
-                  toast.error("重启失败", (e as Error)?.message ?? String(e));
-                }
-              }}
-              title="把任务从当前阶段重新执行（绕过状态机；用于 dangling / 卡死 救援）"
-            >
-              <RotateCcw className="h-4 w-4" />
-              重新执行
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setConfirmCancel(true)}
-            >
-              取消任务
-            </Button>
+    <div className={cn(embedded ? "w-full" : "mx-auto w-full max-w-6xl px-5 py-6")}>
+      {/* Header — 整页模式：返回 + task.id + 状态 + 操作组。embedded 时由需求页承担页头，仅保留操作组 */}
+      {embedded ? (
+        actionGroup && (
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <span className="font-mono text-[10px] text-muted-foreground">任务执行 · {task.id}</span>
+            {actionGroup}
           </div>
-        )}
-      </div>
+        )
+      ) : (
+        <div className="mb-5 flex flex-wrap items-center gap-3 border-b border-border pb-4">
+          <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
+            <ArrowLeft className="h-4 w-4" />
+            返回
+          </Button>
+          <div className="flex min-w-0 flex-col">
+            <span className="font-mono text-[10px] text-muted-foreground">
+              TASK
+            </span>
+            <h2 className="truncate font-mono text-xl font-bold text-foreground sm:text-2xl">
+              {task.id}
+            </h2>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <StatusBadge status={task.status} />
+          </div>
+          {actionGroup}
+        </div>
+      )}
 
       {isTerminal(task.status, graph?.terminalStates) && (
         <TaskOutcomeCard
@@ -337,8 +356,8 @@ export function TaskDetail({ taskId, onBack, subscribe }: TaskDetailProps) {
         />
       )}
 
-      {/* 来源需求卡片（task.requirement_id 存在时显示） */}
-      {task.requirement_id && (
+      {/* 来源需求卡片（task.requirement_id 存在时显示）— embedded 时已在需求页内，冗余故隐藏 */}
+      {!embedded && task.requirement_id && (
         <Card className="mb-3 border-l-4 border-l-accent/60 px-4 py-2.5">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
@@ -634,7 +653,7 @@ function TaskDetailTabs({
   }, [liveLogs.length, tab]);
 
   const triggers: Array<{ key: DetailTab; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }> = [
-    { key: "workspace", label: "工作区", icon: FolderTree },
+    { key: "workspace", label: "沙盒", icon: FolderTree },
     { key: "phase-logs", label: "阶段日志", icon: FileText },
     { key: "agent-calls", label: "Agent 调用", icon: Bot },
     { key: "transitions", label: "状态日志", icon: History, badge: logs.length || undefined },
@@ -978,7 +997,7 @@ function GateBanner({
               {gateMessage ? (
                 <> {gateMessage}</>
               ) : (
-                <> 切到 Workspace tab 查看 <code className="font-mono">agent-trace.md</code> 后再决断。</>
+                <> 切到「沙盒」tab 查看 <code className="font-mono">agent-trace.md</code> 后再决断。</>
               )}
             </p>
           </div>

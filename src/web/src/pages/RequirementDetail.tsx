@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
-import { TaskProgressCard } from "@/components/TaskProgressCard";
+import { TaskDetail } from "@/pages/TaskDetail";
 import { RequirementProgressBar } from "@/components/RequirementProgressBar";
 import { NextStepCTA } from "@/components/NextStepCTA";
 import { cn } from "@/lib/utils";
@@ -911,12 +911,9 @@ export function RequirementDetail() {
               </a>
             )}
             {req.task_id && (
-              <Link
-                to={`/tasks/${req.task_id}`}
-                className="inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline"
-              >
+              <span className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
                 TASK {req.task_id.slice(0, 8)}…
-              </Link>
+              </span>
             )}
           </div>
           <div className="mt-3 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
@@ -1009,8 +1006,12 @@ export function RequirementDetail() {
         </Card>
       )}
 
-      {/* 任务进度卡片（关联了 task 之后显示） */}
-      {req.task_id && <TaskProgressCard taskId={req.task_id} />}
+      {/* 任务执行视图（关联了 task 之后内嵌）— 含阶段时间线 / 沙盒 / 日志 / 取消重启 */}
+      {req.task_id && (
+        <Card className="mb-6 p-5">
+          <TaskDetail taskId={req.task_id} embedded subscribe={subscribe} />
+        </Card>
+      )}
 
       {/* clarifier 出错（任何阶段都可能发生）— 覆盖 spinner 优先显示 */}
       {req.clarifier_error && req.status === "clarifying" && (
