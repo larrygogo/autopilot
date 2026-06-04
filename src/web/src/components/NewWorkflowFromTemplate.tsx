@@ -203,7 +203,7 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
                 type="button"
                 onClick={() => setSelected(FROM_SCRATCH)}
                 className={cn(
-                  "block w-full rounded-md border border-dashed px-3 py-2 text-left transition-colors",
+                  "block w-full rounded-md border px-3 py-2 text-left transition-colors",
                   selected === FROM_SCRATCH
                     ? "border-accent bg-accent/5"
                     : "border-border hover:border-foreground/60",

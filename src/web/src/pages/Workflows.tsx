@@ -450,7 +450,7 @@ function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card/50 px-6 py-12 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-lg border bg-card/50 px-6 py-12 text-center">
       <div className="text-sm font-medium">{title}</div>
       {hint && <p className="max-w-sm text-xs text-muted-foreground">{hint}</p>}
       {action}

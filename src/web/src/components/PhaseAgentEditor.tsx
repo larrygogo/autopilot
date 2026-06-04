@@ -111,7 +111,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
   }
 
   return (
-    <section className="border-t border-dashed border-border pt-3">
+    <section className="border-t border-border pt-3">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -141,7 +141,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
       {expanded && (
         <div className="mt-2 space-y-3">
           {!configured ? (
-            <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3">
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
               <p className="text-[11px] text-muted-foreground">
                 本阶段未配置内联 agent，运行时使用默认 agent（DEFAULT_AGENT）。
                 点下方按钮开始为本阶段单独配置。

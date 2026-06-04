@@ -1137,7 +1137,7 @@ function PromptDryRunner({
   }
 
   return (
-    <div className="mt-2 border border-dashed border-border bg-muted/20 p-2">
+    <div className="mt-2 border border-border bg-muted/20 p-2">
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-[10px] text-muted-foreground">
           试跑 · 用当前 prompt 直接调一次 {agentLabel}
@@ -1238,17 +1238,17 @@ function PhaseTsEditor({
         </Button>
       </div>
       {hasPrompt && initialCode === null && (
-        <p className="mb-1 border border-dashed border-success/40 bg-success/5 p-2 text-[11px] text-success">
+        <p className="mb-1 border border-success/40 bg-success/5 p-2 text-[11px] text-success">
           该阶段由 prompt 驱动（yaml 里有 prompt 字段），框架自动调 agent.run；无需 ts 函数
         </p>
       )}
       {hasPrompt && initialCode !== null && (
-        <p className="mb-1 border border-dashed border-warning/40 bg-warning/5 p-2 text-[11px] text-warning">
+        <p className="mb-1 border border-warning/40 bg-warning/5 p-2 text-[11px] text-warning">
           该阶段同时有 prompt 字段和 ts 函数；框架会优先调用 ts 函数（prompt 字段被忽略）
         </p>
       )}
       {!hasPrompt && initialCode === null && draft === "" && (
-        <p className="mb-1 border border-dashed border-border bg-muted/30 p-2 text-[11px] text-muted-foreground">
+        <p className="mb-1 border border-border bg-muted/30 p-2 text-[11px] text-muted-foreground">
           未找到 <code className="font-mono">run_{phaseName}</code> 函数；上面填 prompt 即可零代码运行，或在下方编写完整 ts 函数
         </p>
       )}
@@ -1459,7 +1459,7 @@ function PhaseEditForm({
 
       {/* 分组操作：顶层 phase 可以移入并行块；并行子项可以移出 */}
       {isTopLevel && parallelBlockNames.length > 0 && (
-        <section className="mt-4 border-t border-dashed border-border pt-3">
+        <section className="mt-4 border-t border-border pt-3">
           <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
             分组
           </div>
@@ -1486,7 +1486,7 @@ function PhaseEditForm({
         </section>
       )}
       {!isTopLevel && (
-        <section className="mt-4 border-t border-dashed border-border pt-3">
+        <section className="mt-4 border-t border-border pt-3">
           <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
             分组
           </div>

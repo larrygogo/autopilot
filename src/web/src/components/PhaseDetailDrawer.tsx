@@ -155,7 +155,7 @@ function PreviewBody({
           <div className="mb-1.5 bp-label text-muted-foreground">
             执行函数 · workflow.ts
           </div>
-          <p className="border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+          <p className="border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
             未找到名为 <code className="font-mono">{phase.name}</code> 的导出函数；
             保存阶段时框架会自动追加 stub。
           </p>

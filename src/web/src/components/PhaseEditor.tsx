@@ -663,7 +663,7 @@ export function PhaseEditor({
       )}
 
       {items.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border bg-card/50 px-6 py-10 text-center text-xs text-muted-foreground">
+        <div className="rounded-lg border border-border bg-card/50 px-6 py-10 text-center text-xs text-muted-foreground">
           暂无阶段，点击右上角「新增阶段」开始
         </div>
       ) : (

@@ -28,7 +28,7 @@ export function LogTimeline({ logs }: { logs: LogEntry[] }) {
     <div className="relative pl-6 font-mono text-xs">
       {/* 左侧时间轴线（虚线） */}
       <div
-        className="absolute left-2 top-2 bottom-2 w-px border-l border-dashed border-border"
+        className="absolute left-2 top-2 bottom-2 w-px border-l border-border"
         aria-hidden="true"
       />
       {logs.map((log, i) => (
@@ -36,7 +36,7 @@ export function LogTimeline({ logs }: { logs: LogEntry[] }) {
           key={log.id}
           className={
             "relative flex flex-wrap items-baseline gap-x-3 gap-y-1 break-words py-1.5 " +
-            (i !== logs.length - 1 ? "border-b border-dashed border-border" : "")
+            (i !== logs.length - 1 ? "border-b border-border" : "")
           }
         >
           {/* 节点圆点 */}

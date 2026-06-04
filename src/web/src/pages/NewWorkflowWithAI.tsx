@@ -202,7 +202,7 @@ export function NewWorkflowWithAI() {
                   onItemsChange={applyPhasesToYaml}
                 />
               ) : (
-                <p className="border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                <p className="border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
                   yaml 解析失败或没有 phases；请检查警告区，或追问让 AI 调整。
                 </p>
               )}
@@ -215,7 +215,7 @@ export function NewWorkflowWithAI() {
             <button
               type="button"
               onClick={() => setEditorOpen((v) => !v)}
-              className="flex w-full items-center gap-2 border-b border-dashed border-border px-4 py-2.5 text-left transition-colors hover:bg-muted/30"
+              className="flex w-full items-center gap-2 border-b border-border px-4 py-2.5 text-left transition-colors hover:bg-muted/30"
               aria-expanded={editorOpen}
             >
               {editorOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}

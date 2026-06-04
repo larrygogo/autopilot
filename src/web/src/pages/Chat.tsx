@@ -432,7 +432,7 @@ function MessageItem({
           <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-accent align-middle" />
         )}
         {message.usage && (
-          <div className="mt-2 border-t border-dashed border-border pt-2 font-mono text-[10px] text-muted-foreground">
+          <div className="mt-2 border-t border-border pt-2 font-mono text-[10px] text-muted-foreground">
             {message.usage.input_tokens}+{message.usage.output_tokens} tok · $
             {message.usage.total_cost_usd?.toFixed(4)}
           </div>
@@ -448,7 +448,7 @@ function MessageItem({
 
 function EmptyChat() {
   return (
-    <div className="flex flex-col items-center gap-3 border border-dashed border-border bg-card/40 px-6 py-16 text-center">
+    <div className="flex flex-col items-center gap-3 border border-border bg-card/40 px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center border border-accent bg-accent/12 text-accent">
         <MessageSquare className="h-6 w-6" />
       </div>

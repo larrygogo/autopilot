@@ -69,7 +69,7 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
           你正在从局域网（<span className="font-mono">{typeof location !== "undefined" ? location.host : ""}</span>）访问 autopilot daemon。
           daemon 启用了 API token 鉴权，请在本机查看 token 后贴入此处。
         </p>
-        <div className="mb-4 border border-dashed border-border bg-muted/40 p-3 text-[11px] leading-relaxed text-muted-foreground rounded-md">
+        <div className="mb-4 border border-border bg-muted/40 p-3 text-[11px] leading-relaxed text-muted-foreground rounded-md">
           <div className="mb-1 font-bold text-foreground">
             查看 token
           </div>

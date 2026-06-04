@@ -196,7 +196,7 @@ export function TaskProgressCard({
 
   return (
     <Card className="mb-6">
-      <div className="flex items-center justify-between gap-2 border-b border-dashed border-border px-5 py-3">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-3">
         <div className="flex items-center gap-2.5">
           {isRunning && <Loader2 className="h-4 w-4 animate-spin text-accent" />}
           {isDone && <CheckCircle2 className="h-4 w-4 text-success" />}

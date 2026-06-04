@@ -393,14 +393,14 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         </div>
         <div className="flex flex-col gap-3 lg:items-end">
           <div className="w-full border border-border bg-card/40 font-mono text-[11px]">
-            <div className="grid grid-cols-[100px_1fr] border-b border-dashed border-border">
-              <div className="border-r border-dashed border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
+            <div className="grid grid-cols-[100px_1fr] border-b border-border">
+              <div className="border-r border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
                 代码库
               </div>
               <div className="px-3 py-1.5 text-foreground">{codebases.length}</div>
             </div>
             <div className="grid grid-cols-[100px_1fr]">
-              <div className="border-r border-dashed border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
+              <div className="border-r border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
                 需求
               </div>
               <div className="px-3 py-1.5 text-foreground">{requirements.length}</div>
@@ -423,7 +423,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         </div>
 
         {codebases.length === 0 ? (
-          <Card className="border border-dashed border-border p-6 text-center">
+          <Card className="border border-border p-6 text-center">
             <FolderGit2 className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
             <p className="mb-3 font-mono text-xs text-muted-foreground">
               暂无代码库，点「添加代码库」关联 Git 仓库。
@@ -449,7 +449,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                   {codebases.map((cb) => (
                     <tr
                       key={cb.id}
-                      className="border-b border-dashed border-border last:border-0 transition-colors hover:bg-accent/8"
+                      className="border-b border-border last:border-0 transition-colors hover:bg-accent/8"
                     >
                       <td className="px-4 py-2.5 font-mono text-sm font-medium">
                         <div className="flex flex-col gap-0.5 md:gap-0">
@@ -540,7 +540,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           </Card>
         ) : (
           <Card className="overflow-hidden">
-            <div className="divide-y divide-dashed divide-foreground/20">
+            <div className="divide-y divide-foreground/20">
               {requirements.map((req) => (
                 <div
                   key={req.id}

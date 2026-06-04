@@ -564,7 +564,7 @@ function NetworkAccessCard(): React.ReactElement {
 
         {/* 本浏览器 token 副本 —— 仅从局域网 IP 访问时显示。本机回环 daemon 自动豁免，无需配 */}
         {isLanBrowser && (
-          <div className="mt-3 border-t border-dashed border-border pt-3">
+          <div className="mt-3 border-t border-border pt-3">
             <div className="mb-1 text-xs font-medium">本浏览器副本</div>
             <p className="mb-2 text-[11px] text-muted-foreground">
               你从局域网 <code className="font-mono">{location.host}</code> 访问 daemon，

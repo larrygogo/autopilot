@@ -67,7 +67,7 @@ export function Now() {
 
       {/* 跳转任务看板看完整任务列表（在跑 / 完成 / 失败 都在那里） */}
       {cards.length > 0 && (
-        <div className="mt-8 flex justify-center border-t border-dashed border-border pt-4">
+        <div className="mt-8 flex justify-center border-t border-border pt-4">
           <Link
             to="/tasks"
             className="inline-flex items-center gap-2 text-[11px] text-muted-foreground hover:text-foreground"

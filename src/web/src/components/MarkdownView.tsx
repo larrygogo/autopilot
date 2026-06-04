@@ -73,7 +73,7 @@ export function MarkdownView({
             <a className="text-accent underline hover:no-underline" target="_blank" rel="noreferrer" {...props} />
           ),
           hr: ({ node, ...props }) => (
-            <hr className="my-4 border-t border-dashed border-border" {...props} />
+            <hr className="my-4 border-t border-border" {...props} />
           ),
           table: ({ node, ...props }) => (
             <div className="my-3 overflow-x-auto">

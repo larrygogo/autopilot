@@ -66,10 +66,10 @@ function MetaRow({
     <div
       className={cn(
         "grid grid-cols-[100px_1fr]",
-        !last && "border-b border-dashed border-border",
+        !last && "border-b border-border",
       )}
     >
-      <div className="border-r border-dashed border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
+      <div className="border-r border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
         {k}
       </div>
       <div className="px-3 py-1.5 text-foreground">{v}</div>
@@ -383,7 +383,7 @@ function ClarifierProgressCard({
               <p className="font-mono text-[10px] text-muted-foreground mb-1">
                 本轮 Prompt
               </p>
-              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground bg-muted/20 p-2 max-h-[400px] overflow-y-auto rounded-md border border-dashed border-border">
+              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground bg-muted/20 p-2 max-h-[400px] overflow-y-auto rounded-md border border-border">
                 {round.prompt}
               </pre>
             </div>
@@ -987,11 +987,11 @@ export function RequirementDetail() {
       {/* 关联子模块 PR */}
       {subPrs.length > 0 && (
         <Card className="mb-6">
-          <div className="border-b border-dashed border-border px-4 py-2.5 flex items-center justify-between">
+          <div className="border-b border-border px-4 py-2.5 flex items-center justify-between">
             <span className="bp-label">关联子 PR · SUB-MODULE PRS</span>
             <Badge variant="secondary">{subPrs.length}</Badge>
           </div>
-          <ul className="divide-y divide-dashed divide-foreground/20">
+          <ul className="divide-y divide-foreground/20">
             {subPrs.map((p) => (
               <li key={p.id} className="flex items-center gap-3 px-4 py-2 font-mono text-xs">
                 <span className="text-muted-foreground">{p.child_repo_id}</span>
@@ -1108,7 +1108,7 @@ export function RequirementDetail() {
           PR-B 会重做：把历史问答折叠到 spec 区附近。*/}
       {questions.length > 0 && (req.status === "drafting" || req.status === "clarifying") && (
         <Card className="mb-6" id="clarification-section">
-          <div className="flex items-center gap-2 border-b border-dashed border-border px-4 py-2.5">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="bp-label">需求澄清 · CLARIFICATION</span>
             <button
@@ -1139,7 +1139,7 @@ export function RequirementDetail() {
 
           {/* 历史问答折叠区 — 默认折叠，点击展开 */}
           {resolvedQuestions.length > 0 && (
-            <details className="group border-t border-dashed border-border">
+            <details className="group border-t border-border">
               <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground [&::-webkit-details-marker]:hidden">
                 <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
                 <span>历史问答 · {resolvedQuestions.length} 条</span>
@@ -1164,7 +1164,7 @@ export function RequirementDetail() {
           */}
           {req.status === "clarifying" && openQuestions.length === 0 &&
            resolvedQuestions.length > 0 && (
-            <div className="mx-5 mb-5 flex items-center gap-3 border border-dashed border-border bg-card/40 px-4 py-3">
+            <div className="mx-5 mb-5 flex items-center gap-3 border border-border bg-card/40 px-4 py-3">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
               <p className="font-mono text-xs text-muted-foreground">
                 AI 正在思考下一个问题…
@@ -1177,7 +1177,7 @@ export function RequirementDetail() {
             提示用户主动点 [继续澄清] 切到 clarifying，AI 才会基于历史提下一题。
           */}
           {req.status === "drafting" && resolvedQuestions.length > 0 && (
-            <div className="mx-5 mb-5 flex flex-col gap-3 border border-dashed border-border bg-card/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mx-5 mb-5 flex flex-col gap-3 border border-border bg-card/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="font-mono text-xs text-muted-foreground">
                 草稿状态。点击右侧让 AI 基于以上对话和当前 SPEC 继续澄清。
               </p>
@@ -1194,7 +1194,7 @@ export function RequirementDetail() {
         {/* 左：需求规约。min-w-0 防 grid 子项被内部长串撑大 */}
         <div className="lg:col-span-2 space-y-4 min-w-0">
           <Card>
-            <div className="flex items-center justify-between gap-2 border-b border-dashed border-border px-4 py-2.5">
+            <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
               <div className="flex items-center gap-2">
                 <span className="bp-label">需求规约 · SPEC</span>
                 {req.spec_md && (req.status === "clarifying" || req.status === "drafting") && (
@@ -1268,7 +1268,7 @@ export function RequirementDetail() {
         <div className="space-y-4 min-w-0">
           {/* 操作按钮区 */}
           <Card>
-            <div className="border-b border-dashed border-border px-4 py-2.5">
+            <div className="border-b border-border px-4 py-2.5">
               <span className="bp-label">操作 · ACTIONS</span>
             </div>
             <div className="space-y-3 p-5">
@@ -1392,7 +1392,7 @@ export function RequirementDetail() {
             req.status === "awaiting_review" ||
             req.status === "fix_revision") && (
             <Card id="feedback-section">
-              <div className="flex items-center gap-2 border-b border-dashed border-border px-4 py-2.5">
+              <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
                 <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="bp-label">反馈历史 · FEEDBACK</span>
                 {feedbacks.length > 0 && (

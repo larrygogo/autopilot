@@ -98,7 +98,7 @@ export function SpecRevisionsSheet({
                 </button>
 
                 {isExpanded && (
-                  <div className="border-t border-dashed border-border grid grid-cols-1 md:grid-cols-2 gap-0 md:divide-x divide-border">
+                  <div className="border-t border-border grid grid-cols-1 md:grid-cols-2 gap-0 md:divide-x divide-border">
                     <div className="p-3 space-y-1.5 min-w-0">
                       <div className="font-mono text-[10px] text-muted-foreground">修订前</div>
                       <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground bg-muted/20 p-2 max-h-[400px] overflow-y-auto">
