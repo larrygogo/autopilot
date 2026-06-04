@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, Hand, AlertCircle, CheckCircle2, XCircle, Clock, Search, X, FileText, List } from "lucide-react";
 import { api, type Requirement } from "@/hooks/useApi";
@@ -45,6 +45,65 @@ interface Group {
 
 /** 终态组（done/cancelled）默认截断条数，超过时显示「看全部 N 条」按钮 */
 const TERMINAL_PREVIEW_LIMIT = 20;
+
+// ──────────── 列表内按时间分组（今天 / 昨天 / 一周内 / 一月内 / 更早） ────────────
+type TimeBucket = "today" | "yesterday" | "week" | "month" | "earlier";
+const BUCKET_ORDER: TimeBucket[] = ["today", "yesterday", "week", "month", "earlier"];
+const BUCKET_LABEL: Record<TimeBucket, string> = {
+  today: "今天", yesterday: "昨天", week: "一周内", month: "一月内", earlier: "更早",
+};
+
+/** 归一化到 ms：需求的 ts 是数字 epoch，任务的是 ISO 字符串；秒级时间戳自动 *1000 */
+function tsToMs(ts: string | number | null | undefined): number {
+  if (ts == null) return 0;
+  const n = typeof ts === "number" ? ts : Date.parse(ts);
+  if (!Number.isFinite(n)) return 0;
+  return n < 1e12 ? n * 1000 : n;
+}
+
+function bucketOf(ms: number, now: number): TimeBucket {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const startToday = start.getTime();
+  const DAY = 86_400_000;
+  if (ms >= startToday) return "today";
+  if (ms >= startToday - DAY) return "yesterday";
+  if (ms >= startToday - 6 * DAY) return "week";
+  if (ms >= startToday - 29 * DAY) return "month";
+  return "earlier";
+}
+
+interface TimedRow { key: string; ts: number; node: ReactNode; }
+
+/** 把已按时间倒序的行列表分桶渲染（带时段小标题）。 */
+function TimeGroupedList({ rows, now }: { rows: TimedRow[]; now: number }) {
+  const byBucket = new Map<TimeBucket, TimedRow[]>();
+  for (const r of rows) {
+    const b = bucketOf(r.ts, now);
+    const arr = byBucket.get(b);
+    if (arr) arr.push(r);
+    else byBucket.set(b, [r]);
+  }
+  const sections = BUCKET_ORDER.filter((b) => byBucket.has(b));
+  return (
+    <div className="space-y-4">
+      {sections.map((b) => {
+        const items = byBucket.get(b)!;
+        return (
+          <div key={b}>
+            <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+              {BUCKET_LABEL[b]}
+              <span className="font-mono text-[10px] text-muted-foreground/60">{items.length}</span>
+            </p>
+            <ul className="space-y-1.5">
+              {items.map((r) => <li key={r.key}>{r.node}</li>)}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export function Tasks() {
   const { subscribe } = useWebSocket();
@@ -176,6 +235,7 @@ export function Tasks() {
   const groupCount = (g: Group) =>
     g.kind === "req" ? (g.reqs?.length ?? 0) : (terminalTotalCount[g.key] ?? g.tasks?.length ?? 0);
 
+  const now = Date.now();
   const hasAny = tasks.length > 0 || requirements.length > 0;
   const filteredAny = filteredTasks.length > 0 || filteredRequirements.length > 0;
   const filterActive = !!searchQuery.trim() || !!workflowFilter;
@@ -328,44 +388,33 @@ export function Tasks() {
             })}
           </TabsList>
 
-          {/* 全部：所有需求 + 任务行，按阶段顺序平铺 */}
+          {/* 全部：所有需求 + 任务，按时间倒序后分时段 */}
           <TabsContent value="all">
-            <ul className="space-y-1.5">
-              {groups.flatMap((g) =>
-                g.kind === "req"
-                  ? (g.reqs ?? []).map((r) => (
-                      <li key={`r-${r.id}`}>
-                        <RequirementRow req={r} borderClass={g.borderClass} />
-                      </li>
-                    ))
-                  : (g.tasks ?? []).map((t) => (
-                      <li key={`t-${t.id}`}>
-                        <TaskRow task={t} borderClass={g.borderClass} />
-                      </li>
-                    )),
-              )}
-            </ul>
+            {(() => {
+              const rows: TimedRow[] = groups
+                .flatMap((g) =>
+                  g.kind === "req"
+                    ? (g.reqs ?? []).map((r) => ({ key: `r-${r.id}`, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} borderClass={g.borderClass} /> }))
+                    : (g.tasks ?? []).map((t) => ({ key: `t-${t.id}`, ts: tsToMs(t.updated_at), node: <TaskRow task={t} borderClass={g.borderClass} /> })),
+                )
+                .sort((a, b) => b.ts - a.ts);
+              return rows.length > 0 ? (
+                <TimeGroupedList rows={rows} now={now} />
+              ) : (
+                <p className="py-10 text-center font-mono text-[11px] text-muted-foreground">流水线暂无内容</p>
+              );
+            })()}
           </TabsContent>
           {groups.map((g) => {
             const total = terminalTotalCount[g.key];
             const truncated = (g.key === "done" || g.key === "cancelled") && typeof total === "number" && total > (g.tasks?.length ?? 0);
-            const items = g.kind === "req" ? (g.reqs ?? []) : (g.tasks ?? []);
+            const rows: TimedRow[] = g.kind === "req"
+              ? (g.reqs ?? []).map((r) => ({ key: `r-${r.id}`, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} borderClass={g.borderClass} /> }))
+              : (g.tasks ?? []).map((t) => ({ key: `t-${t.id}`, ts: tsToMs(t.updated_at), node: <TaskRow task={t} borderClass={g.borderClass} /> }));
             return (
               <TabsContent key={g.key} value={g.key}>
-                {items.length > 0 ? (
-                  <ul className="space-y-1.5">
-                    {g.kind === "req"
-                      ? g.reqs!.map((r) => (
-                          <li key={r.id}>
-                            <RequirementRow req={r} borderClass={g.borderClass} />
-                          </li>
-                        ))
-                      : g.tasks!.map((t) => (
-                          <li key={t.id}>
-                            <TaskRow task={t} borderClass={g.borderClass} />
-                          </li>
-                        ))}
-                  </ul>
+                {rows.length > 0 ? (
+                  <TimeGroupedList rows={rows} now={now} />
                 ) : (
                   <p className="py-10 text-center font-mono text-[11px] text-muted-foreground">
                     {g.kind === "req" ? "此阶段暂无需求" : "此分类下暂无任务"}
