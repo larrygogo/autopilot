@@ -54,7 +54,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **Agent 系统**：内置 Anthropic / OpenAI / Google 三大 Agent 提供商（凭证由对应 CLI 自身管理）
 - **Phase 内联 Agent**：每个 phase 在 `workflow.yaml` 里内联配置自己的 agent（`agent: {provider, model, system_prompt, max_turns, permission_mode}`）；省略则用 `DEFAULT_AGENT` 兜底。无"全局命名可复用 agent"概念（已于 2026-06 移除）。model 缺省时回退到 `providers.<provider>.default_model`
 - **Web UI 工作流编辑器**：阶段 CRUD / 并行块 / 驳回 / **phase 内联 agent 编辑**全图形化，`workflow.ts` 自动同步（改名重命名函数、追加缺失、孤儿清理）
-- **项目工作台**：两层数据模型 `Project ⊃ Codebase`，需求挂项目维度，支持 AI 调查 + 评论线程 + 用户审批流
+- **项目工作台**：两层数据模型 `Project ⊃ Workspace`，需求挂项目维度，支持 AI 调查 + 评论线程 + 用户审批流
 - **流水线（原"看板"）**：Web 的 `/tasks` 页（导航名「流水线」）把**需求 + 任务**合到一处看全生命周期，4 段 tab（全部 / 等待人工 / 运行中 / 归档），列表内按时间分组（今天/昨天/…），行是 Claude Code 风卡片。**「现在(Now)」独立保留**为决策收件箱，不并入
 - **评论线程**：`requirement_questions` + `requirement_question_replies`，Agent 调查期主动提问，用户回复后继续
 - **框架零业务知识**：核心模块不含任何工作流专属常量或逻辑
@@ -104,9 +104,9 @@ autopilot/
 │   │   ├── migrate.ts             # 数据库迁移引擎
 │   │   ├── config.ts              # 配置加载 & 校验
 │   │   ├── projects.ts            # Project CRUD（id: proj-NNN）
-│   │   ├── codebases.ts           # Codebase CRUD（id: cb-NNN，原 repos.ts）
-│   │   ├── codebase-health.ts     # Codebase 健康检查（原 repo-health.ts）
-│   │   ├── requirements.ts        # Requirement CRUD（含 project_id + codebase_id）
+│   │   ├── workspaces.ts          # Workspace CRUD（id: ws-NNN，原 codebases.ts→repos.ts）
+│   │   ├── workspace-health.ts    # Workspace 健康检查（原 codebase-health.ts）
+│   │   ├── requirements.ts        # Requirement CRUD（含 project_id + workspace_id）
 │   │   └── requirement-questions.ts # 评论线程 CRUD（id: qst-NNN）
 │   ├── daemon/                    # Daemon 进程
 │   │   ├── index.ts               # Daemon 入口（init→server→watcher→signal）
@@ -149,13 +149,15 @@ autopilot/
 
 ## 数据模型（P1+）
 
-两层结构：`Project ⊃ Codebase ⊃ Submodule`
+两层结构：`Project ⊃ Workspace ⊃ Submodule`
+
+> **命名说明（2026-06 Phase 2 改名）**：内核「用户代码库」概念全量改名 **Workspace**（表 `workspaces`、id `ws-NNN`、列 `workspace_id`/`parent_workspace_id`、RPC `workspaces.*`、CLI `autopilot workspace`）。注意与**任务运行沙盒** `sandbox`（每 task 的 git worktree 运行目录，Phase 1 由旧 `workspace` 改名而来）区分：**workspace = 用户的源码仓库，sandbox = 任务的临时执行目录**，互不相干。`.worktree.json` 里历史字段名保持兼容旧 `codebase_*` 读取。
 
 | 实体 | 表 | ID 前缀 | 说明 |
 |------|-----|---------|------|
 | Project | `projects` | `proj-NNN` | 顶层工作空间。`proj-default` 是兜底项目（无归属的快捷任务挂这里） |
-| Codebase | `codebases` | `cb-NNN` | 物理 Git 目录，归属某 Project |
-| Requirement | `requirements` | `req-NNN` | 挂 project_id + codebase_id（多对多 via requirement_codebases）。**是每个 Task 的前置** |
+| Workspace | `workspaces` | `ws-NNN` | 物理 Git 目录（用户源码仓库），归属某 Project |
+| Requirement | `requirements` | `req-NNN` | 挂 project_id + workspace_id（多对多 via requirement_workspaces）。**是每个 Task 的前置** |
 | Task | `tasks` | 8 位短 id | 执行单元。**必有 `requirement_id`（非空）**，由某需求衍生 |
 | Question | `requirement_questions` | `qst-NNN` | Agent 调查期提问，含多轮回复 |
 
@@ -164,10 +166,10 @@ autopilot/
   `drafting → clarifying → ready → (awaiting_approval) → queued → running → awaiting_review ⇄ fix_revision → done`，另有 `cancelled` / `failed`（failed 可回 queued/awaiting_approval 重试）。
   ⚠️ 不是早期文档写的 `draft/investigating` —— 那是过期简化，别照它写过滤逻辑。
 - Task 状态机：`pending_* → running_* → running_await_review → done/failed/cancelled`（phase 名内联在 status 里）。
-- 快捷起任务（`task start "<描述>"` / 一句话发包 `startAdHoc`）也**先建真需求**：`runClarifierExtract` 把描述抽成 title+spec → 建需求（进需求池）→ 有 codebase 走调度器（`requirement-scheduler`，同仓库串行）、纯 adhoc 直接起。CLI 参数/退出码不变。helper 在 `src/daemon/start-from-prompt.ts`。
+- 快捷起任务（`task start "<描述>"` / 一句话发包 `startAdHoc`）也**先建真需求**：`runClarifierExtract` 把描述抽成 title+spec → 建需求（进需求池）→ 有 workspace 走调度器（`requirement-scheduler`，同仓库串行）、纯 adhoc 直接起。CLI 参数/退出码不变。helper 在 `src/daemon/start-from-prompt.ts`。
 - 当前为 Phase 1（应用层强制 `requirement_id` 非空 + 迁移 023 回填历史游离任务，可回退）。**Phase 2 未做**：DB 列改 NOT NULL + FK（表重建、不可逆），dogfood 确认无新游离任务再单独上。
 
-向后兼容：`/api/repos` 路由别名保留至 P6 清理（≈90 天）；`Requirement.repo_id` 已于 P1 正式改名 `codebase_id`。
+向后兼容：`/api/repos` 路由别名保留至 P6 清理（≈90 天）；`Requirement.repo_id` 已于 P1 改名 `codebase_id`、Phase 2（2026-06）再改名 `workspace_id`。RPC 层对旧 `codebase_id`/`codebase_alias` 入参仍做读时兼容（迁移期防御）。
 
 ## Claude Code 协作角色（`.claude/agents/`）
 
@@ -292,13 +294,13 @@ autopilot daemon start
 autopilot daemon status
 autopilot daemon stop
 
-# Project / Codebase / Requirement（纯 CLI 路径，不必开浏览器；dogfood-bug20/21）
+# Project / Workspace / Requirement（纯 CLI 路径，不必开浏览器；dogfood-bug20/21）
 autopilot project create <name> [-d desc]
 autopilot project list / delete <id>
-autopilot codebase create <alias> <path> [-b branch] [-p project-id] [--github owner/repo]
+autopilot workspace create <alias> <path> [-b branch] [-p project-id] [--github owner/repo]
 # 缺省 -b / --github 时自动从 path 的 git 仓库识别（默认分支取 origin/HEAD→当前分支→main；GitHub 取 origin 远程）
-autopilot codebase list / delete <id> / health <id>
-autopilot req new --from-prompt "<需求>" [--no-extract] [-p project-id] [-c codebase-id]
+autopilot workspace list / delete <id> / health <id>
+autopilot req new --from-prompt "<需求>" [--no-extract] [-p project-id] [-c workspace-id]
 
 # 任务管理（通过 daemon API）
 # 注：每个任务必有需求。task start 只给 title 时会自动抽成一条真需求再起任务（无游离任务）
