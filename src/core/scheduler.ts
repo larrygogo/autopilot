@@ -28,11 +28,11 @@ export function createRequirementForSchedule(opts: { title: string; spec_md: str
   createRequirement({
     id: reqId,
     project_id: projectId,
-    codebase_id: null,
+    workspace_id: null,
     title: opts.title,
     spec_md: opts.spec_md,
   });
-  // drafting → ready → queued → running（不能跳级；scheduler 跳过无 codebase 的需求，这里手动推进）
+  // drafting → ready → queued → running（不能跳级；scheduler 跳过无 workspace 的需求，这里手动推进）
   setRequirementStatus(reqId, "ready");
   setRequirementStatus(reqId, "queued");
   return reqId;

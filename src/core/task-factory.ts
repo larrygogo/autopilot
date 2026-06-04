@@ -2,8 +2,8 @@ import { getTask, createTask } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { ensureTaskSandbox, type CodebaseRef } from "./sandbox";
-import { getCodebaseById } from "./codebases";
+import { ensureTaskSandbox, type WorkspaceRef } from "./sandbox";
+import { getWorkspaceById } from "./workspaces";
 import { executePhase } from "./runner";
 
 // ──────────────────────────────────────────────
@@ -40,7 +40,7 @@ export interface StartTaskOpts {
   requirement_id?: string;
   /** 兼容老接口：可选传入 reqId（既当 task id 种子，也兜底当 FK link） */
   reqId?: string;
-  /** 额外工作流参数（如 codebase_id），转发给 setup_func */
+  /** 额外工作流参数（如 workspace_id），转发给 setup_func */
   [key: string]: unknown;
 }
 
@@ -102,7 +102,7 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
         taskId,
         requirement,
       };
-      // 添加所有额外参数（如 codebase_id）
+      // 添加所有额外参数（如 workspace_id）
       for (const [key, value] of Object.entries(opts)) {
         if (!["workflow", "title", "requirement", "reqId"].includes(key)) {
           setupArgs[key] = value;
@@ -139,18 +139,21 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
   });
 
   try {
-    // sandbox.git=true 时反查 codebase 传给 ensureTaskSandbox，让它能起 git worktree
-    let codebase: CodebaseRef | undefined;
+    // sandbox.git=true 时反查 workspace 传给 ensureTaskSandbox，让它能起 git worktree
+    let workspace: WorkspaceRef | undefined;
     if (wf.sandbox?.git) {
-      const codebaseId = typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined;
-      if (codebaseId) {
-        const cb = getCodebaseById(codebaseId);
-        if (cb) {
-          codebase = { id: cb.id, path: cb.path, default_branch: cb.default_branch };
+      // 新键 workspace_id 优先；兼容仍发 codebase_id 的旧 setup_func（如未同步的用户工作流副本）
+      const workspaceId =
+        (typeof extra["workspace_id"] === "string" ? extra["workspace_id"] : undefined) ??
+        (typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined);
+      if (workspaceId) {
+        const ws = getWorkspaceById(workspaceId);
+        if (ws) {
+          workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch };
         }
       }
     }
-    ensureTaskSandbox(taskId, workflowName, wf.sandbox, codebase);
+    ensureTaskSandbox(taskId, workflowName, wf.sandbox, workspace);
   } catch (e: unknown) {
     console.warn("ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
   }

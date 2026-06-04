@@ -36,17 +36,34 @@ export interface SandboxConfig {
   base?: string;
 }
 
-/** 创建 worktree 时传入的 codebase 信息（caller 反查后传入，sandbox.ts 不依赖 codebases.ts） */
-export interface CodebaseRef {
+/** 创建 worktree 时传入的 workspace 信息（caller 反查后传入，sandbox.ts 不依赖 workspaces.ts） */
+export interface WorkspaceRef {
   id: string;
   path: string;
   default_branch: string;
 }
 
-/** task sandbox 走 git worktree 时记录在 .worktree.json 的元数据 */
+/**
+ * task sandbox 走 git worktree 时记录在 .worktree.json 的元数据。
+ *
+ * 这些字段是纯操作性元数据，仅用于删除时定位 git 目录（不参与任何 DB 查询/FK join），
+ * codebase→workspace 改名后字段名改为 workspace_*。读取时兼容 Phase 2 之前写下的旧文件
+ * （旧字段名 codebase_id/codebase_path、旧 id 前缀 cb-）见 readWorktreeMeta()。
+ */
 export interface WorktreeMeta {
-  codebase_id: string;
-  codebase_path: string;
+  workspace_id: string;
+  workspace_path: string;
+  branch: string;
+  base: string;
+  created_at: number;
+}
+
+/** .worktree.json 磁盘原文形态：可能是新字段（workspace_*）或 Phase 2 前的旧字段（codebase_*）。 */
+interface WorktreeMetaRaw {
+  workspace_id?: string;
+  workspace_path?: string;
+  codebase_id?: string;
+  codebase_path?: string;
   branch: string;
   base: string;
   created_at: number;
@@ -66,17 +83,17 @@ export function getTaskSandbox(taskId: string): string {
 
 /**
  * 确保 sandbox 目录存在；按 workflow.yaml 的 sandbox 段配置选择初始化方式：
- *   - git=true + 提供 codebase 信息 → git worktree 模式（在 codebase 临时分支上工作）
+ *   - git=true + 提供 workspace 信息 → git worktree 模式（在 workspace 临时分支上工作）
  *   - template=xxx → 拷贝模板目录
  *   - 其余 → 空目录
  *
  * 幂等：已存在非空 sandbox 时不会覆盖用户数据。
- * 退化策略：worktree 创建失败（codebase 非 git / 命令失败）→ warn + 空目录，不抛错。
+ * 退化策略：worktree 创建失败（workspace 非 git / 命令失败）→ warn + 空目录，不抛错。
  *
  * @param taskId 任务 ID
  * @param workflowName 工作流名（决定 template 查找路径）
  * @param sandboxConfig 工作流 workflow.yaml 里的 sandbox 段（可选）
- * @param codebase git worktree 模式所需的 codebase 信息（caller 反查后传入；不传 + git=true 时退化）
+ * @param workspace git worktree 模式所需的 workspace 信息（caller 反查后传入；不传 + git=true 时退化）
  * @returns sandbox 绝对路径（无论 worktree 是否成功 — 失败会退化为空目录）。
  *   worktree 元数据通过 getTaskWorktreeMeta(taskId) 单独读取。
  */
@@ -84,7 +101,7 @@ export function ensureTaskSandbox(
   taskId: string,
   workflowName: string,
   sandboxConfig?: SandboxConfig,
-  codebase?: CodebaseRef,
+  workspace?: WorkspaceRef,
 ): string {
   const wsPath = getTaskSandbox(taskId);
 
@@ -98,7 +115,7 @@ export function ensureTaskSandbox(
       log.warn("sandbox.git=true 与 template=%s 互斥，忽略 template [task=%s]",
         sandboxConfig.template, taskId);
     }
-    const wt = tryCreateWorktree(taskId, sandboxConfig, codebase, wsPath);
+    const wt = tryCreateWorktree(taskId, sandboxConfig, workspace, wsPath);
     if (wt) return wsPath;
     // 退化：worktree 创建失败 → 空目录
     if (!existsSync(wsPath)) mkdirSync(wsPath, { recursive: true });
@@ -133,31 +150,31 @@ export function getTaskWorktreeMeta(taskId: string): WorktreeMeta | null {
  * 试图为 task 创建 git worktree。成功返回 WorktreeMeta，失败 warn + 返回 null（caller 退化空目录）。
  *
  * 步骤：
- *   1. 校验 codebase 已传入且 codebase.path/.git 是 git 仓库
+ *   1. 校验 workspace 已传入且 workspace.path/.git 是 git 仓库
  *   2. 计算 branch 名 ${branch_prefix}${taskId}，冲突附 -2 / -3 后缀（最多 10 次）
- *   3. git -C <codebase.path> worktree add -b <branch> <wsPath> <base>
+ *   3. git -C <workspace.path> worktree add -b <branch> <wsPath> <base>
  *   4. 写 .worktree.json 让删除路径自包含
  */
 function tryCreateWorktree(
   taskId: string,
   cfg: SandboxConfig,
-  codebase: CodebaseRef | undefined,
+  workspace: WorkspaceRef | undefined,
   wsPath: string,
 ): WorktreeMeta | null {
-  if (!codebase) {
-    log.warn("sandbox.git=true 但未提供 codebase（task.extra 无 codebase_id？）；退化空目录 [task=%s]", taskId);
+  if (!workspace) {
+    log.warn("sandbox.git=true 但未提供 workspace（task.extra 无 workspace_id？）；退化空目录 [task=%s]", taskId);
     return null;
   }
-  if (!existsSync(join(codebase.path, ".git"))) {
-    log.warn("sandbox.git=true 但 codebase %s 不是 git 仓库（%s/.git 不存在）；退化空目录 [task=%s]",
-      codebase.id, codebase.path, taskId);
+  if (!existsSync(join(workspace.path, ".git"))) {
+    log.warn("sandbox.git=true 但 workspace %s 不是 git 仓库（%s/.git 不存在）；退化空目录 [task=%s]",
+      workspace.id, workspace.path, taskId);
     return null;
   }
   const prefix = cfg.branch_prefix ?? "autopilot/";
-  const base = cfg.base ?? codebase.default_branch;
+  const base = cfg.base ?? workspace.default_branch;
 
-  // 计算唯一 branch 名（防止与 codebase 现有分支冲突）
-  const branch = pickUniqueBranchName(codebase.path, prefix, taskId);
+  // 计算唯一 branch 名（防止与 workspace 现有分支冲突）
+  const branch = pickUniqueBranchName(workspace.path, prefix, taskId);
 
   // worktree 目录的父目录要存在（mkdir wsPath 父级），但 wsPath 本身 git worktree add 会创建
   const parent = join(wsPath, "..");
@@ -167,33 +184,33 @@ function tryCreateWorktree(
     rmSync(wsPath, { recursive: true, force: true });
   }
 
-  const argv = ["git", "-C", codebase.path, "worktree", "add", "-b", branch, wsPath, base];
+  const argv = ["git", "-C", workspace.path, "worktree", "add", "-b", branch, wsPath, base];
   const proc = Bun.spawnSync(argv, { stdout: "pipe", stderr: "pipe" });
   if (proc.exitCode !== 0) {
     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
-    log.warn("git worktree add 失败 [task=%s codebase=%s branch=%s base=%s exit=%d]: %s",
-      taskId, codebase.id, branch, base, proc.exitCode, stderr.slice(0, 300));
+    log.warn("git worktree add 失败 [task=%s workspace=%s branch=%s base=%s exit=%d]: %s",
+      taskId, workspace.id, branch, base, proc.exitCode, stderr.slice(0, 300));
     return null;
   }
 
   const meta: WorktreeMeta = {
-    codebase_id: codebase.id,
-    codebase_path: codebase.path,
+    workspace_id: workspace.id,
+    workspace_path: workspace.path,
     branch,
     base,
     created_at: Date.now(),
   };
   writeWorktreeMeta(taskId, meta);
-  log.info("git worktree 创建 [task=%s codebase=%s branch=%s base=%s ws=%s]",
-    taskId, codebase.id, branch, base, wsPath);
+  log.info("git worktree 创建 [task=%s workspace=%s branch=%s base=%s ws=%s]",
+    taskId, workspace.id, branch, base, wsPath);
   return meta;
 }
 
-function pickUniqueBranchName(codebasePath: string, prefix: string, taskId: string): string {
+function pickUniqueBranchName(workspacePath: string, prefix: string, taskId: string): string {
   const base = `${prefix}${taskId}`;
   for (let i = 0; i < 10; i++) {
     const candidate = i === 0 ? base : `${base}-${i + 1}`;
-    const proc = Bun.spawnSync(["git", "-C", codebasePath, "rev-parse", "--verify", "--quiet", `refs/heads/${candidate}`], {
+    const proc = Bun.spawnSync(["git", "-C", workspacePath, "rev-parse", "--verify", "--quiet", `refs/heads/${candidate}`], {
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -213,7 +230,13 @@ function readWorktreeMeta(taskId: string): WorktreeMeta | null {
   const p = worktreeMetaPath(taskId);
   if (!existsSync(p)) return null;
   try {
-    return JSON.parse(readFileSync(p, "utf8")) as WorktreeMeta;
+    const raw = JSON.parse(readFileSync(p, "utf8")) as WorktreeMetaRaw;
+    // 兼容 Phase 2 之前写下的旧 .worktree.json（字段 codebase_id/codebase_path）。
+    // 仅用于删除时定位 git 目录，不参与任何 DB 查询，旧 cb- 前缀 id 也无需转换。
+    const workspace_id = raw.workspace_id ?? raw.codebase_id;
+    const workspace_path = raw.workspace_path ?? raw.codebase_path;
+    if (!workspace_id || !workspace_path) return null;
+    return { workspace_id, workspace_path, branch: raw.branch, base: raw.base, created_at: raw.created_at };
   } catch { return null; }
 }
 
@@ -237,16 +260,16 @@ export function removeTaskWorktree(taskId: string): boolean {
   const wsPath = getTaskSandbox(taskId);
 
   const proc = Bun.spawnSync(
-    ["git", "-C", meta.codebase_path, "worktree", "remove", "--force", wsPath],
+    ["git", "-C", meta.workspace_path, "worktree", "remove", "--force", wsPath],
     { stdout: "pipe", stderr: "pipe" },
   );
   if (proc.exitCode !== 0) {
     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
-    // 常见失败：worktree 已不存在 / 路径不在 codebase 里。仍然清掉 .worktree.json 让上游继续 rmSync。
+    // 常见失败：worktree 已不存在 / 路径不在 workspace 里。仍然清掉 .worktree.json 让上游继续 rmSync。
     log.warn("git worktree remove 失败（继续清理元数据）[task=%s ws=%s exit=%d]: %s",
       taskId, wsPath, proc.exitCode, stderr.slice(0, 300));
   } else {
-    log.info("git worktree 移除 [task=%s codebase=%s branch=%s]", taskId, meta.codebase_id, meta.branch);
+    log.info("git worktree 移除 [task=%s workspace=%s branch=%s]", taskId, meta.workspace_id, meta.branch);
   }
 
   // 清元数据文件（无论 git worktree remove 是否成功）

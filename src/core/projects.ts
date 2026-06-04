@@ -1,6 +1,6 @@
 import { getDb } from "./db";
 import { listRequirements, deleteRequirement } from "./requirements";
-import { listCodebases, deleteCodebase } from "./codebases";
+import { listWorkspaces, deleteWorkspace } from "./workspaces";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -104,15 +104,15 @@ export function updateProject(id: string, opts: UpdateProjectOpts): Project | nu
 
 export function deleteProject(id: string): void {
   const db = getDb();
-  // 注意：deleteRequirement 和 deleteCodebase 各自已是 transaction；嵌套 transaction 在 bun:sqlite 中是 savepoint，安全。
+  // 注意：deleteRequirement 和 deleteWorkspace 各自已是 transaction；嵌套 transaction 在 bun:sqlite 中是 savepoint，安全。
   db.transaction(() => {
-    // 1. 删所有 requirements（级联清问题/回复/反馈/sub_prs/codebase 关联）
+    // 1. 删所有 requirements（级联清问题/回复/反馈/sub_prs/workspace 关联）
     const reqs = listRequirements({ project_id: id });
     for (const r of reqs) deleteRequirement(r.id);
 
-    // 2. 删所有顶层 codebases（deleteCodebase 内部处理子 codebase + requirement 引用置 NULL + join 清理）
-    const cbs = listCodebases({ projectId: id, includeSubmodules: false });
-    for (const c of cbs) deleteCodebase(c.id);
+    // 2. 删所有顶层 workspaces（deleteWorkspace 内部处理子 workspace + requirement 引用置 NULL + join 清理）
+    const wss = listWorkspaces({ projectId: id, includeSubmodules: false });
+    for (const w of wss) deleteWorkspace(w.id);
 
     // 3. 删 project 自身
     db.run("DELETE FROM projects WHERE id = ?", [id]);

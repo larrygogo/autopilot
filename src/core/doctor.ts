@@ -4,7 +4,7 @@ import { getConfigPath } from "./config";
 import { initDb, getDb } from "./db";
 
 export type CheckStatus = "ok" | "warning" | "error" | "skipped";
-export type CheckCategory = "config" | "provider" | "project" | "codebase";
+export type CheckCategory = "config" | "provider" | "project" | "workspace";
 
 export type FixId =
   | "init.providers"

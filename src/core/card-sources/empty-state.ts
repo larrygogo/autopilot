@@ -25,14 +25,14 @@ function snapshot(): NowCard[] {
     }];
   }
 
-  const codebases = count("SELECT COUNT(*) AS n FROM codebases");
-  if (codebases === 0) {
+  const workspaces = count("SELECT COUNT(*) AS n FROM workspaces");
+  if (workspaces === 0) {
     return [{
-      id: "empty-state:no-codebase",
+      id: "empty-state:no-workspace",
       priority: "P2",
       category: "decision",
-      title: "给项目加一个代码库",
-      subtitle: "代码库（Codebase）是实际的 Git 目录",
+      title: "给项目加一个工作区",
+      subtitle: "工作区（Workspace）是实际的 Git 目录",
       actions: [
         { label: "去添加", kind: "primary", href: "/library" },
       ],
@@ -75,7 +75,7 @@ export function createEmptyStateSource(): CardSource {
       const wanted = snapshot();
       const removeAll: CardDelta[] = [
         { op: "remove", id: "empty-state:no-project", reason: "resolved" },
-        { op: "remove", id: "empty-state:no-codebase", reason: "resolved" },
+        { op: "remove", id: "empty-state:no-workspace", reason: "resolved" },
         { op: "remove", id: "empty-state:no-requirement", reason: "resolved" },
       ];
       const adds: CardDelta[] = wanted.map((c) => ({ op: "add", card: c }));

@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "fs";
 
-export interface CodebaseHealth {
+export interface WorkspaceHealth {
   healthy: boolean;
   issues: string[];
   github_owner: string | null;
@@ -8,7 +8,7 @@ export interface CodebaseHealth {
 }
 
 /**
- * 检查 codebase 健康度：
+ * 检查 workspace 健康度：
  *  1. path 存在且是目录
  *  2. 是 git 仓库（git rev-parse --is-inside-work-tree）
  *  3. origin 远端已配置（git remote get-url origin）
@@ -20,7 +20,7 @@ export interface CodebaseHealth {
  * 注：当前用 spawnSync 同步实现；async 签名预留未来切真异步空间，
  * 单次健康检查耗时 ms 级，不阻塞 daemon 其他处理。
  */
-export async function checkCodebaseHealth(path: string): Promise<CodebaseHealth> {
+export async function checkWorkspaceHealth(path: string): Promise<WorkspaceHealth> {
   const issues: string[] = [];
   let owner: string | null = null;
   let repo: string | null = null;
@@ -69,7 +69,7 @@ export async function checkCodebaseHealth(path: string): Promise<CodebaseHealth>
   };
 }
 
-export interface CodebaseGitInfo {
+export interface WorkspaceGitInfo {
   /** path 是否是一个 git 工作树 */
   is_git: boolean;
   /** 默认分支：优先 origin/HEAD 指向，回退当前分支；探测不到为 null（创建时再兜底 main） */
@@ -85,7 +85,7 @@ function decodeOut(buf: Uint8Array | undefined): string {
 }
 
 /**
- * 从本地路径探测 git 信息，供「添加代码库」时自动识别默认分支 + 远程地址。
+ * 从本地路径探测 git 信息，供「添加工作区」时自动识别默认分支 + 远程地址。
  *
  * 默认分支解析顺序：
  *   1. `git symbolic-ref refs/remotes/origin/HEAD` → refs/remotes/origin/<branch>（最准，反映远端默认分支）
@@ -95,8 +95,8 @@ function decodeOut(buf: Uint8Array | undefined): string {
  * 远程地址：`git remote get-url origin`，原文返回；github.com 域再解析 owner/repo。
  * 所有外部命令走 Bun.spawnSync argv，不拼 shell 字符串。纯读，不改仓库。
  */
-export function detectCodebaseGit(path: string): CodebaseGitInfo {
-  const none: CodebaseGitInfo = {
+export function detectWorkspaceGit(path: string): WorkspaceGitInfo {
+  const none: WorkspaceGitInfo = {
     is_git: false, default_branch: null, remote_url: null, github_owner: null, github_repo: null,
   };
   if (!existsSync(path)) return none;

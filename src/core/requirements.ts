@@ -1,23 +1,23 @@
 import { getDb } from "./db";
 import { emit } from "./event-bus";
 import { resolveComment } from "./requirement-comments";
-import { listCodebases } from "./codebases";
+import { listWorkspaces } from "./workspaces";
 
 // ──────────────────────────────────────────────
 // 类型定义
 // ──────────────────────────────────────────────
 
 /**
- * P1 Task 14：requirements 字段适配 project + codebase 模型。
+ * requirements 字段适配 project + workspace 模型。
  *  - project_id：必填，requirement 归属的 project
- *  - codebase_id：可选（spec §5.1：高层需求可以不绑定具体 codebase），rename 自旧字段 repo_id
+ *  - workspace_id：可选（spec §5.1：高层需求可以不绑定具体 workspace）
  *
- * 创建时如果带了 codebase_id，会自动写一条 requirement_codebases 关联。
+ * 创建时如果带了 workspace_id，会自动写一条 requirement_workspaces 关联。
  */
 export interface Requirement {
   id: string;
   project_id: string;
-  codebase_id: string | null;
+  workspace_id: string | null;
   title: string;
   status: string;
   spec_md: string;
@@ -37,7 +37,7 @@ export interface Requirement {
 export interface CreateRequirementOpts {
   id: string;
   project_id: string;
-  codebase_id?: string | null;
+  workspace_id?: string | null;
   title: string;
   spec_md?: string;
   chat_session_id?: string | null;
@@ -46,7 +46,7 @@ export interface CreateRequirementOpts {
 export interface UpdateRequirementOpts {
   title?: string;
   spec_md?: string;
-  codebase_id?: string | null;
+  workspace_id?: string | null;
   chat_session_id?: string | null;
   task_id?: string | null;
   pr_url?: string | null;
@@ -105,24 +105,24 @@ function nowMs(): number {
 // ──────────────────────────────────────────────
 
 export function createRequirement(opts: CreateRequirementOpts): Requirement {
-  // 自动关联：若未指定 codebase_id 且 project 下只有 1 个 codebase，自动选它
-  let resolvedCodebaseId: string | null = opts.codebase_id ?? null;
-  if (resolvedCodebaseId === null && opts.project_id) {
-    const cbs = listCodebases({ projectId: opts.project_id, includeSubmodules: false });
-    if (cbs.length === 1) {
-      resolvedCodebaseId = cbs[0].id;
+  // 自动关联：若未指定 workspace_id 且 project 下只有 1 个 workspace，自动选它
+  let resolvedWorkspaceId: string | null = opts.workspace_id ?? null;
+  if (resolvedWorkspaceId === null && opts.project_id) {
+    const wss = listWorkspaces({ projectId: opts.project_id, includeSubmodules: false });
+    if (wss.length === 1) {
+      resolvedWorkspaceId = wss[0].id;
     }
   }
 
   const db = getDb();
   const ts = nowMs();
   db.run(
-    "INSERT INTO requirements (id, project_id, codebase_id, title, status, spec_md, chat_session_id, created_at, updated_at) " +
+    "INSERT INTO requirements (id, project_id, workspace_id, title, status, spec_md, chat_session_id, created_at, updated_at) " +
       "VALUES (?, ?, ?, ?, 'drafting', ?, ?, ?, ?)",
     [
       opts.id,
       opts.project_id,
-      resolvedCodebaseId,
+      resolvedWorkspaceId,
       opts.title,
       opts.spec_md ?? "",
       opts.chat_session_id ?? null,
@@ -130,11 +130,11 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
       ts,
     ],
   );
-  // 有 codebase_id 时自动写多对多关联（spec §5.1）
-  if (resolvedCodebaseId) {
+  // 有 workspace_id 时自动写多对多关联（spec §5.1）
+  if (resolvedWorkspaceId) {
     db.run(
-      "INSERT OR IGNORE INTO requirement_codebases (requirement_id, codebase_id) VALUES (?, ?)",
-      [opts.id, resolvedCodebaseId],
+      "INSERT OR IGNORE INTO requirement_workspaces (requirement_id, workspace_id) VALUES (?, ?)",
+      [opts.id, resolvedWorkspaceId],
     );
   }
   return getRequirementById(opts.id) as Requirement;
@@ -148,14 +148,14 @@ export function getRequirementById(id: string): Requirement | null {
 }
 
 export function listRequirements(
-  filters: { codebase_id?: string; project_id?: string; status?: string } = {},
+  filters: { workspace_id?: string; project_id?: string; status?: string } = {},
 ): Requirement[] {
   const db = getDb();
   const where: string[] = [];
   const vals: (string | number)[] = [];
-  if (filters.codebase_id) {
-    where.push("codebase_id = ?");
-    vals.push(filters.codebase_id);
+  if (filters.workspace_id) {
+    where.push("workspace_id = ?");
+    vals.push(filters.workspace_id);
   }
   if (filters.project_id) {
     where.push("project_id = ?");
@@ -173,7 +173,7 @@ export function listRequirements(
 }
 
 /**
- * 列出某 project 下所有 requirement（spec §5.1 一个 project 多 codebase 共享需求池）。
+ * 列出某 project 下所有 requirement（spec §5.1 一个 project 多 workspace 共享需求池）。
  */
 export function listRequirementsByProject(projectId: string): Requirement[] {
   const db = getDb();
@@ -191,7 +191,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
   const updatable = [
     "title",
     "spec_md",
-    "codebase_id",
+    "workspace_id",
     "chat_session_id",
     "task_id",
     "pr_url",
@@ -216,7 +216,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
 }
 
 /**
- * 删除需求 + 级联删反馈、sub_prs 和 requirement_codebases 关联。仅供调用方自己保证 id 处于终态（cancelled / done / failed）。
+ * 删除需求 + 级联删反馈、sub_prs 和 requirement_workspaces 关联。仅供调用方自己保证 id 处于终态（cancelled / done / failed）。
  *
  * 抽出此函数是为了让 REST handler / chat tools 不直接写 SQL，集中数据库写入到 core 层。
  */
@@ -226,7 +226,7 @@ export function deleteRequirement(id: string): void {
     // requirement_comments 已有 ON DELETE CASCADE，但显式删一次便于无 FK 场景（如旧 DB / 测试纯表）
     db.run("DELETE FROM requirement_comments WHERE requirement_id = ?", [id]);
     db.run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [id]);
-    db.run("DELETE FROM requirement_codebases WHERE requirement_id = ?", [id]);
+    db.run("DELETE FROM requirement_workspaces WHERE requirement_id = ?", [id]);
     db.run("DELETE FROM requirements WHERE id = ?", [id]);
   })();
 }
