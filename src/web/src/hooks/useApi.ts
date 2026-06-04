@@ -123,8 +123,6 @@ const NEW_API_PATTERNS: RegExp[] = [
   // 带固定后缀的子路径 endpoint
   /^\/api\/workflows\/[\w.\-]+\/phases$/,
   /^\/api\/workflows\/[\w.\-]+\/sync-ts$/,
-  /^\/api\/codebases\/[\w.\-]+\/submodules$/,
-  /^\/api\/codebases\/[\w.\-]+\/rediscover-submodules$/,
   /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
   /^\/api\/requirements\/[\w.\-]+\/spec-revisions$/,
   /^\/api\/requirements\/[\w.\-]+\/clarifier-round$/,
@@ -132,7 +130,6 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/providers(\?.*)?$/,
   /^\/api\/schedules(\?.*)?$/,
   /^\/api\/defaults(\?.*)?$/,
-  /^\/api\/codebases(\?.*)?$/,
   /^\/api\/fs\//,
   /^\/api\/requirements(\?.*)?$/,
   /^\/api\/projects(\?.*)?$/,
@@ -535,31 +532,31 @@ export const api = {
   // [WS-RPC] projects.delete
   deleteProject: (id: string) =>
     requestRpc<{ ok: true }>("projects.delete", { id }),
-  // [WS-RPC] projects.codebases
-  listProjectCodebases: (projectId: string) =>
-    requestRpc<{ codebases: Codebase[] }>("projects.codebases", { id: projectId }).then((r) => r.codebases),
-  // [WS-RPC] projects.addCodebase
-  createProjectCodebase: (
+  // [WS-RPC] projects.workspaces
+  listProjectWorkspaces: (projectId: string) =>
+    requestRpc<{ workspaces: Workspace[] }>("projects.workspaces", { id: projectId }).then((r) => r.workspaces),
+  // [WS-RPC] projects.addWorkspace
+  createProjectWorkspace: (
     projectId: string,
     body: { alias: string; path: string; default_branch?: string; github_owner?: string | null; github_repo?: string | null },
   ) =>
-    requestRpc<{ codebase: Codebase }>("projects.addCodebase", { id: projectId, ...body }).then((r) => r.codebase),
-  // [WS-RPC] codebases.delete —— 默认拒删 in-use codebase；force=true 才允许级联清空
-  deleteCodebase: (codebaseId: string, force = false) =>
-    requestRpc<{ ok: true }>("codebases.delete", { id: codebaseId, force }),
+    requestRpc<{ workspace: Workspace }>("projects.addWorkspace", { id: projectId, ...body }).then((r) => r.workspace),
+  // [WS-RPC] workspaces.delete —— 默认拒删 in-use workspace；force=true 才允许级联清空
+  deleteWorkspace: (workspaceId: string, force = false) =>
+    requestRpc<{ ok: true }>("workspaces.delete", { id: workspaceId, force }),
   // [WS-RPC] projects.requirements
   listProjectRequirements: (projectId: string) =>
     requestRpc<{ requirements: Requirement[] }>("projects.requirements", { id: projectId }).then((r) => r.requirements),
 
-  // Codebases CRUD —— 走 WS RPC，handler 返回裸数据，无 envelope
-  // [WS-RPC] codebases.list
-  listCodebases: () =>
-    requestRpc<Codebase[]>("codebases.list"),
-  // [WS-RPC] codebases.get
-  getCodebase: (id: string) =>
-    requestRpc<Codebase>("codebases.get", { id }),
-  // [WS-RPC] codebases.create
-  createCodebase: (body: {
+  // Workspaces CRUD —— 走 WS RPC，handler 返回裸数据，无 envelope
+  // [WS-RPC] workspaces.list
+  listWorkspaces: () =>
+    requestRpc<Workspace[]>("workspaces.list"),
+  // [WS-RPC] workspaces.get
+  getWorkspace: (id: string) =>
+    requestRpc<Workspace>("workspaces.get", { id }),
+  // [WS-RPC] workspaces.create
+  createWorkspace: (body: {
     alias: string;
     path: string;
     default_branch?: string;
@@ -567,36 +564,36 @@ export const api = {
     github_repo?: string | null;
     project_id?: string;
   }) =>
-    requestRpc<Codebase>("codebases.create", body),
-  // [WS-RPC] codebases.detect —— 从本地路径探测 git 信息，用于创建表单自动填充
-  detectCodebase: (path: string) =>
+    requestRpc<Workspace>("workspaces.create", body),
+  // [WS-RPC] workspaces.detect —— 从本地路径探测 git 信息，用于创建表单自动填充
+  detectWorkspace: (path: string) =>
     requestRpc<{
       is_git: boolean;
       default_branch: string | null;
       remote_url: string | null;
       github_owner: string | null;
       github_repo: string | null;
-    }>("codebases.detect", { path }),
-  // [WS-RPC] codebases.update
-  updateCodebase: (id: string, body: Partial<{
+    }>("workspaces.detect", { path }),
+  // [WS-RPC] workspaces.update
+  updateWorkspace: (id: string, body: Partial<{
     alias: string;
     path: string;
     default_branch: string;
     github_owner: string | null;
     github_repo: string | null;
   }>) =>
-    requestRpc<Codebase>("codebases.update", { id, ...body }),
-  // [WS-RPC] codebases.healthcheck
-  healthcheckCodebase: (id: string) =>
-    requestRpc<CodebaseHealthResult>("codebases.healthcheck", { id }),
+    requestRpc<Workspace>("workspaces.update", { id, ...body }),
+  // [WS-RPC] workspaces.healthcheck
+  healthcheckWorkspace: (id: string) =>
+    requestRpc<WorkspaceHealthResult>("workspaces.healthcheck", { id }),
 
   // Submodules（仅查询；自动发现写在 healthcheck 里）
-  // [WS-RPC] codebases.listSubmodules
+  // [WS-RPC] workspaces.listSubmodules
   listSubmodules: (parentId: string) =>
-    requestRpc<{ submodules: Codebase[] }>("codebases.listSubmodules", { id: parentId }).then((r) => r.submodules),
-  // [WS-RPC] codebases.rediscoverSubmodules
+    requestRpc<{ submodules: Workspace[] }>("workspaces.listSubmodules", { id: parentId }).then((r) => r.submodules),
+  // [WS-RPC] workspaces.rediscoverSubmodules
   rediscoverSubmodules: (parentId: string) =>
-    requestRpc<RediscoverSubmodulesResult>("codebases.rediscoverSubmodules", { id: parentId }),
+    requestRpc<RediscoverSubmodulesResult>("workspaces.rediscoverSubmodules", { id: parentId }),
 
   // 文件系统浏览
   browseFs: (path?: string, showHidden = false) => {
@@ -617,10 +614,10 @@ export const api = {
 
   // setup.saveAgents 已移除（Phase 3：命名复用 agent 机制删除；首跑向导不再单独配 agent）。
 
-  // [WS-RPC] setup.saveCodebases
-  setupCodebase: (payload: { name: string; path: string; project_id?: string }) =>
-    requestRpc<{ codebase: { id: string; alias: string; path: string; project_id: string } }>(
-      "setup.saveCodebases",
+  // [WS-RPC] setup.saveWorkspaces
+  setupWorkspace: (payload: { name: string; path: string; project_id?: string }) =>
+    requestRpc<{ workspace: { id: string; alias: string; path: string; project_id: string } }>(
+      "setup.saveWorkspaces",
       payload,
     ),
 
@@ -629,12 +626,12 @@ export const api = {
     requestRpc<{ ok: boolean }>("setup.dismiss"),
 
   // [WS-RPC] requirements.extract（LLM 长任务，5min 超时）
-  extractRequirement: (input: { raw_text: string; project_id: string; codebase_id?: string | null }) =>
+  extractRequirement: (input: { raw_text: string; project_id: string; workspace_id?: string | null }) =>
     requestRpc<{ title: string; spec_md: string }>("requirements.extract", input, { timeoutMs: 300_000 }),
 
   // Requirements
   // [WS-RPC] requirements.list
-  listRequirements: (filters?: { codebase_id?: string; project_id?: string; status?: string }) =>
+  listRequirements: (filters?: { workspace_id?: string; project_id?: string; status?: string }) =>
     requestRpc<{ requirements: Requirement[] }>("requirements.list", filters ?? {})
       .then((r) => r.requirements),
 
@@ -651,7 +648,7 @@ export const api = {
   // [WS-RPC] requirements.create
   createRequirement: (body: {
     project_id?: string;
-    codebase_id?: string | null;
+    workspace_id?: string | null;
     title: string;
     spec_md?: string;
     chat_session_id?: string | null;
@@ -662,7 +659,7 @@ export const api = {
   updateRequirement: (id: string, body: {
     title?: string;
     spec_md?: string;
-    codebase_id?: string | null;
+    workspace_id?: string | null;
     chat_session_id?: string | null;
     clarifier_provider?: string | null;
     clarifier_model?: string | null;
@@ -794,7 +791,7 @@ export interface TaskOutcome {
 
 export interface DoctorCheck {
   id: string;
-  category: "config" | "provider" | "agent" | "project" | "codebase";
+  category: "config" | "provider" | "agent" | "project" | "workspace";
   status: "ok" | "warning" | "error" | "skipped";
   title: string;
   detail?: string;
@@ -899,7 +896,7 @@ export interface ChatSessionManifest {
   message_count: number;
 }
 
-export interface CodebaseHealthResult {
+export interface WorkspaceHealthResult {
   healthy: boolean;
   issues: string[];
 }
@@ -912,7 +909,7 @@ export interface Project {
   updated_at: number;
 }
 
-export interface Codebase {
+export interface Workspace {
   id: string;
   project_id: string;
   alias: string;
@@ -920,7 +917,7 @@ export interface Codebase {
   default_branch: string;
   github_owner: string | null;
   github_repo: string | null;
-  parent_codebase_id: string | null;
+  parent_workspace_id: string | null;
   submodule_path: string | null;
   created_at: number;
   updated_at: number;
@@ -967,7 +964,7 @@ export interface Question {
 
 export interface Requirement {
   id: string;
-  codebase_id: string | null;
+  workspace_id: string | null;
   project_id: string;
   title: string;
   status: string;
@@ -999,7 +996,7 @@ export interface RequirementFeedback {
 export interface RequirementSubPr {
   id: number;
   requirement_id: string;
-  child_repo_id: string;
+  child_workspace_id: string;
   pr_url: string;
   pr_number: number;
   created_at: number;

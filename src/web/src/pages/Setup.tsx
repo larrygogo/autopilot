@@ -21,7 +21,7 @@ export function Setup() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  // 命名复用 agent 删除后，首跑向导从 3 步简化为 2 步：Provider → Codebase。
+  // 命名复用 agent 删除后，首跑向导从 3 步简化为 2 步：Provider → 工作区。
   // agent 配置不再在向导里单独配，改由每个工作流的 phase 内联编辑（默认 agent 兜底）。
   const [step, setStep] = useState<1 | 2>(1);
   const [report, setReport] = useState<DoctorReportWithDismiss | null>(null);
@@ -75,9 +75,9 @@ export function Setup() {
     if (!skip) {
       if (!cbName.trim() || !cbPath.trim()) { toast.error("name / path 不能为空", ""); return; }
       try {
-        await api.setupCodebase({ name: cbName.trim(), path: cbPath.trim() });
+        await api.setupWorkspace({ name: cbName.trim(), path: cbPath.trim() });
       } catch (e: unknown) {
-        toast.error("创建 codebase 失败", (e as Error)?.message ?? String(e));
+        toast.error("创建工作区失败", (e as Error)?.message ?? String(e));
         return;
       }
     }
@@ -97,7 +97,7 @@ export function Setup() {
         </p>
       </header>
 
-      <SetupProgress current={step} labels={["Provider", "Codebase"]} />
+      <SetupProgress current={step} labels={["Provider", "工作区"]} />
 
       {step === 2 && minimumReady && (
         <div className="mb-4 rounded-md border border-border px-3 py-2 text-xs">
@@ -140,7 +140,7 @@ export function Setup() {
 
       {step === 2 && (
         <section className="space-y-4">
-          <h2 className="text-sm font-bold">2/2 · 添加 Codebase（可选）</h2>
+          <h2 className="text-sm font-bold">2/2 · 添加工作区（可选）</h2>
           <div>
             <Label htmlFor="cb-name">名称</Label>
             <Input id="cb-name" value={cbName} onChange={(e) => setCbName(e.target.value)} placeholder="my-project" />

@@ -4,7 +4,7 @@ import {
   ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw, ExternalLink,
   FolderOpen, Trash2, Pencil,
 } from "lucide-react";
-import { api, type Project, type Codebase, type Requirement } from "@/hooks/useApi";
+import { api, type Project, type Workspace, type Requirement } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -81,7 +81,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const toast = useToast();
 
   const [project, setProject] = useState<Project | null>(null);
-  const [codebases, setCodebases] = useState<Codebase[]>([]);
+  const [codebases, setCodebases] = useState<Workspace[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -98,7 +98,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
   // 新建 / 编辑工作区 dialog
   const [cbDialogOpen, setCbDialogOpen] = useState(false);
-  const [editingCb, setEditingCb] = useState<Codebase | null>(null);
+  const [editingCb, setEditingCb] = useState<Workspace | null>(null);
   const [cbForm, setCbForm] = useState<CbForm>(EMPTY_CB);
   const [savingCb, setSavingCb] = useState(false);
   const [detectingCb, setDetectingCb] = useState(false);
@@ -112,7 +112,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     setLoadError(null);
     Promise.all([
       api.getProject(projectId),
-      api.listProjectCodebases(projectId),
+      api.listProjectWorkspaces(projectId),
       api.listProjectRequirements(projectId),
     ])
       .then(([proj, cbs, reqs]) => {
@@ -187,7 +187,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
   // ── 工作区 ────────────────────────────────────
 
-  const openCbDialog = (cb?: Codebase) => {
+  const openCbDialog = (cb?: Workspace) => {
     if (cb) {
       setEditingCb(cb);
       setCbForm({
@@ -237,7 +237,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     setDetectingCb(true);
     setCbDetectHint(null);
     try {
-      const info = await api.detectCodebase(path);
+      const info = await api.detectWorkspace(path);
       if (!info.is_git) {
         setCbDetectHint("该路径不是 git 仓库，未能自动识别。");
         return;
@@ -268,7 +268,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     setSavingCb(true);
     try {
       if (editingCb) {
-        await api.updateCodebase(editingCb.id, {
+        await api.updateWorkspace(editingCb.id, {
           path,
           default_branch: cbForm.default_branch.trim() || "main",
           github_owner: cbForm.github_owner.trim() || null,
@@ -276,7 +276,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         });
         toast.success(`已更新工作区「${alias}」`);
       } else {
-        await api.createProjectCodebase(projectId, {
+        await api.createProjectWorkspace(projectId, {
           alias,
           path,
           default_branch: cbForm.default_branch.trim() || "main",
@@ -295,24 +295,24 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     }
   };
 
-  const removeCb = async (cb: Codebase) => {
+  const removeCb = async (cb: Workspace) => {
     if (!confirm(`确定移除工作区「${cb.alias}」？`)) return;
     setDeletingCbId(cb.id);
     try {
-      await api.deleteCodebase(cb.id);
+      await api.deleteWorkspace(cb.id);
       toast.success(`已移除工作区「${cb.alias}」`);
       refresh();
     } catch (e: unknown) {
       const msg = (e as Error)?.message ?? String(e);
-      // 后端 IN_USE：有需求挂在此 codebase；提取数字弹二次确认
+      // 后端 IN_USE：有需求挂在此 workspace；提取数字弹二次确认
       if (msg.startsWith("IN_USE:")) {
         const m = msg.match(/(\d+)/);
         const n = m ? m[1] : "若干";
         if (confirm(
-          `⚠ ${n} 条需求关联此工作区。继续删除会把这些需求的 codebase_id 置 NULL（需求保留，但变成"未关联工作区"）。\n\n确定要级联删除吗？`,
+          `⚠ ${n} 条需求关联此工作区。继续删除会把这些需求的 workspace_id 置 NULL（需求保留，但变成"未关联工作区"）。\n\n确定要级联删除吗？`,
         )) {
           try {
-            await api.deleteCodebase(cb.id, true);
+            await api.deleteWorkspace(cb.id, true);
             toast.success(`已移除工作区「${cb.alias}」（${n} 条需求已解关联）`);
             refresh();
           } catch (e2: unknown) {
@@ -414,7 +414,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FolderGit2 className="h-4 w-4 text-muted-foreground" />
-            <span className="bp-label">工作区 · CODEBASES（{codebases.length}）</span>
+            <span className="bp-label">工作区 · WORKSPACES（{codebases.length}）</span>
           </div>
           <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
             <Plus className="h-4 w-4" />

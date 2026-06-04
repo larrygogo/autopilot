@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Plus } from "lucide-react";
-import { api, type Project, type Codebase } from "@/hooks/useApi";
+import { api, type Project, type Workspace } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -13,25 +13,25 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/Toast";
 
-const CODEBASE_NONE = "__none__";
+const WORKSPACE_NONE = "__none__";
 
 export function Start() {
   const navigate = useNavigate();
   const toast = useToast();
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [allCodebases, setAllCodebases] = useState<Codebase[]>([]);
+  const [allWorkspaces, setAllWorkspaces] = useState<Workspace[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
-  const [loadingCodebases, setLoadingCodebases] = useState(false);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
   const [projectId, setProjectId] = useState("");
-  const [codebaseId, setCodebaseId] = useState(CODEBASE_NONE);
+  const [workspaceId, setWorkspaceId] = useState(WORKSPACE_NONE);
   const [rawText, setRawText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   // P2 断点修复：首跑场景 projects 为空时，inline 建项目而不是把用户卡死在 disabled select
   const [newProjectName, setNewProjectName] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
 
-  // 进入页面：拉 projects + codebases
+  // 进入页面：拉 projects + workspaces
   useEffect(() => {
     setLoadingProjects(true);
     api.listProjects()
@@ -42,22 +42,22 @@ export function Start() {
       .catch((e: unknown) => toast.error("加载项目失败", (e as Error)?.message ?? String(e)))
       .finally(() => setLoadingProjects(false));
 
-    setLoadingCodebases(true);
-    api.listCodebases()
-      .then((cs) => setAllCodebases(cs))
-      .catch(() => setAllCodebases([]))
-      .finally(() => setLoadingCodebases(false));
+    setLoadingWorkspaces(true);
+    api.listWorkspaces()
+      .then((cs) => setAllWorkspaces(cs))
+      .catch(() => setAllWorkspaces([]))
+      .finally(() => setLoadingWorkspaces(false));
   }, [toast]);
 
-  // project 切换时 reset codebase
+  // project 切换时 reset workspace
   useEffect(() => {
-    setCodebaseId(CODEBASE_NONE);
+    setWorkspaceId(WORKSPACE_NONE);
   }, [projectId]);
 
-  // 当前 project 下的 codebases
-  const filteredCodebases = useMemo(
-    () => allCodebases.filter((c) => c.project_id === projectId),
-    [allCodebases, projectId],
+  // 当前 project 下的 workspaces
+  const filteredWorkspaces = useMemo(
+    () => allWorkspaces.filter((c) => c.project_id === projectId),
+    [allWorkspaces, projectId],
   );
 
   const canSubmit = useMemo(
@@ -86,15 +86,15 @@ export function Start() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const cbId = codebaseId === CODEBASE_NONE ? null : codebaseId;
+      const wsId = workspaceId === WORKSPACE_NONE ? null : workspaceId;
       const { title, spec_md } = await api.extractRequirement({
         raw_text: rawText.trim(),
         project_id: projectId,
-        codebase_id: cbId,
+        workspace_id: wsId,
       });
       const requirement = await api.createRequirement({
         project_id: projectId,
-        codebase_id: cbId,
+        workspace_id: wsId,
         title,
         spec_md,
       });
@@ -165,14 +165,14 @@ export function Start() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="codebase" className="bp-label">工作区（可选）</Label>
-          <Select value={codebaseId} onValueChange={setCodebaseId} disabled={!projectId || loadingCodebases}>
-            <SelectTrigger id="codebase">
-              <SelectValue placeholder={!projectId ? "请先选项目" : loadingCodebases ? "加载中..." : "不绑定工作区"} />
+          <Label htmlFor="workspace" className="bp-label">工作区（可选）</Label>
+          <Select value={workspaceId} onValueChange={setWorkspaceId} disabled={!projectId || loadingWorkspaces}>
+            <SelectTrigger id="workspace">
+              <SelectValue placeholder={!projectId ? "请先选项目" : loadingWorkspaces ? "加载中..." : "不绑定工作区"} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={CODEBASE_NONE}>不绑定</SelectItem>
-              {filteredCodebases.map((c) => (
+              <SelectItem value={WORKSPACE_NONE}>不绑定</SelectItem>
+              {filteredWorkspaces.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
                   {c.alias} <span className="text-muted-foreground ml-2">{c.path}</span>
                 </SelectItem>

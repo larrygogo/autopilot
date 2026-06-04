@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2 } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Codebase, type ProviderItem, type ClarifierRoundState } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -401,7 +401,7 @@ export function RequirementDetail() {
 
   const [req, setReq] = useState<Requirement | null>(null);
   const [feedbacks, setFeedbacks] = useState<RequirementFeedback[]>([]);
-  const [repos, setRepos] = useState<Codebase[]>([]);
+  const [repos, setRepos] = useState<Workspace[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
@@ -420,7 +420,7 @@ export function RequirementDetail() {
   const busyRef = useRef(false);
   const [subPrs, setSubPrs] = useState<RequirementSubPr[]>([]);
   // 回复输入状态：qid → 文本
-  const [projectCodebases, setProjectCodebases] = useState<Codebase[]>([]);
+  const [projectCodebases, setProjectCodebases] = useState<Workspace[]>([]);
   const [codebaseDialogOpen, setCodebaseDialogOpen] = useState(false);
   const [clarifierDialogOpen, setClarifierDialogOpen] = useState(false);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
@@ -441,7 +441,7 @@ export function RequirementDetail() {
     try {
       const [data, repoList, sub, qs, rd] = await Promise.all([
         api.getRequirement(id),
-        api.listCodebases(),
+        api.listWorkspaces(),
         api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
         api.listQuestions(id).catch(() => [] as Question[]),
         api.getClarifierRound(id).catch(() => null),
@@ -537,13 +537,13 @@ export function RequirementDetail() {
   useEffect(() => {
     if (!req?.project_id) { setProject(null); setProjectCodebases([]); return; }
     api.getProject(req.project_id).then(setProject).catch(() => setProject(null));
-    api.listProjectCodebases(req.project_id).then(setProjectCodebases).catch(() => setProjectCodebases([]));
+    api.listProjectWorkspaces(req.project_id).then(setProjectCodebases).catch(() => setProjectCodebases([]));
   }, [req?.project_id]);
 
   const repoAlias = useMemo(() => {
     if (!req) return "";
-    if (!req.codebase_id) return "";
-    return repos.find((r) => r.id === req.codebase_id)?.alias ?? req.codebase_id;
+    if (!req.workspace_id) return "";
+    return repos.find((r) => r.id === req.workspace_id)?.alias ?? req.workspace_id;
   }, [repos, req]);
 
   async function saveSpec() {
@@ -589,7 +589,7 @@ export function RequirementDetail() {
 
   async function enqueue() {
     if (!id || !req) return;
-    if (!req.codebase_id) {
+    if (!req.workspace_id) {
       toast.error("请先关联工作区", "需要绑定工作区才能入队执行，请在下方选择工作区。");
       return;
     }
@@ -611,13 +611,13 @@ export function RequirementDetail() {
     }
   }
 
-  async function setCodebase(codebaseId: string | null) {
+  async function setCodebase(workspaceId: string | null) {
     if (!id || !req) return;
     const prev = req;
-    setReq({ ...req, codebase_id: codebaseId });
+    setReq({ ...req, workspace_id: workspaceId });
     try {
-      await api.updateRequirement(id, { codebase_id: codebaseId });
-      toast.success(codebaseId ? "工作区已关联" : "已取消关联工作区");
+      await api.updateRequirement(id, { workspace_id: workspaceId });
+      toast.success(workspaceId ? "工作区已关联" : "已取消关联工作区");
     } catch (e: unknown) {
       setReq(prev);
       toast.error("关联失败", (e as Error)?.message ?? String(e));
@@ -942,8 +942,8 @@ export function RequirementDetail() {
               v={
                 <div className="flex items-center gap-2">
                   <span className="text-foreground">
-                    {req.codebase_id
-                      ? (projectCodebases.find(cb => cb.id === req.codebase_id)?.alias ?? req.codebase_id)
+                    {req.workspace_id
+                      ? (projectCodebases.find(cb => cb.id === req.workspace_id)?.alias ?? req.workspace_id)
                       : <span className="text-muted-foreground">未关联</span>
                     }
                   </span>
@@ -951,7 +951,7 @@ export function RequirementDetail() {
                     <button
                       type="button"
                       onClick={() => {
-                        setCodebaseDraft(req.codebase_id ?? NONE_VALUE);
+                        setCodebaseDraft(req.workspace_id ?? NONE_VALUE);
                         setCodebaseDialogOpen(true);
                       }}
                       className="text-[10px] text-accent hover:underline"
@@ -992,7 +992,7 @@ export function RequirementDetail() {
           <ul className="divide-y divide-foreground/20">
             {subPrs.map((p) => (
               <li key={p.id} className="flex items-center gap-3 px-4 py-2 font-mono text-xs">
-                <span className="text-muted-foreground">{p.child_repo_id}</span>
+                <span className="text-muted-foreground">{p.child_workspace_id}</span>
                 <span className="ml-auto" />
                 <a
                   href={p.pr_url}

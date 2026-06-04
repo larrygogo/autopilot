@@ -2,11 +2,11 @@ import { cn } from "@/lib/utils";
 
 export interface SetupProgressProps {
   current: number;
-  /** 步骤标签，长度即步数（默认 2 步：Provider / Codebase） */
+  /** 步骤标签，长度即步数（默认 2 步：Provider / 工作区） */
   labels?: string[];
 }
 
-const DEFAULT_LABELS: string[] = ["Provider", "Codebase"];
+const DEFAULT_LABELS: string[] = ["Provider", "工作区"];
 
 export function SetupProgress({ current, labels = DEFAULT_LABELS }: SetupProgressProps) {
   const total = labels.length;
