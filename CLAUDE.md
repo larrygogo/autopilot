@@ -149,7 +149,7 @@ autopilot/
 
 ## 数据模型（P1+）
 
-两层结构：`Project ⊃ Workspace ⊃ Submodule`
+两层结构：`Project ⊃ Workspace(1:1) ⊃ Submodule`（**每个 Project 最多一个顶层 Workspace**；submodule 不计入。靠迁移 025 的部分唯一索引 `UNIQUE(project_id) WHERE parent_workspace_id IS NULL` + RPC 入口守卫 `projectHasTopWorkspace` 落，core `createWorkspace` 原语不强制以便测试夹具/内部自由建）
 
 > **命名说明（2026-06 Phase 2 改名）**：内核「用户代码库」概念全量改名 **Workspace**（表 `workspaces`、id `ws-NNN`、列 `workspace_id`/`parent_workspace_id`、RPC `workspaces.*`、CLI `autopilot workspace`）。注意与**任务运行沙盒** `sandbox`（每 task 的 git worktree 运行目录，Phase 1 由旧 `workspace` 改名而来）区分：**workspace = 用户的源码仓库，sandbox = 任务的临时执行目录**，互不相干。`.worktree.json` 里历史字段名保持兼容旧 `codebase_*` 读取。
 
