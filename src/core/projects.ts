@@ -37,6 +37,22 @@ function nowMs(): number {
 // CRUD
 // ──────────────────────────────────────────────
 
+/** 兜底项目稳定 id：快捷发包 / 定时任务等无显式项目维度的需求挂这里。 */
+export const DEFAULT_PROJECT_ID = "proj-default";
+
+/**
+ * 确保兜底项目存在，返回其 id。幂等：不存在才建。
+ */
+export function ensureDefaultProject(): string {
+  const existing = getProjectById(DEFAULT_PROJECT_ID);
+  if (existing) return existing.id;
+  return createProject({
+    id: DEFAULT_PROJECT_ID,
+    name: "默认 / Default",
+    description: "快捷发包 / 定时任务（无显式项目）的兜底项目",
+  }).id;
+}
+
 export function createProject(opts: CreateProjectOpts): Project {
   const db = getDb();
   const ts = nowMs();
@@ -112,9 +128,11 @@ export function deleteProject(id: string): void {
  */
 export function nextProjectId(): string {
   const db = getDb();
+  // 只看 proj-<纯数字> 的 id（用 GLOB 排除 proj-default 这类非编号兜底项目，
+  // 否则 "default" 会被 parseInt 成 NaN → proj-NaN 重复冲突）。
   const rows = db
     .query<{ id: string }, []>(
-      "SELECT id FROM projects WHERE id LIKE 'proj-%' ORDER BY id DESC LIMIT 1"
+      "SELECT id FROM projects WHERE id GLOB 'proj-[0-9]*' ORDER BY id DESC LIMIT 1"
     )
     .all();
   if (rows.length === 0) return "proj-001";
