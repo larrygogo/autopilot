@@ -240,10 +240,10 @@ function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode 
     <div key={q.id} className="space-y-3">
       {/* AI 气泡 */}
       <div className="flex items-start gap-2.5">
-        <div className="bp-num-block h-7 w-7 text-[10px]">AI</div>
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[10px] font-semibold text-accent">AI</div>
         <div className="flex-1 space-y-2">
           <div className={cn(
-            "border border-border bg-muted/50 px-4 py-3 text-sm leading-relaxed",
+            "rounded-2xl rounded-tl-sm bg-muted px-4 py-3 text-sm leading-relaxed",
             q.status === "resolved" && "opacity-60"
           )}>
             {q.agent_text}
@@ -255,7 +255,7 @@ function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode 
                   key={s}
                   type="button"
                   onClick={() => setReplyDrafts(d => ({ ...d, [q.id]: s }))}
-                  className="border border-border bg-background px-3 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:border-accent hover:text-accent"
+                  className="rounded-full border border-border bg-card px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-accent hover:text-accent"
                 >
                   {s}
                 </button>
@@ -269,12 +269,12 @@ function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode 
       {(q.replies ?? []).filter(r => r.author_role === "user").map((reply) => (
         <div key={reply.id} className="flex items-start justify-end gap-2.5">
           <div className={cn(
-            "max-w-[80%] border border-accent bg-accent/12 px-4 py-3 text-sm leading-relaxed text-foreground",
+            "max-w-[80%] rounded-2xl rounded-tr-sm bg-accent/15 px-4 py-3 text-sm leading-relaxed text-foreground",
             q.status === "resolved" && "opacity-70"
           )}>
             {reply.text}
           </div>
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center border border-accent bg-accent text-[10px] font-mono font-bold text-accent-foreground">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold text-accent-foreground">
             你
           </div>
         </div>
