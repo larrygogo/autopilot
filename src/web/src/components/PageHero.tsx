@@ -62,19 +62,17 @@ export function PageHero({
 
       <div className="flex flex-col gap-3 lg:items-end">
         {meta && meta.length > 0 && (
-          <div className="w-full rounded-lg border border-border bg-card/40 font-mono text-[11px]">
+          <div className="w-full rounded-lg border border-border bg-card/40 text-[13px]">
             {meta.map((row, i) => (
               <div
                 key={i}
                 className={cn(
-                  "grid grid-cols-[100px_1fr]",
+                  "grid grid-cols-[88px_1fr] gap-3 px-3.5 py-2",
                   i !== meta.length - 1 && "border-b border-border",
                 )}
               >
-                <div className="border-r border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
-                  {row.k}
-                </div>
-                <div className="px-3 py-1.5 text-foreground">{row.v}</div>
+                <div className="text-muted-foreground">{row.k}</div>
+                <div className="text-foreground">{row.v}</div>
               </div>
             ))}
           </div>

@@ -65,14 +65,12 @@ function MetaRow({
   return (
     <div
       className={cn(
-        "grid grid-cols-[100px_1fr]",
+        "grid grid-cols-[88px_1fr] gap-3 px-3.5 py-2",
         !last && "border-b border-border",
       )}
     >
-      <div className="border-r border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
-        {k}
-      </div>
-      <div className="px-3 py-1.5 text-foreground">{v}</div>
+      <div className="text-muted-foreground">{k}</div>
+      <div className="text-foreground">{v}</div>
     </div>
   );
 }
@@ -931,8 +929,8 @@ export function RequirementDetail() {
 
         {/* 右侧 metadata block */}
         <div className="flex flex-col gap-3 lg:items-end">
-          <div className="w-full border border-border bg-card/40 font-mono text-[11px]">
-            <MetaRow k="ID" v={<code className="text-accent">{req.id}</code>} />
+          <div className="w-full rounded-lg border border-border bg-card/40 text-[13px]">
+            <MetaRow k="ID" v={<code className="font-mono text-accent">{req.id}</code>} />
             {project && (
               <MetaRow
                 k="项目"
