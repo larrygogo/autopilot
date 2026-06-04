@@ -7,8 +7,9 @@ import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
+import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest } from "../src/core/db";
-import { createCodebase } from "../src/core/codebases";
+import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 import {
   createRequirement,
@@ -32,9 +33,10 @@ describe("pr-poller pollOne", () => {
     migrate007(db);
     migrate008(db);
     migrate021(db);
+    migrate024(db);
     _setDbForTest(db);
     createProject({ id: "proj-001", name: "test-proj" });
-    createCodebase({
+    createWorkspace({
       id: "cb-A",
       project_id: "proj-001",
       alias: "rA",
@@ -63,7 +65,7 @@ describe("pr-poller pollOne", () => {
   // 辅助：把需求快速推到 awaiting_review，并设 pr_number
   function setupReqAwaitingReview(prNumber = 42, lastReviewId: string | null = null): string {
     const id = nextRequirementId();
-    createRequirement({ id, project_id: "proj-001", codebase_id: "cb-A", title: "T" });
+    createRequirement({ id, project_id: "proj-001", workspace_id: "cb-A", title: "T" });
     setRequirementStatus(id, "clarifying");
     setRequirementStatus(id, "ready");
     setRequirementStatus(id, "queued");
@@ -165,9 +167,9 @@ describe("pr-poller pollOne", () => {
 
   it("repo 缺 github_owner/repo → 跳过 + 状态不变", async () => {
     // 创建 cb-B 不填 github
-    createCodebase({ id: "cb-B", project_id: "proj-001", alias: "rB", path: "/tmp/B", default_branch: "main" });
+    createWorkspace({ id: "cb-B", project_id: "proj-001", alias: "rB", path: "/tmp/B", default_branch: "main" });
     const id = nextRequirementId();
-    createRequirement({ id, project_id: "proj-001", codebase_id: "cb-B", title: "T" });
+    createRequirement({ id, project_id: "proj-001", workspace_id: "cb-B", title: "T" });
     setRequirementStatus(id, "clarifying");
     setRequirementStatus(id, "ready");
     setRequirementStatus(id, "queued");
@@ -239,7 +241,7 @@ describe("pr-poller pollOne", () => {
 
   it("requirement 状态非 awaiting_review → 跳过不调 gh", async () => {
     const id = nextRequirementId();
-    createRequirement({ id, project_id: "proj-001", codebase_id: "cb-A", title: "T" });
+    createRequirement({ id, project_id: "proj-001", workspace_id: "cb-A", title: "T" });
     setRequirementStatus(id, "clarifying"); // 不在 awaiting_review
     let called = 0;
     _setGhRunnerForTest(async () => {
@@ -253,7 +255,7 @@ describe("pr-poller pollOne", () => {
 
   it("requirement 无 pr_number → 跳过不调 gh（典型：尚未跑到 submit_pr）", async () => {
     const id = nextRequirementId();
-    createRequirement({ id, project_id: "proj-001", codebase_id: "cb-A", title: "T" });
+    createRequirement({ id, project_id: "proj-001", workspace_id: "cb-A", title: "T" });
     setRequirementStatus(id, "clarifying");
     setRequirementStatus(id, "ready");
     setRequirementStatus(id, "queued");

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
+import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest } from "../src/core/db";
 import {
   createAggregator,
@@ -30,6 +31,7 @@ describe("now-aggregator", () => {
   beforeEach(() => {
     const db = new Database(":memory:");
     migrate011(db);
+    migrate024(db);
     _setDbForTest(db);
     enableBus();
   });

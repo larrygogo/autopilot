@@ -17,7 +17,7 @@ const ALLOWLIST = new Set([
   "src/core/migrate.ts",         // 迁移：INSERT schema_version
   "src/core/rebuild-index.ts",   // 索引重建：从 manifest INSERT/UPDATE 回 DB
   "src/core/schedules.ts",       // schedules 表：SQLite 即权威源，无 manifest 同步需求
-  "src/core/codebases.ts",       // codebases 表（P1 由 repos 改名）：SQLite 即权威源，无 manifest 同步需求
+  "src/core/workspaces.ts",      // workspaces 表（Phase 2 由 codebases 改名）：SQLite 即权威源，无 manifest 同步需求
   "src/core/projects.ts",        // projects 表：SQLite 即权威源（CRUD 模块），无 manifest 同步需求
   "src/core/requirements.ts",    // requirements 表：SQLite 即权威源，无 manifest 同步需求
   "src/core/requirement-feedbacks.ts", // 旧 shim：转发到 requirement-comments.ts（Phase 2 后保留兼容，无独立写）
@@ -31,6 +31,7 @@ const ALLOWLIST = new Set([
   "src/migrations/009-nullable-codebase.ts", // requirements.codebase_id NOT NULL → NULLable 需表重建（DDL+一次性数据迁移）
   "src/migrations/021-requirement-comments.ts", // Phase 2 合并：把 questions+replies+feedbacks 迁移到 requirement_comments（一次性数据迁移）
   "src/migrations/023-backfill-orphan-task-requirements.ts", // 每个任务必有需求 Phase 1：回填历史游离 task 的 requirement（一次性数据迁移）
+  "src/migrations/024-codebase-to-workspace.ts", // Phase 2：codebase→workspace 表/列/id 改名（DDL + UPDATE 数据迁移，无 manifest 同步需求）
   "src/core/now-dismiss.ts",       // now_dismissed_cards 表：SQLite 即权威源，dismiss 状态无 manifest 同步需求
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
 ]);

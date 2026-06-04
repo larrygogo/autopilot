@@ -9,7 +9,8 @@ import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
-import { createCodebase } from "../src/core/codebases";
+import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 
 describe("setup_req_dev_task", () => {
@@ -26,8 +27,9 @@ describe("setup_req_dev_task", () => {
     migrate006(sqlite);
     migrate007(sqlite);
     migrate008(sqlite);
+    migrate024(sqlite);
     createProject({ id: "proj-001", name: "test-proj" });
-    createCodebase({
+    createWorkspace({
       id: "cb-001",
       project_id: "proj-001",
       alias: "autopilot",
@@ -43,14 +45,14 @@ describe("setup_req_dev_task", () => {
     sqlite.close();
   });
 
-  it("根据 codebase_id 派生 task 字段", () => {
+  it("根据 workspace_id 派生 task 字段", () => {
     const result = setup_req_dev_task({
-      codebase_id: "cb-001",
+      workspace_id: "cb-001",
       title: "GitHub 集成",
       requirement: "加 GitHub Issues 接入",
     });
     expect(result.title).toBe("GitHub 集成");
-    expect(result.codebase_id).toBe("cb-001");
+    expect(result.workspace_id).toBe("cb-001");
     expect(result.repo_path).toBe("/tmp/autopilot");
     expect(result.default_branch).toBe("main");
     expect(result.github_owner).toBe("larrygogo");
@@ -59,13 +61,13 @@ describe("setup_req_dev_task", () => {
     expect((result.branch as string).startsWith("feat/")).toBe(true);
   });
 
-  it("codebase_id 不存在时报错", () => {
-    expect(() => setup_req_dev_task({ codebase_id: "no-such", title: "x", requirement: "y" }))
-      .toThrow(/codebase not found/);
+  it("workspace_id 不存在时报错", () => {
+    expect(() => setup_req_dev_task({ workspace_id: "no-such", title: "x", requirement: "y" }))
+      .toThrow(/workspace not found/);
   });
 
   it("title / requirement 缺省", () => {
-    const result = setup_req_dev_task({ codebase_id: "cb-001" });
+    const result = setup_req_dev_task({ workspace_id: "cb-001" });
     expect(result.title).toBe("untitled");
     expect(result.requirement).toBe("");
   });
@@ -85,6 +87,7 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
     migrate006(sqlite);
     migrate007(sqlite);
     migrate008(sqlite);
+    migrate024(sqlite);
     createProject({ id: "proj-sub", name: "sub-proj" });
   });
 
@@ -94,9 +97,9 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
   });
 
   it("无子模块时 submodules 为空数组", () => {
-    createCodebase({ id: "cb-no-sub", project_id: "proj-sub", alias: "no-sub", path: "/tmp/no-sub" });
+    createWorkspace({ id: "cb-no-sub", project_id: "proj-sub", alias: "no-sub", path: "/tmp/no-sub" });
     const result = setup_req_dev_task({
-      codebase_id: "cb-no-sub",
+      workspace_id: "cb-no-sub",
       title: "x",
       requirement: "y",
     });
@@ -104,8 +107,8 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
   });
 
   it("有子模块时注入数组", () => {
-    createCodebase({ id: "cb-with-sub", project_id: "proj-sub", alias: "parent", path: "/tmp/parent" });
-    createCodebase({
+    createWorkspace({ id: "cb-with-sub", project_id: "proj-sub", alias: "parent", path: "/tmp/parent" });
+    createWorkspace({
       id: "cb-child",
       project_id: "proj-sub",
       alias: "child",
@@ -113,11 +116,11 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
       default_branch: "master",
       github_owner: "foo",
       github_repo: "child",
-      parent_codebase_id: "cb-with-sub",
+      parent_workspace_id: "cb-with-sub",
       submodule_path: "child",
     });
     const result = setup_req_dev_task({
-      codebase_id: "cb-with-sub",
+      workspace_id: "cb-with-sub",
       title: "feat",
       requirement: "x",
     });

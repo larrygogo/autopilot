@@ -18,9 +18,10 @@ import { up as m008 } from "../src/migrations/008-projects";
 import { up as m009 } from "../src/migrations/009-nullable-codebase";
 import { up as m010 } from "../src/migrations/010-question-suggestions";
 import { up as m021 } from "../src/migrations/021-requirement-comments";
+import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
-import { createCodebase } from "../src/core/codebases";
+import { createWorkspace } from "../src/core/workspaces";
 import { createRequirement } from "../src/core/requirements";
 import {
   createComment,
@@ -36,10 +37,10 @@ describe("requirement_comments CRUD", () => {
 
   beforeAll(() => {
     db = new Database(":memory:");
-    [m001, m004, m005, m006, m007, m008, m009, m010, m021].forEach((fn) => fn(db));
+    [m001, m004, m005, m006, m007, m008, m009, m010, m021, migrate024].forEach((fn) => fn(db));
     _setDbForTest(db);
     createProject({ id: "proj-1", name: "P" });
-    createCodebase({ id: "cb-1", project_id: "proj-1", alias: "a", path: "/tmp/a", default_branch: "main" });
+    createWorkspace({ id: "cb-1", project_id: "proj-1", alias: "a", path: "/tmp/a", default_branch: "main" });
     createRequirement({ id: "req-1", project_id: "proj-1", title: "T", spec_md: "" });
   });
 
@@ -186,10 +187,11 @@ describe("requirement_comments migration 021 数据迁移", () => {
   it("旧 questions / replies / feedbacks 数据迁移到 requirement_comments", () => {
     const db = new Database(":memory:");
     [m001, m004, m005, m006, m007, m008, m009, m010].forEach((fn) => fn(db));
+    migrate024(db);
 
     // 准备旧表数据
     db.run("INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', 'P', 0, 0)");
-    db.run("INSERT INTO codebases (id, project_id, alias, path, default_branch, created_at, updated_at) VALUES ('cb1', 'p1', 'a', '/tmp/a', 'main', 0, 0)");
+    db.run("INSERT INTO workspaces (id, project_id, alias, path, default_branch, created_at, updated_at) VALUES ('cb1', 'p1', 'a', '/tmp/a', 'main', 0, 0)");
     db.run("INSERT INTO requirements (id, project_id, title, status, spec_md, created_at, updated_at) VALUES ('req-m1', 'p1', 'T', 'drafting', '', 0, 0)");
 
     db.run("INSERT INTO requirement_questions (id, requirement_id, agent_text, suggestions, status, created_at, resolved_at) VALUES ('qst-001', 'req-m1', '问？', '[\"A\"]', 'open', 100, NULL)");
@@ -235,9 +237,10 @@ describe("requirement_comments migration 021 数据迁移", () => {
   it("suggestions 列不存在时（跳过 m010）回退到 NULL", () => {
     const db = new Database(":memory:");
     [m001, m004, m005, m006, m007, m008].forEach((fn) => fn(db));
+    migrate024(db);
     db.run("INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', 'P', 0, 0)");
-    db.run("INSERT INTO codebases (id, project_id, alias, path, default_branch, created_at, updated_at) VALUES ('cb1', 'p1', 'a', '/tmp/a', 'main', 0, 0)");
-    db.run("INSERT INTO requirements (id, project_id, codebase_id, title, status, spec_md, created_at, updated_at) VALUES ('req-m2', 'p1', 'cb1', 'T', 'drafting', '', 0, 0)");
+    db.run("INSERT INTO workspaces (id, project_id, alias, path, default_branch, created_at, updated_at) VALUES ('cb1', 'p1', 'a', '/tmp/a', 'main', 0, 0)");
+    db.run("INSERT INTO requirements (id, project_id, workspace_id, title, status, spec_md, created_at, updated_at) VALUES ('req-m2', 'p1', 'cb1', 'T', 'drafting', '', 0, 0)");
     db.run("INSERT INTO requirement_questions (id, requirement_id, agent_text, status, created_at, resolved_at) VALUES ('qst-100', 'req-m2', '?', 'open', 100, NULL)");
 
     m021(db);

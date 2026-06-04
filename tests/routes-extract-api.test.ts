@@ -11,7 +11,7 @@ import { Database } from "bun:sqlite";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { runPendingMigrations } from "../src/core/migrate";
 import { createProject, nextProjectId } from "../src/core/projects";
-import { createCodebase, nextCodebaseId } from "../src/core/codebases";
+import { createWorkspace, nextWorkspaceId } from "../src/core/workspaces";
 import { _setExtractFnForTest } from "../src/daemon/requirement-extract";
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
@@ -37,8 +37,8 @@ beforeEach(async () => {
   registerCoreRpcMethods();
   projectId = nextProjectId();
   createProject({ id: projectId, name: "test" });
-  codebaseId = nextCodebaseId();
-  createCodebase({ id: codebaseId, project_id: projectId, alias: "cb", path: "/tmp/x" });
+  codebaseId = nextWorkspaceId();
+  createWorkspace({ id: codebaseId, project_id: projectId, alias: "cb", path: "/tmp/x" });
   _setExtractFnForTest(async () =>
     "title: 测试标题\nspec_md: |\n  ## 背景\n  x\n  ## 目标\n  y\n  ## 验收\n  z",
   );
@@ -87,15 +87,15 @@ describe("requirements.extract RPC", () => {
     if (!r.ok) expect(r.error.code).toBe("NOT_FOUND");
   });
 
-  it("codebase_id 不属于 project → INVALID_PARAM", async () => {
+  it("workspace_id 不属于 project → INVALID_PARAM", async () => {
     const otherProj = nextProjectId();
     createProject({ id: otherProj, name: "other" });
-    const otherCb = nextCodebaseId();
-    createCodebase({ id: otherCb, project_id: otherProj, alias: "cb2", path: "/tmp/y" });
+    const otherCb = nextWorkspaceId();
+    createWorkspace({ id: otherCb, project_id: otherProj, alias: "cb2", path: "/tmp/y" });
     const r = await invokeRpcMethod("requirements.extract", {
       raw_text: "x",
       project_id: projectId,
-      codebase_id: otherCb,
+      workspace_id: otherCb,
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("INVALID_PARAM");

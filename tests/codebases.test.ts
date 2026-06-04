@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
-  createCodebase,
-  getCodebaseById,
-  getCodebaseByAlias,
-  listCodebases,
-  updateCodebase,
-  deleteCodebase,
-  nextCodebaseId,
-} from "../src/core/codebases";
+  createWorkspace,
+  getWorkspaceById,
+  getWorkspaceByAlias,
+  listWorkspaces,
+  updateWorkspace,
+  deleteWorkspace,
+  nextWorkspaceId,
+} from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 import { createRequirement, getRequirementById } from "../src/core/requirements";
 import { _setDbForTest, initDb } from "../src/core/db";
@@ -22,13 +22,14 @@ import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
-import { checkCodebaseHealth, parseGithubFromRemote, detectCodebaseGit } from "../src/core/codebase-health";
+import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { checkWorkspaceHealth, parseGithubFromRemote, detectWorkspaceGit } from "../src/core/workspace-health";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
 // 注意：initDb() 不接受路径参数，通过 _setDbForTest 注入内存 DB，
-// 再手动执行各迁移脚本，确保 codebases 表（及上游依赖）存在且与迁移定义一致。
+// 再手动执行各迁移脚本，确保 workspaces 表（及上游依赖）存在且与迁移定义一致。
 
 function runAllMigrations(db: Database): void {
   migrate001(db);
@@ -41,14 +42,15 @@ function runAllMigrations(db: Database): void {
   migrate009(db);
   migrate010(db);
   migrate011(db);
+  migrate024(db);
 }
 
-describe("migration produces codebases table", () => {
+describe("migration produces workspaces table", () => {
   it("含约定的 11 个字段", () => {
     const db = new Database(":memory:");
     runAllMigrations(db);
     const cols = db
-      .query<{ name: string }, []>("PRAGMA table_info(codebases)")
+      .query<{ name: string }, []>("PRAGMA table_info(workspaces)")
       .all()
       .map((c) => c.name)
       .sort();
@@ -59,7 +61,7 @@ describe("migration produces codebases table", () => {
       "github_owner",
       "github_repo",
       "id",
-      "parent_codebase_id",
+      "parent_workspace_id",
       "path",
       "project_id",
       "submodule_path",
@@ -68,7 +70,7 @@ describe("migration produces codebases table", () => {
   });
 });
 
-describe("codebases CRUD", () => {
+describe("workspaces CRUD", () => {
   let sqlite: Database;
   let projId: string;
 
@@ -87,8 +89,8 @@ describe("codebases CRUD", () => {
     sqlite.close();
   });
 
-  it("createCodebase + getCodebaseById + getCodebaseByAlias", () => {
-    const created = createCodebase({
+  it("createWorkspace + getWorkspaceById + getWorkspaceByAlias", () => {
+    const created = createWorkspace({
       id: "cb-001",
       project_id: projId,
       alias: "autopilot",
@@ -103,18 +105,18 @@ describe("codebases CRUD", () => {
     expect(created.path).toBe("/tmp/autopilot");
     expect(typeof created.created_at).toBe("number");
 
-    const byId = getCodebaseById("cb-001");
+    const byId = getWorkspaceById("cb-001");
     expect(byId?.alias).toBe("autopilot");
     expect(byId?.path).toBe("/tmp/autopilot");
     expect(typeof byId?.created_at).toBe("number");
 
-    const byAlias = getCodebaseByAlias(projId, "autopilot");
+    const byAlias = getWorkspaceByAlias(projId, "autopilot");
     expect(byAlias?.id).toBe("cb-001");
   });
 
   it("alias 在同 project 内重复时报错（UNIQUE 约束）", () => {
     expect(() => {
-      createCodebase({
+      createWorkspace({
         id: "cb-002",
         project_id: projId,
         alias: "autopilot",
@@ -126,7 +128,7 @@ describe("codebases CRUD", () => {
   it("alias 在不同 project 间允许重复", () => {
     const p2 = createProject({ id: "proj-other", name: "other" });
     expect(() => {
-      createCodebase({
+      createWorkspace({
         id: "cb-100",
         project_id: p2.id,
         alias: "autopilot", // 跟 proj-test 同名
@@ -135,45 +137,45 @@ describe("codebases CRUD", () => {
     }).not.toThrow();
   });
 
-  it("listCodebases 按 created_at 升序", () => {
-    const cb3 = createCodebase({ id: "cb-003", project_id: projId, alias: "alpha", path: "/tmp/a" });
-    const cb4 = createCodebase({ id: "cb-004", project_id: projId, alias: "beta", path: "/tmp/b" });
+  it("listWorkspaces 按 created_at 升序", () => {
+    const cb3 = createWorkspace({ id: "cb-003", project_id: projId, alias: "alpha", path: "/tmp/a" });
+    const cb4 = createWorkspace({ id: "cb-004", project_id: projId, alias: "beta", path: "/tmp/b" });
     expect(cb3.id).toBe("cb-003");
     expect(cb4.id).toBe("cb-004");
-    const all = listCodebases({ projectId: projId });
+    const all = listWorkspaces({ projectId: projId });
     expect(all.length).toBeGreaterThanOrEqual(3);
     expect(all[0].id).toBe("cb-001");
   });
 
-  it("updateCodebase 更新可变字段", () => {
-    const before = getCodebaseById("cb-001");
-    const updated = updateCodebase("cb-001", { path: "/new/path", default_branch: "develop" });
+  it("updateWorkspace 更新可变字段", () => {
+    const before = getWorkspaceById("cb-001");
+    const updated = updateWorkspace("cb-001", { path: "/new/path", default_branch: "develop" });
     expect(updated?.path).toBe("/new/path");
     expect(updated?.default_branch).toBe("develop");
     expect(updated?.updated_at).toBeGreaterThanOrEqual(before?.updated_at ?? 0);
   });
 
-  it("updateCodebase 空 opts 是 no-op", () => {
-    const before = getCodebaseById("cb-001");
-    const after = updateCodebase("cb-001", {});
+  it("updateWorkspace 空 opts 是 no-op", () => {
+    const before = getWorkspaceById("cb-001");
+    const after = updateWorkspace("cb-001", {});
     expect(after?.path).toBe(before?.path);
     expect(after?.updated_at).toBe(before?.updated_at);
   });
 
-  it("deleteCodebase 删除", () => {
-    deleteCodebase("cb-003");
-    expect(getCodebaseById("cb-003")).toBeNull();
+  it("deleteWorkspace 删除", () => {
+    deleteWorkspace("cb-003");
+    expect(getWorkspaceById("cb-003")).toBeNull();
   });
 
-  it("nextCodebaseId 自增（cb-NNN 格式）", () => {
-    const next = nextCodebaseId();
-    expect(next).toMatch(/^cb-\d{3}$/);
+  it("nextWorkspaceId 自增（ws-NNN 格式）", () => {
+    const next = nextWorkspaceId();
+    expect(next).toMatch(/^ws-\d{3}$/);
   });
 });
 
-describe("checkCodebaseHealth", () => {
+describe("checkWorkspaceHealth", () => {
   it("路径不存在 → healthy=false", async () => {
-    const r = await checkCodebaseHealth("/no/such/path/abcxyz123456");
+    const r = await checkWorkspaceHealth("/no/such/path/abcxyz123456");
     expect(r.healthy).toBe(false);
     expect(r.issues.some((i) => i.includes("不存在"))).toBe(true);
   });
@@ -181,7 +183,7 @@ describe("checkCodebaseHealth", () => {
   it("路径存在但不是 git 仓库 → healthy=false", async () => {
     const dir = mkdtempSync(join(tmpdir(), "health-test-"));
     try {
-      const r = await checkCodebaseHealth(dir);
+      const r = await checkWorkspaceHealth(dir);
       expect(r.healthy).toBe(false);
       expect(r.issues.some((i) => i.includes("git"))).toBe(true);
     } finally {
@@ -190,13 +192,13 @@ describe("checkCodebaseHealth", () => {
   });
 
   it("autopilot 仓库本身健康（或仅 issue 为远端相关）", async () => {
-    const r = await checkCodebaseHealth(process.cwd());
+    const r = await checkWorkspaceHealth(process.cwd());
     // 在 CI 或无远端环境，可能 origin 不可达；这是 OK 的
     expect(r.healthy === true || r.issues.every((i) => i.includes("远端"))).toBe(true);
   });
 });
 
-describe("detectCodebaseGit", () => {
+describe("detectWorkspaceGit", () => {
   function git(dir: string, args: string[]): void {
     const r = Bun.spawnSync(["git", ...args], { cwd: dir, stderr: "pipe", stdout: "pipe" });
     if (r.exitCode !== 0) {
@@ -207,7 +209,7 @@ describe("detectCodebaseGit", () => {
   it("非 git 路径 → is_git=false，全 null", () => {
     const dir = mkdtempSync(join(tmpdir(), "detect-nogit-"));
     try {
-      const info = detectCodebaseGit(dir);
+      const info = detectWorkspaceGit(dir);
       expect(info.is_git).toBe(false);
       expect(info.default_branch).toBeNull();
       expect(info.remote_url).toBeNull();
@@ -218,7 +220,7 @@ describe("detectCodebaseGit", () => {
   });
 
   it("路径不存在 → is_git=false", () => {
-    expect(detectCodebaseGit("/no/such/path/xyz987").is_git).toBe(false);
+    expect(detectWorkspaceGit("/no/such/path/xyz987").is_git).toBe(false);
   });
 
   it("本地 git 仓库 → 探测到当前分支（无 origin 时 github 为 null）", () => {
@@ -228,7 +230,7 @@ describe("detectCodebaseGit", () => {
       git(dir, ["config", "user.email", "t@t.io"]);
       git(dir, ["config", "user.name", "t"]);
       Bun.spawnSync(["git", "commit", "--allow-empty", "-m", "init"], { cwd: dir });
-      const info = detectCodebaseGit(dir);
+      const info = detectWorkspaceGit(dir);
       expect(info.is_git).toBe(true);
       expect(info.default_branch).toBe("develop"); // 无 origin/HEAD，回退当前分支
       expect(info.github_owner).toBeNull();
@@ -243,7 +245,7 @@ describe("detectCodebaseGit", () => {
     try {
       git(dir, ["init", "-b", "main"]);
       git(dir, ["remote", "add", "origin", "https://github.com/acme/widget.git"]);
-      const info = detectCodebaseGit(dir);
+      const info = detectWorkspaceGit(dir);
       expect(info.is_git).toBe(true);
       expect(info.remote_url).toBe("https://github.com/acme/widget.git");
       expect(info.github_owner).toBe("acme");
@@ -320,7 +322,7 @@ describe("parseGithubFromRemote", () => {
   });
 });
 
-describe("codebases submodule 字段（P5.1 → P1 改名后）", () => {
+describe("workspaces submodule 字段（P5.1 → P1 改名后）", () => {
   let db: Database;
   let projId: string;
 
@@ -340,96 +342,96 @@ describe("codebases submodule 字段（P5.1 → P1 改名后）", () => {
 
   beforeEach(() => {
     // 清表避免 case 污染
-    db.run("DELETE FROM codebases");
+    db.run("DELETE FROM workspaces");
   });
 
-  it("createCodebase 接受 parent_codebase_id + submodule_path", () => {
-    createCodebase({
+  it("createWorkspace 接受 parent_workspace_id + submodule_path", () => {
+    createWorkspace({
       id: "cb-parent",
       project_id: projId,
       alias: "parent",
       path: "/tmp/parent",
     });
-    createCodebase({
+    createWorkspace({
       id: "cb-child",
       project_id: projId,
       alias: "child",
       path: "/tmp/parent/child",
-      parent_codebase_id: "cb-parent",
+      parent_workspace_id: "cb-parent",
       submodule_path: "child",
     });
-    const child = getCodebaseById("cb-child");
-    expect(child?.parent_codebase_id).toBe("cb-parent");
+    const child = getWorkspaceById("cb-child");
+    expect(child?.parent_workspace_id).toBe("cb-parent");
     expect(child?.submodule_path).toBe("child");
-    const parent = getCodebaseById("cb-parent");
-    expect(parent?.parent_codebase_id).toBeNull();
+    const parent = getWorkspaceById("cb-parent");
+    expect(parent?.parent_workspace_id).toBeNull();
     expect(parent?.submodule_path).toBeNull();
   });
 
-  it("listCodebases 默认不含子模块（仅父 codebase）", () => {
-    createCodebase({ id: "cb-parent", project_id: projId, alias: "parent", path: "/tmp/parent" });
-    createCodebase({
+  it("listWorkspaces 默认不含子模块（仅父 codebase）", () => {
+    createWorkspace({ id: "cb-parent", project_id: projId, alias: "parent", path: "/tmp/parent" });
+    createWorkspace({
       id: "cb-child",
       project_id: projId,
       alias: "child",
       path: "/tmp/parent/child",
-      parent_codebase_id: "cb-parent",
+      parent_workspace_id: "cb-parent",
       submodule_path: "child",
     });
-    const list = listCodebases({ projectId: projId });
+    const list = listWorkspaces({ projectId: projId });
     expect(list.find((c) => c.id === "cb-child")).toBeUndefined();
     expect(list.find((c) => c.id === "cb-parent")).toBeDefined();
   });
 
-  it("listCodebases({ includeSubmodules: true }) 含全部", () => {
-    createCodebase({ id: "cb-parent", project_id: projId, alias: "parent", path: "/tmp/parent" });
-    createCodebase({
+  it("listWorkspaces({ includeSubmodules: true }) 含全部", () => {
+    createWorkspace({ id: "cb-parent", project_id: projId, alias: "parent", path: "/tmp/parent" });
+    createWorkspace({
       id: "cb-child",
       project_id: projId,
       alias: "child",
       path: "/tmp/parent/child",
-      parent_codebase_id: "cb-parent",
+      parent_workspace_id: "cb-parent",
       submodule_path: "child",
     });
-    const list = listCodebases({ projectId: projId, includeSubmodules: true });
+    const list = listWorkspaces({ projectId: projId, includeSubmodules: true });
     expect(list.find((c) => c.id === "cb-child")).toBeDefined();
     expect(list.find((c) => c.id === "cb-parent")).toBeDefined();
   });
 
-  it("deleteCodebase 级联删子模块", () => {
-    createCodebase({ id: "cb-parent", project_id: projId, alias: "parent", path: "/tmp/parent" });
-    createCodebase({
+  it("deleteWorkspace 级联删子模块", () => {
+    createWorkspace({ id: "cb-parent", project_id: projId, alias: "parent", path: "/tmp/parent" });
+    createWorkspace({
       id: "cb-child",
       project_id: projId,
       alias: "child",
       path: "/tmp/parent/child",
-      parent_codebase_id: "cb-parent",
+      parent_workspace_id: "cb-parent",
       submodule_path: "child",
     });
-    deleteCodebase("cb-parent");
-    expect(getCodebaseById("cb-parent")).toBeNull();
-    expect(getCodebaseById("cb-child")).toBeNull();
+    deleteWorkspace("cb-parent");
+    expect(getWorkspaceById("cb-parent")).toBeNull();
+    expect(getWorkspaceById("cb-child")).toBeNull();
   });
 
-  it("deleteCodebase 把指向它的 requirement.codebase_id 置 NULL + 清 join", async () => {
+  it("deleteWorkspace 把指向它的 requirement.workspace_id 置 NULL + 清 join", async () => {
     const db = (await import("../src/core/db")).getDb();
 
-    createCodebase({ id: "cb-del", project_id: projId, alias: "del-main", path: "/tmp/del" });
-    createRequirement({ id: "REQ-CB1", project_id: projId, codebase_id: "cb-del", title: "X", spec_md: "" });
+    createWorkspace({ id: "cb-del", project_id: projId, alias: "del-main", path: "/tmp/del" });
+    createRequirement({ id: "REQ-CB1", project_id: projId, workspace_id: "cb-del", title: "X", spec_md: "" });
 
-    // 验证 requirement 持有 codebase_id 引用
+    // 验证 requirement 持有 workspace_id 引用
     let req = getRequirementById("REQ-CB1");
-    expect(req?.codebase_id).toBe("cb-del");
+    expect(req?.workspace_id).toBe("cb-del");
 
-    deleteCodebase("cb-del");
+    deleteWorkspace("cb-del");
 
     // codebase 已删
-    expect(db.query("SELECT COUNT(*) AS n FROM codebases WHERE id = 'cb-del'").get()).toEqual({ n: 0 });
-    // requirement 还在，但 codebase_id 已置 NULL
+    expect(db.query("SELECT COUNT(*) AS n FROM workspaces WHERE id = 'cb-del'").get()).toEqual({ n: 0 });
+    // requirement 还在，但 workspace_id 已置 NULL
     req = getRequirementById("REQ-CB1");
     expect(req).not.toBeNull();
-    expect(req?.codebase_id).toBeNull();
-    // requirement_codebases 关联也清
-    expect(db.query("SELECT COUNT(*) AS n FROM requirement_codebases WHERE codebase_id = 'cb-del'").get()).toEqual({ n: 0 });
+    expect(req?.workspace_id).toBeNull();
+    // requirement_workspaces 关联也清
+    expect(db.query("SELECT COUNT(*) AS n FROM requirement_workspaces WHERE workspace_id = 'cb-del'").get()).toEqual({ n: 0 });
   });
 });

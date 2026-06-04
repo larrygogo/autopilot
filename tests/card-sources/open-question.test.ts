@@ -15,6 +15,7 @@ import { up as m021 } from "../../src/migrations/021-requirement-comments";
 import { up as m012 } from "../../src/migrations/012-spec-revisions";
 import { up as m013 } from "../../src/migrations/013-active-question-id";
 import { up as m014 } from "../../src/migrations/014-resolve-orphan-open-questions";
+import { up as m024 } from "../../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest } from "../../src/core/db";
 import { createProject } from "../../src/core/projects";
 import { createRequirement, setRequirementStatus, setActiveQuestionId } from "../../src/core/requirements";
@@ -23,7 +24,7 @@ import { createOpenQuestionSource } from "../../src/core/card-sources/open-quest
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m019, m021].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m019, m021, m024].forEach(fn => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "P" });
 }

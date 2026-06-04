@@ -12,11 +12,12 @@ import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
+import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import {
   createProject, getProjectById, listProjects,
   updateProject, deleteProject, nextProjectId,
 } from "../src/core/projects";
-import { createCodebase } from "../src/core/codebases";
+import { createWorkspace } from "../src/core/workspaces";
 import { createRequirement } from "../src/core/requirements";
 import { createQuestion } from "../src/core/requirement-questions";
 
@@ -38,6 +39,7 @@ describe("projects CRUD", () => {
     migrate010(sqlite);
     migrate011(sqlite);
     migrate021(sqlite);
+    migrate024(sqlite);
   });
 
   afterAll(() => {
@@ -87,18 +89,18 @@ describe("projects CRUD", () => {
     expect(id2).not.toBe(id1);
   });
 
-  it("deleteProject 级联删 codebases / requirements / questions / replies / feedbacks", async () => {
+  it("deleteProject 级联删 workspaces / requirements / questions / replies / feedbacks", async () => {
     const db = (await import("../src/core/db")).getDb();
 
     createProject({ id: "proj-cascade", name: "Cascade Project" });
-    createCodebase({ id: "cb-c1", project_id: "proj-cascade", alias: "main", path: "/tmp/c1" });
+    createWorkspace({ id: "cb-c1", project_id: "proj-cascade", alias: "main", path: "/tmp/c1" });
     createRequirement({ id: "REQ-CP1", project_id: "proj-cascade", title: "X", spec_md: "" });
     createQuestion({ id: "QST-CP1", requirement_id: "REQ-CP1", agent_text: "Q?" });
 
     deleteProject("proj-cascade");
 
     expect(db.query("SELECT COUNT(*) AS n FROM projects WHERE id = 'proj-cascade'").get()).toEqual({ n: 0 });
-    expect(db.query("SELECT COUNT(*) AS n FROM codebases WHERE project_id = 'proj-cascade'").get()).toEqual({ n: 0 });
+    expect(db.query("SELECT COUNT(*) AS n FROM workspaces WHERE project_id = 'proj-cascade'").get()).toEqual({ n: 0 });
     expect(db.query("SELECT COUNT(*) AS n FROM requirements WHERE project_id = 'proj-cascade'").get()).toEqual({ n: 0 });
     expect(db.query("SELECT COUNT(*) AS n FROM requirement_comments WHERE kind = 'question' AND parent_id IS NULL AND requirement_id = 'REQ-CP1'").get()).toEqual({ n: 0 });
   });

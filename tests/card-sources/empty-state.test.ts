@@ -12,15 +12,16 @@ import { up as m010 } from "../../src/migrations/010-question-suggestions";
 import { up as m011 } from "../../src/migrations/011-now-dismissed-cards";
 import { up as m019 } from "../../src/migrations/019-task-requirement-id";
 import { up as m021 } from "../../src/migrations/021-requirement-comments";
+import { up as m024 } from "../../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest } from "../../src/core/db";
 import { createProject } from "../../src/core/projects";
-import { createCodebase } from "../../src/core/codebases";
+import { createWorkspace } from "../../src/core/workspaces";
 import { createRequirement } from "../../src/core/requirements";
 import { createEmptyStateSource } from "../../src/core/card-sources/empty-state";
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m019, m021].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m019, m021, m024].forEach(fn => fn(db));
   _setDbForTest(db);
 }
 
@@ -34,16 +35,16 @@ describe("CardSource: empty-state", () => {
     expect(cards[0].title).toContain("项目");
   });
 
-  it("有项目无 codebase → 一张'加 codebase'引导卡", async () => {
+  it("有项目无 workspace → 一张'加 workspace'引导卡", async () => {
     createProject({ id: "proj-001", name: "P" });
     const cards = await createEmptyStateSource().scan();
     expect(cards).toHaveLength(1);
-    expect(cards[0].id).toBe("empty-state:no-codebase");
+    expect(cards[0].id).toBe("empty-state:no-workspace");
   });
 
-  it("有项目有 codebase 无需求 → 一张'提需求'引导卡", async () => {
+  it("有项目有 workspace 无需求 → 一张'提需求'引导卡", async () => {
     createProject({ id: "proj-001", name: "P" });
-    createCodebase({ id: "cb-001", project_id: "proj-001", alias: "main", path: "/tmp" });
+    createWorkspace({ id: "cb-001", project_id: "proj-001", alias: "main", path: "/tmp" });
     const cards = await createEmptyStateSource().scan();
     expect(cards).toHaveLength(1);
     expect(cards[0].id).toBe("empty-state:no-requirement");
@@ -51,7 +52,7 @@ describe("CardSource: empty-state", () => {
 
   it("有需求 → 不出引导卡", async () => {
     createProject({ id: "proj-001", name: "P" });
-    createCodebase({ id: "cb-001", project_id: "proj-001", alias: "main", path: "/tmp" });
+    createWorkspace({ id: "cb-001", project_id: "proj-001", alias: "main", path: "/tmp" });
     createRequirement({ id: "REQ-001", project_id: "proj-001", title: "X", spec_md: "" });
     const cards = await createEmptyStateSource().scan();
     expect(cards).toEqual([]);

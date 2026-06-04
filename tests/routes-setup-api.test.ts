@@ -75,14 +75,14 @@ describe("setup.save* RPC", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("setup.saveCodebases 自动建 default project + 写 codebase", async () => {
-    const r = await invokeRpcMethod("setup.saveCodebases", { name: "my-project", path: tmpHome });
+  it("setup.saveWorkspaces 自动建 default project + 写 workspace", async () => {
+    const r = await invokeRpcMethod("setup.saveWorkspaces", { name: "my-project", path: tmpHome });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      const body = r.payload as { codebase: { alias: string; path: string; project_id: string } };
-      expect(body.codebase.alias).toBe("my-project");
-      expect(body.codebase.path).toBe(tmpHome);
-      expect(body.codebase.project_id).toBeTruthy();
+      const body = r.payload as { workspace: { alias: string; path: string; project_id: string } };
+      expect(body.workspace.alias).toBe("my-project");
+      expect(body.workspace.path).toBe(tmpHome);
+      expect(body.workspace.project_id).toBeTruthy();
     }
   });
 

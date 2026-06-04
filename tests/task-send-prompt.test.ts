@@ -21,6 +21,7 @@ import { up as m007 } from "../src/migrations/007-workflows";
 import { up as m008 } from "../src/migrations/008-projects";
 import { up as m009 } from "../src/migrations/009-nullable-codebase";
 import { up as m019 } from "../src/migrations/019-task-requirement-id";
+import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest, createTask, updateTask, appendPendingPrompt, getTask } from "../src/core/db";
 import {
   sendPromptToTask,
@@ -34,7 +35,7 @@ describe("sendPromptToTask 三档分支", () => {
 
   beforeAll(() => {
     db = new Database(":memory:");
-    [m001, m004, m005, m006, m007, m008, m009, m019].forEach((fn) => fn(db));
+    [m001, m004, m005, m006, m007, m008, m009, m019, m024].forEach((fn) => fn(db));
     _setDbForTest(db);
   });
 

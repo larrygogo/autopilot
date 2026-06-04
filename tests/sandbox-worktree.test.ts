@@ -78,7 +78,7 @@ console.log(JSON.stringify({ ws, exists: existsSync(ws), hasGit: existsSync(ws +
     expect(r.exists).toBe(true);
     expect(r.hasGit).toBe(true); // worktree 子目录有 .git 文件指向主 repo
     expect(r.meta).not.toBeNull();
-    expect(r.meta.codebase_id).toBe("cb-1");
+    expect(r.meta.workspace_id).toBe("cb-1");
     expect(r.meta.branch).toBe("autopilot/t-wt-1");
     expect(r.meta.base).toBe("main");
   });

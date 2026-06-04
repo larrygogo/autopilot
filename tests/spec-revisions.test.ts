@@ -13,12 +13,13 @@ import { up as m011 } from "../src/migrations/011-now-dismissed-cards";
 import { up as m012 } from "../src/migrations/012-spec-revisions";
 import { up as m013 } from "../src/migrations/013-active-question-id";
 import { up as m014 } from "../src/migrations/014-resolve-orphan-open-questions";
+import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest } from "../src/core/db";
 import { createSpecRevision, listSpecRevisionsByRequirement } from "../src/core/spec-revisions";
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m024].forEach(fn => fn(db));
   _setDbForTest(db);
   db.run("INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', 'P', 0, 0)");
   db.run("INSERT INTO requirements (id, project_id, title, status, spec_md, created_at, updated_at) VALUES ('r1', 'p1', 'T', 'clarifying', '', 0, 0)");

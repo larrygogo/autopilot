@@ -3,8 +3,8 @@
  * 客户 onboarding 烟雾测试。
  *
  * 跑客户从 git clone 到能用的完整 CLI 路径：
- *   init → 数据库表全部存在 → project create → codebase create →
- *   project list 验证 → codebase list 验证 → doctor → daemon status（daemon 不跑应报错）
+ *   init → 数据库表全部存在 → project create → workspace create →
+ *   project list 验证 → workspace list 验证 → doctor → daemon status（daemon 不跑应报错）
  *
  * 用 tmpdir 隔离 AUTOPILOT_HOME，跑完清理。任何一步失败立即退出非 0。
  *
@@ -99,14 +99,14 @@ async function main(): Promise<void> {
       .query("SELECT name FROM sqlite_master WHERE type='table'")
       .all() as { name: string }[];
     const names = new Set(tables.map((t) => t.name));
-    for (const required of ["projects", "codebases", "requirements", "workflows", "schedules"]) {
+    for (const required of ["projects", "workspaces", "requirements", "workflows", "schedules"]) {
       if (!names.has(required)) {
         console.error(`  ✗ 表 ${required} 不存在`);
         cleanup();
         process.exit(1);
       }
     }
-    console.log(`  ✓ projects / codebases / requirements / workflows / schedules 全存在`);
+    console.log(`  ✓ projects / workspaces / requirements / workflows / schedules 全存在`);
   } finally {
     db.close();
   }
@@ -175,19 +175,19 @@ async function main(): Promise<void> {
   }
 
   // ────────────────────────────────────────────────
-  step("autopilot codebase --help —— 命令完整（bug 21）");
+  step("autopilot workspace --help —— 命令完整（bug 21）");
   // ────────────────────────────────────────────────
-  const cHelpR = runCli(["codebase", "--help"]);
+  const cHelpR = runCli(["workspace", "--help"]);
   for (const sub of ["list", "create", "delete", "health"]) {
-    assertContains(cHelpR.stdout, sub, `codebase ${sub} 子命令注册`);
+    assertContains(cHelpR.stdout, sub, `workspace ${sub} 子命令注册`);
   }
 
   // ────────────────────────────────────────────────
-  step("autopilot codebase create —— path 不存在时本地校验 exit 2");
+  step("autopilot workspace create —— path 不存在时本地校验 exit 2");
   // ────────────────────────────────────────────────
   const fakePath = join(tmpdir(), `nonexistent-${Date.now()}`);
-  const cFakeR = runCli(["codebase", "create", "myrepo", fakePath, "--port", "19999"], 2);
-  assertContains(cFakeR.stderr, "path 不存在", "codebase create 报 path 错误");
+  const cFakeR = runCli(["workspace", "create", "myrepo", fakePath, "--port", "19999"], 2);
+  assertContains(cFakeR.stderr, "path 不存在", "workspace create 报 path 错误");
 
   // ────────────────────────────────────────────────
   step("autopilot req new --help —— 无 daemon 也能看 help");
@@ -228,7 +228,7 @@ async function main(): Promise<void> {
   step("autopilot run --help —— ad-hoc 命令完整（Phase 4 spec §3.7）");
   // ────────────────────────────────────────────────
   const runHelpR = runCli(["run", "--help"]);
-  for (const opt of ["--codebase", "--workflow", "--no-follow"]) {
+  for (const opt of ["--workspace", "--workflow", "--no-follow"]) {
     assertContains(runHelpR.stdout, opt, `run ${opt} 选项注册`);
   }
 

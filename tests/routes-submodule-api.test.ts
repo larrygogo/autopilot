@@ -7,8 +7,9 @@ import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
+import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest } from "../src/core/db";
-import { createCodebase } from "../src/core/codebases";
+import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 import { createRequirement, nextRequirementId } from "../src/core/requirements";
 import { appendSubPr } from "../src/core/requirement-sub-prs";
@@ -27,29 +28,30 @@ describe("submodule + sub-pr 查询 RPC", () => {
     migrate007(db);
     migrate008(db);
     migrate021(db);
+    migrate024(db);
     _setDbForTest(db);
     registerCoreRpcMethods();
 
     createProject({ id: "proj-001", name: "test-proj" });
-    createCodebase({ id: "cb-p1", project_id: "proj-001", alias: "parent1", path: "/tmp/p1", default_branch: "main" });
-    createCodebase({
+    createWorkspace({ id: "cb-p1", project_id: "proj-001", alias: "parent1", path: "/tmp/p1", default_branch: "main" });
+    createWorkspace({
       id: "cb-c1",
       project_id: "proj-001",
       alias: "child1",
       path: "/tmp/p1/child1",
       default_branch: "main",
-      parent_codebase_id: "cb-p1",
+      parent_workspace_id: "cb-p1",
       submodule_path: "child1",
       github_owner: "owner",
       github_repo: "child1-repo",
     });
-    createCodebase({
+    createWorkspace({
       id: "cb-c2",
       project_id: "proj-001",
       alias: "child2",
       path: "/tmp/p1/child2",
       default_branch: "master",
-      parent_codebase_id: "cb-p1",
+      parent_workspace_id: "cb-p1",
       submodule_path: "child2",
     });
   });
@@ -65,8 +67,8 @@ describe("submodule + sub-pr 查询 RPC", () => {
     db.run("DELETE FROM requirements");
   });
 
-  it("codebases.listSubmodules 返回父 codebase 的所有子模块", async () => {
-    const r = await invokeRpcMethod("codebases.listSubmodules", { id: "cb-p1" });
+  it("workspaces.listSubmodules 返回父 codebase 的所有子模块", async () => {
+    const r = await invokeRpcMethod("workspaces.listSubmodules", { id: "cb-p1" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       const body = r.payload as { submodules: Array<{ id: string; alias: string }> };
@@ -75,8 +77,8 @@ describe("submodule + sub-pr 查询 RPC", () => {
     }
   });
 
-  it("codebases.listSubmodules 子模块 id 自身 → 返回空（非父 codebase）", async () => {
-    const r = await invokeRpcMethod("codebases.listSubmodules", { id: "cb-c1" });
+  it("workspaces.listSubmodules 子模块 id 自身 → 返回空（非父 codebase）", async () => {
+    const r = await invokeRpcMethod("workspaces.listSubmodules", { id: "cb-c1" });
     expect(r.ok).toBe(true);
     if (r.ok) {
       const body = r.payload as { submodules: unknown[] };
@@ -84,24 +86,24 @@ describe("submodule + sub-pr 查询 RPC", () => {
     }
   });
 
-  it("codebases.listSubmodules 不存在的 codebase → NOT_FOUND", async () => {
-    const r = await invokeRpcMethod("codebases.listSubmodules", { id: "no-such" });
+  it("workspaces.listSubmodules 不存在的 codebase → NOT_FOUND", async () => {
+    const r = await invokeRpcMethod("workspaces.listSubmodules", { id: "no-such" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("NOT_FOUND");
   });
 
   it("requirements.subPrs 返回该需求的所有子模块 PR", async () => {
     const reqId = nextRequirementId();
-    createRequirement({ id: reqId, project_id: "proj-001", codebase_id: "cb-p1", title: "T" });
+    createRequirement({ id: reqId, project_id: "proj-001", workspace_id: "cb-p1", title: "T" });
     appendSubPr({
       requirement_id: reqId,
-      child_repo_id: "cb-c1",
+      child_workspace_id: "cb-c1",
       pr_url: "https://github.com/owner/child1-repo/pull/10",
       pr_number: 10,
     });
     appendSubPr({
       requirement_id: reqId,
-      child_repo_id: "cb-c2",
+      child_workspace_id: "cb-c2",
       pr_url: "https://github.com/owner/child2-repo/pull/20",
       pr_number: 20,
     });
@@ -110,7 +112,7 @@ describe("submodule + sub-pr 查询 RPC", () => {
     expect(r.ok).toBe(true);
     if (r.ok) {
       const body = r.payload as {
-        sub_prs: Array<{ child_repo_id: string; pr_number: number; pr_url: string }>;
+        sub_prs: Array<{ child_workspace_id: string; pr_number: number; pr_url: string }>;
       };
       expect(body.sub_prs.length).toBe(2);
       expect(body.sub_prs.map((p) => p.pr_number).sort()).toEqual([10, 20]);

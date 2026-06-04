@@ -10,8 +10,9 @@ import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
+import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest, initDb } from "../src/core/db";
-import { createCodebase } from "../src/core/codebases";
+import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 import {
   createRequirement,
@@ -42,6 +43,7 @@ describe("migration 005-requirements（pre-008 schema 验证）", () => {
     migrate004(db);
     migrate005(db);
     migrate006(db);
+    migrate024(db);
 
     const cols = db.query<{ name: string }, []>("PRAGMA table_info(requirements)").all();
     const names = cols.map(c => c.name).sort();
@@ -68,6 +70,7 @@ describe("migration 005-requirements（pre-008 schema 验证）", () => {
     migrate004(db);
     migrate005(db);
     migrate006(db);
+    migrate024(db);
 
     const cols = db.query<{ name: string }, []>("PRAGMA table_info(requirement_feedbacks)").all();
     const names = cols.map(c => c.name).sort();
@@ -88,6 +91,7 @@ describe("migration 005-requirements（pre-008 schema 验证）", () => {
     migrate004(db);
     migrate005(db);
     migrate006(db);
+    migrate024(db);
     db.exec("PRAGMA foreign_keys = ON;");
     expect(() => {
       db.run(
@@ -104,6 +108,7 @@ describe("migration 005-requirements（pre-008 schema 验证）", () => {
     migrate004(db);
     migrate005(db);
     migrate006(db);
+    migrate024(db);
     const idxs = db
       .query<{ name: string }, []>(
         "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name IN ('requirements','requirement_feedbacks')"
@@ -127,7 +132,7 @@ describe("requirements CRUD + 状态机", () => {
     _setDbForTest(testDb);
     // initDb 执行 PRAGMA + tasks/task_logs 表建立
     initDb();
-    // 执行各迁移，确保 codebases / requirements 表存在
+    // 执行各迁移，确保 workspaces / requirements 表存在
     migrate001(testDb);
     migrate002(testDb);
     migrate004(testDb);
@@ -138,9 +143,10 @@ describe("requirements CRUD + 状态机", () => {
     migrate009(testDb);
     migrate010(testDb);
     migrate021(testDb);
+    migrate024(testDb);
     // 准备关联的 project + codebase 记录
     createProject({ id: "proj-001", name: "test-proj" });
-    createCodebase({ id: "cb-001", project_id: "proj-001", alias: "test", path: "/tmp/x", default_branch: "main" });
+    createWorkspace({ id: "cb-001", project_id: "proj-001", alias: "test", path: "/tmp/x", default_branch: "main" });
   });
 
   afterAll(() => {
@@ -149,7 +155,7 @@ describe("requirements CRUD + 状态机", () => {
   });
 
   it("createRequirement + getById 默认 status=drafting + created_at 是 number", () => {
-    createRequirement({ id: "req-001", project_id: "proj-001", codebase_id: "cb-001", title: "hello" });
+    createRequirement({ id: "req-001", project_id: "proj-001", workspace_id: "cb-001", title: "hello" });
     const r = getRequirementById("req-001");
     expect(r?.status).toBe("drafting");
     expect(typeof r?.created_at).toBe("number");
@@ -157,11 +163,11 @@ describe("requirements CRUD + 状态机", () => {
   });
 
   it("listRequirements 按 created_at 升序 + 过滤", () => {
-    createRequirement({ id: "req-002", project_id: "proj-001", codebase_id: "cb-001", title: "second" });
-    const all = listRequirements({ codebase_id: "cb-001" });
+    createRequirement({ id: "req-002", project_id: "proj-001", workspace_id: "cb-001", title: "second" });
+    const all = listRequirements({ workspace_id: "cb-001" });
     expect(all.length).toBeGreaterThanOrEqual(2);
     expect(all[0].id).toBe("req-001");
-    const drafts = listRequirements({ codebase_id: "cb-001", status: "drafting" });
+    const drafts = listRequirements({ workspace_id: "cb-001", status: "drafting" });
     expect(drafts.every(r => r.status === "drafting")).toBe(true);
   });
 
@@ -289,6 +295,7 @@ describe("requirements 适配 project + codebase（P1 Task 14）", () => {
     migrate006(testDb);
     migrate007(testDb);
     migrate008(testDb);
+    migrate024(testDb);
   });
 
   afterAll(() => {
@@ -296,17 +303,17 @@ describe("requirements 适配 project + codebase（P1 Task 14）", () => {
     testDb.close();
   });
 
-  it("Requirement 类型有 project_id 和 codebase_id（不再有 repo_id）", () => {
+  it("Requirement 类型有 project_id 和 workspace_id（不再有 repo_id）", () => {
     const proj = createProject({ id: "proj-rt1", name: "rt" });
-    const cb = createCodebase({ id: "cb-rt1", project_id: proj.id, alias: "rt", path: "/p" });
+    const cb = createWorkspace({ id: "cb-rt1", project_id: proj.id, alias: "rt", path: "/p" });
     const req = createRequirement({
       id: "req-rt1",
       project_id: proj.id,
-      codebase_id: cb.id,
+      workspace_id: cb.id,
       title: "t",
     });
     expect(req.project_id).toBe(proj.id);
-    expect(req.codebase_id).toBe(cb.id);
+    expect(req.workspace_id).toBe(cb.id);
     expect((req as unknown as { repo_id?: unknown }).repo_id).toBeUndefined();
   });
 
@@ -316,28 +323,28 @@ describe("requirements 适配 project + codebase（P1 Task 14）", () => {
     expect(list.every((r) => r.project_id === "proj-rt1")).toBe(true);
   });
 
-  it("createRequirement 自动写 requirement_codebases 关联", () => {
+  it("createRequirement 自动写 requirement_workspaces 关联", () => {
     const proj = createProject({ id: "proj-rt2", name: "rt2" });
-    const cb = createCodebase({ id: "cb-rt2", project_id: proj.id, alias: "rt2", path: "/p2" });
-    createRequirement({ id: "req-rt2", project_id: proj.id, codebase_id: cb.id, title: "t2" });
+    const cb = createWorkspace({ id: "cb-rt2", project_id: proj.id, alias: "rt2", path: "/p2" });
+    createRequirement({ id: "req-rt2", project_id: proj.id, workspace_id: cb.id, title: "t2" });
 
     const links = testDb
-      .query<{ requirement_id: string; codebase_id: string }, []>(
-        "SELECT requirement_id, codebase_id FROM requirement_codebases WHERE requirement_id = 'req-rt2'",
+      .query<{ requirement_id: string; workspace_id: string }, []>(
+        "SELECT requirement_id, workspace_id FROM requirement_workspaces WHERE requirement_id = 'req-rt2'",
       )
       .all();
-    expect(links).toEqual([{ requirement_id: "req-rt2", codebase_id: cb.id }]);
+    expect(links).toEqual([{ requirement_id: "req-rt2", workspace_id: cb.id }]);
   });
 
-  // P1 阶段 schema 仍保留 codebase_id NOT NULL（migration 008 §7 注释说明 P4 才表重建去掉 NOT NULL）；
+  // P1 阶段 schema 仍保留 workspace_id NOT NULL（migration 008 §7 注释说明 P4 才表重建去掉 NOT NULL）；
   // 接口 TS 类型允许 null，但当前实际写入 null 会被 SQLite 拒绝。这里用接口校验代替 DB 写入。
-  it("CreateRequirementOpts.codebase_id 可选（spec §5.1 NULLable，schema P4 落地）", () => {
+  it("CreateRequirementOpts.workspace_id 可选（spec §5.1 NULLable，schema P4 落地）", () => {
     const opts: import("../src/core/requirements").CreateRequirementOpts = {
       id: "req-rt3",
       project_id: "proj-rt3",
       title: "t3",
     };
-    expect(opts.codebase_id).toBeUndefined();
+    expect(opts.workspace_id).toBeUndefined();
   });
 
   it("listRequirements 支持按 project_id 过滤", () => {
@@ -364,6 +371,7 @@ describe("deleteRequirement 级联删除", () => {
     migrate009(testDb);
     migrate010(testDb);
     migrate021(testDb);
+    migrate024(testDb);
   });
 
   afterAll(() => {

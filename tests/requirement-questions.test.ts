@@ -11,8 +11,9 @@ import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
+import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { createProject } from "../src/core/projects";
-import { createCodebase } from "../src/core/codebases";
+import { createWorkspace } from "../src/core/workspaces";
 import { createRequirement } from "../src/core/requirements";
 import {
   createQuestion, addReply, resolveQuestion,
@@ -31,10 +32,11 @@ describe("requirement-questions 评论线程", () => {
     migrate005(sqlite); migrate006(sqlite); migrate007(sqlite); migrate008(sqlite);
     migrate009(sqlite); migrate010(sqlite);
     migrate021(sqlite);
+    migrate024(sqlite);
 
     const p = createProject({ id: "proj-q", name: "q" });
-    const c = createCodebase({ id: "cb-q", project_id: p.id, alias: "q", path: "/q" });
-    const r = createRequirement({ id: "req-q", project_id: p.id, codebase_id: c.id, title: "qt" });
+    const c = createWorkspace({ id: "cb-q", project_id: p.id, alias: "q", path: "/q" });
+    const r = createRequirement({ id: "req-q", project_id: p.id, workspace_id: c.id, title: "qt" });
     reqId = r.id;
   });
 

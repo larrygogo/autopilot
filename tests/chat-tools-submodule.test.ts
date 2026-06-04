@@ -7,8 +7,9 @@ import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
+import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest } from "../src/core/db";
-import { createCodebase } from "../src/core/codebases";
+import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 import { buildAutopilotTools } from "../src/agents/tools";
 
@@ -24,17 +25,18 @@ describe("chat tool create_requirement_draft 子模块校验", () => {
     migrate007(db);
     migrate008(db);
     migrate021(db);
+    migrate024(db);
     _setDbForTest(db);
 
     createProject({ id: "proj-001", name: "test-proj" });
-    createCodebase({ id: "cb-p1", project_id: "proj-001", alias: "parent1", path: "/tmp/p1", default_branch: "main" });
-    createCodebase({
+    createWorkspace({ id: "cb-p1", project_id: "proj-001", alias: "parent1", path: "/tmp/p1", default_branch: "main" });
+    createWorkspace({
       id: "cb-c1",
       project_id: "proj-001",
       alias: "child1",
       path: "/tmp/p1/child1",
       default_branch: "main",
-      parent_codebase_id: "cb-p1",
+      parent_workspace_id: "cb-p1",
       submodule_path: "child1",
     });
   });

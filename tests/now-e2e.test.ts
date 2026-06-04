@@ -10,6 +10,7 @@ import { up as m008 } from "../src/migrations/008-projects";
 import { up as m009 } from "../src/migrations/009-nullable-codebase";
 import { up as m010 } from "../src/migrations/010-question-suggestions";
 import { up as m011 } from "../src/migrations/011-now-dismissed-cards";
+import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createRequirement, setRequirementStatus } from "../src/core/requirements";
@@ -24,7 +25,7 @@ describe("/now e2e smoke (RPC)", () => {
 
   beforeAll(async () => {
     const db = new Database(":memory:");
-    [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011].forEach(fn => fn(db));
+    [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m024].forEach(fn => fn(db));
     _setDbForTest(db);
     registerCoreRpcMethods();
     createProject({ id: "proj-001", name: "P" });
