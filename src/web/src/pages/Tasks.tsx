@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, Hand, AlertCircle, CheckCircle2, XCircle, Clock, Search, X, FileText, List } from "lucide-react";
+import { Loader2, Hand, Search, X, List, Archive } from "lucide-react";
 import { api, type Requirement } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,6 @@ interface Task {
   workflow: string;
   status: string;
   requirement_id?: string | null;
-  /** task.requirement 字段（extra 里的需求描述文本，不是 id） */
   requirement?: string;
   created_at: string;
   updated_at: string;
@@ -27,24 +26,28 @@ interface Task {
 /**
  * 流水线 — 一条工作从「需求」到「任务」的全生命周期全景视图。
  *
- * 前三段是需求阶段（草稿 / 调查中 / 待审批），审批通过后衍生任务，
- * 后六段是任务阶段（进行中 / 等待人工 / 失败 / 待执行 / 完成 / 取消）。
+ * 状态简化为 4 段（按"球在谁那边"）：
+ *  - 全部
+ *  - 等待人工：草稿/待审批(需求) + 任务等待人工 + 失败需关注（需要你介入）
+ *  - 运行中：调查中(需求) + 进行中/待执行(任务)（AI 自动推进）
+ *  - 归档：已完成/已取消
  * Now 仍独立留给"需要你拍板"的决策收件箱，本页是"所有在途工作"的全景。
  */
-interface Group {
-  key: string;
-  label: string;
-  icon: typeof Loader2;
-  iconClass: string;
-  borderClass: string;
-  /** 需求阶段还是任务阶段 —— 决定行渲染方式 */
-  kind: "req" | "task";
-  reqs?: Requirement[];
-  tasks?: Task[];
-}
 
-/** 终态组（done/cancelled）默认截断条数，超过时显示「看全部 N 条」按钮 */
-const TERMINAL_PREVIEW_LIMIT = 20;
+// 行左侧色条：按各自状态着色（桶内混排，每行表达自己的状态）
+function taskBar(status: string): string {
+  if (status.startsWith("running_")) return "border-l-accent";
+  if (status.startsWith("awaiting_")) return "border-l-warning";
+  if (status === "failed" || status.startsWith("failed_")) return "border-l-destructive";
+  if (status.startsWith("pending_")) return "border-l-foreground/40";
+  if (status === "done") return "border-l-success";
+  return "border-l-foreground/30"; // cancelled / 其它
+}
+function reqBar(status: string): string {
+  if (status === "investigating") return "border-l-info";
+  if (status === "awaiting_approval") return "border-l-warning";
+  return "border-l-foreground/30"; // draft
+}
 
 // ──────────── 列表内按时间分组（今天 / 昨天 / 一周内 / 一月内 / 更早） ────────────
 type TimeBucket = "today" | "yesterday" | "week" | "month" | "earlier";
@@ -75,7 +78,7 @@ function bucketOf(ms: number, now: number): TimeBucket {
 
 interface TimedRow { key: string; ts: number; node: ReactNode; }
 
-/** 把已按时间倒序的行列表分桶渲染（带时段小标题）。 */
+/** 把行列表分桶渲染（带时段小标题）。入参应已按时间倒序。 */
 function TimeGroupedList({ rows, now }: { rows: TimedRow[]; now: number }) {
   const byBucket = new Map<TimeBucket, TimedRow[]>();
   for (const r of rows) {
@@ -105,19 +108,24 @@ function TimeGroupedList({ rows, now }: { rows: TimedRow[]; now: number }) {
   );
 }
 
+interface PipelineTab {
+  key: string;
+  label: string;
+  icon: typeof Loader2;
+  iconClass: string;
+  reqs: Requirement[];
+  tasks: Task[];
+}
+
 export function Tasks() {
   const { subscribe } = useWebSocket();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // P0 断点修复：用过一段时间后任务积累到几十条，搜不到 / 筛不动。
-  // 全量本地过滤即可（数量 <几百 时 perf 完全够），不上后端。
   const [searchQuery, setSearchQuery] = useState("");
   const [workflowFilter, setWorkflowFilter] = useState<string | null>(null);
-  /** 终态组（done/cancelled）独立的"展开全部"开关 */
-  const [expandedTerminal, setExpandedTerminal] = useState<Record<string, boolean>>({});
-  /** 当前激活的状态 tab（默认「全部」总览） */
+  /** 当前激活的 tab（默认「全部」总览） */
   const [tab, setTab] = useState<string>("all");
 
   const refresh = () => {
@@ -133,21 +141,19 @@ export function Tasks() {
   };
   useEffect(() => { refresh(); }, []);
 
-  // WS：task:* 与 requirement:* 变化（创建 / 更新 / transition / 删除）自动 refetch
+  // WS：task:* 与 requirement:* 变化自动 refetch
   useEffect(() => {
     const unsubT = subscribe("task:*", () => refresh());
     const unsubR = subscribe("requirement:*", () => refresh());
     return () => { unsubT(); unsubR(); };
   }, [subscribe]);
 
-  // distinct workflow 列表（用于 chip 筛选）— 来自当前 tasks
   const allWorkflows = useMemo(() => {
     const set = new Set<string>();
     for (const t of tasks) if (t.workflow) set.add(t.workflow);
     return [...set].sort();
   }, [tasks]);
 
-  // search + workflow chip 过滤后的任务集
   const filteredTasks = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q && !workflowFilter) return tasks;
@@ -163,10 +169,9 @@ export function Tasks() {
     });
   }, [tasks, searchQuery, workflowFilter]);
 
-  // 需求只按搜索过滤（workflow chip 不适用于需求）
+  // 需求只按搜索过滤；workflow chip 激活时聚焦任务视角，隐藏需求段
   const filteredRequirements = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    // workflow 筛选激活时，用户聚焦任务视角 —— 需求段隐藏，避免干扰
     if (workflowFilter) return [];
     if (!q) return requirements;
     return requirements.filter((r) =>
@@ -174,68 +179,42 @@ export function Tasks() {
     );
   }, [requirements, searchQuery, workflowFilter]);
 
-  const groups = useMemo<Group[]>(() => {
-    // ── 需求阶段（前置） ──
-    const draft: Requirement[] = [];
-    const investigating: Requirement[] = [];
-    const awaitingApproval: Requirement[] = [];
+  // 4 段分类：等待人工 / 运行中 / 归档（需求只显示 draft/investigating/awaiting_approval 前置阶段）
+  const tabs = useMemo<PipelineTab[]>(() => {
+    const reqHuman: Requirement[] = [];
+    const reqRunning: Requirement[] = [];
     for (const r of filteredRequirements) {
-      if (r.status === "draft") draft.push(r);
-      else if (r.status === "investigating") investigating.push(r);
-      else if (r.status === "awaiting_approval") awaitingApproval.push(r);
+      if (r.status === "draft" || r.status === "awaiting_approval") reqHuman.push(r);
+      else if (r.status === "investigating") reqRunning.push(r);
     }
-    const sortReq = (arr: Requirement[]) => arr.sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
-
-    // ── 任务阶段 ──
-    const running: Task[] = [];
-    const awaiting: Task[] = [];
-    const failed: Task[] = [];
-    const pending: Task[] = [];
-    const done: Task[] = [];
-    const cancelled: Task[] = [];
+    const taskHuman: Task[] = [];
+    const taskRunning: Task[] = [];
+    const archived: Task[] = [];
     for (const t of filteredTasks) {
       const s = t.status;
-      if (s.startsWith("running_")) running.push(t);
-      else if (s.startsWith("awaiting_")) awaiting.push(t);
-      else if (s === "failed" || s.startsWith("failed_")) failed.push(t);
-      else if (s.startsWith("pending_")) pending.push(t);
-      else if (s === "done") done.push(t);
-      else if (s === "cancelled" || s === "canceled") cancelled.push(t);
+      if (s.startsWith("awaiting_") || s === "failed" || s.startsWith("failed_")) taskHuman.push(t);
+      else if (s.startsWith("running_") || s.startsWith("pending_")) taskRunning.push(t);
+      else if (s === "done" || s === "cancelled" || s === "canceled") archived.push(t);
     }
-    const sortDesc = (arr: Task[]) =>
-      arr.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
-    // 终态组（done/cancelled）：默认 slice(0, 20)，展开后给完整列表；活跃组不截断
-    const sliceTerminal = (key: string, arr: Task[]) =>
-      expandedTerminal[key] ? sortDesc(arr) : sortDesc(arr).slice(0, TERMINAL_PREVIEW_LIMIT);
-
     return [
-      { key: "draft", label: "草稿", icon: FileText, iconClass: "text-muted-foreground", borderClass: "border-l-foreground/30", kind: "req", reqs: sortReq(draft) },
-      { key: "investigating", label: "调查中", icon: Search, iconClass: "text-info", borderClass: "border-l-info", kind: "req", reqs: sortReq(investigating) },
-      { key: "awaiting_approval", label: "待审批", icon: Hand, iconClass: "text-warning", borderClass: "border-l-warning", kind: "req", reqs: sortReq(awaitingApproval) },
-      { key: "running", label: "进行中", icon: Loader2, iconClass: "text-accent animate-spin", borderClass: "border-l-accent", kind: "task", tasks: sortDesc(running) },
-      { key: "awaiting", label: "等待人工", icon: Hand, iconClass: "text-warning", borderClass: "border-l-warning", kind: "task", tasks: sortDesc(awaiting) },
-      { key: "failed", label: "失败需关注", icon: AlertCircle, iconClass: "text-destructive", borderClass: "border-l-destructive", kind: "task", tasks: sortDesc(failed) },
-      { key: "pending", label: "待执行", icon: Clock, iconClass: "text-muted-foreground", borderClass: "border-l-foreground/40", kind: "task", tasks: sortDesc(pending) },
-      { key: "done", label: "已完成", icon: CheckCircle2, iconClass: "text-success", borderClass: "border-l-success", kind: "task", tasks: sliceTerminal("done", done) },
-      { key: "cancelled", label: "已取消", icon: XCircle, iconClass: "text-muted-foreground", borderClass: "border-l-foreground/30", kind: "task", tasks: sliceTerminal("cancelled", cancelled) },
+      { key: "human", label: "等待人工", icon: Hand, iconClass: "text-warning", reqs: reqHuman, tasks: taskHuman },
+      { key: "running", label: "运行中", icon: Loader2, iconClass: "text-accent", reqs: reqRunning, tasks: taskRunning },
+      { key: "archived", label: "归档", icon: Archive, iconClass: "text-muted-foreground", reqs: [], tasks: archived },
     ];
-  }, [filteredRequirements, filteredTasks, expandedTerminal]);
-
-  // 各终态任务组的总数（不经截断），用于「看全部 N 条」按钮
-  const terminalTotalCount = useMemo(() => {
-    const out: Record<string, number> = { done: 0, cancelled: 0 };
-    for (const t of filteredTasks) {
-      if (t.status === "done") out.done += 1;
-      else if (t.status === "cancelled" || t.status === "canceled") out.cancelled += 1;
-    }
-    return out;
-  }, [filteredTasks]);
-
-  /** 某组的计数（需求组取 reqs 长度；任务终态组取未截断总数） */
-  const groupCount = (g: Group) =>
-    g.kind === "req" ? (g.reqs?.length ?? 0) : (terminalTotalCount[g.key] ?? g.tasks?.length ?? 0);
+  }, [filteredRequirements, filteredTasks]);
 
   const now = Date.now();
+
+  /** 把一个 tab 的需求+任务合成按时间倒序的行列表 */
+  const rowsOf = (t: PipelineTab): TimedRow[] =>
+    [
+      ...t.reqs.map((r) => ({ key: `r-${r.id}`, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} borderClass={reqBar(r.status)} /> })),
+      ...t.tasks.map((tk) => ({ key: `t-${tk.id}`, ts: tsToMs(tk.updated_at), node: <TaskRow task={tk} borderClass={taskBar(tk.status)} /> })),
+    ].sort((a, b) => b.ts - a.ts);
+
+  const allRows = useMemo(() => tabs.flatMap(rowsOf).sort((a, b) => b.ts - a.ts), [tabs]);
+  const tabCount = (t: PipelineTab) => t.reqs.length + t.tasks.length;
+
   const hasAny = tasks.length > 0 || requirements.length > 0;
   const filteredAny = filteredTasks.length > 0 || filteredRequirements.length > 0;
   const filterActive = !!searchQuery.trim() || !!workflowFilter;
@@ -257,7 +236,7 @@ export function Tasks() {
         ]}
       />
 
-      {/* 工具栏：搜索框 + workflow chip 过滤 — 只在有数据时显示 */}
+      {/* 工具栏：搜索框 + workflow chip 过滤 */}
       {hasAny && (
         <div className="mt-4 space-y-2">
           <div className="flex items-center gap-2">
@@ -282,21 +261,14 @@ export function Tasks() {
               )}
             </div>
             {filterActive && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearFilters}
-                className="rounded-md font-mono text-[10px] "
-              >
+              <Button variant="ghost" size="sm" onClick={clearFilters} className="rounded-md font-mono text-[10px] ">
                 清除筛选
               </Button>
             )}
           </div>
           {allWorkflows.length > 1 && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="font-mono text-[10px] text-muted-foreground">
-                工作流
-              </span>
+              <span className="font-mono text-[10px] text-muted-foreground">工作流</span>
               {allWorkflows.map((w) => {
                 const active = workflowFilter === w;
                 return (
@@ -322,9 +294,7 @@ export function Tasks() {
 
       {error && (
         <Card className="mb-4 border-l-4 border-l-destructive px-4 py-3">
-          <p className="font-mono text-[10px] text-destructive mb-1">
-            ERROR
-          </p>
+          <p className="font-mono text-[10px] text-destructive mb-1">ERROR</p>
           <p className="text-sm">{error}</p>
         </Card>
       )}
@@ -345,89 +315,53 @@ export function Tasks() {
         </div>
       )}
 
-      {/* 有数据但过滤后空 — 引导清除筛选 */}
       {!loading && !error && hasAny && !filteredAny && (
         <div className="mt-12 flex flex-col items-center text-muted-foreground">
           <p className="text-lg font-medium">没匹配的结果</p>
-          <p className="mt-1 font-mono text-xs ">
-            当前筛选条件下没有需求或任务
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={clearFilters}
-            className="mt-3 rounded-md font-mono text-[10px] "
-          >
+          <p className="mt-1 font-mono text-xs ">当前筛选条件下没有需求或任务</p>
+          <Button variant="outline" size="sm" onClick={clearFilters} className="mt-3 rounded-md font-mono text-[10px] ">
             清除筛选
           </Button>
         </div>
       )}
 
-      {/* 流水线：需求阶段 + 任务阶段 tab 分类，每类下整行列表 */}
+      {/* 流水线：全部 + 等待人工 / 运行中 / 归档，列表内按时间分时段 */}
       {!loading && !error && filteredAny && (
         <Tabs value={tab} onValueChange={setTab} className="mt-6">
           <TabsList className="w-full justify-start overflow-x-auto overflow-y-hidden">
             <TabsTrigger value="all" className="gap-1.5">
               <List className="h-3.5 w-3.5 text-foreground/70" />
               全部
-              <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
-                {groups.reduce((n, g) => n + groupCount(g), 0)}
-              </span>
+              <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{allRows.length}</span>
             </TabsTrigger>
-            {groups.map((g) => {
-              const Icon = g.icon;
+            {tabs.map((t) => {
+              const Icon = t.icon;
               return (
-                <TabsTrigger key={g.key} value={g.key} className="gap-1.5">
-                  <Icon className={cn("h-3.5 w-3.5", g.iconClass)} />
-                  {g.label}
-                  <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
-                    {groupCount(g)}
-                  </span>
+                <TabsTrigger key={t.key} value={t.key} className="gap-1.5">
+                  <Icon className={cn("h-3.5 w-3.5", t.iconClass)} />
+                  {t.label}
+                  <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{tabCount(t)}</span>
                 </TabsTrigger>
               );
             })}
           </TabsList>
 
-          {/* 全部：所有需求 + 任务，按时间倒序后分时段 */}
           <TabsContent value="all">
-            {(() => {
-              const rows: TimedRow[] = groups
-                .flatMap((g) =>
-                  g.kind === "req"
-                    ? (g.reqs ?? []).map((r) => ({ key: `r-${r.id}`, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} borderClass={g.borderClass} /> }))
-                    : (g.tasks ?? []).map((t) => ({ key: `t-${t.id}`, ts: tsToMs(t.updated_at), node: <TaskRow task={t} borderClass={g.borderClass} /> })),
-                )
-                .sort((a, b) => b.ts - a.ts);
-              return rows.length > 0 ? (
-                <TimeGroupedList rows={rows} now={now} />
-              ) : (
-                <p className="py-10 text-center font-mono text-[11px] text-muted-foreground">流水线暂无内容</p>
-              );
-            })()}
+            {allRows.length > 0 ? (
+              <TimeGroupedList rows={allRows} now={now} />
+            ) : (
+              <p className="py-10 text-center font-mono text-[11px] text-muted-foreground">流水线暂无内容</p>
+            )}
           </TabsContent>
-          {groups.map((g) => {
-            const total = terminalTotalCount[g.key];
-            const truncated = (g.key === "done" || g.key === "cancelled") && typeof total === "number" && total > (g.tasks?.length ?? 0);
-            const rows: TimedRow[] = g.kind === "req"
-              ? (g.reqs ?? []).map((r) => ({ key: `r-${r.id}`, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} borderClass={g.borderClass} /> }))
-              : (g.tasks ?? []).map((t) => ({ key: `t-${t.id}`, ts: tsToMs(t.updated_at), node: <TaskRow task={t} borderClass={g.borderClass} /> }));
+
+          {tabs.map((t) => {
+            const rows = rowsOf(t);
             return (
-              <TabsContent key={g.key} value={g.key}>
+              <TabsContent key={t.key} value={t.key}>
                 {rows.length > 0 ? (
                   <TimeGroupedList rows={rows} now={now} />
                 ) : (
-                  <p className="py-10 text-center font-mono text-[11px] text-muted-foreground">
-                    {g.kind === "req" ? "此阶段暂无需求" : "此分类下暂无任务"}
-                  </p>
-                )}
-                {truncated && (
-                  <button
-                    type="button"
-                    onClick={() => setExpandedTerminal((prev) => ({ ...prev, [g.key]: true }))}
-                    className="mt-2 w-full rounded-lg border border-dashed border-border py-1.5 text-center font-mono text-[10px] text-muted-foreground hover:border-accent/60 hover:text-foreground"
-                  >
-                    看全部 {total} 条 →
-                  </button>
+                  <p className="py-10 text-center font-mono text-[11px] text-muted-foreground">此分类下暂无内容</p>
                 )}
               </TabsContent>
             );
