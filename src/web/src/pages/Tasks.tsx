@@ -54,9 +54,12 @@ function taskMeta(status: string): { Icon: typeof Loader2; tone: Tone; label: st
   return { Icon: XCircle, tone: "muted", label: "已取消" };
 }
 function reqMeta(status: string): { Icon: typeof Loader2; tone: Tone; label: string } {
-  if (status === "investigating") return { Icon: Search, tone: "info", label: "调查中" };
+  if (status === "queued") return { Icon: Clock, tone: "accent", label: "待执行" };
   if (status === "awaiting_approval") return { Icon: Hand, tone: "warning", label: "待审批" };
-  return { Icon: FileText, tone: "muted", label: "草稿" };
+  if (status === "ready") return { Icon: Hand, tone: "warning", label: "待入队" };
+  if (status === "clarifying") return { Icon: Search, tone: "info", label: "调查中" };
+  if (status === "drafting") return { Icon: FileText, tone: "muted", label: "草稿" };
+  return { Icon: FileText, tone: "muted", label: status };
 }
 
 /** 相对时间（中文）：刚刚 / N分钟前 / N小时前 / N天前 / N周前 / N个月前 */
@@ -209,8 +212,12 @@ export function Tasks() {
     const reqHuman: Requirement[] = [];
     const reqRunning: Requirement[] = [];
     for (const r of filteredRequirements) {
-      if (r.status === "draft" || r.status === "awaiting_approval") reqHuman.push(r);
-      else if (r.status === "investigating") reqRunning.push(r);
+      // 已派生任务的需求由任务行代表，避免一件工作显示两条
+      if (r.task_id) continue;
+      const s = r.status;
+      if (s === "cancelled" || s === "done") continue; // 终态需求不单列
+      if (s === "queued") reqRunning.push(r); // 已审批、即将起任务
+      else reqHuman.push(r); // drafting/clarifying/ready/awaiting_approval/failed 等 → 球在你这
     }
     const taskHuman: Task[] = [];
     const taskRunning: Task[] = [];
