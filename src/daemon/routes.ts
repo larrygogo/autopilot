@@ -98,15 +98,15 @@ import {
 import type { Agent } from "../agents/agent";
 import { loadApiToken, previewApiToken, saveApiToken, deleteApiToken, generateApiToken } from "../core/api-token";
 import {
-  ensureTaskWorkspace,
-  getTaskWorkspace,
-  listWorkspaceDir,
-  readWorkspaceFile,
-  resolveWorkspacePath,
-  spawnWorkspaceZip,
-  deleteTaskWorkspace,
-  workspaceSize,
-} from "../core/workspace";
+  ensureTaskSandbox,
+  getTaskSandbox,
+  listSandboxDir,
+  readSandboxFile,
+  resolveSandboxPath,
+  spawnSandboxZip,
+  deleteTaskSandbox,
+  sandboxSize,
+} from "../core/sandbox";
 import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task-logs";
 import { emit } from "../core/event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
@@ -916,8 +916,8 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     if (method === "GET" && taskIdMatch) {
       const task = getTask(taskIdMatch);
       if (!task) return error("Task not found", 404);
-      // 附加 workspace 路径（方便 UI 展示 / 用户 cd 过去）
-      return json({ ...task, workspace: getTaskWorkspace(taskIdMatch) });
+      // 附加 sandbox 路径（方便 UI 展示 / 用户 cd 过去）
+      return json({ ...task, workspace: getTaskSandbox(taskIdMatch) });
     }
 
     // POST /api/tasks/:id/cancel
@@ -1001,38 +1001,38 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       return json({ from, to });
     }
 
-    // GET /api/tasks/:id/ws/tree?path=<relative>
-    const wsTreeMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/ws\/tree$/);
+    // GET /api/tasks/:id/sandbox/tree?path=<relative>
+    const wsTreeMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/sandbox\/tree$/);
     if (method === "GET" && wsTreeMatch) {
       const relPath = url.searchParams.get("path") ?? "";
       try {
-        const entries = listWorkspaceDir(wsTreeMatch, relPath);
+        const entries = listSandboxDir(wsTreeMatch, relPath);
         return json({ path: relPath, entries });
       } catch (e: unknown) {
         return error(e instanceof Error ? e.message : String(e), 400);
       }
     }
 
-    // GET /api/tasks/:id/ws/file?path=<relative>
-    const wsFileMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/ws\/file$/);
+    // GET /api/tasks/:id/sandbox/file?path=<relative>
+    const wsFileMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/sandbox\/file$/);
     if (method === "GET" && wsFileMatch) {
       const relPath = url.searchParams.get("path") ?? "";
       if (!relPath) return error("path 参数必填", 400);
       try {
-        const file = readWorkspaceFile(wsFileMatch, relPath);
+        const file = readSandboxFile(wsFileMatch, relPath);
         return json(file);
       } catch (e: unknown) {
         return error(e instanceof Error ? e.message : String(e), 400);
       }
     }
 
-    // GET /api/tasks/:id/ws/download?path=<relative> —— 二进制原样下载单文件
-    const wsDownloadMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/ws\/download$/);
+    // GET /api/tasks/:id/sandbox/download?path=<relative> —— 二进制原样下载单文件
+    const wsDownloadMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/sandbox\/download$/);
     if (method === "GET" && wsDownloadMatch) {
       const relPath = url.searchParams.get("path") ?? "";
       if (!relPath) return error("path 参数必填", 400);
       try {
-        const abs = resolveWorkspacePath(wsDownloadMatch, relPath);
+        const abs = resolveSandboxPath(wsDownloadMatch, relPath);
         if (!abs) return error("非法路径", 400);
         const fileName = relPath.split(/[/\\]/).pop() ?? "file";
         const file = Bun.file(abs);
@@ -1049,15 +1049,15 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // GET /api/tasks/:id/ws/zip — 整个 workspace 打包
-    const wsZipMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/ws\/zip$/);
+    // GET /api/tasks/:id/sandbox/zip — 整个 sandbox 打包
+    const wsZipMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/sandbox\/zip$/);
     if (method === "GET" && wsZipMatch) {
       try {
-        const proc = spawnWorkspaceZip(wsZipMatch);
+        const proc = spawnSandboxZip(wsZipMatch);
         return new Response(proc.stdout as ReadableStream, {
           headers: {
             "Content-Type": "application/zip",
-            "Content-Disposition": `attachment; filename="workspace-${wsZipMatch}.zip"`,
+            "Content-Disposition": `attachment; filename="sandbox-${wsZipMatch}.zip"`,
             ...cors,
           },
         });
@@ -1066,11 +1066,11 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // DELETE /api/tasks/:id/ws — 手动清理 workspace
-    const wsDeleteMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/ws$/);
+    // DELETE /api/tasks/:id/sandbox — 手动清理 sandbox
+    const wsDeleteMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/sandbox$/);
     if (method === "DELETE" && wsDeleteMatch) {
       try {
-        const removed = deleteTaskWorkspace(wsDeleteMatch);
+        const removed = deleteTaskSandbox(wsDeleteMatch);
         return json({ ok: true, removed });
       } catch (e: unknown) {
         return error(e instanceof Error ? e.message : String(e), 500);
@@ -1089,7 +1089,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // GET /api/workspaces/usage 已迁到 WS RPC: workspaces.usage
+    // GET /api/sandboxes/usage 已迁到 WS RPC: sandboxes.usage
 
     // GET /api/tasks/:id/logs
     const logsMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/logs$/);
@@ -1528,7 +1528,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       return json({ content });
     }
 
-    // POST /api/workflows/:name/dry-run — 不建 task / 不写 workspace，直接调 agent.run 试跑 prompt
+    // POST /api/workflows/:name/dry-run — 不建 task / 不写 sandbox，直接调 agent.run 试跑 prompt
     // body: { agent?: InlineAgentConfig, prompt: string, timeout?: number(秒) }
     // 命名复用 agent 移除后：agent 字段接收一个内联配置对象（provider/model/system_prompt...），
     // 省略则用 DEFAULT_AGENT 兜底。

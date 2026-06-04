@@ -46,11 +46,11 @@ import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig
 import { requestRestart } from "./index";
 import { loadApiToken } from "../core/api-token";
 import {
-  listWorkspaceDir,
-  readWorkspaceFile,
-  deleteTaskWorkspace,
-  scanTaskWorkspaces,
-} from "../core/workspace";
+  listSandboxDir,
+  readSandboxFile,
+  deleteTaskSandbox,
+  scanTaskSandboxes,
+} from "../core/sandbox";
 import { setKv } from "../core/db";
 import { discover as registryDiscover, getWorkflow as registryGetWorkflow } from "../core/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
@@ -349,7 +349,7 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "tasks.phaseLogs",
-    description: "列出任务 workspace 下已有的阶段日志文件元信息",
+    description: "列出任务 sandbox 下已有的阶段日志文件元信息",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
@@ -536,7 +536,7 @@ export function registerCoreRpcMethods(): void {
       if (!prompt) throw new RpcError("INVALID_PARAM", "需要 prompt");
       const workflow = typeof p.workflow === "string" && p.workflow.trim() ? p.workflow.trim() : "ad-hoc";
 
-      // 可选 codebase 透传：让 workspace.git=true 时能起 git worktree
+      // 可选 codebase 透传：让 sandbox.git=true 时能起 git worktree
       let codebaseId =
         typeof p.codebase_id === "string" && p.codebase_id.trim() ? p.codebase_id.trim() : undefined;
       if (!codebaseId && typeof p.codebase_alias === "string" && p.codebase_alias.trim()) {
@@ -1335,17 +1335,17 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
-  // ── 第九批：workspace + defaults + setup mutation（8 个） ──
+  // ── 第九批：sandbox + defaults + setup mutation（8 个） ──
 
   registerRpcMethod({
-    method: "workspaces.tree",
-    description: "列任务 workspace 子目录（默认根目录）",
+    method: "sandboxes.tree",
+    description: "列任务 sandbox 子目录（默认根目录）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const relPath = typeof p.path === "string" ? p.path : "";
       try {
-        return { path: relPath, entries: listWorkspaceDir(p.id, relPath) };
+        return { path: relPath, entries: listSandboxDir(p.id, relPath) };
       } catch (e: unknown) {
         throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
       }
@@ -1353,14 +1353,14 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
-    method: "workspaces.file",
-    description: "读 workspace 内单个文件（text）",
+    method: "sandboxes.file",
+    description: "读 sandbox 内单个文件（text）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (typeof p.path !== "string" || !p.path) throw new RpcError("INVALID_PARAM", "需要 path");
       try {
-        return readWorkspaceFile(p.id, p.path);
+        return readSandboxFile(p.id, p.path);
       } catch (e: unknown) {
         throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
       }
@@ -1368,13 +1368,13 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
-    method: "workspaces.delete",
-    description: "手动清理某任务 workspace 目录",
+    method: "sandboxes.delete",
+    description: "手动清理某任务 sandbox 目录",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       try {
-        const removed = deleteTaskWorkspace(p.id);
+        const removed = deleteTaskSandbox(p.id);
         return { ok: true, removed };
       } catch (e: unknown) {
         throw new RpcError("INTERNAL", e instanceof Error ? e.message : String(e));
@@ -1383,10 +1383,10 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
-    method: "workspaces.usage",
-    description: "扫描所有任务 workspace 占用（Dashboard 用）",
+    method: "sandboxes.usage",
+    description: "扫描所有任务 sandbox 占用（Dashboard 用）",
     handler: () => {
-      const list = scanTaskWorkspaces();
+      const list = scanTaskSandboxes();
       const total = list.reduce((a, it) => a + it.size, 0);
       return { total, tasks: list };
     },

@@ -5,7 +5,7 @@ import { installAutopilotResolver } from "../core/autopilot-resolver";
 import { initDb, closeDb, listTasks, updateTask } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/registry";
-import { checkStuckTasks, pruneWorkspacesByPolicy } from "../core/watcher";
+import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
 import { runInBackground } from "../core/runner";
 import { runScheduledTasks } from "../core/scheduler";
 import { initDaemonFileLog, log } from "../core/logger";
@@ -234,12 +234,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     });
   }, CLARIFIER_WATCHDOG_INTERVAL_MS);
 
-  // workspace 保留策略定时器（配置为空时函数内部会提前返回）
+  // sandbox 保留策略定时器（配置为空时函数内部会提前返回）
   // dogfood-bug25：启动时**立即跑一次**，否则 setInterval 1 小时后才第一次触发，
-  // 上次 daemon 停机期间累积的旧 workspace 在新启动后第一小时完全不会清。
+  // 上次 daemon 停机期间累积的旧 sandbox 在新启动后第一小时完全不会清。
   const runRetention = () => {
     try {
-      pruneWorkspacesByPolicy();
+      pruneSandboxesByPolicy();
     } catch (e: unknown) {
       console.error("retention 异常：", e instanceof Error ? e.message : String(e));
     }

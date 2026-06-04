@@ -16,7 +16,7 @@ import { getTask, updateTask } from "../core/db";
 import { transition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { getWorkflow, buildTransitions, isParallelPhase } from "../core/registry";
-import { getTaskWorkspace } from "../core/workspace";
+import { getTaskSandbox } from "../core/sandbox";
 import { emit } from "../core/event-bus";
 import { createLogger } from "../core/logger";
 
@@ -196,7 +196,7 @@ export function decideTaskAction(
     const phaseIdx = helpers.phaseIndex(wf, phase);
     if (phaseIdx >= 0) {
       const dirName = `${String(phaseIdx).padStart(2, "0")}-${phase}`;
-      const phaseDir = join(getTaskWorkspace(taskId), dirName);
+      const phaseDir = join(getTaskSandbox(taskId), dirName);
       if (!existsSync(phaseDir)) mkdirSync(phaseDir, { recursive: true });
       const md = helpers.renderDecisionMd(decisionRecord);
       const dPath = join(phaseDir, "decision.md");
