@@ -507,7 +507,25 @@ export function getSubTasks(parentTaskId: string): Task[] {
 }
 
 /**
- * 原子级联删除一组 task：先删所有 task_logs，再删 tasks 本身。
+ * 按 requirement id 列表查根任务（parent_task_id IS NULL）。
+ * 供项目级联删除收集需要清理的任务树根（子任务由调用方经 getSubTasks 展开）。
+ */
+export function listRootTasksByRequirementIds(requirementIds: string[]): Task[] {
+  if (requirementIds.length === 0) return [];
+  const db = getDb();
+  const placeholders = requirementIds.map(() => "?").join(",");
+  const rows = db
+    .query<RawRow, string[]>(
+      "SELECT * FROM tasks WHERE requirement_id IN (" +
+        placeholders +
+        ") AND parent_task_id IS NULL ORDER BY created_at ASC"
+    )
+    .all(...requirementIds);
+  return rows.map(rowToTask);
+}
+
+/**
+ * 原子级联删除一组 task：先删 task_logs / task_phase_events，再删 tasks 本身。
  * 仅做 DB 层删除，不动文件/锁/manifest；不 emit 事件。
  * 由 task-delete.ts 统一协调，高层负责预校验与外部副作用清理。
  */
@@ -517,6 +535,7 @@ export function deleteTaskRecords(taskIds: string[]): void {
   const placeholders = taskIds.map(() => "?").join(",");
   db.transaction(() => {
     db.run("DELETE FROM task_logs WHERE task_id IN (" + placeholders + ")", taskIds);
+    db.run("DELETE FROM task_phase_events WHERE task_id IN (" + placeholders + ")", taskIds);
     db.run("DELETE FROM tasks WHERE id IN (" + placeholders + ")", taskIds);
   })();
 }

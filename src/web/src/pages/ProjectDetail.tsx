@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { FolderPicker } from "@/components/FolderPicker";
+import { ConfirmDialog } from "@/components/Modal";
 import { cn } from "@/lib/utils";
 
 interface ProjectDetailProps {
@@ -88,6 +89,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
   // 编辑项目 dialog
   const [projDialogOpen, setProjDialogOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [projForm, setProjForm] = useState<{ name: string; description: string }>({ name: "", description: "" });
   const [savingProj, setSavingProj] = useState(false);
 
@@ -182,6 +184,18 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       toast.error("更新失败", (e as Error)?.message ?? String(e));
     } finally {
       setSavingProj(false);
+    }
+  };
+
+  const removeProject = async () => {
+    if (!project) return;
+    try {
+      await api.deleteProject(project.id);
+      toast.success(`已删除项目「${project.name}」`);
+      navigate("/projects");
+    } catch (e: unknown) {
+      toast.error("删除失败", (e as Error)?.message ?? String(e));
+      throw e; // 让 ConfirmDialog 退出 busy 态，弹窗保持打开供重试
     }
   };
 
@@ -384,6 +398,17 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                 onClick={openProjDialog}
               >
                 <Pencil className="h-4 w-4" />
+              </Button>
+            )}
+            {project && project.id !== "proj-default" && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                title="删除项目"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 className="h-4 w-4" />
               </Button>
             )}
           </div>
@@ -621,6 +646,24 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 删除项目确认 —— 用共享 ConfirmDialog（confirmWord=项目名，高危输入名确认）*/}
+      <ConfirmDialog
+        open={deleteOpen}
+        title={`删除项目「${project?.name}」？`}
+        danger
+        confirmText="确认删除"
+        confirmWord={project?.name}
+        message={
+          <p>
+            将<strong className="text-destructive">永久删除</strong>该项目，并级联清除其下
+            {" "}{requirements.length}{" "}条需求、关联的全部任务（含运行中，会先尝试停止）、
+            {" "}{codebases.length}{" "}个工作区配置及评论/反馈等数据。此操作<strong>不可恢复</strong>。
+          </p>
+        }
+        onConfirm={removeProject}
+        onCancel={() => setDeleteOpen(false)}
+      />
 
       {/* 新建需求 Dialog */}
       <Dialog open={reqDialogOpen} onOpenChange={(open) => { if (!open) closeReqDialog(); }}>

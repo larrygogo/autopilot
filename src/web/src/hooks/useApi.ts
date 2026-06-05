@@ -666,9 +666,9 @@ export const api = {
   }) =>
     requestRpc<{ requirement: Requirement }>("requirements.update", { id, ...body }).then((r) => r.requirement),
 
-  // [WS-RPC] requirements.delete
+  // [WS-RPC] requirements.delete —— 删一件工作：需求 + 其名下全部任务（返回连带删的任务数）
   deleteRequirement: (id: string) =>
-    requestRpc<{ ok: true }>("requirements.delete", { id }),
+    requestRpc<{ ok: true; deletedTasks: number }>("requirements.delete", { id }),
 
   // [WS-RPC] requirements.transition
   transitionRequirement: (id: string, to: string) =>

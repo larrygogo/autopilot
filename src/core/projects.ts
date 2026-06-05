@@ -1,6 +1,7 @@
 import { getDb } from "./db";
 import { listRequirements, deleteRequirement } from "./requirements";
 import { listWorkspaces, deleteWorkspace } from "./workspaces";
+import { forceDeleteTasksForProject } from "./task-delete";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -104,9 +105,19 @@ export function updateProject(id: string, opts: UpdateProjectOpts): Project | nu
 
 export function deleteProject(id: string): void {
   const db = getDb();
+
+  // 0. 先强删项目下所有任务（含非终态）：清 task DB 记录 + runtime/锁/watcher/scheduler 引用。
+  //    放在 SQL 事务之外 —— 内部有文件 IO（git worktree 清理等），不该阻塞事务也不该因文件失败回滚 DB。
+  //    必须在删 requirements 之前：task 经 requirement_id 关联，先删需求就回查不到任务了。
+  //    停运行中 agent 子进程由 daemon 层（RPC handler）在调用前 cancelTaskAction 负责，core 不依赖 daemon。
+  forceDeleteTasksForProject(id);
+
   // 注意：deleteRequirement 和 deleteWorkspace 各自已是 transaction；嵌套 transaction 在 bun:sqlite 中是 savepoint，安全。
   db.transaction(() => {
     // 1. 删所有 requirements（级联清问题/回复/反馈/sub_prs/workspace 关联）
+    //    这里用 core 裸 deleteRequirement 而非 deleteRequirementWithTasks —— 任务已被上面
+    //    forceDeleteTasksForProject 先清完，再走 wrapper 会对每个 req 二次 purge（空树、无害但浪费且误导）。
+    //    勿顺手「统一」成 deleteRequirementWithTasks。
     const reqs = listRequirements({ project_id: id });
     for (const r of reqs) deleteRequirement(r.id);
 

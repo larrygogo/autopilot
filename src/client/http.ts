@@ -375,4 +375,12 @@ export class HttpClient {
   }): Promise<{ title: string; spec_md: string }> {
     return this.call("requirements.extract", input, { timeoutMs: 300_000 });
   }
+
+  async updateRequirement(id: string, body: {
+    title?: string;
+    spec_md?: string;
+    workspace_id?: string | null;
+  }): Promise<{ requirement: { id: string; status: string; title: string } }> {
+    return this.call("requirements.update", { id, ...body });
+  }
 }

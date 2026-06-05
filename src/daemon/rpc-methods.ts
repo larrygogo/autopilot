@@ -51,7 +51,7 @@ import {
   deleteTaskSandbox,
   scanTaskSandboxes,
 } from "../core/sandbox";
-import { setKv } from "../core/db";
+import { setKv, listRootTasksByRequirementIds } from "../core/db";
 import { discover as registryDiscover, getWorkflow as registryGetWorkflow } from "../core/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
@@ -62,6 +62,7 @@ import {
   updateProject as coreUpdateProject,
   deleteProject as coreDeleteProject,
   nextProjectId,
+  DEFAULT_PROJECT_ID,
 } from "../core/projects";
 import { listRequirementsByProject } from "../core/requirements";
 import { listWorkspaces, getWorkspaceById, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, projectHasTopWorkspace } from "../core/workspaces";
@@ -79,7 +80,6 @@ import {
   getRequirementById,
   createRequirement as coreCreateRequirement,
   updateRequirement as coreUpdateRequirement,
-  deleteRequirement as coreDeleteRequirement,
   setRequirementStatus,
   nextRequirementId,
   finishClarification,
@@ -130,7 +130,7 @@ import {
 } from "./task-actions";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { startTaskFromPrompt } from "./start-from-prompt";
-import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
+import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "../core/task-delete";
 import { registerRpcMethod, hasRpcMethod, RpcError } from "./rpc";
 import { wsManager } from "./ws";
 import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
@@ -943,12 +943,24 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.delete",
-    description: "删除需求",
+    description: "删除一件工作（需求 + 其名下全部任务，含运行中）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      coreDeleteRequirement(p.id);
-      return { ok: true };
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      // 删前先停运行中任务的 agent 进程（best-effort）：让 runner 收敛、释放 worktree 占用，
+      // 再由 deleteRequirementWithTasks 强删记录。cancel 是异步的，这里不 sleep 等它生效。
+      for (const t of listRootTasksByRequirementIds([p.id])) {
+        try {
+          cancelTaskAction(t.id);
+        } catch {
+          /* 已终态 / 不存在：忽略，强删兜底 */
+        }
+      }
+      const { deletedTasks } = deleteRequirementWithTasks(p.id);
+      // 连带删掉的任务逐个 emit task:deleted（由 purgeTaskTree 内部负责）；需求删除本身
+      // 沿用旧行为不额外 emit（无 requirement:deleted 事件类型，避免伪造状态触发 scheduler/clarifier）。
+      return { ok: true, deletedTasks: deletedTasks.length };
     },
   });
 
@@ -1606,12 +1618,25 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "projects.delete",
-    description: "级联删除 Project（含 requirements + workspaces）",
+    description: "级联删除 Project（含 requirements + tasks + workspaces）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (p.id === DEFAULT_PROJECT_ID) {
+        throw new RpcError("PRECONDITION_FAILED", "默认项目（兜底快捷发包/定时任务）不可删除");
+      }
       if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
       try {
+        // 删前先停运行中任务的 agent 进程（best-effort）：让 runner 收敛、释放 worktree 占用，
+        // 再由 coreDeleteProject 强删记录。cancel 是异步的，这里不 sleep 等它生效。
+        const reqs = listRequirementsByProject(p.id);
+        for (const t of listRootTasksByRequirementIds(reqs.map((r) => r.id))) {
+          try {
+            cancelTaskAction(t.id);
+          } catch {
+            /* 已终态 / 不存在：忽略，强删兜底 */
+          }
+        }
         coreDeleteProject(p.id);
         emitBus({ type: "projects:changed", payload: { id: p.id, action: "delete" } });
         return { ok: true };

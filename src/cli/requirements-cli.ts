@@ -177,4 +177,25 @@ export function registerRequirementCommands(program: Command): void {
         process.exit(3);
       }
     });
+
+  req
+    .command("set-title <id> <title>")
+    .description("修改需求标题")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, title: string, opts: { port: string }) => {
+      const next = title.trim();
+      if (!next) {
+        console.error("错误：标题不能为空");
+        process.exit(1);
+      }
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement } = await client.updateRequirement(id, { title: next });
+        console.log(`✓ 已更新需求 ${requirement.id} 标题：${requirement.title}`);
+      } catch (e: unknown) {
+        console.error(`更新失败：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
 }

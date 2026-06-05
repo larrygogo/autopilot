@@ -497,56 +497,61 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
         onLogScroll={onLogScroll}
       />
 
-      {/* 危险操作区 */}
-      <Card className="mt-4 border border-destructive bg-destructive/8">
-        <div className="border-b border-destructive/40 px-4 py-2.5">
-          <span className="font-mono text-[10px] text-destructive font-semibold">
-            ⚠ 危险操作 · DANGER ZONE
-          </span>
-        </div>
-        <div className="flex flex-wrap items-start justify-between gap-3 p-4">
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              彻底删除该任务的 DB 记录、manifest、阶段日志、agent 调用记录与 workspace 文件；此操作不可撤销。
-              {canCancel && (
-                <span className="ml-1 font-semibold text-foreground">
-                  任务当前非终态，请先取消后再删除。
-                </span>
-              )}
-            </p>
-          </div>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setConfirmDelete(true)}
-            disabled={canCancel}
-          >
-            <Trash2 className="h-4 w-4" />
-            删除任务
-          </Button>
-        </div>
-      </Card>
+      {/* 危险操作区 —— 仅整页（孤儿任务兜底）显示。embedded 进需求页时，删除走需求页的
+          「删除此工作」统一入口（需求+任务一起删），此处隐藏避免重复且不一致的删除路径。 */}
+      {!embedded && (
+        <>
+          <Card className="mt-4 border border-destructive bg-destructive/8">
+            <div className="border-b border-destructive/40 px-4 py-2.5">
+              <span className="font-mono text-[10px] text-destructive font-semibold">
+                ⚠ 危险操作 · DANGER ZONE
+              </span>
+            </div>
+            <div className="flex flex-wrap items-start justify-between gap-3 p-4">
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  彻底删除该任务的 DB 记录、manifest、阶段日志、agent 调用记录与 workspace 文件；此操作不可撤销。
+                  {canCancel && (
+                    <span className="ml-1 font-semibold text-foreground">
+                      任务当前非终态，请先取消后再删除。
+                    </span>
+                  )}
+                </p>
+              </div>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmDelete(true)}
+                disabled={canCancel}
+              >
+                <Trash2 className="h-4 w-4" />
+                删除任务
+              </Button>
+            </div>
+          </Card>
 
-      <ConfirmDialog
-        open={confirmDelete}
-        title="删除任务"
-        danger
-        confirmText="永久删除"
-        cancelText="取消"
-        message={
-          <div className="space-y-2">
-            <p>
-              确认永久删除任务{" "}
-              <code className="rounded bg-muted px-1 font-mono">{task.id}</code>？
-            </p>
-            <p className="text-xs text-muted-foreground">
-              将清理：DB 记录、task-manifest、阶段日志、agent 调用、workspace 目录，以及所有子任务。操作不可撤销。
-            </p>
-          </div>
-        }
-        onConfirm={doDelete}
-        onCancel={() => setConfirmDelete(false)}
-      />
+          <ConfirmDialog
+            open={confirmDelete}
+            title="删除任务"
+            danger
+            confirmText="永久删除"
+            cancelText="取消"
+            message={
+              <div className="space-y-2">
+                <p>
+                  确认永久删除任务{" "}
+                  <code className="rounded bg-muted px-1 font-mono">{task.id}</code>？
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  将清理：DB 记录、task-manifest、阶段日志、agent 调用、workspace 目录，以及所有子任务。操作不可撤销。
+                </p>
+              </div>
+            }
+            onConfirm={doDelete}
+            onCancel={() => setConfirmDelete(false)}
+          />
+        </>
+      )}
 
       <ConfirmDialog
         open={confirmCancel}

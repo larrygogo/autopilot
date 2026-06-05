@@ -1,18 +1,19 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/input";
+import { Textarea, Input } from "@/components/ui/input";
 import { TaskDetail } from "@/pages/TaskDetail";
 import { RequirementProgressBar } from "@/components/RequirementProgressBar";
 import { NextStepCTA } from "@/components/NextStepCTA";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/Modal";
 import { SpecRevisionsSheet } from "@/components/SpecRevisionsSheet";
 import { MarkdownView } from "@/components/MarkdownView";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -408,6 +409,10 @@ export function RequirementDetail() {
   const [editingSpec, setEditingSpec] = useState(false);
   const [specDraft, setSpecDraft] = useState("");
   const [savingSpec, setSavingSpec] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [savingTitle, setSavingTitle] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [feedbackBody, setFeedbackBody] = useState("");
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
@@ -421,12 +426,8 @@ export function RequirementDetail() {
   const [subPrs, setSubPrs] = useState<RequirementSubPr[]>([]);
   // 回复输入状态：qid → 文本
   const [projectCodebases, setProjectCodebases] = useState<Workspace[]>([]);
-  const [codebaseDialogOpen, setCodebaseDialogOpen] = useState(false);
   const [clarifierDialogOpen, setClarifierDialogOpen] = useState(false);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
-  // Radix Select 不允许 value=""（空串保留给清空 placeholder），用 sentinel 表示"未关联"
-  const NONE_VALUE = "__none__";
-  const [codebaseDraft, setCodebaseDraft] = useState<string>(NONE_VALUE);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -546,6 +547,30 @@ export function RequirementDetail() {
     return repos.find((r) => r.id === req.workspace_id)?.alias ?? req.workspace_id;
   }, [repos, req]);
 
+  async function saveTitle() {
+    if (!id) return;
+    const next = titleDraft.trim();
+    if (!next) {
+      toast.error("标题不能为空");
+      return;
+    }
+    if (req && next === req.title) {
+      setEditingTitle(false);
+      return;
+    }
+    setSavingTitle(true);
+    try {
+      await api.updateRequirement(id, { title: next });
+      setEditingTitle(false);
+      await refresh();
+      toast.success("标题已更新");
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setSavingTitle(false);
+    }
+  }
+
   async function saveSpec() {
     if (!id) return;
     setSavingSpec(true);
@@ -608,19 +633,6 @@ export function RequirementDetail() {
     } finally {
       busyRef.current = false;
       setActionBusy(false);
-    }
-  }
-
-  async function setCodebase(workspaceId: string | null) {
-    if (!id || !req) return;
-    const prev = req;
-    setReq({ ...req, workspace_id: workspaceId });
-    try {
-      await api.updateRequirement(id, { workspace_id: workspaceId });
-      toast.success(workspaceId ? "工作区已关联" : "已取消关联工作区");
-    } catch (e: unknown) {
-      setReq(prev);
-      toast.error("关联失败", (e as Error)?.message ?? String(e));
     }
   }
 
@@ -792,18 +804,19 @@ export function RequirementDetail() {
 
   async function deleteReq() {
     if (!id || !req) return;
-    if (!confirm(`确认删除需求「${req.title}」？此操作不可恢复。`)) return;
     if (busyRef.current) return;
     busyRef.current = true;
     setActionBusy(true);
     try {
-      await api.deleteRequirement(id);
-      toast.success("需求已删除");
+      const res = await api.deleteRequirement(id);
+      const extra = res.deletedTasks > 0 ? `（含 ${res.deletedTasks} 个任务）` : "";
+      toast.success(`已删除此工作${extra}`);
       navigate(req.project_id ? `/projects/${req.project_id}` : "/projects");
     } catch (e: unknown) {
       toast.error("删除失败", (e as Error)?.message ?? String(e));
       busyRef.current = false;
       setActionBusy(false);
+      throw e; // 让 ConfirmDialog 退出 busy 态，弹窗保持打开供重试
     }
   }
 
@@ -882,9 +895,51 @@ export function RequirementDetail() {
             <span>REQUIREMENT · {req.id}</span>
             <span className="h-px flex-1 bg-foreground/20" aria-hidden="true" />
           </div>
-          <h1 className="break-words font-display text-3xl font-bold leading-[1.05] sm:text-4xl">
-            {req.title}
-          </h1>
+          {editingTitle ? (
+            <div className="space-y-2">
+              <Input
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                disabled={savingTitle}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); saveTitle(); }
+                  if (e.key === "Escape") { setEditingTitle(false); setTitleDraft(req.title); }
+                }}
+                className="h-auto break-words py-1.5 font-display text-2xl font-bold leading-tight sm:text-3xl"
+                placeholder="需求标题"
+              />
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={saveTitle} disabled={savingTitle || !titleDraft.trim()}>
+                  {savingTitle ? "保存中…" : "保存"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { setEditingTitle(false); setTitleDraft(req.title); }}
+                  disabled={savingTitle}
+                >
+                  取消
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2">
+              <h1 className="break-words font-display text-3xl font-bold leading-[1.05] sm:text-4xl">
+                {req.title}
+              </h1>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-1.5 shrink-0 gap-1.5 text-muted-foreground hover:text-foreground"
+                title="编辑标题"
+                onClick={() => { setTitleDraft(req.title); setEditingTitle(true); }}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                <span className="text-xs">编辑</span>
+              </Button>
+            </div>
+          )}
           <RequirementProgressBar status={req.status} />
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={STATUS_VARIANT[req.status] ?? "outline"}>
@@ -937,26 +992,9 @@ export function RequirementDetail() {
             <MetaRow
               k="工作区"
               v={
-                <div className="flex items-center gap-2">
-                  <span className="text-foreground">
-                    {req.workspace_id
-                      ? (projectCodebases.find(cb => cb.id === req.workspace_id)?.alias ?? req.workspace_id)
-                      : <span className="text-muted-foreground">未关联</span>
-                    }
-                  </span>
-                  {projectCodebases.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCodebaseDraft(req.workspace_id ?? NONE_VALUE);
-                        setCodebaseDialogOpen(true);
-                      }}
-                      className="text-[10px] text-accent hover:underline"
-                    >
-                      修改
-                    </button>
-                  )}
-                </div>
+                req.workspace_id
+                  ? (projectCodebases.find(cb => cb.id === req.workspace_id)?.alias ?? req.workspace_id)
+                  : <span className="text-muted-foreground">未关联</span>
               }
             />
             <MetaRow k="状态" v={STATUS_LABEL[req.status] ?? req.status} last />
@@ -1372,16 +1410,15 @@ export function RequirementDetail() {
               {isTerminal && (
                 <p className="text-xs text-muted-foreground text-center">需求已终止，无可用操作。</p>
               )}
-              {/* 删除按钮：执行中禁用，其余状态均可用 */}
+              {/* 删除此工作 = 需求 + 其名下全部任务（含运行中，会先尝试停止）。统一删除入口。 */}
               <Button
                 variant="outline"
                 className="w-full text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
                 size="sm"
-                onClick={() => void deleteReq()}
-                disabled={actionBusy || req.status === "running" || req.status === "fix_revision"}
-                title={req.status === "running" || req.status === "fix_revision" ? "需求正在执行中，请先取消" : undefined}
+                onClick={() => setDeleteOpen(true)}
+                disabled={actionBusy}
               >
-                删除需求
+                删除此工作
               </Button>
             </div>
           </Card>
@@ -1447,41 +1484,29 @@ export function RequirementDetail() {
         onSaved={() => void refresh({ silent: true })}
       />
 
-      {/* 修改工作区关联 dialog */}
-      <Dialog open={codebaseDialogOpen} onOpenChange={setCodebaseDialogOpen}>
-        <DialogContent className="rounded-md">
-          <DialogHeader>
-            <DialogTitle>修改工作区关联</DialogTitle>
-            <DialogDescription>
-              切换此需求关联的工作区。提交后不可立即撤销，请确认。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-2">
-            <Select value={codebaseDraft} onValueChange={setCodebaseDraft}>
-              <SelectTrigger className="rounded-md">
-                <SelectValue placeholder="选择工作区" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE_VALUE}>— 未关联 —</SelectItem>
-                {projectCodebases.map((cb) => (
-                  <SelectItem key={cb.id} value={cb.id}>{cb.alias}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+      {/* 删除此工作确认（需求 + 任务统一删除）*/}
+      <ConfirmDialog
+        open={deleteOpen}
+        title={`删除此工作「${req.title}」？`}
+        danger
+        confirmText="确认删除"
+        message={
+          <div className="space-y-2">
+            <p>
+              将<strong className="text-destructive">永久删除</strong>此需求及其名下全部任务
+              （DB 记录、阶段日志、agent 调用、workspace 文件、评论与反馈）。
+            </p>
+            {(req.status === "running" || req.status === "fix_revision") && (
+              <p className="text-xs font-semibold text-foreground">
+                任务正在执行中 —— 将先尝试停止运行中的 agent 再删除。
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">此操作不可恢复。</p>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCodebaseDialogOpen(false)}>取消</Button>
-            <Button
-              onClick={async () => {
-                await setCodebase(codebaseDraft === NONE_VALUE ? null : codebaseDraft);
-                setCodebaseDialogOpen(false);
-              }}
-            >
-              确认
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        }
+        onConfirm={deleteReq}
+        onCancel={() => setDeleteOpen(false)}
+      />
     </div>
   );
 }

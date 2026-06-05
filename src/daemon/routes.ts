@@ -15,7 +15,7 @@ import {
 } from "../core/auth";
 import { getPhaseIndex } from "../core/artifacts";
 import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
-import { initDb, getDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks, updateTask } from "../core/db";
+import { initDb, getDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks, updateTask, listRootTasksByRequirementIds } from "../core/db";
 import { log } from "../core/logger";
 import { snapshotWorkflow } from "../core/manifest";
 import {
@@ -32,7 +32,7 @@ import type { ListTasksFilters } from "../core/db";
 import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
-import { cascadeDeleteTask, DeleteTaskError } from "../core/task-delete";
+import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "../core/task-delete";
 import { cancelTaskAction, restartTaskAction, answerTaskAction, decideTaskAction, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { listWorkspaces, getWorkspaceById } from "../core/workspaces";
@@ -44,7 +44,6 @@ import {
   updateRequirement,
   setRequirementStatus,
   nextRequirementId,
-  deleteRequirement,
   finishClarification,
 } from "../core/requirements";
 import {
@@ -903,11 +902,17 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         return json({ requirement: updateRequirement(reqDetailMatch, body) });
       }
       if (method === "DELETE") {
-        if (["running", "fix_revision"].includes(r.status)) {
-          return error(`需求正在执行中（status=${r.status}），请先取消再删除`);
+        // 删一件工作 = 需求 + 其名下全部任务（含运行中）。先 best-effort 停 agent 再强删，
+        // 与 WS RPC requirements.delete / 项目级联删除同一语义，不留孤儿任务。
+        for (const t of listRootTasksByRequirementIds([reqDetailMatch])) {
+          try {
+            cancelTaskAction(t.id);
+          } catch {
+            /* 已终态 / 不存在：忽略，强删兜底 */
+          }
         }
-        deleteRequirement(reqDetailMatch);
-        return json({ ok: true });
+        const { deletedTasks } = deleteRequirementWithTasks(reqDetailMatch);
+        return json({ ok: true, deletedTasks: deletedTasks.length });
       }
     }
 
