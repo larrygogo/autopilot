@@ -35,7 +35,7 @@ import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "../core/task-delete";
 import { cancelTaskAction, restartTaskAction, answerTaskAction, decideTaskAction, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
-import { listWorkspaces, getWorkspaceById } from "../core/workspaces";
+import { listWorkspaces, getWorkspaceById, getTopWorkspaceForProject } from "../core/workspaces";
 import { listSubPrs } from "../core/requirement-sub-prs";
 import {
   listRequirements,
@@ -689,7 +689,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         spec_md?: string;
         chat_session_id?: string | null;
       };
-      const workspaceId = body.workspace_id ?? null;
+      let workspaceId = body.workspace_id ?? null;
       if (!body.title?.trim()) {
         return error("title 必填");
       }
@@ -703,6 +703,12 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       if (!projectId) {
         return error("project_id 必填（或提供 workspace_id 由 daemon 反查）");
       }
+      // 强制项目须关联工作区；项目:工作区 1:1 → 未显式指定时自动派生，免手动绑定
+      const topWs = getTopWorkspaceForProject(projectId);
+      if (!topWs) {
+        return error("项目未关联工作区，请先添加工作区再创建需求");
+      }
+      if (!workspaceId) workspaceId = topWs.id;
       const id = nextRequirementId();
       try {
         createRequirement({

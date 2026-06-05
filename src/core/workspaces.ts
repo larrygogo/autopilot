@@ -54,13 +54,22 @@ function nowMs(): number {
  * （测试夹具/内部仍可用 createWorkspace 自由建多顶层）。DB 部分唯一索引（迁移 025）兜底。
  */
 export function projectHasTopWorkspace(projectId: string): boolean {
+  return getTopWorkspaceForProject(projectId) != null;
+}
+
+/**
+ * 取项目的顶层工作区（submodule 不计入）。项目:工作区 1:1 约束下最多一个；
+ * 若历史脏数据存在多个，取最早建的。无则返回 null。
+ * 供「新建需求自动派生 workspace_id」等场景免去用户手动选工作区。
+ */
+export function getTopWorkspaceForProject(projectId: string): Workspace | null {
   const db = getDb();
   const row = db
-    .query<{ id: string }, [string]>(
-      "SELECT id FROM workspaces WHERE project_id = ? AND parent_workspace_id IS NULL LIMIT 1",
+    .query<Workspace, [string]>(
+      "SELECT * FROM workspaces WHERE project_id = ? AND parent_workspace_id IS NULL ORDER BY created_at ASC LIMIT 1",
     )
     .get(projectId);
-  return row != null;
+  return row ?? null;
 }
 
 export function createWorkspace(opts: CreateWorkspaceOpts): Workspace {

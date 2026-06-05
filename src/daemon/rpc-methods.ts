@@ -65,7 +65,7 @@ import {
   DEFAULT_PROJECT_ID,
 } from "../core/projects";
 import { listRequirementsByProject } from "../core/requirements";
-import { listWorkspaces, getWorkspaceById, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, projectHasTopWorkspace } from "../core/workspaces";
+import { listWorkspaces, getWorkspaceById, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, projectHasTopWorkspace, getTopWorkspaceForProject } from "../core/workspaces";
 import { listSubmodules, discoverSubmodules } from "../core/submodules";
 import { checkWorkspaceHealth, detectWorkspaceGit } from "../core/workspace-health";
 import {
@@ -890,7 +890,7 @@ export function registerCoreRpcMethods(): void {
     handler: (params) => {
       const p = asObj(params);
       const rawWorkspace = p.workspace_id ?? p.codebase_id;
-      const workspaceId = (typeof rawWorkspace === "string" || rawWorkspace === null)
+      let workspaceId = (typeof rawWorkspace === "string" || rawWorkspace === null)
         ? (rawWorkspace ?? null)
         : null;
       const title = typeof p.title === "string" ? p.title.trim() : "";
@@ -905,9 +905,12 @@ export function registerCoreRpcMethods(): void {
         throw new RpcError("INVALID_PARAM", "project_id 必填（或提供 workspace_id 由 daemon 反查）");
       }
       // 强制：项目必须关联工作区才能创建/运行需求
-      if (!projectHasTopWorkspace(projectId)) {
+      const topWs = getTopWorkspaceForProject(projectId);
+      if (!topWs) {
         throw new RpcError("PRECONDITION_FAILED", "项目未关联工作区，请先添加工作区再创建需求");
       }
+      // 项目:工作区 1:1 —— 未显式指定时自动派生项目唯一工作区，免去用户手动绑定。
+      if (!workspaceId) workspaceId = topWs.id;
       const id = nextRequirementId();
       coreCreateRequirement({
         id,
