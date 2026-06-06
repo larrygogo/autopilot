@@ -931,6 +931,12 @@ program
     const port = resolvePort(opts);
     const url = `http://${DEFAULT_HOST}:${port}`;
     console.log(`打开浏览器：${url}`);
+    // headless / CI / 测试环境：只打印 URL，不真正拉起浏览器，
+    // 避免在 `bun test`（spawn 本命令验证端口解析）时刷开真实浏览器 tab。
+    if (process.env.AUTOPILOT_NO_BROWSER || process.env.CI) {
+      console.log("（已设 AUTOPILOT_NO_BROWSER/CI，跳过自动打开，请手动访问上面的 URL）");
+      return;
+    }
     const platform = process.platform;
     const cmd: string[] =
       platform === "darwin" ? ["open", url]

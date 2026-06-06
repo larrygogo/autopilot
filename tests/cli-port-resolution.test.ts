@@ -134,7 +134,8 @@ describe("tui + dashboard 端口解析（dogfood-bug24）", () => {
     try {
       const r = Bun.spawnSync({
         cmd: ["bun", "run", join(process.cwd(), "bin/autopilot.ts"), "dashboard"],
-        env: { ...process.env, AUTOPILOT_HOME: tmpHome },
+        // AUTOPILOT_NO_BROWSER：只验证打印的 URL，不真正拉起浏览器（否则每次 bun test 都刷开 tab）
+        env: { ...process.env, AUTOPILOT_HOME: tmpHome, AUTOPILOT_NO_BROWSER: "1" },
         stdout: "pipe",
         stderr: "pipe",
         timeout: 5000,
@@ -143,6 +144,8 @@ describe("tui + dashboard 端口解析（dogfood-bug24）", () => {
       // URL 应该用 16180 而不是 default 6180
       expect(out).toContain("127.0.0.1:16180");
       expect(out).not.toContain("127.0.0.1:6180");
+      // 确认走了跳过分支，没有真正打开浏览器
+      expect(out).toContain("跳过自动打开");
     } finally {
       if (existsSync(tmpHome)) rmSync(tmpHome, { recursive: true, force: true });
     }
@@ -160,7 +163,7 @@ describe("tui + dashboard 端口解析（dogfood-bug24）", () => {
     try {
       const r = Bun.spawnSync({
         cmd: ["bun", "run", join(process.cwd(), "bin/autopilot.ts"), "dashboard"],
-        env: { ...process.env, AUTOPILOT_HOME: tmpHome },
+        env: { ...process.env, AUTOPILOT_HOME: tmpHome, AUTOPILOT_NO_BROWSER: "1" },
         stdout: "pipe",
         stderr: "pipe",
         timeout: 5000,
@@ -168,6 +171,7 @@ describe("tui + dashboard 端口解析（dogfood-bug24）", () => {
       const out = r.stdout.toString();
       // 没 listen.json → 用默认 6180
       expect(out).toContain("127.0.0.1:6180");
+      expect(out).toContain("跳过自动打开");
     } finally {
       if (existsSync(tmpHome)) rmSync(tmpHome, { recursive: true, force: true });
     }
