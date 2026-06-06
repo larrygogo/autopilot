@@ -159,15 +159,15 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
               <ShieldAlert className="mr-1 h-3.5 w-3.5" /> 去 SETUP 检查
             </Button>
           )}
-          {/* 失败时给"去工作流修复"出口：跳到 /workflows?wf=&phase=，自动选中并展开该 phase drawer。
-              prompt 类失败时升级为 default variant，引导用户优先去改 prompt */}
+          {/* 失败时给"去工作流修复"出口：跳到独立工作流详情页 /workflows/:name?phase=&fromTask=，
+              引导用户点对应 phase drawer。prompt 类失败时升级为 default variant，优先去改 prompt */}
           {outcome.status === "failed" && parseFailedPhase(taskStatus) && (
             <Button
               variant={failureProfile?.primary === "fix_prompt" ? "default" : "outline"}
               size="sm"
               onClick={() => {
                 const phase = parseFailedPhase(taskStatus);
-                navigate(`/workflows?wf=${encodeURIComponent(workflow)}&phase=${encodeURIComponent(phase!)}&fromTask=${encodeURIComponent(taskId)}`);
+                navigate(`/workflows/${encodeURIComponent(workflow)}?phase=${encodeURIComponent(phase!)}&fromTask=${encodeURIComponent(taskId)}`);
               }}
               className="rounded-md font-mono text-[11px] "
             >

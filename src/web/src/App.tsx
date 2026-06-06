@@ -54,6 +54,7 @@ const SettingsHub = lazy(() => import("./pages/SettingsHub").then((m) => ({ defa
 const Setup = lazy(() => import("./pages/Setup").then((m) => ({ default: m.Setup })));
 const NewWorkflowWithAI = lazy(() => import("./pages/NewWorkflowWithAI").then((m) => ({ default: m.NewWorkflowWithAI })));
 const Workflows = lazy(() => import("./pages/Workflows").then((m) => ({ default: m.Workflows })));
+const WorkflowDetail = lazy(() => import("./pages/WorkflowDetail").then((m) => ({ default: m.WorkflowDetail })));
 const Schedules = lazy(() => import("./pages/Schedules").then((m) => ({ default: m.Schedules })));
 const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
 const TaskDetail = lazy(() =>
@@ -263,6 +264,7 @@ function AppInner() {
                 <Route path="/projects" element={<Navigate to="/library?tab=projects" replace />} />
                 <Route path="/tasks" element={<Tasks />} />
                 <Route path="/workflows/new-with-ai" element={<NewWorkflowWithAI />} />
+                <Route path="/workflows/:name" element={<WorkflowDetail />} />
                 <Route path="/workflows" element={<Workflows />} />
                 <Route path="/schedules" element={<SchedulesRoute subscribe={subscribe} />} />
                 {/* /agents 旧入口：命名复用 agent 已删除，agent 配置下放到 phase 内联编辑（工作流编辑器） */}

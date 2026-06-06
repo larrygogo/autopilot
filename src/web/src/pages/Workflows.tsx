@@ -1,18 +1,15 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Plus, Trash2, X } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
 import { WorkflowCatalog } from "@/components/WorkflowCatalog";
 import { WorkflowHealthBanner } from "@/components/WorkflowHealthBanner";
-import { ConfirmDialog } from "@/components/Modal";
 import { PageHero } from "@/components/PageHero";
 import { useToast } from "@/components/Toast";
-import { PhasePipelineEditor } from "@/components/PhasePipelineEditor";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -32,38 +29,17 @@ interface WorkflowInfo {
   derives_from?: string | null;
 }
 
-interface WorkflowDetail {
-  name: string;
-  description?: string;
-  phases?: unknown[];
-  initial_state?: string;
-  terminal_states?: string[];
-  source?: "db" | "file";
-  derives_from?: string | null;
-  [key: string]: unknown;
-}
-
-interface Selected {
-  name: string;
-  detail: WorkflowDetail;
-  graph: any;
-}
-
 export function Workflows() {
   const toast = useToast();
   const navigate = useNavigate();
   const { subscribe } = useWebSocket();
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<Selected | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [cloneSource, setCloneSource] = useState<string | null>(null);
   const [cloneName, setCloneName] = useState("");
   const [cloning, setCloning] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-  const [tsSource, setTsSource] = useState<string | null>(null);
 
   const refresh = () => {
     setLoading(true);
@@ -86,92 +62,6 @@ export function Workflows() {
     return unsub;
   }, [subscribe]);
 
-  // 接收 URL query：?wf=<name>&phase=<name>&fromTask=<id>
-  // 用于 TaskOutcomeCard 失败时「去工作流修复」跳过来自动定位
-  const [searchParams] = useSearchParams();
-  const autoSelectedRef = useRef<string | null>(null);
-  const fromTaskId = searchParams.get("fromTask");
-  const fromTaskPhase = searchParams.get("phase");
-  useEffect(() => {
-    const wf = searchParams.get("wf");
-    if (!wf) return;
-    if (workflows.length === 0 || autoSelectedRef.current === wf) return;
-    if (!workflows.some((w) => w.name === wf)) return;
-    autoSelectedRef.current = wf;
-    void toggle(wf);
-    const phase = searchParams.get("phase");
-    if (phase) {
-      toast.info(`已选中工作流，请点击「${phase}」节点编辑 prompt 或 ts`);
-    }
-  }, [searchParams, workflows]);
-
-  // 修复完后回任务详情 + 重启
-  const [retryingFromTask, setRetryingFromTask] = useState(false);
-  const handleReturnAndRetry = async () => {
-    if (!fromTaskId) return;
-    setRetryingFromTask(true);
-    try {
-      await api.restartTask(fromTaskId);
-      toast.success(`已重启任务 ${fromTaskId}，跳转查看`);
-      navigate(`/tasks/${fromTaskId}`);
-    } catch (e: unknown) {
-      toast.error("重启失败", (e as Error)?.message ?? String(e));
-      setRetryingFromTask(false);
-    }
-  };
-
-  const toggle = async (name: string) => {
-    if (selected?.name === name) {
-      setSelected(null);
-      setTsSource(null);
-      return;
-    }
-    setLoadingDetail(true);
-    setTsSource(null);
-    try {
-      const [detail, graph] = await Promise.all([
-        api.getWorkflow(name),
-        api.getWorkflowGraph(name),
-      ]);
-      setSelected({ name, detail, graph });
-      // 后台预载 ts 给 drawer 用
-      void loadTsSilently(name);
-    } catch (e: unknown) {
-      // 之前 silent ignore：用户点 workflow → loading 停了但 detail 没出现，看着卡住。
-      toast.error("加载工作流详情失败", (e as Error)?.message ?? String(e));
-    } finally {
-      setLoadingDetail(false);
-    }
-  };
-
-  /**
-   * 后台懒加载 workflow.ts 源码，仅给 drawer 抽取本阶段函数片段用。
-   * 不再展示完整 ts viewer，所以静默失败：拿不到就 drawer 里显示 stub 提示。
-   */
-  const loadTsSilently = async (name: string) => {
-    try {
-      const res = await api.getWorkflowTs(name);
-      setTsSource(res.content);
-    } catch {
-      setTsSource(null);
-    }
-  };
-
-  const reloadSelected = async () => {
-    if (!selected) return;
-    try {
-      const [detail, graph] = await Promise.all([
-        api.getWorkflow(selected.name),
-        api.getWorkflowGraph(selected.name),
-      ]);
-      setSelected({ name: selected.name, detail, graph });
-    } catch (e: unknown) {
-      // 之前 silent：用户保存 workflow 后 reload 失败时 UI 还显示旧数据，
-      // 像"保存了没生效"。露出 toast 让用户知道刷新失败需重试。
-      toast.error("刷新工作流失败", (e as Error)?.message ?? String(e));
-    }
-  };
-
   if (loading) {
     return (
       <div className="mx-auto w-full max-w-6xl px-5 py-8 text-sm text-muted-foreground">
@@ -187,9 +77,7 @@ export function Workflows() {
         title="工作流"
         subtitle="编排定义 · 阶段图谱"
         description="管理所有可用的工作流；每个工作流都是 AUTOPILOT_HOME/workflows/ 下的独立目录。"
-        meta={[
-          { k: "总数", v: workflows.length },
-        ]}
+        meta={[{ k: "总数", v: workflows.length }]}
         actions={
           <Button onClick={() => setTemplatePickerOpen(true)}>
             <Plus className="h-4 w-4" />
@@ -199,115 +87,18 @@ export function Workflows() {
       />
 
       {/* 工作流目录健康检查：孤儿 / 重名碰撞 → 顶部警告条 + 修复 dialog */}
-      {/* 从失败任务跳过来修复 prompt 的上下文 banner */}
-      {fromTaskId && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2.5">
-          <div className="flex-1 text-sm">
-            <span className="font-bold text-accent">
-              修复来自任务 {fromTaskId}
-            </span>
-            <span className="ml-2 text-muted-foreground">
-              {fromTaskPhase && (
-                <>
-                  点击「<code className="font-mono text-foreground">{fromTaskPhase}</code>」节点编辑 prompt / ts → 保存
-                </>
-              )}
-              <span className="ml-1">→ 然后点右侧按钮回任务并重跑</span>
-            </span>
-          </div>
-          <Button
-            variant="default"
-            size="sm"
-            onClick={handleReturnAndRetry}
-            disabled={retryingFromTask}
-            className="text-[11px]"
-          >
-            {retryingFromTask ? "重启中…" : `回任务 & 重跑 →`}
-          </Button>
-        </div>
-      )}
+      <WorkflowHealthBanner onFixed={refresh} />
 
-      {!selected && <WorkflowHealthBanner onFixed={refresh} />}
-
-      {/* 用例目录视图（业务视角，PR #71 加） */}
-      {!selected && (
-        <WorkflowCatalog
-          workflows={workflows}
-          onSelect={(name) => toggle(name)}
-          onClone={(name) => {
-            setCloneSource(name);
-            setCloneName(`${name}-copy`);
-          }}
-          onNew={() => setTemplatePickerOpen(true)}
-        />
-      )}
-
-      {loadingDetail && (
-        <p className="mt-4 text-sm text-muted-foreground">加载详情中…</p>
-      )}
-
-      {/* 详情 */}
-      {selected && !loadingDetail && (
-        <div className="mt-6 space-y-4">
-          {/* Summary card */}
-          <Card className="p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="truncate font-mono text-base font-semibold text-accent">
-                {selected.name}
-              </h3>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setPendingDelete(selected.name)}
-                  disabled={loadingDetail || (selected.detail.source ?? "file") === "file"}
-                  title={
-                    (selected.detail.source ?? "file") === "file"
-                      ? "文件工作流只读，请改源目录"
-                      : "删除"
-                  }
-                >
-                  <Trash2 className="h-4 w-4" />
-                  删除
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => setSelected(null)}>
-                  <X className="h-4 w-4" />
-                  收起
-                </Button>
-              </div>
-            </div>
-
-            {selected.detail.description && (
-              <p className="mb-3 text-sm text-muted-foreground">{selected.detail.description}</p>
-            )}
-
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
-              <SummaryField label="初始状态">
-                <code className="font-mono">{selected.detail.initial_state}</code>
-              </SummaryField>
-              <SummaryField label="终态数">
-                {selected.detail.terminal_states?.length ?? 0}
-              </SummaryField>
-              <SummaryField label="阶段数">{selected.detail.phases?.length ?? 0}</SummaryField>
-            </dl>
-          </Card>
-
-          {/* 流水线 + 阶段编辑器合二为一：流水线节点点击弹编辑 drawer。
-              agent 配置已下放到每个 phase 内联编辑（点节点 → drawer 里的「智能体 · agent」区） */}
-          <Card className="p-4">
-            <PhasePipelineEditor
-              workflowName={selected.name}
-              initialPhases={(selected.detail.phases as any[]) ?? []}
-              tsSource={tsSource}
-              onSaved={async () => {
-                // 同步刷新 drawer 里用的 ts 源码
-                void loadTsSilently(selected.name);
-                await reloadSelected();
-              }}
-            />
-          </Card>
-        </div>
-      )}
+      {/* 用例目录视图：点卡片跳独立详情页 /workflows/:name */}
+      <WorkflowCatalog
+        workflows={workflows}
+        onSelect={(name) => navigate(`/workflows/${encodeURIComponent(name)}`)}
+        onClone={(name) => {
+          setCloneSource(name);
+          setCloneName(`${name}-copy`);
+        }}
+        onNew={() => setTemplatePickerOpen(true)}
+      />
 
       <NewWorkflowDialog
         open={newOpen}
@@ -385,75 +176,6 @@ export function Workflows() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <ConfirmDialog
-        open={!!pendingDelete}
-        title="删除工作流"
-        message={
-          <div className="space-y-3">
-            <p>
-              确认删除工作流{" "}
-              <code className="rounded bg-muted px-1 font-mono">{pendingDelete}</code>？
-            </p>
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
-              <p className="text-xs text-destructive">
-                ⚠ 将永久删除整个目录：
-                <br />
-                <code className="font-mono">
-                  AUTOPILOT_HOME/workflows/{pendingDelete}/
-                </code>
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                包括 workflow.yaml、workflow.ts 及该目录内的所有文件。此操作不可恢复。
-              </p>
-            </div>
-          </div>
-        }
-        confirmText="删除"
-        danger
-        onConfirm={async () => {
-          if (!pendingDelete) return;
-          const name = pendingDelete;
-          try {
-            await api.deleteWorkflow(name);
-            toast.success(`工作流 ${name} 已删除`);
-            setSelected(null);
-            refresh();
-          } catch (e: unknown) {
-            toast.error("删除失败", (e as Error)?.message ?? String(e));
-          } finally {
-            setPendingDelete(null);
-          }
-        }}
-        onCancel={() => setPendingDelete(null)}
-      />
-    </div>
-  );
-}
-
-function SummaryField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="truncate text-sm">{children}</dd>
-    </div>
-  );
-}
-
-function EmptyState({
-  title,
-  hint,
-  action,
-}: {
-  title: string;
-  hint?: React.ReactNode;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border bg-card/50 px-6 py-12 text-center">
-      <div className="text-sm font-medium">{title}</div>
-      {hint && <p className="max-w-sm text-xs text-muted-foreground">{hint}</p>}
-      {action}
     </div>
   );
 }
