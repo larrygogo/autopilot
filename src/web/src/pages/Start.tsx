@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Plus } from "lucide-react";
-import { api, type Project, type Workspace } from "@/hooks/useApi";
+import { api, type Project } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -13,25 +13,20 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/Toast";
 
-const WORKSPACE_NONE = "__none__";
-
 export function Start() {
   const navigate = useNavigate();
   const toast = useToast();
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [allWorkspaces, setAllWorkspaces] = useState<Workspace[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
-  const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
   const [projectId, setProjectId] = useState("");
-  const [workspaceId, setWorkspaceId] = useState(WORKSPACE_NONE);
   const [rawText, setRawText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   // P2 断点修复：首跑场景 projects 为空时，inline 建项目而不是把用户卡死在 disabled select
   const [newProjectName, setNewProjectName] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
 
-  // 进入页面：拉 projects + workspaces
+  // 进入页面：拉 projects（工作区不再让用户选 —— 项目:工作区 1:1，后端按 project 自动派生）
   useEffect(() => {
     setLoadingProjects(true);
     api.listProjects()
@@ -41,24 +36,7 @@ export function Start() {
       })
       .catch((e: unknown) => toast.error("加载项目失败", (e as Error)?.message ?? String(e)))
       .finally(() => setLoadingProjects(false));
-
-    setLoadingWorkspaces(true);
-    api.listWorkspaces()
-      .then((cs) => setAllWorkspaces(cs))
-      .catch(() => setAllWorkspaces([]))
-      .finally(() => setLoadingWorkspaces(false));
   }, [toast]);
-
-  // project 切换时 reset workspace
-  useEffect(() => {
-    setWorkspaceId(WORKSPACE_NONE);
-  }, [projectId]);
-
-  // 当前 project 下的 workspaces
-  const filteredWorkspaces = useMemo(
-    () => allWorkspaces.filter((c) => c.project_id === projectId),
-    [allWorkspaces, projectId],
-  );
 
   const canSubmit = useMemo(
     () => !submitting && !!projectId && rawText.trim().length > 0,
@@ -86,15 +64,13 @@ export function Start() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const wsId = workspaceId === WORKSPACE_NONE ? null : workspaceId;
+      // 不传 workspace_id：后端按 project 唯一工作区自动派生（项目:工作区 1:1）
       const { title, spec_md } = await api.extractRequirement({
         raw_text: rawText.trim(),
         project_id: projectId,
-        workspace_id: wsId,
       });
       const requirement = await api.createRequirement({
         project_id: projectId,
-        workspace_id: wsId,
         title,
         spec_md,
       });
@@ -162,23 +138,6 @@ export function Start() {
               </SelectContent>
             </Select>
           )}
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="workspace" className="bp-label">工作区（可选）</Label>
-          <Select value={workspaceId} onValueChange={setWorkspaceId} disabled={!projectId || loadingWorkspaces}>
-            <SelectTrigger id="workspace">
-              <SelectValue placeholder={!projectId ? "请先选项目" : loadingWorkspaces ? "加载中..." : "不绑定工作区"} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={WORKSPACE_NONE}>不绑定</SelectItem>
-              {filteredWorkspaces.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.alias} <span className="text-muted-foreground ml-2">{c.path}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
         <div className="space-y-2">
