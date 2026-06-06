@@ -980,6 +980,8 @@ export interface Requirement {
   clarifier_error: string | null;
   clarifier_provider: string | null;
   clarifier_model: string | null;
+  /** 调度器起 task 失败（回滚 ready）时记录的原因；成功起 task 时清空 */
+  schedule_error: string | null;
   created_at: number;
   updated_at: number;
 }

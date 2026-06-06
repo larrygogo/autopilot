@@ -1301,6 +1301,18 @@ export function RequirementDetail() {
 
           {stage === "ready" && (
             <>
+              {req.schedule_error && (
+                <Card className="border-l-4 border-l-destructive p-4">
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 text-destructive">⚠</span>
+                    <div className="min-w-0 text-sm">
+                      <p className="font-medium text-destructive">上次起任务失败，已退回</p>
+                      <p className="mt-0.5 break-words text-muted-foreground">{req.schedule_error}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">修复后点上方「入队执行」可重试。</p>
+                    </div>
+                  </div>
+                </Card>
+              )}
               {specCard}
               {req.status === "queued" && (
                 <Button variant="outline" className="w-full" size="sm" onClick={recallToReady} disabled={actionBusy}>

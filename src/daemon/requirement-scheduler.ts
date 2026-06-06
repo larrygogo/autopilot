@@ -90,8 +90,12 @@ export async function tickRepo(workspaceId: string): Promise<void> {
       requirement_id: candidate.id,
     });
   } catch (e: unknown) {
-    log.error("tickRepo: 创建 task 失败 candidate=%s: %s", candidate.id, (e as Error).message);
+    const msg = (e as Error).message;
+    log.error("tickRepo: 创建 task 失败 candidate=%s: %s", candidate.id, msg);
     try {
+      // 把失败原因写进需求，让用户在需求页直接看到「为什么退回 ready / 没开跑」，
+      // 不必翻 daemon.log（静默回滚是这类问题极难排查的根源）。
+      updateRequirement(candidate.id, { schedule_error: `起任务失败：${msg}` });
       setRequirementStatus(candidate.id, "ready");
     } catch (rollbackErr: unknown) {
       log.error("tickRepo: 回滚 status 失败 %s: %s", candidate.id, (rollbackErr as Error).message);
@@ -100,7 +104,8 @@ export async function tickRepo(workspaceId: string): Promise<void> {
   }
 
   try {
-    updateRequirement(candidate.id, { task_id: task.id });
+    // 起 task 成功：清掉上次可能残留的调度失败原因
+    updateRequirement(candidate.id, { task_id: task.id, schedule_error: null });
     setRequirementStatus(candidate.id, "running");
     log.info(
       "tickRepo: 启动 requirement %s → task %s on workspace %s (group=%s, submodules=%d)",

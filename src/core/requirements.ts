@@ -30,6 +30,8 @@ export interface Requirement {
   clarifier_error: string | null;
   clarifier_provider: string | null;
   clarifier_model: string | null;
+  /** 调度器起 task 失败（回滚 ready）时记录的原因；成功起 task 时清空。 */
+  schedule_error: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -55,6 +57,7 @@ export interface UpdateRequirementOpts {
   clarifier_error?: string | null;
   clarifier_provider?: string | null;
   clarifier_model?: string | null;
+  schedule_error?: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -200,6 +203,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
     "clarifier_error",
     "clarifier_provider",
     "clarifier_model",
+    "schedule_error",
   ] as const;
   for (const k of updatable) {
     if (opts[k] !== undefined) {
