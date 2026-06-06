@@ -29,6 +29,8 @@ interface TaskInfo {
   started_at: string | null;
   pr_url?: string | null;
   dangling?: boolean;
+  /** 阶段连续异常次数；>0 表示正在失败重试，达 5 次自动取消 */
+  failure_count?: number;
 }
 
 interface LogEntry {
@@ -242,6 +244,20 @@ export function TaskProgressCard({
           <div className="text-[11px] text-muted-foreground">
             正在执行 <span className="font-semibold text-foreground">{phaseLabel}</span> 阶段
             {startedMs && <span className="ml-1">· 已耗时 {formatElapsed(elapsedMs)}</span>}
+          </div>
+        )}
+
+        {/* 失败重试可见化：phase 异常后状态留在 running/pending、靠 watcher 重试，
+            过去这里毫无提示，确定性失败时观感像"卡死"。露出重试计数 + 最近错误。 */}
+        {!isFailed && !isDone && !isCancelled && (task.failure_count ?? 0) > 0 && (
+          <div className="border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+            <div className="font-bold">⚠ 执行报错，正在重试（{task.failure_count}/5）</div>
+            {recentError && (
+              <p className="mt-1 break-words opacity-90">
+                最近错误：{recentError.split("\n")[0].slice(0, 200)}
+              </p>
+            )}
+            <p className="mt-1 opacity-75">连续异常 5 次将自动取消。可展开下方日志查看完整原因。</p>
           </div>
         )}
 
