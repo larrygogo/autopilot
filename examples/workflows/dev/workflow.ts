@@ -10,7 +10,6 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import { getTask, updateTask } from "@autopilot/core/db";
 import { transition } from "@autopilot/core/state-machine";
 import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
@@ -54,11 +53,6 @@ function getRejectionCounts(task: ReturnType<typeof getTask>): Record<string, nu
   }
 }
 
-function expandPath(p: string): string {
-  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
-  return p;
-}
-
 /**
  * 计算指定 phase 的产物目录：workspace/<NN-phase>/，幂等创建。
  */
@@ -77,19 +71,11 @@ function phaseDir(taskId: string, workflowName: string, phaseName: string): stri
 // ──────────────────────────────────────────────
 
 export function setup_dev_task(args: { title?: string; requirement?: string }): Record<string, unknown> {
-  const wf = getWorkflow("dev");
-  const config = (wf?.config ?? {}) as Record<string, string>;
-
-  const repoPath = expandPath(config["repo_path"] ?? "");
-  const defaultBranch = config["default_branch"] ?? "main";
-  const title = args.title ?? "untitled";
-
+  // repo_path / default_branch / branch 由框架按需求绑定的 workspace + git worktree 注入
+  // （见 task-factory.ts）。这里只回传业务字段，不再从 config 读写死路径。
   return {
-    title,
+    title: args.title ?? "untitled",
     requirement: args.requirement ?? "",
-    repo_path: repoPath,
-    default_branch: defaultBranch,
-    branch: `feat/${title.slice(0, 20).replace(/\s+/g, "-").toLowerCase()}`,
   };
 }
 
@@ -102,10 +88,8 @@ export async function run_design(taskId: string): Promise<void> {
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
   const repoPath = task["repo_path"] as string;
-  const defaultBranch = (task["default_branch"] as string) ?? "main";
-
-  runGit(["checkout", defaultBranch], repoPath);
-  runGit(["pull", "--ff-only"], repoPath);
+  // worktree 模式：sandbox 已 checkout 在基于 default_branch 派生的独立分支上，
+  // 无需再 checkout/pull（worktree 不能 checkout 主仓库已占用的 default_branch）。
 
   const requirement = ((task["requirement"] as string | undefined) ?? "").trim();
   if (!requirement) {
@@ -225,28 +209,8 @@ export async function run_develop(taskId: string): Promise<void> {
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
   const repoPath = task["repo_path"] as string;
-  const branch = task["branch"] as string;
-  const defaultBranch = (task["default_branch"] as string) ?? "main";
-
-  runGit(["checkout", defaultBranch], repoPath);
-  runGit(["pull", "--ff-only"], repoPath);
-
-  // 用户工作目录保护：develop 阶段开始前若 working tree 有未提交改动，
-  // 全部 stash（含 untracked），commit agent 自己的产物后再 pop 回来。
-  // 不加这层保护时 git add -A 会把用户散改一并卷入 dogfood commit，污染
-  // 下游 code_review 看到的 diff，让 reviewer 抱怨 agent 没写过的代码。
-  const dirtyBefore = runGit(["status", "--porcelain"], repoPath).stdout.trim();
-  let stashed = false;
-  if (dirtyBefore) {
-    const stashMsg = `autopilot-pre-develop-${taskId}`;
-    runGit(["stash", "push", "--include-untracked", "-m", stashMsg], repoPath);
-    stashed = true;
-  }
-
-  const checkoutNew = runGit(["checkout", "-b", branch], repoPath, false);
-  if (checkoutNew.exitCode !== 0) {
-    runGit(["checkout", branch], repoPath);
-  }
+  // worktree 模式：sandbox 是基于 default_branch 派生的独立分支工作树，工作树天然
+  // 干净、已在自己的分支（autopilot/<taskId>）上 —— 无需 checkout/pull/stash/建分支。
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
@@ -273,51 +237,15 @@ export async function run_develop(taskId: string): Promise<void> {
       `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。`;
 
   const agent = agentForPhase(task.workflow, "develop");
-  try {
-    const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
-    const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
-    writeFileSync(reportPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
+  const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
+  const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
+  writeFileSync(reportPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
 
-    const statusResult = runGit(["status", "--porcelain"], repoPath);
-    if (statusResult.stdout.trim()) {
-      // agent 自己改的文件 add + commit；此时 working tree 只有 agent
-      // 的产物（用户散改已 stash），git add -A 是安全的。
-      runGit(["add", "-A"], repoPath);
-      runGit(["commit", "-m", `feat: ${task.title}`], repoPath);
-    }
-  } finally {
-    // 不论 agent 成功 / 失败 / 超时，都要 pop 回用户散改，否则用户看不到
-    // 自己的未提交改动会很慌。
-    //
-    // dogfood-bug11 修法：pop 冲突时不能 silent 失败 —— 必须显式告诉用户
-    // working tree 当前有 conflict marker 在某些文件，否则下游 submit_pr
-    // 的 checkout default_branch 会因 unmerged 状态再失败一次（连锁 bug 6
-    // fix 失效）。检测 pop 失败 → 把 conflict 状态写进 dev_report.md，
-    // 任务仍 done 但 user 能看到"该手工解 conflict"的指引。
-    if (stashed) {
-      const popResult = runGit(["stash", "pop"], repoPath, false);
-      if (popResult.exitCode !== 0) {
-        const unmergedResult = runGit(["diff", "--name-only", "--diff-filter=U"], repoPath, false);
-        const unmergedFiles = unmergedResult.stdout.trim();
-        const warning =
-          `\n\n---\n\n` +
-          `## ⚠ 用户散改恢复冲突\n\n` +
-          `develop 阶段开始前 stash 了用户工作目录散改（含 untracked），` +
-          `开发完成 commit 后 \`git stash pop\` 失败：\n\n` +
-          `\`\`\`\n${popResult.stderr || "(no stderr)"}\n\`\`\`\n\n` +
-          (unmergedFiles
-            ? `**unmerged 文件**：\n\n\`\`\`\n${unmergedFiles}\n\`\`\`\n\n`
-            : "") +
-          `这些文件的散改可能因为本次 task commit 修改同名文件而冲突。\n` +
-          `**stash 仍保留在 \`git stash list\` 顶部**，可手工 \`git stash apply\` 后解冲突。\n` +
-          `submit_pr 阶段会因 unmerged 状态无法 checkout main —— 请先手工解决冲突。\n`;
-        try {
-          const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
-          const existing = existsSync(reportPath) ? readFileSync(reportPath, "utf-8") : "";
-          writeFileSync(reportPath, existing + warning, "utf-8");
-        } catch { /* 写不进 report 也不能影响 task 进展 */ }
-      }
-    }
+  // worktree 工作树只含 agent 本次产物（无用户散改），git add -A 安全。
+  const statusResult = runGit(["status", "--porcelain"], repoPath);
+  if (statusResult.stdout.trim()) {
+    runGit(["add", "-A"], repoPath);
+    runGit(["commit", "-m", `feat: ${task.title}`], repoPath);
   }
 
   transition(taskId, "develop_complete", {
@@ -457,11 +385,8 @@ export async function run_submit_pr(taskId: string): Promise<void> {
 
   updateTask(taskId, { pr_url: prUrl });
 
-  // 切回 default branch，避免 daemon 主机 cwd 上 HEAD 长期停留在 task
-  // feature branch 上 — 用户在终端 / IDE 跑 git 时默认是 feature branch
-  // 而不是 main，连续两次 dogfood 都因此把我的 fix commit 误推到 feature
-  // branch 而不是 main。dogfood-bug6 修法。
-  runGit(["checkout", defaultBranch], repoPath, false);
+  // worktree 模式无需切回 default branch：worktree 是独立目录，daemon 主机 cwd
+  // 与用户工作仓库的 HEAD 都不受影响（旧 dogfood-bug6 的切回补丁仅对"在本体跑"有意义）。
 
   transition(taskId, "submit_pr_complete", {
     transitions: getTransitions(task.workflow),

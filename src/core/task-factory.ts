@@ -2,7 +2,7 @@ import { getTask, createTask } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { ensureTaskSandbox, type WorkspaceRef } from "./sandbox";
+import { ensureTaskSandbox, getTaskSandbox, getTaskWorktreeMeta, type WorkspaceRef } from "./sandbox";
 import { getWorkspaceById } from "./workspaces";
 import { executePhase } from "./runner";
 
@@ -120,6 +120,43 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     extra["requirement"] = requirement ?? "";
   }
 
+  // sandbox.git=true 时反查 workspace 起 git worktree。必须在 createTask 之前，
+  // 这样能把 worktree 的真实路径/分支注入 extra（写进 manifest），供 run 阶段使用。
+  let workspace: WorkspaceRef | undefined;
+  if (wf.sandbox?.git) {
+    // 直接从原始入参 opts 读（scheduler / routes 传的真值）。setup_func 返回的 extra
+    // 不一定回传 workspace_id，不能依赖它（这是 worktree 之前从未建成的根因）。
+    // 仍兜底看 extra，兼容显式回传 workspace_id/codebase_id 的工作流。
+    const workspaceId =
+      (typeof opts.workspace_id === "string" ? opts.workspace_id : undefined) ??
+      (typeof opts.codebase_id === "string" ? opts.codebase_id : undefined) ??
+      (typeof extra["workspace_id"] === "string" ? extra["workspace_id"] : undefined) ??
+      (typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined);
+    if (workspaceId) {
+      const ws = getWorkspaceById(workspaceId);
+      if (ws) {
+        workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch };
+      }
+    }
+  }
+  try {
+    ensureTaskSandbox(taskId, workflowName, wf.sandbox, workspace);
+  } catch (e: unknown) {
+    console.warn("ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
+  }
+
+  // 框架标准字段注入：worktree 建成功时，把隔离 worktree 的物理路径/分支/base 写进
+  // extra，覆盖 setup_func 可能返回的占位值（如 dev 模板旧的 config.repo_path）。
+  // workspace→物理路径解析是通用基础设施（注入的是路径事实，非工作流业务概念），
+  // 不违反"核心零业务知识"红线。run 阶段统一在这个隔离 worktree 里跑 git。
+  const worktreeMeta = getTaskWorktreeMeta(taskId);
+  if (worktreeMeta) {
+    extra["repo_path"] = getTaskSandbox(taskId);
+    extra["default_branch"] = worktreeMeta.base;
+    extra["branch"] = worktreeMeta.branch;
+    extra["workspace_path"] = worktreeMeta.workspace_path;
+  }
+
   const firstPhaseEntry = wf.phases[0];
   if (!firstPhaseEntry) throw new StartTaskError("Workflow has no phases", 500);
   const firstPhaseName = isParallelPhase(firstPhaseEntry)
@@ -137,26 +174,6 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     requirementId: reqLink,
     workflowSnapshot: snapshotWorkflow(wf),
   });
-
-  try {
-    // sandbox.git=true 时反查 workspace 传给 ensureTaskSandbox，让它能起 git worktree
-    let workspace: WorkspaceRef | undefined;
-    if (wf.sandbox?.git) {
-      // 新键 workspace_id 优先；兼容仍发 codebase_id 的旧 setup_func（如未同步的用户工作流副本）
-      const workspaceId =
-        (typeof extra["workspace_id"] === "string" ? extra["workspace_id"] : undefined) ??
-        (typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined);
-      if (workspaceId) {
-        const ws = getWorkspaceById(workspaceId);
-        if (ws) {
-          workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch };
-        }
-      }
-    }
-    ensureTaskSandbox(taskId, workflowName, wf.sandbox, workspace);
-  } catch (e: unknown) {
-    console.warn("ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
-  }
 
   executePhase(taskId, firstPhaseName).catch(() => {});
 

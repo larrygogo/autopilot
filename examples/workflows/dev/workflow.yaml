@@ -3,9 +3,12 @@ label: "完整开发"
 description: "完整开发流程（设计 → 评审 → 开发 → 代码审查 → PR）"
 setup_func: setup_dev_task
 
-config:
-  repo_path: ~/repos/my-project
-  default_branch: main
+# git worktree 沙盒：基于需求绑定的 workspace 的 default_branch 派生一个
+# 独立分支工作树（autopilot/<taskId>），run 阶段全程在隔离 worktree 里跑 git，
+# 不碰用户主仓库工作树。repo_path / default_branch / branch 由框架按 workspace 注入，
+# 无需在此写死路径（旧的 config.repo_path 占位已废弃）。
+sandbox:
+  git: true
 
 # 每个 phase 就地内联 agent 配置（不再引用命名 agent）。
 # 省略 agent: 的 phase 走 DEFAULT_AGENT 兜底。
