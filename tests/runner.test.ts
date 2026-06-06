@@ -186,6 +186,78 @@ describe("runner - executePhase", () => {
     expect(after!.status).toBe("cancelled");
   });
 
+  it("确定性失败：连续相同错误指纹，第 2 次即 cancelled（不等 failure_count 到 5）", async () => {
+    const phaseFn = async (_taskId: string) => {
+      throw new Error("Cannot find module '/repo/x.ts'");
+    };
+    registryModule.register(makeTestWorkflow(phaseFn) as any);
+    dbModule.createTask({
+      id: "task-det-001",
+      title: "确定性失败",
+      workflow: "test_wf",
+      initialStatus: "pending_step1",
+    });
+
+    // 第 1 次：记指纹，留 running，不立即 cancel
+    await runnerModule.executePhase("task-det-001", "step1");
+    const after1 = dbModule.getTask("task-det-001");
+    expect(after1!.failure_count).toBe(1);
+    expect(after1!.status).not.toBe("cancelled");
+    sqlite.run("UPDATE tasks SET status='pending_step1' WHERE id='task-det-001'");
+
+    // 第 2 次：相同指纹 → 判定确定性 → 立即 cancelled（远未到 5）
+    await runnerModule.executePhase("task-det-001", "step1");
+    const after2 = dbModule.getTask("task-det-001");
+    expect(after2!.status).toBe("cancelled");
+    expect(after2!.failure_count).toBe(2);
+  });
+
+  it("偶发失败：连续不同错误指纹不触发快速止损，留给 watcher 重试", async () => {
+    const msgs = ["network timeout", "disk quota exceeded", "upstream 503", "connection reset"];
+    let i = 0;
+    const phaseFn = async (_taskId: string) => {
+      throw new Error(msgs[i++ % msgs.length]);
+    };
+    registryModule.register(makeTestWorkflow(phaseFn) as any);
+    dbModule.createTask({
+      id: "task-flaky-001",
+      title: "偶发失败",
+      workflow: "test_wf",
+      initialStatus: "pending_step1",
+    });
+
+    for (let n = 0; n < 4; n++) {
+      await runnerModule.executePhase("task-flaky-001", "step1");
+      // 不同错误不快速止损，仍留 running（手动弹回模拟 watcher）
+      expect(dbModule.getTask("task-flaky-001")!.status).not.toBe("cancelled");
+      sqlite.run("UPDATE tasks SET status='pending_step1' WHERE id='task-flaky-001'");
+    }
+    expect(dbModule.getTask("task-flaky-001")!.failure_count).toBe(4);
+  });
+
+  it("指纹归一化：错误仅路径/行号不同（语义同一确定性失败）→ 判等 → 第 2 次 cancelled", async () => {
+    const errs = [
+      "Cannot find module '/a/b/c.ts' at line 31",
+      "Cannot find module '/x/y/z.ts' at line 99",
+    ];
+    let i = 0;
+    const phaseFn = async (_taskId: string) => {
+      throw new Error(errs[i++]);
+    };
+    registryModule.register(makeTestWorkflow(phaseFn) as any);
+    dbModule.createTask({
+      id: "task-norm-001",
+      title: "归一化",
+      workflow: "test_wf",
+      initialStatus: "pending_step1",
+    });
+
+    await runnerModule.executePhase("task-norm-001", "step1");
+    sqlite.run("UPDATE tasks SET status='pending_step1' WHERE id='task-norm-001'");
+    await runnerModule.executePhase("task-norm-001", "step1");
+    expect(dbModule.getTask("task-norm-001")!.status).toBe("cancelled");
+  });
+
   it("executePhase 重复调用时锁保护防止双重执行", async () => {
     let callCount = 0;
     // 阶段函数引入延迟，模拟耗时操作

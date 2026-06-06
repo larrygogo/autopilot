@@ -9,6 +9,21 @@ import { closeAgents } from "../agents/registry";
 import { emit } from "./event-bus";
 import { archivePhaseArtifacts } from "./artifacts";
 
+/**
+ * 把错误消息归一化成稳定指纹：剥掉绝对路径、8 位 task id/hash、行号/数字，
+ * 让"同一确定性错误的多次发生"判等（指纹相同），而语义不同的偶发错误保持区分。
+ * 用于 phase 异常的确定性失败快速止损（连续相同指纹 = 重试必然同样失败）。
+ */
+function fingerprintError(msg: string): string {
+  const firstLine = (msg.split("\n")[0] ?? "").trim();
+  return firstLine
+    .replace(/['"][A-Za-z]:[\\/][^'"]*['"]/g, "<path>") // 引号内 Windows 绝对路径
+    .replace(/['"]\/[^'"]*['"]/g, "<path>")             // 引号内 Unix 绝对路径
+    .replace(/[A-Za-z]:[\\/][^\s:'"]+/g, "<path>")      // 裸 Windows 路径
+    .replace(/\b[0-9a-f]{8}\b/gi, "<id>")               // 8 位 hex（task id / hash）
+    .replace(/\d+/g, "N");                              // 行号 / 时间戳 / 数字
+}
+
 // ──────────────────────────────────────────────
 // Push 模型：非阻塞启动阶段
 // ──────────────────────────────────────────────
@@ -234,12 +249,27 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
         const t = getTask(taskId);
         if (t) {
           const newCount = (t.failure_count ?? 0) + 1;
-          updateTask(taskId, { failure_count: newCount });
           const MAX_PHASE_FAILURES = 5;
-          if (newCount >= MAX_PHASE_FAILURES) {
-            log.error("阶段 %s 已连续异常 %d 次，强制转 cancelled [task=%s]", phase, newCount, taskId);
+          const fingerprint = fingerprintError(errMsg);
+          const prevFingerprint = (t["last_failure_fingerprint"] as string | undefined) ?? null;
+          // 确定性失败快速止损：连续两次相同错误指纹 = 重试必然同样失败（cwd 不存在 /
+          // 模块缺失 / git ENOENT 等），立即 cancelled，不留 running 让 watcher 熬满
+          // recoveryCount(≥3) × 卡死阈值(~10min) 才终止（确定性失败要拖 ~30min）。
+          // 不同指纹 → 视为可能偶发，照旧累计 + 留 running 给 watcher 重试（保偶发容错）。
+          // 用 cancelled（已是全链路验证的终态）而非引入 failed（状态机无该状态）。
+          if (prevFingerprint !== null && prevFingerprint === fingerprint) {
+            updateTask(taskId, { failure_count: newCount });
+            log.error("阶段 %s 连续相同错误（确定性失败），立即 cancelled [task=%s]：%s",
+              phase, taskId, fingerprint.slice(0, 160));
             forceTransition(taskId, "cancelled",
-              `阶段 ${phase} 连续异常 ${newCount} 次（最近：${errMsg.split("\n")[0].slice(0, 160)}）`);
+              `阶段 ${phase} 确定性失败（错误重复）：${errMsg.split("\n")[0].slice(0, 160)}`);
+          } else {
+            updateTask(taskId, { failure_count: newCount, last_failure_fingerprint: fingerprint });
+            if (newCount >= MAX_PHASE_FAILURES) {
+              log.error("阶段 %s 已连续异常 %d 次，强制转 cancelled [task=%s]", phase, newCount, taskId);
+              forceTransition(taskId, "cancelled",
+                `阶段 ${phase} 连续异常 ${newCount} 次（最近：${errMsg.split("\n")[0].slice(0, 160)}）`);
+            }
           }
         }
       } catch (cleanupErr: unknown) {
