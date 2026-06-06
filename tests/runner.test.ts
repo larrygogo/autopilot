@@ -275,6 +275,32 @@ describe("runner - executePhase", () => {
     expect(dbModule.getTask("task-norm-001")!.status).toBe("cancelled");
   });
 
+  it("resetTaskForRerun：复用同 id 重置——状态回首阶段、failure_count/指纹/dangling 清空、重跑首阶段", async () => {
+    const taskFactory = await import("../src/core/task-factory");
+    let calls = 0;
+    const phaseFn = async (_taskId: string) => { calls++; };
+    registryModule.register(makeTestWorkflow(phaseFn) as any);
+    dbModule.createTask({
+      id: "task-rerun-001",
+      title: "重跑复用",
+      workflow: "test_wf",
+      initialStatus: "pending_step1",
+    });
+    // 模拟上一轮失败残留：终态 + 失败计数 + 指纹 + dangling
+    sqlite.run("UPDATE tasks SET status='cancelled', failure_count=3 WHERE id='task-rerun-001'");
+    dbModule.updateTask("task-rerun-001", { last_failure_fingerprint: "step1::boom", dangling: true });
+
+    taskFactory.resetTaskForRerun("task-rerun-001");
+    await new Promise((r) => setImmediate(r)); // 等 executePhase 异步跑首阶段
+
+    const t = dbModule.getTask("task-rerun-001");
+    expect(t!.failure_count).toBe(0);
+    expect(t!["last_failure_fingerprint"]).toBeFalsy();
+    expect(t!["dangling"]).toBeFalsy();
+    expect(t!.status).not.toBe("cancelled"); // 已重置离开终态、重跑了首阶段
+    expect(calls).toBeGreaterThan(0);
+  });
+
   it("executePhase 重复调用时锁保护防止双重执行", async () => {
     let callCount = 0;
     // 阶段函数引入延迟，模拟耗时操作

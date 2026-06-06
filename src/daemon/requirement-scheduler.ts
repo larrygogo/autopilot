@@ -4,7 +4,8 @@ import { listRequirements, setRequirementStatus, updateRequirement, getRequireme
 import { getWorkspaceById } from "../core/workspaces";
 import { listSubmodules } from "../core/submodules";
 import { listComments } from "../core/requirement-comments";
-import { startTaskFromTemplate } from "../core/task-factory";
+import { getTask } from "../core/db";
+import { startTaskFromTemplate, resetTaskForRerun } from "../core/task-factory";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("requirement-scheduler");
@@ -73,6 +74,29 @@ export async function tickRepo(workspaceId: string): Promise<void> {
     requirement = requirement
       ? `${requirement}\n\n## 需求澄清记录\n\n${qa}`
       : `## 需求澄清记录\n\n${qa}`;
+  }
+
+  // req:task 1:1：需求已有存活 task → 复用它重置重跑，不新建第二个（避免一 req 堆多 task）。
+  // 首次执行 task_id 为 null 走下面新建；failed/重新入队时 task_id 已写 → 复用重跑。
+  const existing = candidate.task_id ? getTask(candidate.task_id) : null;
+  if (existing) {
+    try {
+      resetTaskForRerun(existing.id, { requirement });
+      updateRequirement(candidate.id, { schedule_error: null });
+      setRequirementStatus(candidate.id, "running");
+      log.info("tickRepo: 重跑 requirement %s → 复用 task %s on workspace %s",
+        candidate.id, existing.id, candidateWorkspace.alias);
+    } catch (e: unknown) {
+      const msg = (e as Error).message;
+      log.error("tickRepo: 重跑失败 candidate=%s: %s", candidate.id, msg);
+      try {
+        updateRequirement(candidate.id, { schedule_error: `重跑失败：${msg}` });
+        setRequirementStatus(candidate.id, "ready");
+      } catch (rollbackErr: unknown) {
+        log.error("tickRepo: 重跑回滚失败 %s: %s", candidate.id, (rollbackErr as Error).message);
+      }
+    }
+    return;
   }
 
   let task;

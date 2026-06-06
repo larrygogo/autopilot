@@ -1,9 +1,13 @@
-import { getTask, createTask } from "./db";
+import { getTask, createTask, updateTask } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { ensureTaskSandbox, getTaskSandbox, getTaskWorktreeMeta, type WorkspaceRef } from "./sandbox";
+import { ensureTaskSandbox, deleteTaskSandbox, getTaskSandbox, getTaskWorktreeMeta, type WorkspaceRef } from "./sandbox";
 import { getWorkspaceById } from "./workspaces";
+import { getRequirementById } from "./requirements";
+import { forceTransition } from "./state-machine";
+import { isLocked } from "./infra";
+import { forgetTaskRecoveryState } from "./watcher";
 import { executePhase } from "./runner";
 
 // ──────────────────────────────────────────────
@@ -79,6 +83,16 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
   const reqLink = (opts.requirement_id as string | undefined) ?? opts.reqId;
   if (!reqLink) {
     throw new StartTaskError("任务必须挂在一个需求下（缺 requirement_id）", 400);
+  }
+
+  // req:task 严格 1:1：需求已有存活 task 时禁止再新建（重跑应走 resetTaskForRerun
+  // 复用同一 task）。挡住任何绕过 scheduler 的非法新建路径，避免一 req 堆多个游离 task。
+  const linkedReq = getRequirementById(reqLink);
+  if (linkedReq?.task_id && getTask(linkedReq.task_id)) {
+    throw new StartTaskError(
+      `需求 ${reqLink} 已有 task ${linkedReq.task_id}，重跑请走 resetTaskForRerun（不新建 task）`,
+      409,
+    );
   }
 
   let taskId: string;
@@ -180,4 +194,86 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
   const task = getTask(taskId);
   if (!task) throw new StartTaskError("任务创建后读取失败", 500);
   return task;
+}
+
+/**
+ * 重跑：复用同一 task id，从首阶段重置重新跑（req:task 严格 1:1，不新建第二个 task）。
+ *
+ * 清执行态（failure_count / 失败指纹 / dangling / pending 问答 / rejection / pr），重建干净
+ * worktree（基于需求绑定 workspace 的最新 default_branch），清 watcher 内存恢复计数，
+ * 再从首阶段启动。审计历史（task_phase_events / task_logs）保留。
+ *
+ * @param opts.requirement 重跑时刷新的需求文本（spec 可能已更新）；省略则沿用 task 已存的。
+ */
+export function resetTaskForRerun(taskId: string, opts: { requirement?: string } = {}): void {
+  const task = getTask(taskId);
+  if (!task) throw new StartTaskError(`task 不存在：${taskId}`, 404);
+
+  // 并发守卫：仍在运行（持文件锁）时不重置，避免删正被 git 写的 worktree
+  if (task.status.startsWith("running_") && isLocked(taskId)) {
+    throw new StartTaskError(`task ${taskId} 仍在运行中，无法重置重跑`, 409);
+  }
+
+  const wf = getWorkflow(task.workflow);
+  if (!wf) throw new StartTaskError(`Workflow "${task.workflow}" not found`, 500);
+
+  // 1. 清执行态：failure_count 是表列，其余在 extra（updateTask 把 null 合并进 extra = 清空）
+  const clear: Record<string, unknown> = {
+    failure_count: 0,
+    last_failure_fingerprint: null,
+    dangling: false,
+    pending_question: null,
+    pending_prompts: [],
+    rejection_counts: null,
+    rejection_reason: null,
+    pr_url: null,
+    pr_number: null,
+  };
+  if (opts.requirement !== undefined) clear["requirement"] = opts.requirement;
+  updateTask(taskId, clear);
+
+  // 2. 清 watcher 内存恢复计数，否则上次卡死累计的 recoveryCount 会让本次重跑过早被 cancel
+  try { forgetTaskRecoveryState(taskId); } catch { /* ignore */ }
+
+  // 3. 重建干净 worktree（基于需求绑定 workspace 的最新 default_branch，而非 extra 里的旧值）
+  if (wf.sandbox?.git) {
+    try {
+      deleteTaskSandbox(taskId);
+    } catch (e: unknown) {
+      console.warn("resetTaskForRerun: deleteTaskSandbox 失败：", e instanceof Error ? e.message : e);
+    }
+    let workspace: WorkspaceRef | undefined;
+    const req = task.requirement_id ? getRequirementById(task.requirement_id) : null;
+    const wsId = req?.workspace_id
+      ?? (typeof task["workspace_id"] === "string" ? (task["workspace_id"] as string) : undefined);
+    if (wsId) {
+      const ws = getWorkspaceById(wsId);
+      if (ws) workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch };
+    }
+    try {
+      ensureTaskSandbox(taskId, task.workflow, wf.sandbox, workspace);
+    } catch (e: unknown) {
+      console.warn("resetTaskForRerun: ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
+    }
+    const meta = getTaskWorktreeMeta(taskId);
+    if (meta) {
+      updateTask(taskId, {
+        repo_path: getTaskSandbox(taskId),
+        default_branch: meta.base,
+        branch: meta.branch,
+        workspace_path: meta.workspace_path,
+      });
+    }
+  }
+
+  // 4. 状态强制回首阶段 pending（绕状态机，任意旧终态都能回 initial，留审计日志）
+  forceTransition(taskId, wf.initial_state, "rerun: 重置到首阶段重新执行");
+
+  // 5. 启动首阶段
+  const firstPhaseEntry = wf.phases[0];
+  if (!firstPhaseEntry) throw new StartTaskError("Workflow has no phases", 500);
+  const firstPhaseName = isParallelPhase(firstPhaseEntry)
+    ? firstPhaseEntry.parallel.name
+    : firstPhaseEntry.name;
+  executePhase(taskId, firstPhaseName).catch(() => {});
 }
