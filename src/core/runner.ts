@@ -250,7 +250,10 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
         if (t) {
           const newCount = (t.failure_count ?? 0) + 1;
           const MAX_PHASE_FAILURES = 5;
-          const fingerprint = fingerprintError(errMsg);
+          // 指纹绑定 phase：dev 等工作流多个阶段都调 runGit，git 错误首行高度相似，
+          // 不带 phase 前缀会让"上一阶段失败留下的指纹"命中"下一阶段的首次失败"，
+          // 把本该给一次重试机会的偶发首失败误判成确定性而立即 cancel。
+          const fingerprint = `${phase}::${fingerprintError(errMsg)}`;
           const prevFingerprint = (t["last_failure_fingerprint"] as string | undefined) ?? null;
           // 确定性失败快速止损：连续两次相同错误指纹 = 重试必然同样失败（cwd 不存在 /
           // 模块缺失 / git ENOENT 等），立即 cancelled，不留 running 让 watcher 熬满

@@ -212,6 +212,23 @@ describe("runner - executePhase", () => {
     expect(after2!.failure_count).toBe(2);
   });
 
+  it("失败指纹绑定 phase 前缀：跨阶段相同错误不互相误判", async () => {
+    const phaseFn = async (_taskId: string) => {
+      throw new Error("git 命令失败：git checkout main");
+    };
+    registryModule.register(makeTestWorkflow(phaseFn) as any);
+    dbModule.createTask({
+      id: "task-fp-phase-001",
+      title: "指纹绑定 phase",
+      workflow: "test_wf",
+      initialStatus: "pending_step1",
+    });
+    await runnerModule.executePhase("task-fp-phase-001", "step1");
+    const t = dbModule.getTask("task-fp-phase-001");
+    // 指纹必须带 phase 前缀，否则不同阶段的相同 git 错误会互相误判为确定性失败
+    expect(t!["last_failure_fingerprint"]).toContain("step1::");
+  });
+
   it("偶发失败：连续不同错误指纹不触发快速止损，留给 watcher 重试", async () => {
     const msgs = ["network timeout", "disk quota exceeded", "upstream 503", "connection reset"];
     let i = 0;
