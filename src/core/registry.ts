@@ -323,7 +323,8 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
     }
   }
   if (!wfDef["terminal_states"]) {
-    wfDef["terminal_states"] = ["done", "cancelled"];
+    // failed = 执行失败终态（可重跑，区别于用户主动取消的 cancelled）。
+    wfDef["terminal_states"] = ["done", "cancelled", "failed"];
   }
 
   // 绑定 workflow 级别函数

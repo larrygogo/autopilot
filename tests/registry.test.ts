@@ -141,7 +141,7 @@ phases:
       const wf = await loadYamlWorkflow(dir);
 
       expect(wf!.initial_state).toBe("pending_alpha");
-      expect(wf!.terminal_states).toEqual(["done", "cancelled"]);
+      expect(wf!.terminal_states).toEqual(["done", "cancelled", "failed"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

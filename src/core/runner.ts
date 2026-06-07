@@ -256,21 +256,21 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
           const fingerprint = `${phase}::${fingerprintError(errMsg)}`;
           const prevFingerprint = (t["last_failure_fingerprint"] as string | undefined) ?? null;
           // 确定性失败快速止损：连续两次相同错误指纹 = 重试必然同样失败（cwd 不存在 /
-          // 模块缺失 / git ENOENT 等），立即 cancelled，不留 running 让 watcher 熬满
+          // 模块缺失 / git ENOENT 等），立即转 failed，不留 running 让 watcher 熬满
           // recoveryCount(≥3) × 卡死阈值(~10min) 才终止（确定性失败要拖 ~30min）。
           // 不同指纹 → 视为可能偶发，照旧累计 + 留 running 给 watcher 重试（保偶发容错）。
-          // 用 cancelled（已是全链路验证的终态）而非引入 failed（状态机无该状态）。
+          // 用 failed（执行失败终态，可重跑）区别于 cancelled（用户主动取消，不可重跑）。
           if (prevFingerprint !== null && prevFingerprint === fingerprint) {
             updateTask(taskId, { failure_count: newCount });
-            log.error("阶段 %s 连续相同错误（确定性失败），立即 cancelled [task=%s]：%s",
+            log.error("阶段 %s 连续相同错误（确定性失败），立即 failed [task=%s]：%s",
               phase, taskId, fingerprint.slice(0, 160));
-            forceTransition(taskId, "cancelled",
+            forceTransition(taskId, "failed",
               `阶段 ${phase} 确定性失败（错误重复）：${errMsg.split("\n")[0].slice(0, 160)}`);
           } else {
             updateTask(taskId, { failure_count: newCount, last_failure_fingerprint: fingerprint });
             if (newCount >= MAX_PHASE_FAILURES) {
-              log.error("阶段 %s 已连续异常 %d 次，强制转 cancelled [task=%s]", phase, newCount, taskId);
-              forceTransition(taskId, "cancelled",
+              log.error("阶段 %s 已连续异常 %d 次，强制转 failed [task=%s]", phase, newCount, taskId);
+              forceTransition(taskId, "failed",
                 `阶段 ${phase} 连续异常 ${newCount} 次（最近：${errMsg.split("\n")[0].slice(0, 160)}）`);
             }
           }
@@ -288,6 +288,7 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
       const terminalStates = new Set(getTerminalStates(task.workflow));
       terminalStates.add("done");
       terminalStates.add("cancelled");
+      terminalStates.add("failed");
       if (terminalStates.has(task.status)) {
         await closeAgents(task.workflow).catch(() => {});
       }

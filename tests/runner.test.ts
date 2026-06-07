@@ -67,7 +67,7 @@ function makeTestWorkflow(phaseFn: (taskId: string) => Promise<void>) {
       },
     ],
     initial_state: "pending_step1",
-    terminal_states: ["done", "cancelled"],
+    terminal_states: ["done", "cancelled", "failed"],
   };
 }
 
@@ -156,7 +156,7 @@ describe("runner - executePhase", () => {
     expect(threw).toBe(false);
   });
 
-  it("阶段函数 throw 时 failure_count 累计，达 5 次后强制转 cancelled", async () => {
+  it("阶段函数 throw 时 failure_count 累计，达 5 次后强制转 failed", async () => {
     const phaseFn = async (_taskId: string) => {
       throw new Error("deterministic failure (模拟 sygvsxmy 缺 requirement_id 场景)");
     };
@@ -179,14 +179,14 @@ describe("runner - executePhase", () => {
     expect(mid!.failure_count).toBe(4);
     expect(mid!.status).toBe("pending_step1");
 
-    // 第 5 次：达阈值 → forceTransition cancelled
+    // 第 5 次：达阈值 → forceTransition failed（执行失败终态，可重跑）
     await runnerModule.executePhase("task-fail-loop-001", "step1");
     const after = dbModule.getTask("task-fail-loop-001");
     expect(after!.failure_count).toBe(5);
-    expect(after!.status).toBe("cancelled");
+    expect(after!.status).toBe("failed");
   });
 
-  it("确定性失败：连续相同错误指纹，第 2 次即 cancelled（不等 failure_count 到 5）", async () => {
+  it("确定性失败：连续相同错误指纹，第 2 次即 failed（不等 failure_count 到 5）", async () => {
     const phaseFn = async (_taskId: string) => {
       throw new Error("Cannot find module '/repo/x.ts'");
     };
@@ -202,13 +202,13 @@ describe("runner - executePhase", () => {
     await runnerModule.executePhase("task-det-001", "step1");
     const after1 = dbModule.getTask("task-det-001");
     expect(after1!.failure_count).toBe(1);
-    expect(after1!.status).not.toBe("cancelled");
+    expect(after1!.status).not.toBe("failed");
     sqlite.run("UPDATE tasks SET status='pending_step1' WHERE id='task-det-001'");
 
-    // 第 2 次：相同指纹 → 判定确定性 → 立即 cancelled（远未到 5）
+    // 第 2 次：相同指纹 → 判定确定性 → 立即 failed（远未到 5）
     await runnerModule.executePhase("task-det-001", "step1");
     const after2 = dbModule.getTask("task-det-001");
-    expect(after2!.status).toBe("cancelled");
+    expect(after2!.status).toBe("failed");
     expect(after2!.failure_count).toBe(2);
   });
 
@@ -246,13 +246,13 @@ describe("runner - executePhase", () => {
     for (let n = 0; n < 4; n++) {
       await runnerModule.executePhase("task-flaky-001", "step1");
       // 不同错误不快速止损，仍留 running（手动弹回模拟 watcher）
-      expect(dbModule.getTask("task-flaky-001")!.status).not.toBe("cancelled");
+      expect(dbModule.getTask("task-flaky-001")!.status).not.toBe("failed");
       sqlite.run("UPDATE tasks SET status='pending_step1' WHERE id='task-flaky-001'");
     }
     expect(dbModule.getTask("task-flaky-001")!.failure_count).toBe(4);
   });
 
-  it("指纹归一化：错误仅路径/行号不同（语义同一确定性失败）→ 判等 → 第 2 次 cancelled", async () => {
+  it("指纹归一化：错误仅路径/行号不同（语义同一确定性失败）→ 判等 → 第 2 次 failed", async () => {
     const errs = [
       "Cannot find module '/a/b/c.ts' at line 31",
       "Cannot find module '/x/y/z.ts' at line 99",
@@ -272,7 +272,7 @@ describe("runner - executePhase", () => {
     await runnerModule.executePhase("task-norm-001", "step1");
     sqlite.run("UPDATE tasks SET status='pending_step1' WHERE id='task-norm-001'");
     await runnerModule.executePhase("task-norm-001", "step1");
-    expect(dbModule.getTask("task-norm-001")!.status).toBe("cancelled");
+    expect(dbModule.getTask("task-norm-001")!.status).toBe("failed");
   });
 
   it("resetTaskForRerun：复用同 id 重置——状态回首阶段、failure_count/指纹/dangling 清空、重跑首阶段", async () => {
@@ -286,8 +286,8 @@ describe("runner - executePhase", () => {
       workflow: "test_wf",
       initialStatus: "pending_step1",
     });
-    // 模拟上一轮失败残留：终态 + 失败计数 + 指纹 + dangling
-    sqlite.run("UPDATE tasks SET status='cancelled', failure_count=3 WHERE id='task-rerun-001'");
+    // 模拟上一轮失败残留：failed 终态 + 失败计数 + 指纹 + dangling
+    sqlite.run("UPDATE tasks SET status='failed', failure_count=3 WHERE id='task-rerun-001'");
     dbModule.updateTask("task-rerun-001", { last_failure_fingerprint: "step1::boom", dangling: true });
 
     taskFactory.resetTaskForRerun("task-rerun-001");
@@ -297,7 +297,7 @@ describe("runner - executePhase", () => {
     expect(t!.failure_count).toBe(0);
     expect(t!["last_failure_fingerprint"]).toBeFalsy();
     expect(t!["dangling"]).toBeFalsy();
-    expect(t!.status).not.toBe("cancelled"); // 已重置离开终态、重跑了首阶段
+    expect(t!.status).not.toBe("failed"); // 已重置离开终态、重跑了首阶段
     expect(calls).toBeGreaterThan(0);
   });
 

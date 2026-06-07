@@ -139,6 +139,7 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
   // 固定终态兜底
   terminalStateSet.add("done");
   terminalStateSet.add("cancelled");
+  terminalStateSet.add("failed");
 
   // 查询所有非终态任务（排除子任务，子任务由父任务管理）
   const rows = db
@@ -216,23 +217,24 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
       continue;
     }
 
-    // 累计恢复次数：超过阈值直接 cancel 任务，避免无限循环
+    // 累计恢复次数：超过阈值直接转 failed（执行失败终态，可重跑），避免无限循环。
+    // 反复卡死是"执行失败"而非"用户主动取消"，用 failed 让用户能重跑。
     const recoveryKey = `${task.id}:${phaseName}`;
     const attempts = recoveryCount.get(recoveryKey) ?? 0;
     if (attempts >= MAX_RECOVERIES_PER_PHASE) {
       log.error(
-        "watcher: 任务 %s 阶段 %s 已恢复 %d 次仍卡死，标记为 cancelled",
+        "watcher: 任务 %s 阶段 %s 已恢复 %d 次仍卡死，标记为 failed",
         task.id, phaseName, attempts
       );
       try {
         forceTransition(
           task.id,
-          "cancelled",
+          "failed",
           `watcher: 阶段 ${phaseName} 反复卡死，恢复 ${attempts} 次后放弃`
         );
-        emit({ type: "watcher:recovery", payload: { taskId: task.id, phase: phaseName, fromStatus: task.status, toStatus: "cancelled" } });
+        emit({ type: "watcher:recovery", payload: { taskId: task.id, phase: phaseName, fromStatus: task.status, toStatus: "failed" } });
       } catch (e: unknown) {
-        log.error("watcher: 强制 cancel 失败 task=%s: %s", task.id, (e as Error).message);
+        log.error("watcher: 强制转 failed 失败 task=%s: %s", task.id, (e as Error).message);
       }
       recoveryCount.delete(recoveryKey);
       lastRecoveryAttempt.delete(task.id);
