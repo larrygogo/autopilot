@@ -603,6 +603,19 @@ export function closeOpenPhaseEvents(taskId: string): void {
   );
 }
 
+/**
+ * 清空某 task 的全部运行历史记录（phase events + 状态转换日志）。
+ * 用于重跑重置：重跑是全新一轮，旧轮的阶段进度/状态记录不该残留（否则流水线图仍显示
+ * 上一轮的 ✓ 和耗时）。只清 DB 记录，文件类（实时日志/agent 调用）由调用方另清。
+ */
+export function clearTaskRunHistory(taskId: string): void {
+  const db = getDb();
+  db.transaction(() => {
+    db.run("DELETE FROM task_phase_events WHERE task_id = ?", [taskId]);
+    db.run("DELETE FROM task_logs WHERE task_id = ?", [taskId]);
+  })();
+}
+
 /** 列出某 task 全部 phase event，按 started_at 升序。 */
 export function listTaskPhaseEvents(taskId: string): TaskPhaseEvent[] {
   const db = getDb();

@@ -522,6 +522,21 @@ export function deleteTaskRuntimeDir(taskId: string): boolean {
 }
 
 /**
+ * 清理任务的运行产物文件（logs 目录 / events / agent-calls），用于重跑重置。
+ * 不动 sandbox（重跑单独 delete+rebuild）与 task-manifest.json。
+ */
+export function clearTaskRunArtifacts(taskId: string): void {
+  if (!TASK_ID_RE.test(taskId)) {
+    throw new Error(`非法 task ID：${taskId}`);
+  }
+  const taskDir = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
+  for (const name of ["logs", "agent-calls.jsonl", "events.jsonl"]) {
+    const p = join(taskDir, name);
+    try { if (existsSync(p)) rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+}
+
+/**
  * 扫描所有任务的 sandbox 目录，返回每个任务的占用信息。
  * 用于 Dashboard 汇总 + 清理规则判断。
  */

@@ -1,8 +1,8 @@
-import { getTask, createTask, updateTask, closeOpenPhaseEvents } from "./db";
+import { getTask, createTask, updateTask, clearTaskRunHistory } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { ensureTaskSandbox, deleteTaskSandbox, getTaskSandbox, getTaskWorktreeMeta, type WorkspaceRef } from "./sandbox";
+import { ensureTaskSandbox, deleteTaskSandbox, getTaskSandbox, getTaskWorktreeMeta, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
 import { getWorkspaceById } from "./workspaces";
 import { getRequirementById } from "./requirements";
 import { forceTransition } from "./state-machine";
@@ -239,8 +239,10 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
   if (opts.requirement !== undefined) clear["requirement"] = opts.requirement;
   updateTask(taskId, clear);
 
-  // 2a. 关闭上一轮残留的未结束 phase event，避免阶段进度 UI 累加历史僵尸（耗时虚高/恒"进行中"）
-  closeOpenPhaseEvents(taskId);
+  // 2a. 重跑是全新一轮 → 清空全部历史运行记录（phase events + 状态日志 + 实时日志 +
+  //     agent 调用），否则流水线图/各日志 tab 仍显示上一轮的 ✓/耗时/记录。
+  clearTaskRunHistory(taskId);   // DB：phase_events + task_logs
+  clearTaskRunArtifacts(taskId); // 文件：logs/ + events.jsonl + agent-calls.jsonl
 
   // 2b. 清 watcher 内存恢复计数，否则上次卡死累计的 recoveryCount 会让本次重跑过早被 cancel
   try { forgetTaskRecoveryState(taskId); } catch { /* ignore */ }
