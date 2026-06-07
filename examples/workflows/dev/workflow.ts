@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getTask, updateTask } from "@autopilot/core/db";
+import { updateRequirement } from "@autopilot/core/requirements";
 import { transition } from "@autopilot/core/state-machine";
 import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
 import { runInBackground } from "@autopilot/core/runner";
@@ -385,8 +386,19 @@ export async function run_submit_pr(taskId: string): Promise<void> {
 
   updateTask(taskId, { pr_url: prUrl });
 
-  // worktree 模式无需切回 default branch：worktree 是独立目录，daemon 主机 cwd
-  // 与用户工作仓库的 HEAD 都不受影响（旧 dogfood-bug6 的切回补丁仅对"在本体跑"有意义）。
+  // 回填 PR 到需求：需求页/产出卡从 requirement.pr_url 读，不回填则"需求做完了看不到 PR"。
+  const reqId = task["requirement_id"] as string | undefined;
+  if (reqId) {
+    const m = prUrl.match(/\/pull\/(\d+)/);
+    const prNumber = m ? Number(m[1]) : null;
+    try {
+      updateRequirement(reqId, { pr_url: prUrl, pr_number: prNumber });
+    } catch (e: unknown) {
+      console.warn("回填 requirement.pr_url 失败：", e instanceof Error ? e.message : e);
+    }
+  }
+
+  // clone 沙盒是独立副本，无需切回 default branch（源仓库与主机 cwd 都不受影响）。
 
   transition(taskId, "submit_pr_complete", {
     transitions: getTransitions(task.workflow),
