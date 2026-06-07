@@ -70,8 +70,12 @@ export async function computeTaskOutcome(taskId: string): Promise<TaskOutcome | 
     }
   }
 
-  // 3) workspace + diff_stat
-  const workspace_path = ((task as Record<string, unknown>).workspace_path as string | undefined) ?? null;
+  // 3) sandbox + diff_stat
+  // 改动落在沙盒（clone）里，不在用户源仓库（workspace_path）。diff 必须算 repo_path（沙盒），
+  // 否则源仓库没有交付分支的 commit → 永远算出 0 files changed。
+  const repo_path = ((task as Record<string, unknown>).repo_path as string | undefined) ?? null;
+  const workspace_path =
+    repo_path ?? ((task as Record<string, unknown>).workspace_path as string | undefined) ?? null;
   let diff_stat: DiffStat | null = null;
   if (workspace_path && existsSync(workspace_path)) {
     const baseBranch = resolveBaseBranch(reqId);

@@ -342,7 +342,9 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const branch = task["branch"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
-  runGit(["push", "-u", "origin", branch], repoPath);
+  // --force：重跑用同名交付分支，远程可能残留上一轮 push 的 commit（非 fast-forward）。
+  // 重跑 = 全新一轮，直接覆盖远程旧分支（autopilot 自有分支，覆盖安全）。
+  runGit(["push", "-u", "--force", "origin", branch], repoPath);
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
