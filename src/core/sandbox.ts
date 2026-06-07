@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "fs";
 import { join, resolve, sep } from "path";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
@@ -216,6 +216,16 @@ function tryCreateClone(
     log.warn("clone 后建交付分支失败 [task=%s branch=%s base=%s]: %s", taskId, branch, base, stderr.slice(0, 200));
     // 不致命：工作树仍在 clone 默认分支，run 阶段尽量跑
   }
+
+  // 让 autopilot 阶段产物（phaseDir 写的 NN-phase/ 目录）被 git 忽略，避免被 git add -A
+  // 卷入交付 commit 污染 PR。写 clone 本地 .git/info/exclude（对 untracked 产物生效），
+  // 不动用户仓库的 .gitignore。保持"PR 只含需求改动"。
+  try {
+    const excludeFile = join(wsPath, ".git", "info", "exclude");
+    if (existsSync(join(wsPath, ".git", "info"))) {
+      appendFileSync(excludeFile, "\n# autopilot 阶段产物（不进交付 PR）\n/[0-9][0-9]-*/\n");
+    }
+  } catch { /* exclude 写失败不阻塞任务 */ }
 
   const meta: WorktreeMeta = {
     workspace_id: workspace.id,
