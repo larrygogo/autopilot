@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Layers, Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { Layers, Plus, RefreshCw, Pencil, Trash2, FolderOpen } from "lucide-react";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,9 +14,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FolderPicker } from "@/components/FolderPicker";
 import { api, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
-import { cn } from "@/lib/utils";
+import { cn, folderName } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Projects tab（原 src/web/src/pages/Projects.tsx 内联简化版，去 PageHero）
@@ -25,9 +26,11 @@ import { cn } from "@/lib/utils";
 interface FormState {
   name: string;
   description: string;
+  path: string;
+  alias: string;
 }
 
-const EMPTY_FORM: FormState = { name: "", description: "" };
+const EMPTY_FORM: FormState = { name: "", description: "", path: "", alias: "" };
 
 function ProjectsTab() {
   const navigate = useNavigate();
@@ -41,6 +44,9 @@ function ProjectsTab() {
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+  // 记录上次自动推导的 alias，用于判断用户是否手动修改过
+  const [lastAutoAlias, setLastAutoAlias] = useState("");
 
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleteInput, setDeleteInput] = useState("");
@@ -69,13 +75,14 @@ function ProjectsTab() {
   const openCreateDialog = () => {
     setEditingProject(null);
     setForm(EMPTY_FORM);
+    setLastAutoAlias("");
     setDialogOpen(true);
   };
 
   const openEditDialog = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingProject(p);
-    setForm({ name: p.name, description: p.description ?? "" });
+    setForm({ name: p.name, description: p.description ?? "", path: "", alias: "" });
     setDialogOpen(true);
   };
 
@@ -85,10 +92,29 @@ function ProjectsTab() {
     setEditingProject(null);
   };
 
+  /** path 变化时自动推导 alias（仅新建模式；用户手改过的不覆盖） */
+  const handlePathChange = (newPath: string) => {
+    setForm((f) => {
+      const autoAlias = folderName(newPath);
+      // alias 为空、或仍是上次自动推导值 → 跟随更新
+      const shouldAutoFill = !f.alias.trim() || f.alias.trim() === lastAutoAlias;
+      if (shouldAutoFill && autoAlias) setLastAutoAlias(autoAlias);
+      return {
+        ...f,
+        path: newPath,
+        alias: shouldAutoFill && autoAlias ? autoAlias : f.alias,
+      };
+    });
+  };
+
   const save = async () => {
     const name = form.name.trim();
     if (!name) {
       toast.error("验证失败", "项目名称不能为空");
+      return;
+    }
+    if (!editingProject && !form.path.trim()) {
+      toast.error("验证失败", "工作区路径不能为空");
       return;
     }
     setSaving(true);
@@ -100,11 +126,19 @@ function ProjectsTab() {
         });
         toast.success(`已更新项目「${name}」`);
       } else {
-        await api.createProject({
+        const result = await api.createProjectWithWorkspace({
           name,
           description: form.description.trim() || undefined,
+          path: form.path.trim(),
+          alias: form.alias.trim() || undefined,
         });
         toast.success(`已创建项目「${name}」`);
+        // 创建成功后跳转到项目详情页
+        setDialogOpen(false);
+        setEditingProject(null);
+        refresh();
+        navigate(`/projects/${result.project.id}`);
+        return;
       }
       setDialogOpen(false);
       setEditingProject(null);
@@ -247,7 +281,7 @@ function ProjectsTab() {
             <DialogDescription>
               {editingProject
                 ? "修改项目名称或描述。"
-                : "填写项目名称和描述，创建后可在项目工作台中关联工作区和需求。"}
+                : "填写项目名称、描述，并指定本地代码目录作为工作区。"}
             </DialogDescription>
           </DialogHeader>
 
@@ -275,6 +309,52 @@ function ProjectsTab() {
                 onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
               />
             </div>
+
+            {/* 新建模式：工作区字段 */}
+            {!editingProject && (
+              <>
+                <div className="border-t border-border pt-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-3">工作区</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="project-path">
+                    本地路径 <span className="text-destructive">*</span>
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="project-path"
+                      className="flex-1"
+                      placeholder="例如：/code/myapp"
+                      value={form.path}
+                      onChange={(e) => handlePathChange(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="shrink-0"
+                      onClick={() => setFolderPickerOpen(true)}
+                      title="选择文件夹"
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="project-alias">别名（可选，缺省取目录名）</Label>
+                  <Input
+                    id="project-alias"
+                    placeholder={folderName(form.path) || "workspace"}
+                    value={form.alias}
+                    onChange={(e) => setForm((f) => ({ ...f, alias: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <DialogFooter>
@@ -282,11 +362,22 @@ function ProjectsTab() {
               取消
             </Button>
             <Button onClick={() => void save()} disabled={saving}>
-              {saving ? (editingProject ? "保存中…" : "创建中…") : (editingProject ? "保存" : "创建")}
+              {saving ? (editingProject ? "保存中…" : "创建中…") : (editingProject ? "保存" : "创建项目")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 文件夹选择器（仅新建模式使用） */}
+      <FolderPicker
+        open={folderPickerOpen}
+        initialPath={form.path || undefined}
+        onSelect={(path) => {
+          handlePathChange(path);
+          setFolderPickerOpen(false);
+        }}
+        onCancel={() => setFolderPickerOpen(false)}
+      />
 
       {/* 删除确认 dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) closeDeleteDialog(); }}>

@@ -34,12 +34,13 @@ describe("autopilot project （dogfood-bug20）", () => {
     expect(r.stdout).toContain("delete");
   });
 
-  it("`project create` 帮助文本含 --description / --json 选项", () => {
+  it("`project create` 帮助文本含 --description / --json / --alias 选项", () => {
     runCli("init");
     const r = runCli("project", "create", "--help");
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain("--description");
     expect(r.stdout).toContain("--json");
+    expect(r.stdout).toContain("--alias");
   });
 
   it("daemon 未启时 `project list` 提示并退出码 ≠ 0", () => {
@@ -51,16 +52,23 @@ describe("autopilot project （dogfood-bug20）", () => {
 
   it("daemon 未启时 `project create` 提示并退出码 ≠ 0", () => {
     runCli("init");
-    const r = runCli("project", "create", "MyProject", "--port", "19999");
+    const r = runCli("project", "create", "MyProject", tmpHome, "--port", "19999");
     expect(r.exitCode).not.toBe(0);
     expect(r.stderr).toContain("daemon");
   });
 
   it("`project create` name 为空时报 exit 2", () => {
     runCli("init");
-    const r = runCli("project", "create", "   ", "--port", "19999");
+    const r = runCli("project", "create", "   ", tmpHome, "--port", "19999");
     expect(r.exitCode).toBe(2);
     expect(r.stderr).toContain("name 不能为空");
+  });
+
+  it("`project create` 缺少 path 参数时 commander 报错", () => {
+    runCli("init");
+    const r = runCli("project", "create", "MyProject", "--port", "19999");
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain("path");
   });
 });
 

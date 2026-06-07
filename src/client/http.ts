@@ -259,6 +259,15 @@ export class HttpClient {
     return this.call("projects.workspaces", { id: projectId });
   }
 
+  async createProjectWithWorkspace(body: {
+    name: string;
+    description?: string;
+    path: string;
+    alias?: string;
+  }): Promise<{ project: Project; workspace: Workspace }> {
+    return this.call("projects.createWithWorkspace", body);
+  }
+
   async createProjectWorkspace(projectId: string, body: {
     alias: string;
     path: string;

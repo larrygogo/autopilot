@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { FolderPicker } from "@/components/FolderPicker";
 import { ConfirmDialog } from "@/components/Modal";
-import { cn } from "@/lib/utils";
+import { cn, folderName } from "@/lib/utils";
 
 interface ProjectDetailProps {
   projectId: string;
@@ -69,13 +69,6 @@ interface CbForm {
 }
 
 const EMPTY_CB: CbForm = { alias: "", path: "", default_branch: "main", github_owner: "", github_repo: "" };
-
-/** 取路径最后一段作为文件夹名（兼容 Windows \ 和 POSIX /，忽略结尾分隔符） */
-function folderName(p: string): string {
-  const trimmed = p.trim().replace(/[\\/]+$/, "");
-  return trimmed.split(/[\\/]/).pop() ?? "";
-}
-
 
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const navigate = useNavigate();

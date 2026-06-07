@@ -51,7 +51,7 @@ import {
   deleteTaskSandbox,
   scanTaskSandboxes,
 } from "../core/sandbox";
-import { setKv, listRootTasksByRequirementIds } from "../core/db";
+import { getDb, setKv, listRootTasksByRequirementIds } from "../core/db";
 import { discover as registryDiscover, getWorkflow as registryGetWorkflow } from "../core/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
@@ -1715,6 +1715,69 @@ export function registerCoreRpcMethods(): void {
         }
         throw new RpcError("CREATE_FAILED", msg);
       }
+    },
+  });
+
+  // ── projects.createWithWorkspace —— 原子新建 Project + 顶层 Workspace ──
+
+  registerRpcMethod({
+    method: "projects.createWithWorkspace",
+    description: "原子新建 Project + 顶层 Workspace（需提供 path）",
+    handler: (params) => {
+      const p = asObj(params);
+      const name = typeof p.name === "string" ? p.name.trim() : "";
+      if (!name) throw new RpcError("INVALID_PARAM", "name 必填");
+      const pathField = typeof p.path === "string" ? p.path.trim() : "";
+      if (!pathField) throw new RpcError("INVALID_PARAM", "path 必填");
+
+      // ① 路径先校验，写 DB 前退出
+      if (!existsSync(pathField)) {
+        throw new RpcError("INVALID_PARAM", `路径不存在：${pathField}`);
+      }
+
+      // ② alias 推导：未传则取路径末段目录名
+      const rawAlias = typeof p.alias === "string" ? p.alias.trim() : "";
+      const derivedAlias = rawAlias || pathField.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "workspace";
+
+      // ③ 探测 git 信息（纯读，无副作用）
+      const detected = detectWorkspaceGit(pathField);
+
+      // ④ 事务：原子建 project + workspace
+      const db = getDb();
+      let project!: ReturnType<typeof coreCreateProject>;
+      let workspace!: ReturnType<typeof createWorkspace>;
+      try {
+        db.transaction(() => {
+          const projectId = nextProjectId();
+          project = coreCreateProject({
+            id: projectId,
+            name,
+            description: (p.description as string | null | undefined) ?? null,
+          });
+          workspace = createWorkspace({
+            id: nextWorkspaceId(),
+            project_id: projectId,
+            alias: derivedAlias,
+            path: pathField,
+            default_branch: detected.default_branch ?? "main",
+            github_owner: detected.github_owner,
+            github_repo: detected.github_repo,
+          });
+        })();
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (code?.startsWith("SQLITE_CONSTRAINT") || msg.toLowerCase().includes("unique")) {
+          throw new RpcError("ALREADY_EXISTS", msg);
+        }
+        throw new RpcError("CREATE_FAILED", msg);
+      }
+
+      // ⑤ 发事件
+      emitBus({ type: "projects:changed", payload: { id: project.id, action: "create" } });
+      emitBus({ type: "workspaces:changed", payload: { id: workspace.id, action: "create" } });
+
+      return { project, workspace };
     },
   });
 
