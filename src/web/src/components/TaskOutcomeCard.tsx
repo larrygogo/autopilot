@@ -70,10 +70,14 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
     }
     setRetrying(true);
     try {
-      const t = await api.startTask({ requirement_id: requirementId, workflow });
-      navigate(`/tasks/${t.id}`);
+      // 复用原 task 重跑：req failed → queued → scheduler 复用同一 task 重置重跑（不新建）。
+      // 不再 api.startTask 新建 —— 那会产生游离空 task（requirement/workspace 都没带）。
+      await api.enqueueRequirement(requirementId);
+      toast.success("已重新入队，复用原任务重跑");
+      // task id 不变，停留当前工作页，WS 会推状态更新
     } catch (e: unknown) {
       toast.error("重跑失败", (e as Error)?.message ?? String(e));
+    } finally {
       setRetrying(false);
     }
   }
@@ -174,14 +178,14 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
               <Wrench className="mr-1 h-3.5 w-3.5" /> 去工作流修复
             </Button>
           )}
-          {requirementId && (
-            // 失败时 retry/unknown 类才让"重跑"是 default；其他类型（fix_prompt / check_config / view_logs / phase_crash）
+          {/* 重跑只在失败时给：cancelled 是终态无法重入队，done 不需要重跑。
+              避免在已取消/已完成的工作页点"重跑"误起游离空 task。 */}
+          {requirementId && outcome.status === "failed" && (
+            // retry/unknown 类让"重跑"是 default；其他类型（fix_prompt / check_config / view_logs / phase_crash）
             // 都降级 outline，引导用户先做更对的事
             <Button
               variant={
-                outcome.status !== "failed" || failureProfile?.primary === "retry"
-                  ? "default"
-                  : "outline"
+                failureProfile?.primary === "retry" ? "default" : "outline"
               }
               size="sm"
               disabled={retrying}
