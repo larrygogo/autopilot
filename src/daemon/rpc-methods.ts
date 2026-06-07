@@ -74,7 +74,7 @@ import {
   readManifest as readSessionManifest,
   readMessages as readSessionMessages,
 } from "../core/sessions";
-import { readDaemonFileLog, getDaemonFileLogPath } from "../core/logger";
+import { readDaemonFileLog, getDaemonFileLogPath, log } from "../core/logger";
 import {
   listRequirements as coreListRequirements,
   getRequirementById,
@@ -1742,19 +1742,18 @@ export function registerCoreRpcMethods(): void {
       // ③ 探测 git 信息（纯读，无副作用）
       const detected = detectWorkspaceGit(pathField);
 
-      // ④ 事务：原子建 project + workspace
+      // ④ 事务：原子建 project + workspace（返回值避免 definite assignment assertion）
       const db = getDb();
-      let project!: ReturnType<typeof coreCreateProject>;
-      let workspace!: ReturnType<typeof createWorkspace>;
+      let result: { project: ReturnType<typeof coreCreateProject>; workspace: ReturnType<typeof createWorkspace> };
       try {
-        db.transaction(() => {
+        result = db.transaction(() => {
           const projectId = nextProjectId();
-          project = coreCreateProject({
+          const project = coreCreateProject({
             id: projectId,
             name,
             description: (p.description as string | null | undefined) ?? null,
           });
-          workspace = createWorkspace({
+          const workspace = createWorkspace({
             id: nextWorkspaceId(),
             project_id: projectId,
             alias: derivedAlias,
@@ -1763,6 +1762,7 @@ export function registerCoreRpcMethods(): void {
             github_owner: detected.github_owner,
             github_repo: detected.github_repo,
           });
+          return { project, workspace };
         })();
       } catch (e: unknown) {
         const code = (e as { code?: string }).code;
@@ -1770,14 +1770,15 @@ export function registerCoreRpcMethods(): void {
         if (code?.startsWith("SQLITE_CONSTRAINT") || msg.toLowerCase().includes("unique")) {
           throw new RpcError("ALREADY_EXISTS", msg);
         }
-        throw new RpcError("CREATE_FAILED", msg);
+        log.error(`projects.createWithWorkspace 失败：${msg}`);
+        throw new RpcError("CREATE_FAILED", "创建项目失败，请检查参数后重试");
       }
 
       // ⑤ 发事件
-      emitBus({ type: "projects:changed", payload: { id: project.id, action: "create" } });
-      emitBus({ type: "workspaces:changed", payload: { id: workspace.id, action: "create" } });
+      emitBus({ type: "projects:changed", payload: { id: result.project.id, action: "create" } });
+      emitBus({ type: "workspaces:changed", payload: { id: result.workspace.id, action: "create" } });
 
-      return { project, workspace };
+      return result;
     },
   });
 

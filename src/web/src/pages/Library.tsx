@@ -94,17 +94,16 @@ function ProjectsTab() {
 
   /** path 变化时自动推导 alias（仅新建模式；用户手改过的不覆盖） */
   const handlePathChange = (newPath: string) => {
-    setForm((f) => {
-      const autoAlias = folderName(newPath);
-      // alias 为空、或仍是上次自动推导值 → 跟随更新
-      const shouldAutoFill = !f.alias.trim() || f.alias.trim() === lastAutoAlias;
-      if (shouldAutoFill && autoAlias) setLastAutoAlias(autoAlias);
-      return {
-        ...f,
-        path: newPath,
-        alias: shouldAutoFill && autoAlias ? autoAlias : f.alias,
-      };
-    });
+    const autoAlias = folderName(newPath);
+    const currentAlias = form.alias.trim();
+    // alias 为空、或仍是上次自动推导值 → 跟随更新；用户手改过的保留
+    const shouldAutoFill = !currentAlias || currentAlias === lastAutoAlias;
+    if (shouldAutoFill && autoAlias) {
+      setLastAutoAlias(autoAlias);
+      setForm((f) => ({ ...f, path: newPath, alias: autoAlias }));
+    } else {
+      setForm((f) => ({ ...f, path: newPath }));
+    }
   };
 
   const save = async () => {
@@ -133,10 +132,9 @@ function ProjectsTab() {
           alias: form.alias.trim() || undefined,
         });
         toast.success(`已创建项目「${name}」`);
-        // 创建成功后跳转到项目详情页
+        // 创建成功后跳转到项目详情页（不调 refresh，避免组件卸载后异步 setState）
         setDialogOpen(false);
         setEditingProject(null);
-        refresh();
         navigate(`/projects/${result.project.id}`);
         return;
       }
