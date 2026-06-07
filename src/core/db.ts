@@ -590,6 +590,19 @@ export function endTaskPhase(eventId: number, status: "done" | "awaiting" | "fai
   );
 }
 
+/**
+ * 关闭某 task 所有未结束（ended_at IS NULL）的 phase event，标记为 aborted。
+ * 用于 cancel / 重置重跑前清理"进行中"的 event，避免留下永远 running 的僵尸记录
+ * （会让阶段进度 UI 把耗时累加到 now、状态恒显示"进行中"）。
+ */
+export function closeOpenPhaseEvents(taskId: string): void {
+  const db = getDb();
+  db.run(
+    "UPDATE task_phase_events SET status = 'aborted', ended_at = started_at WHERE task_id = ? AND ended_at IS NULL",
+    [taskId],
+  );
+}
+
 /** 列出某 task 全部 phase event，按 started_at 升序。 */
 export function listTaskPhaseEvents(taskId: string): TaskPhaseEvent[] {
   const db = getDb();

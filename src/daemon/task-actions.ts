@@ -12,7 +12,7 @@
 
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
-import { getTask, updateTask } from "../core/db";
+import { getTask, updateTask, closeOpenPhaseEvents } from "../core/db";
 import { transition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { getWorkflow, buildTransitions, isParallelPhase } from "../core/registry";
@@ -58,6 +58,8 @@ export function cancelTaskAction(taskId: string): { from: string; to: string } {
     : { [task.status]: [["cancel", "cancelled"] as [string, string]] };
 
   const [from, to] = transition(taskId, "cancel", { transitions, note: "API cancel" });
+  // 关闭进行中的 phase event，避免取消后留下永远 running 的僵尸（阶段进度 UI 会恒显示"进行中"+耗时虚高）
+  closeOpenPhaseEvents(taskId);
   return { from, to };
 }
 

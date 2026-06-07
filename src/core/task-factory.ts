@@ -1,4 +1,4 @@
-import { getTask, createTask, updateTask } from "./db";
+import { getTask, createTask, updateTask, closeOpenPhaseEvents } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
@@ -239,7 +239,10 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
   if (opts.requirement !== undefined) clear["requirement"] = opts.requirement;
   updateTask(taskId, clear);
 
-  // 2. 清 watcher 内存恢复计数，否则上次卡死累计的 recoveryCount 会让本次重跑过早被 cancel
+  // 2a. 关闭上一轮残留的未结束 phase event，避免阶段进度 UI 累加历史僵尸（耗时虚高/恒"进行中"）
+  closeOpenPhaseEvents(taskId);
+
+  // 2b. 清 watcher 内存恢复计数，否则上次卡死累计的 recoveryCount 会让本次重跑过早被 cancel
   try { forgetTaskRecoveryState(taskId); } catch { /* ignore */ }
 
   // 3. 重建干净 worktree（基于需求绑定 workspace 的最新 default_branch，而非 extra 里的旧值）
