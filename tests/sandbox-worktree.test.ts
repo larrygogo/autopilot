@@ -83,9 +83,9 @@ console.log(JSON.stringify({ ws, exists: existsSync(ws), hasGit: existsSync(ws +
     expect(r.meta.base).toBe("main");
   });
 
-  it("分支已存在时附 -2 后缀", async () => {
+  it("clone 模式：交付分支用 -B 覆盖（独立仓库，无需 -2 防冲突后缀）+ mode=clone", async () => {
     initGitRepo(codebasePath, "main");
-    // 在 codebase 里预先建一个同名分支占位
+    // 源仓库预先有同名分支：clone 带过来后 checkout -B 直接覆盖，独立仓库无冲突
     Bun.spawnSync(["git", "-C", codebasePath, "branch", "autopilot/t-wt-2"], { stdout: "pipe", stderr: "pipe" });
 
     const script = `
@@ -101,7 +101,8 @@ console.log(JSON.stringify({ meta: getTaskWorktreeMeta("t-wt-2") }));
     await proc.exited;
     const out = await new Response(proc.stdout).text();
     const r = JSON.parse(out.trim());
-    expect(r.meta.branch).toBe("autopilot/t-wt-2-2");
+    expect(r.meta.branch).toBe("autopilot/t-wt-2"); // -B 覆盖，无 -2 后缀
+    expect(r.meta.mode).toBe("clone");
   });
 
   it("codebase 非 git 仓库 → warn 退化空目录（不抛错）", async () => {
@@ -155,7 +156,7 @@ console.log(JSON.stringify({
     expect(r.meta).toBeNull();
   });
 
-  it("removeTaskWorktree → git worktree remove + 清 .worktree.json", async () => {
+  it("clone 模式：removeTaskWorktree 清 meta 且零碰源仓库（不删 ws 目录、源仓库无 worktree 痕迹）", async () => {
     initGitRepo(codebasePath, "main");
 
     const script = `
@@ -166,12 +167,10 @@ const ws = ensureTaskSandbox("t-wt-5", "wf", { git: true }, codebase);
 const before = getTaskWorktreeMeta("t-wt-5");
 const removed = removeTaskWorktree("t-wt-5");
 const after = getTaskWorktreeMeta("t-wt-5");
-console.log(JSON.stringify({
-  before: before?.branch,
-  removed,
-  after,
-  wsExists: existsSync(ws),
-}));
+// 源仓库零痕迹：clone 模式下源仓库 .git 不该出现任何 t-wt-5 的 worktree 注册
+const wt = Bun.spawnSync(["git","-C",${JSON.stringify(codebasePath)},"worktree","list"],{stdout:"pipe"});
+const srcClean = !new TextDecoder().decode(wt.stdout ?? new Uint8Array()).includes("t-wt-5");
+console.log(JSON.stringify({ before: before?.branch, removed, after, wsExists: existsSync(ws), srcClean }));
 `;
     const proc = Bun.spawn(["bun", "-e", script], {
       stdout: "pipe", stderr: "pipe",
@@ -182,8 +181,9 @@ console.log(JSON.stringify({
     const r = JSON.parse(out.trim());
     expect(r.before).toBe("autopilot/t-wt-5");
     expect(r.removed).toBe(true);
-    expect(r.after).toBeNull();
-    expect(r.wsExists).toBe(false); // git worktree remove 同步清掉了 ws 目录
+    expect(r.after).toBeNull();           // meta 已清
+    expect(r.wsExists).toBe(true);        // clone 模式 removeTaskWorktree 不删 ws 目录（交给 deleteTaskSandbox）
+    expect(r.srcClean).toBe(true);        // 源仓库零痕迹：无 worktree 注册
   });
 
   it("非 worktree task 的 removeTaskWorktree → no-op 返回 false", async () => {

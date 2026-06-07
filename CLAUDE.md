@@ -151,7 +151,9 @@ autopilot/
 
 两层结构：`Project ⊃ Workspace(1:1) ⊃ Submodule`（**每个 Project 最多一个顶层 Workspace**；submodule 不计入。靠迁移 025 的部分唯一索引 `UNIQUE(project_id) WHERE parent_workspace_id IS NULL` + RPC 入口守卫 `projectHasTopWorkspace` 落，core `createWorkspace` 原语不强制以便测试夹具/内部自由建）
 
-> **命名说明（2026-06 Phase 2 改名）**：内核「用户代码库」概念全量改名 **Workspace**（表 `workspaces`、id `ws-NNN`、列 `workspace_id`/`parent_workspace_id`、RPC `workspaces.*`、CLI `autopilot workspace`）。注意与**任务运行沙盒** `sandbox`（每 task 的 git worktree 运行目录，Phase 1 由旧 `workspace` 改名而来）区分：**workspace = 用户的源码仓库，sandbox = 任务的临时执行目录**，互不相干。`.worktree.json` 里历史字段名保持兼容旧 `codebase_*` 读取。
+> **命名说明（2026-06 Phase 2 改名）**：内核「用户代码库」概念全量改名 **Workspace**（表 `workspaces`、id `ws-NNN`、列 `workspace_id`/`parent_workspace_id`、RPC `workspaces.*`、CLI `autopilot workspace`）。注意与**任务运行沙盒** `sandbox`（每 task 的独立运行目录，Phase 1 由旧 `workspace` 改名而来）区分：**workspace = 用户的源码仓库，sandbox = 任务的临时执行目录**，互不相干。`.worktree.json` 里历史字段名保持兼容旧 `codebase_*` 读取。
+>
+> **sandbox = 独立 clone（2026-06-07，原则：用户仓库零痕迹）**：`sandbox.git=true` 时把 workspace 仓库 `git clone --local` 到 `runtime/tasks/<id>/workspace`（独立 .git、硬链接 object）。run 阶段在副本里跑 git，**源仓库全程零痕迹**——不在源仓库 .git 留 worktree 注册/临时分支，删除纯 rmSync 不碰源仓库；交付 push 规范分支 `feat/<需求>` + PR。**早期用 git worktree（在源仓库 .git 注册 + 留 `autopilot/<taskId>` 分支），因污染源仓库已废弃**。`.worktree.json`（文件名沿用）记 `mode:"clone"`，旧 worktree 数据（无 mode）走老 worktree remove 删除路径兼容。
 
 | 实体 | 表 | ID 前缀 | 说明 |
 |------|-----|---------|------|

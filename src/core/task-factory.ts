@@ -24,6 +24,13 @@ function genTaskId(len = 8): string {
   return id;
 }
 
+/** 交付分支名：feat/<title-slug>-<taskId4>；中文等无 ascii slug 时回退 feat/task-<taskId8>。
+ *  规范命名（而非 autopilot/<taskId> 这种中间痕迹名），让 PR head 干净。 */
+function deliverBranchName(title: string, taskId: string): string {
+  const slug = (title ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return slug ? `feat/${slug}-${taskId.slice(0, 4)}` : `feat/task-${taskId.slice(0, 8)}`;
+}
+
 export function generateUniqueTaskId(): string {
   for (let i = 0; i < 10; i++) {
     const id = genTaskId();
@@ -149,12 +156,12 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     if (workspaceId) {
       const ws = getWorkspaceById(workspaceId);
       if (ws) {
-        workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch };
+        workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch, github_owner: ws.github_owner, github_repo: ws.github_repo };
       }
     }
   }
   try {
-    ensureTaskSandbox(taskId, workflowName, wf.sandbox, workspace);
+    ensureTaskSandbox(taskId, workflowName, wf.sandbox, workspace, deliverBranchName(title, taskId));
   } catch (e: unknown) {
     console.warn("ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
   }
@@ -248,10 +255,10 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
       ?? (typeof task["workspace_id"] === "string" ? (task["workspace_id"] as string) : undefined);
     if (wsId) {
       const ws = getWorkspaceById(wsId);
-      if (ws) workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch };
+      if (ws) workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch, github_owner: ws.github_owner, github_repo: ws.github_repo };
     }
     try {
-      ensureTaskSandbox(taskId, task.workflow, wf.sandbox, workspace);
+      ensureTaskSandbox(taskId, task.workflow, wf.sandbox, workspace, deliverBranchName(String(task.title ?? ""), taskId));
     } catch (e: unknown) {
       console.warn("resetTaskForRerun: ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
     }

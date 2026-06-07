@@ -36,11 +36,14 @@ export interface SandboxConfig {
   base?: string;
 }
 
-/** 创建 worktree 时传入的 workspace 信息（caller 反查后传入，sandbox.ts 不依赖 workspaces.ts） */
+/** 创建 sandbox（独立 clone）时传入的 workspace 信息（caller 反查后传入，sandbox.ts 不依赖 workspaces.ts） */
 export interface WorkspaceRef {
   id: string;
   path: string;
   default_branch: string;
+  /** GitHub owner/repo：用于把 clone 的 origin 从本地路径改写成 GitHub url（push/PR 用） */
+  github_owner?: string | null;
+  github_repo?: string | null;
 }
 
 /**
@@ -56,6 +59,10 @@ export interface WorktreeMeta {
   branch: string;
   base: string;
   created_at: number;
+  /** 沙盒模式：clone=独立克隆（删除纯 rmSync，不碰源仓库）；缺省/worktree=老 git worktree 数据 */
+  mode?: "clone" | "worktree";
+  /** clone 模式 push 的目标远程 url（GitHub）；null 表示无远程，submit_pr 会失败 */
+  remote_url?: string | null;
 }
 
 /** .worktree.json 磁盘原文形态：可能是新字段（workspace_*）或 Phase 2 前的旧字段（codebase_*）。 */
@@ -67,6 +74,8 @@ interface WorktreeMetaRaw {
   branch: string;
   base: string;
   created_at: number;
+  mode?: "clone" | "worktree";
+  remote_url?: string | null;
 }
 
 
@@ -102,6 +111,7 @@ export function ensureTaskSandbox(
   workflowName: string,
   sandboxConfig?: SandboxConfig,
   workspace?: WorkspaceRef,
+  deliverBranch?: string,
 ): string {
   const wsPath = getTaskSandbox(taskId);
 
@@ -109,15 +119,15 @@ export function ensureTaskSandbox(
   const alreadyPopulated = existsSync(wsPath) && readdirSync(wsPath).length > 0;
   if (alreadyPopulated) return wsPath;
 
-  // git worktree 模式优先（template 与 git 互斥，git=true 时忽略 template）
+  // git 沙盒模式：独立 clone（template 与 git 互斥，git=true 时忽略 template）
   if (sandboxConfig?.git) {
     if (sandboxConfig.template) {
       log.warn("sandbox.git=true 与 template=%s 互斥，忽略 template [task=%s]",
         sandboxConfig.template, taskId);
     }
-    const wt = tryCreateWorktree(taskId, sandboxConfig, workspace, wsPath);
+    const wt = tryCreateClone(taskId, sandboxConfig, workspace, wsPath, deliverBranch);
     if (wt) return wsPath;
-    // 退化：worktree 创建失败 → 空目录
+    // 退化：clone 创建失败 → 空目录
     if (!existsSync(wsPath)) mkdirSync(wsPath, { recursive: true });
     return wsPath;
   }
@@ -147,19 +157,24 @@ export function getTaskWorktreeMeta(taskId: string): WorktreeMeta | null {
 }
 
 /**
- * 试图为 task 创建 git worktree。成功返回 WorktreeMeta，失败 warn + 返回 null（caller 退化空目录）。
+ * 为 task 创建独立 clone 沙盒。成功返回 WorktreeMeta(mode=clone)，失败 warn + 返回 null（caller 退化空目录）。
+ *
+ * 核心：用户仓库**全程零痕迹**——源仓库只被 `git clone --local` 只读一次，之后零交互，
+ * 删除时纯 rmSync（不跑任何 `git -C <源仓库>`）。不再在源仓库 .git 留 worktree 注册 / 临时分支。
  *
  * 步骤：
- *   1. 校验 workspace 已传入且 workspace.path/.git 是 git 仓库
- *   2. 计算 branch 名 ${branch_prefix}${taskId}，冲突附 -2 / -3 后缀（最多 10 次）
- *   3. git -C <workspace.path> worktree add -b <branch> <wsPath> <base>
- *   4. 写 .worktree.json 让删除路径自包含
+ *   1. 校验 workspace 是 git 仓库
+ *   2. git clone --local <workspace.path> <wsPath>（硬链接 object，快省空间）
+ *   3. 修正 origin → GitHub url（--local origin 指本地路径，否则 push 推回本地仓库）
+ *   4. fetch origin 最新 base，基于 origin/<base> 建交付分支（fetch 失败回退本地 base）
+ *   5. 写 .worktree.json（mode=clone）让删除路径自包含
  */
-function tryCreateWorktree(
+function tryCreateClone(
   taskId: string,
   cfg: SandboxConfig,
   workspace: WorkspaceRef | undefined,
   wsPath: string,
+  deliverBranch?: string,
 ): WorktreeMeta | null {
   if (!workspace) {
     log.warn("sandbox.git=true 但未提供 workspace（task.extra 无 workspace_id？）；退化空目录 [task=%s]", taskId);
@@ -170,27 +185,36 @@ function tryCreateWorktree(
       workspace.id, workspace.path, taskId);
     return null;
   }
-  const prefix = cfg.branch_prefix ?? "autopilot/";
   const base = cfg.base ?? workspace.default_branch;
+  const branch = deliverBranch ?? `${cfg.branch_prefix ?? "autopilot/"}${taskId}`;
 
-  // 计算唯一 branch 名（防止与 workspace 现有分支冲突）
-  const branch = pickUniqueBranchName(workspace.path, prefix, taskId);
-
-  // worktree 目录的父目录要存在（mkdir wsPath 父级），但 wsPath 本身 git worktree add 会创建
+  // 目标目录必须不存在（git clone 要求）；父目录要在
   const parent = join(wsPath, "..");
   if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
-  // wsPath 必须不存在或为空，否则 git worktree add 会拒绝
-  if (existsSync(wsPath) && readdirSync(wsPath).length === 0) {
-    rmSync(wsPath, { recursive: true, force: true });
+  if (existsSync(wsPath)) rmSync(wsPath, { recursive: true, force: true });
+
+  // 1. 本地硬链接 clone —— 源仓库只读，零写入（不碰源 .git 的分支/worktree 注册）
+  const cl = Bun.spawnSync(["git", "clone", "--local", workspace.path, wsPath], { stdout: "pipe", stderr: "pipe" });
+  if (cl.exitCode !== 0) {
+    const stderr = cl.stderr ? new TextDecoder().decode(cl.stderr) : "";
+    log.warn("git clone --local 失败 [task=%s workspace=%s exit=%d]: %s",
+      taskId, workspace.id, cl.exitCode, stderr.slice(0, 300));
+    return null;
   }
 
-  const argv = ["git", "-C", workspace.path, "worktree", "add", "-b", branch, wsPath, base];
-  const proc = Bun.spawnSync(argv, { stdout: "pipe", stderr: "pipe" });
-  if (proc.exitCode !== 0) {
-    const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
-    log.warn("git worktree add 失败 [task=%s workspace=%s branch=%s base=%s exit=%d]: %s",
-      taskId, workspace.id, branch, base, proc.exitCode, stderr.slice(0, 300));
-    return null;
+  // 2. 修正 origin → GitHub（--local 的 origin 指向本地路径，push 会推回本地仓库而非远程）
+  const remoteUrl = resolveRemoteUrl(workspace);
+  if (remoteUrl) {
+    Bun.spawnSync(["git", "-C", wsPath, "remote", "set-url", "origin", remoteUrl], { stderr: "pipe" });
+  }
+
+  // 3. 基于 base 建交付分支。clone --local 已带源仓库所有本地 ref（含 base），
+  //    用本地 base 快照（dogfood 时源仓库本地即最新），run 阶段 diff <base>...HEAD 准确。
+  const co = Bun.spawnSync(["git", "-C", wsPath, "checkout", "-B", branch, base], { stderr: "pipe" });
+  if (co.exitCode !== 0) {
+    const stderr = co.stderr ? new TextDecoder().decode(co.stderr) : "";
+    log.warn("clone 后建交付分支失败 [task=%s branch=%s base=%s]: %s", taskId, branch, base, stderr.slice(0, 200));
+    // 不致命：工作树仍在 clone 默认分支，run 阶段尽量跑
   }
 
   const meta: WorktreeMeta = {
@@ -199,11 +223,26 @@ function tryCreateWorktree(
     branch,
     base,
     created_at: Date.now(),
+    mode: "clone",
+    remote_url: remoteUrl ?? null,
   };
   writeWorktreeMeta(taskId, meta);
-  log.info("git worktree 创建 [task=%s workspace=%s branch=%s base=%s ws=%s]",
-    taskId, workspace.id, branch, base, wsPath);
+  log.info("独立 clone 创建 [task=%s workspace=%s branch=%s base=%s remote=%s ws=%s]",
+    taskId, workspace.id, branch, base, remoteUrl ?? "(本地无远程)", wsPath);
   return meta;
+}
+
+/** 解析 clone 的 push 目标远程 url：优先 workspace 的 GitHub owner/repo，回退源仓库 origin（只读）。 */
+function resolveRemoteUrl(ws: WorkspaceRef): string | null {
+  if (ws.github_owner && ws.github_repo) {
+    return `https://github.com/${ws.github_owner}/${ws.github_repo}.git`;
+  }
+  const p = Bun.spawnSync(["git", "-C", ws.path, "remote", "get-url", "origin"], { stdout: "pipe", stderr: "pipe" });
+  if (p.exitCode === 0) {
+    const u = new TextDecoder().decode(p.stdout ?? new Uint8Array()).trim();
+    if (u) return u;
+  }
+  return null;
 }
 
 function pickUniqueBranchName(workspacePath: string, prefix: string, taskId: string): string {
@@ -236,7 +275,10 @@ function readWorktreeMeta(taskId: string): WorktreeMeta | null {
     const workspace_id = raw.workspace_id ?? raw.codebase_id;
     const workspace_path = raw.workspace_path ?? raw.codebase_path;
     if (!workspace_id || !workspace_path) return null;
-    return { workspace_id, workspace_path, branch: raw.branch, base: raw.base, created_at: raw.created_at };
+    return {
+      workspace_id, workspace_path, branch: raw.branch, base: raw.base, created_at: raw.created_at,
+      mode: raw.mode, remote_url: raw.remote_url,
+    };
   } catch { return null; }
 }
 
@@ -247,32 +289,37 @@ function writeWorktreeMeta(taskId: string, meta: WorktreeMeta): void {
 }
 
 /**
- * 移除任务的 git worktree（清掉 .worktree.json）。
+ * 移除任务沙盒的 git 元数据。
  *
- * 调用 `git worktree remove --force <wsPath>`，无视未提交修改（spec §3.4：超过保留期还没提交就是垃圾）。
- * 若 .worktree.json 不存在（task 未走 worktree 模式）→ no-op 返回 false。
- *
- * @returns true 若执行了 git worktree remove；false 若 task 未走 worktree 或元数据缺失
+ * - clone 模式（mode=clone）：**零碰源仓库** —— 只清 .worktree.json，沙盒目录交给上游 rmSync。
+ *   这是"用户仓库零痕迹"的代码级护栏：独立 clone 的删除绝不跑任何 `git -C <源仓库>`。
+ * - 老 worktree 数据（无 mode）：向后兼容，仍 `git worktree remove --force` 清掉源仓库的 worktree 注册。
+ * - .worktree.json 不存在 → no-op 返回 false。
  */
 export function removeTaskWorktree(taskId: string): boolean {
   const meta = readWorktreeMeta(taskId);
   if (!meta) return false;
-  const wsPath = getTaskSandbox(taskId);
 
+  // clone 模式：源仓库零接触，删除纯靠 rmSync（上游 deleteTaskSandbox 做）
+  if (meta.mode === "clone") {
+    try { rmSync(worktreeMetaPath(taskId), { force: true }); } catch { /* ignore */ }
+    return true;
+  }
+
+  // 老 worktree 数据：清源仓库的 worktree 注册（向后兼容历史 task）
+  const wsPath = getTaskSandbox(taskId);
   const proc = Bun.spawnSync(
     ["git", "-C", meta.workspace_path, "worktree", "remove", "--force", wsPath],
     { stdout: "pipe", stderr: "pipe" },
   );
   if (proc.exitCode !== 0) {
     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
-    // 常见失败：worktree 已不存在 / 路径不在 workspace 里。仍然清掉 .worktree.json 让上游继续 rmSync。
     log.warn("git worktree remove 失败（继续清理元数据）[task=%s ws=%s exit=%d]: %s",
       taskId, wsPath, proc.exitCode, stderr.slice(0, 300));
   } else {
     log.info("git worktree 移除 [task=%s workspace=%s branch=%s]", taskId, meta.workspace_id, meta.branch);
   }
 
-  // 清元数据文件（无论 git worktree remove 是否成功）
   try { rmSync(worktreeMetaPath(taskId), { force: true }); } catch { /* ignore */ }
   return proc.exitCode === 0;
 }
