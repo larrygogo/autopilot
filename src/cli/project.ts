@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { AutopilotClient, DEFAULT_PORT } from "../client/index";
 import { readListenInfo } from "../daemon/pid";
+import { existsSync } from "node:fs";
 
 function getClient(port: string): AutopilotClient {
   if (port !== String(DEFAULT_PORT)) {
@@ -63,28 +64,53 @@ export function registerProjectCommands(program: Command): void {
     });
 
   proj
-    .command("create <name>")
-    .description("创建 project（用于 req new 等需要挂载 project 的命令）")
+    .command("create <name> <path>")
+    .description("创建 project 并绑定本地工作区（一步到位）")
+    .option("--alias <alias>", "工作区别名（省略时从目录名自动推导，冲突时静默追加后缀）")
     .option("-d, --description <text>", "简短描述")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
     .option("--json", "原始 JSON 输出")
-    .action(async (name: string, opts: { description?: string; port: string; json?: boolean }) => {
+    .action(async (
+      name: string,
+      wsPath: string,
+      opts: { alias?: string; description?: string; port: string; json?: boolean },
+    ) => {
       if (!name.trim()) {
         console.error("错误：name 不能为空");
         process.exit(2);
       }
+      if (!wsPath.trim()) {
+        console.error("错误：path 不能为空");
+        process.exit(2);
+      }
+
+      // 客户端预校验路径（快速失败，减少一次 daemon 往返）
+      if (!existsSync(wsPath)) {
+        console.error(`错误：路径不存在: ${wsPath}`);
+        process.exit(2);
+      }
+
       const client = getClient(opts.port);
       await ensureDaemon(client);
 
       try {
-        const body: { name: string; description?: string } = { name: name.trim() };
+        const body: {
+          name: string;
+          path: string;
+          alias?: string;
+          description?: string;
+        } = { name: name.trim(), path: wsPath.trim() };
+        if (opts.alias) body.alias = opts.alias;
         if (opts.description) body.description = opts.description;
-        const { project } = await client.createProject(body);
+
+        const { project, workspace } = await client.createProjectWithWorkspace(body);
         if (opts.json) {
-          console.log(JSON.stringify(project, null, 2));
+          console.log(JSON.stringify({ project, workspace }, null, 2));
         } else {
           console.log(`已创建 project：${project.id}  ${project.name}`);
           if (project.description) console.log(`  描述：${project.description}`);
+          // 展示实际生效的 alias（可能已被静默追加后缀变为 myapp-2 等）
+          console.log(`已绑定工作区：${workspace.id}  ${workspace.alias}  →  ${workspace.path}`);
           console.log(`\n下一步：autopilot req new "你的需求描述" -p ${project.id}`);
         }
       } catch (e: unknown) {

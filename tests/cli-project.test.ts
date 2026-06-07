@@ -51,14 +51,16 @@ describe("autopilot project （dogfood-bug20）", () => {
 
   it("daemon 未启时 `project create` 提示并退出码 ≠ 0", () => {
     runCli("init");
-    const r = runCli("project", "create", "MyProject", "--port", "19999");
+    // 新签名需要 <path>；用 REPO 根目录（必然存在）让路径校验通过，再触发 daemon 检查
+    const r = runCli("project", "create", "MyProject", REPO, "--port", "19999");
     expect(r.exitCode).not.toBe(0);
     expect(r.stderr).toContain("daemon");
   });
 
   it("`project create` name 为空时报 exit 2", () => {
     runCli("init");
-    const r = runCli("project", "create", "   ", "--port", "19999");
+    // name 校验先于 daemon 检查执行，path 给合法值即可（不影响 name 校验触发）
+    const r = runCli("project", "create", "   ", REPO, "--port", "19999");
     expect(r.exitCode).toBe(2);
     expect(r.stderr).toContain("name 不能为空");
   });

@@ -59,6 +59,7 @@ import {
   listProjects,
   getProjectById,
   createProject as coreCreateProject,
+  createProjectWithWorkspace as coreCreateProjectWithWorkspace,
   updateProject as coreUpdateProject,
   deleteProject as coreDeleteProject,
   nextProjectId,
@@ -1595,6 +1596,50 @@ export function registerCoreRpcMethods(): void {
         if (code?.startsWith("SQLITE_CONSTRAINT") || msg.toLowerCase().includes("unique")) {
           throw new RpcError("ALREADY_EXISTS", msg);
         }
+        throw new RpcError("CREATE_FAILED", msg);
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "projects.createWithWorkspace",
+    description: "一步新建 Project + 顶层 Workspace（路径须存在；alias 省略时从目录名自动推导并全局去重）",
+    handler: (params) => {
+      const p = asObj(params);
+      const name = typeof p.name === "string" ? p.name.trim() : "";
+      if (!name) throw new RpcError("INVALID_PARAM", "name 必填");
+      const pathField = typeof p.path === "string" ? p.path.trim() : "";
+      if (!pathField) throw new RpcError("INVALID_PARAM", "path 必填");
+
+      // 路径先校验：不存在则立即报错，项目和工作区均不创建
+      if (!existsSync(pathField)) {
+        throw new RpcError("INVALID_PARAM", `路径不存在: ${pathField}`);
+      }
+
+      // 可选 git 探测（纯读；非 git 目录时 github_owner/github_repo 为 null，default_branch 为 null）
+      const detected = detectWorkspaceGit(pathField);
+      const rawAlias = typeof p.alias === "string" ? p.alias.trim() : "";
+      const explicitBranch =
+        typeof p.default_branch === "string" && p.default_branch.trim()
+          ? p.default_branch.trim()
+          : null;
+      const gh_owner = typeof p.github_owner === "string" ? p.github_owner : null;
+      const gh_repo = typeof p.github_repo === "string" ? p.github_repo : null;
+
+      try {
+        const { project, workspace } = coreCreateProjectWithWorkspace({
+          name,
+          description: (p.description as string | null | undefined) ?? null,
+          path: pathField,
+          alias: rawAlias || undefined,
+          default_branch: explicitBranch ?? detected.default_branch ?? undefined,
+          github_owner: gh_owner || detected.github_owner || null,
+          github_repo: gh_repo || detected.github_repo || null,
+        });
+        emitBus({ type: "projects:changed", payload: { id: project.id, action: "create" } });
+        return { project, workspace };
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
         throw new RpcError("CREATE_FAILED", msg);
       }
     },

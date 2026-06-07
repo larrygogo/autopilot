@@ -526,6 +526,17 @@ export const api = {
   // [WS-RPC] projects.create
   createProject: (body: { name: string; description?: string }) =>
     requestRpc<{ project: Project }>("projects.create", body).then((r) => r.project),
+  // [WS-RPC] projects.createWithWorkspace
+  createProjectWithWorkspace: (body: {
+    name: string;
+    description?: string | null;
+    path: string;
+    alias?: string;
+  }) =>
+    requestRpc<{ project: Project; workspace: Workspace }>(
+      "projects.createWithWorkspace",
+      body,
+    ),
   // [WS-RPC] projects.update
   updateProject: (id: string, body: { name?: string; description?: string | null }) =>
     requestRpc<{ project: Project }>("projects.update", { id, ...body }).then((r) => r.project),

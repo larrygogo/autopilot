@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Layers, Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { Layers, Plus, RefreshCw, Pencil, Trash2, FolderOpen } from "lucide-react";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,7 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { api, type Project } from "@/hooks/useApi";
+import { api, type Project, type Workspace } from "@/hooks/useApi";
+import { FolderPicker } from "@/components/FolderPicker";
 import { useToast } from "@/components/Toast";
 import { cn } from "@/lib/utils";
 
@@ -25,9 +26,22 @@ import { cn } from "@/lib/utils";
 interface FormState {
   name: string;
   description: string;
+  /** 新建时必填，编辑时忽略 */
+  path: string;
+  /** 新建时可选；空时服务端从路径末尾推导（并全局去重后缀） */
+  alias: string;
 }
 
-const EMPTY_FORM: FormState = { name: "", description: "" };
+const EMPTY_FORM: FormState = { name: "", description: "", path: "", alias: "" };
+
+/**
+ * 从路径取末尾目录名用于自动填写 alias 预览，兼容 Windows/POSIX，忽略结尾分隔符。
+ * 与 FolderPicker 返回的路径格式一致。
+ */
+function folderName(p: string): string {
+  const trimmed = p.trim().replace(/[\\/]+$/, "");
+  return trimmed.split(/[\\/]/).pop() ?? "";
+}
 
 function ProjectsTab() {
   const navigate = useNavigate();
@@ -41,6 +55,7 @@ function ProjectsTab() {
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleteInput, setDeleteInput] = useState("");
@@ -75,8 +90,20 @@ function ProjectsTab() {
   const openEditDialog = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingProject(p);
-    setForm({ name: p.name, description: p.description ?? "" });
+    setForm({ name: p.name, description: p.description ?? "", path: "", alias: "" });
     setDialogOpen(true);
+  };
+
+  /** FolderPicker 选定路径后回调：更新 path，并在 alias 为空时自动预填 */
+  const handlePathSelect = (selectedPath: string) => {
+    setFolderPickerOpen(false);
+    const derived = folderName(selectedPath);
+    setForm((f) => ({
+      ...f,
+      path: selectedPath,
+      // 仅当 alias 为空时自动填入目录名；用户已手动填写的 alias 不覆盖
+      alias: f.alias || derived,
+    }));
   };
 
   const closeDialog = () => {
@@ -91,6 +118,11 @@ function ProjectsTab() {
       toast.error("验证失败", "项目名称不能为空");
       return;
     }
+    // 新建时校验路径（编辑时不要求）
+    if (!editingProject && !form.path.trim()) {
+      toast.error("验证失败", "工作区路径不能为空");
+      return;
+    }
     setSaving(true);
     try {
       if (editingProject) {
@@ -100,11 +132,16 @@ function ProjectsTab() {
         });
         toast.success(`已更新项目「${name}」`);
       } else {
-        await api.createProject({
+        const result = await api.createProjectWithWorkspace({
           name,
           description: form.description.trim() || undefined,
+          path: form.path.trim(),
+          alias: form.alias.trim() || undefined,
         });
-        toast.success(`已创建项目「${name}」`);
+        // 展示实际生效的 alias（服务端可能已全局去重追加后缀）
+        toast.success(
+          `已创建项目「${result.project.name}」并绑定工作区 ${result.workspace.alias}`,
+        );
       }
       setDialogOpen(false);
       setEditingProject(null);
@@ -247,7 +284,7 @@ function ProjectsTab() {
             <DialogDescription>
               {editingProject
                 ? "修改项目名称或描述。"
-                : "填写项目名称和描述，创建后可在项目工作台中关联工作区和需求。"}
+                : "填写项目名称，并选择本地工作区路径，一步完成创建和关联。"}
             </DialogDescription>
           </DialogHeader>
 
@@ -275,6 +312,52 @@ function ProjectsTab() {
                 onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
               />
             </div>
+
+            {!editingProject && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="project-path">
+                    工作区路径 <span className="text-destructive">*</span>
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="project-path"
+                      placeholder="例如：/code/myapp"
+                      value={form.path}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, path: e.target.value }))
+                      }
+                      className="font-mono text-xs"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      onClick={() => setFolderPickerOpen(true)}
+                      title="浏览文件夹"
+                      aria-label="浏览文件夹"
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    本地目录路径（无需是 git 仓库），daemon 会自动探测 git 信息
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="project-alias">工作区别名（可选）</Label>
+                  <Input
+                    id="project-alias"
+                    placeholder="不填时自动取目录名"
+                    value={form.alias}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, alias: e.target.value }))
+                    }
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <DialogFooter>
@@ -287,6 +370,13 @@ function ProjectsTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 文件夹选择器（新建项目时弹出，通过 daemon 服务端目录树选路径） */}
+      <FolderPicker
+        open={folderPickerOpen}
+        onSelect={handlePathSelect}
+        onCancel={() => setFolderPickerOpen(false)}
+      />
 
       {/* 删除确认 dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) closeDeleteDialog(); }}>

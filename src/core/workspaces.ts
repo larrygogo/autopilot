@@ -206,3 +206,36 @@ export function nextWorkspaceId(): string {
   const n = parseInt(last, 10) + 1;
   return `ws-${String(n).padStart(3, "0")}`;
 }
+
+// ──────────────────────────────────────────────
+// 辅助函数
+// ──────────────────────────────────────────────
+
+/**
+ * 从本地路径推导 workspace alias（取末尾目录名，兼容 Windows/POSIX，忽略结尾分隔符）。
+ * 框架规范版本；与 ProjectDetail.tsx 的 folderName 逻辑对齐。
+ */
+export function deriveAlias(dirPath: string): string {
+  const trimmed = dirPath.trim().replace(/[\\/]+$/, "");
+  return trimmed.split(/[\\/]/).pop() || "workspace";
+}
+
+/**
+ * 确保 alias 在全局 workspaces 表中唯一（跨所有 project_id）。
+ * 若已存在同名 workspace，自动追加 -2/-3/… 后缀，对调用方完全透明。
+ *
+ * 去重范围：全局（不限 project），因为 alias 是用户面的全局标识符。
+ */
+export function resolveUniqueAlias(baseAlias: string): string {
+  const db = getDb();
+  let alias = baseAlias;
+  let counter = 2;
+  while (true) {
+    const row = db
+      .query<{ id: string }, [string]>("SELECT id FROM workspaces WHERE alias = ? LIMIT 1")
+      .get(alias);
+    if (!row) return alias;
+    alias = `${baseAlias}-${counter}`;
+    counter++;
+  }
+}

@@ -1,6 +1,14 @@
 import { getDb } from "./db";
 import { listRequirements, deleteRequirement } from "./requirements";
-import { listWorkspaces, deleteWorkspace } from "./workspaces";
+import {
+  listWorkspaces,
+  deleteWorkspace,
+  createWorkspace,
+  nextWorkspaceId,
+  deriveAlias,
+  resolveUniqueAlias,
+  type Workspace,
+} from "./workspaces";
 import { forceDeleteTasksForProject } from "./task-delete";
 
 // ──────────────────────────────────────────────
@@ -150,4 +158,55 @@ export function nextProjectId(): string {
   const last = rows[0].id.replace("proj-", "");
   const n = parseInt(last, 10) + 1;
   return `proj-${String(n).padStart(3, "0")}`;
+}
+
+// ──────────────────────────────────────────────
+// 原子建项目 + 工作区
+// ──────────────────────────────────────────────
+
+export interface CreateProjectWithWorkspaceOpts {
+  name: string;
+  description?: string | null;
+  /** 本地目录路径（调用方保证路径存在，本函数不做 FS 校验） */
+  path: string;
+  /**
+   * 工作区别名。省略时从 path 末尾目录名自动推导；
+   * 全局冲突时静默追加数字后缀（-2/-3/…），对调用方不可见。
+   */
+  alias?: string;
+  default_branch?: string;
+  github_owner?: string | null;
+  github_repo?: string | null;
+}
+
+/**
+ * 在单个 DB 事务内原子地创建 Project + 顶层 Workspace。
+ * - 路径存在性校验：由上层（RPC 层）负责，本函数不做 FS 操作。
+ * - alias 推导和全局去重：在事务开始前完成（resolveUniqueAlias 是 SELECT，幂等）。
+ */
+export function createProjectWithWorkspace(opts: CreateProjectWithWorkspaceOpts): {
+  project: Project;
+  workspace: Workspace;
+} {
+  const db = getDb();
+  const baseAlias = opts.alias?.trim() || deriveAlias(opts.path);
+  const uniqueAlias = resolveUniqueAlias(baseAlias);
+
+  return db.transaction(() => {
+    const project = createProject({
+      id: nextProjectId(),
+      name: opts.name,
+      description: opts.description ?? null,
+    });
+    const workspace = createWorkspace({
+      id: nextWorkspaceId(),
+      project_id: project.id,
+      alias: uniqueAlias,
+      path: opts.path,
+      default_branch: opts.default_branch ?? "main",
+      github_owner: opts.github_owner ?? null,
+      github_repo: opts.github_repo ?? null,
+    });
+    return { project, workspace };
+  })();
 }

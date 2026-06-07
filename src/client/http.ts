@@ -247,6 +247,18 @@ export class HttpClient {
     return this.call("projects.create", body);
   }
 
+  async createProjectWithWorkspace(body: {
+    name: string;
+    description?: string | null;
+    path: string;
+    alias?: string;
+    default_branch?: string;
+    github_owner?: string | null;
+    github_repo?: string | null;
+  }): Promise<{ project: Project; workspace: Workspace }> {
+    return this.call("projects.createWithWorkspace", body);
+  }
+
   async updateProject(id: string, body: { name?: string; description?: string | null }): Promise<{ project: Project }> {
     return this.call("projects.update", { id, ...body });
   }

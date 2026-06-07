@@ -58,6 +58,7 @@ export class AutopilotClient {
   get listProjects() { return this.http.listProjects.bind(this.http); }
   get getProject() { return this.http.getProject.bind(this.http); }
   get createProject() { return this.http.createProject.bind(this.http); }
+  get createProjectWithWorkspace() { return this.http.createProjectWithWorkspace.bind(this.http); }
   get updateProject() { return this.http.updateProject.bind(this.http); }
   get deleteProject() { return this.http.deleteProject.bind(this.http); }
   get listWorkspaces() { return this.http.listWorkspaces.bind(this.http); }
