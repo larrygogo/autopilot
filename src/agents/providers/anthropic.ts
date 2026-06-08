@@ -267,6 +267,7 @@ async function spawnClaudeAndConsume(opts: {
 
 export class AnthropicProvider extends BaseProvider {
   private sessionId?: string;
+  private lastCwd?: string;
 
   async chat(message: string, options?: ChatOptions): Promise<ChatResult> {
     const model = options?.model ?? (this.config["model"] as string | undefined) ?? "claude-sonnet-4-6";
@@ -370,6 +371,12 @@ export class AnthropicProvider extends BaseProvider {
   }
 
   async run(prompt: string, options?: RunOptions): Promise<AgentResult> {
+    // 即焚 sandbox：cwd 变化（换了新副本）意味着旧 session 绑的副本已销毁，claude --resume
+    // 会 "No conversation found"。cwd 变则弃旧 session、开新会话（仅同副本内多轮才复用 session）。
+    if (options?.cwd !== this.lastCwd) {
+      this.sessionId = undefined;
+      this.lastCwd = options?.cwd;
+    }
     const model = this.resolveModel(options, "claude-sonnet-4-6");
     const permissionMode = (this.config["permission_mode"] as string | undefined) ?? "auto";
     const systemPrompt = this.resolveSystemPrompt(options);

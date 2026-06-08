@@ -2,8 +2,8 @@ import { getTask, createTask, updateTask, clearTaskRunHistory } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { prepareDeliverMeta, deleteRemoteDeliverBranch, getTaskWorktreeMeta, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
-import { purgeAgentRuns, cumulativePatchPath } from "./agent-sandbox";
+import { prepareDeliverMeta, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskArtifactsDir, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
+import { purgeAgentRuns } from "./agent-sandbox";
 import { rmSync } from "fs";
 import { getWorkspaceById } from "./workspaces";
 import { getRequirementById, updateRequirement } from "./requirements";
@@ -268,8 +268,8 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
     } catch (e: unknown) {
       console.warn("resetTaskForRerun: deleteRemoteDeliverBranch 失败（容错继续）：", e instanceof Error ? e.message : e);
     }
-    // 即焚模型：清累积 patch（代码状态归零）+ 临时副本残留。
-    try { rmSync(cumulativePatchPath(taskId), { force: true }); } catch { /* ignore */ }
+    // 即焚模型：清整个 artifacts（上轮产物 + 累积 patch，代码状态归零）+ 临时副本残留。
+    try { rmSync(getTaskArtifactsDir(taskId), { recursive: true, force: true }); } catch { /* ignore */ }
     purgeAgentRuns(taskId);
     let workspace: WorkspaceRef | undefined;
     const req = task.requirement_id ? getRequirementById(task.requirement_id) : null;
