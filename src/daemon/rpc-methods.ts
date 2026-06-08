@@ -20,6 +20,7 @@ import {
   getWorkflowPhaseStats,
 } from "../core/db";
 import { existsSync } from "node:fs";
+import { basename } from "node:path";
 import {
   listWorkflows,
   getWorkflowYaml as registryGetWorkflowYaml,
@@ -51,7 +52,7 @@ import {
   deleteTaskSandbox,
   scanTaskSandboxes,
 } from "../core/sandbox";
-import { setKv, listRootTasksByRequirementIds } from "../core/db";
+import { setKv, listRootTasksByRequirementIds, getDb } from "../core/db";
 import { discover as registryDiscover, getWorkflow as registryGetWorkflow } from "../core/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
@@ -65,7 +66,7 @@ import {
   DEFAULT_PROJECT_ID,
 } from "../core/projects";
 import { listRequirementsByProject } from "../core/requirements";
-import { listWorkspaces, getWorkspaceById, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, projectHasTopWorkspace, getTopWorkspaceForProject } from "../core/workspaces";
+import { listWorkspaces, getWorkspaceById, getWorkspaceByAlias, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, projectHasTopWorkspace, getTopWorkspaceForProject } from "../core/workspaces";
 import { listSubmodules, discoverSubmodules } from "../core/submodules";
 import { checkWorkspaceHealth, detectWorkspaceGit } from "../core/workspace-health";
 import {
@@ -150,6 +151,19 @@ function asObj(params: unknown): Record<string, unknown> {
     throw new RpcError("INVALID_PARAM", "params 必须是对象");
   }
   return params as Record<string, unknown>;
+}
+
+/**
+ * alias 唯一性约束为 per-project。新建项目时理论上不会冲突，
+ * 此函数作防御层，确保"冲突对用户无感"在极端情形下也成立。
+ */
+function _generateUniqueAlias(projectId: string, baseAlias: string): string {
+  if (!getWorkspaceByAlias(projectId, baseAlias)) return baseAlias;
+  for (let n = 2; n <= 99; n++) {
+    const candidate = `${baseAlias}-${n}`;
+    if (!getWorkspaceByAlias(projectId, candidate)) return candidate;
+  }
+  return `${baseAlias}-${Date.now() % 100000}`;
 }
 
 /** 在 daemon 启动早期调用一次。重复调用幂等（检查 daemon.status 是否已注册）。 */
@@ -1597,6 +1611,78 @@ export function registerCoreRpcMethods(): void {
         }
         throw new RpcError("CREATE_FAILED", msg);
       }
+    },
+  });
+
+  registerRpcMethod({
+    method: "projects.createWithWorkspace",
+    description: "原子性创建 Project + 顶层 Workspace（路径先校验，DB 事务 all-or-nothing，alias 冲突静默处理）",
+    handler: (params) => {
+      const p = asObj(params);
+
+      // ── 参数校验 ──
+      const name = typeof p.name === "string" ? p.name.trim() : "";
+      if (!name) throw new RpcError("INVALID_PARAM", "name 必填");
+
+      const rawPath = typeof p.path === "string" ? p.path.trim() : "";
+      if (!rawPath) throw new RpcError("INVALID_PARAM", "path 必填");
+
+      // ── 路径校验（在任何 DB 写操作前，失败则整体不建）──
+      if (!existsSync(rawPath)) {
+        throw new RpcError("PATH_NOT_FOUND", `路径不存在：${rawPath}`);
+      }
+
+      // ── alias 基础值：显式传入优先，否则从路径 basename 推导 ──
+      const baseAlias = (typeof p.alias === "string" && p.alias.trim())
+        ? p.alias.trim()
+        : (basename(rawPath) || "workspace");
+
+      // ── git 信息探测（纯读，失败不阻塞）──
+      const detected = detectWorkspaceGit(rawPath);
+      const description = (p.description as string | null | undefined) ?? null;
+
+      const db = getDb();
+      let project!: ReturnType<typeof coreCreateProject>;
+      let workspace!: ReturnType<typeof createWorkspace>;
+
+      // ── 原子性事务：ID 生成 + 双表写入全在事务内 ──
+      try {
+        db.transaction(() => {
+          const projectId = nextProjectId();
+          const workspaceId = nextWorkspaceId();
+
+          // 1. 建项目
+          project = coreCreateProject({ id: projectId, name, description });
+
+          // 2. alias 去重（事务内，静默追加后缀）
+          const alias = _generateUniqueAlias(projectId, baseAlias);
+
+          // 3. 建工作区
+          workspace = createWorkspace({
+            id: workspaceId,
+            project_id: projectId,
+            alias,
+            path: rawPath,
+            // best-effort：非 git 目录回退 "main"，用户可事后 workspace update 修正
+            default_branch: detected.default_branch ?? "main",
+            github_owner: detected.github_owner ?? null,
+            github_repo: detected.github_repo ?? null,
+          });
+        })();
+      } catch (e: unknown) {
+        const code = (e as { code?: string }).code;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (code?.startsWith("SQLITE_CONSTRAINT") || msg.toLowerCase().includes("unique")) {
+          throw new RpcError("PROJECT_CREATE_FAILED", `项目创建失败：${msg}`);
+        }
+        throw new RpcError("WORKSPACE_CREATE_FAILED", `工作区创建失败：${msg}`);
+      }
+
+      // ── 双事件通知 ──
+      emitBus({ type: "projects:changed", payload: { id: project.id, action: "create" } });
+      emitBus({ type: "workspaces:changed", payload: { id: workspace.id, action: "create" } });
+
+      return { project, workspace };
     },
   });
 
