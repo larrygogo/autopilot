@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../index";
-import { getTaskSandbox } from "./sandbox";
+import { getTaskArtifactsDir } from "./sandbox";
 import { isParallelPhase, type WorkflowDefinition } from "./registry";
 import type { AgentCallRecord } from "./task-logs";
 
@@ -152,7 +152,7 @@ export function archivePhaseArtifacts(
     if (idx < 0) return; // 未在 workflow 中找到（非常规调用），跳过
 
     const dirName = `${String(idx).padStart(2, "0")}-${phaseName}`;
-    const phaseDir = join(getTaskSandbox(taskId), dirName);
+    const phaseDir = join(getTaskArtifactsDir(taskId), dirName);
     if (!existsSync(phaseDir)) mkdirSync(phaseDir, { recursive: true });
 
     const allCalls = readAllAgentCalls(taskId);

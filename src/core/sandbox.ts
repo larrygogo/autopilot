@@ -110,6 +110,23 @@ export function getTaskAgentHome(taskId: string): string {
 }
 
 /**
+ * 任务文件夹的产物根目录 `runtime/tasks/<id>/artifacts`（持久，跨 agent 累积）。
+ *
+ * 装这个任务所有中间产物：每个 phase 的文档/计划/报告（artifacts/NN-phase/）、agent 调用
+ * 归档、累积 patch 链（artifacts/patches/）。**与代码工作树物理分离** —— 产物不再塞进代码
+ * clone 的工作树根（旧做法靠 .git/info/exclude 防进 PR），从根上杜绝产物污染交付。
+ * 「沙盒」tab 展示的就是这个目录。
+ */
+export function getTaskArtifactsDir(taskId: string): string {
+  if (!TASK_ID_RE.test(taskId)) {
+    throw new Error(`非法 task ID：${taskId}`);
+  }
+  const dir = join(AUTOPILOT_HOME, "runtime", "tasks", taskId, "artifacts");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/**
  * 确保 sandbox 目录存在；按 workflow.yaml 的 sandbox 段配置选择初始化方式：
  *   - git=true + 提供 workspace 信息 → git worktree 模式（在 workspace 临时分支上工作）
  *   - template=xxx → 拷贝模板目录

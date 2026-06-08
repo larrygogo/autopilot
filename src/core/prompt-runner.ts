@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { agentForPhase } from "../agents/registry";
 import type { InlineAgentConfig } from "./agent-defaults";
 import { getTask } from "./db";
-import { getTaskSandbox } from "./sandbox";
+import { getTaskSandbox, getTaskArtifactsDir } from "./sandbox";
 import { getPhaseIndex } from "./artifacts";
 import { getWorkflow, type PhaseDefinition, type WorkflowDefinition } from "./registry";
 import { createLogger } from "./logger";
@@ -81,14 +81,17 @@ export function expandPromptTemplate(
     workspaceRoot?: string;
   },
 ): string {
-  const workspaceRoot = ctx.workspaceRoot ?? getTaskSandbox(ctx.taskId);
+  // 代码路径（${WORKSPACE} 给 agent）与产物路径（handoff 读取）分离：产物在 artifacts/，
+  // 代码在 sandbox（Step 4 起为即焚临时 clone）。测试传 ctx.workspaceRoot 时两者同源。
+  const codeRoot = ctx.workspaceRoot ?? getTaskSandbox(ctx.taskId);
+  const artifactsRoot = ctx.workspaceRoot ?? getTaskArtifactsDir(ctx.taskId);
   const builtins: Record<string, string> = {
     TASK_ID: ctx.taskId,
     PHASE: ctx.phase,
     TASK_TITLE: String(ctx.task["title"] ?? ""),
     REQUIREMENT: String(ctx.task["requirement"] ?? ""),
-    WORKSPACE: workspaceRoot,
-    HANDOFF: ctx.workflow ? collectUpstreamHandoffs(ctx.taskId, ctx.workflow, ctx.phase, workspaceRoot) : "",
+    WORKSPACE: codeRoot,
+    HANDOFF: ctx.workflow ? collectUpstreamHandoffs(ctx.taskId, ctx.workflow, ctx.phase, artifactsRoot) : "",
   };
 
   // ${VAR} 优先匹配（含 ${TASK.xxx} 和 ${HANDOFF_<NAME>}）
@@ -100,7 +103,7 @@ export function expandPromptTemplate(
     }
     if (key.startsWith("HANDOFF_") && ctx.workflow) {
       const phaseName = key.slice("HANDOFF_".length).toLowerCase();
-      return readPhaseHandoff(ctx.taskId, ctx.workflow, phaseName, workspaceRoot) ?? "";
+      return readPhaseHandoff(ctx.taskId, ctx.workflow, phaseName, artifactsRoot) ?? "";
     }
     return builtins[key] ?? m;
   });
@@ -129,7 +132,7 @@ export function readPhaseHandoff(
 ): string | null {
   const idx = getPhaseIndex(workflow, phaseName);
   const dirName = idx >= 0 ? `${String(idx).padStart(2, "0")}-${phaseName}` : phaseName;
-  const root = workspaceRoot ?? getTaskSandbox(taskId);
+  const root = workspaceRoot ?? getTaskArtifactsDir(taskId);
   const handoffPath = join(root, dirName, "handoff.md");
   if (!existsSync(handoffPath)) return null;
   try {
@@ -276,7 +279,7 @@ export function makePromptRunner(
     // 输出目录预备
     const idx = getPhaseIndex(wf, phaseName);
     const dirName = idx >= 0 ? `${String(idx).padStart(2, "0")}-${phaseName}` : phaseName;
-    const dir = join(getTaskSandbox(taskId), dirName);
+    const dir = join(getTaskArtifactsDir(taskId), dirName);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     // 第一轮：用解析后的 phase prompt 跑
