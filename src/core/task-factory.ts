@@ -4,7 +4,7 @@ import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registr
 import { snapshotWorkflow } from "./manifest";
 import { ensureTaskSandbox, deleteTaskSandbox, deleteRemoteDeliverBranch, getTaskSandbox, getTaskWorktreeMeta, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
 import { getWorkspaceById } from "./workspaces";
-import { getRequirementById } from "./requirements";
+import { getRequirementById, updateRequirement } from "./requirements";
 import { forceTransition } from "./state-machine";
 import { isLocked } from "./infra";
 import { forgetTaskRecoveryState } from "./watcher";
@@ -238,6 +238,16 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
   };
   if (opts.requirement !== undefined) clear["requirement"] = opts.requirement;
   updateTask(taskId, clear);
+
+  // 1b. 重跑=全新一轮：清 requirement 残留的 pr_url/pr_number（旧 PR 已被 deleteRemoteDeliverBranch
+  //     删分支 → GitHub 自动 close）。否则需求页在新 PR 出来前仍显示已关闭的旧 PR 链接。
+  if (task.requirement_id) {
+    try {
+      updateRequirement(task.requirement_id, { pr_url: null, pr_number: null });
+    } catch (e: unknown) {
+      console.warn("resetTaskForRerun: 清 requirement pr_url 失败：", e instanceof Error ? e.message : e);
+    }
+  }
 
   // 2a. 重跑是全新一轮 → 清空全部历史运行记录（phase events + 状态日志 + 实时日志 +
   //     agent 调用），否则流水线图/各日志 tab 仍显示上一轮的 ✓/耗时/记录。
