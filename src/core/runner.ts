@@ -24,6 +24,20 @@ function fingerprintError(msg: string): string {
     .replace(/\d+/g, "N");                              // 行号 / 时间戳 / 数字
 }
 
+/**
+ * 区分「环境/远程瞬时态失败」(C2) 与「确定性代码错误」(C1)。
+ *
+ * 失败自愈的核心分水岭：C1 重试必然同样错（cwd 不存在 / 模块缺失 / null 解引用），应快速止损；
+ * 但 C2 的错误信息天然也很稳定（git non-fast-forward 提示每次一字不差、429/超时文案固定），
+ * 会被「连续相同指纹」的快速止损误判成 C1，一次失败就直接 failed。这类失败重试（配合幂等/
+ * 补偿）可能成功，不该被快速止损——放它走累计路径，熬满 MAX_PHASE_FAILURES 次机会再放弃。
+ */
+function isRecoverableError(msg: string): boolean {
+  return /non-fast-forward|failed to push|\brejected\b|\b(?:429|502|503|504)\b|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|connection reset|timed?\s*out|could not lock|index\.lock|rate limit/i.test(
+    msg,
+  );
+}
+
 // ──────────────────────────────────────────────
 // Push 模型：非阻塞启动阶段
 // ──────────────────────────────────────────────
@@ -260,7 +274,9 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
           // recoveryCount(≥3) × 卡死阈值(~10min) 才终止（确定性失败要拖 ~30min）。
           // 不同指纹 → 视为可能偶发，照旧累计 + 留 running 给 watcher 重试（保偶发容错）。
           // 用 failed（执行失败终态，可重跑）区别于 cancelled（用户主动取消，不可重跑）。
-          if (prevFingerprint !== null && prevFingerprint === fingerprint) {
+          // recoverable（C2 环境/远程瞬时态）即使指纹重复也不快速止损 —— 它的错误文案天然稳定，
+          // 重试（配合重跑幂等清远程 / 补偿）可能成功，放它走下面累计路径熬满次数再放弃。
+          if (prevFingerprint !== null && prevFingerprint === fingerprint && !isRecoverableError(errMsg)) {
             updateTask(taskId, { failure_count: newCount });
             log.error("阶段 %s 连续相同错误（确定性失败），立即 failed [task=%s]：%s",
               phase, taskId, fingerprint.slice(0, 160));

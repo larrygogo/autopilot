@@ -335,6 +335,43 @@ export function removeTaskWorktree(taskId: string): boolean {
 }
 
 /**
+ * 重跑专属：删除任务在远程的交付分支（GitHub 会自动 close 关联的 OPEN PR）。
+ *
+ * 用于「重跑 = 干净重来」语义：让新一轮 push 到全新分支，从源头消除 non-fast-forward 冲突，
+ * 无需 --force 覆盖远程。正常终态清理（deleteTaskSandbox）**不**调此函数 —— done 任务的
+ * PR/分支要保留。
+ *
+ * 安全边界（守 CLAUDE.md「仓库零痕迹」+ 只动自有命名空间）：
+ * - 仅 clone 模式生效（autopilot 独立副本）；
+ * - 仅删 meta.branch（由 deliverBranchName 生成、记在 .worktree.json 的 autopilot 自有交付分支），
+ *   且强制 `feat/` 前缀校验，绝不碰用户的其它分支；
+ * - 用 clone 的 origin（tryCreateClone 已 set-url 成 GitHub https）push --delete，
+ *   分支不存在 / 无凭证等一律容错（重跑继续，不阻断）。
+ */
+export function deleteRemoteDeliverBranch(taskId: string): { deleted: boolean; branch?: string } {
+  const meta = readWorktreeMeta(taskId);
+  if (!meta || meta.mode !== "clone" || !meta.branch) return { deleted: false };
+  if (!meta.branch.startsWith("feat/")) {
+    log.warn("跳过删远程分支：非 autopilot 交付分支命名空间 [task=%s branch=%s]", taskId, meta.branch);
+    return { deleted: false, branch: meta.branch };
+  }
+  const wsPath = getTaskSandbox(taskId);
+  if (!existsSync(wsPath)) return { deleted: false, branch: meta.branch };
+  const proc = Bun.spawnSync(
+    ["git", "push", "origin", "--delete", meta.branch],
+    { cwd: wsPath, stdout: "pipe", stderr: "pipe" },
+  );
+  if (proc.exitCode === 0) {
+    log.info("删远程交付分支（重跑清旧轮，GitHub 自动 close 旧 PR）[task=%s branch=%s]", taskId, meta.branch);
+    return { deleted: true, branch: meta.branch };
+  }
+  const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+  log.warn("删远程交付分支失败（容错继续）[task=%s branch=%s exit=%d]: %s",
+    taskId, meta.branch, proc.exitCode, stderr.slice(0, 200));
+  return { deleted: false, branch: meta.branch };
+}
+
+/**
  * 解析 template 目录：workflow.yaml 中的 template 字段相对工作流目录。
  * 为防止目录穿越，解析后的路径必须仍在工作流目录内。
  */

@@ -2,7 +2,7 @@ import { getTask, createTask, updateTask, clearTaskRunHistory } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { ensureTaskSandbox, deleteTaskSandbox, getTaskSandbox, getTaskWorktreeMeta, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
+import { ensureTaskSandbox, deleteTaskSandbox, deleteRemoteDeliverBranch, getTaskSandbox, getTaskWorktreeMeta, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
 import { getWorkspaceById } from "./workspaces";
 import { getRequirementById } from "./requirements";
 import { forceTransition } from "./state-machine";
@@ -249,6 +249,14 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
 
   // 3. 重建干净 worktree（基于需求绑定 workspace 的最新 default_branch，而非 extra 里的旧值）
   if (wf.sandbox?.git) {
+    // 重跑=干净重来：先删远程上一轮交付分支（GitHub 自动 close 旧 PR），让新一轮 push 到全新
+    // 分支、从源头消除 non-fast-forward 冲突（无需 --force）。必须在 deleteTaskSandbox 之前——
+    // 删 sandbox 后 clone 没了就无法用其 origin push --delete。
+    try {
+      deleteRemoteDeliverBranch(taskId);
+    } catch (e: unknown) {
+      console.warn("resetTaskForRerun: deleteRemoteDeliverBranch 失败（容错继续）：", e instanceof Error ? e.message : e);
+    }
     try {
       deleteTaskSandbox(taskId);
     } catch (e: unknown) {

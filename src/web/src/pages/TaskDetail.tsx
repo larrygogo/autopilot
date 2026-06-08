@@ -166,7 +166,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
     if (!task?.workspace) return;
     try {
       await navigator.clipboard.writeText(task.workspace);
-      toast.success("已复制 workspace 路径");
+      toast.success("已复制沙盒路径");
     } catch (e: unknown) {
       toast.error("复制失败", (e as Error)?.message ?? "可能是浏览器拒绝了 clipboard 权限");
     }
@@ -448,7 +448,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
         )}
         {task.workspace && (
           <div className="mx-4 mb-4 flex flex-wrap items-center gap-2 border-t border-border pt-3 text-xs">
-            <span className="bp-label">Workspace</span>
+            <span className="bp-label">沙盒</span>
             <code
               className="flex-1 cursor-pointer break-all border border-border bg-muted px-2 py-1 font-mono text-foreground"
               title="点击复制"
@@ -510,7 +510,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
             <div className="flex flex-wrap items-start justify-between gap-3 p-4">
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  彻底删除该任务的 DB 记录、manifest、阶段日志、agent 调用记录与 workspace 文件；此操作不可撤销。
+                  彻底删除该任务的 DB 记录、manifest、阶段日志、agent 调用记录与沙盒文件；此操作不可撤销。
                   {canCancel && (
                     <span className="ml-1 font-semibold text-foreground">
                       任务当前非终态，请先取消后再删除。
@@ -543,7 +543,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
                   <code className="rounded bg-muted px-1 font-mono">{task.id}</code>？
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  将清理：DB 记录、task-manifest、阶段日志、agent 调用、workspace 目录，以及所有子任务。操作不可撤销。
+                  将清理：DB 记录、task-manifest、阶段日志、agent 调用、沙盒目录，以及所有子任务。操作不可撤销。
                 </p>
               </div>
             }
@@ -624,7 +624,7 @@ function findPhaseStartTime(
 // Tabs
 // ──────────────────────────────────────────────
 
-type DetailTab = "workspace" | "phase-logs" | "agent-calls" | "transitions" | "live";
+type DetailTab = "sandbox" | "phase-logs" | "agent-calls" | "transitions" | "live";
 
 interface TaskDetailTabsProps {
   taskId: string;
@@ -646,7 +646,7 @@ function TaskDetailTabs({
   stickToTopRef,
   onLogScroll,
 }: TaskDetailTabsProps) {
-  const [tab, setTab] = useState<DetailTab>("workspace");
+  const [tab, setTab] = useState<DetailTab>("sandbox");
 
   const [unreadLive, setUnreadLive] = useState(0);
   const prevLiveLenRef = useRef(liveLogs.length);
@@ -658,7 +658,7 @@ function TaskDetailTabs({
   }, [liveLogs.length, tab]);
 
   const triggers: Array<{ key: DetailTab; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }> = [
-    { key: "workspace", label: "沙盒", icon: FolderTree },
+    { key: "sandbox", label: "沙盒", icon: FolderTree },
     { key: "phase-logs", label: "阶段日志", icon: FileText },
     { key: "agent-calls", label: "Agent 调用", icon: Bot },
     { key: "transitions", label: "状态日志", icon: History, badge: logs.length || undefined },
@@ -681,7 +681,7 @@ function TaskDetailTabs({
         ))}
       </TabsList>
 
-      <TabsContent value="workspace" className="mt-0">
+      <TabsContent value="sandbox" className="mt-0">
         <SandboxBrowser taskId={taskId} />
       </TabsContent>
 
@@ -792,7 +792,7 @@ function DanglingBanner({
           <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
             任务在 <code className="border border-border bg-muted px-1 font-mono">ask_user</code> 等待回答时 daemon 重启了。
             agent 进程的等待 promise 在内存中丢失，即使你现在回答 agent 也收不到。
-            可以选择：<strong className="text-foreground">重新执行</strong>当前阶段（沿用原 workspace 历史从头跑），或
+            可以选择：<strong className="text-foreground">重新执行</strong>当前阶段（沿用原沙盒历史从头跑），或
             <strong className="text-foreground">取消任务</strong>新建一个。
           </p>
         </div>

@@ -785,7 +785,7 @@ export interface TaskOutcome {
   diff_stat: { files: number; insertions: number; deletions: number } | null;
   total_duration_ms: number;
   top_phases: Array<{ phase: string; duration_ms: number }>;
-  workspace_path: string | null;
+  sandbox_path: string | null;
   failure_reason: string | null;
 }
 

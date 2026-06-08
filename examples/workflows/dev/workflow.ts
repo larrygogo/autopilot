@@ -342,9 +342,10 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const branch = task["branch"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
-  // --force：重跑用同名交付分支，远程可能残留上一轮 push 的 commit（非 fast-forward）。
-  // 重跑 = 全新一轮，直接覆盖远程旧分支（autopilot 自有分支，覆盖安全）。
-  runGit(["push", "-u", "--force", "origin", branch], repoPath);
+  // 普通 push（不 --force）：重跑时 resetTaskForRerun 已删远程上一轮交付分支（幂等清旧轮，
+  // GitHub 自动 close 旧 PR），新一轮 push 到全新分支不会有 non-fast-forward 冲突，
+  // 无需 --force 覆盖远程。force 覆盖有破坏性风险（抹掉 review 中的 PR），从源头消除冲突更安全。
+  runGit(["push", "-u", "origin", branch], repoPath);
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
