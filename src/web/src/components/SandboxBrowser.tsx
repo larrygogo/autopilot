@@ -102,7 +102,7 @@ export function SandboxBrowser({ taskId }: Props) {
     <Card>
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
-        <span className="bp-label">Workspace · FILES</span>
+        <span className="bp-label">沙盒 · 产物文件</span>
         <div className="flex items-center gap-1.5">
           <Button
             variant="ghost"
@@ -128,7 +128,7 @@ export function SandboxBrowser({ taskId }: Props) {
             variant="destructive"
             size="sm"
             onClick={() => setConfirmRelease(true)}
-            title="删除 workspace 目录（不影响任务记录与日志）"
+            title="删除沙盒产物目录（不影响任务记录与日志）"
           >
             <Trash2 className="h-3.5 w-3.5" />
             释放
@@ -147,7 +147,7 @@ export function SandboxBrowser({ taskId }: Props) {
               loadTree("");
             }}
           >
-            workspace
+            产物
           </button>
           {crumbs.map((seg, i) => (
             <React.Fragment key={i}>
@@ -184,7 +184,7 @@ export function SandboxBrowser({ taskId }: Props) {
               </p>
             ) : entries.length === 0 && !err ? (
               <p className="p-3 font-mono text-xs text-muted-foreground">
-                {cwd ? "（空目录）" : "（workspace 为空，任务尚未产生文件）"}
+                {cwd ? "（空目录）" : "（暂无产物，任务尚未产出文档）"}
               </p>
             ) : (
               <ul className="divide-y divide-border">
