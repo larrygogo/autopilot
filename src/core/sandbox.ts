@@ -381,8 +381,8 @@ export function removeTaskWorktree(taskId: string): boolean {
  * - 仅 clone 模式生效（autopilot 独立副本）；
  * - 仅删 meta.branch（由 deliverBranchName 生成、记在 .worktree.json 的 autopilot 自有交付分支），
  *   且强制 `feat/` 前缀校验，绝不碰用户的其它分支；
- * - 用 clone 的 origin（tryCreateClone 已 set-url 成 GitHub https）push --delete，
- *   分支不存在 / 无凭证等一律容错（重跑继续，不阻断）。
+ * - 用 gh api 删远程分支（即焚模型无常驻 clone 可 push --delete；从 meta.remote_url
+ *   解析 owner/repo），分支不存在 / 无凭证等一律容错（重跑继续，不阻断）。
  */
 export function deleteRemoteDeliverBranch(taskId: string): { deleted: boolean; branch?: string } {
   const meta = readWorktreeMeta(taskId);
@@ -391,20 +391,58 @@ export function deleteRemoteDeliverBranch(taskId: string): { deleted: boolean; b
     log.warn("跳过删远程分支：非 autopilot 交付分支命名空间 [task=%s branch=%s]", taskId, meta.branch);
     return { deleted: false, branch: meta.branch };
   }
-  const wsPath = getTaskSandbox(taskId);
-  if (!existsSync(wsPath)) return { deleted: false, branch: meta.branch };
+  // 从 remote_url 解析 owner/repo，用 gh api 删远程分支（即焚模型无常驻 clone 可 push --delete）。
+  const m = (meta.remote_url ?? "").match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
+  if (!m) {
+    log.warn("删远程分支跳过：无法从 remote 解析 owner/repo [task=%s remote=%s]", taskId, meta.remote_url ?? "");
+    return { deleted: false, branch: meta.branch };
+  }
   const proc = Bun.spawnSync(
-    ["git", "push", "origin", "--delete", meta.branch],
-    { cwd: wsPath, stdout: "pipe", stderr: "pipe" },
+    ["gh", "api", "-X", "DELETE", `repos/${m[1]}/${m[2]}/git/refs/heads/${meta.branch}`],
+    { stdout: "pipe", stderr: "pipe" },
   );
   if (proc.exitCode === 0) {
     log.info("删远程交付分支（重跑清旧轮，GitHub 自动 close 旧 PR）[task=%s branch=%s]", taskId, meta.branch);
     return { deleted: true, branch: meta.branch };
   }
   const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
-  log.warn("删远程交付分支失败（容错继续）[task=%s branch=%s exit=%d]: %s",
-    taskId, meta.branch, proc.exitCode, stderr.slice(0, 200));
+  log.warn("删远程交付分支失败（容错继续，可能远程无此分支）[task=%s branch=%s]: %s",
+    taskId, meta.branch, stderr.slice(0, 200));
   return { deleted: false, branch: meta.branch };
+}
+
+/**
+ * 准备交付元数据（即焚 sandbox 模型）：只写 .worktree.json（workspace 路径 / base / 交付分支 /
+ * 远程 url），**不建常驻 clone 工作树** —— 代码副本由 agent-sandbox.acquire 每次即用即焚 clone。
+ * 替代旧 tryCreateClone（常驻 clone）。返回 null = workspace 缺失 / 非 git 仓库。
+ */
+export function prepareDeliverMeta(
+  taskId: string,
+  workspace: WorkspaceRef | undefined,
+  deliverBranch: string,
+): WorktreeMeta | null {
+  if (!workspace) {
+    log.warn("prepareDeliverMeta: 未提供 workspace（工作流无代码仓库？）[task=%s]", taskId);
+    return null;
+  }
+  if (!existsSync(join(workspace.path, ".git"))) {
+    log.warn("prepareDeliverMeta: workspace %s 非 git 仓库 [task=%s]", workspace.path, taskId);
+    return null;
+  }
+  const remoteUrl = resolveRemoteUrl(workspace);
+  const meta: WorktreeMeta = {
+    workspace_id: workspace.id,
+    workspace_path: workspace.path,
+    branch: deliverBranch,
+    base: workspace.default_branch,
+    created_at: Date.now(),
+    mode: "clone",
+    remote_url: remoteUrl ?? null,
+  };
+  writeWorktreeMeta(taskId, meta);
+  log.info("准备交付元数据 [task=%s workspace=%s branch=%s base=%s remote=%s]",
+    taskId, workspace.id, deliverBranch, workspace.default_branch, remoteUrl ?? "(无远程)");
+  return meta;
 }
 
 /**

@@ -2,7 +2,9 @@ import { getTask, createTask, updateTask, clearTaskRunHistory } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { ensureTaskSandbox, deleteTaskSandbox, deleteRemoteDeliverBranch, getTaskSandbox, getTaskWorktreeMeta, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
+import { prepareDeliverMeta, deleteRemoteDeliverBranch, getTaskWorktreeMeta, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
+import { purgeAgentRuns, cumulativePatchPath } from "./agent-sandbox";
+import { rmSync } from "fs";
 import { getWorkspaceById } from "./workspaces";
 import { getRequirementById, updateRequirement } from "./requirements";
 import { forceTransition } from "./state-machine";
@@ -161,9 +163,10 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     }
   }
   try {
-    ensureTaskSandbox(taskId, workflowName, wf.sandbox, workspace, deliverBranchName(title, taskId));
+    // 即焚模型：只写交付元数据（.worktree.json），不建常驻 clone；代码副本由 agent-sandbox 即用即焚。
+    prepareDeliverMeta(taskId, workspace, deliverBranchName(title, taskId));
   } catch (e: unknown) {
-    console.warn("ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
+    console.warn("prepareDeliverMeta 失败：", e instanceof Error ? e.message : e);
   }
 
   // 框架标准字段注入：worktree 建成功时，把隔离 worktree 的物理路径/分支/base 写进
@@ -172,7 +175,7 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
   // 不违反"核心零业务知识"红线。run 阶段统一在这个隔离 worktree 里跑 git。
   const worktreeMeta = getTaskWorktreeMeta(taskId);
   if (worktreeMeta) {
-    extra["repo_path"] = getTaskSandbox(taskId);
+    // 即焚模型无常驻 clone：不注入 repo_path（phase 用 getCurrentSandboxDir 拿即焚副本）。
     extra["default_branch"] = worktreeMeta.base;
     extra["branch"] = worktreeMeta.branch;
     extra["workspace_path"] = worktreeMeta.workspace_path;
@@ -257,21 +260,17 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
   // 2b. 清 watcher 内存恢复计数，否则上次卡死累计的 recoveryCount 会让本次重跑过早被 cancel
   try { forgetTaskRecoveryState(taskId); } catch { /* ignore */ }
 
-  // 3. 重建干净 worktree（基于需求绑定 workspace 的最新 default_branch，而非 extra 里的旧值）
+  // 3. 即焚模型重跑：删远程旧交付分支 + 清累积 patch / 临时副本 + 重置交付元数据
   if (wf.sandbox?.git) {
-    // 重跑=干净重来：先删远程上一轮交付分支（GitHub 自动 close 旧 PR），让新一轮 push 到全新
-    // 分支、从源头消除 non-fast-forward 冲突（无需 --force）。必须在 deleteTaskSandbox 之前——
-    // 删 sandbox 后 clone 没了就无法用其 origin push --delete。
+    // 重跑=干净重来：删远程上一轮交付分支（GitHub 自动 close 旧 PR）→ 消除 non-fast-forward 冲突。
     try {
       deleteRemoteDeliverBranch(taskId);
     } catch (e: unknown) {
       console.warn("resetTaskForRerun: deleteRemoteDeliverBranch 失败（容错继续）：", e instanceof Error ? e.message : e);
     }
-    try {
-      deleteTaskSandbox(taskId);
-    } catch (e: unknown) {
-      console.warn("resetTaskForRerun: deleteTaskSandbox 失败：", e instanceof Error ? e.message : e);
-    }
+    // 即焚模型：清累积 patch（代码状态归零）+ 临时副本残留。
+    try { rmSync(cumulativePatchPath(taskId), { force: true }); } catch { /* ignore */ }
+    purgeAgentRuns(taskId);
     let workspace: WorkspaceRef | undefined;
     const req = task.requirement_id ? getRequirementById(task.requirement_id) : null;
     const wsId = req?.workspace_id
@@ -280,15 +279,10 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
       const ws = getWorkspaceById(wsId);
       if (ws) workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch, github_owner: ws.github_owner, github_repo: ws.github_repo };
     }
-    try {
-      ensureTaskSandbox(taskId, task.workflow, wf.sandbox, workspace, deliverBranchName(String(task.title ?? ""), taskId));
-    } catch (e: unknown) {
-      console.warn("resetTaskForRerun: ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
-    }
-    const meta = getTaskWorktreeMeta(taskId);
+    // 重置交付元数据（不建常驻 clone；代码副本由 agent-sandbox 即用即焚）
+    const meta = prepareDeliverMeta(taskId, workspace, deliverBranchName(String(task.title ?? ""), taskId));
     if (meta) {
       updateTask(taskId, {
-        repo_path: getTaskSandbox(taskId),
         default_branch: meta.base,
         branch: meta.branch,
         workspace_path: meta.workspace_path,
