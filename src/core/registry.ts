@@ -54,6 +54,14 @@ export interface PhaseDefinition {
    * 仅对纯 yaml prompt phase 生效（ts phase 已有完全控制权，不强加）。
    */
   handoff?: boolean;
+  /**
+   * Phase 级 sandbox 策略（即用即焚 + patch 累积模型）。省略走框架默认
+   * {code:read-only, ephemeral:true, deliver:false}。
+   * - code: read-only 只读代码（产文档不回写 patch）/ read-write 写代码（diff 累积成 patch）
+   * - ephemeral: 跑完销毁临时 clone（当前唯一支持值 true）
+   * - deliver: 交付 phase（消费 patch 链落成分支 + PR），如 submit_pr
+   */
+  sandbox?: PhaseSandboxSpec;
   [key: string]: unknown;
 }
 
@@ -66,8 +74,15 @@ export interface ParallelDefinition {
 export interface WorkflowSandboxSpec {
   /** 模板目录名（相对工作流目录），创建任务时 copy 到 sandbox 目录 */
   template?: string;
-  /** 是否在 sandbox 里 git init（保留给后续版本，当前未实现） */
+  /** 工作流是否需要代码仓库（true → 任务反查 workspace、准备 patch 链 / 即焚 clone） */
   git?: boolean;
+}
+
+/** Phase 级 sandbox 策略（即用即焚 + patch 累积模型）。详见 PhaseDefinition.sandbox。 */
+export interface PhaseSandboxSpec {
+  code?: "read-only" | "read-write";
+  ephemeral?: boolean;
+  deliver?: boolean;
 }
 
 export interface WorkflowDefinition {
@@ -92,6 +107,36 @@ export function isParallelPhase(
   phase: PhaseDefinition | { parallel: ParallelDefinition }
 ): phase is { parallel: ParallelDefinition } {
   return "parallel" in phase && phase.parallel instanceof Object;
+}
+
+/** 在工作流里查 phase 定义（顶层或并行子阶段），找不到返回 null。 */
+function findPhaseDef(wf: WorkflowDefinition, phaseName: string): PhaseDefinition | null {
+  for (const p of wf.phases) {
+    if (isParallelPhase(p)) {
+      for (const sub of p.parallel.phases) if (sub.name === phaseName) return sub;
+    } else if (p.name === phaseName) {
+      return p;
+    }
+  }
+  return null;
+}
+
+/**
+ * 取 phase 的 sandbox 策略，带框架默认兜底。
+ * 省略 sandbox 段 / 找不到 phase → {code:"read-only", ephemeral:true, deliver:false}。
+ */
+export function getPhaseSandboxSpec(
+  workflowName: string,
+  phaseName: string,
+): Required<PhaseSandboxSpec> {
+  const wf = getWorkflow(workflowName);
+  const phase = wf ? findPhaseDef(wf, phaseName) : null;
+  const s: PhaseSandboxSpec = (phase?.sandbox as PhaseSandboxSpec | undefined) ?? {};
+  return {
+    code: s.code === "read-write" ? "read-write" : "read-only",
+    ephemeral: s.ephemeral !== false,
+    deliver: s.deliver === true,
+  };
 }
 
 // ──────────────────────────────────────────────
