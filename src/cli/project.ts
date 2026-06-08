@@ -82,13 +82,6 @@ export function registerProjectCommands(program: Command): void {
           process.exit(2);
         }
 
-        if (!rawPath) {
-          console.error("错误：缺少必填参数 <path>。");
-          console.error("新用法：autopilot project create <name> <path> [--alias <alias>]");
-          console.error("示例：autopilot project create myapp /code/myapp");
-          process.exit(2);
-        }
-
         const abs = resolve(rawPath);
 
         // 本地前置校验：在 RPC 往返前快速 fail-fast

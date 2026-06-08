@@ -157,7 +157,7 @@ function asObj(params: unknown): Record<string, unknown> {
  * alias 唯一性约束为 per-project。新建项目时理论上不会冲突，
  * 此函数作防御层，确保"冲突对用户无感"在极端情形下也成立。
  */
-function _generateUniqueAlias(projectId: string, baseAlias: string): string {
+function generateUniqueAlias(projectId: string, baseAlias: string): string {
   if (!getWorkspaceByAlias(projectId, baseAlias)) return baseAlias;
   for (let n = 2; n <= 99; n++) {
     const candidate = `${baseAlias}-${n}`;
@@ -1646,33 +1646,37 @@ export function registerCoreRpcMethods(): void {
       let workspace!: ReturnType<typeof createWorkspace>;
 
       // ── 原子性事务：ID 生成 + 双表写入全在事务内 ──
+      // 内部用 _step 标记当前执行阶段，catch 时据此映射精确错误码
+      let _step: "project" | "workspace" = "project";
       try {
         db.transaction(() => {
           const projectId = nextProjectId();
           const workspaceId = nextWorkspaceId();
 
           // 1. 建项目
+          _step = "project";
           project = coreCreateProject({ id: projectId, name, description });
 
           // 2. alias 去重（事务内，静默追加后缀）
-          const alias = _generateUniqueAlias(projectId, baseAlias);
+          const alias = generateUniqueAlias(projectId, baseAlias);
 
           // 3. 建工作区
+          _step = "workspace";
           workspace = createWorkspace({
             id: workspaceId,
             project_id: projectId,
             alias,
             path: rawPath,
             // best-effort：非 git 目录回退 "main"，用户可事后 workspace update 修正
-            default_branch: detected.default_branch ?? "main",
-            github_owner: detected.github_owner ?? null,
-            github_repo: detected.github_repo ?? null,
+            default_branch: detected?.default_branch ?? "main",
+            github_owner: detected?.github_owner ?? null,
+            github_repo: detected?.github_repo ?? null,
           });
         })();
       } catch (e: unknown) {
-        const code = (e as { code?: string }).code;
         const msg = e instanceof Error ? e.message : String(e);
-        if (code?.startsWith("SQLITE_CONSTRAINT") || msg.toLowerCase().includes("unique")) {
+        // 根据 _step 准确映射错误码：项目写入失败 vs 工作区写入失败
+        if (_step === "project") {
           throw new RpcError("PROJECT_CREATE_FAILED", `项目创建失败：${msg}`);
         }
         throw new RpcError("WORKSPACE_CREATE_FAILED", `工作区创建失败：${msg}`);

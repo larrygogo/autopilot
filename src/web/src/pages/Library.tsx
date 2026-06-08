@@ -89,6 +89,7 @@ function ProjectsTab() {
     if (saving) return;
     setDialogOpen(false);
     setEditingProject(null);
+    setFolderPickerOpen(false);
   };
 
   // 路径输入框 onBlur：仅在 alias 为空时自动填入 basename
