@@ -17,6 +17,7 @@ phases:
   - name: design
     label: "设计"
     timeout: 900
+    sandbox: { code: read-only }
     agent:
       label: "架构师"
       provider: anthropic
@@ -26,6 +27,7 @@ phases:
     label: "设计评审"
     timeout: 900
     reject: design
+    sandbox: { code: read-only }
     max_rejections: 3
     agent:
       label: "评审员"
@@ -37,6 +39,7 @@ phases:
   - name: develop
     label: "开发"
     timeout: 1800
+    sandbox: { code: read-write }
     agent:
       label: "开发者"
       provider: anthropic
@@ -46,6 +49,7 @@ phases:
     label: "代码评审"
     timeout: 1200
     reject: develop
+    sandbox: { code: read-only }
     max_rejections: 3
     agent:
       label: "评审员"
@@ -57,6 +61,7 @@ phases:
   - name: submit_pr
     label: "提交 PR"
     timeout: 300
+    sandbox: { code: read-write, deliver: true }
     # run_submit_pr 用 agent 生成 PR 描述，沿用评审员配置
     agent:
       label: "评审员"

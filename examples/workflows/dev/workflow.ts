@@ -18,6 +18,7 @@ import { runInBackground } from "@autopilot/core/runner";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 import { getTaskArtifactsDir } from "@autopilot/core/sandbox";
+import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { notify } from "@autopilot/core/notify";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
@@ -88,7 +89,7 @@ export async function run_design(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const repoPath = task["repo_path"] as string;
+  const repoPath = getCurrentSandboxDir() ?? (task["repo_path"] as string);
   // worktree 模式：sandbox 已 checkout 在基于 default_branch 派生的独立分支上，
   // 无需再 checkout/pull（worktree 不能 checkout 主仓库已占用的 default_branch）。
 
@@ -133,7 +134,7 @@ export async function run_review(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const repoPath = task["repo_path"] as string;
+  const repoPath = getCurrentSandboxDir() ?? (task["repo_path"] as string);
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
@@ -209,7 +210,7 @@ export async function run_develop(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const repoPath = task["repo_path"] as string;
+  const repoPath = getCurrentSandboxDir() ?? (task["repo_path"] as string);
   // worktree 模式：sandbox 是基于 default_branch 派生的独立分支工作树，工作树天然
   // 干净、已在自己的分支（autopilot/<taskId>）上 —— 无需 checkout/pull/stash/建分支。
 
@@ -242,12 +243,8 @@ export async function run_develop(taskId: string): Promise<void> {
   const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
   writeFileSync(reportPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
 
-  // worktree 工作树只含 agent 本次产物（无用户散改），git add -A 安全。
-  const statusResult = runGit(["status", "--porcelain"], repoPath);
-  if (statusResult.stdout.trim()) {
-    runGit(["add", "-A"], repoPath);
-    runGit(["commit", "-m", `feat: ${task.title}`], repoPath);
-  }
+  // 即焚 sandbox 模型：改动留在工作树（不 commit），runner 的 captureAgentSandbox 会
+  // git diff 提取成 cumulative.patch 累积回任务文件夹，下游 phase 的副本 apply 它。
 
   transition(taskId, "develop_complete", {
     transitions: getTransitions(task.workflow),
@@ -260,10 +257,9 @@ export async function run_code_review(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const repoPath = task["repo_path"] as string;
-  const defaultBranch = (task["default_branch"] as string) ?? "main";
-
-  const diffResult = runGit(["diff", `${defaultBranch}...HEAD`, "--no-ext-diff"], repoPath);
+  const repoPath = getCurrentSandboxDir() ?? (task["repo_path"] as string);
+  // 即焚副本已 apply 累积 patch（改动在工作树、未 commit），diff 工作树 vs base(HEAD)。
+  const diffResult = runGit(["diff", "--no-ext-diff"], repoPath);
   const gitDiff = diffResult.stdout.slice(0, 80000);
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
@@ -338,13 +334,15 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const repoPath = task["repo_path"] as string;
+  const repoPath = getCurrentSandboxDir() ?? (task["repo_path"] as string);
   const branch = task["branch"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
+  // 即焚副本已 apply 累积 patch（改动在工作树），先落成交付 commit（空改动时容错不报错）。
+  runGit(["add", "-A"], repoPath);
+  runGit(["commit", "-m", `feat: ${task.title}`], repoPath, false);
   // 普通 push（不 --force）：重跑时 resetTaskForRerun 已删远程上一轮交付分支（幂等清旧轮，
-  // GitHub 自动 close 旧 PR），新一轮 push 到全新分支不会有 non-fast-forward 冲突，
-  // 无需 --force 覆盖远程。force 覆盖有破坏性风险（抹掉 review 中的 PR），从源头消除冲突更安全。
+  // GitHub 自动 close 旧 PR），新一轮 push 到全新分支不会有 non-fast-forward 冲突。
   runGit(["push", "-u", "origin", branch], repoPath);
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
