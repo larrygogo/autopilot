@@ -177,6 +177,16 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     appendTaskEvent(taskId, { type: "phase-completed", phase });
     archivePhaseArtifacts(taskId, workflow, phase);
 
+    // phase 成功完成 → 清失败计数 + 指纹。否则任务从重试中恢复、继续推进后，"⚠ 执行报错，
+    // 正在重试 (n/5)" 横幅（基于 failure_count>0）会一直残留，让用户误以为还没恢复。
+    // 失败累计、成功归零，横幅随恢复消失。
+    {
+      const tDone = getTask(taskId);
+      if (tDone && (((tDone.failure_count as number | undefined) ?? 0) > 0 || tDone["last_failure_fingerprint"])) {
+        updateTask(taskId, { failure_count: 0, last_failure_fingerprint: null });
+      }
+    }
+
     // Phase 5 兜底（spec §3.8 ts phase 兜底机制）：检查 pending_prompts 是否未消费。
     // prompt-runner 跑完会自动 consumePendingPrompts；ts phase 函数需自己显式调，
     // 忘调则在此 warn 让用户能从日志看到。不 fail，仅提醒。
