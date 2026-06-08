@@ -363,17 +363,22 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const prResult = await agent.run(prPrompt, { cwd: repoPath, timeout: 300_000 });
   const prBody = prResult.text;
 
-  // 检查是否已存在 PR
+  // 检查是否已存在 **OPEN** PR：只有 open 的才复用、更新 body（如 review 驳回返工后再 submit）。
+  // closed 的必须建新 —— 重跑会删交付分支触发 GitHub 自动 close 旧 PR，gh pr view 仍会返回这个
+  // closed PR；若不判 state 就会把改动"更新"到已关闭的 PR 上，等于重跑跑完却没有有效 open PR。
   const existingPr = Bun.spawnSync(
-    ["gh", "pr", "view", "--json", "url"],
+    ["gh", "pr", "view", "--json", "url,state"],
     { cwd: repoPath, stderr: "pipe" }
   );
   const existingOut = new TextDecoder().decode(existingPr.stdout ?? new Uint8Array()).trim();
 
   let prUrl: string;
+  let parsedExisting: { url?: string; state?: string } | null = null;
   if (existingPr.exitCode === 0 && existingOut) {
-    const parsed = JSON.parse(existingOut) as { url?: string };
-    prUrl = parsed.url ?? "";
+    try { parsedExisting = JSON.parse(existingOut) as { url?: string; state?: string }; } catch { parsedExisting = null; }
+  }
+  if (parsedExisting && parsedExisting.state === "OPEN") {
+    prUrl = parsedExisting.url ?? "";
     Bun.spawnSync(["gh", "pr", "edit", "--body", prBody], { cwd: repoPath });
   } else {
     const createProc = Bun.spawnSync(
