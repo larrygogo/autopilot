@@ -39,6 +39,7 @@ export class GoogleProvider extends BaseProvider {
         stderr: "pipe",
         signal: abort.signal,
         cwd: options?.cwd,
+        env: { ...process.env, ...options?.env },
       });
       const [out, err] = await Promise.all([
         new Response(proc.stdout).text(),

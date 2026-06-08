@@ -200,6 +200,7 @@ async function spawnClaudeAndConsume(opts: {
   cwd?: string;
   signal?: AbortSignal;
   timeout?: number;
+  env?: Record<string, string>;
   onMessage: (msg: unknown) => void;
 }): Promise<SpawnResult> {
   const abort = new AbortController();
@@ -216,6 +217,7 @@ async function spawnClaudeAndConsume(opts: {
     stdout: "pipe",
     stderr: "pipe",
     cwd: opts.cwd,
+    env: { ...process.env, ...opts.env },
   });
 
   const killOnAbort = () => {
@@ -403,6 +405,7 @@ export class AnthropicProvider extends BaseProvider {
       cwd: options?.cwd,
       signal: options?.signal,
       timeout: options?.timeout,
+      env: options?.env,
       onMessage: (msg) => {
         if (!msg || typeof msg !== "object") return;
         const m = msg as Record<string, unknown>;

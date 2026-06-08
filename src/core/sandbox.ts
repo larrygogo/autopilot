@@ -91,6 +91,25 @@ export function getTaskSandbox(taskId: string): string {
 }
 
 /**
+ * task agent 的隔离 AUTOPILOT_HOME（L0 环境隔离）。
+ *
+ * agent 子进程跑 autopilot 命令时，AUTOPILOT_HOME 指向这个 task 专属空目录，而非用户真实
+ * `~/.autopilot` —— agent 的验证类操作（如 `autopilot project create`）落在隔离 home 的空
+ * DB / 无 daemon 上，污染不了用户真实数据。位于 task 目录下、git 工作树（workspace/）之外，
+ * 不进 PR；随 task 沙盒一并清理。
+ *
+ * 注意：这是「运行时隔离」的轻量补丁（L0），非环境级隔离（L2 MicroVM/CubeSandbox）。
+ */
+export function getTaskAgentHome(taskId: string): string {
+  if (!TASK_ID_RE.test(taskId)) {
+    throw new Error(`非法 task ID：${taskId}`);
+  }
+  const home = join(AUTOPILOT_HOME, "runtime", "tasks", taskId, "agent-home");
+  mkdirSync(home, { recursive: true });
+  return home;
+}
+
+/**
  * 确保 sandbox 目录存在；按 workflow.yaml 的 sandbox 段配置选择初始化方式：
  *   - git=true + 提供 workspace 信息 → git worktree 模式（在 workspace 临时分支上工作）
  *   - template=xxx → 拷贝模板目录

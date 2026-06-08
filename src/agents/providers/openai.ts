@@ -47,6 +47,7 @@ export class OpenAIProvider extends BaseProvider {
         stderr: "pipe",
         signal: abort.signal,
         cwd: options?.cwd,
+        env: { ...process.env, ...options?.env },
       });
       proc.stdin.write(prompt);
       proc.stdin.end();

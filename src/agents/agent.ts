@@ -1,6 +1,7 @@
 import type { BaseProvider } from "./providers/base";
 import type { AgentConfig, AgentResult, RunOptions, ChatOptions, ChatResult } from "./types";
 import { getTaskContext } from "../core/task-context";
+import { getTaskAgentHome } from "../core/sandbox";
 import { appendAgentCall } from "../core/task-logs";
 import {
   recordProviderSuccess,
@@ -16,11 +17,16 @@ export class Agent {
 
   async run(prompt: string, options?: RunOptions): Promise<AgentResult> {
     const ctx = getTaskContext();  // 来自 runner 的 AsyncLocalStorage
+    // L0 环境隔离：task 执行中的 agent 子进程改用沙箱内独立 AUTOPILOT_HOME，防 agent 跑
+    // autopilot 命令污染用户真实 daemon/DB（沙箱此前只隔离代码、运行时未隔离）。
+    const runOptions: RunOptions | undefined = ctx
+      ? { ...options, env: { ...options?.env, AUTOPILOT_HOME: getTaskAgentHome(ctx.taskId) } }
+      : options;
     const started = Date.now();
     let result: AgentResult | undefined;
     let error: string | undefined;
     try {
-      result = await this.provider.run(prompt, options);
+      result = await this.provider.run(prompt, runOptions);
       recordProviderSuccess(this.config.provider ?? "unknown");
       return result;
     } catch (e: unknown) {

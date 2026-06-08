@@ -39,6 +39,12 @@ export interface RunOptions {
   model?: string;
   /** 临时覆盖 max_turns */
   max_turns?: number;
+  /**
+   * 注入/覆盖 agent 子进程的环境变量（L0 环境隔离）。
+   * task 执行时由 Agent.run 自动注入 AUTOPILOT_HOME=沙箱内隔离 home，防 agent 跑 autopilot
+   * 命令污染用户真实 daemon/DB（沙箱此前只隔离代码、未隔离运行时）。
+   */
+  env?: Record<string, string>;
 }
 
 // ──────────────────────────────────────────────
