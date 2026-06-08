@@ -1,4 +1,6 @@
 import type { Command } from "commander";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { AutopilotClient, DEFAULT_PORT } from "../client/index";
 import { readListenInfo } from "../daemon/pid";
 
@@ -63,35 +65,67 @@ export function registerProjectCommands(program: Command): void {
     });
 
   proj
-    .command("create <name>")
-    .description("创建 project（用于 req new 等需要挂载 project 的命令）")
-    .option("-d, --description <text>", "简短描述")
+    .command("create <name> <path>")
+    .description("创建 project 并同步关联工作区（一步完成）\n  示例：autopilot project create myapp /code/myapp")
+    .option("-a, --alias <alias>", "工作区别名（省略时自动从目录名推导）")
+    .option("-d, --description <text>", "项目描述")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
-    .option("--json", "原始 JSON 输出")
-    .action(async (name: string, opts: { description?: string; port: string; json?: boolean }) => {
-      if (!name.trim()) {
-        console.error("错误：name 不能为空");
-        process.exit(2);
-      }
-      const client = getClient(opts.port);
-      await ensureDaemon(client);
-
-      try {
-        const body: { name: string; description?: string } = { name: name.trim() };
-        if (opts.description) body.description = opts.description;
-        const { project } = await client.createProject(body);
-        if (opts.json) {
-          console.log(JSON.stringify(project, null, 2));
-        } else {
-          console.log(`已创建 project：${project.id}  ${project.name}`);
-          if (project.description) console.log(`  描述：${project.description}`);
-          console.log(`\n下一步：autopilot req new "你的需求描述" -p ${project.id}`);
+    .option("--json", "原始 JSON 输出（含 project + workspace）")
+    .action(
+      async (
+        name: string,
+        rawPath: string,
+        opts: { alias?: string; description?: string; port: string; json?: boolean },
+      ) => {
+        if (!name.trim()) {
+          console.error("错误：name 不能为空");
+          process.exit(2);
         }
-      } catch (e: unknown) {
-        console.error(`创建失败：${e instanceof Error ? e.message : String(e)}`);
-        process.exit(1);
-      }
-    });
+
+        const abs = resolve(rawPath);
+
+        // 本地前置校验：在 RPC 往返前快速 fail-fast
+        if (!existsSync(abs)) {
+          console.error(`错误：路径不存在：${abs}`);
+          process.exit(2);
+        }
+
+        const client = getClient(opts.port);
+        await ensureDaemon(client);
+
+        try {
+          const body: Parameters<typeof client.createProjectWithWorkspace>[0] = {
+            name: name.trim(),
+            path: abs,
+          };
+          if (opts.alias?.trim()) body.alias = opts.alias.trim();
+          if (opts.description) body.description = opts.description;
+
+          const { project, workspace } = await client.createProjectWithWorkspace(body);
+
+          if (opts.json) {
+            console.log(JSON.stringify({ project, workspace }, null, 2));
+            return;
+          }
+
+          // 人类可读输出
+          console.log(`已创建项目：${project.id}  ${project.name}`);
+          if (project.description) console.log(`  描述：${project.description}`);
+          console.log(`\n已关联工作区：`);
+          console.log(`  id:      ${workspace.id}`);
+          console.log(`  alias:   ${workspace.alias}`);
+          console.log(`  path:    ${workspace.path}`);
+          console.log(`  branch:  ${workspace.default_branch}${workspace.default_branch === "main" ? "（自动探测，如需修正：autopilot workspace update " + workspace.id + " --branch <name>）" : "（自动探测）"}`);
+          if (workspace.github_owner && workspace.github_repo) {
+            console.log(`  github:  ${workspace.github_owner}/${workspace.github_repo}`);
+          }
+          console.log(`\n下一步：autopilot req new "需求描述" -p ${project.id}`);
+        } catch (e: unknown) {
+          console.error(`创建失败：${e instanceof Error ? e.message : String(e)}`);
+          process.exit(1);
+        }
+      },
+    );
 
   proj
     .command("delete <id>")

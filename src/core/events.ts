@@ -39,6 +39,7 @@ export type AutopilotEvent =
   | { type: "schedule:deleted"; payload: { scheduleId: string } }
   | { type: "schedule:fired"; payload: { schedule: Schedule; taskId: string } }
   | { type: "projects:changed"; payload: { id: string; action: "create" | "update" | "delete" } }
+  | { type: "workspaces:changed"; payload: { id: string; action: "create" | "update" | "delete" } }
   | { type: "requirement:status-changed"; payload: { id: string; from: string; to: string } }
   | { type: "requirement:questions-updated"; payload: { id: string } }
   | { type: "requirement:all-questions-resolved"; payload: { id: string } }
