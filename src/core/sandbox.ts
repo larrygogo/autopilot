@@ -121,9 +121,8 @@ export function getTaskArtifactsDir(taskId: string): string {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
   }
-  const dir = join(AUTOPILOT_HOME, "runtime", "tasks", taskId, "artifacts");
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  // 纯路径（不 mkdir）：浏览 / 算大小等只读用途不该产生副作用；写产物处各自 recursive mkdir。
+  return join(AUTOPILOT_HOME, "runtime", "tasks", taskId, "artifacts");
 }
 
 /**
@@ -483,7 +482,8 @@ export interface SandboxEntry {
  * @returns 绝对路径或 null（路径非法）
  */
 export function resolveSandboxPath(taskId: string, relPath: string): string | null {
-  const ws = getTaskSandbox(taskId);
+  // 「沙盒」tab 展示的是任务文件夹产物（artifacts/），不是代码副本（即焚、跑完即销毁）。
+  const ws = getTaskArtifactsDir(taskId);
   const root = resolve(ws);
   if (relPath.includes("\0")) return null;
   const trimmed = relPath.replace(/^[/\\]+/, "");
@@ -565,7 +565,7 @@ export function readSandboxFile(taskId: string, relPath: string): SandboxFileInf
  * 没装 zip 命令时抛错。调用方负责把 stdout 流包装成 Response。
  */
 export function spawnSandboxZip(taskId: string): ReturnType<typeof Bun.spawn> {
-  const ws = getTaskSandbox(taskId);
+  const ws = getTaskArtifactsDir(taskId);
   if (!existsSync(ws)) throw new Error("sandbox 不存在");
   return Bun.spawn(["zip", "-r", "-q", "-", "."], {
     cwd: ws,
@@ -579,7 +579,7 @@ export function spawnSandboxZip(taskId: string): ReturnType<typeof Bun.spawn> {
  * 跳过不可 stat 项，静默忽略错误。
  */
 export function sandboxSize(taskId: string): number {
-  const ws = getTaskSandbox(taskId);
+  const ws = getTaskArtifactsDir(taskId);
   if (!existsSync(ws)) return 0;
   return dirSizeBytes(ws);
 }

@@ -43,14 +43,14 @@ describe("resolveSandboxPath 路径穿越防护", () => {
   it("合法相对路径返回绝对路径", () => {
     const p = resolveSandboxPath("t1", "src/index.ts");
     expect(p).not.toBeNull();
-    expect(p).toMatch(/[/\\]workspace[/\\]src[/\\]index\.ts$/);
+    expect(p).toMatch(/[/\\]artifacts[/\\]src[/\\]index\.ts$/);
   });
 
-  it("空路径返回 workspace 根", () => {
+  it("空路径返回 artifacts 根", () => {
     const p = resolveSandboxPath("t1", "");
     expect(p).not.toBeNull();
     // 跨平台：Windows 用反斜杠，Unix 用正斜杠
-    expect(p).toMatch(/[/\\]workspace$/);
+    expect(p).toMatch(/[/\\]artifacts$/);
   });
 
   it("拒绝 .. 穿越", () => {
@@ -66,7 +66,7 @@ describe("resolveSandboxPath 路径穿越防护", () => {
   it("根目录开头的 / 被剥离", () => {
     const p = resolveSandboxPath("t1", "/absolute/looking");
     expect(p).not.toBeNull();
-    expect(p).toMatch(/[/\\]workspace[/\\]absolute[/\\]looking$/);
+    expect(p).toMatch(/[/\\]artifacts[/\\]absolute[/\\]looking$/);
   });
 });
 
