@@ -4,7 +4,8 @@ import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { appendTaskEvent } from "./task-logs";
 import { runWithTaskContext } from "./task-context";
 import { transition, forceTransition, InvalidTransitionError } from "./state-machine";
-import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./registry";
+import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, getPhaseSandboxSpec, type ParallelDefinition, type WorkflowDefinition } from "./registry";
+import { acquireAgentSandbox, captureAgentSandbox, releaseAgentSandbox, type AgentSandboxHandle } from "./agent-sandbox";
 import { closeAgents } from "../agents/registry";
 import { emit } from "./event-bus";
 import { archivePhaseArtifacts } from "./artifacts";
@@ -155,12 +156,21 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
         touchTaskHeartbeat(taskId);
       } catch { /* 心跳失败不影响主流程 */ }
     }, 120_000);
+    // 即用即焚 sandbox：每个 agent 跑前建干净副本（apply 累积 patch），跑完按策略回写 + 销毁。
+    const sbSpec = getPhaseSandboxSpec(task.workflow, phase);
+    let sbHandle: AgentSandboxHandle | null = null;
     try {
-      await runWithTaskContext({ taskId, phase }, async () => {
+      sbHandle = acquireAgentSandbox(taskId, phase, sbSpec.code);
+      await runWithTaskContext({ taskId, phase, sandboxDir: sbHandle?.dir }, async () => {
         await phaseFn(taskId);
       });
+      // read-write 非 deliver phase：把改动累积回 cumulative.patch（deliver phase 消费 patch、不回写）
+      if (sbHandle && sbSpec.code === "read-write" && !sbSpec.deliver) {
+        captureAgentSandbox(sbHandle);
+      }
     } finally {
       clearInterval(heartbeat);
+      if (sbHandle && sbSpec.ephemeral) releaseAgentSandbox(sbHandle);
     }
     log.info("阶段执行完成：%s [task=%s]", phase, taskId);
     emit({ type: "phase:completed", payload: { taskId, phase } });
@@ -371,9 +381,21 @@ async function executeParallelGroup(
         if (typeof phaseFn !== "function") {
           throw new Error(`阶段函数未定义：run_${subName}`);
         }
-        await runWithTaskContext({ taskId, phase: subName }, async () => {
-          await phaseFn(taskId);
-        });
+        const subSpec = getPhaseSandboxSpec(workflow.name, subName);
+        let subHandle: AgentSandboxHandle | null = null;
+        try {
+          subHandle = acquireAgentSandbox(taskId, subName, subSpec.code);
+          await runWithTaskContext({ taskId, phase: subName, sandboxDir: subHandle?.dir }, async () => {
+            await phaseFn(taskId);
+          });
+          // 注意：并行多个 read-write 子阶段会争抢同一 cumulative.patch（全量模型，最后写赢）。
+          // dev 工作流无并行写代码场景；真要并行写需 patch 按子阶段分文件（YAGNI，暂不做）。
+          if (subHandle && subSpec.code === "read-write" && !subSpec.deliver) {
+            captureAgentSandbox(subHandle);
+          }
+        } finally {
+          if (subHandle && subSpec.ephemeral) releaseAgentSandbox(subHandle);
+        }
         log.info("[parallel] %s 完成 [task=%s]", subName, taskId);
         appendTaskEvent(taskId, { type: "phase-completed", phase: subName, parallel: groupName });
         archivePhaseArtifacts(taskId, workflow, subName);
