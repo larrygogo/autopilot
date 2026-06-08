@@ -210,7 +210,16 @@ async function spawnClaudeAndConsume(opts: {
     if (opts.signal.aborted) markAborted();
     else opts.signal.addEventListener("abort", markAborted);
   }
-  const timer = opts.timeout ? setTimeout(markAborted, opts.timeout) : undefined;
+  // idle（无进展）超时：每收到一条 stdout 消息就续命，只有连续 opts.timeout 毫秒无任何输出
+  // 才判假死 kill。区别于"总时长硬上限"——timeout 的本质是防假死，不是限制正常但慢的任务。
+  // 正常 agent 持续流式产消息 → idle 永不触发 → 不被误杀；真卡死（长时间零输出）照样兜住。
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const resetIdle = () => {
+    if (!opts.timeout) return;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(markAborted, opts.timeout);
+  };
+  resetIdle();
 
   const proc = Bun.spawn(opts.argv, {
     stdin: "pipe",
@@ -245,6 +254,7 @@ async function spawnClaudeAndConsume(opts: {
     // 并发：消费 stdout NDJSON，同时收集 stderr
     const stderrPromise = new Response(proc.stderr).text();
     for await (const msg of parseNdjsonStream(proc.stdout)) {
+      resetIdle();  // 有输出 = 有进展，续命（防"正常但慢"被总时长误杀）
       try {
         opts.onMessage(msg);
       } catch (e: unknown) {
@@ -257,7 +267,7 @@ async function spawnClaudeAndConsume(opts: {
   } finally {
     abort.signal.removeEventListener("abort", killOnAbort);
     if (opts.signal) opts.signal.removeEventListener("abort", markAborted);
-    if (timer) clearTimeout(timer);
+    if (idleTimer) clearTimeout(idleTimer);
   }
 }
 
