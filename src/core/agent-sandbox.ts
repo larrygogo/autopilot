@@ -108,6 +108,10 @@ export function acquireAgentSandbox(
       rmSync(dir, { recursive: true, force: true });
       throw new Error(`agent sandbox apply 累积 patch 失败 [task=${taskId} phase=${phase}]: ${ap.stderr.slice(0, 300)}`);
     }
+    // git apply --3way 会把改动放进 index(staged)。unstage 让改动回工作树（unstaged），使各
+    // phase 统一用 `git diff` 看到改动 —— 否则 code_review 的 `git diff`(unstaged) 看空、误判
+    // "变更未实现"反复驳回（dogfood 实测 bug）。submit_pr 的 git add -A 仍会重新 stage。
+    git(["-C", dir, "reset", "-q"]);
   }
 
   log.info("acquireAgentSandbox [task=%s phase=%s code=%s dir=%s]", taskId, phase, code, dir);
