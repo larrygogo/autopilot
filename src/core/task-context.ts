@@ -8,6 +8,12 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export interface TaskContext {
   taskId: string;
   phase: string;
+  /**
+   * 本次 phase 的即焚 agent sandbox 临时代码目录（runner 在 acquire 后注入）。
+   * phase 函数 / prompt-runner 取代码 cwd 时用 getCurrentSandboxDir()，而非常驻路径。
+   * 无代码沙盒的 phase（纯文档 / 非 git 工作流）为 undefined。
+   */
+  sandboxDir?: string;
 }
 
 const als = new AsyncLocalStorage<TaskContext>();
@@ -19,4 +25,9 @@ export function runWithTaskContext<T>(ctx: TaskContext, fn: () => T | Promise<T>
 
 export function getTaskContext(): TaskContext | undefined {
   return als.getStore();
+}
+
+/** 当前 phase 的即焚 sandbox 代码目录（无则 undefined）。 */
+export function getCurrentSandboxDir(): string | undefined {
+  return als.getStore()?.sandboxDir;
 }
