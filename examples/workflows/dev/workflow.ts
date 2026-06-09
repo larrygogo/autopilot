@@ -233,7 +233,7 @@ export async function run_develop(taskId: string): Promise<void> {
     ? `你是一位高级开发工程师。**这是 reject 重做轮** —— 上一轮你的提交被代码审查打回，需要根据 review 反馈修改代码。\n\n` +
       `## 技术方案\n${planContent}\n\n` +
       `## 上一轮代码审查反馈（必须 address 所有 Critical 问题）\n${priorReviewContent}\n\n` +
-      `注意：当前 feature branch 上已有上一轮的 commit。**不要因为"已经 commit 过"就回答"任务已完成"** — review 明确指出了需要补充/修改的具体内容，你必须基于现有 commit **追加新的修改**（修文件、补字段、删冗余等），然后追加一个新 commit。代码可编译、可运行。`
+      `注意：上一轮你的改动已在工作树里（未提交，共用沙盒会保留）。**不要因为"已经改过"就回答"任务已完成"** — review 明确指出了需要补充/修改的具体内容，你必须在现有改动基础上**继续修改**（修文件、补字段、删冗余等），直接改文件即可、**不要自己 git commit**（提交由 submit_pr 阶段统一做）。代码可编译、可运行。`
     : `你是一位高级开发工程师。请根据以下技术方案进行开发。\n\n` +
       `## 技术方案\n${planContent}\n\n` +
       `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。`;
@@ -243,8 +243,8 @@ export async function run_develop(taskId: string): Promise<void> {
   const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
   writeFileSync(reportPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
 
-  // 即焚 sandbox 模型：改动留在工作树（不 commit），runner 的 captureAgentSandbox 会
-  // git diff 提取成 cumulative.patch 累积回任务文件夹，下游 phase 的副本 apply 它。
+  // 共用沙盒模型：改动直接留在共用 clone 的工作树（不 commit），下游 phase 共用同一 clone
+  // 直接看到；submit_pr 才 git add -A && commit && push。
 
   transition(taskId, "develop_complete", {
     transitions: getTransitions(task.workflow),
@@ -258,8 +258,14 @@ export async function run_code_review(taskId: string): Promise<void> {
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
   const repoPath = getCurrentSandboxDir() ?? (task["repo_path"] as string);
-  // 即焚副本已 apply 累积 patch（改动在工作树、未 commit），diff 工作树 vs base(HEAD)。
-  const diffResult = runGit(["diff", "--no-ext-diff"], repoPath);
+  const defaultBranch = (task["default_branch"] as string) ?? "main";
+  // 共用沙盒：develop 改动留在工作树（可能含 commit / 新建文件）。先 add -A 纳入未跟踪新文件，
+  // 再 diff --cached <base> 看相对 base 的全量改动 —— 覆盖 committed + 未提交 + 新建，不依赖
+  // agent 把改动留成什么状态。否则 agent 一 commit 或新建文件，工作树 vs HEAD 的 diff 就看空 →
+  // code_review 误判"变更未实现"反复驳回 → 任务 cancelled（即焚的 reset -q 归一层删掉后的回归）。
+  runGit(["add", "-A"], repoPath);
+  // base 用 origin/<branch>：clone 后远程跟踪 ref 对默认+非默认分支都在（本地只建了默认分支）。
+  const diffResult = runGit(["diff", "--cached", "--no-ext-diff", `origin/${defaultBranch}`], repoPath);
   const gitDiff = diffResult.stdout.slice(0, 80000);
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");

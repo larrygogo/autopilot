@@ -88,6 +88,31 @@ describe("共用沙盒 · 跨 phase 直接可见（Task 2）", () => {
   });
 });
 
+describe("共用沙盒 · diff 看得到 committed + 新建改动（审计 P1 回归）", () => {
+  it("develop 在 clone 里自己 commit 了 + 新建文件 → computeDiffStat 仍统计到", async () => {
+    const { computeDiffStat } = await import("../src/daemon/task-outcome");
+    const id = taskId("shrcr");
+    ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", path: srcRepo, default_branch: "main" }, `feat/${id}`);
+    const ws = getTaskSandbox(id);
+    const gitc = (args: string[]) => Bun.spawnSync(["git", "-C", ws, ...args], { stdout: "pipe", stderr: "pipe" });
+    gitc(["config", "user.email", "t@t.io"]);
+    gitc(["config", "user.name", "t"]);
+    gitc(["config", "commit.gpgsign", "false"]);
+    // 模拟 develop agent：改已跟踪文件 + 新建文件，并自己 commit（这正是审计 P1 里
+    // `git diff`(工作树 vs HEAD) 看空 diff 的场景——commit 后工作树==HEAD）。
+    writeFileSync(join(ws, "README.md"), "base\nfeature\n", "utf-8");
+    writeFileSync(join(ws, "new.ts"), "export const y = 2;\n", "utf-8");
+    gitc(["add", "-A"]);
+    gitc(["commit", "-m", "dev commit"]);
+
+    // computeDiffStat 用 origin/<base> + add -A + diff --cached：即便已 commit、含新文件，仍看得到。
+    // 旧的 `git diff`(工作树 vs HEAD) 在此场景会返回空 → code_review 反复驳回杀任务。
+    const stat = computeDiffStat(ws, "main");
+    expect(stat).not.toBeNull();
+    expect(stat!.files).toBe(2); // README 改 + new.ts 新增
+  });
+});
+
 describe("共用沙盒 · 重跑重新 clone（Task 5）", () => {
   it("重跑删旧 workspace 并重新 clone（上一轮残留不带过来）", async () => {
     const { createTask, updateTask } = await import("../src/core/db");

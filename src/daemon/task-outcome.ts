@@ -133,14 +133,16 @@ function resolveBaseBranch(reqId: string | undefined): string {
 
 /**
  * 对任务 clone 工作树统计相对 base 的改动量。共用沙盒模型：先 git add -A（含未跟踪新文件）
- * 再 git diff --cached --shortstat <base> —— 覆盖 committed + 未提交 + 未跟踪。base 用本地分支
- * 名（clone 里 checkout -B feat base 时 base 是本地分支），不带 origin/ 前缀。
+ * 再 git diff --cached --shortstat <base> —— 覆盖 committed + 未提交 + 未跟踪。base 优先用
+ * origin/<branch>（clone 后远程跟踪 ref 对非默认分支也在），解析不到回退本地分支名。
  */
 export function computeDiffStat(workspacePath: string, baseBranch: string): DiffStat | null {
   const run = (args: string[]) => Bun.spawnSync(["git", "-C", workspacePath, ...args], { stdout: "pipe", stderr: "pipe" });
   try {
     run(["add", "-A"]);
-    const proc = run(["diff", "--cached", "--shortstat", baseBranch]);
+    const ref = run(["rev-parse", "--verify", "--quiet", `origin/${baseBranch}`]).exitCode === 0
+      ? `origin/${baseBranch}` : baseBranch;
+    const proc = run(["diff", "--cached", "--shortstat", ref]);
     if (proc.exitCode !== 0) return null;
     const stdout = proc.stdout ? new TextDecoder().decode(proc.stdout) : "";
     const m = stdout.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);

@@ -11,6 +11,7 @@ import { forceTransition } from "./state-machine";
 import { isLocked } from "./infra";
 import { forgetTaskRecoveryState } from "./watcher";
 import { executePhase } from "./runner";
+import { closeAgents } from "../agents/registry";
 
 // ──────────────────────────────────────────────
 // Task ID 生成（避开易混字符与数字 4）
@@ -154,7 +155,10 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
       (typeof opts.workspace_id === "string" ? opts.workspace_id : undefined) ??
       (typeof opts.codebase_id === "string" ? opts.codebase_id : undefined) ??
       (typeof extra["workspace_id"] === "string" ? extra["workspace_id"] : undefined) ??
-      (typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined);
+      (typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined) ??
+      // 回退需求绑定的 workspace（需求是 task 前置、必带 workspace 才能入队）：让 MCP start_task /
+      // 任意只给 reqId 的入口也能解析到 workspace，否则 git 工作流退化空目录、跑空任务。
+      (getRequirementById(reqLink)?.workspace_id ?? undefined);
     if (workspaceId) {
       const ws = getWorkspaceById(workspaceId);
       if (ws) {
@@ -300,6 +304,13 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
         repo_path: getTaskSandbox(taskId),
       });
     }
+  }
+
+  // 3b. 共用沙盒下重跑会重新 clone（同一 cwd 路径，但底层是全新 clone）。anthropic 的「cwd 变→
+  //     弃 session」保护因 cwd 路径不变而失效，claude --resume 会续到指向已删旧 clone 的陈旧会话。
+  //     重跑 = 干净重来，显式关掉该工作流的 agent 连接（清缓存 session），下轮起全新会话。
+  if (wf.sandbox?.git) {
+    void closeAgents(task.workflow).catch(() => { /* best-effort */ });
   }
 
   // 4. 状态强制回首阶段 pending（绕状态机，任意旧终态都能回 initial，留审计日志）

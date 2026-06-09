@@ -243,9 +243,12 @@ function tryCreateClone(
     Bun.spawnSync(["git", "-C", wsPath, "remote", "set-url", "origin", remoteUrl], { stderr: "pipe" });
   }
 
-  // 3. 基于 base 建交付分支。clone --local 已带源仓库所有本地 ref（含 base），
-  //    用本地 base 快照（dogfood 时源仓库本地即最新），run 阶段 diff <base>...HEAD 准确。
-  const co = Bun.spawnSync(["git", "-C", wsPath, "checkout", "-B", branch, base], { stderr: "pipe" });
+  // 3. 基于 base 建交付分支。clone --local 只把源仓库**默认分支**建成本地分支，其余分支是
+  //    origin/<x> 远程跟踪 ref。故 base 优先用 origin/<base>（默认+非默认分支都在），解析不到
+  //    回退本地 base。否则非默认 base（如 develop）会 `checkout -B feat develop` 失败、建不出交付分支。
+  const baseRef = Bun.spawnSync(["git", "-C", wsPath, "rev-parse", "--verify", "--quiet", `origin/${base}`], { stderr: "pipe" }).exitCode === 0
+    ? `origin/${base}` : base;
+  const co = Bun.spawnSync(["git", "-C", wsPath, "checkout", "-B", branch, baseRef], { stderr: "pipe" });
   if (co.exitCode !== 0) {
     const stderr = co.stderr ? new TextDecoder().decode(co.stderr) : "";
     log.warn("clone 后建交付分支失败 [task=%s branch=%s base=%s]: %s", taskId, branch, base, stderr.slice(0, 200));
