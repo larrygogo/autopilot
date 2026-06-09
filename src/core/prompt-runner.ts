@@ -35,13 +35,9 @@ const log = createLogger("prompt-runner");
 /**
  * 解析 phase 的代码工作目录（agent cwd 与 ${WORKSPACE} 占位符）。
  *
- * 优先级：显式覆盖（测试夹具）> 即焚 sandbox 副本（runner acquire 后经 task-context 注入）
- * > 旧常驻 getTaskSandbox（非 git 工作流 / 无即焚副本时兜底）。
- *
- * **必须优先 getCurrentSandboxDir()**：即焚模型下 getTaskSandbox 目录从不创建，
- * 若直接用它，prompt 模式 agent 会在空目录里跑 git，captureAgentSandbox diff 恒空 →
- * cumulative.patch 永空 → submit_pr 推零改动 PR，静默丢失全部工作成果（EPH-01）。
- * 与 dev workflow.ts 各 phase 的 `getCurrentSandboxDir() ?? ...` 取 cwd 方式对齐。
+ * 优先级：显式覆盖（测试夹具）> task-context 注入的共用沙盒（runner 注入 getTaskSandbox）
+ * > getTaskSandbox 兜底。共用沙盒模型下 getCurrentSandboxDir() 与 getTaskSandbox 是同一个
+ * 共用 clone，两者等价；保留链式取法与 dev workflow.ts 的 `getCurrentSandboxDir() ?? ...` 对齐。
  */
 function resolveCodeRoot(taskId: string, override?: string): string {
   return override ?? getCurrentSandboxDir() ?? getTaskSandbox(taskId);

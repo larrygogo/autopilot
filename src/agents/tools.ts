@@ -353,8 +353,8 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
             return err(`需求不存在：${args.reqId}（start_task 的 reqId 必须是已存在的需求 id）`);
           }
           // 复用规范单一入口 startTaskFromTemplate：强制 requirement_id 非空、req:task 1:1 守卫、
-          // 即焚 sandbox（prepareDeliverMeta，非旧常驻 clone）、注入 workspace 的 github 信息。
-          // 不再在此处旁路 createTask + ensureTaskSandbox 自建（那会绕过不变式并走旧 clone 双轨）。
+          // 共用沙盒 clone（ensureTaskSandbox）、注入 workspace 的 github 信息。
+          // 不再在此处旁路 createTask 自建（那会绕过不变式）。
           const task = await startTaskFromTemplate({
             reqId: args.reqId,
             workflow: args.workflow,

@@ -413,39 +413,6 @@ export function deleteRemoteDeliverBranch(taskId: string): { deleted: boolean; b
   return { deleted: false, branch: meta.branch, failed: true, error: stderr.slice(0, 200) };
 }
 
-/**
- * 准备交付元数据（即焚 sandbox 模型）：只写 .worktree.json（workspace 路径 / base / 交付分支 /
- * 远程 url），**不建常驻 clone 工作树** —— 代码副本由 agent-sandbox.acquire 每次即用即焚 clone。
- * 替代旧 tryCreateClone（常驻 clone）。返回 null = workspace 缺失 / 非 git 仓库。
- */
-export function prepareDeliverMeta(
-  taskId: string,
-  workspace: WorkspaceRef | undefined,
-  deliverBranch: string,
-): WorktreeMeta | null {
-  if (!workspace) {
-    log.warn("prepareDeliverMeta: 未提供 workspace（工作流无代码仓库？）[task=%s]", taskId);
-    return null;
-  }
-  if (!existsSync(join(workspace.path, ".git"))) {
-    log.warn("prepareDeliverMeta: workspace %s 非 git 仓库 [task=%s]", workspace.path, taskId);
-    return null;
-  }
-  const remoteUrl = resolveRemoteUrl(workspace);
-  const meta: WorktreeMeta = {
-    workspace_id: workspace.id,
-    workspace_path: workspace.path,
-    branch: deliverBranch,
-    base: workspace.default_branch,
-    created_at: Date.now(),
-    mode: "clone",
-    remote_url: remoteUrl ?? null,
-  };
-  writeWorktreeMeta(taskId, meta);
-  log.info("准备交付元数据 [task=%s workspace=%s branch=%s base=%s remote=%s]",
-    taskId, workspace.id, deliverBranch, workspace.default_branch, remoteUrl ?? "(无远程)");
-  return meta;
-}
 
 /**
  * 解析 template 目录：workflow.yaml 中的 template 字段相对工作流目录。
