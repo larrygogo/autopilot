@@ -14,8 +14,8 @@ function buildCard(task: { id: string; title: string; created_at: string }): Now
     subtitle: `${task.title} · design 阶段产物已就绪`,
     related: { type: "task", id: task.id },
     actions: [
-      { label: "看方案", kind: "primary", href: `/tasks/${task.id}` },
-      { label: "驳回", kind: "danger", href: `/tasks/${task.id}?action=reject` },
+      { label: "看方案", kind: "primary", href: `/tasks/${task.id}`, intent: { kind: "view_task", taskId: task.id } },
+      { label: "驳回", kind: "danger", href: `/tasks/${task.id}?action=reject`, intent: { kind: "reject_review", taskId: task.id } },
     ],
     dismissable: false,
     created_at: Math.floor(new Date(task.created_at).getTime() / 1000),

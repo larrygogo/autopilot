@@ -15,11 +15,11 @@ function buildCard(task: Task): NowCard {
     subtitle: task.title,
     related: { type: "task", id: task.id },
     actions: [
-      { label: "看 PR", kind: "secondary", href: `/tasks/${task.id}` },
+      { label: "看 PR", kind: "secondary", href: `/tasks/${task.id}`, intent: { kind: "view_task", taskId: task.id } },
       { label: "关闭", kind: "secondary", invoke: {
         method: "POST",
         path: `/api/now/cards/completed:${task.id}/dismiss`,
-      } },
+      }, intent: { kind: "dismiss", cardId: `completed:${task.id}` } },
     ],
     dismissable: true,
     created_at: Math.floor(new Date(task.updated_at).getTime() / 1000),

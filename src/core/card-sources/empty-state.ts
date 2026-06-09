@@ -18,7 +18,7 @@ function snapshot(): NowCard[] {
       title: "先建一个项目吧",
       subtitle: "项目是 autopilot 工作的最小单位",
       actions: [
-        { label: "新建项目", kind: "primary", href: "/library/projects/new" },
+        { label: "新建项目", kind: "primary", href: "/library/projects/new", intent: { kind: "create_project" } },
       ],
       dismissable: false,
       created_at: Math.floor(Date.now() / 1000),
@@ -34,7 +34,7 @@ function snapshot(): NowCard[] {
       title: "给项目加一个工作区",
       subtitle: "工作区（Workspace）是实际的 Git 目录",
       actions: [
-        { label: "去添加", kind: "primary", href: "/library" },
+        { label: "去添加", kind: "primary", href: "/library", intent: { kind: "add_workspace" } },
       ],
       dismissable: false,
       created_at: Math.floor(Date.now() / 1000),
@@ -50,7 +50,7 @@ function snapshot(): NowCard[] {
       title: "提一个新需求开始",
       subtitle: "autopilot 会调查 → 你审批 → 自动开发 → 提 PR",
       actions: [
-        { label: "/start", kind: "primary", href: "/start" },
+        { label: "/start", kind: "primary", href: "/start", intent: { kind: "new_requirement" } },
       ],
       dismissable: false,
       created_at: Math.floor(Date.now() / 1000),

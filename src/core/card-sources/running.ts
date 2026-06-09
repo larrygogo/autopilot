@@ -19,7 +19,7 @@ function buildCard(task: Task): NowCard {
     subtitle: `${task.title} · ${phaseOf(task.status)} 阶段`,
     related: { type: "task", id: task.id },
     actions: [
-      { label: "看日志", kind: "secondary", href: `/tasks/${task.id}` },
+      { label: "看日志", kind: "secondary", href: `/tasks/${task.id}`, intent: { kind: "view_task", taskId: task.id } },
     ],
     dismissable: false,
     created_at: Math.floor(new Date(task.created_at).getTime() / 1000),

@@ -11,11 +11,11 @@ function buildCard(taskId: string, phase: string, fromStatus: string, toStatus: 
     subtitle: `${phase} 阶段：${fromStatus} → ${toStatus}（watcher 接管）`,
     related: { type: "task", id: taskId },
     actions: [
-      { label: "看日志", kind: "primary", href: `/tasks/${taskId}` },
+      { label: "看日志", kind: "primary", href: `/tasks/${taskId}`, intent: { kind: "view_task", taskId: taskId } },
       { label: "关闭", kind: "secondary", invoke: {
         method: "POST",
         path: `/api/now/cards/stuck:${taskId}/dismiss`,
-      } },
+      }, intent: { kind: "dismiss", cardId: `stuck:${taskId}` } },
     ],
     dismissable: true,
     created_at: Math.floor(Date.now() / 1000),

@@ -12,24 +12,39 @@ export type NowCardPriority = "P0" | "P1" | "P2" | "P3";
 export type NowCardCategory = "error" | "decision" | "running" | "completed";
 export type NowCardActionKind = "primary" | "secondary" | "danger";
 
+// 语义化动作 intent：内核只出「要做什么」+ 关联实体引用，不出 href/HTTP path/UI 文案。
+// 客户端（Web/CLI/TUI）各自把 intent 翻译成跳转/RPC/只读标签（见 web/lib/now-intent.ts）。
+export type NowActionIntent =
+  | { kind: "view_task"; taskId: string }
+  | { kind: "view_requirement"; requirementId: string }
+  | { kind: "configure_providers"; provider?: string }
+  | { kind: "create_project" }
+  | { kind: "add_workspace" }
+  | { kind: "new_requirement" }
+  | { kind: "reject_review"; taskId: string }
+  | { kind: "retry_clarify"; requirementId: string }
+  | { kind: "dismiss"; cardId: string };
+
 export type NowCardAction =
   | {
       label: string;
       kind: NowCardActionKind;
-      /** 客户端路由跳转 */
+      /** @deprecated 阶段 4 删；客户端改用 intent 翻译 */
       href: string;
       invoke?: never;
+      intent: NowActionIntent;
     }
   | {
       label: string;
       kind: NowCardActionKind;
-      /** 触发后端动作 */
+      /** @deprecated 阶段 4 删；客户端改用 intent 翻译 */
       invoke: {
         method: "POST" | "PATCH";
         path: string;
         body?: unknown;
       };
       href?: never;
+      intent: NowActionIntent;
     };
 
 export interface NowCardRelated {
