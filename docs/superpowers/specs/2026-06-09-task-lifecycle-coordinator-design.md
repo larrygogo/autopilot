@@ -97,6 +97,14 @@ executePhase 入口：new AbortController() 存入 _controllers，signal 放进 
 
 ## 3. submit_pr 中途 abort 的补偿语义
 
+> **⚠️ 实施后修正（2026-06-09，阶段 1+2 合并后复核）**：本节 §3.3 的「push 前协作检查点」经运行时分析判定为
+> **no-op，不实现**。Bun 单线程下 `run_submit_pr` 的 add/commit/push 是同步 `spawnSync`（占住事件循环 → 触发
+> cancel 的 RPC handler 无法在序列中途插入），唯一 await 是 push **之后**的 `agent.run`。故 cancel 只有两种到达
+> 时机：(a) submit_pr 开始前 → executePhase 入口 trigger 撞 `InvalidTransitionError`，phaseFn 整个不执行（push 不
+> 发生）；(b) push 之后的 `agent.run` await → 阶段 1 的 catch 守卫收口，`gh pr create` 永不执行（无半 PR），push
+> 产生的孤儿分支重跑 `deleteRemoteDeliverBranch` 自清。检查点假设了「多线程能中断同步序列」，本运行时不成立。
+> **结论：cancel-during-submit_pr 已被阶段 1 完整覆盖，阶段 3 无需实现。** 下文 §3.1~3.4 保留为原始设计推演记录。
+
 ### 3.1 残酷约束
 `submit_pr` 的 commit/push/`gh pr create` 全是 `Bun.spawnSync`。**AbortSignal 无法打断 spawnSync**。submit_pr 里唯一让出点是生成 PR body 的 `await agent.run`——cancel 若在它之前命中，则 **commit+push 已完成、PR 未创建**。**靠 signal 精确卡在某半态收口，技术上做不到**（除非把 git 异步化，YAGNI）。
 
