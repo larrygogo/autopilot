@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { _setDbForTest, initDb, startTaskPhase, endTaskPhase, createTask, updateTask } from "../src/core/db";
 import { runPendingMigrations } from "../src/core/migrate";
-import { computeTaskOutcome, computeDiffStatFromPatch } from "../src/daemon/task-outcome";
+import { computeTaskOutcome, computeDiffStat } from "../src/daemon/task-outcome";
 
 let tmpHome: string;
 
@@ -57,41 +57,45 @@ describe("computeTaskOutcome", () => {
 
 });
 
-// 即焚模型下代码改动唯一可靠来源是 cumulative.patch（源仓库零痕迹、即焚副本已销毁）。
-// 纯函数直接单测，不经 AUTOPILOT_HOME（其为 import 期冻结常量，测试改 env 不生效）。
-describe("computeDiffStatFromPatch（EPH-02）", () => {
-  it("解析 unified diff：files/insertions/deletions，正确排除 +++/--- 文件头", () => {
-    const patchPath = join(tmpHome, "cumulative.patch");
-    const patch = [
-      "diff --git a/foo.ts b/foo.ts",
-      "index 000..111 100644",
-      "--- a/foo.ts",
-      "+++ b/foo.ts",
-      "@@ -1,2 +1,3 @@",
-      " context",
-      "-old line",
-      "+new line 1",
-      "+new line 2",
-      "diff --git a/bar.ts b/bar.ts",
-      "new file mode 100644",
-      "--- /dev/null",
-      "+++ b/bar.ts",
-      "@@ -0,0 +1 @@",
-      "+only added",
-      "",
-    ].join("\n");
-    writeFileSync(patchPath, patch, "utf-8");
-    // files=2（两个 diff --git）；insertions=3（+ 行，排除两行 +++）；deletions=1（- 行，排除两行 ---）
-    expect(computeDiffStatFromPatch(patchPath)).toEqual({ files: 2, insertions: 3, deletions: 1 });
+// 共用沙盒模型：diff_stat 对任务 clone 工作树跑 git diff（add -A + diff --cached <base>），
+// 覆盖 committed + 未提交 + 未跟踪。用真实临时 git 仓库测。
+describe("computeDiffStat（共用沙盒，对任务 clone 跑 git diff）", () => {
+  function git(args: string[], cwd: string): void {
+    const p = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+    if (p.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${new TextDecoder().decode(p.stderr)}`);
+  }
+  function makeRepo(name: string): string {
+    const repo = join(tmpHome, name);
+    mkdirSync(repo, { recursive: true });
+    git(["init", "-q"], repo);
+    git(["config", "user.email", "t@t.io"], repo);
+    git(["config", "user.name", "t"], repo);
+    git(["config", "commit.gpgsign", "false"], repo);
+    writeFileSync(join(repo, "README.md"), "base\n", "utf-8");
+    git(["add", "-A"], repo);
+    git(["commit", "-q", "-m", "base"], repo);
+    git(["branch", "-M", "main"], repo);
+    return repo;
+  }
+
+  it("统计 committed + 未提交 + 未跟踪改动（add -A + diff --cached base）", () => {
+    const repo = makeRepo("repo1");
+    writeFileSync(join(repo, "README.md"), "base\nmore\n", "utf-8");   // 改已跟踪文件
+    writeFileSync(join(repo, "feature.ts"), "export const x = 1;\n", "utf-8"); // 未跟踪新文件
+    const stat = computeDiffStat(repo, "main");
+    expect(stat).not.toBeNull();
+    expect(stat!.files).toBe(2);                       // README 改 + feature 新增
+    expect(stat!.insertions).toBeGreaterThanOrEqual(2);
   });
 
-  it("空 patch → 全 0（非 null）", () => {
-    const patchPath = join(tmpHome, "empty.patch");
-    writeFileSync(patchPath, "", "utf-8");
-    expect(computeDiffStatFromPatch(patchPath)).toEqual({ files: 0, insertions: 0, deletions: 0 });
+  it("无改动 → 全 0（非 null）", () => {
+    const repo = makeRepo("repo2");
+    expect(computeDiffStat(repo, "main")).toEqual({ files: 0, insertions: 0, deletions: 0 });
   });
 
-  it("patch 文件不存在 → null", () => {
-    expect(computeDiffStatFromPatch(join(tmpHome, "nope.patch"))).toBeNull();
+  it("非 git 目录 → null", () => {
+    const dir = join(tmpHome, "notgit");
+    mkdirSync(dir, { recursive: true });
+    expect(computeDiffStat(dir, "main")).toBeNull();
   });
 });
