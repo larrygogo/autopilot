@@ -295,6 +295,19 @@ export function forgetTaskRecoveryState(taskId: string): void {
   }
 }
 
+/**
+ * phase 成功完成时调用：清该 phase 的累计恢复计数（RERUN-02）。
+ *
+ * recoveryCount keyed by `${taskId}:${phase}`，只在达上限/删任务时清。dev 的 code_review
+ * 驳回经 retry_develop 重入同一 develop phase（同 key），上一轮卡死累计的计数会带进返工轮，
+ * develop 第一轮被救活 2 次后成功、返工再卡 1 次即达 3 → 合法返工被误判反复卡死转 failed。
+ * 成功即归零，让每一轮返工从干净计数起算（resetTaskForRerun 已为手动重跑做了同款 forget）。
+ */
+export function clearPhaseRecoveryCount(taskId: string, phase: string): void {
+  recoveryCount.delete(`${taskId}:${phase}`);
+  lastRecoveryAttempt.delete(taskId);
+}
+
 // ──────────────────────────────────────────────
 // Sandbox 保留策略清理（由 daemon 定期触发）
 // ──────────────────────────────────────────────

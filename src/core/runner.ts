@@ -7,6 +7,7 @@ import { transition, forceTransition, InvalidTransitionError } from "./state-mac
 import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, getPhaseSandboxSpec, type ParallelDefinition, type WorkflowDefinition } from "./registry";
 import { acquireAgentSandbox, captureAgentSandbox, releaseAgentSandbox, type AgentSandboxHandle } from "./agent-sandbox";
 import { closeAgents } from "../agents/registry";
+import { clearPhaseRecoveryCount } from "./watcher";
 import { emit } from "./event-bus";
 import { archivePhaseArtifacts } from "./artifacts";
 
@@ -186,6 +187,9 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
         updateTask(taskId, { failure_count: 0, last_failure_fingerprint: null });
       }
     }
+    // 同步清 watcher 内存里该 phase 的卡死恢复计数（RERUN-02）：否则上一轮卡死累计的计数
+    // 会带进 reject→retry 重入的同一 phase，把合法返工误判为反复卡死。
+    clearPhaseRecoveryCount(taskId, phase);
 
     // Phase 5 兜底（spec §3.8 ts phase 兜底机制）：检查 pending_prompts 是否未消费。
     // prompt-runner 跑完会自动 consumePendingPrompts；ts phase 函数需自己显式调，

@@ -234,6 +234,32 @@ describe("watcher - checkStuckTasks", () => {
     expect(dbModule.getTask("task-par-002")?.status).toBe("waiting_nonexistent");
   });
 
+  it("phase 成功清恢复计数 → 同一 phase 反复返工卡死不累积到误判 failed（RERUN-02）", () => {
+    registryModule.register(makeTestWorkflowWithAwaitReview() as any);
+    dbModule.createTask({
+      id: "task-rerun-02",
+      title: "反复返工任务",
+      workflow: "test_wf",
+      initialStatus: "running_step1",
+    });
+
+    // 模拟 code_review reject→retry_develop 反复重入同一 step1：每轮卡死→watcher 恢复→
+    // （模拟该轮 phase 成功）清恢复计数。MAX_RECOVERIES_PER_PHASE=3，但每轮成功清零 →
+    // 累计永不到 3 → 永远恢复到 pending，绝不被误判 failed。
+    // 注：clearPhaseRecoveryCount 同时清 lastRecoveryAttempt，故下一轮 checkStuckTasks 不被
+    // 60s 节流挡住 —— 这正是 runner 成功后调它的副作用之一。
+    for (let round = 0; round < 5; round++) {
+      sqlite.run(
+        "UPDATE tasks SET status='running_step1', updated_at=? WHERE id=?",
+        [new Date(Date.now() - 30 * 60 * 1000).toISOString(), "task-rerun-02"],
+      );
+      watcherModule.checkStuckTasks(600);
+      expect(dbModule.getTask("task-rerun-02")?.status).toBe("pending_step1");
+      // runner 在 phase 成功完成时调此函数
+      watcherModule.clearPhaseRecoveryCount("task-rerun-02", "step1");
+    }
+  });
+
   it("running_await_review 在 heartbeat 内（updated_at 新）不应被误恢复", () => {
     // 注册工作流
     registryModule.register(makeTestWorkflowWithAwaitReview() as any);
