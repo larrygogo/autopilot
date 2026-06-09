@@ -27,10 +27,7 @@ import { listSessions, readManifest as readSessionManifest } from "../core/sessi
 import { VERSION } from "../index";
 import { transition, canTransition } from "../core/state-machine";
 import { buildTransitions } from "../core/registry";
-import { ensureTaskSandbox } from "../core/sandbox";
-import { createTask } from "../core/db";
-import { snapshotWorkflow } from "../core/manifest";
-import { executePhase } from "../core/runner";
+import { startTaskFromTemplate } from "../core/task-factory";
 import { randomUUID } from "crypto";
 import { log } from "../core/logger";
 import { listWorkspaces, getWorkspaceById } from "../core/workspaces";
@@ -351,67 +348,22 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
       },
       async (args) => {
         try {
-          const workflows = listWorkflows();
-          let workflowName = args.workflow;
-          if (!workflowName) {
-            if (workflows.length !== 1) {
-              return err(`系统有 ${workflows.length} 个工作流，请显式指定 workflow 参数（可选：${workflows.map((w) => w.name).join(", ")}）`);
-            }
-            workflowName = workflows[0]!.name;
+          // requirement 必须已存在：start_task 不建游离任务（核心不变式：每 task 必有真需求）。
+          if (!getRequirementById(args.reqId)) {
+            return err(`需求不存在：${args.reqId}（start_task 的 reqId 必须是已存在的需求 id）`);
           }
-          const wf = getWorkflow(workflowName);
-          if (!wf) return err(`工作流不存在：${workflowName}`);
-          const firstPhaseEntry = wf.phases[0];
-          if (!firstPhaseEntry) return err("工作流没有阶段");
-          const firstPhaseName = isParallelPhase(firstPhaseEntry)
-            ? firstPhaseEntry.parallel.name
-            : firstPhaseEntry.name;
-
-          const taskId = args.reqId.slice(0, 8);
-          const title = args.title ?? args.reqId;
-
-          let extra: Record<string, unknown> = {};
-          if (typeof wf.setup_func === "function") {
-            try {
-              extra = wf.setup_func({ reqId: args.reqId, title, taskId }) ?? {};
-            } catch (e: unknown) {
-              return err(`setup_func 失败：${e instanceof Error ? e.message : String(e)}`);
-            }
-          }
-
-          createTask({
-            id: taskId,
-            title,
-            workflow: workflowName,
-            initialStatus: wf.initial_state,
-            extra,
-            workflowSnapshot: snapshotWorkflow(wf),
+          // 复用规范单一入口 startTaskFromTemplate：强制 requirement_id 非空、req:task 1:1 守卫、
+          // 即焚 sandbox（prepareDeliverMeta，非旧常驻 clone）、注入 workspace 的 github 信息。
+          // 不再在此处旁路 createTask + ensureTaskSandbox 自建（那会绕过不变式并走旧 clone 双轨）。
+          const task = await startTaskFromTemplate({
+            reqId: args.reqId,
+            workflow: args.workflow,
+            title: args.title,
           });
-          try {
-            // sandbox.git=true 时反查 workspace 让 ensureTaskSandbox 起 git worktree
-            let workspace;
-            if (wf.sandbox?.git) {
-              const workspaceId =
-                (typeof extra["workspace_id"] === "string" ? extra["workspace_id"] : undefined) ??
-                (typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined);
-              if (workspaceId) {
-                const ws = getWorkspaceById(workspaceId);
-                if (ws) workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch };
-              }
-            }
-            ensureTaskSandbox(taskId, workflowName, wf.sandbox, workspace);
-          } catch (e: unknown) {
-            log.warn("start_task: ensureTaskSandbox 失败 [task=%s]: %s",
-              taskId, e instanceof Error ? e.message : String(e));
-          }
-          // 异步执行第一阶段
-          executePhase(taskId, firstPhaseName).catch(() => {});
-
-          const created = getTask(taskId);
           return ok({
-            id: taskId,
-            workflow: workflowName,
-            status: created?.status,
+            id: task.id,
+            workflow: task.workflow,
+            status: task.status,
             message: "任务已创建并启动",
           });
         } catch (e: unknown) {
