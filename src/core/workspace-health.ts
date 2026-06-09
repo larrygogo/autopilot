@@ -45,16 +45,16 @@ export async function checkWorkspaceHealth(path: string): Promise<WorkspaceHealt
     return { healthy: false, issues, github_owner: null, github_repo: null };
   }
 
-  // 3. origin 远端
-  const remoteProc = Bun.spawnSync(["git", "remote", "get-url", "origin"], {
+  // 3. origin 远端（`git config --get` 取原文，不施加 insteadOf 重写，避免读到注入的凭据，H2）
+  const remoteProc = Bun.spawnSync(["git", "config", "--get", "remote.origin.url"], {
     cwd: path, stderr: "pipe",
   });
   if (remoteProc.exitCode !== 0) {
     const stderrText = new TextDecoder().decode(remoteProc.stderr ?? new Uint8Array()).trim().split("\n")[0];
     issues.push(stderrText ? `远端 origin 未配置（${stderrText}）` : "远端 origin 未配置");
   } else {
-    const url = new TextDecoder().decode(remoteProc.stdout ?? new Uint8Array()).trim();
-    const parsed = parseGithubFromRemote(url);
+    const url = redactRemoteUrl(new TextDecoder().decode(remoteProc.stdout ?? new Uint8Array()).trim());
+    const parsed = url ? parseGithubFromRemote(url) : null;
     if (parsed) {
       owner = parsed.owner;
       repo = parsed.repo;
@@ -109,9 +109,12 @@ export function detectWorkspaceGit(path: string): WorkspaceGitInfo {
   let remote_url: string | null = null;
   let owner: string | null = null;
   let repo: string | null = null;
-  const remoteProc = Bun.spawnSync(["git", "remote", "get-url", "origin"], { cwd: path, stderr: "pipe" });
+  // 用 `git config --get` 取配置原文，不施加 url.<base>.insteadOf 重写
+  // （后者会把宿主全局 git 配置里的 PAT 注入 URL → 泄露 + 测试不可复现，H2）。
+  const remoteProc = Bun.spawnSync(["git", "config", "--get", "remote.origin.url"], { cwd: path, stderr: "pipe" });
   if (remoteProc.exitCode === 0) {
-    remote_url = decodeOut(remoteProc.stdout) || null;
+    // 即便 remote 本身配了带凭据的 URL（CI 常见），也脱敏后再返回/落库/展示。
+    remote_url = redactRemoteUrl(decodeOut(remoteProc.stdout) || null);
     const parsed = remote_url ? parseGithubFromRemote(remote_url) : null;
     if (parsed) { owner = parsed.owner; repo = parsed.repo; }
   }
@@ -145,6 +148,17 @@ export function detectWorkspaceGit(path: string): WorkspaceGitInfo {
  *  - 仓库名可含点（如 autopilot.js、autopilot.io）
  *  - 大小写不敏感
  */
+/**
+ * 脱敏 git remote URL：剥掉 scheme://user:pass@host 形式里的凭据（userinfo），避免把宿主
+ * PAT（CI token / 全局 insteadOf 注入）随 remote_url 回传客户端 / 落库 / 在 Web UI 展示 /
+ * 进日志（H2）。scp-style git@host:path 的 user 是 SSH 公开用户名（非密码），保留。
+ */
+export function redactRemoteUrl(url: string | null): string | null {
+  if (!url) return url;
+  // 仅匹配 scheme://[userinfo@]host：剥掉 host 前的 userinfo；path 里的 @ 不受影响。
+  return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, "$1");
+}
+
 export function parseGithubFromRemote(url: string): { owner: string; repo: string } | null {
   if (!url) return null;
   const u = url.trim();

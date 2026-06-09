@@ -23,7 +23,7 @@ import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
-import { checkWorkspaceHealth, parseGithubFromRemote, detectWorkspaceGit } from "../src/core/workspace-health";
+import { checkWorkspaceHealth, parseGithubFromRemote, detectWorkspaceGit, redactRemoteUrl } from "../src/core/workspace-health";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -199,6 +199,23 @@ describe("checkWorkspaceHealth", () => {
 });
 
 describe("detectWorkspaceGit", () => {
+  // 隔离宿主全局/系统 git 配置（如 insteadOf 把 PAT 注入 remote URL），
+  // 否则 detect 读到的 remote_url 会被污染、测试不可复现（H2）。
+  let savedGlobal: string | undefined;
+  let savedSystem: string | undefined;
+  beforeAll(() => {
+    savedGlobal = process.env.GIT_CONFIG_GLOBAL;
+    savedSystem = process.env.GIT_CONFIG_SYSTEM;
+    process.env.GIT_CONFIG_GLOBAL = "/dev/null";
+    process.env.GIT_CONFIG_SYSTEM = "/dev/null";
+  });
+  afterAll(() => {
+    if (savedGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = savedGlobal;
+    if (savedSystem === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+    else process.env.GIT_CONFIG_SYSTEM = savedSystem;
+  });
+
   function git(dir: string, args: string[]): void {
     const r = Bun.spawnSync(["git", ...args], { cwd: dir, stderr: "pipe", stdout: "pipe" });
     if (r.exitCode !== 0) {
@@ -253,6 +270,44 @@ describe("detectWorkspaceGit", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("带凭据的 origin URL → remote_url 脱敏，不泄露 token（H2）", () => {
+    const dir = mkdtempSync(join(tmpdir(), "detect-creds-"));
+    try {
+      git(dir, ["init", "-b", "main"]);
+      git(dir, ["remote", "add", "origin", "https://x-access-token:ghp_FAKE12345@github.com/acme/widget.git"]);
+      const info = detectWorkspaceGit(dir);
+      expect(info.remote_url).toBe("https://github.com/acme/widget.git");
+      expect(info.remote_url ?? "").not.toContain("ghp_FAKE12345");
+      expect(info.github_owner).toBe("acme");
+      expect(info.github_repo).toBe("widget");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("redactRemoteUrl（H2 凭据脱敏）", () => {
+  it("剥 https user:token 凭据", () => {
+    expect(redactRemoteUrl("https://x-access-token:ghp_FAKE@github.com/o/r.git")).toBe(
+      "https://github.com/o/r.git",
+    );
+  });
+  it("剥 https 单段 token（token 作 user）", () => {
+    expect(redactRemoteUrl("https://ghp_FAKE@github.com/o/r.git")).toBe("https://github.com/o/r.git");
+  });
+  it("无凭据的 https 不变", () => {
+    expect(redactRemoteUrl("https://github.com/o/r.git")).toBe("https://github.com/o/r.git");
+  });
+  it("scp-style git@host 保留（git 是公开用户名非凭据）", () => {
+    expect(redactRemoteUrl("git@github.com:o/r.git")).toBe("git@github.com:o/r.git");
+  });
+  it("path 里的 @ 不被误剥", () => {
+    expect(redactRemoteUrl("https://github.com/o/r@v1.git")).toBe("https://github.com/o/r@v1.git");
+  });
+  it("null → null", () => {
+    expect(redactRemoteUrl(null)).toBeNull();
   });
 });
 
