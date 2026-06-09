@@ -227,27 +227,16 @@ phases:
 
 ### 执行流程
 
+并行块**不创建独立子任务、不写状态机**（状态机单状态无法同时表达多个 running），而是在父任务进程内并发执行各子阶段函数：
+
 1. 父任务到达并行组时，状态 → `waiting_{group_name}`
-2. 为每个子阶段创建独立子任务（子任务 ID：`{parent_id}__{phase_name}`）
-3. 子任务并行执行，各自有独立的 lock、status、logs
-4. 全部子任务完成 → 父任务自动 transition 到下一阶段
-5. 任一子任务失败：
-   - `fail_strategy: cancel_all`（默认）→ 取消所有兄弟子任务，父任务回退
-   - `fail_strategy: continue` → 等待其他子任务完成
+2. 在父进程内用 `Promise.allSettled` 并发调用各子阶段的 `phaseFn(taskId)`；进度通过日志与事件流记录（不建子任务行）
+3. 全部 settle 后：
+   - 全部成功 / `fail_strategy: continue` → `transition({group}_complete)` → 推进下一阶段
+   - 有失败 且 `fail_strategy: cancel_all`（默认）→ `transition({group}_fail)` 走失败分支
+4. **`cancel_all` 命名有误导**：它**不中途取消/打断仍在跑的兄弟**，`Promise.allSettled` 永远等所有兄弟各自结束，只是决定全部结束后走 fail 还是 complete 分支。真正的「失败即取消兄弟」尚未实现（见状态机文档 CONC-06）。
 
-### 数据库字段
-
-子任务使用 tasks 表的核心列：
-- `parent_task_id` — 父任务 ID
-- `parallel_index` — 并行组内的索引
-- `parallel_group` — 并行组名称
-
-子任务自动继承父任务的 `extra` JSON 字段。
-
-### CLI 行为
-
-- `task status`：默认隐藏子任务；指定父任务 ID 时显示其子任务列表，指定子任务 ID 时显示父任务 ID
-- `task cancel`：取消父任务时级联取消所有子任务
+> 共用沙盒模型下，并行块的各子阶段共用同一个任务 clone、**不隔离子工作树**，因此暂不支持多个子阶段并行写同一份代码（YAGNI）。并行块更适合「各子阶段产出互不冲突的产物」（如前端/后端分别写各自目录）或只读型并发。
 
 ---
 

@@ -144,18 +144,18 @@ bun --version
 2. 查看该工作流的转换表：`autopilot workflow show <name>`
 3. 查看完整状态图：参考 [状态机详解](state-machine.md)
 
-### Q: 并行子任务失败后父任务如何处理？
+### Q: 并行子阶段失败后父任务如何处理？
 
-取决于 `fail_strategy` 配置：
+取决于 `fail_strategy` 配置（并行块在父任务进程内并发跑各子阶段，不建独立子任务）：
 
-- **`cancel_all`**（默认）：任一子任务失败 → 取消所有兄弟子任务 → 父任务回退
-- **`continue`**：等待其他子任务完成后再处理
+- **`cancel_all`**（默认）：任一子阶段失败 → 等其余兄弟各自结束后整组判失败、走失败分支。注意它**不中途取消/打断仍在跑的兄弟**（命名有误导，见 backlog CONC-06），只是全部结束后选失败分支
+- **`continue`**：失败后其他子阶段继续运行，全部结束再处理
 
-查看任务（含子任务）状态：
+查看任务状态：
 
 ```bash
-autopilot task status <parent-task-id>   # 查看父任务及子任务
-autopilot task status                     # 列出所有任务
+autopilot task status <task-id>   # 查看某任务
+autopilot task status             # 列出所有任务
 ```
 
 ---

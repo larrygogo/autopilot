@@ -350,6 +350,10 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
 // 全部完成后：
 //   - 全部成功 / fail_strategy=continue → transition(<group>_complete) → 推进下一阶段
 //   - 有失败 且 fail_strategy=cancel_all → transition(<group>_fail) 走失败分支
+//
+// 注意 cancel_all 命名有误导（backlog CONC-06）：它**不中途 abort/取消仍在跑的兄弟子阶段**，
+// Promise.allSettled 永远等所有兄弟各自结束，只是决定全部 settle 后走 fail 还是 complete 分支。
+// 真正的「失败即取消兄弟」需 AbortController 贯穿，未实现；改 enum 名属破坏性变更，亦未做。
 // ──────────────────────────────────────────────
 
 async function executeParallelGroup(

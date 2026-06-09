@@ -146,18 +146,18 @@ If you still see an empty directory, confirm you're running the latest build
 2. View the workflow's transition table: `autopilot workflow show <name>`
 3. See the full state diagram: refer to [State Machine Details](state-machine.md)
 
-### Q: How is the parent task handled when a parallel subtask fails?
+### Q: How is the parent task handled when a parallel sub-phase fails?
 
-Depends on the `fail_strategy` configuration:
+Depends on the `fail_strategy` configuration (a parallel group runs its sub-phases concurrently inside the parent task process; no independent subtasks are created):
 
-- **`cancel_all`** (default): any subtask failure → cancel all sibling subtasks → parent task rolls back
-- **`continue`**: wait for other subtasks to complete before handling
+- **`cancel_all`** (default): any sub-phase failure → wait for the remaining siblings to finish on their own, then fail the whole group and take the failure branch. Note it does **not** abort or interrupt siblings still running (the name is misleading, see CONC-06); it only selects the failure branch after all have settled
+- **`continue`**: other sub-phases keep running after a failure; handling happens once all have settled
 
-Check task (including subtask) status:
+Check task status:
 
 ```bash
-autopilot task status <parent-task-id>   # parent task and its subtasks
-autopilot task status                     # list all tasks
+autopilot task status <task-id>   # a specific task
+autopilot task status             # list all tasks
 ```
 
 ---

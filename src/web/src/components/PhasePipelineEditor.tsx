@@ -958,7 +958,7 @@ function ParallelBlockEditForm({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="cancel_all">cancel_all · 任一子失败 → 全部取消</SelectItem>
+            <SelectItem value="cancel_all">cancel_all · 任一子失败 → 整组判失败</SelectItem>
             <SelectItem value="continue">continue · 任一子失败 → 其它继续</SelectItem>
           </SelectContent>
         </Select>

@@ -337,7 +337,7 @@ function ParallelNode({
         </span>
         {failStrategy && (
           <span className="font-mono text-[10px] text-muted-foreground">
-            · {failStrategy === "cancel_all" ? "失败时全部取消" : failStrategy === "continue" ? "失败时继续" : failStrategy}
+            · {failStrategy === "cancel_all" ? "失败时整组判失败" : failStrategy === "continue" ? "失败时继续" : failStrategy}
           </span>
         )}
       </div>

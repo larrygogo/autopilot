@@ -195,7 +195,7 @@ export function AddParallelDialog({
             </Select>
             <p className="text-xs text-muted-foreground">
               <span className="font-semibold">cancel_all</span>
-              ：任一子阶段失败则全部中止；
+              ：任一子阶段失败 → 等其余兄弟各自结束后整组判失败、走失败分支（不中途打断仍在跑的兄弟）；
               <span className="font-semibold">continue</span>
               ：失败后其他子阶段继续运行。
             </p>

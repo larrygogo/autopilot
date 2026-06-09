@@ -227,27 +227,16 @@ phases:
 
 ### Execution Flow
 
+A parallel group does **not** create independent subtasks and does **not** drive the state machine (a single-valued state cannot express multiple `running` phases at once). Instead, the sub-phase functions run concurrently inside the parent task process:
+
 1. When the parent task reaches the parallel group, its status transitions to `waiting_{group_name}`
-2. Independent subtasks are created for each sub-phase (subtask ID: `{parent_id}__{phase_name}`)
-3. Subtasks execute in parallel, each with independent lock, status, and logs
-4. All subtasks complete -> parent task automatically transitions to the next phase
-5. If any subtask fails:
-   - `fail_strategy: cancel_all` (default) -> cancel all sibling subtasks, parent task rolls back
-   - `fail_strategy: continue` -> wait for other subtasks to complete
+2. The parent process calls each sub-phase's `phaseFn(taskId)` concurrently via `Promise.allSettled`; progress is recorded through logs and the event stream (no subtask rows are created)
+3. After all settle:
+   - All succeed / `fail_strategy: continue` → `transition({group}_complete)` → advance to the next phase
+   - Any failure with `fail_strategy: cancel_all` (default) → `transition({group}_fail)` → take the failure branch
+4. **`cancel_all` is a misleading name**: it does **not** abort or interrupt siblings still running. `Promise.allSettled` always waits for every sibling to finish on its own; the strategy only decides whether to take the fail or complete branch once all have settled. True "cancel siblings on failure" is not yet implemented (see CONC-06 in the state-machine docs).
 
-### Database Fields
-
-Subtasks use the tasks table's core columns:
-- `parent_task_id` — parent task ID
-- `parallel_index` — index within the parallel group
-- `parallel_group` — parallel group name
-
-Subtasks automatically inherit the parent task's `extra` JSON field.
-
-### CLI Behavior
-
-- `task status`: subtasks are hidden by default; given a parent task ID it shows the subtask list, given a subtask ID it shows the parent task ID
-- `task cancel`: cancelling a parent task cascades to cancel all subtasks
+> Under the shared-sandbox model, the sub-phases of a parallel group share the same task clone and are **not** isolated into separate worktrees, so concurrent writes to the same code from multiple sub-phases are not supported (YAGNI). Parallel groups suit sub-phases that produce non-conflicting artifacts (e.g. frontend/backend writing to their own directories) or read-only concurrency.
 
 ---
 
