@@ -50,7 +50,7 @@ import {
   readSandboxFile,
   scanTaskSandboxes,
 } from "../core/sandbox";
-import { setKv, listRootTasksByRequirementIds, getDb } from "../core/db";
+import { setKv, getDb } from "../core/db";
 import { discover as registryDiscover, getWorkflow as registryGetWorkflow } from "../core/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
@@ -126,6 +126,7 @@ import {
   decideTaskAction,
   releaseTaskSandboxAction,
   cancelRequirementWithTasks,
+  cancelTasksForRequirements,
   TaskActionError,
 } from "./task-actions";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
@@ -942,15 +943,10 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
-      // 删前先停运行中任务的 agent 进程（best-effort）：让 runner 收敛、释放 worktree 占用，
-      // 再由 deleteRequirementWithTasks 强删记录。cancel 是异步的，这里不 sleep 等它生效。
-      for (const t of listRootTasksByRequirementIds([p.id])) {
-        try {
-          cancelTaskAction(t.id);
-        } catch {
-          /* 已终态 / 不存在：忽略，强删兜底 */
-        }
-      }
+      // 删前先停运行中任务的 agent 进程（best-effort）：让 runner 收敛、释放 sandbox 占用，
+      // 再由 deleteRequirementWithTasks 强删记录。cancel 同步触发 abort（向子进程发 SIGTERM），
+      // 但不阻塞等子进程实际退出 / phase 收敛，故不 sleep。
+      cancelTasksForRequirements([p.id]);
       const { deletedTasks } = deleteRequirementWithTasks(p.id);
       // 连带删掉的任务逐个 emit task:deleted（由 purgeTaskTree 内部负责）；需求删除本身
       // 沿用旧行为不额外 emit（无 requirement:deleted 事件类型，避免伪造状态触发 scheduler/clarifier）。
@@ -1703,16 +1699,11 @@ export function registerCoreRpcMethods(): void {
       }
       if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
       try {
-        // 删前先停运行中任务的 agent 进程（best-effort）：让 runner 收敛、释放 worktree 占用，
-        // 再由 coreDeleteProject 强删记录。cancel 是异步的，这里不 sleep 等它生效。
+        // 删前先停运行中任务的 agent 进程（best-effort）：让 runner 收敛、释放 sandbox 占用，
+        // 再由 coreDeleteProject 强删记录。cancel 同步触发 abort（向子进程发 SIGTERM），但不阻塞
+        // 等子进程实际退出 / phase 收敛，故不 sleep。
         const reqs = listRequirementsByProject(p.id);
-        for (const t of listRootTasksByRequirementIds(reqs.map((r) => r.id))) {
-          try {
-            cancelTaskAction(t.id);
-          } catch {
-            /* 已终态 / 不存在：忽略，强删兜底 */
-          }
-        }
+        cancelTasksForRequirements(reqs.map((r) => r.id));
         coreDeleteProject(p.id);
         emitBus({ type: "projects:changed", payload: { id: p.id, action: "delete" } });
         return { ok: true };
