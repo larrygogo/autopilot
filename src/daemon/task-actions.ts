@@ -100,6 +100,29 @@ export function releaseTaskSandboxAction(taskId: string): { removed: boolean } {
 }
 
 // ──────────────────────────────────────────────
+// cancelTasksForRequirements — 级联取消多个需求名下的根任务（单一实现）
+// ──────────────────────────────────────────────
+
+/**
+ * 级联取消给定需求名下的全部 root 任务（best-effort：已终态 / 不存在的跳过不抛）。
+ * 收编原先散在 4 处（cancelRequirementWithTasks / requirements.delete / projects.delete /
+ * REST 删需求）的重复 `for(roots){try cancelTaskAction}catch{}`，让 SC-1 级联只有一份实现、
+ * 不会各处漂移。返回实际取消的任务数。
+ */
+export function cancelTasksForRequirements(reqIds: string[]): { cancelled: number } {
+  let cancelled = 0;
+  for (const t of listRootTasksByRequirementIds(reqIds)) {
+    try {
+      cancelTaskAction(t.id);
+      cancelled++;
+    } catch {
+      /* 已终态 / 不存在：忽略，调用方（删记录 / 置需求 cancelled）兜底 */
+    }
+  }
+  return { cancelled };
+}
+
+// ──────────────────────────────────────────────
 // cancelRequirementWithTasks — 取消需求并级联停名下任务
 // ──────────────────────────────────────────────
 
@@ -109,13 +132,7 @@ export function releaseTaskSandboxAction(taskId: string): { removed: boolean } {
  * active 过滤不含 cancelled，可能并发起第二个 task；task 最终 transition 时撞终态需求留不一致。
  */
 export function cancelRequirementWithTasks(reqId: string): { requirement: Requirement } {
-  for (const t of listRootTasksByRequirementIds([reqId])) {
-    try {
-      cancelTaskAction(t.id);
-    } catch {
-      /* 已终态 / 不存在：忽略，下面置需求 cancelled 兜底 */
-    }
-  }
+  cancelTasksForRequirements([reqId]);
   return { requirement: setRequirementStatus(reqId, "cancelled") };
 }
 

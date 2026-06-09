@@ -12,6 +12,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
+import { up as migrate018 } from "../src/migrations/018-task-phase-events";
 import { up as migrate019 } from "../src/migrations/019-task-requirement-id";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
@@ -24,7 +25,7 @@ import {
   nextRequirementId,
 } from "../src/core/requirements";
 import { acquireLock, _releaseAllLocks } from "../src/core/infra";
-import { cancelRequirementWithTasks, restartTaskAction, TaskActionError } from "../src/daemon/task-actions";
+import { cancelRequirementWithTasks, cancelTasksForRequirements, restartTaskAction, TaskActionError } from "../src/daemon/task-actions";
 
 let db: Database;
 let tmpHome: string;
@@ -34,7 +35,7 @@ beforeEach(() => {
   mkdirSync(tmpHome, { recursive: true });
   process.env.AUTOPILOT_HOME = tmpHome;
   db = new Database(":memory:");
-  for (const m of [migrate001, migrate002, migrate004, migrate005, migrate006, migrate007, migrate008, migrate009, migrate010, migrate019, migrate021, migrate024]) {
+  for (const m of [migrate001, migrate002, migrate004, migrate005, migrate006, migrate007, migrate008, migrate009, migrate010, migrate018, migrate019, migrate021, migrate024]) {
     m(db);
   }
   _setDbForTest(db);
@@ -75,6 +76,38 @@ describe("cancelRequirementWithTasks（SC-1：cancel 级联停 task）", () => {
 
     const { requirement } = cancelRequirementWithTasks(reqId);
     expect(requirement.status).toBe("cancelled");
+  });
+});
+
+describe("cancelTasksForRequirements（级联取消单一实现）", () => {
+  it("级联取消多个需求名下的所有 root 任务，返回取消数", () => {
+    createProject({ id: "proj-c1", name: "p" });
+    const reqA = nextRequirementId();
+    createRequirement({ id: reqA, project_id: "proj-c1", title: "A" });
+    const reqB = nextRequirementId();
+    createRequirement({ id: reqB, project_id: "proj-c1", title: "B" });
+    createTask({ id: "tk-a1", title: "A1", workflow: "dev", initialStatus: "running_design", requirementId: reqA });
+    createTask({ id: "tk-b1", title: "B1", workflow: "dev", initialStatus: "running_design", requirementId: reqB });
+
+    const { cancelled } = cancelTasksForRequirements([reqA, reqB]);
+
+    expect(cancelled).toBe(2);
+    expect(getTask("tk-a1")?.status).toBe("cancelled");
+    expect(getTask("tk-b1")?.status).toBe("cancelled");
+  });
+
+  it("best-effort：已终态任务被跳过、不抛错、不计入取消数", () => {
+    createProject({ id: "proj-c2", name: "p2" });
+    const reqId = nextRequirementId();
+    createRequirement({ id: reqId, project_id: "proj-c2", title: "T" });
+    createTask({ id: "tk-live", title: "live", workflow: "dev", initialStatus: "running_design", requirementId: reqId });
+    createTask({ id: "tk-dead", title: "dead", workflow: "dev", initialStatus: "done", requirementId: reqId });
+
+    const { cancelled } = cancelTasksForRequirements([reqId]);
+
+    expect(cancelled).toBe(1); // 只取消了存活的那个
+    expect(getTask("tk-live")?.status).toBe("cancelled");
+    expect(getTask("tk-dead")?.status).toBe("done"); // 终态不动
   });
 });
 
