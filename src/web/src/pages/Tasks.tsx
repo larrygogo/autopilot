@@ -244,7 +244,7 @@ export function Tasks() {
       ...t.tasks.map((tk) => ({ key: `t-${tk.id}`, ts: tsToMs(tk.updated_at), node: <TaskRow task={tk} now={now} /> })),
     ].sort((a, b) => b.ts - a.ts);
 
-  const allRows = useMemo(() => tabs.flatMap(rowsOf).sort((a, b) => b.ts - a.ts), [tabs]);
+  const allRows = useMemo(() => tabs.flatMap(rowsOf).sort((a, b) => b.ts - a.ts), [tabs, now]);
   const tabCount = (t: PipelineTab) => t.reqs.length + t.tasks.length;
 
   const hasAny = tasks.length > 0 || requirements.length > 0;

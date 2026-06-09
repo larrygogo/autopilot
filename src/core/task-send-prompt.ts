@@ -72,7 +72,7 @@ export function sendPromptToTask(
       if (pending.hasPending(taskId)) {
         const answered = pending.answerPending(taskId, text);
         if (answered) {
-          emit({ type: "task:prompt-answered", payload: { id: taskId, source } });
+          emit({ type: "task:prompt-answered", payload: { taskId, source } });
           return { accepted: true, mode: "answered" };
         }
       }
@@ -88,7 +88,7 @@ export function sendPromptToTask(
     queued_at: Date.now(),
   };
   appendPendingPrompt(taskId, item);
-  emit({ type: "task:prompt-queued", payload: { id: taskId, source, queued_at: item.queued_at } });
+  emit({ type: "task:prompt-queued", payload: { taskId, source, queued_at: item.queued_at } });
   log.info("sendPromptToTask: 已排队 [task=%s source=%s status=%s]", taskId, source, task.status);
   return { accepted: true, mode: "queued" };
 }

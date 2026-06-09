@@ -1009,7 +1009,7 @@ export function RequirementDetail() {
         <span className="font-mono text-[10px] text-muted-foreground">TASK {req.task_id.slice(0, 8)}…</span>
       </div>
       <div className="p-5">
-        <TaskDetail taskId={req.task_id} embedded subscribe={subscribe} />
+        <TaskDetail key={req.task_id ?? "none"} taskId={req.task_id} embedded subscribe={subscribe} />
       </div>
     </Card>
   ) : null;

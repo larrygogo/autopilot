@@ -54,8 +54,8 @@ export type AutopilotEvent =
   // Clarifier 进度反馈（内存态，daemon 重启即清）
   | { type: "requirement:clarifier-round-update"; payload: import("../daemon/clarifier-progress").ClarifierRoundState }
   // Phase 5 — 运行中 task 追加 prompt（spec §3.8）
-  | { type: "task:prompt-queued"; payload: { id: string; source: string; queued_at: number } }
-  | { type: "task:prompt-answered"; payload: { id: string; source: string } }
+  | { type: "task:prompt-queued"; payload: { taskId: string; source: string; queued_at: number } }
+  | { type: "task:prompt-answered"; payload: { taskId: string; source: string } }
   | { type: "phase:pending-prompts-unconsumed"; payload: { taskId: string; phase: string; count: number; preview: string[] } }
   // Phase 6 — prompt phase handoff 协议（spec §3.10）
   | { type: "phase:handoff-incomplete"; payload: { taskId: string; phase: string; missing: string[] } }

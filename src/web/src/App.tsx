@@ -331,7 +331,7 @@ function TaskDetailRoute({
   if (!id) return <Navigate to="/now" replace />;
   if (state.kind === "loading") return <PageLoader />;
   if (state.kind === "redirect") return <Navigate to={`/requirements/${state.reqId}`} replace />;
-  return <TaskDetail taskId={id} onBack={() => navigate("/now")} subscribe={subscribe} />;
+  return <TaskDetail key={id} taskId={id} onBack={() => navigate("/now")} subscribe={subscribe} />;
 }
 
 function ProjectDetailRoute() {
