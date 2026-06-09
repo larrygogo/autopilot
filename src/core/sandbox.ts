@@ -600,20 +600,33 @@ function dirSizeBytes(dir: string): number {
 }
 
 /**
- * 删除任务 sandbox 目录。返回是否真的删除过。
- * 若 task 走的是 git worktree，先调 git worktree remove --force 让 workspace 干净，再 rmSync 兜底。
- * logs / agent-calls.jsonl 等元数据不受影响（保留在 runtime/tasks/<id>/ 顶层）。
+ * 释放任务沙盒产物，回收磁盘。返回是否真的删除过任何内容。
+ *
+ * 即焚模型下实际占盘的是 artifacts/（产物 + 累积 patch）与 .agent-runs/（即焚副本残留）；
+ * 旧常驻 workspace/ 即焚下不存在，作兼容删除。logs / events / agent-calls / manifest 等
+ * 元数据不受影响（保留在 runtime/tasks/<id>/ 顶层）。
+ *
+ * 注意：会删累积 patch（代码状态唯一载体），调用方（releaseTaskSandboxAction）须保证仅对
+ * 终态任务执行，否则会损坏运行中任务。
  */
 export function deleteTaskSandbox(taskId: string): boolean {
-  // 先尝试 worktree 移除（若是 worktree task；非 worktree 直接 no-op 返回 false）
-  // worktree 模式下 git worktree remove 会同步删 ws 目录，无需再 rmSync。
-  const removedWorktree = removeTaskWorktree(taskId);
-  const ws = getTaskSandbox(taskId);
-  if (existsSync(ws)) {
-    rmSync(ws, { recursive: true, force: true });
-    return true;
+  if (!TASK_ID_RE.test(taskId)) {
+    throw new Error(`非法 task ID：${taskId}`);
   }
-  return removedWorktree;
+  // 旧 worktree task：先 git worktree remove --force 让源仓库干净（即焚 clone 模式下 no-op）。
+  let removed = removeTaskWorktree(taskId);
+  const taskRoot = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
+  for (const target of [
+    getTaskSandbox(taskId),       // 旧常驻 workspace/（即焚下通常不存在）
+    getTaskArtifactsDir(taskId),  // artifacts/（沙盒 tab 实际展示的产物 + 累积 patch）
+    join(taskRoot, ".agent-runs"), // 即焚副本残留
+  ]) {
+    if (existsSync(target)) {
+      rmSync(target, { recursive: true, force: true });
+      removed = true;
+    }
+  }
+  return removed;
 }
 
 /**

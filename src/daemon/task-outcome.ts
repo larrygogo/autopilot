@@ -1,5 +1,7 @@
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import { getTask, listTaskPhaseEvents, getDb } from "../core/db";
+import { getTaskArtifactsDir } from "../core/sandbox";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("task-outcome");
@@ -71,13 +73,17 @@ export async function computeTaskOutcome(taskId: string): Promise<TaskOutcome | 
   }
 
   // 3) sandbox + diff_stat
-  // 改动落在沙盒（clone）里，不在用户源仓库（workspace_path）。diff 必须算 repo_path（沙盒），
-  // 否则源仓库没有交付分支的 commit → 永远算出 0 files changed。
+  // 即焚模型下代码改动只存在于 artifacts/patches/cumulative.patch —— 源仓库（workspace_path）
+  // 零痕迹、即焚副本已销毁，对二者跑 git diff 都恒算 0。故优先解析累积 patch；无 patch
+  // （legacy 注入 repo_path / 非 git 工作流）才回退到对沙盒目录跑 git diff。
   const repo_path = ((task as Record<string, unknown>).repo_path as string | undefined) ?? null;
   const sandbox_path =
     repo_path ?? ((task as Record<string, unknown>).workspace_path as string | undefined) ?? null;
   let diff_stat: DiffStat | null = null;
-  if (sandbox_path && existsSync(sandbox_path)) {
+  const patchPath = join(getTaskArtifactsDir(taskId), "patches", "cumulative.patch");
+  if (existsSync(patchPath)) {
+    diff_stat = computeDiffStatFromPatch(patchPath);
+  } else if (sandbox_path && existsSync(sandbox_path)) {
     const baseBranch = resolveBaseBranch(reqId);
     diff_stat = await computeDiffStat(sandbox_path, baseBranch);
   }
@@ -129,6 +135,30 @@ function resolveBaseBranch(reqId: string | undefined): string {
   } catch {
     return "main";
   }
+}
+
+/**
+ * 从累积 patch（unified diff 文本）统计改动量。即焚模型下这是代码改动的唯一可靠来源
+ * （源仓库零痕迹、即焚副本已销毁）。纯文本解析，不依赖 git / 工作树。
+ */
+export function computeDiffStatFromPatch(patchPath: string): DiffStat | null {
+  let text: string;
+  try {
+    text = readFileSync(patchPath, "utf-8");
+  } catch {
+    return null;
+  }
+  if (!text.trim()) return { files: 0, insertions: 0, deletions: 0 };
+  let files = 0;
+  let insertions = 0;
+  let deletions = 0;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("diff --git ")) files++;
+    else if (line.startsWith("+++") || line.startsWith("---")) continue; // 文件头，非内容行
+    else if (line.startsWith("+")) insertions++;
+    else if (line.startsWith("-")) deletions++;
+  }
+  return { files, insertions, deletions };
 }
 
 async function computeDiffStat(workspacePath: string, baseBranch: string): Promise<DiffStat | null> {

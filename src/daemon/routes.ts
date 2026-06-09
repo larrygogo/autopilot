@@ -33,7 +33,7 @@ import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "../core/task-delete";
-import { cancelTaskAction, restartTaskAction, answerTaskAction, decideTaskAction, TaskActionError } from "./task-actions";
+import { cancelTaskAction, restartTaskAction, answerTaskAction, decideTaskAction, releaseTaskSandboxAction, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { listWorkspaces, getWorkspaceById, getTopWorkspaceForProject } from "../core/workspaces";
 import { listSubPrs } from "../core/requirement-sub-prs";
@@ -103,7 +103,6 @@ import {
   readSandboxFile,
   resolveSandboxPath,
   spawnSandboxZip,
-  deleteTaskSandbox,
   sandboxSize,
 } from "../core/sandbox";
 import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task-logs";
@@ -1081,9 +1080,10 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     const wsDeleteMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/sandbox$/);
     if (method === "DELETE" && wsDeleteMatch) {
       try {
-        const removed = deleteTaskSandbox(wsDeleteMatch);
+        const { removed } = releaseTaskSandboxAction(wsDeleteMatch);
         return json({ ok: true, removed });
       } catch (e: unknown) {
+        if (e instanceof TaskActionError) return error(e.message, e.status);
         return error(e instanceof Error ? e.message : String(e), 500);
       }
     }

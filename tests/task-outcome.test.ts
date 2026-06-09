@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, existsSync } from "fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { _setDbForTest, initDb, startTaskPhase, endTaskPhase, createTask, updateTask } from "../src/core/db";
 import { runPendingMigrations } from "../src/core/migrate";
-import { computeTaskOutcome } from "../src/daemon/task-outcome";
+import { computeTaskOutcome, computeDiffStatFromPatch } from "../src/daemon/task-outcome";
 
 let tmpHome: string;
 
@@ -53,5 +53,45 @@ describe("computeTaskOutcome", () => {
     createTask({ id: "task-003", title: "x", workflow: "dev", initialStatus: "done" });
     const o = await computeTaskOutcome("task-003");
     expect(o!.diff_stat).toBeNull();
+  });
+
+});
+
+// 即焚模型下代码改动唯一可靠来源是 cumulative.patch（源仓库零痕迹、即焚副本已销毁）。
+// 纯函数直接单测，不经 AUTOPILOT_HOME（其为 import 期冻结常量，测试改 env 不生效）。
+describe("computeDiffStatFromPatch（EPH-02）", () => {
+  it("解析 unified diff：files/insertions/deletions，正确排除 +++/--- 文件头", () => {
+    const patchPath = join(tmpHome, "cumulative.patch");
+    const patch = [
+      "diff --git a/foo.ts b/foo.ts",
+      "index 000..111 100644",
+      "--- a/foo.ts",
+      "+++ b/foo.ts",
+      "@@ -1,2 +1,3 @@",
+      " context",
+      "-old line",
+      "+new line 1",
+      "+new line 2",
+      "diff --git a/bar.ts b/bar.ts",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/bar.ts",
+      "@@ -0,0 +1 @@",
+      "+only added",
+      "",
+    ].join("\n");
+    writeFileSync(patchPath, patch, "utf-8");
+    // files=2（两个 diff --git）；insertions=3（+ 行，排除两行 +++）；deletions=1（- 行，排除两行 ---）
+    expect(computeDiffStatFromPatch(patchPath)).toEqual({ files: 2, insertions: 3, deletions: 1 });
+  });
+
+  it("空 patch → 全 0（非 null）", () => {
+    const patchPath = join(tmpHome, "empty.patch");
+    writeFileSync(patchPath, "", "utf-8");
+    expect(computeDiffStatFromPatch(patchPath)).toEqual({ files: 0, insertions: 0, deletions: 0 });
+  });
+
+  it("patch 文件不存在 → null", () => {
+    expect(computeDiffStatFromPatch(join(tmpHome, "nope.patch"))).toBeNull();
   });
 });

@@ -286,15 +286,15 @@ export function SandboxBrowser({ taskId }: Props) {
 
       <ConfirmDialog
         open={confirmRelease}
-        title="释放 Workspace"
+        title="释放沙盒产物"
         message={
           <div className="space-y-2">
-            <p>将删除此任务的 workspace 目录：</p>
+            <p>将删除此任务的沙盒产物目录（产物文件 + 累积代码 patch + 即焚副本残留）：</p>
             <pre className="overflow-x-auto border border-border bg-muted/40 px-2 py-1.5 font-mono text-[11px]">
-              {`~/.autopilot/runtime/tasks/${taskId}/workspace`}
+              {`~/.autopilot/runtime/tasks/${taskId}/artifacts`}
             </pre>
             <p className="text-xs text-muted-foreground">
-              任务记录、状态日志、阶段日志、Agent 调用记录都保留，仅删除产出文件。此操作不可恢复。
+              任务记录、状态日志、阶段日志、Agent 调用记录都保留。任务运行中无法释放。此操作不可恢复。
             </p>
           </div>
         }
@@ -303,8 +303,8 @@ export function SandboxBrowser({ taskId }: Props) {
         onConfirm={async () => {
           try {
             const res = await api.deleteSandbox(taskId);
-            if (res.removed) toast.success("已释放 workspace");
-            else toast.info("workspace 不存在或已被清理");
+            if (res.removed) toast.success("已释放沙盒产物");
+            else toast.info("沙盒产物不存在或已清理");
             setFile(null);
             loadTree("");
           } catch (e: unknown) {

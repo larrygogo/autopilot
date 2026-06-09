@@ -49,7 +49,6 @@ import { loadApiToken } from "../core/api-token";
 import {
   listSandboxDir,
   readSandboxFile,
-  deleteTaskSandbox,
   scanTaskSandboxes,
 } from "../core/sandbox";
 import { setKv, listRootTasksByRequirementIds, getDb } from "../core/db";
@@ -127,6 +126,7 @@ import {
   restartTaskAction,
   answerTaskAction,
   decideTaskAction,
+  releaseTaskSandboxAction,
   TaskActionError,
 } from "./task-actions";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
@@ -1412,14 +1412,15 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "sandboxes.delete",
-    description: "手动清理某任务 sandbox 目录",
+    description: "释放某任务沙盒产物（artifacts/ + 即焚副本残留；仅终态任务）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       try {
-        const removed = deleteTaskSandbox(p.id);
+        const { removed } = releaseTaskSandboxAction(p.id);
         return { ok: true, removed };
       } catch (e: unknown) {
+        if (e instanceof TaskActionError) throw new RpcError(e.code, e.message);
         throw new RpcError("INTERNAL", e instanceof Error ? e.message : String(e));
       }
     },

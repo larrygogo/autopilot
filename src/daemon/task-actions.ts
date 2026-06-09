@@ -16,7 +16,8 @@ import { getTask, updateTask, closeOpenPhaseEvents } from "../core/db";
 import { transition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { getWorkflow, buildTransitions, isParallelPhase } from "../core/registry";
-import { getTaskSandbox } from "../core/sandbox";
+import { getTaskArtifactsDir, deleteTaskSandbox } from "../core/sandbox";
+import { isLocked } from "../core/infra";
 import { emit } from "../core/event-bus";
 import { createLogger } from "../core/logger";
 
@@ -61,6 +62,32 @@ export function cancelTaskAction(taskId: string): { from: string; to: string } {
   // 关闭进行中的 phase event，避免取消后留下永远 running 的僵尸（阶段进度 UI 会恒显示"进行中"+耗时虚高）
   closeOpenPhaseEvents(taskId);
   return { from, to };
+}
+
+// ──────────────────────────────────────────────
+// releaseTaskSandboxAction — 释放任务沙盒产物（artifacts/ + 即焚副本残留 + 旧 workspace/）
+// ──────────────────────────────────────────────
+
+/**
+ * 释放任务的沙盒产物目录，回收磁盘。只允许对终态任务执行：即焚模型下 artifacts/ 含累积
+ * patch（代码状态唯一载体），删运行中任务的 patch 会损坏其后续阶段。
+ * 任务记录 / 状态日志 / 阶段日志 / Agent 调用记录均保留（在 runtime/tasks/<id>/ 顶层）。
+ */
+export function releaseTaskSandboxAction(taskId: string): { removed: boolean } {
+  const task = getTask(taskId);
+  if (!task) throw new TaskActionError("NOT_FOUND", "Task not found", 404);
+
+  const terminalStates = new Set(["done", "cancelled", "failed"]);
+  const wf = getWorkflow(task.workflow);
+  if (wf) for (const s of wf.terminal_states ?? []) terminalStates.add(s);
+  if (!terminalStates.has(task.status) || isLocked(taskId)) {
+    throw new TaskActionError(
+      "INVALID_STATE",
+      `任务未处于终态或仍在运行（${task.status}），无法释放产物；请先取消或等待完成`,
+      409,
+    );
+  }
+  return { removed: deleteTaskSandbox(taskId) };
 }
 
 // ──────────────────────────────────────────────
@@ -193,12 +220,13 @@ export function decideTaskAction(
     extraUpdates["user_reject_counts"] = JSON.stringify(counts);
   }
 
-  // 写 workspace/<NN-phase>/decision.md（追加历史）
+  // 写 artifacts/<NN-phase>/decision.md（追加历史）。即焚模型下决断记录与其它阶段产物
+  // （agent-trace.md / phase.log）统一落 artifacts/，旧 workspace/ 即焚下不存在会孤儿化。
   try {
     const phaseIdx = helpers.phaseIndex(wf, phase);
     if (phaseIdx >= 0) {
       const dirName = `${String(phaseIdx).padStart(2, "0")}-${phase}`;
-      const phaseDir = join(getTaskSandbox(taskId), dirName);
+      const phaseDir = join(getTaskArtifactsDir(taskId), dirName);
       if (!existsSync(phaseDir)) mkdirSync(phaseDir, { recursive: true });
       const md = helpers.renderDecisionMd(decisionRecord);
       const dPath = join(phaseDir, "decision.md");
