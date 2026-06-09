@@ -177,6 +177,48 @@ describe("cancelTaskAction · 触发 abortRun（Task 5）", () => {
   });
 });
 
+describe("executePhase catch · 取消不污染失败计数（Task 6，关键回归）", () => {
+  let db: Database;
+  const cleanupIds: string[] = [];
+
+  afterEach(() => {
+    _setDbForTest(null);
+    try { db.close(); } catch { /* ignore */ }
+    registry._clearRegistry();
+    _clearRunsForTest();
+    for (const id of cleanupIds) {
+      try { rmSync(join(AUTOPILOT_HOME, "runtime", "tasks", id), { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    cleanupIds.length = 0;
+  });
+
+  it("cancel 命中 phase 执行中（abort 后抛错）→ 任务终态 cancelled，failure_count 不被污染", async () => {
+    db = new Database(":memory:");
+    _setDbForTest(db);
+    initDb();
+    await runPendingMigrations();
+    registry._clearRegistry();
+    const id = "cnclrun-1";
+    cleanupIds.push(id);
+    registry.register(makeLinearWorkflow("cancel_wf3", (taskId) => {
+      // 模拟：cancel 在本 phase 执行中命中（走真实 cancelTaskAction → 转 cancelled + abortRun）
+      cancelTaskAction(taskId);
+      expect(getCurrentAbortSignal()?.aborted).toBe(true);
+      // 模拟 agent.run 因 abort 抛错
+      throw new Error("claude CLI 被取消或超时");
+    }));
+    createTask({ id, title: "t", workflow: "cancel_wf3", initialStatus: "running_develop", requirementId: undefined });
+
+    await executePhase(id, "develop");
+
+    const t = getTask(id);
+    expect(t?.status).toBe("cancelled");
+    // 关键：取消导致的 abort 不计失败（否则 failure_count 会被脏写、UI 误显示"正在重试"）
+    expect((t?.failure_count as number | undefined) ?? 0).toBe(0);
+    expect(t?.last_failure_fingerprint ?? null).toBeNull();
+  });
+});
+
 describe("executePhase · 登记/注入/注销 signal（Task 4）", () => {
   let db: Database;
   const cleanupIds: string[] = [];

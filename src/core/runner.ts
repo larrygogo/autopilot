@@ -265,7 +265,12 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
       }
     }
   } catch (err) {
-    if (err instanceof InvalidTransitionError) {
+    // 取消导致的中止：task 已 cancelled 终态 / signal 已 abort → 静默退出，不计失败、不 forceTransition。
+    // 否则 abort 错误会落进下面的失败计数分支，污染 failure_count（UI 误显示"正在重试"）并 emit
+    // 误导性 phase:error（CONC-09 / 设计稿 §5 最危险回归）。
+    if (controller?.signal.aborted || getTask(taskId)?.status === "cancelled") {
+      log.info("阶段因取消中止，跳过失败计数 [task=%s phase=%s]", taskId, phase);
+    } else if (err instanceof InvalidTransitionError) {
       log.warn("InvalidTransitionError [task=%s phase=%s]: %s", taskId, phase, err.message);
     } else {
       const errMsg = err instanceof Error ? err.stack ?? err.message : String(err);
