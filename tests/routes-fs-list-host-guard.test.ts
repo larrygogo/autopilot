@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { handleRequest, setListenHost } from "../src/daemon/routes";
+import { _setDbForTest, initDb } from "../src/core/db";
+import { runPendingMigrations } from "../src/core/migrate";
 
 // /api/fs/list 守卫按「请求来源 socket IP」判断（不是 daemon 绑定地址）：
 //   本机 loopback 请求放行；局域网远程请求禁用——即使 daemon 绑 0.0.0.0。
@@ -16,6 +19,21 @@ const ipv6LoopbackServer = fakeServer("::1");
 const lanServer = fakeServer("192.168.1.50");
 
 let tmpHome: string;
+let testDb: Database;
+
+// authResolve 现在会调 hasAnyUser() 查 users 表（A2 鉴权），夹具需跑真实迁移建表，
+// 否则抛 "no such table: users"，掩盖真正要测的来源校验逻辑。
+beforeAll(async () => {
+  testDb = new Database(":memory:");
+  _setDbForTest(testDb);
+  initDb();
+  await runPendingMigrations();
+});
+
+afterAll(() => {
+  _setDbForTest(null);
+  testDb.close();
+});
 
 function req(path: string): Request {
   return new Request(`http://127.0.0.1:6180/api/fs/list?path=${encodeURIComponent(path)}`);
