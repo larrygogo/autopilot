@@ -78,3 +78,21 @@ describe("共用沙盒 · ensureTaskSandbox 建 clone（Task 1）", () => {
     expect(readFileSync(join(ws, "README.md"), "utf-8")).toContain("base");
   });
 });
+
+describe("共用沙盒 · 跨 phase 直接可见（Task 2）", () => {
+  it("phase1 在共用 clone 改文件，phase2 在同一 clone 直接看到（无 patch 中转）", async () => {
+    const { runWithTaskContext, getCurrentSandboxDir } = await import("../src/core/task-context");
+    const id = taskId("shr2");
+    ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", path: srcRepo, default_branch: "main" }, "feat/shr2");
+    const ws = getTaskSandbox(id);
+
+    // 模拟 runner：phase1 在注入的共用沙盒里写文件
+    await runWithTaskContext({ taskId: id, phase: "develop", sandboxDir: ws }, async () => {
+      writeFileSync(join(getCurrentSandboxDir()!, "feature.ts"), "export const x = 1;\n", "utf-8");
+    });
+    // phase2：同一共用沙盒应直接看到 phase1 的改动
+    await runWithTaskContext({ taskId: id, phase: "review", sandboxDir: ws }, async () => {
+      expect(existsSync(join(getCurrentSandboxDir()!, "feature.ts"))).toBe(true);
+    });
+  });
+});
