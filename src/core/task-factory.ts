@@ -2,7 +2,7 @@ import { getTask, createTask, updateTask, clearTaskRunHistory } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { prepareDeliverMeta, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskArtifactsDir, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
+import { ensureTaskSandbox, prepareDeliverMeta, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskArtifactsDir, getTaskSandbox, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
 import { purgeAgentRuns } from "./agent-sandbox";
 import { rmSync } from "fs";
 import { getWorkspaceById } from "./workspaces";
@@ -164,22 +164,21 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     }
   }
   try {
-    // 即焚模型：只写交付元数据（.worktree.json），不建常驻 clone；代码副本由 agent-sandbox 即用即焚。
-    prepareDeliverMeta(taskId, workspace, deliverBranchName(title, taskId));
+    // 共用沙盒模型：task 启动时建一个独立 clone（源仓库零痕迹），所有 phase 共用它直接改文件。
+    ensureTaskSandbox(taskId, workflowName, wf.sandbox, workspace, deliverBranchName(title, taskId));
   } catch (e: unknown) {
-    console.warn("prepareDeliverMeta 失败：", e instanceof Error ? e.message : e);
+    console.warn("ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
   }
 
-  // 框架标准字段注入：worktree 建成功时，把隔离 worktree 的物理路径/分支/base 写进
-  // extra，覆盖 setup_func 可能返回的占位值（如 dev 模板旧的 config.repo_path）。
-  // workspace→物理路径解析是通用基础设施（注入的是路径事实，非工作流业务概念），
-  // 不违反"核心零业务知识"红线。run 阶段统一在这个隔离 worktree 里跑 git。
+  // 框架标准字段注入：clone 建成功时，把物理路径/分支/base 写进 extra（写进 manifest 供 run
+  // 阶段用）。workspace→物理路径解析是通用基础设施（注入路径事实，非业务概念），不违反红线。
   const worktreeMeta = getTaskWorktreeMeta(taskId);
   if (worktreeMeta) {
-    // 即焚模型无常驻 clone：不注入 repo_path（phase 用 getCurrentSandboxDir 拿即焚副本）。
     extra["default_branch"] = worktreeMeta.base;
     extra["branch"] = worktreeMeta.branch;
     extra["workspace_path"] = worktreeMeta.workspace_path;
+    // 共用沙盒：注入 repo_path = 共用 clone 路径，供 phase 直接当 cwd。
+    extra["repo_path"] = getTaskSandbox(taskId);
   }
 
   const firstPhaseEntry = wf.phases[0];
