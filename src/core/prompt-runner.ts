@@ -22,6 +22,7 @@ import { agentForPhase } from "../agents/registry";
 import type { InlineAgentConfig } from "./agent-defaults";
 import { getTask } from "./db";
 import { getTaskSandbox, getTaskArtifactsDir } from "./sandbox";
+import { getCurrentSandboxDir } from "./task-context";
 import { getPhaseIndex } from "./artifacts";
 import { getWorkflow, type PhaseDefinition, type WorkflowDefinition } from "./registry";
 import { createLogger } from "./logger";
@@ -30,6 +31,21 @@ import { emit } from "./event-bus";
 import { appendTaskEvent } from "./task-logs";
 
 const log = createLogger("prompt-runner");
+
+/**
+ * 解析 phase 的代码工作目录（agent cwd 与 ${WORKSPACE} 占位符）。
+ *
+ * 优先级：显式覆盖（测试夹具）> 即焚 sandbox 副本（runner acquire 后经 task-context 注入）
+ * > 旧常驻 getTaskSandbox（非 git 工作流 / 无即焚副本时兜底）。
+ *
+ * **必须优先 getCurrentSandboxDir()**：即焚模型下 getTaskSandbox 目录从不创建，
+ * 若直接用它，prompt 模式 agent 会在空目录里跑 git，captureAgentSandbox diff 恒空 →
+ * cumulative.patch 永空 → submit_pr 推零改动 PR，静默丢失全部工作成果（EPH-01）。
+ * 与 dev workflow.ts 各 phase 的 `getCurrentSandboxDir() ?? ...` 取 cwd 方式对齐。
+ */
+function resolveCodeRoot(taskId: string, override?: string): string {
+  return override ?? getCurrentSandboxDir() ?? getTaskSandbox(taskId);
+}
 
 /** 同一 phase 内 pending_prompts 消费循环上限（防意外死循环 / 用户疯狂排队） */
 const MAX_PROMPT_TURNS = 10;
@@ -83,7 +99,7 @@ export function expandPromptTemplate(
 ): string {
   // 代码路径（${WORKSPACE} 给 agent）与产物路径（handoff 读取）分离：产物在 artifacts/，
   // 代码在 sandbox（Step 4 起为即焚临时 clone）。测试传 ctx.workspaceRoot 时两者同源。
-  const codeRoot = ctx.workspaceRoot ?? getTaskSandbox(ctx.taskId);
+  const codeRoot = resolveCodeRoot(ctx.taskId, ctx.workspaceRoot);
   const artifactsRoot = ctx.workspaceRoot ?? getTaskArtifactsDir(ctx.taskId);
   const builtins: Record<string, string> = {
     TASK_ID: ctx.taskId,
@@ -290,7 +306,7 @@ export function makePromptRunner(
     while (turn < MAX_PROMPT_TURNS) {
       turn++;
       const result = await agent.run(currentPrompt, {
-        cwd: getTaskSandbox(taskId),
+        cwd: resolveCodeRoot(taskId),
         timeout: (options.timeoutSec ?? 900) * 1000,
       });
 

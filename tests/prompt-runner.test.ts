@@ -4,6 +4,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { expandPromptTemplate, tryMakePromptRunnerForPhase } from "../src/core/prompt-runner";
 import { _clearRegistry, loadYamlWorkflow, register, type PhaseDefinition } from "../src/core/registry";
+import { runWithTaskContext } from "../src/core/task-context";
 
 let tmpHome: string;
 
@@ -54,6 +55,42 @@ describe("expandPromptTemplate", () => {
     const out = expandPromptTemplate("ws=${WORKSPACE}", ctx);
     expect(out).toMatch(/ws=.+/);
     expect(out).not.toContain("${WORKSPACE}");
+  });
+});
+
+// 即焚 sandbox 模型下 ${WORKSPACE} / agent cwd 必须指向 runner 注入的即焚副本，而非旧常驻
+// getTaskSandbox 目录（即焚下从不创建）。否则 prompt 模式 agent 在空目录跑 git、改动全丢（EPH-01）。
+describe("expandPromptTemplate × 即焚 sandbox 上下文（EPH-01 回归）", () => {
+  const baseCtx = {
+    taskId: "t1",
+    phase: "develop",
+    task: { title: "x", requirement: "y" },
+  };
+
+  it("phase 在即焚 sandbox 上下文里 → ${WORKSPACE} 取即焚副本目录，而非旧常驻路径", () => {
+    const ephemeral = join(tmpHome, "agent-runs", "develop-abc123");
+    const out = runWithTaskContext(
+      { taskId: "t1", phase: "develop", sandboxDir: ephemeral },
+      () => expandPromptTemplate("ws=${WORKSPACE}", baseCtx),
+    ) as string;
+    expect(out).toBe(`ws=${ephemeral}`);
+    expect(out).not.toContain(join("tasks", "t1", "workspace"));
+  });
+
+  it("无即焚 sandbox（sandboxDir undefined）→ 回退旧常驻 getTaskSandbox 路径（非 git 工作流不回归）", () => {
+    const out = runWithTaskContext(
+      { taskId: "t1", phase: "develop", sandboxDir: undefined },
+      () => expandPromptTemplate("ws=${WORKSPACE}", baseCtx),
+    ) as string;
+    expect(out).toContain(join("tasks", "t1", "workspace"));
+  });
+
+  it("ctx.workspaceRoot 显式覆盖优先级最高（测试夹具语义不变）", () => {
+    const out = runWithTaskContext(
+      { taskId: "t1", phase: "develop", sandboxDir: join(tmpHome, "ephemeral") },
+      () => expandPromptTemplate("ws=${WORKSPACE}", { ...baseCtx, workspaceRoot: "/override" }),
+    ) as string;
+    expect(out).toBe("ws=/override");
   });
 });
 
