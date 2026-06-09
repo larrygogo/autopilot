@@ -127,6 +127,7 @@ import {
   answerTaskAction,
   decideTaskAction,
   releaseTaskSandboxAction,
+  cancelRequirementWithTasks,
   TaskActionError,
 } from "./task-actions";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
@@ -1012,12 +1013,12 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.cancel",
-    description: "取消需求",
+    description: "取消需求（级联停名下运行中任务）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
-      return { requirement: setRequirementStatus(p.id, "cancelled") };
+      return cancelRequirementWithTasks(p.id);
     },
   });
 

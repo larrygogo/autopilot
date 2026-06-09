@@ -384,7 +384,13 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
       {/* 任务状态摘要（当前阶段 / 耗时 / 失败原因） */}
       <TaskProgressCard taskId={taskId} showDetailLink={false} showActions={false} />
 
-      <TaskPhaseTimeline workflowPhases={workflowPhasesList} events={phaseEvents} phaseStats={phaseStats} />
+      <TaskPhaseTimeline
+        workflowPhases={workflowPhasesList}
+        events={phaseEvents}
+        phaseStats={phaseStats}
+        frozen={isTerminal(task.status, graph?.terminalStates)}
+        terminalTime={task.updated_at}
+      />
 
       {task.dangling && task.status?.startsWith("running_") && (
         <DanglingBanner taskId={taskId} toast={toast} />

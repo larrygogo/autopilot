@@ -8,6 +8,10 @@ export interface TaskPhaseTimelineProps {
   events: TaskPhaseEvent[];
   /** 同 workflow 历史 phase 耗时 P50 — 给"还要多久"参考（可选；缺失时不显示参考线） */
   phaseStats?: Record<string, { count: number; p50_ms: number }>;
+  /** 任务已进入终态，计时器冻结停止 */
+  frozen?: boolean;
+  /** task.updated_at，终态时刻；预留给未来「完成于 XX 时」显示 */
+  terminalTime?: string;
 }
 
 interface PhaseSummary {
@@ -64,17 +68,18 @@ function StatusText({ status }: { status: PhaseSummary["latestStatus"] }) {
   }
 }
 
-export function TaskPhaseTimeline({ workflowPhases, events, phaseStats }: TaskPhaseTimelineProps) {
+export function TaskPhaseTimeline({ workflowPhases, events, phaseStats, frozen, terminalTime }: TaskPhaseTimelineProps) {
   const summaries = useMemo(() => aggregate(events, workflowPhases), [events, workflowPhases]);
   const [now, setNow] = useState(Date.now());
 
-  // 有进行中 phase 时 1Hz 重渲，让 elapsed 滚动
+  // 有进行中 phase 时 1Hz 重渲，让 elapsed 滚动；终态时跳过，避免僵尸事件驱动 timer 空转
   useEffect(() => {
+    if (frozen) return;
     const hasRunning = summaries.some((s) => s.runningStartedAt !== null);
     if (!hasRunning) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [summaries]);
+  }, [summaries, frozen]);
 
   // 当前进行中 phase 在序列里的位置（1-based）；没有进行中时 = 已完成最末位 + 1
   const currentIndex = useMemo(() => {
@@ -99,7 +104,11 @@ export function TaskPhaseTimeline({ workflowPhases, events, phaseStats }: TaskPh
       </header>
       <ul className="divide-y divide-border">
         {summaries.map((s, idx) => {
-          const runningMs = s.runningStartedAt !== null ? now - s.runningStartedAt : 0;
+          // frozen 时 runningMs 强制为 0：僵尸事件持续时长不可信，只展示已完成 event 精确累计值
+          // Math.max(0, ...) 防止时钟回拨导致的负值
+          const runningMs = (s.runningStartedAt !== null && !frozen)
+            ? Math.max(0, now - s.runningStartedAt)
+            : 0;
           const displayMs = s.totalMs + runningMs;
           const isActive = s.runningStartedAt !== null || s.latestStatus === "awaiting";
           const ref = phaseStats?.[s.phase];

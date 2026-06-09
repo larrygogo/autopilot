@@ -12,7 +12,8 @@
 
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
-import { getTask, updateTask, closeOpenPhaseEvents } from "../core/db";
+import { getTask, updateTask, closeOpenPhaseEvents, listRootTasksByRequirementIds } from "../core/db";
+import { setRequirementStatus, type Requirement } from "../core/requirements";
 import { transition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { getWorkflow, buildTransitions, isParallelPhase } from "../core/registry";
@@ -91,6 +92,26 @@ export function releaseTaskSandboxAction(taskId: string): { removed: boolean } {
 }
 
 // ──────────────────────────────────────────────
+// cancelRequirementWithTasks — 取消需求并级联停名下任务
+// ──────────────────────────────────────────────
+
+/**
+ * 取消需求：先级联停名下运行中任务（best-effort），再置需求为 cancelled。RPC + REST 共用，
+ * 避免任一侧漏掉级联（SC-1）。否则取消后 task 继续烧 token / 占 sandbox，且 scheduler 的
+ * active 过滤不含 cancelled，可能并发起第二个 task；task 最终 transition 时撞终态需求留不一致。
+ */
+export function cancelRequirementWithTasks(reqId: string): { requirement: Requirement } {
+  for (const t of listRootTasksByRequirementIds([reqId])) {
+    try {
+      cancelTaskAction(t.id);
+    } catch {
+      /* 已终态 / 不存在：忽略，下面置需求 cancelled 兜底 */
+    }
+  }
+  return { requirement: setRequirementStatus(reqId, "cancelled") };
+}
+
+// ──────────────────────────────────────────────
 // restartTaskAction — 从当前阶段重新执行（dangling 救援）
 // ──────────────────────────────────────────────
 
@@ -105,6 +126,17 @@ export function restartTaskAction(taskId: string): { ok: true; phase: string; fr
     throw new TaskActionError(
       "ALREADY_TERMINAL",
       `Task 已是终态（${task.status}），无法重启；请新建任务`,
+    );
+  }
+
+  // 仍在运行（持文件锁）时不重启：会把 status 翻到 pending_<phase> 但新 executePhase 抢锁
+  // 失败直接 return，原 phase 完成时 status≠running_state 跳过推进 → 永久卡死 pending（SC-2）。
+  // 与 resetTaskForRerun 的并发守卫对齐。
+  if (task.status.startsWith("running_") && isLocked(taskId)) {
+    throw new TaskActionError(
+      "INVALID_STATE",
+      `task ${taskId} 仍在运行中，无法重启（请先取消或等待当前阶段结束）`,
+      409,
     );
   }
 

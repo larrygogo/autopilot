@@ -33,7 +33,7 @@ import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
 import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "../core/task-delete";
-import { cancelTaskAction, restartTaskAction, answerTaskAction, decideTaskAction, releaseTaskSandboxAction, TaskActionError } from "./task-actions";
+import { cancelTaskAction, restartTaskAction, answerTaskAction, decideTaskAction, releaseTaskSandboxAction, cancelRequirementWithTasks, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { listWorkspaces, getWorkspaceById, getTopWorkspaceForProject } from "../core/workspaces";
 import { listSubPrs } from "../core/requirement-sub-prs";
@@ -763,7 +763,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     if (reqCancelMatch && method === "POST") {
       if (!getRequirementById(reqCancelMatch)) return error("requirement not found", 404);
       try {
-        return json({ requirement: setRequirementStatus(reqCancelMatch, "cancelled") });
+        return json(cancelRequirementWithTasks(reqCancelMatch));
       } catch (e: unknown) {
         return error((e as Error).message);
       }

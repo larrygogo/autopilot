@@ -220,6 +220,9 @@ describe("requirements CRUD + 状态机", () => {
     expect(canTransitionStatus("running", "cancelled")).toBe(true);
     // dogfood-bug3: awaiting_approval → queued（之前 enqueue 报"非法状态转换"）
     expect(canTransitionStatus("awaiting_approval", "queued")).toBe(true);
+    // SC-4: awaiting_review → failed（task 在 await_review 期失败时 bridge 要能同步，
+    // 否则需求永卡 awaiting_review、pr-poller 持续轮询死 task）
+    expect(canTransitionStatus("awaiting_review", "failed")).toBe(true);
   });
 
   it("updateRequirement 部分字段 + 不改 status", () => {
