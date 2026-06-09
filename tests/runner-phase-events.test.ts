@@ -177,4 +177,31 @@ describe("runner phase events 集成", () => {
     expect(events[0]!.status).toBe("awaiting");
     expect(events[0]!.ended_at).not.toBeNull();
   });
+
+  it("phase 函数自己 transition（自转移工作流）→ finally 兜底 close，无僵尸 running event（ERL-1/ERL-2）", async () => {
+    const { forceTransition } = await import("../src/core/state-machine");
+    // 模拟 dev 工作流：phase 函数自己把状态转走（自转移），使 executePhase 的守卫块
+    // current.status === running_state（runner.ts:220）为假而整体跳过 close。
+    const phaseFn = async (taskId: string) => {
+      forceTransition(taskId, "done", "test: phase 自转移");
+    };
+    registryModule.register(makeNormalWorkflow(phaseFn) as any);
+
+    createTask({
+      id: "task-pe-selftrans",
+      title: "test",
+      workflow: "pe_normal_wf",
+      initialStatus: "pending_design",
+    });
+
+    await runnerModule.executePhase("task-pe-selftrans", "design");
+
+    // ERL-1 回归：自转移后该 phase event 仍被 executePhase 的 finally 兜底 close（修前会留
+    // status='running'/ended_at=null 的僵尸 → Web 阶段进度恒"进行中"+耗时虚高 + P50 失真）。
+    const events = listTaskPhaseEvents("task-pe-selftrans");
+    expect(events.length).toBe(1);
+    expect(events[0]!.phase).toBe("design");
+    expect(events[0]!.status).toBe("done");
+    expect(events[0]!.ended_at).not.toBeNull();
+  });
 });
