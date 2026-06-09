@@ -19,8 +19,11 @@ export class Agent {
     const ctx = getTaskContext();  // 来自 runner 的 AsyncLocalStorage
     // L0 环境隔离：task 执行中的 agent 子进程改用沙箱内独立 AUTOPILOT_HOME，防 agent 跑
     // autopilot 命令污染用户真实 daemon/DB（沙箱此前只隔离代码、运行时未隔离）。
+    // signal：显式传入优先，否则用 task-context 注入的 per-task 取消令牌（CONC-09）。
+    // 注入点放在 Agent.run 而非各 phaseFn —— 所有走 agent.run 的 phase（含 prompt-runner 零代码模式）
+    // 都自动获得可中断能力，无需逐个 phaseFn 改造。
     const runOptions: RunOptions | undefined = ctx
-      ? { ...options, env: { ...options?.env, AUTOPILOT_HOME: getTaskAgentHome(ctx.taskId) } }
+      ? { ...options, signal: options?.signal ?? ctx.signal, env: { ...options?.env, AUTOPILOT_HOME: getTaskAgentHome(ctx.taskId) } }
       : options;
     const started = Date.now();
     let result: AgentResult | undefined;

@@ -9,6 +9,12 @@ import {
   runWithTaskContext,
   getCurrentAbortSignal,
 } from "../src/core/task-context";
+import { Agent } from "../src/agents/agent";
+import { BaseProvider } from "../src/agents/providers/base";
+import type { AgentResult, RunOptions } from "../src/agents/types";
+import { rmSync } from "fs";
+import { join } from "path";
+import { AUTOPILOT_HOME } from "../src/index";
 
 afterEach(() => {
   _clearRunsForTest();
@@ -56,5 +62,60 @@ describe("task-context · 注入 signal（Task 2）", () => {
     runWithTaskContext({ taskId: "t", phase: "develop" }, () => {
       expect(getCurrentAbortSignal()).toBeUndefined();
     });
+  });
+});
+
+class CaptureProvider extends BaseProvider {
+  captured: RunOptions | undefined;
+  constructor() {
+    super({});
+  }
+  async run(_prompt: string, options?: RunOptions): Promise<AgentResult> {
+    this.captured = options;
+    return { text: "ok" };
+  }
+  async close(): Promise<void> {}
+}
+
+describe("agent.run · 透传 ctx.signal（Task 3）", () => {
+  const cleanupIds: string[] = [];
+  afterEach(() => {
+    for (const id of cleanupIds) {
+      try { rmSync(join(AUTOPILOT_HOME, "runtime", "tasks", id), { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    cleanupIds.length = 0;
+  });
+
+  it("在带 signal 的 task-context 内调 agent.run，provider 收到该 signal", async () => {
+    const provider = new CaptureProvider();
+    const agent = new Agent("test", provider, { name: "test", provider: "anthropic" });
+    const controller = new AbortController();
+    const id = "agtcap-1";
+    cleanupIds.push(id);
+
+    await runWithTaskContext(
+      { taskId: id, phase: "develop", signal: controller.signal },
+      async () => {
+        await agent.run("hi", { cwd: "/tmp" });
+      },
+    );
+    expect(provider.captured?.signal).toBe(controller.signal);
+  });
+
+  it("显式传入的 signal 优先于 ctx.signal", async () => {
+    const provider = new CaptureProvider();
+    const agent = new Agent("test", provider, { name: "test", provider: "anthropic" });
+    const ctxSignal = new AbortController().signal;
+    const explicit = new AbortController().signal;
+    const id = "agtcap-2";
+    cleanupIds.push(id);
+
+    await runWithTaskContext(
+      { taskId: id, phase: "develop", signal: ctxSignal },
+      async () => {
+        await agent.run("hi", { cwd: "/tmp", signal: explicit });
+      },
+    );
+    expect(provider.captured?.signal).toBe(explicit);
   });
 });
