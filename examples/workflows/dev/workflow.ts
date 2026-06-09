@@ -338,7 +338,7 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const branch = task["branch"] as string;
   const defaultBranch = (task["default_branch"] as string) ?? "main";
 
-  // 即焚副本已 apply 累积 patch（改动在工作树），先落成交付 commit（空改动时容错不报错）。
+  // 共用沙盒：各 phase 的改动已直接累积在工作树，submit_pr 落成交付 commit（空改动时容错不报错）。
   runGit(["add", "-A"], repoPath);
   runGit(["commit", "-m", `feat: ${task.title}`], repoPath, false);
   // 普通 push（不 --force）：重跑时 resetTaskForRerun 已删远程上一轮交付分支（幂等清旧轮，
