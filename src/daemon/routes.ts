@@ -276,26 +276,54 @@ export function tokenEquals(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb);
 }
 
-function checkAuth(req: Request, server?: import("bun").Server<undefined>): boolean {
-  if (!API_TOKEN) return true;
+/**
+ * 统一鉴权裁决（HTTP + WS 共用，消除「HTTP 认 JWT 但 WS 不认」两套逻辑漂移）。返回 true=放行。
+ * 规则（短路）：1 loopback 豁免 → 2 API token → 3 JWT cookie(hasAnyUser 时) → 4 零配置(!token&&!user) → 5 拒绝。
+ * loopback 必须在 JWT 之前短路（CLI/TUI/本机命脉，且 JWT async 异常不波及本机）。
+ */
+export async function authResolve(
+  req: Request,
+  server?: import("bun").Server<undefined>,
+): Promise<boolean> {
+  // 1. 本机 loopback 永远豁免（按 socket peer IP，不可伪造）
   if (isLoopbackSocket(server, req)) return true;
-  const header = req.headers.get("authorization") ?? "";
-  if (header.startsWith("Bearer ") && tokenEquals(header.slice(7), API_TOKEN)) return true;
-  const xToken = req.headers.get("x-autopilot-token");
-  if (xToken && tokenEquals(xToken, API_TOKEN)) return true;
-  // URL query string fallback：浏览器 WebSocket API 不能自定义 header，
-  // 只能把 token 塞 URL；HTTP 走 fetch 通常用 header，但 query 路径也开着兜底。
-  try {
-    const url = new URL(req.url);
-    const q = url.searchParams.get("token");
-    if (q && tokenEquals(q, API_TOKEN)) return true;
-  } catch { /* ignore URL parse 失败 */ }
+  // 2. API token 路径（机器/CI）—— Bearer / X-Autopilot-Token / ?token=
+  if (API_TOKEN) {
+    const header = req.headers.get("authorization") ?? "";
+    if (header.startsWith("Bearer ") && tokenEquals(header.slice(7), API_TOKEN)) return true;
+    const xToken = req.headers.get("x-autopilot-token");
+    if (xToken && tokenEquals(xToken, API_TOKEN)) return true;
+    // 浏览器 WebSocket API 不能自定义 header，只能把 token 塞 URL；HTTP 也开着兜底。
+    try {
+      const q = new URL(req.url).searchParams.get("token");
+      if (q && tokenEquals(q, API_TOKEN)) return true;
+    } catch { /* URL parse 失败忽略 */ }
+  }
+  // 3. JWT cookie 路径（人/浏览器）—— HTTP 与 WS 同此分支（消除半不一致）
+  if (hasAnyUser()) {
+    const jwt = extractJwtFromCookie(req);
+    if (jwt) {
+      try { await verifyJwt(jwt); return true; }
+      catch (e: unknown) { /* 无效/过期 → 落拒绝 */ }
+    }
+  }
+  // 4. 既没 token 也没用户 → auth 未启用，放行（零配置全新用户）
+  if (!API_TOKEN && !hasAnyUser()) return true;
+  // 5. 启用了某种 auth 但凭证缺失/无效
   return false;
 }
 
-/** 仅 WebSocket upgrade 路径使用 —— 不复用 checkAuth 是为了避免 server 参数变成可选时静默通过。 */
-export function checkWebSocketAuth(req: Request, server: import("bun").Server<undefined>): boolean {
-  return checkAuth(req, server);
+/** WebSocket upgrade 路径 —— 与 HTTP 同口径（server 必填）。 */
+export function checkWebSocketAuth(req: Request, server: import("bun").Server<undefined>): Promise<boolean> {
+  return authResolve(req, server);
+}
+
+/**
+ * 启动门谓词（SEC-6）：暴露 host 上必须已设防（有 API token 或有登录用户）才放行启动。
+ * A2 后 JWT 是服务端一等鉴权，故「有用户」等同于设了防。纯函数，便于测试。
+ */
+export function startupAuthBlocked(host: string, tokenIsSet: boolean, hasUser: boolean, insecure: boolean): boolean {
+  return isExposedHost(host) && !(tokenIsSet || hasUser) && !insecure;
 }
 
 // ──────────────────────────────────────────────
@@ -488,20 +516,10 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     if (authResult) return authResult;
   }
 
-  // Token 鉴权（仅在 /api/* 上生效，静态资源不需要）
-  // 回落策略：API token 不通时再检查 JWT cookie（Web UI 登录后用此方式鉴权）
-  if (path.startsWith("/api/") && !checkAuth(req, server)) {
-    const jwtToken = extractJwtFromCookie(req);
-    if (jwtToken) {
-      try {
-        await verifyJwt(jwtToken);
-        // JWT 有效，放行
-      } catch {
-        return error("Unauthorized", 401);
-      }
-    } else {
-      return error("Unauthorized", 401);
-    }
+  // 鉴权（仅 /api/* 生效，静态资源不需要）：loopback / API token / JWT cookie 任一通过即放行，
+  // 统一走 authResolve（HTTP 与 WS 同口径，消除半不一致）。
+  if (path.startsWith("/api/") && !(await authResolve(req, server))) {
+    return error("Unauthorized", 401);
   }
 
   try {

@@ -38,7 +38,7 @@ export function startServer(opts: { host: string; port: number }): Server<undefi
       // WebSocket 升级 —— 跟 /api/* 同样要过 token 鉴权（loopback 来源豁免）。
       // 否则开 0.0.0.0 后任何人连 WS 就能订阅所有 task/log/事件，绕过整个 token 体系。
       if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-        if (!checkWebSocketAuth(req, server)) {
+        if (!(await checkWebSocketAuth(req, server))) {
           return new Response("Unauthorized", { status: 401 });
         }
         const success = server.upgrade(req);
