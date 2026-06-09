@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { readdir } from "node:fs/promises";
+import { timingSafeEqual } from "node:crypto";
 import { join, resolve, sep, dirname, parse as parsePath } from "path";
 import {
   signJwt,
@@ -267,18 +268,28 @@ function isLoopbackSocket(server: import("bun").Server<undefined> | undefined, r
   }
 }
 
+/** 常量时间字符串比较，避免 token 逐字符早退泄露的时序侧信道（SEC-3）。 */
+export function tokenEquals(a: string, b: string): boolean {
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  // 长度不等 timingSafeEqual 会抛；长度本身非高度机密，直接早退可接受。
+  if (ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
+}
+
 function checkAuth(req: Request, server?: import("bun").Server<undefined>): boolean {
   if (!API_TOKEN) return true;
   if (isLoopbackSocket(server, req)) return true;
   const header = req.headers.get("authorization") ?? "";
-  if (header.startsWith("Bearer ") && header.slice(7) === API_TOKEN) return true;
-  if (req.headers.get("x-autopilot-token") === API_TOKEN) return true;
+  if (header.startsWith("Bearer ") && tokenEquals(header.slice(7), API_TOKEN)) return true;
+  const xToken = req.headers.get("x-autopilot-token");
+  if (xToken && tokenEquals(xToken, API_TOKEN)) return true;
   // URL query string fallback：浏览器 WebSocket API 不能自定义 header，
   // 只能把 token 塞 URL；HTTP 走 fetch 通常用 header，但 query 路径也开着兜底。
   try {
     const url = new URL(req.url);
     const q = url.searchParams.get("token");
-    if (q && q === API_TOKEN) return true;
+    if (q && tokenEquals(q, API_TOKEN)) return true;
   } catch { /* ignore URL parse 失败 */ }
   return false;
 }
@@ -453,6 +464,12 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
   // MCP HTTP server：claude CLI 通过 --mcp-config 连入，走自己的 Bearer 鉴权，
   // 不复用 /api/* 的 AUTOPILOT_API_TOKEN，也不需要 CORS（来源是本机 claude 子进程）。
   if (path === "/mcp") {
+    // MCP 客户端永远是本机 claude 子进程（URL 回退 127.0.0.1）；即便 daemon 绑 0.0.0.0，
+    // 也不该把可触发 start_task/cancel_task 的 /mcp 暴露到局域网。按请求来源 socket IP 判定
+    // （不可伪造、不看 Host 头），与 /api/fs/list 同款 loopback 闸（SEC-2）。
+    if (!isLoopbackSocket(server, req)) {
+      return error("mcp-disabled-on-public-bind", 403);
+    }
     const token = getMcpToken();
     // 防御深度：daemon 启动顺序已把 initMcpRuntime 提前到 server 之前，
     // 但万一未来重构破坏顺序，这里也得拒绝请求 —— mcp-server.checkAuth 把空
