@@ -16,7 +16,9 @@ export class DeleteTaskError extends Error {
 }
 
 function terminalStatesFor(task: Task): Set<string> {
-  const set = new Set<string>(["done", "cancelled"]);
+  // failed 是 runner/watcher 普遍写入的执行失败终态，必须并入基础集（RERUN-04）：否则自定义
+  // 工作流显式声明 terminal_states 漏掉 failed 时，删 failed 任务会被 cascadeDeleteTask 误拒。
+  const set = new Set<string>(["done", "cancelled", "failed"]);
   const wf = getWorkflow(task.workflow);
   for (const s of wf?.terminal_states ?? []) set.add(s);
   return set;

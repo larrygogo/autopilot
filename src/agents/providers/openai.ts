@@ -31,8 +31,9 @@ export class OpenAIProvider extends BaseProvider {
 
     // signal + timeout → AbortController
     const abort = new AbortController();
+    const onUpstreamAbort = () => abort.abort();
     if (options?.signal) {
-      options.signal.addEventListener("abort", () => abort.abort());
+      options.signal.addEventListener("abort", onUpstreamAbort);
     }
     const timer = options?.timeout
       ? setTimeout(() => abort.abort(), options.timeout)
@@ -69,6 +70,8 @@ export class OpenAIProvider extends BaseProvider {
       throw e;
     } finally {
       if (timer) clearTimeout(timer);
+      // 对称移除 upstream abort listener（ERL-5），与 anthropic.ts 一致，避免长寿 signal 泄漏。
+      if (options?.signal) options.signal.removeEventListener("abort", onUpstreamAbort);
     }
 
     // 解析 JSONL：取最后一条 agent_message / assistant_message / item.completed 文本

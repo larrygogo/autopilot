@@ -171,7 +171,7 @@ autopilot/
 - 快捷起任务（`task start "<描述>"` / 一句话发包 `startAdHoc`）也**先建真需求**：`runClarifierExtract` 把描述抽成 title+spec → 建需求（进需求池）→ 有 workspace 走调度器（`requirement-scheduler`，同仓库串行）、纯 adhoc 直接起。CLI 参数/退出码不变。helper 在 `src/daemon/start-from-prompt.ts`。
 - 当前为 Phase 1（应用层强制 `requirement_id` 非空 + 迁移 023 回填历史游离任务，可回退）。**Phase 2 未做**：DB 列改 NOT NULL + FK（表重建、不可逆），dogfood 确认无新游离任务再单独上。
 
-向后兼容：`/api/repos` 路由别名保留至 P6 清理（≈90 天）；`Requirement.repo_id` 已于 P1 改名 `codebase_id`、Phase 2（2026-06）再改名 `workspace_id`。RPC 层对旧 `codebase_id`/`codebase_alias` 入参仍做读时兼容（迁移期防御）。
+向后兼容：`/api/repos`/`/api/workspaces` 等 HTTP 路由已于 Phase 1 全量迁至 WS RPC（`workspaces.*`），不再保留 HTTP 别名；`Requirement.repo_id` 已于 P1 改名 `codebase_id`、Phase 2（2026-06）再改名 `workspace_id`。RPC 层对旧 `codebase_id`/`codebase_alias` 入参仍做读时兼容（迁移期防御）。
 
 ## Claude Code 协作角色（`.claude/agents/`）
 

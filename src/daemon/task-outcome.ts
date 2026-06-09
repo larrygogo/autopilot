@@ -171,10 +171,11 @@ async function computeDiffStat(workspacePath: string, baseBranch: string): Promi
       stderr: "pipe",
       signal: controller.signal,
     });
-    const exitCode = await proc.exited;
+    // 并发 drain stdout 与等退出（ERL-4）：先 await exited 再读 stdout 是死锁形态（输出超
+    // pipe 缓冲会互锁）；--shortstat 输出极小不会真死锁，但仍按正确范式写。
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     clearTimeout(timer);
     if (exitCode !== 0) return null;
-    const stdout = await new Response(proc.stdout).text();
     const m = stdout.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
     if (!m) return { files: 0, insertions: 0, deletions: 0 };
     return {

@@ -248,11 +248,18 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   runRetention();
   const retentionTimer = setInterval(runRetention, RETENTION_INTERVAL_MS);
 
-  // scheduler 定时器：扫描到期的 schedule，创建对应任务
+  // scheduler 定时器：扫描到期的 schedule，创建对应任务。
+  // 重入守卫（CONC-04）：单 tick 可能涉及 agent 抽取耗时数秒，无守卫时重叠的两个 tick 会在
+  // 任一 markScheduleFired 之前各自命中同一 due schedule 双触发。
+  let schedulerRunning = false;
   const schedulerTimer = setInterval(() => {
-    runScheduledTasks().catch((e: unknown) => {
-      console.error("scheduler 异常：", e instanceof Error ? e.message : String(e));
-    });
+    if (schedulerRunning) return;
+    schedulerRunning = true;
+    runScheduledTasks()
+      .catch((e: unknown) => {
+        console.error("scheduler 异常：", e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => { schedulerRunning = false; });
   }, SCHEDULER_INTERVAL_MS);
 
   // pr-poller 定时器：扫 awaiting_review 需求的 PR，自动注入 review 反馈 / 标 done

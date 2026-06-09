@@ -320,6 +320,14 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
       }
     }
   } finally {
+    // 兜底关闭仍开着的 phase event（ERL-2）：成功/失败/挂起三条主路径各自 close 后置 null；
+    // 但「phase 函数自己 transition 致守卫块整体跳过」等边缘路径会留下永久 running 的僵尸
+    // event（让阶段进度 UI 恒显示"进行中"+耗时虚高）。这里统一收尾。endTaskPhase 对已 close
+    // 的 id 静默，已置 null 的路径不会被二次写。
+    if (phaseEventId !== null) {
+      try { endTaskPhase(phaseEventId, "done"); } catch { /* 防御 */ }
+      phaseEventId = null;
+    }
     resetPhase();
     releaseLock(taskId);
     // 只在任务进入终态时才关闭 agent 连接，避免破坏会话复用

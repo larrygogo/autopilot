@@ -142,6 +142,9 @@ export function _setDbForTest(db: Database | null): void {
 export function initDb(): void {
   const db = getDb();
   db.run("PRAGMA journal_mode=WAL");
+  // 写锁竞争时自旋重试至多 5s 而非立即抛 SQLITE_BUSY（CONC-07）：daemon 与 run-phase 子进程
+  // 并发写同库的窄窗口下兜底。per-connection 设置，initDb 是唯一规范初始化入口故两端都覆盖。
+  db.run("PRAGMA busy_timeout=5000");
   db.run("PRAGMA foreign_keys=ON");
   db.exec(SCHEMA);
 }

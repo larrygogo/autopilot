@@ -984,7 +984,7 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.transition",
-    description: "手动转移状态（管理员级，绕过验证不太严格）",
+    description: "手动转移需求状态（仍走状态机校验，非法转换会被拒）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
@@ -1516,6 +1516,11 @@ export function registerCoreRpcMethods(): void {
           const proj = coreCreateProject({ id: nextProjectId(), name: "default" });
           projectId = proj.id;
         }
+      }
+      // 1:1 守卫（DM-06）：与 workspaces.create / projects.createForProject 一致，把"项目已有
+      // 顶层 workspace"的裸 SQLite UNIQUE 约束错换成结构化 RpcError。
+      if (projectHasTopWorkspace(projectId)) {
+        throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
       }
       const detected = detectWorkspaceGit(pathField);
       const ws = createWorkspace({

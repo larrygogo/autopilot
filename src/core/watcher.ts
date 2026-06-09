@@ -6,47 +6,8 @@ import { forceTransition } from "./state-machine";
 import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./registry";
 import type { PhaseDefinition, ParallelDefinition } from "./registry";
 import { emit } from "./event-bus";
-import { applyRetentionPolicy, loadRetentionPolicy, getTaskSandbox } from "./sandbox";
-import { existsSync, readdirSync, statSync } from "fs";
-import { join } from "path";
+import { applyRetentionPolicy, loadRetentionPolicy } from "./sandbox";
 
-/**
- * 递归扫 task sandbox 拿到最新文件 mtime（毫秒）。
- * 用于 watcher 判断卡死：task.updated_at 只在状态切换时更新，
- * 但 agent 长跑（develop / design 阶段）期间会持续在 sandbox 写文件，
- * 取这两者中较新的作为"实际活跃时间"。
- */
-function getSandboxLatestMtime(taskId: string): number {
-  try {
-    const root = getTaskSandbox(taskId);
-    if (!existsSync(root)) return 0;
-    let latest = 0;
-    const stack: string[] = [root];
-    while (stack.length) {
-      const dir = stack.pop()!;
-      let entries: import("fs").Dirent[];
-      try {
-        entries = readdirSync(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      for (const e of entries) {
-        const full = join(dir, e.name);
-        try {
-          if (e.isDirectory()) {
-            stack.push(full);
-          } else {
-            const m = statSync(full).mtimeMs;
-            if (m > latest) latest = m;
-          }
-        } catch { /* skip */ }
-      }
-    }
-    return latest;
-  } catch {
-    return 0;
-  }
-}
 
 // ──────────────────────────────────────────────
 // 洪泛防护：记录每个任务上次恢复时间
@@ -177,13 +138,13 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
     // 已持有活跃锁 → 正在执行，跳过
     if (isLocked(task.id)) continue;
 
-    // 检查超时：task.updated_at 与 sandbox 文件最新 mtime 取较新者
-    // 因为 develop / design 等长跑阶段期间 task 状态不变但 sandbox 持续在写
+    // 检查超时：仅靠 task.updated_at（runner 每 2 分钟心跳更新它）+ 文件锁判活。
+    // 即焚模型下旧 workspace/ 目录已不再被填充，原"扫 sandbox 最新 mtime"启发式恒返回 0
+    // 已死，故移除（RERUN-06）；长跑阶段的活跃信号统一由 heartbeat 提供。
     const updatedAt = new Date(task.updated_at).getTime();
     if (isNaN(updatedAt)) continue;
 
-    const sandboxMtime = getSandboxLatestMtime(task.id);
-    const lastActive = Math.max(updatedAt, sandboxMtime);
+    const lastActive = updatedAt;
 
     const elapsedMs = nowMs - lastActive;
     if (elapsedMs < thresholdMs) continue;
@@ -250,7 +211,9 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
           "failed",
           `watcher: 阶段 ${phaseName} 反复卡死，恢复 ${attempts} 次后放弃`
         );
-        emit({ type: "watcher:recovery", payload: { taskId: task.id, phase: phaseName, fromStatus: task.status, toStatus: "failed" } });
+        // 放弃=失败：forceTransition→failed 已 emit task:transition，被 card-sources/task-failed
+        // 生成 P0「失败」卡。这里不再 emit watcher:recovery（否则 stuck.ts 会同时弹「已自动恢复」
+        // 卡，两张矛盾卡并存，RERUN-03）。正常恢复路径（下方 toStatus=pending_）才 emit。
       } catch (e: unknown) {
         log.error("watcher: 强制转 failed 失败 task=%s: %s", task.id, (e as Error).message);
       }

@@ -7,6 +7,7 @@ import { purgeAgentRuns } from "./agent-sandbox";
 import { rmSync } from "fs";
 import { getWorkspaceById } from "./workspaces";
 import { getRequirementById, updateRequirement } from "./requirements";
+import { clearSubPrs } from "./requirement-sub-prs";
 import { forceTransition } from "./state-machine";
 import { isLocked } from "./infra";
 import { forgetTaskRecoveryState } from "./watcher";
@@ -211,7 +212,7 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
  *
  * 清执行态（failure_count / 失败指纹 / dangling / pending 问答 / rejection / pr），重建干净
  * worktree（基于需求绑定 workspace 的最新 default_branch），清 watcher 内存恢复计数，
- * 再从首阶段启动。审计历史（task_phase_events / task_logs）保留。
+ * 再从首阶段启动。运行记录（task_phase_events / task_logs）随重跑清空，权威审计在 manifest / artifacts。
  *
  * @param opts.requirement 重跑时刷新的需求文本（spec 可能已更新）；省略则沿用 task 已存的。
  */
@@ -247,8 +248,10 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
   if (task.requirement_id) {
     try {
       updateRequirement(task.requirement_id, { pr_url: null, pr_number: null });
+      // 一并清子模块 PR 记录（RERUN-08）：否则需求页残留上一轮未触及子模块的过期 sub PR 链接。
+      clearSubPrs(task.requirement_id);
     } catch (e: unknown) {
-      console.warn("resetTaskForRerun: 清 requirement pr_url 失败：", e instanceof Error ? e.message : e);
+      console.warn("resetTaskForRerun: 清 requirement pr_url/sub_prs 失败：", e instanceof Error ? e.message : e);
     }
   }
 

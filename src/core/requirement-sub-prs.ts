@@ -55,3 +55,12 @@ export function listSubPrs(requirementId: string): RequirementSubPr[] {
     )
     .all(requirementId);
 }
+
+/**
+ * 清空某需求的全部子模块 PR 记录（重跑专用，RERUN-08）。
+ * 重跑=全新一轮：上一轮的子模块 PR（appendSubPr UPSERT 写入）须清，否则需求页残留本轮未触及
+ * 子模块的过期 PR 链接。区别于 deleteRequirement 的级联删除——这里保留需求、仅清 sub_prs。
+ */
+export function clearSubPrs(requirementId: string): void {
+  getDb().run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [requirementId]);
+}

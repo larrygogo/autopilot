@@ -19,6 +19,7 @@ import { executePhase } from "../core/runner";
 import { getWorkflow, buildTransitions, isParallelPhase } from "../core/registry";
 import { getTaskArtifactsDir, deleteTaskSandbox } from "../core/sandbox";
 import { isLocked } from "../core/infra";
+import { forgetTaskRecoveryState } from "../core/watcher";
 import { emit } from "../core/event-bus";
 import { createLogger } from "../core/logger";
 
@@ -46,7 +47,7 @@ export function cancelTaskAction(taskId: string): { from: string; to: string } {
   if (!task) throw new TaskActionError("NOT_FOUND", "Task not found", 404);
 
   const wf = getWorkflow(task.workflow);
-  const terminalStates = new Set(["done", "cancelled"]);
+  const terminalStates = new Set(["done", "cancelled", "failed"]);
   if (wf) for (const s of wf.terminal_states ?? []) terminalStates.add(s);
   if (terminalStates.has(task.status)) {
     throw new TaskActionError(
@@ -62,6 +63,9 @@ export function cancelTaskAction(taskId: string): { from: string; to: string } {
   const [from, to] = transition(taskId, "cancel", { transitions, note: "API cancel" });
   // 关闭进行中的 phase event，避免取消后留下永远 running 的僵尸（阶段进度 UI 会恒显示"进行中"+耗时虚高）
   closeOpenPhaseEvents(taskId);
+  // 清 watcher 内存里该任务的卡死恢复计数（CONC-08）：被救活过又被 cancel（未删除）的任务
+  // 否则会在 Map 里留残条目（轻微泄漏）。
+  forgetTaskRecoveryState(taskId);
   return { from, to };
 }
 
@@ -120,7 +124,7 @@ export function restartTaskAction(taskId: string): { ok: true; phase: string; fr
   if (!task) throw new TaskActionError("NOT_FOUND", "Task not found", 404);
 
   const wf = getWorkflow(task.workflow);
-  const terminalStates = new Set(["done", "cancelled"]);
+  const terminalStates = new Set(["done", "cancelled", "failed"]);
   if (wf) for (const s of wf.terminal_states ?? []) terminalStates.add(s);
   if (terminalStates.has(task.status)) {
     throw new TaskActionError(
