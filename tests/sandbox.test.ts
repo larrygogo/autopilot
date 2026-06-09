@@ -3,7 +3,22 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-import { getTaskSandbox, ensureTaskSandbox, resolveSandboxPath } from "../src/core/sandbox";
+import { getTaskSandbox, ensureTaskSandbox, resolveSandboxPath, isBenignBranchDeleteError } from "../src/core/sandbox";
+
+describe("isBenignBranchDeleteError（RERUN-07：区分良性 404 vs 真失败）", () => {
+  it("404 / 分支不存在 → 良性（幂等成功）", () => {
+    expect(isBenignBranchDeleteError("gh: Reference does not exist (HTTP 404)")).toBe(true);
+    expect(isBenignBranchDeleteError("HTTP 404: Not Found")).toBe(true);
+    expect(isBenignBranchDeleteError("error: no such ref")).toBe(true);
+  });
+  it("受保护/无凭证/网络 → 真失败（非良性）", () => {
+    expect(isBenignBranchDeleteError("HTTP 403: Required status check ... protected branch")).toBe(false);
+    expect(isBenignBranchDeleteError("gh: Bad credentials (HTTP 401)")).toBe(false);
+    // 网络错（no such host）不能误判成良性 404，否则会让重跑当作分支已删继续 → push 冲突
+    expect(isBenignBranchDeleteError("dial tcp: lookup api.github.com: no such host")).toBe(false);
+    expect(isBenignBranchDeleteError("connection refused")).toBe(false);
+  });
+});
 
 // workspace 模块路径：用正斜杠避免 Windows 反斜杠在 JS 字符串字面量里被当作转义字符吃掉
 const WORKSPACE_MODULE = join(import.meta.dir, "..", "src", "core", "sandbox").replace(/\\/g, "/");

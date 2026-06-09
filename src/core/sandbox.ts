@@ -383,7 +383,16 @@ export function removeTaskWorktree(taskId: string): boolean {
  * - 用 gh api 删远程分支（即焚模型无常驻 clone 可 push --delete；从 meta.remote_url
  *   解析 owner/repo），分支不存在 / 无凭证等一律容错（重跑继续，不阻断）。
  */
-export function deleteRemoteDeliverBranch(taskId: string): { deleted: boolean; branch?: string } {
+/**
+ * gh api 删远程分支失败时，判断是否是「远程已无此分支」的良性 404（幂等成功）
+ * 而非真失败（受保护/无凭证/网络）。用于 RERUN-07 区分。
+ */
+export function isBenignBranchDeleteError(stderr: string): boolean {
+  // 只认明确的「ref 不存在」信号；不匹配裸 "no such"（会误吞网络错 "no such host"）。
+  return /\bHTTP 404\b|\b404\b|reference does not exist|not found|no such ref/i.test(stderr);
+}
+
+export function deleteRemoteDeliverBranch(taskId: string): { deleted: boolean; branch?: string; failed?: boolean; error?: string } {
   const meta = readWorktreeMeta(taskId);
   if (!meta || meta.mode !== "clone" || !meta.branch) return { deleted: false };
   if (!meta.branch.startsWith("feat/")) {
@@ -405,9 +414,17 @@ export function deleteRemoteDeliverBranch(taskId: string): { deleted: boolean; b
     return { deleted: true, branch: meta.branch };
   }
   const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
-  log.warn("删远程交付分支失败（容错继续，可能远程无此分支）[task=%s branch=%s]: %s",
+  // 区分良性 404（远程已无此分支 = 幂等成功，无需 push 冲突顾虑）与真失败（受保护/无凭证/
+  // 网络）。真失败下重跑的普通 push 会撞已存在分支 → non-fast-forward，被判可恢复反复重试整
+  // 条流水线 5 轮才 failed，根因对用户完全不可见（RERUN-07）。真失败 ERROR 级日志 + 回传
+  // failed 让调用方 surface 到需求页。
+  if (isBenignBranchDeleteError(stderr)) {
+    log.info("删远程交付分支：远程已无此分支（幂等，重跑可继续）[task=%s branch=%s]", taskId, meta.branch);
+    return { deleted: false, branch: meta.branch };
+  }
+  log.error("删远程交付分支真失败（非 404；重跑后 push 可能因分支已存在冲突）[task=%s branch=%s]: %s",
     taskId, meta.branch, stderr.slice(0, 200));
-  return { deleted: false, branch: meta.branch };
+  return { deleted: false, branch: meta.branch, failed: true, error: stderr.slice(0, 200) };
 }
 
 /**

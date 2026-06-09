@@ -263,8 +263,17 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
   // 3. 即焚模型重跑：删远程旧交付分支 + 清累积 patch / 临时副本 + 重置交付元数据
   if (wf.sandbox?.git) {
     // 重跑=干净重来：删远程上一轮交付分支（GitHub 自动 close 旧 PR）→ 消除 non-fast-forward 冲突。
+    // 删分支真失败（非 404）时 surface 到需求页：否则下一轮普通 push 撞已存在分支 → 反复重试
+    // 5 轮才 failed，根因完全不可见（RERUN-07）。
     try {
-      deleteRemoteDeliverBranch(taskId);
+      const del = deleteRemoteDeliverBranch(taskId);
+      if (del.failed && task.requirement_id) {
+        try {
+          updateRequirement(task.requirement_id, {
+            schedule_error: `重跑前删远程交付分支失败：${del.error ?? "未知错误"}（下一轮 push 可能因分支已存在冲突，请检查分支保护/凭证）`,
+          });
+        } catch { /* ignore */ }
+      }
     } catch (e: unknown) {
       console.warn("resetTaskForRerun: deleteRemoteDeliverBranch 失败（容错继续）：", e instanceof Error ? e.message : e);
     }
