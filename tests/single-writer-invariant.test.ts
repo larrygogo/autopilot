@@ -32,6 +32,7 @@ const ALLOWLIST = new Set([
   "src/migrations/021-requirement-comments.ts", // Phase 2 合并：把 questions+replies+feedbacks 迁移到 requirement_comments（一次性数据迁移）
   "src/migrations/023-backfill-orphan-task-requirements.ts", // 每个任务必有需求 Phase 1：回填历史游离 task 的 requirement（一次性数据迁移）
   "src/migrations/024-codebase-to-workspace.ts", // Phase 2：codebase→workspace 表/列/id 改名（DDL + UPDATE 数据迁移，无 manifest 同步需求）
+  "src/migrations/027-fix-requirement-sub-prs-fk.ts", // 修悬空 FK：requirement_sub_prs 重建（DDL + INSERT...SELECT 一次性数据 copy，无 manifest 同步需求）
   "src/core/now-dismiss.ts",       // now_dismissed_cards 表：SQLite 即权威源，dismiss 状态无 manifest 同步需求
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
 ]);
