@@ -72,7 +72,31 @@ export function getTopWorkspaceForProject(projectId: string): Workspace | null {
   return row ?? null;
 }
 
+// git ref 保留字符（含控制字符、空格、~^:?*[ 与反斜杠）。
+const GIT_REF_FORBIDDEN = /[\x00-\x1f\x7f ~^:?*[\\]/;
+
+/**
+ * default_branch 等会作为 git 位置参数的 ref 是否安全（git check-ref-format 子集，SEC-4）。
+ * 重点是拒绝 leading-dash —— 用户自设 "--upload-pack=..." 之类会被 git 当选项注入。
+ * 自动探测（origin/HEAD→当前分支→main）产出的值天然合法，不会被误拒。
+ */
+export function isSafeGitRef(ref: string): boolean {
+  return (
+    ref.length > 0 &&
+    ref.length <= 255 &&
+    !ref.startsWith("-") &&
+    !ref.startsWith("/") &&
+    !ref.endsWith("/") &&
+    !ref.endsWith(".lock") &&
+    !ref.includes("..") &&
+    !GIT_REF_FORBIDDEN.test(ref)
+  );
+}
+
 export function createWorkspace(opts: CreateWorkspaceOpts): Workspace {
+  if (opts.default_branch && !isSafeGitRef(opts.default_branch)) {
+    throw new Error(`非法分支名 default_branch=${JSON.stringify(opts.default_branch)}（不能以 - 开头或含 git 保留字符，防 git 参数注入）`);
+  }
   const db = getDb();
   const ts = nowMs();
   db.run(
@@ -141,6 +165,9 @@ export function listWorkspaces(opts: {
 }
 
 export function updateWorkspace(id: string, opts: UpdateWorkspaceOpts): Workspace | null {
+  if (opts.default_branch && !isSafeGitRef(opts.default_branch)) {
+    throw new Error(`非法分支名 default_branch=${JSON.stringify(opts.default_branch)}（不能以 - 开头或含 git 保留字符，防 git 参数注入）`);
+  }
   const db = getDb();
   const fields: string[] = [];
   const vals: (string | number | null)[] = [];
