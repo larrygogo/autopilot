@@ -4,8 +4,7 @@ import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { appendTaskEvent } from "./task-logs";
 import { runWithTaskContext } from "./task-context";
 import { transition, forceTransition, InvalidTransitionError } from "./state-machine";
-import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, getPhaseSandboxSpec, type ParallelDefinition, type WorkflowDefinition } from "./registry";
-import { acquireAgentSandbox, captureAgentSandbox, releaseAgentSandbox, type AgentSandboxHandle } from "./agent-sandbox";
+import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./registry";
 import { getTaskSandbox } from "./sandbox";
 import { closeAgents } from "../agents/registry";
 import { clearPhaseRecoveryCount } from "./watcher";
@@ -376,6 +375,7 @@ async function executeParallelGroup(
 
   const subNames = parallel.phases.map((p) => p.name);
   log.info("并行块开始 %s [task=%s 子阶段=%s]", groupName, taskId, subNames.join(", "));
+  log.warn("并行块 %s 在共用沙盒模型下不隔离子阶段工作树，多个 read-write 子阶段会互相覆盖（YAGNI 暂不支持并行写）[task=%s]", groupName, taskId);
   emit({ type: "phase:started", payload: { taskId, phase: groupName, label: parallel.name } });
   appendTaskEvent(taskId, { type: "parallel-started", phase: groupName, subs: subNames });
 
@@ -401,21 +401,11 @@ async function executeParallelGroup(
         if (typeof phaseFn !== "function") {
           throw new Error(`阶段函数未定义：run_${subName}`);
         }
-        const subSpec = getPhaseSandboxSpec(workflow.name, subName);
-        let subHandle: AgentSandboxHandle | null = null;
-        try {
-          subHandle = acquireAgentSandbox(taskId, subName, subSpec.code);
-          await runWithTaskContext({ taskId, phase: subName, sandboxDir: subHandle?.dir }, async () => {
-            await phaseFn(taskId);
-          });
-          // 注意：并行多个 read-write 子阶段会争抢同一 cumulative.patch（全量模型，最后写赢）。
-          // dev 工作流无并行写代码场景；真要并行写需 patch 按子阶段分文件（YAGNI，暂不做）。
-          if (subHandle && subSpec.code === "read-write" && !subSpec.deliver) {
-            captureAgentSandbox(subHandle);
-          }
-        } finally {
-          if (subHandle && subSpec.ephemeral) releaseAgentSandbox(subHandle);
-        }
+        // 共用沙盒：并行子阶段也共用同一 clone（不隔离）。当前无 shipped 并行写工作流；多个
+        // read-write 子阶段同改一棵工作树会互相覆盖，YAGNI 暂不支持（见 fork 处 warn）。
+        await runWithTaskContext({ taskId, phase: subName, sandboxDir: getTaskSandbox(taskId) }, async () => {
+          await phaseFn(taskId);
+        });
         log.info("[parallel] %s 完成 [task=%s]", subName, taskId);
         appendTaskEvent(taskId, { type: "phase-completed", phase: subName, parallel: groupName });
         archivePhaseArtifacts(taskId, workflow, subName);
