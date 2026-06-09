@@ -15,7 +15,8 @@ import { enableBus, disableBus, bus } from "../core/event-bus";
 import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
 import { startServerWithRetry } from "./server";
-import { setWebDistDir, reloadApiToken, getApiTokenState, extendAllowedOrigins, detectLanIPv4, isExposedHost } from "./routes";
+import { setWebDistDir, reloadApiToken, getApiTokenState, extendAllowedOrigins, detectLanIPv4, isExposedHost, startupAuthBlocked } from "./routes";
+import { hasAnyUser } from "../core/auth";
 import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo } from "./pid";
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
 import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
@@ -113,24 +114,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     process.exit(1);
   }
 
-  // 安全检查：暴露 host 必须设 token，否则等于内网裸奔
+  // API token 加载（鉴权用）。SEC-6 启动安全门移到 initDb/migrations 后以便查 hasAnyUser，见下。
   reloadApiToken();
-  const tokenState = getApiTokenState();
-  if (isExposedHost(host) && !tokenState.is_set && !opts.insecureNoAuth) {
-    console.error(`
-错误：daemon 配置为监听 ${host}（对外暴露），但未设置 API token。
-
-这意味着同网段的任何人都能访问你的任务、凭证、Agent 调用，等于内网裸奔。
-
-请选择以下之一：
-  1. 在 Web 设置页生成 token（推荐）
-  2. 写入 ~/.autopilot/runtime/api-token 文件（一行 token 文本）
-  3. 设置环境变量 AUTOPILOT_API_TOKEN
-  4. 切回 127.0.0.1（autopilot daemon stop && autopilot daemon run，或改 config.yaml）
-  5. 明知风险仍要继续：autopilot daemon run --insecure-no-auth
-`);
-    process.exit(2);
-  }
 
   // 暴露 host 时把所有 LAN IP 加进 CORS allowlist —— 从同网段其他机器浏览器访问
   // daemon serve 的 SPA 时（同源访问 daemon 自己），同源策略下不会触发 CORS；
@@ -152,6 +137,27 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 初始化数据库 + 迁移
   initDb();
   await runPendingMigrations();
+
+  // 安全门（SEC-6）：暴露 host 必须已设防（API token 或登录用户），否则内网裸奔。
+  // 移到 initDb/migrations 后以便查 hasAnyUser——A2 后 JWT 是服务端一等鉴权，有用户=已设防。
+  {
+    const tokenState = getApiTokenState();
+    if (startupAuthBlocked(host, tokenState.is_set, hasAnyUser(), !!opts.insecureNoAuth)) {
+      console.error(`
+错误：daemon 配置为监听 ${host}（对外暴露），但既未设置 API token、也无登录用户。
+
+这意味着同网段的任何人都能访问你的任务、凭证、Agent 调用，等于内网裸奔。
+
+请选择以下之一：
+  1. 在 Web 设置页生成 token 或创建登录用户（推荐）
+  2. 写入 ~/.autopilot/runtime/api-token 文件（一行 token 文本）
+  3. 设置环境变量 AUTOPILOT_API_TOKEN
+  4. 切回 127.0.0.1（autopilot daemon stop && autopilot daemon run，或改 config.yaml）
+  5. 明知风险仍要继续：autopilot daemon run --insecure-no-auth
+`);
+      process.exit(2);
+    }
+  }
 
   // 发现工作流
   await discover();
