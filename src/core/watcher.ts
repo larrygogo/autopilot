@@ -139,8 +139,9 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
     if (isLocked(task.id)) continue;
 
     // 检查超时：仅靠 task.updated_at（runner 每 2 分钟心跳更新它）+ 文件锁判活。
-    // 即焚模型下旧 workspace/ 目录已不再被填充，原"扫 sandbox 最新 mtime"启发式恒返回 0
-    // 已死，故移除（RERUN-06）；长跑阶段的活跃信号统一由 heartbeat 提供。
+    // 原"扫 sandbox 最新 mtime"启发式已移除（RERUN-06）：长跑阶段的活跃信号统一由 heartbeat
+    // 提供，足够兜住误杀。注：共用沙盒模型下 workspace/ 确实是活跃代码目录、phase 持续写它，
+    // mtime 信号其实又有效，但 heartbeat 已够，故不重新引入（避免每 tick 递归扫目录的 IO）。
     const updatedAt = new Date(task.updated_at).getTime();
     if (isNaN(updatedAt)) continue;
 

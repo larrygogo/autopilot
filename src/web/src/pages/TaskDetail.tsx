@@ -799,7 +799,7 @@ function DanglingBanner({
             任务在 <code className="border border-border bg-muted px-1 font-mono">ask_user</code> 等待回答时 daemon 重启了。
             agent 进程的等待 promise 在内存中丢失，即使你现在回答 agent 也收不到。
             可以选择：<strong className="text-foreground">重新执行</strong>当前阶段（只重跑当前所在阶段，
-            不回到最初——前面已完成的 design / review 等不会重来；累积 patch 保留），或
+            不回到最初——前面已完成的 design / review 等不会重来；共用沙盒工作树已累积的改动保留），或
             <strong className="text-foreground">取消任务</strong>新建一个。
           </p>
         </div>

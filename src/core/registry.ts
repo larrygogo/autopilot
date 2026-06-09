@@ -55,11 +55,10 @@ export interface PhaseDefinition {
    */
   handoff?: boolean;
   /**
-   * Phase 级 sandbox 策略（即用即焚 + patch 累积模型）。省略走框架默认
-   * {code:read-only, ephemeral:true, deliver:false}。
-   * - code: read-only 只读代码（产文档不回写 patch）/ read-write 写代码（diff 累积成 patch）
-   * - ephemeral: 跑完销毁临时 clone（当前唯一支持值 true）
-   * - deliver: 交付 phase（消费 patch 链落成分支 + PR），如 submit_pr
+   * 【已废弃 / 当前共用沙盒模型不消费，无任何运行时效果】Phase 级 sandbox 策略。
+   * 即焚+patch 模型的遗留字段（2026-06-09 revert 为任务级共用 clone 后 runner 不再读
+   * getPhaseSandboxSpec）。保留字段仅为兼容存量 workflow.yaml 不报错；read-only/read-write/
+   * deliver 不再限制任何 phase。未来若上 L2 环境隔离再重新定义。**勿据此以为有沙盒隔离语义。**
    */
   sandbox?: PhaseSandboxSpec;
   [key: string]: unknown;
@@ -74,11 +73,11 @@ export interface ParallelDefinition {
 export interface WorkflowSandboxSpec {
   /** 模板目录名（相对工作流目录），创建任务时 copy 到 sandbox 目录 */
   template?: string;
-  /** 工作流是否需要代码仓库（true → 任务反查 workspace、准备 patch 链 / 即焚 clone） */
+  /** 工作流是否需要代码仓库（true → 任务启动反查 workspace、`ensureTaskSandbox` 建共用 clone） */
   git?: boolean;
 }
 
-/** Phase 级 sandbox 策略（即用即焚 + patch 累积模型）。详见 PhaseDefinition.sandbox。 */
+/** 【已废弃，共用沙盒模型不消费】Phase 级 sandbox 策略遗留字段。详见 PhaseDefinition.sandbox。 */
 export interface PhaseSandboxSpec {
   code?: "read-only" | "read-write";
   ephemeral?: boolean;
@@ -122,8 +121,8 @@ function findPhaseDef(wf: WorkflowDefinition, phaseName: string): PhaseDefinitio
 }
 
 /**
- * 取 phase 的 sandbox 策略，带框架默认兜底。
- * 省略 sandbox 段 / 找不到 phase → {code:"read-only", ephemeral:true, deliver:false}。
+ * 【已废弃，零调用方】取 phase 的 sandbox 策略。即焚模型遗留——共用沙盒模型下 runner 不再读它，
+ * 保留仅防外部引用编译断裂。返回值不影响任何运行时行为。
  */
 export function getPhaseSandboxSpec(
   workflowName: string,
