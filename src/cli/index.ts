@@ -4,6 +4,7 @@ import { join } from "path";
 import { buildConfigTemplate } from "./config-template";
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
+import { intentToLabel } from "../client/now-intent";
 import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { rebuildIndexFromManifests, rebuildManifestsFromIndex } from "../core/rebuild-index";
@@ -988,7 +989,7 @@ program
         const wait = waitedSec < 60 ? `${waitedSec}s`
           : waitedSec < 3600 ? `${Math.floor(waitedSec / 60)}min`
           : `${Math.floor(waitedSec / 3600)}h`;
-        const actionsLine = c.actions.map((a) => a.label).join(" / ");
+        const actionsLine = c.actions.map((a) => intentToLabel(a.intent)).join(" / ");
         return {
           prio: c.priority,
           title: c.title,

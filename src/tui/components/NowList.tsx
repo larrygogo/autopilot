@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { NowCard, NowCardPriority } from "../../core/now-types";
+import { intentToLabel } from "../../client/now-intent";
 
 const PRIORITY_COLOR: Record<NowCardPriority, string> = {
   P0: "red",
@@ -54,7 +55,7 @@ export function NowList({ cards, loading }: Props) {
       <Box flexDirection="column" marginTop={1}>
         {cards.map((card) => {
           const waited = formatWaited(Math.max(0, nowSec - card.created_at));
-          const actions = card.actions.map((a) => a.label).join(" / ");
+          const actions = card.actions.map((a) => intentToLabel(a.intent)).join(" / ");
           return (
             <Box key={card.id} flexDirection="column" marginBottom={1}>
               <Box>
