@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { ConfirmDialog } from "@/components/Modal";
 import { cn } from "@/lib/utils";
 import { modShortcut } from "@/lib/platform";
 
@@ -43,6 +44,7 @@ export function Chat({ subscribe }: ChatProps) {
   const [workflows, setWorkflows] = useState<{ name: string; description: string }[]>([]);
   const [workflow, setWorkflow] = useState<string>("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [confirmDeleteSession, setConfirmDeleteSession] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -145,14 +147,19 @@ export function Chat({ subscribe }: ChatProps) {
     setSidebarOpen(false);
   };
 
-  const deleteCurrent = async () => {
+  const deleteCurrent = () => {
     if (!selected) return;
-    if (!confirm("删除这个对话？")) return;
+    setConfirmDeleteSession(true);
+  };
+
+  const doDeleteSession = async () => {
+    if (!selected) return;
     try {
       await api.deleteSession(selected);
       setSelected(null);
       setMessages([]);
       refreshSessions();
+      setConfirmDeleteSession(false);
     } catch (e) {
       toast.error(`删除失败：${(e as Error).message}`);
     }
@@ -325,6 +332,16 @@ export function Chat({ subscribe }: ChatProps) {
           </p>
         </div>
       </main>
+
+      <ConfirmDialog
+        open={confirmDeleteSession}
+        title="删除对话"
+        message="删除这个对话？此操作不可恢复。"
+        confirmText="删除"
+        danger
+        onConfirm={doDeleteSession}
+        onCancel={() => setConfirmDeleteSession(false)}
+      />
     </div>
   );
 }

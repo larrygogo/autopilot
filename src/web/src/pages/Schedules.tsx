@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { PageHero } from "@/components/PageHero";
+import { ConfirmDialog } from "@/components/Modal";
 
 interface Props {
   onSelectTask?: (taskId: string) => void;
@@ -51,6 +52,7 @@ export function Schedules({ onSelectTask, subscribe }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<Schedule | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -99,12 +101,19 @@ export function Schedules({ onSelectTask, subscribe }: Props) {
     }
   };
 
-  const remove = async (s: Schedule) => {
-    if (!confirm(`确定删除定时任务「${s.name}」？此操作不可撤销。`)) return;
+  const remove = (s: Schedule) => {
+    setConfirmRemove(s);
+  };
+
+  const doRemove = async () => {
+    const s = confirmRemove;
+    if (!s) return;
+    // 保留共享 busy：删除进行中同样禁用同行的 Switch/Play（busy === s.id）
     setBusy(s.id);
     try {
       await api.deleteSchedule(s.id);
       toast.success(`已删除：${s.name}`);
+      setConfirmRemove(null);
       refresh();
     } catch (e: unknown) {
       toast.error("删除失败", (e as Error)?.message ?? String(e));
@@ -235,6 +244,16 @@ export function Schedules({ onSelectTask, subscribe }: Props) {
           </Card>
         ))}
       </div>
+
+      <ConfirmDialog
+        open={!!confirmRemove}
+        title="删除定时任务"
+        message={confirmRemove ? `确定删除定时任务「${confirmRemove.name}」？此操作不可撤销。` : ""}
+        confirmText="删除"
+        danger
+        onConfirm={doRemove}
+        onCancel={() => setConfirmRemove(null)}
+      />
     </div>
   );
 }
