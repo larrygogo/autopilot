@@ -15,6 +15,11 @@ import type { AgentResult, RunOptions } from "../src/agents/types";
 import { rmSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../src/index";
+import { Database } from "bun:sqlite";
+import { _setDbForTest, initDb, createTask, getTask } from "../src/core/db";
+import { runPendingMigrations } from "../src/core/migrate";
+import { executePhase } from "../src/core/runner";
+import * as registry from "../src/core/registry";
 
 afterEach(() => {
   _clearRunsForTest();
@@ -117,5 +122,60 @@ describe("agent.run · 透传 ctx.signal（Task 3）", () => {
       },
     );
     expect(provider.captured?.signal).toBe(explicit);
+  });
+});
+
+function makeLinearWorkflow(name: string, capture: (taskId: string) => void) {
+  return {
+    name,
+    description: "取消测试工作流",
+    phases: [{
+      name: "develop", pending_state: "pending_develop", running_state: "running_develop",
+      trigger: "start_develop", complete_trigger: "develop_complete", fail_trigger: "develop_fail",
+      label: "DEV",
+      func: async (taskId: string) => { capture(taskId); },
+    }],
+    initial_state: "pending_develop",
+    terminal_states: ["done", "cancelled", "failed"],
+  } as never;
+}
+
+describe("executePhase · 登记/注入/注销 signal（Task 4）", () => {
+  let db: Database;
+  const cleanupIds: string[] = [];
+
+  afterEach(() => {
+    _setDbForTest(null);
+    try { db.close(); } catch { /* ignore */ }
+    registry._clearRegistry();
+    _clearRunsForTest();
+    for (const id of cleanupIds) {
+      try { rmSync(join(AUTOPILOT_HOME, "runtime", "tasks", id), { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    cleanupIds.length = 0;
+  });
+
+  it("phaseFn 在执行中能拿到未 abort 的 signal；executePhase 结束后 controller 被注销", async () => {
+    let seen: AbortSignal | undefined;
+    let seenAborted: boolean | undefined;
+    db = new Database(":memory:");
+    _setDbForTest(db);
+    initDb();
+    await runPendingMigrations();
+    registry._clearRegistry();
+    registry.register(makeLinearWorkflow("cancel_wf", (_taskId) => {
+      seen = getCurrentAbortSignal();
+      seenAborted = seen?.aborted;
+    }));
+    const id = "exru-1";
+    cleanupIds.push(id);
+    createTask({ id, title: "t", workflow: "cancel_wf", initialStatus: "running_develop", requirementId: undefined });
+
+    await executePhase(id, "develop");
+
+    expect(seen).toBeInstanceOf(AbortSignal);
+    expect(seenAborted).toBe(false);
+    expect(abortRun(id)).toBe(false); // 已注销，找不到 controller
+    expect(getTask(id)?.status).toBe("done");
   });
 });

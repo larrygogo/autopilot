@@ -3,6 +3,7 @@ import { acquireLock, releaseLock } from "./infra";
 import { log, setPhase, resetPhase, setTaskId } from "./logger";
 import { appendTaskEvent } from "./task-logs";
 import { runWithTaskContext } from "./task-context";
+import { registerRun, unregisterRun } from "./task-lifecycle";
 import { transition, forceTransition, InvalidTransitionError } from "./state-machine";
 import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./registry";
 import { getTaskSandbox } from "./sandbox";
@@ -71,6 +72,7 @@ export function runInBackground(taskId: string, phase: string): void {
  */
 export async function executePhase(taskId: string, phase: string): Promise<void> {
   let phaseEventId: number | null = null;
+  let controller: AbortController | null = null;
 
   // 尝试获取锁
   const locked = acquireLock(taskId);
@@ -159,9 +161,10 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     }, 120_000);
     // 共用沙盒：所有 phase 共用 task 启动时建的同一个 clone（getTaskSandbox），直接在工作树改
     // 文件、跨 phase 可见；submit_pr 才 commit。不再 acquire/capture/release/patch。
+    controller = registerRun(taskId);
     try {
       await runWithTaskContext(
-        { taskId, phase, sandboxDir: getTaskSandbox(taskId) },
+        { taskId, phase, sandboxDir: getTaskSandbox(taskId), signal: controller.signal },
         async () => { await phaseFn(taskId); },
       );
     } finally {
@@ -327,6 +330,7 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     }
     resetPhase();
     releaseLock(taskId);
+    unregisterRun(taskId);
     // 只在任务进入终态时才关闭 agent 连接，避免破坏会话复用
     const task = getTask(taskId);
     if (task) {
