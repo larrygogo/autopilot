@@ -276,17 +276,95 @@ export function tokenEquals(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb);
 }
 
+/** 从 Host 头取 hostname（剥离端口，兼容 IPv6 字面量 [::1]:port）。 */
+function hostHeaderHostname(hostHeader: string): string {
+  const h = hostHeader.trim();
+  if (h.startsWith("[")) {
+    const end = h.indexOf("]");
+    return end >= 0 ? h.slice(1, end) : h;
+  }
+  const colon = h.indexOf(":");
+  return colon >= 0 ? h.slice(0, colon) : h;
+}
+
+/** origin 字符串的 host（含端口）是否等于 Host 头（用于 LAN allowlist 精确匹配）。 */
+function originHostEquals(origin: string, hostHeader: string): boolean {
+  try {
+    return new URL(origin).host === hostHeader;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * hostname 是否为 loopback 字面量（127.0.0.0/8 IPv4 / ::1 / localhost）。
+ *
+ * 严格按 IP 字面量校验 —— **不能**用 `startsWith("127.")`，否则攻击者注册的
+ * `127.0.0.1.evil.com` / `127.evil.com` 子域会被误判为本机（对抗复核 BYPASS-1）。
+ * 请求来源 hostname 可为任意攻击者控制的域名，故此处必须按真正的四段 IPv4 字面量判定。
+ * 注意：与 isExposedHost（面向「监听地址」配置项，语义不同）刻意分开，互不影响。
+ */
+function isLoopbackHostname(hostname: string): boolean {
+  // 剥 IPv6 字面量方括号：new URL("http://[::1]:6180").hostname 返回带括号的 "[::1]"，
+  // 而 Host 头侧已由 hostHeaderHostname 剥过 —— 两侧归一，避免 IPv6 本机 Web UI 被误挡。
+  const h = hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1");
+  if (h === "localhost" || h === "::1") return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (!m) return false;
+  const oct = [m[1], m[2], m[3], m[4]].map((s) => Number(s));
+  return oct.every((o) => o <= 255) && oct[0] === 127;
+}
+
+/**
+ * 请求来源是否可信 —— 「免鉴权」放行路径（loopback 豁免 / JWT cookie / 零配置）的
+ * 防 DNS rebinding + 跨源滥用闸（审计 H1）。
+ *
+ * 浏览器对跨源请求（WebSocket、跨源 POST）自动带 Origin、对 DNS rebinding 带指向攻击者
+ * 域名的 Host —— 这两个头攻击页面的 JS 都无法伪造。非浏览器客户端（CLI/TUI/CI）既不发
+ * Origin、Host 又是本机，故此闸只拦「浏览器借本机 socket 越权」这一类请求。
+ *
+ * 返回 false 当且仅当 Origin 或 Host 暴露出非本机、且不在 ALLOWED_ORIGINS 内的外部域。
+ * 显式 API token 路径不经此闸（持有 token 即视为授权）。
+ */
+function requestOriginIsTrusted(req: Request): boolean {
+  // Origin：跨源 WS / 跨源 POST 必带；同源 GET 不带。
+  const origin = req.headers.get("origin");
+  if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+    let hostname: string;
+    try {
+      hostname = new URL(origin).hostname;
+    } catch {
+      return false; // 畸形 Origin → 保守拒绝
+    }
+    if (!isLoopbackHostname(hostname)) return false;
+  }
+  // Host：HTTP/1.1 必带；DNS rebinding 时为攻击者域名，本机访问时为 127.x/localhost/[::1]。
+  const host = req.headers.get("host");
+  if (host) {
+    const hn = hostHeaderHostname(host);
+    if (!isLoopbackHostname(hn) && !ALLOWED_ORIGINS.some((o) => originHostEquals(o, host))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * 统一鉴权裁决（HTTP + WS 共用，消除「HTTP 认 JWT 但 WS 不认」两套逻辑漂移）。返回 true=放行。
- * 规则（短路）：1 loopback 豁免 → 2 API token → 3 JWT cookie(hasAnyUser 时) → 4 零配置(!token&&!user) → 5 拒绝。
+ * 规则（短路）：0 来源可信闸(防 rebinding/跨源) → 1 loopback 豁免 → 2 API token → 3 JWT cookie(hasAnyUser 时) → 4 零配置(!token&&!user) → 5 拒绝。
  * loopback 必须在 JWT 之前短路（CLI/TUI/本机命脉，且 JWT async 异常不波及本机）。
+ * 来源闸（0）只约束「免鉴权」路径（1/3/4），显式 API token(2) 不受其限。
  */
 export async function authResolve(
   req: Request,
   server?: import("bun").Server<undefined>,
 ): Promise<boolean> {
-  // 1. 本机 loopback 永远豁免（按 socket peer IP，不可伪造）
-  if (isLoopbackSocket(server, req)) return true;
+  // 0. 反 DNS rebinding / 跨源滥用闸（审计 H1）：浏览器借本机 socket 发起、Host/Origin
+  //    暴露外部域的请求，不允许走任何「免鉴权」放行路径（loopback / JWT cookie / 零配置）。
+  //    非浏览器客户端（CLI/TUI/CI：无 Origin、Host 为本机）不受影响。
+  const trusted = requestOriginIsTrusted(req);
+  // 1. 本机 loopback 豁免（按 socket peer IP，不可伪造）+ 来源可信
+  if (trusted && isLoopbackSocket(server, req)) return true;
   // 2. API token 路径（机器/CI）—— Bearer / X-Autopilot-Token / ?token=
   if (API_TOKEN) {
     const header = req.headers.get("authorization") ?? "";
@@ -299,16 +377,16 @@ export async function authResolve(
       if (q && tokenEquals(q, API_TOKEN)) return true;
     } catch { /* URL parse 失败忽略 */ }
   }
-  // 3. JWT cookie 路径（人/浏览器）—— HTTP 与 WS 同此分支（消除半不一致）
-  if (hasAnyUser()) {
+  // 3. JWT cookie 路径（人/浏览器）—— 跨源（!trusted）即便浏览器自动带 cookie 也不认（防 CSRF）
+  if (trusted && hasAnyUser()) {
     const jwt = extractJwtFromCookie(req);
     if (jwt) {
       try { await verifyJwt(jwt); return true; }
       catch (e: unknown) { /* 无效/过期 → 落拒绝 */ }
     }
   }
-  // 4. 既没 token 也没用户 → auth 未启用，放行（零配置全新用户）
-  if (!API_TOKEN && !hasAnyUser()) return true;
+  // 4. 既没 token 也没用户 → auth 未启用，放行（零配置全新用户）；跨源/rebinding 不放行
+  if (trusted && !API_TOKEN && !hasAnyUser()) return true;
   // 5. 启用了某种 auth 但凭证缺失/无效
   return false;
 }
