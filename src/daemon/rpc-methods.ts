@@ -1389,7 +1389,7 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "sandboxes.delete",
-    description: "释放某任务沙盒产物（artifacts/ + 即焚副本残留；仅终态任务）",
+    description: "释放某任务沙盒（workspace 共用 clone + artifacts/ 产物；仅终态任务）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");

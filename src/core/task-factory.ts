@@ -265,7 +265,7 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
   // 2b. 清 watcher 内存恢复计数，否则上次卡死累计的 recoveryCount 会让本次重跑过早被 cancel
   try { forgetTaskRecoveryState(taskId); } catch { /* ignore */ }
 
-  // 3. 即焚模型重跑：删远程旧交付分支 + 清累积 patch / 临时副本 + 重置交付元数据
+  // 3. 共用沙盒重跑：删远程旧交付分支 + 清 artifacts + 删旧 clone 重新 clone 干净
   if (wf.sandbox?.git) {
     // 重跑=干净重来：删远程上一轮交付分支（GitHub 自动 close 旧 PR）→ 消除 non-fast-forward 冲突。
     // 删分支真失败（非 404）时 surface 到需求页：否则下一轮普通 push 撞已存在分支 → 反复重试

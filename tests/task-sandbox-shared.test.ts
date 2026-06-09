@@ -147,3 +147,59 @@ describe("共用沙盒 · 重跑重新 clone（Task 5）", () => {
     expect(existsSync(join(ws, "README.md"))).toBe(true);
   });
 });
+
+describe("共用沙盒 · 全流程集成（真 runner → 共用 clone → phase 写 → diff_stat → 自动推进）", () => {
+  it("executePhase 注入共用沙盒，phase 经 getCurrentSandboxDir 写文件落进 clone 且 diff_stat 端到端看到", async () => {
+    const { executePhase } = await import("../src/core/runner");
+    const { getCurrentSandboxDir } = await import("../src/core/task-context");
+    const { computeDiffStat } = await import("../src/daemon/task-outcome");
+    const { createTask, updateTask, getTask } = await import("../src/core/db");
+    const { createProject } = await import("../src/core/projects");
+    const { createWorkspace } = await import("../src/core/workspaces");
+    const registry = await import("../src/core/registry");
+
+    // phase 函数完全不知道路径，只从 ALS 上下文取 runner 注入的共用沙盒——
+    // 这正是要端到端验证的链路：runner 注入 getTaskSandbox(id) → 函数读 getCurrentSandboxDir()。
+    let sawSandbox: string | undefined;
+    registry._clearRegistry();
+    registry.register({
+      name: "shr_int",
+      description: "共用沙盒全流程集成测试工作流",
+      phases: [{
+        name: "develop", pending_state: "pending_develop", running_state: "running_develop",
+        trigger: "start_develop", complete_trigger: "develop_complete", fail_trigger: "develop_fail",
+        label: "DEV",
+        func: async () => {
+          sawSandbox = getCurrentSandboxDir();
+          writeFileSync(join(sawSandbox!, "delivered.ts"), "export const ok = true;\n", "utf-8");
+        },
+      }],
+      initial_state: "pending_develop",
+      terminal_states: ["done", "cancelled", "failed"],
+      sandbox: { git: true },
+    } as never);
+
+    createProject({ id: "proj-1", name: "p" });
+    createWorkspace({ id: "ws-1", project_id: "proj-1", alias: "r", path: srcRepo, default_branch: "main" });
+
+    const id = taskId("shrint");
+    ensureTaskSandbox(id, "shr_int", { git: true }, { id: "ws-1", path: srcRepo, default_branch: "main" }, `feat/${id}`);
+    const ws = getTaskSandbox(id);
+    createTask({ id, title: "t", workflow: "shr_int", initialStatus: "running_develop", requirementId: undefined });
+    updateTask(id, { workspace_id: "ws-1", branch: `feat/${id}`, default_branch: "main", workspace_path: ws });
+
+    // 真 runner 跑这一 phase：内部会注入 getTaskSandbox(id) 作 sandboxDir
+    await executePhase(id, "develop");
+
+    // 1) phase 函数确实拿到了共用沙盒路径（= 该 task 的共用 clone）
+    expect(sawSandbox).toBe(ws);
+    // 2) 文件真落进了共用 clone
+    expect(existsSync(join(ws, "delivered.ts"))).toBe(true);
+    // 3) diff_stat 端到端看到这次改动（add -A + diff --cached origin/main）
+    const stat = computeDiffStat(ws, "main");
+    expect(stat).not.toBeNull();
+    expect(stat!.files).toBe(1);
+    // 4) phase 成功 → 单 phase 工作流自动推进到终态 done（无下一阶段 spawn）
+    expect(getTask(id)?.status).toBe("done");
+  });
+});

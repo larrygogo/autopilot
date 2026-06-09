@@ -94,7 +94,7 @@ export function expandPromptTemplate(
   },
 ): string {
   // 代码路径（${WORKSPACE} 给 agent）与产物路径（handoff 读取）分离：产物在 artifacts/，
-  // 代码在 sandbox（Step 4 起为即焚临时 clone）。测试传 ctx.workspaceRoot 时两者同源。
+  // 代码在共用 clone（getCurrentSandboxDir）。测试传 ctx.workspaceRoot 时两者同源。
   const codeRoot = resolveCodeRoot(ctx.taskId, ctx.workspaceRoot);
   const artifactsRoot = ctx.workspaceRoot ?? getTaskArtifactsDir(ctx.taskId);
   const builtins: Record<string, string> = {

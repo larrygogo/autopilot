@@ -70,12 +70,12 @@ export function cancelTaskAction(taskId: string): { from: string; to: string } {
 }
 
 // ──────────────────────────────────────────────
-// releaseTaskSandboxAction — 释放任务沙盒产物（artifacts/ + 即焚副本残留 + 旧 workspace/）
+// releaseTaskSandboxAction — 释放任务沙盒产物（workspace/ 共用 clone + artifacts/ + 旧 .agent-runs/）
 // ──────────────────────────────────────────────
 
 /**
- * 释放任务的沙盒产物目录，回收磁盘。只允许对终态任务执行：即焚模型下 artifacts/ 含累积
- * patch（代码状态唯一载体），删运行中任务的 patch 会损坏其后续阶段。
+ * 释放任务的沙盒目录，回收磁盘。只允许对终态任务执行：共用沙盒模型下 workspace/ 是任务的代码
+ * clone，删运行中任务的 workspace/ 会删掉它正在改的代码。
  * 任务记录 / 状态日志 / 阶段日志 / Agent 调用记录均保留（在 runtime/tasks/<id>/ 顶层）。
  */
 export function releaseTaskSandboxAction(taskId: string): { removed: boolean } {

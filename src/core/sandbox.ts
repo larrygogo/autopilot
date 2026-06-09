@@ -28,7 +28,7 @@ const WORKTREE_MANIFEST = ".worktree.json";
 export interface SandboxConfig {
   /** 模板目录名（相对于 workflow 目录），默认 undefined = 空 sandbox */
   template?: string;
-  /** 启用 git worktree 模式（基于 workspace 临时分支沙盒） */
+  /** 启用 git 代码沙盒：task 启动把 workspace 仓库 git clone --local 成独立共用 clone（源仓库零痕迹） */
   git?: boolean;
   /** worktree 分支名前缀，默认 "autopilot/" */
   branch_prefix?: string;
@@ -369,7 +369,7 @@ export function removeTaskWorktree(taskId: string): boolean {
  * - 仅 clone 模式生效（autopilot 独立副本）；
  * - 仅删 meta.branch（由 deliverBranchName 生成、记在 .worktree.json 的 autopilot 自有交付分支），
  *   且强制 `feat/` 前缀校验，绝不碰用户的其它分支；
- * - 用 gh api 删远程分支（即焚模型无常驻 clone 可 push --delete；从 meta.remote_url
+ * - 用 gh api 删远程分支（重跑时共用 clone 可能已被删，故走 gh api 而非本地 push --delete；从 meta.remote_url
  *   解析 owner/repo），分支不存在 / 无凭证等一律容错（重跑继续，不阻断）。
  */
 /**
@@ -455,7 +455,7 @@ export interface SandboxEntry {
  * @returns 绝对路径或 null（路径非法）
  */
 export function resolveSandboxPath(taskId: string, relPath: string): string | null {
-  // 「沙盒」tab 展示的是任务文件夹产物（artifacts/），不是代码副本（即焚、跑完即销毁）。
+  // 「沙盒」tab 展示的是任务文件夹产物（artifacts/），不是代码 clone（workspace/）。
   const ws = getTaskArtifactsDir(taskId);
   const root = resolve(ws);
   if (relPath.includes("\0")) return null;
@@ -575,24 +575,24 @@ function dirSizeBytes(dir: string): number {
 /**
  * 释放任务沙盒产物，回收磁盘。返回是否真的删除过任何内容。
  *
- * 即焚模型下实际占盘的是 artifacts/（产物 + 累积 patch）与 .agent-runs/（即焚副本残留）；
- * 旧常驻 workspace/ 即焚下不存在，作兼容删除。logs / events / agent-calls / manifest 等
- * 元数据不受影响（保留在 runtime/tasks/<id>/ 顶层）。
+ * 共用沙盒模型下占盘的是 workspace/（共用代码 clone）与 artifacts/（产物文档）；.agent-runs/
+ * 是旧即焚残留（已无人写，兼容删除）。logs / events / agent-calls / manifest 等元数据不受影响
+ * （保留在 runtime/tasks/<id>/ 顶层）。
  *
- * 注意：会删累积 patch（代码状态唯一载体），调用方（releaseTaskSandboxAction）须保证仅对
- * 终态任务执行，否则会损坏运行中任务。
+ * 注意：会删 workspace/（共用代码 clone）。调用方（releaseTaskSandboxAction）须保证仅对终态任务
+ * 执行，否则会删掉运行中任务正在改的代码。
  */
 export function deleteTaskSandbox(taskId: string): boolean {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
   }
-  // 旧 worktree task：先 git worktree remove --force 让源仓库干净（即焚 clone 模式下 no-op）。
+  // 旧 worktree task：先 git worktree remove --force 让源仓库干净（独立 clone 模式下 no-op）。
   let removed = removeTaskWorktree(taskId);
   const taskRoot = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
   for (const target of [
-    getTaskSandbox(taskId),       // 旧常驻 workspace/（即焚下通常不存在）
-    getTaskArtifactsDir(taskId),  // artifacts/（沙盒 tab 实际展示的产物 + 累积 patch）
-    join(taskRoot, ".agent-runs"), // 即焚副本残留
+    getTaskSandbox(taskId),       // workspace/（共用代码 clone）
+    getTaskArtifactsDir(taskId),  // artifacts/（沙盒 tab 展示的产物文档）
+    join(taskRoot, ".agent-runs"), // 旧即焚副本残留（兼容删除）
   ]) {
     if (existsSync(target)) {
       rmSync(target, { recursive: true, force: true });

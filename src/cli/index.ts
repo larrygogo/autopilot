@@ -676,7 +676,7 @@ task
 program
   .command("run <prompt>")
   .description("一句话发包：跳过项目/需求/工作流选择，直接跑 ad-hoc 工作流")
-  .option("-c, --workspace <alias>", "绑定 workspace 别名（启用 git worktree 模式）")
+  .option("-c, --workspace <alias>", "绑定 workspace 别名（启用 git 沙盒：独立 clone）")
   .option("-w, --workflow <name>", "覆盖默认 ad-hoc workflow")
   .option("--no-follow", "不跟踪实时日志，仅返回 task id")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
