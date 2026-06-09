@@ -140,8 +140,10 @@ export function restartTaskAction(taskId: string): { ok: true; phase: string; fr
     );
   }
 
-  // 从 status 提取 phase 名（running_X / pending_X / awaiting_X）
-  const m = task.status.match(/^(?:running_|pending_|awaiting_)(.+)$/);
+  // 从 status 提取 phase 名（running_X / pending_X / awaiting_X / waiting_<group>）。
+  // waiting_<group> 是并行块 fork 后的挂起态——重启时 phase=group，下面 phase 校验认 parallel.name，
+  // executePhase(group) 会重新 fork 跑整组（CONC-01：原正则漏 waiting_ 致并行块卡死无法手动救）。
+  const m = task.status.match(/^(?:running_|pending_|awaiting_|waiting_)(.+)$/);
   const phase = m ? m[1] : null;
   if (!phase) {
     throw new TaskActionError(

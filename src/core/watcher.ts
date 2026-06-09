@@ -110,6 +110,15 @@ function getRunningToPendingMap(workflowName: string): Map<string, string> {
   return map;
 }
 
+/** 该 group 是否是工作流里的并行块名（用于 waiting_<group> 恢复时校验）。 */
+function isParallelGroup(workflowName: string, group: string): boolean {
+  const workflow = getWorkflow(workflowName);
+  if (!workflow) return false;
+  return workflow.phases.some(
+    (p) => "parallel" in p && (p.parallel as ParallelDefinition).name === group,
+  );
+}
+
 // ──────────────────────────────────────────────
 // 卡死任务检测
 // ──────────────────────────────────────────────
@@ -155,8 +164,9 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
     // 跳过终态
     if (terminalStateSet.has(task.status)) continue;
 
-    // 只处理 running 状态的任务
-    if (!task.status.startsWith("running_")) continue;
+    // 处理 running_ 状态，以及并行块挂起的 waiting_<group>（CONC-01：子阶段内存 promise
+    // 在崩溃/重启时丢失，三条恢复路原本只认 running_，waiting_ 会永久卡死）。
+    if (!task.status.startsWith("running_") && !task.status.startsWith("waiting_")) continue;
 
     // 注：await_review 是「polling DB 等外部 trigger」设计本来就该长期 running，
     // 但 runner 的 heartbeat 每 2 分钟会更新 updated_at（runner.ts:121），
@@ -189,9 +199,22 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
       continue;
     }
 
-    // 找到对应 phase name
-    const phaseMap = getRunningStatePhaseMap(task.workflow);
-    const phaseName = phaseMap.get(task.status);
+    // 解析 phase 名 + 回退目标 pending 状态。
+    // - running_<X>：查工作流 running_state→phase / running_state→pending_state 映射
+    // - waiting_<group>（并行块挂起）：按约定取 group 名 + pending_<group>，回退后让 runner 重新
+    //   fork 跑整组（并行块可幂等重跑；executeParallelGroup 的 fork 要求当前是 pending_<group>）
+    let phaseName: string | undefined;
+    let pendingState: string | undefined;
+    if (task.status.startsWith("waiting_")) {
+      const group = task.status.slice("waiting_".length);
+      if (isParallelGroup(task.workflow, group)) {
+        phaseName = group;
+        pendingState = `pending_${group}`;
+      }
+    } else {
+      phaseName = getRunningStatePhaseMap(task.workflow).get(task.status);
+      pendingState = getRunningToPendingMap(task.workflow).get(task.status);
+    }
 
     if (!phaseName) {
       log.warn(
@@ -202,11 +225,6 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
       );
       continue;
     }
-
-    // 找到对应 pending state，使用 forceTransition 回退并记录审计日志
-    const pendingMap = getRunningToPendingMap(task.workflow);
-    const pendingState = pendingMap.get(task.status);
-
     if (!pendingState) {
       log.warn(
         "watcher: 无法确定 pending 状态 [task=%s status=%s workflow=%s]，跳过恢复",

@@ -71,6 +71,27 @@ function makeTestWorkflowWithAwaitReview() {
   };
 }
 
+function makeTestWorkflowWithParallel() {
+  return {
+    name: "test_par_wf",
+    description: "测试并行块",
+    phases: [
+      {
+        parallel: {
+          name: "build",
+          fail_strategy: "cancel_all",
+          phases: [
+            { name: "frontend", pending_state: "pending_frontend", running_state: "running_frontend", trigger: "start_frontend", complete_trigger: "frontend_complete", fail_trigger: "frontend_fail", label: "FE", func: async (_t: string) => {} },
+            { name: "backend", pending_state: "pending_backend", running_state: "running_backend", trigger: "start_backend", complete_trigger: "backend_complete", fail_trigger: "backend_fail", label: "BE", func: async (_t: string) => {} },
+          ],
+        },
+      },
+    ],
+    initial_state: "pending_build",
+    terminal_states: ["done", "cancelled"],
+  };
+}
+
 // ──────────────────────────────────────────────
 // 测试套件
 // ──────────────────────────────────────────────
@@ -175,6 +196,42 @@ describe("watcher - checkStuckTasks", () => {
     // 验证任务状态已改变（被强制转换回 pending）
     const taskAfter = dbModule.getTask("task-stuck-001");
     expect(taskAfter?.status).toBe("pending_step1");
+  });
+
+  it("waiting_<group> 并行块挂起超时 → 回退 pending_<group> 重跑整组（CONC-01）", () => {
+    // 并行块 fork 后挂在 waiting_build；daemon 崩溃/重启后子阶段内存 promise 丢失。
+    // 修前 watcher 只认 running_ → waiting_build 永久卡死，无人恢复。
+    registryModule.register(makeTestWorkflowWithParallel() as any);
+
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    dbModule.createTask({
+      id: "task-par-001",
+      title: "并行块挂起卡死",
+      workflow: "test_par_wf",
+      initialStatus: "waiting_build",
+    });
+    sqlite.run("UPDATE tasks SET updated_at = ? WHERE id = ?", [thirtyMinAgo, "task-par-001"]);
+
+    expect(dbModule.getTask("task-par-001")?.status).toBe("waiting_build");
+    watcherModule.checkStuckTasks(600);
+    // 回退到 pending_build，让 runner 重新 fork 跑整组
+    expect(dbModule.getTask("task-par-001")?.status).toBe("pending_build");
+  });
+
+  it("waiting_<未知group>（工作流无此并行块）→ 不误恢复，跳过", () => {
+    registryModule.register(makeTestWorkflowWithParallel() as any);
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    dbModule.createTask({
+      id: "task-par-002",
+      title: "未知并行块",
+      workflow: "test_par_wf",
+      initialStatus: "waiting_nonexistent",
+    });
+    sqlite.run("UPDATE tasks SET updated_at = ? WHERE id = ?", [thirtyMinAgo, "task-par-002"]);
+
+    watcherModule.checkStuckTasks(600);
+    // group 不存在于工作流 → isParallelGroup 假 → 不动状态
+    expect(dbModule.getTask("task-par-002")?.status).toBe("waiting_nonexistent");
   });
 
   it("running_await_review 在 heartbeat 内（updated_at 新）不应被误恢复", () => {

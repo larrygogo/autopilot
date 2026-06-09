@@ -3,6 +3,7 @@ import { join } from "path";
 import { AUTOPILOT_HOME, VERSION } from "../index";
 import { installAutopilotResolver } from "../core/autopilot-resolver";
 import { initDb, closeDb, listTasks, updateTask } from "../core/db";
+import { forceTransition } from "../core/state-machine";
 import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/registry";
 import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
@@ -315,8 +316,29 @@ export function recoverDanglingTasks(
     //       打断业务）
     //     - 否则（崩溃 / 干净启动）→ 标 dangling 让 UI 提示用户决定
     for (const t of tasks) {
-      if (!t.status.startsWith("running_")) continue;
-      const phase = t.status.slice("running_".length);
+      const isWaiting = t.status.startsWith("waiting_");
+      if (!t.status.startsWith("running_") && !isWaiting) continue;
+      const phase = isWaiting ? t.status.slice("waiting_".length) : t.status.slice("running_".length);
+
+      // 并行块 waiting_<group>（CONC-01）：子阶段内存 promise 在重启时已丢，回退 pending_<group>
+      // 重跑整组（并行块可幂等重跑；executeParallelGroup 的 fork 要求当前是 pending_<group>）。
+      // 无 dangling 中间态——直接自动恢复。
+      if (isWaiting) {
+        log.info(
+          "task %s 在 daemon 启动时停留在 %s（并行块挂起）→ 回退 pending_%s 重跑整组",
+          t.id, t.status, phase,
+        );
+        if (t["dangling"]) updateTask(t.id, { dangling: false });
+        try {
+          forceTransition(t.id, `pending_${phase}`, "daemon 启动：并行块中断，回退重跑整组");
+        } catch (e: unknown) {
+          log.error("recoverDanglingTasks: 回退 waiting_%s 失败 task=%s: %s", phase, t.id, (e as Error).message);
+          continue;
+        }
+        runFn(t.id, phase);
+        respawnCount++;
+        continue;
+      }
 
       if (t.status === "running_await_review") {
         log.info(
