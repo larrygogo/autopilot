@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { _setDbForTest, initDb, createTask, listTaskPhaseEvents } from "../src/core/db";
+import { _setDbForTest, initDb, createTask, updateTask, getTask, listTaskPhaseEvents } from "../src/core/db";
 import { runPendingMigrations } from "../src/core/migrate";
 import { mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
@@ -203,5 +203,20 @@ describe("runner phase events 集成", () => {
     expect(events[0]!.phase).toBe("design");
     expect(events[0]!.status).toBe("done");
     expect(events[0]!.ended_at).not.toBeNull();
+  });
+
+  it("phase 成功完成 → 清 dangling 标志（被 watcher 救活的任务跑到 done 不残留失联）", async () => {
+    const phaseFn = async (_taskId: string) => { /* no-op */ };
+    registryModule.register(makeNormalWorkflow(phaseFn) as any);
+
+    createTask({ id: "task-pe-dangling", title: "test", workflow: "pe_normal_wf", initialStatus: "pending_design" });
+    // 模拟该任务曾被 watcher 标记失联（daemon 重启丢内存执行流）
+    updateTask("task-pe-dangling", { dangling: true });
+    expect(getTask("task-pe-dangling")?.dangling).toBeTruthy();
+
+    await runnerModule.executePhase("task-pe-dangling", "design");
+
+    // phase 成功 = 任务活着且在推进 → dangling 归零，避免跑到 done 仍挂"任务已失联"红横幅
+    expect(getTask("task-pe-dangling")?.dangling).toBeFalsy();
   });
 });

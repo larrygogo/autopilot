@@ -178,13 +178,16 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     appendTaskEvent(taskId, { type: "phase-completed", phase });
     archivePhaseArtifacts(taskId, workflow, phase);
 
-    // phase 成功完成 → 清失败计数 + 指纹。否则任务从重试中恢复、继续推进后，"⚠ 执行报错，
-    // 正在重试 (n/5)" 横幅（基于 failure_count>0）会一直残留，让用户误以为还没恢复。
-    // 失败累计、成功归零，横幅随恢复消失。
+    // phase 成功完成 → 清失败计数 + 指纹 + dangling。否则：
+    //  - failure_count 残留 → "⚠ 执行报错，正在重试 (n/5)" 横幅一直挂；
+    //  - dangling 残留 → 被 watcher 恢复路径救活的任务跑到 done 仍带失联标志，需求页/任务进度卡
+    //    会对已完成任务挂"⚠ 任务已失联"红横幅（watcher.checkStuckTasks 恢复时不清 dangling，
+    //    只有 recoverDangling respawn / restart 清；phase 成功是统一收口点）。
+    //  phase 跑成功 = 任务活着且在推进，这些"不健康"标志都该归零。
     {
       const tDone = getTask(taskId);
-      if (tDone && (((tDone.failure_count as number | undefined) ?? 0) > 0 || tDone["last_failure_fingerprint"])) {
-        updateTask(taskId, { failure_count: 0, last_failure_fingerprint: null });
+      if (tDone && (((tDone.failure_count as number | undefined) ?? 0) > 0 || tDone["last_failure_fingerprint"] || tDone["dangling"])) {
+        updateTask(taskId, { failure_count: 0, last_failure_fingerprint: null, dangling: false });
       }
     }
     // 同步清 watcher 内存里该 phase 的卡死恢复计数（RERUN-02）：否则上一轮卡死累计的计数

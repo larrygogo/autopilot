@@ -144,7 +144,9 @@ export function TaskProgressCard({
   const phaseLabel = phaseName
     ? pickPhaseLabel({ name: phaseName, label: phaseDef?.label })
     : null;
-  const isDangling = !!task.dangling;
+  // 失联只对 running_ 任务有意义（与 TaskDetail/TasksOverview 一致）：done/failed/cancelled 等
+  // 已收尾的任务即便残留 dangling 标志也不是"丢失"，不挂红横幅（修 done 任务仍显示失联的不一致）。
+  const isDangling = !!task.dangling && task.status.startsWith("running_");
   const isFailed = task.status.startsWith("failed_") || (task.status === "cancelled" && recentError);
   const isCancelled = task.status === "cancelled" && !recentError;
   const isDone = task.status === "done";
