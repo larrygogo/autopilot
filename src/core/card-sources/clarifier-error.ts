@@ -13,16 +13,8 @@ function buildCard(reqId: string, reason: string): NowCard {
     subtitle: preview,
     related: { type: "requirement", id: reqId },
     actions: [
-      { label: "查看", kind: "primary", href: `/requirements/${reqId}`, intent: { kind: "view_requirement", requirementId: reqId } },
-      {
-        label: "重试",
-        kind: "secondary",
-        invoke: {
-          method: "POST",
-          path: `/api/requirements/${reqId}/retry-clarify`,
-        },
-        intent: { kind: "retry_clarify", requirementId: reqId },
-      },
+      { kind: "primary", intent: { kind: "view_requirement", requirementId: reqId } },
+      { kind: "secondary", intent: { kind: "retry_clarify", requirementId: reqId } },
     ],
     dismissable: false,
     created_at: Math.floor(Date.now() / 1000),

@@ -25,7 +25,7 @@ function buildCard(provider: string, reason: string, firstFailedAt?: number): No
     subtitle: preview,
     related: { type: "provider", id: provider },
     actions: [
-      { label: "去配置", kind: "primary", href: "/settings?tab=providers", intent: { kind: "configure_providers", provider } },
+      { kind: "primary", intent: { kind: "configure_providers", provider } },
     ],
     dismissable: true,
     created_at: Math.floor((firstFailedAt ?? Date.now()) / 1000),

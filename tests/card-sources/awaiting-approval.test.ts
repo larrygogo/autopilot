@@ -50,7 +50,7 @@ describe("CardSource: awaiting-approval", () => {
     expect(cards[0].title).toContain("改 hover bug");
     expect(cards[0].related).toEqual({ type: "requirement", id: "REQ-001" });
     const primary = cards[0].actions.find(a => a.kind === "primary");
-    expect(primary?.href).toBe("/requirements/REQ-001");
+    expect(primary?.intent).toEqual({ kind: "view_requirement", requirementId: "REQ-001" });
   });
 
   it("scan 跳过非 awaiting_approval 状态的需求", async () => {

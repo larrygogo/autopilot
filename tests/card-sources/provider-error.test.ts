@@ -28,7 +28,7 @@ describe("CardSource: provider-error", () => {
     expect(cards[0].category).toBe("error");
     expect(cards[0].subtitle).toContain("auth 401");
     expect(cards[0].dismissable).toBe(true);
-    expect(cards[0].actions[0]?.href).toBe("/settings?tab=providers");
+    expect(cards[0].actions[0]?.intent.kind).toBe("configure_providers");
   });
 
   it("onEvent: health-changed healthy=false → add 卡", async () => {

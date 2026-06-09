@@ -44,7 +44,7 @@ function buildCard(row: ActiveQuestionRow): NowCard {
     subtitle: `Req ${row.req_id}「${row.req_title}」· ${preview}`,
     related: { type: "requirement", id: row.req_id },
     actions: [
-      { label: "回答", kind: "primary", href: `/requirements/${row.req_id}`, intent: { kind: "view_requirement", requirementId: row.req_id } },
+      { kind: "primary", intent: { kind: "view_requirement", requirementId: row.req_id } },
     ],
     dismissable: false,
     created_at: Math.floor(row.created_at / 1000),

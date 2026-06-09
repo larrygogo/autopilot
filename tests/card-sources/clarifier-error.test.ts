@@ -54,12 +54,10 @@ describe("CardSource: clarifier-error", () => {
     expect(cards[0].category).toBe("error");
     expect(cards[0].dismissable).toBe(false);
     expect(cards[0].subtitle).toContain("AI 超时");
-    const hasHref = cards[0].actions.some(a => a.href === "/requirements/r1");
-    const hasInvoke = cards[0].actions.some(a =>
-      a.invoke?.method === "POST" && a.invoke?.path === "/api/requirements/r1/retry-clarify",
-    );
-    expect(hasHref).toBe(true);
-    expect(hasInvoke).toBe(true);
+    const hasView = cards[0].actions.some(a => a.intent.kind === "view_requirement" && a.intent.requirementId === "r1");
+    const hasRetry = cards[0].actions.some(a => a.intent.kind === "retry_clarify" && a.intent.requirementId === "r1");
+    expect(hasView).toBe(true);
+    expect(hasRetry).toBe(true);
   });
 
   it("onEvent: clarifier-error → P0 add 卡", async () => {

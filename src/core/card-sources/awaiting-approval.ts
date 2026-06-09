@@ -12,7 +12,7 @@ function buildCard(req: { id: string; title: string; created_at: number }): NowC
     subtitle: `需求 ${req.id} 已就绪，等你审批入队`,
     related: { type: "requirement", id: req.id },
     actions: [
-      { label: "去看", kind: "primary", href: `/requirements/${req.id}`, intent: { kind: "view_requirement", requirementId: req.id } },
+      { kind: "primary", intent: { kind: "view_requirement", requirementId: req.id } },
     ],
     dismissable: false,
     created_at: Math.floor(req.created_at / 1000),

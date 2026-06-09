@@ -59,7 +59,7 @@ describe("CardSource: open-question (按 req_id 出卡)", () => {
     expect(cards[0].category).toBe("decision");
     expect(cards[0].subtitle).toContain("目标用户是谁");
     expect(cards[0].related).toEqual({ type: "requirement", id: "r1" });
-    expect(cards[0].actions.find(a => a.kind === "primary")?.href).toBe("/requirements/r1");
+    expect(cards[0].actions.find(a => a.kind === "primary")?.intent).toEqual({ kind: "view_requirement", requirementId: "r1" });
   });
 
   it("onEvent: active-question-changed 到非 null → add", async () => {

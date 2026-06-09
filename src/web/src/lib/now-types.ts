@@ -15,27 +15,12 @@ export type NowActionIntent =
   | { kind: "retry_clarify"; requirementId: string }
   | { kind: "dismiss"; cardId: string };
 
-export type NowCardAction =
-  | {
-      label: string;
-      kind: NowCardActionKind;
-      /** @deprecated 阶段 4 删；改用 intent 翻译 */
-      href: string;
-      invoke?: never;
-      intent: NowActionIntent;
-    }
-  | {
-      label: string;
-      kind: NowCardActionKind;
-      /** @deprecated 阶段 4 删；改用 intent 翻译 */
-      invoke: {
-        method: "POST" | "PATCH";
-        path: string;
-        body?: unknown;
-      };
-      href?: never;
-      intent: NowActionIntent;
-    };
+export interface NowCardAction {
+  /** 语义动作 —— 内核只出这个；落点/文案由 now-intent.ts 翻译 */
+  intent: NowActionIntent;
+  /** 视觉重要性（中性语义） */
+  kind: NowCardActionKind;
+}
 
 export interface NowCardRelated {
   type: "task" | "requirement" | "provider" | "system";

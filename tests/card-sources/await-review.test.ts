@@ -47,8 +47,8 @@ describe("CardSource: await-review", () => {
     expect(cards.map(c => c.id)).toEqual(["await-review:task-1"]);
     expect(cards[0].priority).toBe("P1");
     expect(cards[0].related).toEqual({ type: "task", id: "task-1" });
-    expect(cards[0].actions.some(a => a.label === "看方案" && a.kind === "primary")).toBe(true);
-    expect(cards[0].actions.some(a => a.label === "驳回" && a.kind === "danger")).toBe(true);
+    expect(cards[0].actions.some(a => a.intent.kind === "view_task" && a.kind === "primary")).toBe(true);
+    expect(cards[0].actions.some(a => a.intent.kind === "reject_review" && a.kind === "danger")).toBe(true);
   });
 
   it("onEvent: to running_await_review 产出 add", async () => {

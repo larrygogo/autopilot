@@ -13,11 +13,8 @@ function buildCard(task: Task): NowCard {
     subtitle: task.title,
     related: { type: "task", id: task.id },
     actions: [
-      { label: "看错误", kind: "primary", href: `/tasks/${task.id}`, intent: { kind: "view_task", taskId: task.id } },
-      { label: "关闭", kind: "secondary", invoke: {
-        method: "POST",
-        path: `/api/now/cards/task-failed:${task.id}/dismiss`,
-      }, intent: { kind: "dismiss", cardId: `task-failed:${task.id}` } },
+      { kind: "primary", intent: { kind: "view_task", taskId: task.id } },
+      { kind: "secondary", intent: { kind: "dismiss", cardId: `task-failed:${task.id}` } },
     ],
     dismissable: true,
     created_at: Math.floor(new Date(task.updated_at).getTime() / 1000),
