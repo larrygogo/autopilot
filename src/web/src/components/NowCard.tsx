@@ -3,7 +3,9 @@ import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/Toast";
-import type { NowCard as NowCardType, NowCardAction, NowCardPriority } from "@/lib/now-types";
+import type { NowCard as NowCardType, NowCardPriority } from "@/lib/now-types";
+import { resolveIntent } from "@/lib/now-intent";
+import { requestRpc } from "@/hooks/useApi";
 
 interface Props {
   card: NowCardType;
@@ -40,21 +42,17 @@ export function NowCard({ card, now }: Props) {
   const waitedSec = Math.max(0, Math.floor(now / 1000) - card.created_at);
 
   const handleInvoke = async (
-    action: Extract<NowCardAction, { invoke: object }>,
+    rpc: { method: string; params: Record<string, unknown> },
+    label: string,
     idx: number,
   ) => {
     setInvoking(idx);
     try {
-      const res = await fetch(action.invoke.path, {
-        method: action.invoke.method,
-        headers: { "Content-Type": "application/json" },
-        body: action.invoke.body ? JSON.stringify(action.invoke.body) : undefined,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
-      }
-      toast.success(`已${action.label}`);
+      // 走 WS RPC（dismiss → now.dismissCard / retry → requirements.retryClarify）。
+      // 旧实现 fetch(/api/now/cards/.../dismiss) 会撞 410（该 REST 已退役）—— 这步修复。
+      await requestRpc(rpc.method, rpc.params);
+      toast.success(`已${label}`);
+      // dismiss 成功后端 emit now:card_removed → useNowCards 自动移除卡片，无需手动改本地 state。
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -97,13 +95,14 @@ export function NowCard({ card, now }: Props) {
 
       <div className="flex flex-row sm:flex-col gap-1.5 shrink-0 items-stretch">
         {card.actions.map((action, idx) => {
+          const resolved = resolveIntent(action.intent);
           const variant =
             action.kind === "primary"
               ? "default"
               : action.kind === "danger"
                 ? "destructive"
                 : "outline";
-          if (action.href) {
+          if (resolved.href) {
             return (
               <Button
                 key={idx}
@@ -112,7 +111,7 @@ export function NowCard({ card, now }: Props) {
                 size="sm"
                 className="rounded-md text-[11px] min-w-[80px]"
               >
-                <Link to={action.href}>{action.label}</Link>
+                <Link to={resolved.href}>{resolved.label}</Link>
               </Button>
             );
           }
@@ -123,14 +122,9 @@ export function NowCard({ card, now }: Props) {
               size="sm"
               className="rounded-md text-[11px] min-w-[80px]"
               disabled={invoking === idx}
-              onClick={() =>
-                void handleInvoke(
-                  action as Extract<NowCardAction, { invoke: object }>,
-                  idx,
-                )
-              }
+              onClick={() => void handleInvoke(resolved.rpc!, resolved.label, idx)}
             >
-              {invoking === idx ? "..." : action.label}
+              {invoking === idx ? "..." : resolved.label}
             </Button>
           );
         })}

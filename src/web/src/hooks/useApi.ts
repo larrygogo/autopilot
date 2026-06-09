@@ -96,7 +96,7 @@ function authHeaders(): Record<string, string> {
  *
  * 错误归一化：RpcCallError 转成普通 Error，文案包含 code，便于现有 UI 错误展示。
  */
-async function requestRpc<T>(method: string, params?: unknown, opts?: CallOptions): Promise<T> {
+export async function requestRpc<T>(method: string, params?: unknown, opts?: CallOptions): Promise<T> {
   try {
     return await rpcCall<T>(method, params, opts);
   } catch (e: unknown) {

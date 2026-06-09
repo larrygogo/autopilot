@@ -3,22 +3,38 @@ export type NowCardPriority = "P0" | "P1" | "P2" | "P3";
 export type NowCardCategory = "error" | "decision" | "running" | "completed";
 export type NowCardActionKind = "primary" | "secondary" | "danger";
 
+// 与 src/core/now-types.ts NowActionIntent 保持一致（手动同步）
+export type NowActionIntent =
+  | { kind: "view_task"; taskId: string }
+  | { kind: "view_requirement"; requirementId: string }
+  | { kind: "configure_providers"; provider?: string }
+  | { kind: "create_project" }
+  | { kind: "add_workspace" }
+  | { kind: "new_requirement" }
+  | { kind: "reject_review"; taskId: string }
+  | { kind: "retry_clarify"; requirementId: string }
+  | { kind: "dismiss"; cardId: string };
+
 export type NowCardAction =
   | {
       label: string;
       kind: NowCardActionKind;
+      /** @deprecated 阶段 4 删；改用 intent 翻译 */
       href: string;
       invoke?: never;
+      intent: NowActionIntent;
     }
   | {
       label: string;
       kind: NowCardActionKind;
+      /** @deprecated 阶段 4 删；改用 intent 翻译 */
       invoke: {
         method: "POST" | "PATCH";
         path: string;
         body?: unknown;
       };
       href?: never;
+      intent: NowActionIntent;
     };
 
 export interface NowCardRelated {
