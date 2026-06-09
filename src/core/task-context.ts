@@ -14,6 +14,11 @@ export interface TaskContext {
    * 非 git 工作流仍注入路径（空目录），phase 不用即忽略。
    */
   sandboxDir?: string;
+  /**
+   * 本次 phase 的取消令牌（per-task，CONC-09）。runner 注入 registerRun 返回的 controller.signal；
+   * Agent.run 兜底取它透传给 provider（provider 转 SIGTERM），phaseFn 也可经 getCurrentAbortSignal 协作检查。
+   */
+  signal?: AbortSignal;
 }
 
 const als = new AsyncLocalStorage<TaskContext>();
@@ -30,4 +35,9 @@ export function getTaskContext(): TaskContext | undefined {
 /** 当前 phase 的共用沙盒代码目录（无则 undefined）。 */
 export function getCurrentSandboxDir(): string | undefined {
   return als.getStore()?.sandboxDir;
+}
+
+/** 当前 phase 的取消令牌（无则 undefined）。 */
+export function getCurrentAbortSignal(): AbortSignal | undefined {
+  return als.getStore()?.signal;
 }

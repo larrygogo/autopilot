@@ -5,6 +5,10 @@ import {
   abortRun,
   _clearRunsForTest,
 } from "../src/core/task-lifecycle";
+import {
+  runWithTaskContext,
+  getCurrentAbortSignal,
+} from "../src/core/task-context";
 
 afterEach(() => {
   _clearRunsForTest();
@@ -33,5 +37,24 @@ describe("task-lifecycle · 取消令牌登记处（Task 1）", () => {
     const fresh = registerRun("t2"); // 不该发生（锁保证），但防御
     expect(old.signal.aborted).toBe(true);
     expect(fresh.signal.aborted).toBe(false);
+  });
+});
+
+describe("task-context · 注入 signal（Task 2）", () => {
+  it("runWithTaskContext 带 signal 时 getCurrentAbortSignal 返回它", () => {
+    const controller = new AbortController();
+    runWithTaskContext(
+      { taskId: "t", phase: "develop", signal: controller.signal },
+      () => {
+        expect(getCurrentAbortSignal()).toBe(controller.signal);
+      },
+    );
+  });
+
+  it("无 signal 上下文 / 无上下文时 getCurrentAbortSignal 为 undefined", () => {
+    expect(getCurrentAbortSignal()).toBeUndefined();
+    runWithTaskContext({ taskId: "t", phase: "develop" }, () => {
+      expect(getCurrentAbortSignal()).toBeUndefined();
+    });
   });
 });
