@@ -2,8 +2,7 @@ import { getTask, createTask, updateTask, clearTaskRunHistory } from "./db";
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { ensureTaskSandbox, prepareDeliverMeta, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskArtifactsDir, getTaskSandbox, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
-import { purgeAgentRuns } from "./agent-sandbox";
+import { ensureTaskSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskArtifactsDir, getTaskSandbox, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
 import { rmSync } from "fs";
 import { getWorkspaceById } from "./workspaces";
 import { getRequirementById, updateRequirement } from "./requirements";
@@ -279,9 +278,9 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
     } catch (e: unknown) {
       console.warn("resetTaskForRerun: deleteRemoteDeliverBranch 失败（容错继续）：", e instanceof Error ? e.message : e);
     }
-    // 即焚模型：清整个 artifacts（上轮产物 + 累积 patch，代码状态归零）+ 临时副本残留。
+    // 共用沙盒重跑：清 artifacts（上轮产物）+ 删旧 clone 工作树 + 重新 clone 干净。
     try { rmSync(getTaskArtifactsDir(taskId), { recursive: true, force: true }); } catch { /* ignore */ }
-    purgeAgentRuns(taskId);
+    try { rmSync(getTaskSandbox(taskId), { recursive: true, force: true }); } catch { /* ignore */ }
     let workspace: WorkspaceRef | undefined;
     const req = task.requirement_id ? getRequirementById(task.requirement_id) : null;
     const wsId = req?.workspace_id
@@ -290,13 +289,15 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
       const ws = getWorkspaceById(wsId);
       if (ws) workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch, github_owner: ws.github_owner, github_repo: ws.github_repo };
     }
-    // 重置交付元数据（不建常驻 clone；代码副本由 agent-sandbox 即用即焚）
-    const meta = prepareDeliverMeta(taskId, workspace, deliverBranchName(String(task.title ?? ""), taskId));
+    // 重新 clone 干净工作树（替即焚的"重置 patch 元数据"）。
+    ensureTaskSandbox(taskId, task.workflow, wf.sandbox, workspace, deliverBranchName(String(task.title ?? ""), taskId));
+    const meta = getTaskWorktreeMeta(taskId);
     if (meta) {
       updateTask(taskId, {
         default_branch: meta.base,
         branch: meta.branch,
         workspace_path: meta.workspace_path,
+        repo_path: getTaskSandbox(taskId),
       });
     }
   }

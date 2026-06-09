@@ -3,18 +3,8 @@ import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
-import { up as m001 } from "../src/migrations/001-baseline";
-import { up as m004 } from "../src/migrations/004-repos";
-import { up as m005 } from "../src/migrations/005-requirements";
-import { up as m006 } from "../src/migrations/006-submodules";
-import { up as m007 } from "../src/migrations/007-workflows";
-import { up as m008 } from "../src/migrations/008-projects";
-import { up as m009 } from "../src/migrations/009-nullable-codebase";
-import { up as m010 } from "../src/migrations/010-question-suggestions";
-import { up as m019 } from "../src/migrations/019-task-requirement-id";
-import { up as m021 } from "../src/migrations/021-requirement-comments";
-import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
-import { _setDbForTest } from "../src/core/db";
+import { _setDbForTest, initDb } from "../src/core/db";
+import { runPendingMigrations } from "../src/core/migrate";
 import { ensureTaskSandbox, getTaskSandbox } from "../src/core/sandbox";
 import { AUTOPILOT_HOME } from "../src/index";
 
@@ -37,13 +27,14 @@ function taskId(prefix: string): string {
   return id;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   tmpHome = join(tmpdir(), `autopilot-shared-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(tmpHome, { recursive: true });
   process.env.AUTOPILOT_HOME = tmpHome;
   db = new Database(":memory:");
-  for (const m of [m001, m004, m005, m006, m007, m008, m009, m010, m019, m021, m024]) m(db);
   _setDbForTest(db);
+  initDb();
+  await runPendingMigrations();
 
   srcRepo = join(tmpdir(), `autopilot-shared-src-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(srcRepo, { recursive: true });
@@ -94,5 +85,40 @@ describe("共用沙盒 · 跨 phase 直接可见（Task 2）", () => {
     await runWithTaskContext({ taskId: id, phase: "review", sandboxDir: ws }, async () => {
       expect(existsSync(join(getCurrentSandboxDir()!, "feature.ts"))).toBe(true);
     });
+  });
+});
+
+describe("共用沙盒 · 重跑重新 clone（Task 5）", () => {
+  it("重跑删旧 workspace 并重新 clone（上一轮残留不带过来）", async () => {
+    const { createTask, updateTask } = await import("../src/core/db");
+    const { createProject } = await import("../src/core/projects");
+    const { createWorkspace } = await import("../src/core/workspaces");
+    const { resetTaskForRerun } = await import("../src/core/task-factory");
+    const registry = await import("../src/core/registry");
+    registry._clearRegistry();
+    registry.register({
+      name: "shr_wf",
+      description: "共用沙盒测试工作流",
+      phases: [{ name: "develop", pending_state: "pending_develop", running_state: "running_develop", trigger: "start_develop", complete_trigger: "develop_complete", fail_trigger: "develop_fail", label: "DEV", func: async () => {} }],
+      initial_state: "pending_develop",
+      terminal_states: ["done", "cancelled", "failed"],
+      sandbox: { git: true },
+    } as never);
+
+    createProject({ id: "proj-1", name: "p" });
+    createWorkspace({ id: "ws-1", project_id: "proj-1", alias: "r", path: srcRepo, default_branch: "main" });
+
+    const id = taskId("shr5");
+    ensureTaskSandbox(id, "shr_wf", { git: true }, { id: "ws-1", path: srcRepo, default_branch: "main" }, `feat/${id}`);
+    const ws = getTaskSandbox(id);
+    createTask({ id, title: "t", workflow: "shr_wf", initialStatus: "running_develop", requirementId: undefined });
+    updateTask(id, { workspace_id: "ws-1", branch: `feat/${id}`, default_branch: "main", workspace_path: ws });
+    writeFileSync(join(ws, "stale.txt"), "old\n", "utf-8"); // 上一轮残留
+
+    resetTaskForRerun(id);
+
+    // 重跑 = 重新 clone 干净：旧残留没了，源仓库 README 在
+    expect(existsSync(join(ws, "stale.txt"))).toBe(false);
+    expect(existsSync(join(ws, "README.md"))).toBe(true);
   });
 });
