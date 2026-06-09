@@ -12,6 +12,9 @@ const log = createLogger("requirement-scheduler");
 
 let _handler: ((event: AutopilotEvent) => void) | null = null;
 
+/** 同组串行锁：防并发 tickRepo（同组两个事件）双双越过 active 检测各起一个 task（SC-3 TOCTOU）。 */
+const _inflightGroups = new Set<string>();
+
 /**
  * 单组 tick：父 workspace + 所有关联子模块视为一个调度组。
  *
@@ -32,6 +35,24 @@ export async function tickRepo(workspaceId: string): Promise<void> {
     return;
   }
   const groupId = workspace.parent_workspace_id ?? workspace.id;
+  // 同组串行守卫（SC-3 TOCTOU）：tickRepo 是 async 事件处理器，从 active 检测到
+  // startTaskFromTemplate 之间有 await 让出点；并发两个 tick 会双双越过 active 检测、
+  // 在 candidate.task_id 写回前各起一个 task。跳过是安全的——task 终态会释放 slot 再触发
+  // tick，新 queued 不会永久丢失。仿 requirement-clarifier 的 _inflightRounds。
+  if (_inflightGroups.has(groupId)) {
+    log.info("tickRepo: group %s 已有调度在执行，本次跳过（同仓库串行）", groupId);
+    return;
+  }
+  _inflightGroups.add(groupId);
+  try {
+    await tickGroup(groupId);
+  } finally {
+    _inflightGroups.delete(groupId);
+  }
+}
+
+/** tickRepo 的实际调度体（调用时已持同组串行锁，见 _inflightGroups）。 */
+async function tickGroup(groupId: string): Promise<void> {
   const submodules = listSubmodules(groupId);
   const groupWorkspaceIds = new Set<string>([groupId, ...submodules.map((r) => r.id)]);
 
