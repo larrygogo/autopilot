@@ -14,6 +14,7 @@ Ships with a Web UI (professional SaaS look · light & dark themes · graphical 
 [![TypeScript](https://img.shields.io/badge/language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
 [![CI](https://github.com/larrygogo/autopilot/actions/workflows/ci.yml/badge.svg)](https://github.com/larrygogo/autopilot/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![dogfooding](https://img.shields.io/badge/dogfooding-this%20repo%20ships%20with%20autopilot-blueviolet.svg)](#three-real-scenarios)
 
 </div>
 
