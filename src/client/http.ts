@@ -136,10 +136,6 @@ export class HttpClient {
     return this.call("tasks.logs", { id, limit });
   }
 
-  async getSubTasks(id: string): Promise<Task[]> {
-    return this.call("tasks.subtasks", { id });
-  }
-
   // ── Workflows ──
 
   async listWorkflows(): Promise<{ name: string; description: string; source?: "db" | "file"; derives_from?: string | null }[]> {

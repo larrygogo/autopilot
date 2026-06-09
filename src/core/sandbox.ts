@@ -290,20 +290,6 @@ function resolveRemoteUrl(ws: WorkspaceRef): string | null {
   return null;
 }
 
-function pickUniqueBranchName(workspacePath: string, prefix: string, taskId: string): string {
-  const base = `${prefix}${taskId}`;
-  for (let i = 0; i < 10; i++) {
-    const candidate = i === 0 ? base : `${base}-${i + 1}`;
-    const proc = Bun.spawnSync(["git", "-C", workspacePath, "rev-parse", "--verify", "--quiet", `refs/heads/${candidate}`], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    // exitCode != 0 表示分支不存在 → 可以用
-    if (proc.exitCode !== 0) return candidate;
-  }
-  // 10 次都冲突时取一个带时间戳的（极端情况，几乎不会触发）
-  return `${base}-${Date.now()}`;
-}
 
 function worktreeMetaPath(taskId: string): string {
   if (!TASK_ID_RE.test(taskId)) throw new Error(`非法 task ID：${taskId}`);

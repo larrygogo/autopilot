@@ -201,6 +201,7 @@ function renderMarkdown(rows: CoverageRow[]): string {
   lines.push("  - **孤儿 method**：注册了但客户端忘接 → 补客户端调用 or 删 method");
   lines.push("- tui 列大面积 `—` 是当前定位（observer-only）的体现，正常");
   lines.push("- cli 列 `—` 而 web 有 → 若 method 跟自动化无关（如 UI 内编辑器）则正常；跟任务/工作流相关则是 CLI 待补");
+  lines.push("- ⚠️ **CLI/TUI 多经 `src/client` 类型化包装调 RPC（不含字面 method 名）**，本表按字面量 grep，故对这类 method 的 cli/tui 列恒显 `—`，**不代表未覆盖**（DC-1）。判「CLI 待补」前请先核对 `src/client/http.ts` 是否已封装该 method。");
   lines.push("");
 
   // 摘要

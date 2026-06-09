@@ -15,7 +15,6 @@ import {
   getTask,
   getKv,
   getTaskLogs,
-  getSubTasks,
   listTaskPhaseEvents,
   getWorkflowPhaseStats,
 } from "../core/db";
@@ -113,7 +112,6 @@ import { runChecks } from "../core/doctor";
 import {
   listPhaseLogs,
   readPhaseLog,
-  readTaskEvents,
   listAgentCalls,
   getAgentCall,
 } from "../core/task-logs";
@@ -443,30 +441,8 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
-  registerRpcMethod({
-    method: "tasks.events",
-    description: "任务事件流（JSONL 解析后），可选 tail",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const tail = typeof p.tail === "number" ? p.tail : undefined;
-      try {
-        return readTaskEvents(p.id, tail !== undefined ? { tail } : undefined);
-      } catch (e: unknown) {
-        throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
-      }
-    },
-  });
-
-  registerRpcMethod({
-    method: "tasks.subtasks",
-    description: "任务下挂的子任务（仅 parent_task_id 关系）",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      return getSubTasks(p.id);
-    },
-  });
+  // 注：tasks.events / tasks.subtasks RPC 已删（DC-2/DC-3）——零 web/tui/cli/client 消费方。
+  // core readTaskEvents / db.getSubTasks 保留（HTTP 双胞胎 + task-delete 级联仍用）。
 
   registerRpcMethod({
     method: "workflows.phaseStats",
