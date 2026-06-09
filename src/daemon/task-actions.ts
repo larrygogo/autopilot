@@ -16,6 +16,7 @@ import { getTask, updateTask, closeOpenPhaseEvents, listRootTasksByRequirementId
 import { setRequirementStatus, type Requirement } from "../core/requirements";
 import { transition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
+import { abortRun } from "../core/task-lifecycle";
 import { getWorkflow, buildTransitions, isParallelPhase } from "../core/registry";
 import { getTaskArtifactsDir, deleteTaskSandbox } from "../core/sandbox";
 import { isLocked } from "../core/infra";
@@ -61,6 +62,9 @@ export function cancelTaskAction(taskId: string): { from: string; to: string } {
     : { [task.status]: [["cancel", "cancelled"] as [string, string]] };
 
   const [from, to] = transition(taskId, "cancel", { transitions, note: "API cancel" });
+  // 打断 in-flight phase 的 agent 子进程（CONC-09）：cancel 不再只是改状态，
+  // 经 task-lifecycle 触发 AbortSignal → provider SIGTERM。无 in-flight 时 no-op。
+  abortRun(taskId);
   // 关闭进行中的 phase event，避免取消后留下永远 running 的僵尸（阶段进度 UI 会恒显示"进行中"+耗时虚高）
   closeOpenPhaseEvents(taskId);
   // 清 watcher 内存里该任务的卡死恢复计数（CONC-08）：被救活过又被 cancel（未删除）的任务

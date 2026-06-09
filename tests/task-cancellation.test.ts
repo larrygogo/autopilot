@@ -5,6 +5,7 @@ import {
   abortRun,
   _clearRunsForTest,
 } from "../src/core/task-lifecycle";
+import { cancelTaskAction } from "../src/daemon/task-actions";
 import {
   runWithTaskContext,
   getCurrentAbortSignal,
@@ -139,6 +140,42 @@ function makeLinearWorkflow(name: string, capture: (taskId: string) => void) {
     terminal_states: ["done", "cancelled", "failed"],
   } as never;
 }
+
+describe("cancelTaskAction · 触发 abortRun（Task 5）", () => {
+  let db: Database;
+  const cleanupIds: string[] = [];
+
+  afterEach(() => {
+    _setDbForTest(null);
+    try { db.close(); } catch { /* ignore */ }
+    registry._clearRegistry();
+    _clearRunsForTest();
+    for (const id of cleanupIds) {
+      try { rmSync(join(AUTOPILOT_HOME, "runtime", "tasks", id), { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    cleanupIds.length = 0;
+  });
+
+  it("cancel 运行中任务 → 其 in-flight controller 被 abort", async () => {
+    db = new Database(":memory:");
+    _setDbForTest(db);
+    initDb();
+    await runPendingMigrations();
+    registry._clearRegistry();
+    registry.register(makeLinearWorkflow("cancel_wf2", () => {}));
+    const id = "cncl-1";
+    cleanupIds.push(id);
+    createTask({ id, title: "t", workflow: "cancel_wf2", initialStatus: "running_develop", requirementId: undefined });
+
+    // 模拟 in-flight：手动登记 controller（真实路径由 executePhase 登记）
+    const controller = registerRun(id);
+    expect(controller.signal.aborted).toBe(false);
+
+    const { to } = cancelTaskAction(id);
+    expect(to).toBe("cancelled");
+    expect(controller.signal.aborted).toBe(true);
+  });
+});
 
 describe("executePhase · 登记/注入/注销 signal（Task 4）", () => {
   let db: Database;
