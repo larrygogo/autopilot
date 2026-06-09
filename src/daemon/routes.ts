@@ -99,7 +99,6 @@ import type { Agent } from "../agents/agent";
 import { loadApiToken, previewApiToken, saveApiToken, deleteApiToken, generateApiToken } from "../core/api-token";
 import {
   ensureTaskSandbox,
-  getTaskSandbox,
   listSandboxDir,
   readSandboxFile,
   resolveSandboxPath,
@@ -943,8 +942,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     if (method === "GET" && taskIdMatch) {
       const task = getTask(taskIdMatch);
       if (!task) return error("Task not found", 404);
-      // 附加 sandbox 路径（方便 UI 展示 / 用户 cd 过去）
-      return json({ ...task, workspace: getTaskSandbox(taskIdMatch) });
+      return json(task);
     }
 
     // POST /api/tasks/:id/cancel

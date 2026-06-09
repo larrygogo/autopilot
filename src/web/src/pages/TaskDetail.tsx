@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Copy, FolderTree, FileText, Bot, History, Radio, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2, MousePointerClick } from "lucide-react";
+import { ArrowLeft, FolderTree, FileText, Bot, History, Radio, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2, MousePointerClick } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LogTimeline } from "@/components/LogTimeline";
@@ -162,15 +162,6 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
     }
   };
 
-  const copyWorkspace = async () => {
-    if (!task?.workspace) return;
-    try {
-      await navigator.clipboard.writeText(task.workspace);
-      toast.success("已复制沙盒路径");
-    } catch (e: unknown) {
-      toast.error("复制失败", (e as Error)?.message ?? "可能是浏览器拒绝了 clipboard 权限");
-    }
-  };
 
   // ⚠️ Hooks 必须在条件 return 之前调用，否则违反 hooks 顺序规则（React error #310）
   // 从 transition 日志推导每个 phase 的运行状态，喂给 PhasePipeline 显示角标。
@@ -451,21 +442,6 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
               {task.requirement}
             </pre>
           </details>
-        )}
-        {task.workspace && (
-          <div className="mx-4 mb-4 flex flex-wrap items-center gap-2 border-t border-border pt-3 text-xs">
-            <span className="bp-label">沙盒</span>
-            <code
-              className="flex-1 cursor-pointer break-all border border-border bg-muted px-2 py-1 font-mono text-foreground"
-              title="点击复制"
-              onClick={copyWorkspace}
-            >
-              {task.workspace}
-            </code>
-            <Button size="icon" variant="ghost" onClick={copyWorkspace} aria-label="复制路径">
-              <Copy className="h-3.5 w-3.5" />
-            </Button>
-          </div>
         )}
       </Card>
 

@@ -388,7 +388,7 @@ export function deleteRemoteDeliverBranch(taskId: string): { deleted: boolean; b
     log.warn("跳过删远程分支：非 autopilot 交付分支命名空间 [task=%s branch=%s]", taskId, meta.branch);
     return { deleted: false, branch: meta.branch };
   }
-  // 从 remote_url 解析 owner/repo，用 gh api 删远程分支（即焚模型无常驻 clone 可 push --delete）。
+  // 从 remote_url 解析 owner/repo，用 gh api 删远程分支（重跑时本地共用 clone 可能已删，故走 gh api）。
   const m = (meta.remote_url ?? "").match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
   if (!m) {
     log.warn("删远程分支跳过：无法从 remote 解析 owner/repo [task=%s remote=%s]", taskId, meta.remote_url ?? "");
