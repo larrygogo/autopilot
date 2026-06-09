@@ -36,6 +36,10 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = 1000;
 let shouldReconnect = true;
 let started = false;
+// 本会话内是否曾成功建立过 WS 连接（onopen 至少触发过一次）。区分「首连 CONNECTING」(false)
+// 与「被动掉线重连」(true)——两者 ws 都非 OPEN 但语义相反：首连必须等（保 9ed3042 首屏修复），
+// 被动掉线该 fast-fail。单调：onopen 置 true，仅 disconnect/_resetWsSingletonForTest 复位。
+let everConnected = false;
 
 const channelHandlers = new Map<string, Set<EventHandler>>();
 const stateListeners = new Set<StateListener>();
@@ -109,6 +113,7 @@ function connect(): void {
   ws = sock;
 
   sock.onopen = () => {
+    everConnected = true;
     setState("connected");
     reconnectDelay = 1000;
     sendSubscriptions();
@@ -172,6 +177,7 @@ export function disconnect(): void {
   setState("disconnected");
   rpc.rejectAllPending("DISCONNECTED", "客户端主动断开");
   started = false;
+  everConnected = false;
 }
 
 export function getConnectionState(): ConnectionState {
@@ -246,12 +252,12 @@ export function isRestarting(): boolean {
 }
 
 /**
- * 发起 RPC 请求。
- * 首次访问页面时 ws 通常还在 CONNECTING，先等一段时间让连接 ready 再发，
- * 避免"页面刚打开 → 所有 RPC 一起 reject DISCONNECTED"的假死。
- * 真断线场景：等不到 OPEN 仍会 reject DISCONNECTED，行为不变。
- * daemon 主动 restart 期间：调用方明知 daemon 在 respawn，立刻 reject 让 UI
- * 即时给反馈，而不是 waitForOpen 拖 5s。
+ * 发起 RPC 请求。ws 非 OPEN 时按连接阶段分叉：
+ * - restarting（daemon 主动重启窗口，38ec63b）：立即 reject RESTARTING。
+ * - 首连 CONNECTING（everConnected=false，页面刚打开）：waitForOpen 最多等 5s，避免"页面刚打开 →
+ *   所有 RPC 一起 reject"的首屏假死（9ed3042）。
+ * - 被动掉线（everConnected=true，曾连上后 daemon 崩/网抖/睡眠唤醒）：立即 fast-fail DISCONNECTED，
+ *   不卡 5s（WEB-08）；UI 即时反馈，DaemonOfflineBanner 另行去抖显红条。
  */
 export async function rpcCall<T = unknown>(method: string, params?: unknown, opts?: CallOptions): Promise<T> {
   if (restarting) {
@@ -259,9 +265,15 @@ export async function rpcCall<T = unknown>(method: string, params?: unknown, opt
   }
   ensureConnected();
   if (ws?.readyState !== WebSocket.OPEN) {
-    const ok = await waitForOpen(5000);
-    if (!ok) {
-      throw new RpcCallError("DISCONNECTED", "WebSocket 未连接，等待超时");
+    if (!everConnected) {
+      // 首连 CONNECTING：仍等，保住 9ed3042 首屏假死修复（硬红线）。
+      const ok = await waitForOpen(5000);
+      if (!ok) {
+        throw new RpcCallError("DISCONNECTED", "WebSocket 未连接，等待超时");
+      }
+    } else {
+      // 被动掉线（曾连上、非主动重启、当前断开/重连中）：立即 fast-fail，不卡 5s（WEB-08）。
+      throw new RpcCallError("DISCONNECTED", "WebSocket 已断开（重连中）");
     }
   }
   return rpc.call<T>(method, params, opts);
@@ -281,4 +293,5 @@ export function _resetWsSingletonForTest(): void {
   state = "disconnected";
   reconnectDelay = 1000;
   started = false;
+  everConnected = false;
 }
