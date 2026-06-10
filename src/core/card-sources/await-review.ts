@@ -2,6 +2,7 @@ import type { CardSource, CardDelta } from "./types";
 import type { NowCard } from "../now-types";
 import type { AutopilotEvent } from "../events";
 import { getTask, listTasks } from "../db";
+import { contextForTask } from "./context";
 
 const AWAIT_REVIEW_STATUS = "running_await_review";
 
@@ -13,6 +14,7 @@ function buildCard(task: { id: string; title: string; created_at: string }): Now
     title: `Task #${task.id} 等审方案`,
     subtitle: `${task.title} · design 阶段产物已就绪`,
     related: { type: "task", id: task.id },
+    context: contextForTask(task.id),
     actions: [
       { kind: "primary", intent: { kind: "view_task", taskId: task.id } },
       { kind: "danger", intent: { kind: "reject_review", taskId: task.id } },

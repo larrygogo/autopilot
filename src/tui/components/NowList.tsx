@@ -17,6 +17,21 @@ const PRIORITY_LABEL: Record<NowCardPriority, string> = {
   P3: "完成",
 };
 
+/** 归属上下文行：需求标题 · 项目名 · 仓库:分支（标题/副标题已含需求名时不重复） */
+function contextLine(card: NowCard): string | null {
+  const ctx = card.context;
+  if (!ctx) return null;
+  const showTitle =
+    ctx.requirement_title &&
+    !card.title.includes(ctx.requirement_title) &&
+    !card.subtitle.includes(ctx.requirement_title);
+  const repo = ctx.workspace_alias
+    ? ctx.branch ? `${ctx.workspace_alias}:${ctx.branch}` : ctx.workspace_alias
+    : null;
+  const parts = [showTitle ? ctx.requirement_title : null, ctx.project_name, repo].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 function formatWaited(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const m = Math.floor(seconds / 60);
@@ -56,6 +71,7 @@ export function NowList({ cards, loading }: Props) {
         {cards.map((card) => {
           const waited = formatWaited(Math.max(0, nowSec - card.created_at));
           const actions = card.actions.map((a) => intentToLabel(a.intent)).join(" / ");
+          const ctxLine = contextLine(card);
           return (
             <Box key={card.id} flexDirection="column" marginBottom={1}>
               <Box>
@@ -69,6 +85,11 @@ export function NowList({ cards, loading }: Props) {
               <Box marginLeft={2}>
                 <Text dimColor>{card.subtitle}</Text>
               </Box>
+              {ctxLine && (
+                <Box marginLeft={2}>
+                  <Text dimColor>{ctxLine}</Text>
+                </Box>
+              )}
               {actions && (
                 <Box marginLeft={2}>
                   <Text dimColor>动作: </Text>

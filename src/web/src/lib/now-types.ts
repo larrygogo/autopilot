@@ -27,6 +27,16 @@ export interface NowCardRelated {
   id: string;
 }
 
+/** 卡片归属上下文（需求/项目/仓库），内核构卡时填充 */
+export interface NowCardContext {
+  requirement_id?: string;
+  requirement_title?: string;
+  project_name?: string;
+  workspace_alias?: string;
+  /** workspace 默认分支 */
+  branch?: string;
+}
+
 export interface NowCard {
   id: string;
   priority: NowCardPriority;
@@ -35,6 +45,7 @@ export interface NowCard {
   subtitle: string;
   detail?: string;
   related?: NowCardRelated;
+  context?: NowCardContext;
   actions: NowCardAction[];
   waited_seconds?: number;
   dismissable: boolean;

@@ -3,6 +3,7 @@ import type { NowCard } from "../now-types";
 import type { AutopilotEvent } from "../events";
 import { getTask, getDb } from "../db";
 import type { Task } from "../db";
+import { contextForTask } from "./context";
 
 const AWAIT_REVIEW_STATUS = "running_await_review";
 
@@ -18,6 +19,7 @@ function buildCard(task: Task): NowCard {
     title: `Task #${task.id} 进行中`,
     subtitle: `${task.title} · ${phaseOf(task.status)} 阶段`,
     related: { type: "task", id: task.id },
+    context: contextForTask(task.id),
     actions: [
       { kind: "secondary", intent: { kind: "view_task", taskId: task.id } },
     ],
