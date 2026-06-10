@@ -6,7 +6,7 @@ import { describe, it, expect } from "bun:test";
 import {
   createExpandState, applyStatusTransitions, toggleManual, isExpanded,
   shouldFollow, resolveLogPhase, phaseRounds, fmtDuration,
-  LEVEL_RE, extractLevel,
+  LEVEL_RE, extractLevel, isNeverRun,
   type ExpandState, type PhaseRunState,
 } from "../src/web/src/lib/run-view-logic";
 
@@ -143,6 +143,17 @@ it("filterLinesToWindow: 按时间窗切片，延续行跟随归属", () => {
   expect(round1).toEqual(lines.slice(0, 3));
   const round2 = filterLinesToWindow(lines, at("10:09:00"), null);
   expect(round2).toEqual(lines.slice(3));
+});
+
+it("isNeverRun: 只有 idle/pending 算从未执行；aborted 是被打断的已执行轮（有日志必须展示）", () => {
+  expect(isNeverRun("idle")).toBe(true);
+  expect(isNeverRun("pending")).toBe(true);
+  // dogfood-bug：daemon 重启打断的第 1 轮曾被映射成 idle → 「尚未开始」且不拉日志
+  expect(isNeverRun("aborted")).toBe(false);
+  expect(isNeverRun("running")).toBe(false);
+  expect(isNeverRun("done")).toBe(false);
+  expect(isNeverRun("failed")).toBe(false);
+  expect(isNeverRun("awaiting")).toBe(false);
 });
 
 it("assignAgentCalls: 按 phase + 时间窗分发；窗口对不上时落到该 phase 最后一轮", () => {

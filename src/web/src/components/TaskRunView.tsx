@@ -203,7 +203,7 @@ export function TaskRunView(props: TaskRunViewProps) {
         item: {
           name: r.key,
           label: r.totalAttempts > 1 ? `${base} · 第${r.attempt}轮` : base,
-          state: (r.state === "aborted" ? "idle" : r.state) as PhaseVisualState,
+          state: r.state as PhaseVisualState,
           durationText: durationOfRun(r),
         },
       });
@@ -257,9 +257,9 @@ export function TaskRunView(props: TaskRunViewProps) {
   // section 流：线性时间线 —— 每轮执行按发生顺序往下排，未执行 phase 灰色占位垫底
   const labelOfPhase = (name: string): string | undefined => flat.find((p) => p.name === name)?.label;
 
-  // aborted（daemon 重启被打断的轮次）UI 上以灰色 idle 圈呈现（不是失败，也不在跑）
-  const visualState = (s: ExecutionRun["state"]): PhaseVisualState =>
-    (s === "aborted" ? "idle" : s) as PhaseVisualState;
+  // aborted（daemon 重启被打断的轮次）作为一等视觉状态直传：图标仍是灰圈，但
+  // section 走正常日志加载（曾映射成 idle 被当"尚未开始"，整轮日志在 UI 上消失）
+  const visualState = (s: ExecutionRun["state"]): PhaseVisualState => s as PhaseVisualState;
 
   const renderRun = (r: ExecutionRun) => (
     <div key={r.key} ref={(el) => { sectionRefs.current[r.key] = el; }} data-phase={r.key}>

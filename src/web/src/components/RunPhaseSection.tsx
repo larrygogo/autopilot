@@ -7,7 +7,7 @@ import { api, type AgentCallSummary, type AgentCallRecord } from "@/hooks/useApi
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  shouldFollow, extractLevel, filterLinesToWindow, fmtDuration,
+  shouldFollow, extractLevel, filterLinesToWindow, fmtDuration, isNeverRun,
   LEVEL_TEXT, ALL_LEVELS, type Level,
 } from "@/lib/run-view-logic";
 import { PhaseStatusIcon, type PhaseVisualState } from "@/components/RunPhaseNav";
@@ -130,7 +130,7 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
   const [missed, setMissed] = useState(0);
 
   const isRunning = runState === "running";
-  const notStarted = runState === "pending" || runState === "idle";
+  const notStarted = isNeverRun(runState);
 
   const fetchLog = (lines: number) => {
     setLoading(true);
@@ -264,6 +264,11 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
         <div className="border-t border-border px-3 pb-3 pt-2">
           {runState === "failed" && errorNote && (
             <p className="mb-2 rounded-lg bg-destructive/8 px-3 py-2 text-xs text-destructive">{errorNote}</p>
+          )}
+          {runState === "aborted" && (
+            <p className="mb-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+              本轮执行被打断（daemon 重启或任务取消），日志保留至中断时刻；后续轮次见下方
+            </p>
           )}
           {/* 本轮 agent 调用（内联，展开懒加载完整 prompt/结果） */}
           {agentCalls && agentCalls.length > 0 && (
