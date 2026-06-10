@@ -164,7 +164,8 @@ export function taskTriggerZh(trigger: string, labelOf: (phase: string) => strin
 export interface PhaseEventLike {
   id: number;
   phase: string;
-  status: "running" | "done" | "awaiting" | "failed";
+  /** aborted = daemon 重启/取消时被打断的轮次（closeOpenPhaseEvents 写入） */
+  status: "running" | "done" | "awaiting" | "failed" | "aborted";
   started_at: number;
   ended_at: number | null;
 }
@@ -177,7 +178,7 @@ export interface ExecutionRun {
   attempt: number;
   /** 同 phase 总轮数 */
   totalAttempts: number;
-  state: "running" | "done" | "awaiting" | "failed";
+  state: "running" | "done" | "awaiting" | "failed" | "aborted";
   startedMs: number;
   endedMs: number | null;
 }
@@ -214,11 +215,13 @@ export function buildTimeline(
   return { runs, pending };
 }
 
-/** 日志行首时间戳（"2026-06-10 05:50:44 …"）→ ms；无时间戳返回 null（延续行） */
+/** 日志行首时间戳（"2026-06-10 05:50:44 …"）→ ms；无时间戳返回 null（延续行）。
+ *  logger 落盘的是 **UTC** 时间字符串（无时区后缀），必须显式按 UTC 解析——
+ *  否则 JS 按本地时区解，与 phase event 的 epoch 窗口错开数小时，切片结果全空。 */
 export function parseLineTs(line: string): number | null {
   const m = line.match(/^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/);
   if (!m) return null;
-  const t = new Date(m[1].replace(" ", "T")).getTime();
+  const t = new Date(m[1].replace(" ", "T") + "Z").getTime();
   return Number.isNaN(t) ? null : t;
 }
 

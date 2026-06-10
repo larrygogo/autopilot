@@ -2,7 +2,7 @@ import { mkdirSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME, VERSION } from "../index";
 import { installAutopilotResolver } from "../core/autopilot-resolver";
-import { initDb, closeDb, listTasks, updateTask } from "../core/db";
+import { initDb, closeDb, listTasks, updateTask, closeOpenPhaseEvents } from "../core/db";
 import { forceTransition } from "../core/state-machine";
 import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/registry";
@@ -363,6 +363,9 @@ export function recoverDanglingTasks(
           t.id, t.status, phase,
         );
         if (t["dangling"]) updateTask(t.id, { dangling: false });
+        // 旧 daemon 死时来不及收尾的 open phase event 先关掉，否则重跑会再开一条，
+        // 执行时间线出现两个并行转圈的同名轮次
+        closeOpenPhaseEvents(t.id);
         try {
           forceTransition(t.id, `pending_${phase}`, "daemon 启动：并行块中断，回退重跑整组");
         } catch (e: unknown) {
@@ -380,6 +383,7 @@ export function recoverDanglingTasks(
           t.id,
         );
         if (t["dangling"]) updateTask(t.id, { dangling: false });
+        closeOpenPhaseEvents(t.id);
         runFn(t.id, "await_review");
         respawnCount++;
         continue;
@@ -392,6 +396,7 @@ export function recoverDanglingTasks(
           t.id, t.status, phase,
         );
         if (t["dangling"]) updateTask(t.id, { dangling: false });
+        closeOpenPhaseEvents(t.id);
         runFn(t.id, phase);
         respawnCount++;
         continue;

@@ -125,12 +125,13 @@ it("buildTimeline: 秒级时间戳归一为毫秒", () => {
 });
 
 it("parseLineTs: 解析行首时间戳，无时间戳返回 null", () => {
-  expect(parseLineTs("2026-06-10 05:50:44 [INFO] hello")).toBe(new Date("2026-06-10T05:50:44").getTime());
+  // logger 落盘 UTC 字符串 → 必须按 UTC 解析（带 Z），否则与 epoch 窗口错开时区差
+  expect(parseLineTs("2026-06-10 05:50:44 [INFO] hello")).toBe(new Date("2026-06-10T05:50:44Z").getTime());
   expect(parseLineTs("    continuation line")).toBe(null);
 });
 
 it("filterLinesToWindow: 按时间窗切片，延续行跟随归属", () => {
-  const at = (s: string) => new Date(`2026-06-10T${s}`).getTime();
+  const at = (s: string) => new Date(`2026-06-10T${s}Z`).getTime();
   const lines = [
     "2026-06-10 10:00:00 [INFO] round1 start",
     "  round1 detail",

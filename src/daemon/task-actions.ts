@@ -197,6 +197,8 @@ export function restartTaskAction(taskId: string): { ok: true; phase: string; fr
     }
   }
 
+  // 重启会重新跑 phase：先关掉遗留 open phase event，防止时间线出现双 running 轮次
+  closeOpenPhaseEvents(taskId);
   // 直接改 status + 清 dangling/pending_question；绕过状态机，因为是用户级救援
   updateTask(taskId, {
     status: `pending_${phase}`,

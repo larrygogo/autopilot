@@ -1432,7 +1432,11 @@ export function registerCoreRpcMethods(): void {
       try {
         return { path: relPath, entries: listSandboxDir(p.id, relPath) };
       } catch (e: unknown) {
-        throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
+        const msg = e instanceof Error ? e.message : String(e);
+        // 产物目录懒创建：任务早期 / 重跑清空后目录还不存在是常态，返回空列表
+        // 让 UI 显示「暂无产物」，而不是红色报错吓用户
+        if (/不存在|ENOENT/i.test(msg)) return { path: relPath, entries: [] };
+        throw new RpcError("INVALID_PARAM", msg);
       }
     },
   });
