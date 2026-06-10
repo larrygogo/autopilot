@@ -1,18 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, FolderTree, Bot, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, FolderTree, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2 } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { type PhasePipelineRunStatus } from "@/components/PhasePipeline";
 import { PhaseDetailDrawer, type DrawerPhaseInfo, type PhaseRunStatus } from "@/components/PhaseDetailDrawer";
 import { SandboxBrowser } from "@/components/SandboxBrowser";
-import { AgentCallsViewer } from "@/components/AgentCallsViewer";
 import { ConfirmDialog } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
 import { modShortcut } from "@/lib/platform";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/input";
 import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { TaskOutcomeCard } from "@/components/TaskOutcomeCard";
@@ -358,7 +356,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
         />
       )}
 
-      {/* Tabs（沙盒 / Agent 调用） */}
+      {/* 沙盒产物（Agent 调用已内联到执行时间线各轮中） */}
       <TaskDetailTabs taskId={taskId} />
 
       {/* 基本信息 — metadata block 风（低频查看，沉到执行视图之后） */}
@@ -528,36 +526,17 @@ function findPhaseStartTime(
 // Tabs
 // ──────────────────────────────────────────────
 
-type DetailTab = "sandbox" | "agent-calls";
-
-/** 辅助视图 tabs。阶段/实时/状态日志已由 TaskRunView（GA 式执行视图）吸收。 */
+/** 辅助视图：沙盒产物浏览。阶段/实时/状态日志由 TaskRunView（线性时间线）吸收，
+ *  Agent 调用已内联到时间线各轮 section 中（完整 prompt/结果），不再单独成 tab。 */
 function TaskDetailTabs({ taskId }: { taskId: string }) {
-  const [tab, setTab] = useState<DetailTab>("sandbox");
-
-  const triggers: Array<{ key: DetailTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-    { key: "sandbox", label: "沙盒", icon: FolderTree },
-    { key: "agent-calls", label: "Agent 调用", icon: Bot },
-  ];
-
   return (
-    <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)}>
-      <TabsList className="scrollbar-thin mb-3 flex h-auto w-full justify-start overflow-x-auto">
-        {triggers.map((t) => (
-          <TabsTrigger key={t.key} value={t.key} className="gap-1.5">
-            <t.icon className="h-3.5 w-3.5" />
-            {t.label}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-
-      <TabsContent value="sandbox" className="mt-0">
-        <SandboxBrowser taskId={taskId} />
-      </TabsContent>
-
-      <TabsContent value="agent-calls" className="mt-0">
-        <AgentCallsViewer taskId={taskId} />
-      </TabsContent>
-    </Tabs>
+    <div>
+      <div className="mb-3 flex items-center gap-1.5 text-sm font-medium">
+        <FolderTree className="h-3.5 w-3.5" />
+        沙盒
+      </div>
+      <SandboxBrowser taskId={taskId} />
+    </div>
   );
 }
 

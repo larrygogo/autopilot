@@ -3,7 +3,7 @@
 // 同一 phase 驳回重做的每一轮是独立 section（往下追加），日志按本轮时间窗切片。
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, ChevronDown, Info, RotateCcw, Loader2, Bot } from "lucide-react";
-import { api, type AgentCallSummary } from "@/hooks/useApi";
+import { api, type AgentCallSummary, type AgentCallRecord } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -38,13 +38,34 @@ export interface RunPhaseSectionProps {
   onRetry?: () => void;         // failed 时的重试
 }
 
-/** agent 调用内联摘要行：默认一行，点击展开 prompt/result 预览 */
-function AgentCallInline({ call }: { call: AgentCallSummary }) {
+/** agent 调用内联：默认一行摘要，点击展开懒加载**完整** prompt / 结果（不截断） */
+function AgentCallInline({ taskId, call }: { taskId: string; call: AgentCallSummary }) {
   const [open, setOpen] = useState(false);
+  const [full, setFull] = useState<AgentCallRecord | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const tokens = call.usage
     ? `${call.usage.input_tokens ?? 0}→${call.usage.output_tokens ?? 0} tok`
     : null;
   const cost = call.usage?.total_cost_usd != null ? `$${call.usage.total_cost_usd.toFixed(4)}` : null;
+
+  // 首次展开懒加载完整记录（summary 里的 preview 是 120 字符截断）
+  useEffect(() => {
+    if (!open || full || loadErr) return;
+    api.getAgentCall(taskId, call.seq)
+      .then(setFull)
+      .catch((e: unknown) => setLoadErr((e as Error)?.message ?? String(e)));
+  }, [open, full, loadErr, taskId, call.seq]);
+
+  const block = (label: string, text: string | undefined, cls = "text-foreground/80") =>
+    text ? (
+      <div>
+        <div className="mb-0.5 text-muted-foreground">{label}</div>
+        <pre className={cn("scrollbar-thin max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 leading-relaxed", cls)}>
+          {text}
+        </pre>
+      </div>
+    ) : null;
+
   return (
     <div className={cn("rounded-lg border border-border/60 bg-muted/30", call.error && "border-destructive/40")}>
       <button
@@ -63,16 +84,28 @@ function AgentCallInline({ call }: { call: AgentCallSummary }) {
         </span>
       </button>
       {open && (
-        <div className="space-y-1.5 border-t border-border/60 px-2.5 py-2 font-mono text-[11px]">
-          <div>
-            <span className="text-muted-foreground">prompt：</span>
-            <span className="break-words text-foreground/80">{call.prompt_preview || "（空）"}</span>
-          </div>
-          <div>
-            <span className="text-muted-foreground">结果：</span>
-            <span className="break-words text-foreground/80">{call.result_preview || "（无）"}</span>
-          </div>
-          {call.error && <div className="break-words text-destructive">error：{call.error}</div>}
+        <div className="space-y-2 border-t border-border/60 px-2.5 py-2 font-mono text-[11px]">
+          {!full && !loadErr && (
+            <p className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" /> 加载完整调用记录…
+            </p>
+          )}
+          {loadErr && (
+            <p className="text-destructive">完整记录加载失败：{loadErr}（以下为摘要预览）</p>
+          )}
+          {full ? (
+            <>
+              {block("system prompt", full.system_prompt, "text-muted-foreground")}
+              {block("prompt", full.prompt || "（空）")}
+              {block("结果", full.result_text || "（无）")}
+              {full.error && <div className="break-words text-destructive">error：{full.error}</div>}
+            </>
+          ) : loadErr ? (
+            <>
+              {block("prompt（预览）", call.prompt_preview || "（空）")}
+              {block("结果（预览）", call.result_preview || "（无）")}
+            </>
+          ) : null}
         </div>
       )}
     </div>
@@ -232,10 +265,10 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
           {runState === "failed" && errorNote && (
             <p className="mb-2 rounded-lg bg-destructive/8 px-3 py-2 text-xs text-destructive">{errorNote}</p>
           )}
-          {/* 本轮 agent 调用（内联摘要，点击展开 prompt/result 预览） */}
+          {/* 本轮 agent 调用（内联，展开懒加载完整 prompt/结果） */}
           {agentCalls && agentCalls.length > 0 && (
             <div className="mb-2 space-y-1.5">
-              {agentCalls.map((c) => <AgentCallInline key={c.seq} call={c} />)}
+              {agentCalls.map((c) => <AgentCallInline key={c.seq} taskId={taskId} call={c} />)}
             </div>
           )}
           {notStarted ? (
