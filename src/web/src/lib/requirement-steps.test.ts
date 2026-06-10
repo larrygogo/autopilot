@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { statusToStep, stepPosition, STEP_ORDER } from "./requirement-steps";
+import { statusToStep, stepPosition, STEP_ORDER, STEPS } from "./requirement-steps";
 
 test("statusToStep: 11 个 status 映射到 6 步", () => {
   expect(statusToStep("drafting")).toBe("clarify");
@@ -27,4 +27,10 @@ test("stepPosition: past/current/future", () => {
   expect(stepPosition("clarify", "execute")).toBe("past");
   expect(stepPosition("execute", "execute")).toBe("current");
   expect(stepPosition("review", "execute")).toBe("future");
+});
+
+test("STEPS 含 6 项，key 顺序与 label 文案正确", () => {
+  expect(STEPS.map((s) => s.key)).toEqual(["clarify", "approve", "queue", "execute", "review", "done"]);
+  expect(STEPS.map((s) => s.label)).toEqual(["澄清", "审批", "排队", "执行", "验收", "完成"]);
+  for (const s of STEPS) expect(s.label.trim().length).toBeGreaterThan(0);
 });
