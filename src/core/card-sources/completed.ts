@@ -3,6 +3,7 @@ import type { NowCard } from "../now-types";
 import type { AutopilotEvent } from "../events";
 import { getTask, getDb } from "../db";
 import type { Task } from "../db";
+import { contextForTask } from "./context";
 
 const TWENTY_FOUR_HOURS_MS = 24 * 3600_000;
 
@@ -14,6 +15,7 @@ function buildCard(task: Task): NowCard {
     title: `✓ Task #${task.id} 已完成`,
     subtitle: task.title,
     related: { type: "task", id: task.id },
+    context: contextForTask(task.id),
     actions: [
       { kind: "secondary", intent: { kind: "view_task", taskId: task.id } },
       { kind: "secondary", intent: { kind: "dismiss", cardId: `completed:${task.id}` } },

@@ -18,6 +18,7 @@ import { up as m014 } from "../src/migrations/014-resolve-orphan-open-questions"
 import { up as m015 } from "../src/migrations/015-clarifier-error";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as m032 } from "../src/migrations/032-requirement-attachments";
+import { up as m033 } from "../src/migrations/033-requirement-sessions";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createRequirement, setRequirementStatus, getRequirementById } from "../src/core/requirements";
@@ -33,7 +34,7 @@ describe("clarifier e2e — 完整链路", () => {
 
   beforeAll(async () => {
     const db = new Database(":memory:");
-    [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m019, m021, m024, m032].forEach(fn => fn(db));
+    [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m019, m021, m024, m032, m033].forEach(fn => fn(db));
     _setDbForTest(db);
     registerCoreRpcMethods();
     createProject({ id: "p1", name: "测试项目" });
@@ -55,11 +56,14 @@ describe("clarifier e2e — 完整链路", () => {
   it("US-1: 创建需求 → 进 clarifying → AI 提一个问题 → /now 出 1 卡", async () => {
     createRequirement({ id: "e2e-1", project_id: "p1", title: "测试需求", spec_md: "" });
 
-    _setClarifyFnForTest(async () => JSON.stringify({
-      new_spec_md: "# 测试需求\n## 目标\n(待确定)",
-      summary: "建立框架",
-      next_question: { agent_text: "目标用户是谁？", suggestions: ["开发者", "运维"] },
-      done: false,
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => ({
+      rawText: JSON.stringify({
+        new_spec_md: "# 测试需求\n## 目标\n(待确定)",
+        summary: "建立框架",
+        next_question: { agent_text: "目标用户是谁？", suggestions: ["开发者", "运维"] },
+        done: false,
+      }),
+      newSessionRef: undefined,
     }));
 
     setRequirementStatus("e2e-1", "clarifying");
@@ -80,11 +84,14 @@ describe("clarifier e2e — 完整链路", () => {
     const activeQid = req?.active_question_id;
     expect(activeQid).toBeTruthy();
 
-    _setClarifyFnForTest(async () => JSON.stringify({
-      new_spec_md: "# 测试需求\n## 目标\n面向开发者\n## 范围\n(待定)",
-      summary: "明确了目标用户",
-      next_question: { agent_text: "范围有多大？", suggestions: [] },
-      done: false,
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => ({
+      rawText: JSON.stringify({
+        new_spec_md: "# 测试需求\n## 目标\n面向开发者\n## 范围\n(待定)",
+        summary: "明确了目标用户",
+        next_question: { agent_text: "范围有多大？", suggestions: [] },
+        done: false,
+      }),
+      newSessionRef: undefined,
     }));
 
     const replyR = await invokeRpcMethod("comments.add", {
@@ -106,11 +113,14 @@ describe("clarifier e2e — 完整链路", () => {
   it("US-4: finish-clarification → 进 awaiting_approval + /now 卡片移除", async () => {
     // 清除注入的 mock，防止 finish-clarification 解除 active question 时触发的
     // question-resolved 事件导致 clarifier 再跑一轮并写入新 active_question_id
-    _setClarifyFnForTest(async () => JSON.stringify({
-      new_spec_md: "# 测试需求\n## 目标\n面向开发者\n## 范围\n(待定)",
-      summary: null,
-      next_question: null,
-      done: true,
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => ({
+      rawText: JSON.stringify({
+        new_spec_md: "# 测试需求\n## 目标\n面向开发者\n## 范围\n(待定)",
+        summary: null,
+        next_question: null,
+        done: true,
+      }),
+      newSessionRef: undefined,
     }));
 
     const finR = await invokeRpcMethod("requirements.finishClarification", { id: "e2e-1" });

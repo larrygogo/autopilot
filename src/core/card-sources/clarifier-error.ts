@@ -2,6 +2,7 @@ import type { CardSource, CardDelta } from "./types";
 import type { NowCard } from "../now-types";
 import type { AutopilotEvent } from "../events";
 import { getDb } from "../db";
+import { contextForRequirement } from "./context";
 
 function buildCard(reqId: string, reason: string): NowCard {
   const preview = reason.length > 80 ? reason.slice(0, 80) + "…" : reason;
@@ -12,6 +13,7 @@ function buildCard(reqId: string, reason: string): NowCard {
     title: `⚠ Req ${reqId} 澄清出错`,
     subtitle: preview,
     related: { type: "requirement", id: reqId },
+    context: contextForRequirement(reqId),
     actions: [
       { kind: "primary", intent: { kind: "view_requirement", requirementId: reqId } },
       { kind: "secondary", intent: { kind: "retry_clarify", requirementId: reqId } },

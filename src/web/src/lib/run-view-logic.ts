@@ -80,6 +80,15 @@ export function resolveLogPhase(
   return labelToName[tag] ?? null;
 }
 
+// ── section 占位判定 ────────────────────────────
+// 「从未执行」（渲染占位、不拉日志）只有 idle/pending 两种。
+// aborted 是**执行过被打断**的轮次（daemon 重启/取消）：日志在盘上、时间窗完整，
+// 必须走正常加载展示——曾因把 aborted 映射成 idle 导致整轮日志在 UI 上"消失"。
+
+export function isNeverRun(state: string): boolean {
+  return state === "idle" || state === "pending";
+}
+
 // ── 重跑轮数 ────────────────────────────────────
 
 export function phaseRounds(events: Array<{ phase: string }>, phase: string): number {
@@ -223,6 +232,19 @@ export function parseLineTs(line: string): number | null {
   if (!m) return null;
   const t = new Date(m[1].replace(" ", "T") + "Z").getTime();
   return Number.isNaN(t) ? null : t;
+}
+
+/** 行首 UTC 时间戳 → 本地时区同格式显示（仅显示层；窗口切片仍用原始 UTC 行）。
+ *  logger 落盘 UTC（跨时区/夏令时稳定），用户看的应是本地时间。 */
+export function localizeLineTs(line: string): string {
+  const m = line.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+  if (!m) return line;
+  const t = new Date(`${m[1]}T${m[2]}Z`);
+  if (Number.isNaN(t.getTime())) return line;
+  const p = (n: number) => String(n).padStart(2, "0");
+  const local = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ` +
+    `${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`;
+  return local + line.slice(m[0].length);
 }
 
 /**

@@ -1,6 +1,7 @@
 import type { CardSource, CardDelta } from "./types";
 import type { NowCard } from "../now-types";
 import type { AutopilotEvent } from "../events";
+import { contextForTask } from "./context";
 
 function buildCard(taskId: string, phase: string, fromStatus: string, toStatus: string): NowCard {
   return {
@@ -10,6 +11,7 @@ function buildCard(taskId: string, phase: string, fromStatus: string, toStatus: 
     title: `⚠ Task #${taskId} 曾卡死，已自动恢复`,
     subtitle: `${phase} 阶段：${fromStatus} → ${toStatus}（watcher 接管）`,
     related: { type: "task", id: taskId },
+    context: contextForTask(taskId),
     actions: [
       { kind: "primary", intent: { kind: "view_task", taskId: taskId } },
       { kind: "secondary", intent: { kind: "dismiss", cardId: `stuck:${taskId}` } },

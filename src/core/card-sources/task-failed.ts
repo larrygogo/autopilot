@@ -3,6 +3,7 @@ import type { NowCard } from "../now-types";
 import type { AutopilotEvent } from "../events";
 import { getTask, listTasks } from "../db";
 import type { Task } from "../db";
+import { contextForTask } from "./context";
 
 function buildCard(task: Task): NowCard {
   return {
@@ -12,6 +13,7 @@ function buildCard(task: Task): NowCard {
     title: `⚠ Task #${task.id} 失败`,
     subtitle: task.title,
     related: { type: "task", id: task.id },
+    context: contextForTask(task.id),
     actions: [
       { kind: "primary", intent: { kind: "view_task", taskId: task.id } },
       { kind: "secondary", intent: { kind: "dismiss", cardId: `task-failed:${task.id}` } },

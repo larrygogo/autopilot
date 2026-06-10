@@ -37,6 +37,16 @@ export interface NowCardRelated {
   id: string;
 }
 
+/** 卡片归属上下文（需求/项目/仓库），由 card source 构卡时 JOIN 填充；客户端只读展示 */
+export interface NowCardContext {
+  requirement_id?: string;
+  requirement_title?: string;
+  project_name?: string;
+  workspace_alias?: string;
+  /** workspace 默认分支 */
+  branch?: string;
+}
+
 export interface NowCard {
   /** 稳定 ID，形如 "<source-name>:<entity-id>"，例 "completed:task-5" */
   id: string;
@@ -46,6 +56,7 @@ export interface NowCard {
   subtitle: string;
   detail?: string;
   related?: NowCardRelated;
+  context?: NowCardContext;
   actions: NowCardAction[];
   /** 由前端基于 created_at 实时计算，后端不推秒级更新 */
   waited_seconds?: number;
