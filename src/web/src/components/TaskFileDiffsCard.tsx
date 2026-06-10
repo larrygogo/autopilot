@@ -1,17 +1,62 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, FileDiff as FileDiffIcon, RefreshCw } from "lucide-react";
 import { api, type TaskFileDiff } from "@/hooks/useApi";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { parseUnifiedDiff, type DiffLine } from "@/lib/diff-parse";
 
-/** unified diff 行着色：+绿 / -红 / @@ hunk 头蓝灰 / 其他默认 */
-function diffLineClass(line: string): string {
-  if (line.startsWith("+") && !line.startsWith("+++")) return "text-success";
-  if (line.startsWith("-") && !line.startsWith("---")) return "text-destructive";
-  if (line.startsWith("@@")) return "text-info";
-  if (line.startsWith("diff --git") || line.startsWith("index ")) return "text-muted-foreground/60";
-  return "text-foreground/80";
+/** GitHub 风 diff 表格：双列行号 + 整行红绿背景 + hunk 头条 */
+function DiffTable({ patch }: { patch: string }) {
+  const lines = useMemo(() => parseUnifiedDiff(patch), [patch]);
+  const rowCls = (l: DiffLine) =>
+    l.kind === "add" ? "bg-success/10"
+    : l.kind === "del" ? "bg-destructive/10"
+    : l.kind === "hunk" ? "bg-info/10"
+    : "";
+  const gutterCls = (l: DiffLine) =>
+    l.kind === "add" ? "bg-success/15 text-success/80"
+    : l.kind === "del" ? "bg-destructive/15 text-destructive/80"
+    : l.kind === "hunk" ? "bg-info/15"
+    : "text-muted-foreground/50";
+  const marker = (l: DiffLine) => (l.kind === "add" ? "+" : l.kind === "del" ? "-" : " ");
+  return (
+    <table className="w-full table-fixed border-collapse font-mono text-[11.5px] leading-[1.45]">
+      <colgroup>
+        <col className="w-10" />
+        <col className="w-10" />
+        <col />
+      </colgroup>
+      <tbody>
+        {lines.map((l, i) => (
+          <tr key={i} className={rowCls(l)}>
+            {l.kind === "hunk" ? (
+              <>
+                <td colSpan={2} className={cn("select-none px-2 py-0.5 text-right", gutterCls(l))} />
+                <td className="px-2 py-0.5 text-info">{l.text}</td>
+              </>
+            ) : (
+              <>
+                <td className={cn("select-none px-2 py-0.5 text-right tabular-nums", gutterCls(l))}>
+                  {l.oldNo ?? ""}
+                </td>
+                <td className={cn("select-none px-2 py-0.5 text-right tabular-nums", gutterCls(l))}>
+                  {l.newNo ?? ""}
+                </td>
+                <td className={cn(
+                  "whitespace-pre-wrap break-all px-2 py-0.5",
+                  l.kind === "add" ? "text-foreground" : l.kind === "del" ? "text-foreground/75" : "text-foreground/80",
+                )}>
+                  <span className="select-none opacity-50">{marker(l)}</span>
+                  {l.text}
+                </td>
+              </>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 /**
@@ -88,15 +133,11 @@ export function TaskFileDiffsCard({ taskId, reloadKey }: { taskId: string; reloa
                 </span>
               </button>
               {isOpen && (
-                <pre className="max-h-[480px] overflow-auto border-t border-border bg-muted/20 px-4 py-3 font-mono text-[11px] leading-relaxed">
+                <div className="max-h-[520px] overflow-auto border-t border-border bg-muted/20">
                   {f.patch
-                    ? f.patch.split("\n").map((line, i) => (
-                        <div key={i} className={cn("whitespace-pre-wrap break-all", diffLineClass(line))}>
-                          {line || " "}
-                        </div>
-                      ))
-                    : <span className="text-muted-foreground">（二进制文件或无文本 diff）</span>}
-                </pre>
+                    ? <DiffTable patch={f.patch} />
+                    : <p className="px-4 py-3 font-mono text-[11px] text-muted-foreground">（二进制文件或无文本 diff）</p>}
+                </div>
               )}
             </div>
           );
