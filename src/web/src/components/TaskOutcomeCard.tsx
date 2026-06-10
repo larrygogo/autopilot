@@ -27,6 +27,9 @@ export interface TaskOutcomeCardProps {
   workflow: string;
   /** task.status；失败时用于解析失败 phase 名（如 failed_design → design） */
   taskStatus?: string;
+  /** 嵌入需求页时：需求终态卡已展示「取消原因 + 来源徽标 + 不可重启指引」，
+   *  这里只保留增量信息（驳回计数 + reviewer 原话），避免同屏双份 */
+  embedded?: boolean;
 }
 
 /** 从 task.status 解析失败的 phase 名（failed_design → design）；非失败状态返回 null */
@@ -36,7 +39,7 @@ function parseFailedPhase(status: string | undefined): string | null {
   return null;
 }
 
-export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, taskStatus }: TaskOutcomeCardProps) {
+export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, taskStatus, embedded = false }: TaskOutcomeCardProps) {
   const navigate = useNavigate();
   const toast = useToast();
   const [outcome, setOutcome] = useState<TaskOutcome | null>(null);
@@ -120,43 +123,57 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
           </div>
         )}
 
-        {/* 取消原因：中性灰调（取消是止损决定，不是错误）。自动止损时带警示标签 + 驳回详情 */}
-        {outcome.status === "cancelled" && (
-          <div className="space-y-2 rounded-lg bg-muted/50 p-2.5">
-            <div className="flex items-center gap-2">
-              <span className={
-                "rounded border px-1.5 py-0.5 font-mono text-[9px] "
-                + (isAutoCancel ? "border-warning/60 text-warning" : "border-border text-muted-foreground")
-              }>
-                {isAutoCancel ? "自动止损" : "手动取消"}
-              </span>
-              <span className="font-mono text-[9px] text-muted-foreground" title="trigger: cancel">
-                trigger: cancel
-              </span>
+        {/* 取消原因：中性灰调（取消是止损决定，不是错误）。自动止损时带警示标签 + 驳回详情。
+            embedded（需求页内嵌）时需求终态卡已有徽标/原因/不可重启指引，只渲染驳回增量信息 */}
+        {outcome.status === "cancelled" && (() => {
+          const hasRejectionDetail =
+            (outcome.rejection_counts && Object.keys(outcome.rejection_counts).length > 0)
+            || !!outcome.rejection_reason;
+          if (embedded && !hasRejectionDetail) return null;
+          return (
+            <div className="space-y-2 rounded-lg bg-muted/50 p-2.5">
+              {!embedded && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className={
+                      "rounded border px-1.5 py-0.5 font-mono text-[9px] "
+                      + (isAutoCancel ? "border-warning/60 text-warning" : "border-border text-muted-foreground")
+                    }>
+                      {isAutoCancel ? "自动止损" : "手动取消"}
+                    </span>
+                    <span className="font-mono text-[9px] text-muted-foreground" title="trigger: cancel">
+                      trigger: cancel
+                    </span>
+                  </div>
+                  <p className="text-xs leading-relaxed text-foreground/85">
+                    {outcome.terminal_reason ?? "已取消 · 原因未记录"}
+                  </p>
+                </>
+              )}
+              {outcome.rejection_counts && Object.keys(outcome.rejection_counts).length > 0 && (
+                <div className="font-mono text-[11px] text-muted-foreground">
+                  驳回计数 {Object.entries(outcome.rejection_counts).map(([k, v]) => `${k} ×${v}`).join(" · ")}
+                </div>
+              )}
+              {outcome.rejection_reason && (
+                // 需求卡的指引承诺「reviewer 原话见执行记录」，嵌入时默认展开兑现它
+                <details open={embedded}>
+                  <summary className="cursor-pointer font-mono text-[10px] text-muted-foreground hover:text-foreground">
+                    最近一次驳回原因（reviewer 原话）
+                  </summary>
+                  <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground/85">
+                    {outcome.rejection_reason}
+                  </pre>
+                </details>
+              )}
+              {!embedded && (
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  已取消的任务无法重启 —— 如需继续，请回需求页重新发起。
+                </p>
+              )}
             </div>
-            <p className="text-xs leading-relaxed text-foreground/85">
-              {outcome.terminal_reason ?? "已取消 · 原因未记录"}
-            </p>
-            {outcome.rejection_counts && Object.keys(outcome.rejection_counts).length > 0 && (
-              <div className="font-mono text-[11px] text-muted-foreground">
-                驳回计数 {Object.entries(outcome.rejection_counts).map(([k, v]) => `${k} ×${v}`).join(" · ")}
-              </div>
-            )}
-            {outcome.rejection_reason && (
-              <details>
-                <summary className="cursor-pointer font-mono text-[10px] text-muted-foreground hover:text-foreground">
-                  最近一次驳回原因（reviewer 原话）
-                </summary>
-                <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground/85">
-                  {outcome.rejection_reason}
-                </pre>
-              </details>
-            )}
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
-              已取消的任务无法重启 —— 如需继续，请回需求页重新发起。
-            </p>
-          </div>
-        )}
+          );
+        })()}
 
         {outcome.pr_url && (
           <div>

@@ -286,6 +286,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
           requirementId={(task as { requirement_id?: string }).requirement_id ?? null}
           workflow={task.workflow}
           taskStatus={task.status}
+          embedded={embedded}
         />
       )}
 
@@ -314,8 +315,11 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
         </Card>
       )}
 
-      {/* 任务状态摘要（当前阶段 / 耗时 / 失败原因） */}
-      <TaskProgressCard taskId={taskId} showDetailLink={false} showActions={false} />
+      {/* 任务状态摘要（当前阶段 / 耗时 / 失败原因）——终态时不渲染：
+          「任务已取消」「✓ 已完成」等占位与上方产出物卡纯重复，零增量信息 */}
+      {!isTerminal(task.status, graph?.terminalStates) && (
+        <TaskProgressCard taskId={taskId} showDetailLink={false} showActions={false} />
+      )}
 
       {task.dangling && task.status?.startsWith("running_") && (
         <DanglingBanner taskId={taskId} toast={toast} />
