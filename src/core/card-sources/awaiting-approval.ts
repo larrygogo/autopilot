@@ -2,6 +2,7 @@ import type { CardSource, CardDelta } from "./types";
 import type { NowCard } from "../now-types";
 import type { AutopilotEvent } from "../events";
 import { listRequirements, getRequirementById } from "../requirements";
+import { contextForRequirement } from "./context";
 
 function buildCard(req: { id: string; title: string; created_at: number }): NowCard {
   return {
@@ -11,6 +12,7 @@ function buildCard(req: { id: string; title: string; created_at: number }): NowC
     title: `等审批：${req.title}`,
     subtitle: `需求 ${req.id} 已就绪，等你审批入队`,
     related: { type: "requirement", id: req.id },
+    context: contextForRequirement(req.id),
     actions: [
       { kind: "primary", intent: { kind: "view_requirement", requirementId: req.id } },
     ],

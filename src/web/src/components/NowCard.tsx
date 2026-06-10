@@ -27,6 +27,21 @@ const PRIORITY_LABEL: Record<NowCardPriority, string> = {
   P3: "完成",
 };
 
+/** 归属上下文行：需求标题 · 项目名 · 仓库:分支（标题/副标题已含需求名时不重复） */
+function contextLine(card: NowCardType): string | null {
+  const ctx = card.context;
+  if (!ctx) return null;
+  const showTitle =
+    ctx.requirement_title &&
+    !card.title.includes(ctx.requirement_title) &&
+    !card.subtitle.includes(ctx.requirement_title);
+  const repo = ctx.workspace_alias
+    ? ctx.branch ? `${ctx.workspace_alias}:${ctx.branch}` : ctx.workspace_alias
+    : null;
+  const parts = [showTitle ? ctx.requirement_title : null, ctx.project_name, repo].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 function formatWaited(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const m = Math.floor(seconds / 60);
@@ -40,6 +55,7 @@ export function NowCard({ card, now }: Props) {
   const [invoking, setInvoking] = useState<number | null>(null);
 
   const waitedSec = Math.max(0, Math.floor(now / 1000) - card.created_at);
+  const ctxLine = contextLine(card);
 
   const handleInvoke = async (
     rpc: { method: string; params: Record<string, unknown> },
@@ -88,6 +104,11 @@ export function NowCard({ card, now }: Props) {
           {card.title}
         </h3>
         <p className="text-sm text-muted-foreground mt-0.5 truncate">{card.subtitle}</p>
+        {ctxLine && (
+          <p className="text-[11px] text-muted-foreground/80 mt-0.5 truncate">
+            {ctxLine}
+          </p>
+        )}
         {card.detail && (
           <p className="text-xs text-muted-foreground/80 mt-1 line-clamp-2">{card.detail}</p>
         )}

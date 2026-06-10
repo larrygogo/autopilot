@@ -2,6 +2,7 @@ import type { CardSource, CardDelta } from "./types";
 import type { NowCard } from "../now-types";
 import type { AutopilotEvent } from "../events";
 import { getDb } from "../db";
+import { contextForRequirement } from "./context";
 
 interface ActiveQuestionRow {
   req_id: string;
@@ -43,6 +44,7 @@ function buildCard(row: ActiveQuestionRow): NowCard {
     title: "AI 提了个问题",
     subtitle: `Req ${row.req_id}「${row.req_title}」· ${preview}`,
     related: { type: "requirement", id: row.req_id },
+    context: contextForRequirement(row.req_id),
     actions: [
       { kind: "primary", intent: { kind: "view_requirement", requirementId: row.req_id } },
     ],
