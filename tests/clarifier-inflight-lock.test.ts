@@ -29,6 +29,7 @@ import { up as m015 } from "../src/migrations/015-clarifier-error";
 import { up as m021 } from "../src/migrations/021-requirement-comments";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as m032 } from "../src/migrations/032-requirement-attachments";
+import { up as m034 } from "../src/migrations/034-requirement-sessions";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import {
@@ -49,7 +50,7 @@ import { resolveQuestion } from "../src/core/requirement-questions";
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m021, m024, m032].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m021, m024, m032, m034].forEach(fn => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "P" });
 }
@@ -73,9 +74,9 @@ describe("_inflightRounds 锁并发拦截", () => {
     // 注意：先 set mock 再 setRequirementStatus(clarifying)，否则后者会 emit
     // status-changed → handler → 用 callClaude 调真实 CLI。
     let llmCallCount = 0;
-    let llmResolve: ((s: string) => void) | null = null;
+    let llmResolve: ((s: { rawText: string; newSessionRef?: string }) => void) | null = null;
     _setClarifyFnForTest(() =>
-      new Promise<string>((res) => {
+      new Promise<{ rawText: string; newSessionRef?: string }>((res) => {
         llmCallCount++;
         llmResolve = res;
       }),
@@ -97,14 +98,15 @@ describe("_inflightRounds 锁并发拦截", () => {
     expect(llmCallCount).toBe(1); // round B 应被锁拦下
 
     // 释放 round A 的 LLM
-    llmResolve!(
-      JSON.stringify({
+    llmResolve!({
+      rawText: JSON.stringify({
         new_spec_md: "改了",
         summary: "fix",
         next_question: { agent_text: "Q1", suggestions: [] },
         done: false,
       }),
-    );
+      newSessionRef: undefined,
+    });
     await new Promise(res => setTimeout(res, 50));
 
     const qs = listQuestionsByRequirement("r1");
@@ -114,9 +116,9 @@ describe("_inflightRounds 锁并发拦截", () => {
 
   it("LLM 卡住期间第二次 trigger → 锁拦下，LLM 只调一次，只产一个新 question", async () => {
     let llmCallCount = 0;
-    let llmResolve: ((s: string) => void) | null = null;
+    let llmResolve: ((s: { rawText: string; newSessionRef?: string }) => void) | null = null;
     _setClarifyFnForTest(() =>
-      new Promise<string>((res) => {
+      new Promise<{ rawText: string; newSessionRef?: string }>((res) => {
         llmCallCount++;
         llmResolve = res;
       }),
@@ -145,14 +147,15 @@ describe("_inflightRounds 锁并发拦截", () => {
     expect(llmCallCount).toBe(1);
 
     // 释放 round A 的 LLM
-    llmResolve!(
-      JSON.stringify({
+    llmResolve!({
+      rawText: JSON.stringify({
         new_spec_md: "改了",
         summary: "fix",
         next_question: { agent_text: "Q1", suggestions: [] },
         done: false,
       }),
-    );
+      newSessionRef: undefined,
+    });
     await roundA;
 
     // 最终：原 qst-pre + round A 写的新 q，共 2 个；round B 没产生 question
