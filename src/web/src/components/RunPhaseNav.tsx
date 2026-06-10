@@ -3,7 +3,7 @@
 import { Circle, CheckCircle2, XCircle, Hand, Loader2, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type PhaseVisualState = "idle" | "pending" | "running" | "done" | "failed" | "awaiting";
+export type PhaseVisualState = "idle" | "pending" | "running" | "done" | "failed" | "awaiting" | "aborted";
 
 /** 左导航与 section header 共用的状态视觉（同源同款） */
 export function PhaseStatusIcon({ state, className }: { state: PhaseVisualState; className?: string }) {

@@ -80,6 +80,15 @@ export function resolveLogPhase(
   return labelToName[tag] ?? null;
 }
 
+// ── section 占位判定 ────────────────────────────
+// 「从未执行」（渲染占位、不拉日志）只有 idle/pending 两种。
+// aborted 是**执行过被打断**的轮次（daemon 重启/取消）：日志在盘上、时间窗完整，
+// 必须走正常加载展示——曾因把 aborted 映射成 idle 导致整轮日志在 UI 上"消失"。
+
+export function isNeverRun(state: string): boolean {
+  return state === "idle" || state === "pending";
+}
+
 // ── 重跑轮数 ────────────────────────────────────
 
 export function phaseRounds(events: Array<{ phase: string }>, phase: string): number {
