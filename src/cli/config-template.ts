@@ -19,12 +19,12 @@ export function buildConfigTemplate(): string {
 #
 # providers:
 #   anthropic:
-#     default_model: claude-opus-4-6   # 默认是 claude-sonnet-4-6
+#     default_model: claude-opus-4-8   # 默认是 claude-sonnet-4-6
 #     # base_url: https://my-proxy.example.com  # 自建代理时取消注释
 #
 # agents:
 #   coder:
-#     model: claude-opus-4-6           # 给 coder 单独换更强模型
+#     model: claude-opus-4-8           # 给 coder 单独换更强模型
 #     # system_prompt: |               # 覆盖内置 prompt
 #     #   你是…
 `;

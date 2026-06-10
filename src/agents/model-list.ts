@@ -28,7 +28,8 @@ export interface ModelListResult {
 // 用户配置了 *_API_KEY 时会优先走官方 REST API 取实时列表，此 catalog 仅作 fallback。
 const CATALOG: Record<ProviderName, string[]> = {
   anthropic: [
-    "claude-opus-4-7",
+    "claude-fable-5",
+    "claude-opus-4-8",
     "claude-sonnet-4-6",
     "claude-haiku-4-5-20251001",
   ],
