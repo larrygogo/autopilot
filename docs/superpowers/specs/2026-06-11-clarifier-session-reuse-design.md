@@ -1,8 +1,22 @@
-# 需求澄清阶段会话复用 — 技术规格
+# 需求澄清阶段会话复用 — 技术规格（v2，修复 C-1/C-2/I-1/I-2/M-1～M-3）
 
-**日期**：2026-06-11  
+**日期**：2026-06-11（v2 更新于同日）  
 **状态**：待实施  
 **作者**：架构师（autopilot 项目）
+
+---
+
+## 变更记录（v2）
+
+| 问题 | 修复说明 |
+|------|---------|
+| **C-1** Provider 回归 | `callClaude` 按 `resolvedProvider` 分支：`anthropic` 走 `chat()`，其他走 `run()`，无 session 跟踪。`supports_session` 字段写入 session 记录。 |
+| **C-2** 接口矛盾 | `ClarifyFn` 统一返回 `{ rawText: string; newSessionRef?: string }`，删除多余 `text` 字段；§2.3.3 snapshot 写入代码与接口一致。 |
+| **I-1** qaHistory 重叠 | replay 模式下 `buildPrompt` 的 `qaHistory` 传空字符串，改由 `messagesReplay` 段落承载；两段不共存。 |
+| **I-2** 命名/边界 | `hasNewUserReply` 改名 `hasPriorQA`；补充"每轮一问"设计前提注释。 |
+| **M-1** 死代码 | 删除不可达的空 if-block。 |
+| **M-2** snapshot 体积 | 写入 snapshot 前截断到最近 `SNAPSHOT_MAX_TURNS`（=20 条，约 10 轮）；风险表更新体积估算。 |
+| **M-3** 测试迁移成本 | 实施步骤中显式新增"迁移现有 mock"子步骤。 |
 
 ---
 
@@ -33,17 +47,22 @@ runClarifierRound(reqId)
 
 | 场景 | 期望行为 |
 |------|----------|
-| 同一需求的第 N 轮（N>1）澄清，session 仍有效 | 通过 `providerSessionId` 续回同一个 Claude 会话，仅发送增量消息（本轮用户回复 + 继续指令） |
-| session 已失效（进程退出、Claude API 超时等） | 降级到全量上下文重建（当前行为）+ 开新 session；如有 `messages_snapshot` 则注入历史对话记录以增强上下文 |
-| 第 1 轮（无历史 session） | 调用 `agent.chat(fullPrompt)`（等价于当前行为），保存返回的 `providerSessionId` |
+| **Anthropic** provider，第 N 轮（N>1），session 仍有效 | 通过 `providerSessionId` 续回同一个 Claude 会话，仅发送增量消息（本轮用户回复 + 继续指令） |
+| **Anthropic** provider，session 失效（进程退出、Claude API 超时等） | 降级到全量上下文重建（当前行为），开新 session；如有 `messages_snapshot` 则以历史对话记录替换 qaHistory 段 |
+| **Anthropic** provider，第 1 轮（无历史 session） | 调用 `agent.chat(fullPrompt)`，保存返回的 `providerSessionId` |
+| **非 Anthropic** provider（OpenAI/Google） | 沿用原 `agent.run()` 路径，不做 session 跟踪（`agent.chat()` 未实现，调用会抛异常） |
 | 需求进入终态（done / cancelled / failed） | 删除对应 session 记录 |
+
+> **Provider 范围说明**：session 复用特性仅限 Anthropic provider（唯一实现了 `chat()` 的 provider）。OpenAI/Google provider 沿用原 `agent.run()` 无 session 路径，行为与改动前完全一致，无回归。
 
 ### 1.3 关键约束
 
 - **复用粒度**：1 需求 = 1 个 clarifying session，不跨需求共享
-- **降级保证**：session 失效不能导致澄清流程中断，必须有无 session 的兜底路径
+- **Provider 兼容**：非 Anthropic provider 的澄清行为与当前完全一致，无改动
+- **降级保证**：Anthropic session 失效不能导致澄清流程中断，必须有无 session 的兜底路径
 - **并发安全**：已有 `_inflightRounds` 进程内锁，session 操作跟在锁内，无额外并发风险
-- **测试可注入**：`_clarifyFn` 注入点保持可替换，新签名向后兼容测试
+- **测试可注入**：`_clarifyFn` 注入点保持可替换，签名升级后现有测试 mock 需同步迁移
+- **每轮一问不变式**：设计前提是每轮最多一个 active question（由 `_inflightRounds` + `setActiveQuestionId` 保证），增量消息只取最后一条已解决问题
 
 ---
 
@@ -59,7 +78,7 @@ CREATE TABLE IF NOT EXISTS requirement_sessions (
   requirement_id    TEXT NOT NULL,
   session_type      TEXT NOT NULL DEFAULT 'clarifying',
   agent_session_ref TEXT,                      -- claude providerSessionId；null = 无有效 session
-  messages_snapshot TEXT NOT NULL DEFAULT '[]',-- JSON：ConversationTurn[]，供回放/审计
+  messages_snapshot TEXT NOT NULL DEFAULT '[]',-- JSON：ConversationTurn[]，供 replay/审计
   created_at        TEXT NOT NULL,
   updated_at        TEXT NOT NULL,
   UNIQUE(requirement_id, session_type),        -- 1 需求 1 个同类型 session
@@ -76,18 +95,30 @@ CREATE INDEX IF NOT EXISTS idx_req_sessions_req
 | `id` | TEXT | `sess-001`、`sess-002`…（与其他实体保持 ID 风格一致） |
 | `requirement_id` | TEXT | 关联需求，CASCADE 删除 |
 | `session_type` | TEXT | 当前固定 `clarifying`；为将来其他类型 session 预留扩展 |
-| `agent_session_ref` | TEXT \| NULL | Claude CLI 返回的 `providerSessionId`；null 表示无有效 session |
-| `messages_snapshot` | TEXT | JSON 序列化的 `ConversationTurn[]`，记录本 session 已发送的完整消息历史，供 session 失效后重放 |
+| `agent_session_ref` | TEXT \| NULL | Anthropic provider 返回的 `providerSessionId`；非 Anthropic provider 或首轮未获取时为 null |
+| `messages_snapshot` | TEXT | JSON 序列化的 `ConversationTurn[]`（最多保留 `SNAPSHOT_MAX_TURNS` 条），供 session 失效后 replay |
 | `created_at` / `updated_at` | TEXT | ISO8601 时间戳 |
 
-**ConversationTurn 结构**（JSON schema）
+**ConversationTurn 结构**
 
-```json
-{
-  "role":    "user" | "assistant",
-  "content": "string"
+```typescript
+interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;   // user turn = 发给 LLM 的原始文本；assistant turn = LLM 返回的原始 YAML
 }
 ```
+
+**snapshot 体积控制常量**
+
+```typescript
+const SNAPSHOT_MAX_TURNS = 20; // 最多保留 20 条（≈10 轮 Q&A）
+```
+
+体积估算：
+- user turn（全量首轮）≈ 8–15 KB（workspace 文档截断 + spec_md + qaHistory）
+- user turn（增量）≈ 0.5–1 KB
+- assistant turn ≈ 2–5 KB（YAML with spec_md）
+- 10 轮 × (1 全量 + 9 增量 + 10 YAML) ≈ 20–50 KB，在 SQLite TEXT 列可接受范围内
 
 ### 2.2 核心模块 — `src/core/requirement-sessions.ts`（新增）
 
@@ -109,13 +140,14 @@ export interface ConversationTurn {
   content: string;
 }
 
-/** 按需求 ID + 类型查 session（不存在返回 null） */
+/** 按需求 ID + 类型查 session（不存在返回 null）。type 默认 "clarifying"。 */
 export function getSession(reqId: string, type?: string): RequirementSession | null;
 
 /**
  * 创建或更新 session。
  * 若已存在：只更新 updates 里提供的字段（agent_session_ref / messages_snapshot）。
  * 若不存在：用 updates 作初始值新建（未提供字段取默认）。
+ * messages_snapshot 写入前自动截断至 SNAPSHOT_MAX_TURNS 最新条目。
  */
 export function upsertSession(
   reqId: string,
@@ -123,75 +155,101 @@ export function upsertSession(
   updates: { agent_session_ref?: string | null; messages_snapshot?: ConversationTurn[] }
 ): RequirementSession;
 
-/** 删除 session（终态清理 / 测试重置用） */
+/** 删除 session（终态清理 / 测试重置用）。type 默认 "clarifying"。 */
 export function deleteSession(reqId: string, type?: string): void;
 ```
 
 **ID 生成**：查 `requirement_sessions` 表当前最大序号 + 1，格式 `sess-NNN`（3 位，不足补零）。与 `requirement-comments.ts` 的 `nextCommentId()` 策略相同。
 
+**snapshot 截断实现**（在 `upsertSession` 内）：
+
+```typescript
+if (updates.messages_snapshot) {
+  const truncated = updates.messages_snapshot.slice(-SNAPSHOT_MAX_TURNS);
+  // 截断后确保首条是 user turn（成对完整）
+  const startIdx = truncated.findIndex(t => t.role === "user");
+  updates = { ...updates, messages_snapshot: startIdx > 0 ? truncated.slice(startIdx) : truncated };
+}
+```
+
 ### 2.3 澄清器改造 — `src/daemon/requirement-clarifier.ts`
 
-#### 2.3.1 `ClarifyFn` 签名升级
+#### 2.3.1 `ClarifyFn` 签名升级（C-2 修复）
 
 ```typescript
 // 旧签名
 type ClarifyFn = (prompt: string, reqId: string) => Promise<string>;
 
-// 新签名（向后兼容：第三个参数可选）
+// 新签名（统一返回对象；rawText = 原始 LLM 输出文本，同时用于解析和 snapshot）
 type ClarifyFn = (
   prompt: string,
   reqId: string,
   sessionRef?: string
-) => Promise<{ text: string; newSessionRef?: string }>;
+) => Promise<{ rawText: string; newSessionRef?: string }>;
 ```
 
 `_setClarifyFnForTest` 同步更新，接收新签名的 mock 函数。
 
-#### 2.3.2 `callClaude()` — 从 `run()` 切换到 `chat()`
+> **与旧签名的迁移**：返回值从 `string` 改为对象；`parseClarifyResult(raw)` 改为 `parseClarifyResult(rawText)`。所有调用 `_setClarifyFnForTest` 的现有测试 mock 需同步迁移（详见 §3 步骤 3-a）。
+
+#### 2.3.2 `callClaude()` — Provider 分支（C-1 修复）
 
 ```typescript
 async function callClaude(
   prompt: string,
   reqId: string,
   sessionRef?: string
-): Promise<{ text: string; newSessionRef?: string }> {
+): Promise<{ rawText: string; newSessionRef?: string }> {
   let agent;
+  let resolvedProvider: ProviderName;
   try {
     const req = getRequirementById(reqId);
     const override: ClarifierAgentOverride = {};
     if (req?.clarifier_provider) override.provider = req.clarifier_provider as ProviderName;
-    if (req?.clarifier_model) override.model = req.clarifier_model;
+    if (req?.clarifier_model)    override.model    = req.clarifier_model;
+    // resolvedProvider：req 级覆盖 > CLARIFIER_DEFAULTS.provider（= "anthropic"）
+    resolvedProvider = override.provider ?? "anthropic";
     agent = buildClarifierAgent(override);
   } catch (e: unknown) {
     throw new Error(`无法初始化 clarifier agent：${e instanceof Error ? e.message : String(e)}`);
   }
 
-  // 从 run() 改为 chat()，支持 providerSessionId 续 session
-  const result = await agent.chat(prompt, { providerSessionId: sessionRef });
-  const text = result.text.trim();
-  if (!text) throw new Error("clarifier agent 返回空");
-  return { text, newSessionRef: result.providerSessionId };
+  if (resolvedProvider === "anthropic") {
+    // ✅ Anthropic：chat() 已实现，支持 providerSessionId 续 session
+    const result = await agent.chat(prompt, { providerSessionId: sessionRef });
+    const rawText = result.text.trim();
+    if (!rawText) throw new Error("clarifier agent 返回空");
+    return { rawText, newSessionRef: result.providerSessionId };
+  } else {
+    // ⚠️ OpenAI/Google：chat() 未实现（base.ts 抛错），沿用 run()，不做 session 跟踪
+    // 传入的 sessionRef 被忽略；返回 newSessionRef = undefined，调用方不写 session
+    const result = await agent.run(prompt);
+    const rawText = result.text.trim();
+    if (!rawText) throw new Error("clarifier agent 返回空");
+    return { rawText, newSessionRef: undefined };
+  }
 }
 ```
 
-> **run() → chat() 的影响**：clarifier 不在 task context 中运行（无 `getTaskContext()`），`agent.run()` 中的 AUTOPILOT_HOME 注入和 agent-calls.jsonl 记录对 clarifier 无效。`agent.chat()` 同样不记录 agent-calls.jsonl（文档注释："不走 task context"），行为等价，不引入副作用。
+> **run() 路径不变**：非 Anthropic provider 走 `agent.run()`，行为与改动前完全一致。`sessionRef` 参数被安全忽略，不会尝试调用未实现的 `chat()`，无回归风险。
 
 #### 2.3.3 `_runClarifierRoundInner()` — 加入 session 管理
 
-在 `buildPrompt()` 调用处前后插入 session 逻辑，分三块：
+在现有 `buildPrompt()` 调用处前后插入 session 逻辑，分三块：
 
 **① Session 查询 & 消息选择**（在原 `buildPrompt` 之前）
 
 ```typescript
-// session 查询
+// ── session 查询 ─────────────────────────────────────────────────────
 const session = getSession(reqId, "clarifying");
 const activeSessionRef = session?.agent_session_ref ?? undefined;
 
-// 判断是否走增量模式：有有效 session + 本轮有新用户回复
-const hasNewUserReply = allQuestionsResolved.length > 0;
-const useIncremental = !!activeSessionRef && hasNewUserReply;
+// hasPriorQA：本轮前有已解答的问题（= session 里已有先验 Q&A，可走增量路径）
+// 设计前提：每轮最多一个 active question（_inflightRounds 进程内锁 + setActiveQuestionId 保证）
+const hasPriorQA = allQuestionsResolved.length > 0;
+const useIncremental = !!activeSessionRef && hasPriorQA;
 
-// 增量消息（仅新回复 + 继续指令）
+// ── 增量消息（仅新回复 + 继续指令）────────────────────────────────────
 let incrementalPrompt: string | null = null;
 if (useIncremental) {
   const lastQ = allQuestionsResolved[allQuestionsResolved.length - 1];
@@ -206,32 +264,35 @@ if (useIncremental) {
   });
 }
 
-// 全量 prompt（首轮 / session 失效 fallback / replay）
+// ── 全量 prompt（首轮 / session 失效 fallback）────────────────────────
+// 当 session 失效且有 snapshot 时：以 messagesReplay 替换 qaHistory，避免两者重叠（I-1 修复）
+const hasSnapshot = (session?.messages_snapshot?.length ?? 0) > 0;
 const fullPrompt = buildPrompt({
-  projectName: project.name,
+  projectName:      project.name,
   projectDescription: project.description,
-  workspaceAlias: workspace?.alias ?? null,
+  workspaceAlias:   workspace?.alias ?? null,
   workspaceContext: workspace?.path ? readWorkspaceContext(workspace.path) : null,
-  title: req.title,
-  specMd: req.spec_md ?? "",
-  qaHistory,
+  title:            req.title,
+  specMd:           req.spec_md ?? "",
+  // 有 snapshot 时 qaHistory 传空：历史信息由 messagesReplay 段落承载，避免重复
+  qaHistory:        (!activeSessionRef && hasSnapshot) ? "" : qaHistory,
   attachmentContext,
-  // 当 session 失效且有 snapshot 时：追加历史对话记录段落
-  messagesReplay: !activeSessionRef ? (session?.messages_snapshot ?? []) : [],
+  // session 失效且有 snapshot：将历史对话注入 prompt
+  messagesReplay:   (!activeSessionRef && hasSnapshot) ? session!.messages_snapshot : [],
 });
 ```
 
-**② 重试循环调整**（替换原有 `for` 循环）
+**② 重试循环**（替换原有 `for` 循环）
 
 ```typescript
 // 尝试顺序：
-//   有 session → [增量+session, 全量+无session]（若增量失败则降级）
-//   无 session → [全量+无session, 全量+无session]（保留原 2 次重试语义）
+//   有 session + 有 Q&A → [增量+session, 全量+无session]
+//   无 session / 首轮   → [全量+无session, 全量+无session]（保留原 2 次重试语义）
 const attempts: Array<{ prompt: string; sessionRef?: string; label: string }> = [];
 
 if (useIncremental && incrementalPrompt) {
   attempts.push({ prompt: incrementalPrompt, sessionRef: activeSessionRef, label: "增量+session" });
-  attempts.push({ prompt: fullPrompt, sessionRef: undefined, label: "全量+新session(fallback)" });
+  attempts.push({ prompt: fullPrompt,        sessionRef: undefined,        label: "全量+新session(fallback)" });
 } else {
   attempts.push({ prompt: fullPrompt, sessionRef: undefined, label: "全量+新session(首轮)" });
   attempts.push({ prompt: fullPrompt, sessionRef: undefined, label: "全量+新session(retry)" });
@@ -241,6 +302,7 @@ let result: ClarifyResult | null = null;
 let lastError: Error | null = null;
 let resolvedSessionRef: string | undefined;
 let resolvedPromptUsed: string = fullPrompt;
+let resolvedRawText = "";   // 原始 LLM 输出文本，用于 snapshot（C-2 修复）
 
 for (let i = 0; i < attempts.length; i++) {
   const { prompt: attemptPrompt, sessionRef: attemptRef, label } = attempts[i];
@@ -248,25 +310,17 @@ for (let i = 0; i < attempts.length; i++) {
     if (i > 0) setPhase(reqId, "calling-llm", { attempt: i });
     setPhase(reqId, "calling-llm", { attempt: i, prompt: attemptPrompt });
 
-    const { text: raw, newSessionRef } = await _clarifyFn(attemptPrompt, reqId, attemptRef);
-    result = parseClarifyResult(raw);
-    resolvedSessionRef = newSessionRef ?? attemptRef;
-    resolvedPromptUsed = attemptPrompt;
-
-    if (i === 0 && useIncremental && !attemptRef) {
-      // 不应到这里，防御性分支
-    }
-    if (attemptRef && !newSessionRef) {
-      // session resume 成功但 provider 没返回新 sessionId（边界情况）
-      // 保留旧 sessionRef 继续用
-      resolvedSessionRef = attemptRef;
-    }
+    const { rawText, newSessionRef } = await _clarifyFn(attemptPrompt, reqId, attemptRef);
+    result = parseClarifyResult(rawText);
+    resolvedRawText     = rawText;
+    resolvedSessionRef  = newSessionRef ?? (attemptRef ?? undefined);
+    resolvedPromptUsed  = attemptPrompt;
     break;
   } catch (e: unknown) {
     lastError = e instanceof Error ? e : new Error(String(e));
     log.warn("clarifier: req=%s 第 %d 次（%s）失败: %s", reqId, i + 1, label, lastError.message);
 
-    // 第一次失败且用了 session：清除失效 session_ref，下次循环走全量
+    // 第一次失败且用了 session → 清除失效 session_ref，下次循环走全量
     if (i === 0 && attemptRef) {
       log.info("clarifier: req=%s session %s 疑似失效，清除 agent_session_ref，下次走全量", reqId, attemptRef);
       upsertSession(reqId, "clarifying", { agent_session_ref: null });
@@ -275,30 +329,22 @@ for (let i = 0; i < attempts.length; i++) {
 }
 ```
 
+> **M-1 修复**：已删除原 `if (i === 0 && useIncremental && !attemptRef)` 不可达空 block。
+
 **③ Session 持久化**（在 `result` 非 null 之后，写 comment/status 之前）
-
-在 `②` 的循环中，需额外保存 `resolvedRaw: string`（原始 YAML 文本，用于 snapshot）：
-
-```typescript
-// 在循环顶部定义（与 resolvedSessionRef / resolvedPromptUsed 并排）
-let resolvedRaw = "";
-
-// 在循环成功分支中
-// const { text: raw, newSessionRef } = ...
-resolvedRaw = raw;      // 保存原始文本供 ③ 写 snapshot
-```
-
-持久化代码：
 
 ```typescript
 if (result) {
-  // 更新 session：保存新 providerSessionId + 追加本轮消息到 snapshot
+  // 无论 provider 类型都写 session：
+  //   Anthropic  → resolvedSessionRef = "session-xxx"（用于下次 resume）
+  //   非 Anthropic → resolvedSessionRef = undefined → agent_session_ref 写 null（不 resume，但 snapshot 留存供审计）
   const prevSnapshot = getSession(reqId, "clarifying")?.messages_snapshot ?? [];
   const newSnapshot: ConversationTurn[] = [
     ...prevSnapshot,
     { role: "user",      content: resolvedPromptUsed },
-    { role: "assistant", content: resolvedRaw },
+    { role: "assistant", content: resolvedRawText },
   ];
+  // upsertSession 内部会做 SNAPSHOT_MAX_TURNS 截断
   upsertSession(reqId, "clarifying", {
     agent_session_ref: resolvedSessionRef ?? null,
     messages_snapshot: newSnapshot,
@@ -306,17 +352,17 @@ if (result) {
 }
 ```
 
-> **注意**：需要在 `parseClarifyResult()` 之前保存原始 `raw` 文本，或在 `callClaude()` 返回值中同时返回 `raw`，供此处写入 snapshot。建议在 `_runClarifierRoundInner` 中将 `callClaude` 的返回类型改为 `{ text: string; raw: string; newSessionRef?: string }`，其中 `text` = 解析后，`raw` = 原始文本。
+> **非 Anthropic provider 的 session 行为**：每轮结束后 `agent_session_ref = null`，snapshot 照常追加。下轮 `activeSessionRef = null → useIncremental = false`，始终走全量 `agent.run()` 路径（即当前行为），无 session resume。
 
 #### 2.3.4 新增 `buildIncrementalPrompt()`
 
 ```typescript
 function buildIncrementalPrompt(opts: {
-  roundNumber: number;      // 当前是第几个 Q&A 轮次（已完成的 Q 数量）
-  questionText: string;     // agent 上一轮提的问题
-  userReply: string;        // 用户的回答
-  currentSpecMd: string;    // 当前最新 spec_md（可能被用户手动编辑过）
-  currentTitle: string;     // 当前需求标题
+  roundNumber: number;   // 当前是第几个 Q&A 轮次（已完成的 Q 数量）
+  questionText: string;  // agent 上一轮提的问题
+  userReply: string;     // 用户的回答
+  currentSpecMd: string; // 当前最新 spec_md（可能被用户手动编辑）
+  currentTitle: string;  // 当前需求标题
 }): string {
   return [
     `用户已回答第 ${opts.roundNumber} 个问题。`,
@@ -336,37 +382,44 @@ function buildIncrementalPrompt(opts: {
 }
 ```
 
-#### 2.3.5 `buildPrompt()` 增加 `messagesReplay` 参数
+#### 2.3.5 `buildPrompt()` 增加 `messagesReplay` 参数（I-1 修复）
 
 ```typescript
 function buildPrompt(opts: {
   // ...原有字段...
-  messagesReplay?: ConversationTurn[];  // session 失效时的历史对话回放（可选）
+  messagesReplay?: ConversationTurn[];  // session 失效时注入历史对话（与 qaHistory 互斥）
 }): string {
-  // ...原有 prompt 构建...
-  
-  // 在末尾附加历史对话记录（仅当 messagesReplay 非空）
+  // ...原有 prompt 构建逻辑不变...
+
+  // qaHistory 段（当 messagesReplay 非空时 qaHistory 已传空，此段即为空）
+  // messagesReplay 段（替换 qaHistory，两段互斥，避免 I-1 重叠）
   const replaySection = opts.messagesReplay && opts.messagesReplay.length > 0
     ? [
         "",
-        "# 历史对话记录（本轮之前的澄清会话）",
-        "以下是此前澄清会话的完整消息历史，供你恢复上下文：",
+        "# 上一次澄清会话记录（会话中断，以下为历史对话）",
+        "以下是此前澄清会话的完整消息历史，请在此基础上继续：",
         "",
         ...opts.messagesReplay.map((t, i) =>
-          `[${t.role === "user" ? "用户" : "助手"} - 第 ${Math.floor(i / 2) + 1} 轮]\n${t.content}`
+          `[${t.role === "user" ? "用户输入" : "助手输出"} · 第 ${Math.floor(i / 2) + 1} 轮]\n${t.content}`
         ),
         "",
-        "---（历史记录结束，请在以上基础上继续澄清）---",
+        "---（历史记录结束）---",
       ]
     : [];
 
   return [
-    // ...原有 prompt 内容...
+    // ...原有 prompt 内容（含 qaHistory 段，replay 时该段为空）...
     ...replaySection,
     "请直接输出 YAML：",
   ].join("\n");
 }
 ```
+
+> **I-1 保证**：`buildPrompt` 被调用时，`qaHistory` 和 `messagesReplay` 至多一个有内容：
+> - 有 snapshot → `qaHistory = ""`，`messagesReplay = snapshot`
+> - 无 snapshot → `qaHistory = 正常构建`，`messagesReplay = []`
+>
+> 两条路径不产生重叠。
 
 #### 2.3.6 终态清理
 
@@ -377,7 +430,7 @@ _statusHandler = (event: AutopilotEvent) => {
   if (event.type !== "requirement:status-changed") return;
   const { id, to } = event.payload;
 
-  // 终态 → 清理 session
+  // 终态 → 清理 session（done/cancelled/failed）
   if (to === "done" || to === "cancelled" || to === "failed") {
     deleteSession(id, "clarifying");
   }
@@ -395,16 +448,21 @@ _statusHandler = (event: AutopilotEvent) => {
 
 | 步骤 | 文件 | 内容 |
 |------|------|------|
-| 1 | `src/migrations/033-requirement-sessions.ts` | 建 `requirement_sessions` 表 |
-| 2 | `src/core/requirement-sessions.ts` | `getSession` / `upsertSession` / `deleteSession` |
-| 3 | `src/daemon/requirement-clarifier.ts` | 更新 `ClarifyFn` 类型、`callClaude`、`buildIncrementalPrompt`、`buildPrompt`（+replay 参数）、`_runClarifierRoundInner`（session 逻辑）、`initRequirementClarifier`（终态清理） |
-| 4 | `tests/requirement-sessions.test.ts` | CRUD 单测 |
-| 5 | `tests/requirement-clarifier.test.ts` | session 相关路径单测（session 复用、降级 fallback、终态清理） |
+| **1** | `src/migrations/033-requirement-sessions.ts` | 建 `requirement_sessions` 表 |
+| **2** | `src/core/requirement-sessions.ts` | `getSession` / `upsertSession`（含 snapshot 截断）/ `deleteSession` |
+| **3a** | `tests/requirement-clarifier.test.ts`（现有） | **迁移所有现有 mock**：`_setClarifyFnForTest` 回调返回值从 `string` 改为 `{ rawText: string; newSessionRef?: string }` |
+| **3b** | `src/daemon/requirement-clarifier.ts` | 核心改造：`ClarifyFn` 类型、`callClaude`（provider 分支）、`buildIncrementalPrompt`（新增）、`buildPrompt`（+replay 参数）、`_runClarifierRoundInner`（session 逻辑）、`initRequirementClarifier`（终态清理） |
+| **4** | `tests/requirement-sessions.test.ts` | Session CRUD 单测 |
+| **5** | `tests/requirement-clarifier.test.ts` | session 路径单测（补充） |
+
+> **步骤 3a 必须先于 3b 完成**：修改核心逻辑前先让所有测试重新通过旧行为，再改逻辑，避免"一次改太多导致测试全绿变成噪音"。
 
 ### 步骤 1：Migration 033
 
 ```typescript
 // src/migrations/033-requirement-sessions.ts
+import type { Database } from "bun:sqlite";
+
 export function up(db: Database): void {
   db.run(`
     CREATE TABLE IF NOT EXISTS requirement_sessions (
@@ -425,20 +483,27 @@ export function up(db: Database): void {
 
 ### 步骤 2：`src/core/requirement-sessions.ts`
 
-完整实现 `getSession` / `upsertSession` / `deleteSession`，遵循项目现有 DB 操作风格（`getDb()` + `db.query<T>().get()` / `db.run()`）。
+完整实现 `getSession` / `upsertSession` / `deleteSession`，遵循项目现有 DB 操作风格（`getDb()` + `db.query<T>().get()` / `db.run()`）。`upsertSession` 内 snapshot 截断使用 `SNAPSHOT_MAX_TURNS = 20` 常量，截断后确保首条为 user turn。
 
-### 步骤 3：澄清器改造（核心改动）
+### 步骤 3a：现有测试 mock 迁移
 
-严格按 §2.3 各子节实施，改动集中在：
-- `callClaude`：签名升级 + `agent.run()` → `agent.chat()`
-- `_runClarifierRoundInner`：session 查询 + 消息选择 + 重试序列 + session 持久化
-- `buildIncrementalPrompt`：新增函数
-- `buildPrompt`：增加 `messagesReplay` 可选参数
-- `initRequirementClarifier`：`_statusHandler` 加终态清理
+```typescript
+// 迁移前
+_setClarifyFnForTest(async (prompt, reqId) => {
+  return "```yaml\nnew_spec_md: ...\ndone: false\n```";
+});
 
-### 步骤 4-5：测试
+// 迁移后
+_setClarifyFnForTest(async (prompt, reqId, _sessionRef) => {
+  return { rawText: "```yaml\nnew_spec_md: ...\ndone: false\n```", newSessionRef: undefined };
+});
+```
 
-按 §5 测试计划实施。
+所有调用 `_setClarifyFnForTest` 的 test case 均需按此格式更新。
+
+### 步骤 3b：澄清器改造
+
+严格按 §2.3 各子节实施。
 
 ---
 
@@ -449,31 +514,32 @@ export function up(db: Database): void {
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
 | `src/migrations/033-requirement-sessions.ts` | **新增** | DB schema |
-| `src/core/requirement-sessions.ts` | **新增** | Session CRUD |
+| `src/core/requirement-sessions.ts` | **新增** | Session CRUD + snapshot 截断 |
 | `src/daemon/requirement-clarifier.ts` | **修改** | 核心逻辑，改动较大 |
-| `src/core/migrate.ts` | 可能微调 | 如果迁移文件需要手动注册 |
-| `tests/requirement-sessions.test.ts` | **新增** | |
-| `tests/requirement-clarifier.test.ts` | **修改** | 补 session 相关测试 |
+| `tests/requirement-sessions.test.ts` | **新增** | Session CRUD 单测 |
+| `tests/requirement-clarifier.test.ts` | **修改** | ① 迁移现有 mock ② 补 session 路径测试 |
 
 ### 4.2 非影响范围
 
 | 模块 | 是否受影响 | 原因 |
 |------|-----------|------|
-| `requirement-comments.ts` / Q&A 历史 | ✗ | 仍从 DB 读取，仅增量消息时少发一次全量 |
+| `requirement-comments.ts` / Q&A 历史 | ✗ | 仍从 DB 读取，不改变 |
 | 状态机 / ALLOWED_TRANSITIONS | ✗ | 无状态变更 |
 | Web UI / TUI / CLI | ✗ | Session 透明，不暴露给客户端 |
 | 任务执行（runner / workflow） | ✗ | 仅 daemon 的 clarifier 层 |
 | `buildClarifierAgent()` | ✗ | 接口不变，返回 `Agent` 实例 |
+| **OpenAI/Google provider clarifier** | ✗ | 沿用 `agent.run()` 原路径，无任何改动 |
 
 ### 4.3 风险与缓解
 
 | 风险 | 严重度 | 缓解措施 |
 |------|--------|---------|
-| Claude CLI session 过期策略未知，`--resume` 失败率不确定 | 中 | 两级降级：先增量+session，失败自动降全量+无session；session 失效不中断澄清流程 |
-| `agent.chat()` 与 `agent.run()` 行为差异 | 低 | clarifier 本已不在 task context 中，`run()` 的 AUTOPILOT_HOME 注入对它无效；`chat()` 行为等价，无副作用差异 |
-| `messages_snapshot` 随轮数增长占用 DB 空间 | 低 | 澄清轮次通常 3-7 轮；单条 snapshot JSON < 50KB；可接受 |
-| 并发 round 下 session 写冲突 | 低 | `_inflightRounds` 进程内锁已确保同一需求同时只跑一个 round，session 写在锁内，无并发 |
-| 测试中 `_clarifyFn` 注入失效 | 低 | 新签名需同步更新所有测试 mock，`_setClarifyFnForTest` 入参类型严格检查 |
+| Claude CLI session 过期策略未知，`--resume` 失败率不确定 | 中 | 两级降级：先增量+session，失败自动降全量+无 session；session 失效不中断澄清流程 |
+| `agent.chat()` 与 `agent.run()` 行为差异（Anthropic） | 低 | clarifier 不在 task context 中，`run()` 的 AUTOPILOT_HOME 注入对其无效；`chat()` 等价，无副作用 |
+| ~~OpenAI/Google provider 回归~~（C-1 已修复） | ✗ | 非 Anthropic 走 `run()` 原路径，无变化 |
+| `messages_snapshot` 体积（M-2 已控制） | 低 | `SNAPSHOT_MAX_TURNS=20` 硬截断；实测估算 10 轮 ≈ 20–50 KB，可接受 |
+| 并发 round 下 session 写冲突 | 低 | `_inflightRounds` 进程内锁已确保同一需求同时只跑一个 round，session 写在锁内 |
+| 现有测试 mock 签名不兼容（M-3 已显式列出） | 低 | 步骤 3a 明确迁移路径，先迁再改 |
 
 ---
 
@@ -484,9 +550,10 @@ export function up(db: Database): void {
 | 场景 | 验证点 |
 |------|--------|
 | `getSession` 不存在时返回 null | 返回值为 null |
-| `upsertSession` 首次创建 | id 符合 `sess-NNN` 格式，字段正确 |
+| `upsertSession` 首次创建 | id 符合 `sess-NNN` 格式，字段正确，`messages_snapshot = []` |
 | `upsertSession` 更新已有 session | `agent_session_ref` 被覆盖，`updated_at` 更新 |
 | `upsertSession` 只传 `agent_session_ref` | `messages_snapshot` 保持原值 |
+| `upsertSession` snapshot 超出 `SNAPSHOT_MAX_TURNS` | 截断为最新 N 条，且首条为 user turn |
 | `deleteSession` 删除后 `getSession` 返回 null | 正常 |
 | UNIQUE 约束：同 reqId + type 只保留一条 | upsert 语义正确，无重复插入 |
 
@@ -494,24 +561,25 @@ export function up(db: Database): void {
 
 | 场景 | mock 行为 | 验证点 |
 |------|-----------|--------|
-| 首轮（无 session）| mock 返回 `newSessionRef: "sess-abc"` | session 被创建，`agent_session_ref = "sess-abc"` |
-| 第 2 轮（session 有效）| mock 接收 `sessionRef = "sess-abc"`，返回 `newSessionRef: "sess-abc2"` | 调用 `_clarifyFn` 时 sessionRef 非 undefined；session 被更新 |
-| session 失效（第一次抛异常）| 第 1 次 mock 抛错，第 2 次成功 | 第 2 次调用 sessionRef 为 undefined；旧 session `agent_session_ref` 被清空；新 session 以全量 prompt 创建 |
-| 增量消息内容检查 | 第 2 轮时检查传给 mock 的 prompt | prompt 不含 `# 任务` 等首轮全量段落；包含用户回答文本 |
-| 终态状态变化清理 session | `to: "done"` 事件 | `deleteSession` 被调用；session 记录删除 |
-| 终态 `cancelled` / `failed` | `to: "cancelled"` 等 | 同上 |
+| 首轮（无 session，Anthropic） | mock 返回 `{ rawText: "...", newSessionRef: "sess-abc" }` | session 被创建，`agent_session_ref = "sess-abc"` |
+| 第 2 轮（session 有效，Anthropic） | mock 接收 `sessionRef = "sess-abc"`，返回 `newSessionRef: "sess-abc2"` | 调用 `_clarifyFn` 时 sessionRef 非 undefined；session 被更新；增量 prompt 不含 `# 任务` 等首轮段落 |
+| session 失效（第一次抛异常，Anthropic） | 第 1 次抛错，第 2 次成功 | 第 2 次 sessionRef 为 undefined；旧 `agent_session_ref` 被清空；全量 prompt 重建 |
+| 非 Anthropic provider（OpenAI） | mock 接收 `sessionRef = undefined`，返回 `newSessionRef: undefined` | session 记录被 upsert 但 `agent_session_ref = null`；不尝试 session resume |
+| replay 无重叠（session 失效 + snapshot 存在） | mock 检查 prompt 内容 | prompt 内不含重复 Q&A：`qaHistory` 段为空，`# 上一次澄清会话记录` 段存在 |
+| 终态清理 `done` / `cancelled` / `failed` | 状态变更事件 | `deleteSession` 被调用；session 记录删除 |
 
 ### 5.3 集成验证（手动 / 烟雾测试）
 
 | 场景 | 验证步骤 |
 |------|---------|
-| 多轮澄清 session 复用 | 创建需求 → 回答 Q1 → DB 查 `requirement_sessions` 确认 `agent_session_ref` 非空 → 回答 Q2 → session `updated_at` 更新，`messages_snapshot` 追加两条 |
-| 模拟 session 失效 | 手动将 DB 中 `agent_session_ref` 改成非法值 → 触发下一轮 → 观察日志确认"session 疑似失效"警告 → 澄清正常完成 |
-| 终态清理 | 澄清完成 → 需求进入 `done` → DB 中 `requirement_sessions` 记录消失 |
+| 多轮澄清 session 复用 | 创建需求 → 回答 Q1 → DB 查 `requirement_sessions` 确认 `agent_session_ref` 非空 → 回答 Q2 → `updated_at` 更新，snapshot 追加两条 |
+| 模拟 session 失效 | 手动将 DB `agent_session_ref` 改成非法值 → 触发下一轮 → 日志出现"session 疑似失效"警告 → 澄清正常完成 |
+| 非 Anthropic provider | 设置 `clarifier_provider: openai` → 多轮澄清正常，`agent_session_ref` 始终为 null |
+| 终态清理 | 澄清完成 → 需求进入 `done` → `requirement_sessions` 记录消失 |
 
 ---
 
-## 6. 附录：完整数据流图
+## 6. 附录：完整数据流图（v2）
 
 ```
 需求进入 clarifying
@@ -519,30 +587,33 @@ export function up(db: Database): void {
          ▼
 getSession(reqId, "clarifying")
          │
-    ┌────┴─────┐
-    │ 有 session │ 无 session
-    │ + Q&A 历史 │
-    ▼          ▼
-buildIncremental   buildFullPrompt
-Prompt(...)       (qaHistory, replay?)
-    │                    │
-    ▼                    ▼
+    ┌────┴──────────────────────────┐
+    │ 有 session.agent_session_ref  │ 无 / null
+    │ + hasPriorQA = true           │
+    ▼                               ▼
+buildIncrementalPrompt(...)     buildFullPrompt(...)
+                                  ├─ 有 snapshot → qaHistory="" + messagesReplay=snapshot
+                                  └─ 无 snapshot → qaHistory=正常 + messagesReplay=[]
+         │                               │
+         ▼                               ▼
 callClaude(prompt, reqId, sessionRef?)
-  → agent.chat(prompt, { providerSessionId? })
-    │
-    ├─ 成功 ──────────────────────────────────────────┐
-    │                                                 │
-    ├─ 失败（sessionRef 非空）                         │
-    │   └─ 清空 agent_session_ref                     │
-    │   └─ 重试：callClaude(fullPrompt, reqId, undefined)
-    │                                                 │
-    ▼                                                 │
-parseClarifyResult(raw)  ◄────────────────────────────┘
+  ├─ resolvedProvider = "anthropic"
+  │   → agent.chat(prompt, { providerSessionId? })
+  │   → return { rawText, newSessionRef }
+  └─ resolvedProvider = "openai/google"
+      → agent.run(prompt)   ← 原路径，无变化
+      → return { rawText, newSessionRef: undefined }
          │
+    ┌────┴─────────────────────────────┐
+    │ 成功                              │ 失败（i=0, session 用过）
+    ▼                                  ▼
+parseClarifyResult(rawText)      清空 agent_session_ref
+         │                       重试：callClaude(fullPrompt, undefined)
          ▼
 upsertSession(reqId, "clarifying", {
-  agent_session_ref: newSessionRef,
-  messages_snapshot: [...prev, {user, prompt}, {assistant, raw}]
+  agent_session_ref: resolvedSessionRef ?? null,
+  messages_snapshot: [...prev, {user, prompt}, {assistant, rawText}]
+                     .slice(-SNAPSHOT_MAX_TURNS)
 })
          │
          ▼
