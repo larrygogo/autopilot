@@ -1,22 +1,33 @@
-# 需求澄清阶段会话复用 — 技术规格（v2，修复 C-1/C-2/I-1/I-2/M-1～M-3）
+# 需求澄清阶段会话复用 — 技术规格（v3，修复 N-1/N-2/N-3）
 
-**日期**：2026-06-11（v2 更新于同日）  
+**日期**：2026-06-11（v3 更新于同日）  
 **状态**：待实施  
 **作者**：架构师（autopilot 项目）
 
 ---
 
-## 变更记录（v2）
+## 变更记录
+
+### v3（本版本）
 
 | 问题 | 修复说明 |
 |------|---------|
-| **C-1** Provider 回归 | `callClaude` 按 `resolvedProvider` 分支：`anthropic` 走 `chat()`，其他走 `run()`，无 session 跟踪。`supports_session` 字段写入 session 记录。 |
-| **C-2** 接口矛盾 | `ClarifyFn` 统一返回 `{ rawText: string; newSessionRef?: string }`，删除多余 `text` 字段；§2.3.3 snapshot 写入代码与接口一致。 |
-| **I-1** qaHistory 重叠 | replay 模式下 `buildPrompt` 的 `qaHistory` 传空字符串，改由 `messagesReplay` 段落承载；两段不共存。 |
-| **I-2** 命名/边界 | `hasNewUserReply` 改名 `hasPriorQA`；补充"每轮一问"设计前提注释。 |
-| **M-1** 死代码 | 删除不可达的空 if-block。 |
-| **M-2** snapshot 体积 | 写入 snapshot 前截断到最近 `SNAPSHOT_MAX_TURNS`（=20 条，约 10 轮）；风险表更新体积估算。 |
-| **M-3** 测试迁移成本 | 实施步骤中显式新增"迁移现有 mock"子步骤。 |
+| **N-1** 非 Anthropic replay 回归 | replay 条件加 `isAnthropicProvider` 守卫：`(isAnthropicProvider && !activeSessionRef && hasSnapshot)`；`isAnthropicProvider` 在 `①` 块预计算，非 Anthropic 时 replay 逻辑完全旁路 |
+| **N-2** `resolvedProvider` desync | `agent` 创建后从 `agent.config.provider` 读取实际 provider，消除与 `buildClarifierAgent()` 的潜在不一致 |
+| **N-3** 冗余 `getSession()` | `③` 中直接复用 `①` 已获取的 `session` 变量，去掉重复 DB 查询 |
+| 测试补充 | §5.2 补充"非 Anthropic 第 2 轮 prompt 结构不变"测试场景 |
+
+### v2（上版本）
+
+| 问题 | 修复说明 |
+|------|---------|
+| **C-1** Provider 回归 | `callClaude` 按 `resolvedProvider` 分支：`anthropic` 走 `chat()`，其他走 `run()` |
+| **C-2** 接口矛盾 | `ClarifyFn` 统一返回 `{ rawText: string; newSessionRef?: string }` |
+| **I-1** qaHistory 重叠 | replay 与 qaHistory 互斥，两段不共存（v3 进一步加 provider 守卫） |
+| **I-2** 命名/边界 | `hasNewUserReply` → `hasPriorQA`；补充"每轮一问"注释 |
+| **M-1** 死代码 | 删除不可达空 if-block |
+| **M-2** snapshot 体积 | `SNAPSHOT_MAX_TURNS=20` 硬截断 |
+| **M-3** 测试迁移 | 步骤 3a 明确 mock 迁移路径 |
 
 ---
 
@@ -200,16 +211,16 @@ async function callClaude(
   reqId: string,
   sessionRef?: string
 ): Promise<{ rawText: string; newSessionRef?: string }> {
-  let agent;
+  let agent: Agent;
   let resolvedProvider: ProviderName;
   try {
     const req = getRequirementById(reqId);
     const override: ClarifierAgentOverride = {};
     if (req?.clarifier_provider) override.provider = req.clarifier_provider as ProviderName;
     if (req?.clarifier_model)    override.model    = req.clarifier_model;
-    // resolvedProvider：req 级覆盖 > CLARIFIER_DEFAULTS.provider（= "anthropic"）
-    resolvedProvider = override.provider ?? "anthropic";
     agent = buildClarifierAgent(override);
+    // N-2 修复：从 agent 实例读取实际 provider，避免与 buildClarifierAgent() 内部推导逻辑 desync
+    resolvedProvider = (agent.config.provider ?? "anthropic") as ProviderName;
   } catch (e: unknown) {
     throw new Error(`无法初始化 clarifier agent：${e instanceof Error ? e.message : String(e)}`);
   }
@@ -222,7 +233,7 @@ async function callClaude(
     return { rawText, newSessionRef: result.providerSessionId };
   } else {
     // ⚠️ OpenAI/Google：chat() 未实现（base.ts 抛错），沿用 run()，不做 session 跟踪
-    // 传入的 sessionRef 被忽略；返回 newSessionRef = undefined，调用方不写 session
+    // 传入的 sessionRef 被忽略；返回 newSessionRef = undefined
     const result = await agent.run(prompt);
     const rawText = result.text.trim();
     if (!rawText) throw new Error("clarifier agent 返回空");
@@ -244,10 +255,16 @@ async function callClaude(
 const session = getSession(reqId, "clarifying");
 const activeSessionRef = session?.agent_session_ref ?? undefined;
 
+// N-1 修复：预计算 isAnthropicProvider，用于守卫 replay 触发条件
+// 与 callClaude 内的 resolvedProvider 推导逻辑保持一致：req 级覆盖 > 默认 "anthropic"
+const isAnthropicProvider =
+  ((req.clarifier_provider as ProviderName | undefined) ?? "anthropic") === "anthropic";
+
 // hasPriorQA：本轮前有已解答的问题（= session 里已有先验 Q&A，可走增量路径）
 // 设计前提：每轮最多一个 active question（_inflightRounds 进程内锁 + setActiveQuestionId 保证）
 const hasPriorQA = allQuestionsResolved.length > 0;
-const useIncremental = !!activeSessionRef && hasPriorQA;
+// useIncremental 仅在 Anthropic + 有效 session + 有历史 Q&A 时为 true
+const useIncremental = isAnthropicProvider && !!activeSessionRef && hasPriorQA;
 
 // ── 增量消息（仅新回复 + 继续指令）────────────────────────────────────
 let incrementalPrompt: string | null = null;
@@ -265,22 +282,26 @@ if (useIncremental) {
 }
 
 // ── 全量 prompt（首轮 / session 失效 fallback）────────────────────────
-// 当 session 失效且有 snapshot 时：以 messagesReplay 替换 qaHistory，避免两者重叠（I-1 修复）
+// N-1 修复：replay 触发条件加 isAnthropicProvider 守卫
+//   Anthropic + session 失效 + 有 snapshot → 用 replay 替换 qaHistory（互斥，避免重叠）
+//   非 Anthropic（无论是否有 snapshot）→ 始终走 qaHistory 原路径，行为完全不变
 const hasSnapshot = (session?.messages_snapshot?.length ?? 0) > 0;
+const useReplay = isAnthropicProvider && !activeSessionRef && hasSnapshot;
 const fullPrompt = buildPrompt({
-  projectName:      project.name,
+  projectName:        project.name,
   projectDescription: project.description,
-  workspaceAlias:   workspace?.alias ?? null,
-  workspaceContext: workspace?.path ? readWorkspaceContext(workspace.path) : null,
-  title:            req.title,
-  specMd:           req.spec_md ?? "",
-  // 有 snapshot 时 qaHistory 传空：历史信息由 messagesReplay 段落承载，避免重复
-  qaHistory:        (!activeSessionRef && hasSnapshot) ? "" : qaHistory,
+  workspaceAlias:     workspace?.alias ?? null,
+  workspaceContext:   workspace?.path ? readWorkspaceContext(workspace.path) : null,
+  title:              req.title,
+  specMd:             req.spec_md ?? "",
+  // useReplay 时 qaHistory 传空：历史信息由 messagesReplay 段落承载，两者互斥
+  qaHistory:          useReplay ? "" : qaHistory,
   attachmentContext,
-  // session 失效且有 snapshot：将历史对话注入 prompt
-  messagesReplay:   (!activeSessionRef && hasSnapshot) ? session!.messages_snapshot : [],
+  messagesReplay:     useReplay ? session!.messages_snapshot : [],
 });
 ```
+
+> **N-1 关键不变式**：`isAnthropicProvider = false` 时 `useIncremental = false` 且 `useReplay = false`，保证非 Anthropic provider 的所有轮次都走原始 `qaHistory` + `agent.run()` 路径，与改动前行为完全一致。
 
 **② 重试循环**（替换原有 `for` 循环）
 
@@ -337,8 +358,9 @@ for (let i = 0; i < attempts.length; i++) {
 if (result) {
   // 无论 provider 类型都写 session：
   //   Anthropic  → resolvedSessionRef = "session-xxx"（用于下次 resume）
-  //   非 Anthropic → resolvedSessionRef = undefined → agent_session_ref 写 null（不 resume，但 snapshot 留存供审计）
-  const prevSnapshot = getSession(reqId, "clarifying")?.messages_snapshot ?? [];
+  //   非 Anthropic → resolvedSessionRef = undefined → agent_session_ref 写 null（snapshot 留存供审计）
+  // N-3 修复：直接复用 ① 中已获取的 session 变量，避免重复 DB 查询
+  const prevSnapshot = session?.messages_snapshot ?? [];
   const newSnapshot: ConversationTurn[] = [
     ...prevSnapshot,
     { role: "user",      content: resolvedPromptUsed },
@@ -352,7 +374,7 @@ if (result) {
 }
 ```
 
-> **非 Anthropic provider 的 session 行为**：每轮结束后 `agent_session_ref = null`，snapshot 照常追加。下轮 `activeSessionRef = null → useIncremental = false`，始终走全量 `agent.run()` 路径（即当前行为），无 session resume。
+> **非 Anthropic provider 的 session 行为**：每轮结束后 `agent_session_ref = null`，snapshot 照常追加（供审计）。下轮 `isAnthropicProvider = false → useIncremental = false，useReplay = false`，始终走全量 `agent.run()` + `qaHistory` 原路径，行为完全不变。
 
 #### 2.3.4 新增 `buildIncrementalPrompt()`
 
@@ -415,11 +437,11 @@ function buildPrompt(opts: {
 }
 ```
 
-> **I-1 保证**：`buildPrompt` 被调用时，`qaHistory` 和 `messagesReplay` 至多一个有内容：
-> - 有 snapshot → `qaHistory = ""`，`messagesReplay = snapshot`
-> - 无 snapshot → `qaHistory = 正常构建`，`messagesReplay = []`
+> **I-1 + N-1 保证**：`buildPrompt` 的调用点使用 `useReplay` 标志（含 `isAnthropicProvider` 守卫）：
+> - `useReplay = true`（Anthropic + session 失效 + 有 snapshot）→ `qaHistory = ""`，`messagesReplay = snapshot`
+> - `useReplay = false`（首轮 / 非 Anthropic / 无 snapshot）→ `qaHistory = 正常构建`，`messagesReplay = []`
 >
-> 两条路径不产生重叠。
+> 两路径互斥，不产生重叠；非 Anthropic 恒走第二路径，行为不变。
 
 #### 2.3.6 终态清理
 
@@ -564,8 +586,9 @@ _setClarifyFnForTest(async (prompt, reqId, _sessionRef) => {
 | 首轮（无 session，Anthropic） | mock 返回 `{ rawText: "...", newSessionRef: "sess-abc" }` | session 被创建，`agent_session_ref = "sess-abc"` |
 | 第 2 轮（session 有效，Anthropic） | mock 接收 `sessionRef = "sess-abc"`，返回 `newSessionRef: "sess-abc2"` | 调用 `_clarifyFn` 时 sessionRef 非 undefined；session 被更新；增量 prompt 不含 `# 任务` 等首轮段落 |
 | session 失效（第一次抛异常，Anthropic） | 第 1 次抛错，第 2 次成功 | 第 2 次 sessionRef 为 undefined；旧 `agent_session_ref` 被清空；全量 prompt 重建 |
-| 非 Anthropic provider（OpenAI） | mock 接收 `sessionRef = undefined`，返回 `newSessionRef: undefined` | session 记录被 upsert 但 `agent_session_ref = null`；不尝试 session resume |
-| replay 无重叠（session 失效 + snapshot 存在） | mock 检查 prompt 内容 | prompt 内不含重复 Q&A：`qaHistory` 段为空，`# 上一次澄清会话记录` 段存在 |
+| 非 Anthropic provider 第 1 轮（OpenAI） | mock 接收 `sessionRef = undefined`，返回 `newSessionRef: undefined` | session 记录被 upsert 但 `agent_session_ref = null`；不尝试 session resume |
+| **非 Anthropic provider 第 2 轮+（N-1 回归检验）** | 第 1 轮已写入 snapshot；第 2 轮触发 → mock 捕获 prompt | **prompt 含 `# 已完成的 Q&A 历史` 段（原路径），不含 `# 上一次澄清会话记录` 段**；`_clarifyFn` 调用时 `sessionRef = undefined` |
+| replay 无重叠（Anthropic session 失效 + snapshot 存在） | Anthropic provider + mock 捕获 prompt | prompt 内 `qaHistory` 段为空，`# 上一次澄清会话记录` 段存在；两段不共存 |
 | 终态清理 `done` / `cancelled` / `failed` | 状态变更事件 | `deleteSession` 被调用；session 记录删除 |
 
 ### 5.3 集成验证（手动 / 烟雾测试）
@@ -579,41 +602,51 @@ _setClarifyFnForTest(async (prompt, reqId, _sessionRef) => {
 
 ---
 
-## 6. 附录：完整数据流图（v2）
+## 6. 附录：完整数据流图（v3）
 
 ```
 需求进入 clarifying
          │
          ▼
-getSession(reqId, "clarifying")
+getSession(reqId, "clarifying")  +  计算 isAnthropicProvider
          │
-    ┌────┴──────────────────────────┐
-    │ 有 session.agent_session_ref  │ 无 / null
-    │ + hasPriorQA = true           │
-    ▼                               ▼
-buildIncrementalPrompt(...)     buildFullPrompt(...)
-                                  ├─ 有 snapshot → qaHistory="" + messagesReplay=snapshot
-                                  └─ 无 snapshot → qaHistory=正常 + messagesReplay=[]
-         │                               │
-         ▼                               ▼
-callClaude(prompt, reqId, sessionRef?)
-  ├─ resolvedProvider = "anthropic"
-  │   → agent.chat(prompt, { providerSessionId? })
-  │   → return { rawText, newSessionRef }
-  └─ resolvedProvider = "openai/google"
-      → agent.run(prompt)   ← 原路径，无变化
-      → return { rawText, newSessionRef: undefined }
+         ├─ isAnthropicProvider = true  ─────────────────────────────┐
+         │                                                             │
+         │   ┌───────────────────────────────────────────┐            │
+         │   │ 有 activeSessionRef + hasPriorQA          │            │
+         │   │ (useIncremental = true)                   │            │
+         │   ▼                                           ▼            │
+         │   buildIncrementalPrompt(...)     buildFullPrompt(...)     │
+         │                                    ├─ useReplay=true       │
+         │                                    │   qaHistory=""        │
+         │                                    │   messagesReplay=snap │
+         │                                    └─ useReplay=false      │
+         │                                        qaHistory=正常      │
+         │                                        messagesReplay=[]   │
+         │         callClaude(prompt, reqId, sessionRef?)             │
+         │           → agent.chat(prompt, { providerSessionId? })  ◄─┘
+         │           → return { rawText, newSessionRef }
          │
-    ┌────┴─────────────────────────────┐
-    │ 成功                              │ 失败（i=0, session 用过）
-    ▼                                  ▼
+         └─ isAnthropicProvider = false ──────────────────────────────┐
+             (useIncremental = false, useReplay = false)              │
+             buildFullPrompt(qaHistory=正常, messagesReplay=[])        │
+             callClaude(prompt, reqId, undefined) ◄──────────────────┘
+               → agent.run(prompt)   ← 原路径，无变化
+               → return { rawText, newSessionRef: undefined }
+
+─────────────────────────────────────────────────────────────────────
+         │ 成功                              │ 失败（i=0, session 用过）
+         ▼                                  ▼
 parseClarifyResult(rawText)      清空 agent_session_ref
          │                       重试：callClaude(fullPrompt, undefined)
          ▼
 upsertSession(reqId, "clarifying", {
-  agent_session_ref: resolvedSessionRef ?? null,
-  messages_snapshot: [...prev, {user, prompt}, {assistant, rawText}]
-                     .slice(-SNAPSHOT_MAX_TURNS)
+  agent_session_ref: resolvedSessionRef ?? null,   -- Anthropic: session-xxx；非Anthropic: null
+  messages_snapshot: [                             -- 截断到 SNAPSHOT_MAX_TURNS
+    ...session?.messages_snapshot ?? [],           -- N-3: 复用 ① 的 session 变量
+    {user, resolvedPromptUsed},
+    {assistant, resolvedRawText}
+  ]
 })
          │
          ▼
