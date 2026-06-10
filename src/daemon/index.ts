@@ -316,13 +316,21 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     nowAggregator.dispose();
     setNowAggregator(null);
     disableBus();
-    server.stop();
-    closeDb();
-    disposeMcpRuntime();
-    removePid();
-    removeListenInfo();
-    console.log("daemon 已关闭。");
-    process.exit(exitCode);
+    // server.stop 必须 await 完成后才能 exit：它是异步的（等 socket 真正关闭），
+    // 同步调用后立刻 process.exit 会让进程死在 socket 关闭中途——浏览器保持着
+    // WS/HTTP 连接时，Windows 内核会留下归属死 pid 的 zombie LISTEN（端口直到
+    // 重启机器都 EADDRINUSE）。stop(true) 强制断开所有活动连接，不等客户端配合。
+    void (async () => {
+      try { await server.stop(true); } catch { /* 已停 */ }
+      closeDb();
+      disposeMcpRuntime();
+      removePid();
+      removeListenInfo();
+      console.log("daemon 已关闭。");
+      process.exit(exitCode);
+    })();
+    // 兜底：若 stop 卡死（极端），3s 后强制退出——此时连接已被 stop(true) 尽力断开
+    setTimeout(() => process.exit(exitCode), 3000).unref?.();
   };
 
   _activeShutdown = shutdown;
