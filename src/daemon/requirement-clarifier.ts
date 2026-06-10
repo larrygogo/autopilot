@@ -302,16 +302,23 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   let result: ClarifyResult | null = null;
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
+    let raw = "";
     try {
       if (attempt > 0) {
         setPhase(reqId, "calling-llm", { attempt: 1 });
       }
-      const raw = await _clarifyFn(prompt, reqId);
+      raw = await _clarifyFn(prompt, reqId);
       result = parseClarifyResult(raw);
       break;
     } catch (e: unknown) {
       lastError = e instanceof Error ? e : new Error(String(e));
-      log.warn("clarifier: req=%s 第 %d 次解析失败: %s", reqId, attempt + 1, lastError.message);
+      log.warn(
+        "clarifier: req=%s 第 %d 次解析失败: %s%s",
+        reqId,
+        attempt + 1,
+        lastError.message,
+        raw ? `；原始输出（前 500 字）: ${raw.slice(0, 500)}` : "",
+      );
       if (attempt === 0) {
         setPhase(reqId, "parsing", { attempt: 1, last_parse_error: lastError.message });
       }

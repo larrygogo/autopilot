@@ -56,6 +56,55 @@ phases:
     });
   });
 
+  it("围栏包裹 + 字段值内嵌 ``` 代码块 → 不被拦腰截断（dogfood：clarifier missing/invalid done）", () => {
+    const raw = [
+      "```yaml",
+      "new_spec_md: |",
+      "  ## 背景",
+      "  配置示例：",
+      "  ```yaml",
+      "  scheduler:",
+      "    max_concurrency: 3",
+      "  ```",
+      "  以上是示例",
+      "summary: 补充了配置示例",
+      "next_question: null",
+      "done: true",
+      "```",
+    ].join("\n");
+    const result = parseLlmYamlWrapper(raw);
+    expect(result.done).toBe(true);
+    expect(result.next_question).toBeNull();
+    expect(result.new_spec_md).toContain("max_concurrency: 3");
+    expect(result.new_spec_md).toContain("以上是示例");
+  });
+
+  it("裸 YAML（无外层围栏）含内嵌 ``` 代码块 → 原样解析不剥", () => {
+    const raw = [
+      "new_spec_md: |",
+      "  示例：",
+      "  ```ts",
+      "  function f() {}",
+      "  ```",
+      "done: false",
+      "next_question:",
+      "  agent_text: 继续吗？",
+    ].join("\n");
+    const result = parseLlmYamlWrapper(raw);
+    expect(result.done).toBe(false);
+    expect(result.new_spec_md).toContain("function f() {}");
+  });
+
+  it("围栏缺闭合（LLM 输出被截断）→ 剥开头围栏后仍解析", () => {
+    const raw = "```yaml\nname: x\ndone: true";
+    expect(parseLlmYamlWrapper(raw)).toEqual({ name: "x", done: true });
+  });
+
+  it("前导说明文字 + 围栏块 → 提取围栏内容（模型不听'只输出 YAML'时兜底）", () => {
+    const raw = "好的，以下是修订结果：\n```yaml\nname: x\ndone: true\n```";
+    expect(parseLlmYamlWrapper(raw)).toEqual({ name: "x", done: true });
+  });
+
   it("空字符串 → 抛", () => {
     expect(() => parseLlmYamlWrapper("")).toThrow();
     expect(() => parseLlmYamlWrapper("   ")).toThrow();
