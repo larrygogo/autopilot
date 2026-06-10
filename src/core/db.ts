@@ -600,9 +600,11 @@ export function endTaskPhase(eventId: number, status: "done" | "awaiting" | "fai
  */
 export function closeOpenPhaseEvents(taskId: string): void {
   const db = getDb();
+  // ended_at 写打断时刻（而非归零到 started_at）：被打断的轮次跑了多久是真实信息，
+  // 归零会让执行时间线把跑了 37 分钟的轮显示成 0s（dogfood 实测困惑点）
   db.run(
-    "UPDATE task_phase_events SET status = 'aborted', ended_at = started_at WHERE task_id = ? AND ended_at IS NULL",
-    [taskId],
+    "UPDATE task_phase_events SET status = 'aborted', ended_at = ? WHERE task_id = ? AND ended_at IS NULL",
+    [Date.now(), taskId],
   );
 }
 
