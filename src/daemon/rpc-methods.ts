@@ -1548,12 +1548,12 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "setup.saveWorkspaces",
-    description: "新建 workspace（与 POST /api/setup/workspaces 等价）；project_id 缺省则用首个 project 或新建 default",
+    description: "新建 workspace（首跑向导）；需提供 remote_url，写 DB 前 probeRemote 验证；project_id 缺省则用首个 project 或新建 default",
     handler: (params) => {
       const p = asObj(params);
       const name = typeof p.name === "string" ? p.name.trim() : "";
-      const pathField = typeof p.path === "string" ? p.path.trim() : "";
-      if (!name || !pathField) throw new RpcError("INVALID_PARAM", "name and path required");
+      const remoteUrl = typeof p.remote_url === "string" ? p.remote_url.trim() : "";
+      if (!name || !remoteUrl) throw new RpcError("INVALID_PARAM", "name and remote_url required");
       let projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
       if (!projectId) {
         const projects = listProjects();
@@ -1569,15 +1569,22 @@ export function registerCoreRpcMethods(): void {
       if (projectHasTopWorkspace(projectId)) {
         throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
       }
-      const detected = detectWorkspaceGit(pathField);
+      // Fail fast：与 workspaces.create 同款 —— 写 DB 前验证远程可达性 + 探测默认分支
+      const gitCfg = loadGitConfig();
+      const probe = probeRemote(remoteUrl, gitCfg.token);
+      if (!probe.ok) {
+        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.yaml 配置 git.token`);
+      }
+      const parsed = parseGithubFromRemote(remoteUrl);
       const ws = createWorkspace({
         id: nextWorkspaceId(),
         project_id: projectId,
         alias: name,
-        path: pathField,
-        default_branch: detected.default_branch ?? "main",
-        github_owner: detected.github_owner,
-        github_repo: detected.github_repo,
+        path: "",
+        remote_url: remoteUrl,
+        default_branch: probe.defaultBranch ?? "main",
+        github_owner: parsed?.owner ?? null,
+        github_repo: parsed?.repo ?? null,
       });
       return { workspace: ws };
     },
