@@ -7,7 +7,7 @@ import { api, type AgentCallSummary, type AgentCallRecord } from "@/hooks/useApi
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  shouldFollow, extractLevel, filterLinesToWindow, fmtDuration, isNeverRun,
+  shouldFollow, extractLevel, filterLinesToWindow, fmtDuration, isNeverRun, localizeLineTs,
   LEVEL_TEXT, ALL_LEVELS, type Level,
 } from "@/lib/run-view-logic";
 import { PhaseStatusIcon, type PhaseVisualState } from "@/components/RunPhaseNav";
@@ -156,14 +156,15 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [expanded, isRunning, taskId, name]);
 
-  // 行合并 + 本轮时间窗切片 + 过滤。phase.log 是同 phase 全部轮次混写的一个文件，
-  // 传了 windowStartMs 时只保留落在本轮窗口内的行（无时间戳行跟随前一条归属）。
+  // 行合并 + 本轮时间窗切片 + 时间戳本地化 + 过滤。phase.log 是同 phase 全部轮次
+  // 混写的一个文件，传了 windowStartMs 时只保留落在本轮窗口内的行（无时间戳行跟随
+  // 前一条归属）。切片必须用原始 UTC 行，本地化只发生在切片之后、搜索过滤之前。
   const lines = useMemo(() => {
     let base = (content ?? "").split("\n");
     if (windowStartMs !== undefined) {
       base = filterLinesToWindow(base, windowStartMs, windowEndMs ?? null);
     }
-    const all = isRunning ? [...base, ...liveLines] : base;
+    const all = (isRunning ? [...base, ...liveLines] : base).map(localizeLineTs);
     const q = filterQuery.trim().toLowerCase();
     return all.filter((line) => {
       if (!line.trim()) return false;
