@@ -82,6 +82,7 @@ import {
   setRequirementStatus,
   nextRequirementId,
   finishClarification,
+  listRequirementStatusLogs,
   type Requirement,
 } from "../core/requirements";
 import { listSubPrs } from "../core/requirement-sub-prs";
@@ -412,6 +413,30 @@ export function registerCoreRpcMethods(): void {
       const outcome = await computeTaskOutcome(p.id);
       if (!outcome) throw new RpcError("NOT_FOUND", "task 不在终态");
       return outcome;
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.diffFiles",
+    description: "任务工作树相对 base 分支的按文件 diff（验收视图）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const task = getTask(p.id);
+      if (!task) throw new RpcError("NOT_FOUND", "task not found");
+      const repoPath = (task as Record<string, unknown>).repo_path as string | undefined;
+      if (!repoPath || !existsSync(repoPath)) return { files: [] };
+      const reqId = (task as Record<string, unknown>).requirement_id as string | undefined;
+      let base = "main";
+      if (reqId) {
+        const req = getRequirementById(reqId);
+        if (req?.workspace_id) {
+          const ws = getWorkspaceById(req.workspace_id);
+          if (ws?.default_branch) base = ws.default_branch;
+        }
+      }
+      const { computeFileDiffs } = await import("./task-outcome");
+      return { files: computeFileDiffs(repoPath, base) };
     },
   });
 
@@ -991,6 +1016,17 @@ export function registerCoreRpcMethods(): void {
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
       return cancelRequirementWithTasks(p.id, typeof p.reason === "string" ? p.reason : undefined);
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.statusLogs",
+    description: "需求状态转移历史（审批/排队时间点等，升序）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      return { logs: listRequirementStatusLogs(p.id) };
     },
   });
 

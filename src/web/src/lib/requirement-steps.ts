@@ -38,6 +38,18 @@ export function statusToStep(status: string): ReqStep {
   }
 }
 
+/**
+ * 当前步解析：终态（cancelled/failed）时定位到「死亡步」（转终态前的状态对应的步），
+ * 让 ✗ 画在实际失败处而不是固定画在「完成」步。无 status_before_terminal（历史数据 /
+ * 执行前取消无从推断）时兜底回「完成」步（旧行为）。
+ */
+export function resolveCurrentStep(status: string, statusBeforeTerminal?: string | null): ReqStep {
+  if ((status === "cancelled" || status === "failed") && statusBeforeTerminal) {
+    return statusToStep(statusBeforeTerminal);
+  }
+  return statusToStep(status);
+}
+
 export type StepPosition = "past" | "current" | "future";
 
 /** selected 相对 current 的时间位置，决定只读 / 可操作 / 占位。 */

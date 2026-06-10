@@ -36,6 +36,8 @@ export interface Requirement {
   status_reason: string | null;
   /** status_reason 的来源：user（用户手动）/ task（任务级联）/ system（调度等系统路径）。 */
   status_reason_source: StatusReasonSource | null;
+  /** 转入终态时的 from 状态（步骤条据此把 ✗ 画在死亡步）；failed 重试时清空。 */
+  status_before_terminal: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -263,24 +265,58 @@ export function setRequirementStatus(
     throw new Error(`requirement ${id} 非法状态转换：${cur.status} → ${to}${hint}`);
   }
   const db = getDb();
+  const ts = nowMs();
   const isTerminal = to === "cancelled" || to === "failed";
   const reason = isTerminal ? opts?.reason ?? null : null;
-  if (isTerminal && reason) {
+  if (isTerminal) {
+    // 终态统一记 status_before_terminal（即便无 reason），步骤条据此定位死亡步
     db.run(
-      "UPDATE requirements SET status = ?, status_reason = ?, status_reason_source = ?, updated_at = ? WHERE id = ?",
-      [to, reason, opts?.reason_source ?? "system", nowMs(), id],
+      "UPDATE requirements SET status = ?, status_reason = ?, status_reason_source = ?, status_before_terminal = ?, updated_at = ? WHERE id = ?",
+      [to, reason, reason ? opts?.reason_source ?? "system" : null, cur.status, ts, id],
     );
   } else if (cur.status === "failed") {
     // failed → queued / awaiting_approval 重试：清掉上一轮的失败原因（与 schedule_error 成功清空同理）
     db.run(
-      "UPDATE requirements SET status = ?, status_reason = NULL, status_reason_source = NULL, updated_at = ? WHERE id = ?",
-      [to, nowMs(), id],
+      "UPDATE requirements SET status = ?, status_reason = NULL, status_reason_source = NULL, status_before_terminal = NULL, updated_at = ? WHERE id = ?",
+      [to, ts, id],
     );
   } else {
-    db.run("UPDATE requirements SET status = ?, updated_at = ? WHERE id = ?", [to, nowMs(), id]);
+    db.run("UPDATE requirements SET status = ?, updated_at = ? WHERE id = ?", [to, ts, id]);
+  }
+  // 需求级状态转移日志（与 task_logs 对称）：审批/排队时间、终态审计的真理来源
+  try {
+    db.run(
+      "INSERT INTO requirement_status_logs (requirement_id, from_status, to_status, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+      [id, cur.status, to, reason, ts],
+    );
+  } catch {
+    // 表不存在（迁移未跑的旧库/测试纯表夹具）：日志是增强，不阻塞状态转换
   }
   emit({ type: "requirement:status-changed", payload: { id, from: cur.status, to, reason } });
   return getRequirementById(id) as Requirement;
+}
+
+export interface RequirementStatusLog {
+  id: number;
+  requirement_id: string;
+  from_status: string;
+  to_status: string;
+  reason: string | null;
+  created_at: number;
+}
+
+/** 需求状态转移历史（升序）。 */
+export function listRequirementStatusLogs(requirementId: string): RequirementStatusLog[] {
+  const db = getDb();
+  try {
+    return db
+      .query<RequirementStatusLog, [string]>(
+        "SELECT * FROM requirement_status_logs WHERE requirement_id = ? ORDER BY id ASC",
+      )
+      .all(requirementId);
+  } catch {
+    return [];
+  }
 }
 
 /**

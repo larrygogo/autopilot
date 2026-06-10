@@ -97,6 +97,17 @@ async function tickGroup(groupId: string): Promise<void> {
       : `## 需求澄清记录\n\n${qa}`;
   }
 
+  // 历史执行评审遗留（bridge 在任务终态时沉淀的 agent feedback）：拼进需求文本让
+  // 重跑的 design v1 即带上轮架构约束，打破「撞墙-失忆-重撞」循环。
+  // 只取 agent 来源（不混入用户 feedback / GitHub review），上限 3 条防多轮失败堆积爆 prompt。
+  const residues = listComments(candidate.id, { kind: "feedback" })
+    .filter((c) => c.from_role === "agent")
+    .slice(-3);
+  if (residues.length > 0) {
+    const txt = residues.map((c, i) => `### 遗留 ${i + 1}\n${c.body.slice(0, 2000)}`).join("\n\n");
+    requirement += `\n\n## 历史执行评审遗留（前序执行被评审驳回的根因，本轮方案必须规避）\n\n${txt}`;
+  }
+
   // req:task 1:1：需求已有存活 task → 复用它重置重跑，不新建第二个（避免一 req 堆多 task）。
   // 首次执行 task_id 为 null 走下面新建；failed/重新入队时 task_id 已写 → 复用重跑。
   const existing = candidate.task_id ? getTask(candidate.task_id) : null;

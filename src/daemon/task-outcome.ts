@@ -154,6 +154,57 @@ function resolveBaseBranch(reqId: string | undefined): string {
   }
 }
 
+export interface FileDiff {
+  file: string;
+  insertions: number;
+  deletions: number;
+  /** 该文件的 unified diff（单文件超 60KB 截断；二进制为空串） */
+  patch: string;
+}
+
+/**
+ * 按文件返回任务 clone 工作树相对 base 的 diff（验收视图用）。
+ * 取数方式与 computeDiffStat 一致（add -A + diff --cached origin/<base>）。
+ */
+export function computeFileDiffs(workspacePath: string, baseBranch: string): FileDiff[] {
+  const run = (args: string[]) => Bun.spawnSync(["git", "-C", workspacePath, ...args], { stdout: "pipe", stderr: "pipe" });
+  const text = (p: ReturnType<typeof Bun.spawnSync>) => (p.stdout ? new TextDecoder().decode(p.stdout) : "");
+  try {
+    run(["add", "-A"]);
+    const ref = run(["rev-parse", "--verify", "--quiet", `origin/${baseBranch}`]).exitCode === 0
+      ? `origin/${baseBranch}` : baseBranch;
+    const numstatProc = run(["diff", "--cached", "--numstat", "--no-ext-diff", ref]);
+    if (numstatProc.exitCode !== 0) return [];
+    const stats = new Map<string, { insertions: number; deletions: number }>();
+    for (const line of text(numstatProc).split("\n")) {
+      const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
+      if (!m) continue;
+      stats.set(m[3]!, {
+        insertions: m[1] === "-" ? 0 : parseInt(m[1]!, 10),
+        deletions: m[2] === "-" ? 0 : parseInt(m[2]!, 10),
+      });
+    }
+    const fullProc = run(["diff", "--cached", "--no-ext-diff", ref]);
+    const full = text(fullProc);
+    // 按 "diff --git a/<path> b/<path>" 切块，块归属到 b 侧路径（新增/改名取目标名）
+    const patches = new Map<string, string>();
+    const blocks = full.split(/^(?=diff --git )/m);
+    for (const block of blocks) {
+      const head = block.match(/^diff --git a\/.+? b\/(.+)$/m);
+      if (!head) continue;
+      patches.set(head[1]!, block.length > 60_000 ? block.slice(0, 60_000) + "\n… (diff 过长已截断)" : block);
+    }
+    return [...stats.entries()].map(([file, s]) => ({
+      file,
+      insertions: s.insertions,
+      deletions: s.deletions,
+      patch: patches.get(file) ?? "",
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * 对任务 clone 工作树统计相对 base 的改动量。共用沙盒模型：先 git add -A（含未跟踪新文件）
  * 再 git diff --cached --shortstat <base> —— 覆盖 committed + 未提交 + 未跟踪。base 优先用

@@ -700,6 +700,14 @@ export const api = {
   cancelRequirement: (id: string, reason?: string) =>
     requestRpc<{ requirement: Requirement }>("requirements.cancel", { id, ...(reason ? { reason } : {}) }).then((r) => r.requirement),
 
+  // [WS-RPC] requirements.statusLogs
+  listRequirementStatusLogs: (id: string) =>
+    requestRpc<{ logs: RequirementStatusLog[] }>("requirements.statusLogs", { id }).then((r) => r.logs),
+
+  // [WS-RPC] tasks.diffFiles
+  getTaskDiffFiles: (id: string) =>
+    requestRpc<{ files: TaskFileDiff[] }>("tasks.diffFiles", { id }).then((r) => r.files),
+
   // [WS-RPC] requirements.subPrs
   listRequirementSubPrs: (id: string) =>
     requestRpc<{ sub_prs: RequirementSubPr[] }>("requirements.subPrs", { id }).then((r) => r.sub_prs),
@@ -783,6 +791,22 @@ export interface TaskPhaseEvent {
   status: "running" | "done" | "awaiting" | "failed";
   started_at: number;
   ended_at: number | null;
+}
+
+export interface RequirementStatusLog {
+  id: number;
+  requirement_id: string;
+  from_status: string;
+  to_status: string;
+  reason: string | null;
+  created_at: number;
+}
+
+export interface TaskFileDiff {
+  file: string;
+  insertions: number;
+  deletions: number;
+  patch: string;
 }
 
 export interface TaskOutcome {
@@ -999,6 +1023,8 @@ export interface Requirement {
   status_reason: string | null;
   /** status_reason 来源：user（手动）/ task（任务级联）/ system */
   status_reason_source: "user" | "task" | "system" | null;
+  /** 转入终态时的 from 状态（步骤条据此把 ✗ 画在死亡步）；failed 重试时清空 */
+  status_before_terminal: string | null;
   created_at: number;
   updated_at: number;
 }

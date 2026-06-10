@@ -1,4 +1,5 @@
 import React from "react";
+import { taskStatusZh, taskTriggerZh } from "@/lib/run-view-logic";
 
 interface LogEntry {
   id: number;
@@ -11,11 +12,12 @@ interface LogEntry {
 }
 
 /**
- * 蓝图风时间轴：
+ * 状态机日志时间轴：
  * - 左侧 1px 虚线时间轴 + 每行节点圆点（accent 色）
- * - mono + 字距，像工程图的时序注记
+ * - 状态/trigger 显示中文（业务标签），hover title 露出内核名（叠加不替换）
  */
-export function LogTimeline({ logs }: { logs: LogEntry[] }) {
+export function LogTimeline({ logs, phaseLabelOf }: { logs: LogEntry[]; phaseLabelOf?: (phase: string) => string }) {
+  const labelOf = phaseLabelOf ?? ((p: string) => p);
   if (logs.length === 0) {
     return (
       <div className="px-3 py-4 text-xs text-muted-foreground">
@@ -47,11 +49,15 @@ export function LogTimeline({ logs }: { logs: LogEntry[] }) {
           <span className="whitespace-nowrap text-muted-foreground">
             {new Date(log.created_at).toLocaleTimeString()}
           </span>
-          <span className="text-info">
-            {log.from_status ?? "—"} <span className="opacity-50">→</span> {log.to_status}
+          <span className="text-info" title={`${log.from_status ?? "—"} → ${log.to_status}`}>
+            {log.from_status ? taskStatusZh(log.from_status, labelOf) : "—"}
+            {" "}<span className="opacity-50">→</span>{" "}
+            {taskStatusZh(log.to_status, labelOf)}
           </span>
           {log.trigger_name && (
-            <span className="text-warning">[{log.trigger_name}]</span>
+            <span className="text-warning" title={`trigger: ${log.trigger_name}`}>
+              [{taskTriggerZh(log.trigger_name, labelOf)}]
+            </span>
           )}
           {log.note && <span className="text-muted-foreground">{log.note}</span>}
         </div>

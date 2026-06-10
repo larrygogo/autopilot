@@ -1,19 +1,22 @@
 import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { STEPS, STEP_ORDER, statusToStep, type ReqStep } from "@/lib/requirement-steps";
+import { STEPS, STEP_ORDER, resolveCurrentStep, type ReqStep } from "@/lib/requirement-steps";
 
 // 可点击的步骤进度条：6 步圆圈数字 + 连接线，当前步高亮、已走过打勾、未到达浅灰。
+// 终态（cancelled/failed）时 ✗ 画在死亡步（statusBeforeTerminal 定位），其后步骤保持未到达灰。
 // 选中步加下划线。所有步骤（含未到达）均可点击，点击回调 onSelect。
 export function StepBar({
   status,
+  statusBeforeTerminal,
   selected,
   onSelect,
 }: {
   status: string;
+  statusBeforeTerminal?: string | null;
   selected: ReqStep;
   onSelect: (step: ReqStep) => void;
 }) {
-  const current = statusToStep(status);
+  const current = resolveCurrentStep(status, statusBeforeTerminal);
   const currentIdx = STEP_ORDER.indexOf(current);
   const aborted = status === "failed" || status === "cancelled";
 
@@ -23,7 +26,7 @@ export function StepBar({
         const done = i < currentIdx;
         const active = i === currentIdx;
         const isSelected = s.key === selected;
-        const isAbortedTail = active && s.key === "done" && aborted;
+        const isAbortedTail = active && aborted;
         return (
           <li key={s.key} className="flex flex-1 items-center gap-1.5 last:flex-none">
             <button

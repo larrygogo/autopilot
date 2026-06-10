@@ -12,7 +12,7 @@ import {
   resolveLogPhase, phaseRounds, fmtDuration,
   ALL_LEVELS, LEVEL_TEXT, type Level, type PhaseRunState,
 } from "@/lib/run-view-logic";
-import { RunPhaseNavSidebar, RunPhaseNavStrip, type NavEntry, type PhaseVisualState } from "@/components/RunPhaseNav";
+import { RunPhaseNavSidebar, type NavEntry, type PhaseVisualState } from "@/components/RunPhaseNav";
 import { RunPhaseSection } from "@/components/RunPhaseSection";
 
 interface FlatPhase { name: string; label?: string; group?: string; groupLabel?: string; }
@@ -66,6 +66,12 @@ export function TaskRunView(props: TaskRunViewProps) {
     const m: Record<string, string> = {};
     for (const p of flat) if (p.label) m[p.label] = p.name;
     return m;
+  }, [flat]);
+  // phase name → 中文 label（状态转移时间轴中文化用；无 label 的 phase 原样返回 name）
+  const phaseLabelOf = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const p of flat) if (p.label) m[p.name] = p.label;
+    return (name: string) => m[name] ?? name;
   }, [flat]);
 
   const stateOf = (name: string): PhaseRunState =>
@@ -264,11 +270,6 @@ export function TaskRunView(props: TaskRunViewProps) {
 
   return (
     <div className="@container mb-4">
-      {/* 窄容器（embedded 等）：横向 chip 条 */}
-      <div className="mb-3 @3xl:hidden">
-        <RunPhaseNavStrip entries={entries} activePhase={activePhase} onSelect={selectPhase} />
-      </div>
-
       <div className="flex items-start gap-5">
         {/* 宽容器：左导航 */}
         <div className="sticky top-4 hidden @3xl:block">
@@ -330,7 +331,7 @@ export function TaskRunView(props: TaskRunViewProps) {
               </button>
               {transitionsOpen && (
                 <div className="border-t border-border p-4">
-                  <LogTimeline logs={logs} />
+                  <LogTimeline logs={logs} phaseLabelOf={phaseLabelOf} />
                 </div>
               )}
             </Card>

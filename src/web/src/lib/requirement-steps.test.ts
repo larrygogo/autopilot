@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { statusToStep, stepPosition, STEP_ORDER, STEPS } from "./requirement-steps";
+import { statusToStep, stepPosition, resolveCurrentStep, STEP_ORDER, STEPS } from "./requirement-steps";
 
 test("statusToStep: 12 个 status 映射到 6 步", () => {
   expect(statusToStep("drafting")).toBe("clarify");
@@ -28,6 +28,20 @@ test("stepPosition: past/current/future", () => {
   expect(stepPosition("clarify", "execute")).toBe("past");
   expect(stepPosition("execute", "execute")).toBe("current");
   expect(stepPosition("review", "execute")).toBe("future");
+});
+
+test("resolveCurrentStep: 终态时定位死亡步，✗ 画在实际失败处", () => {
+  // req-011 场景：执行期（running）被驳回触顶取消 → 死亡步是「执行」
+  expect(resolveCurrentStep("cancelled", "running")).toBe("execute");
+  expect(resolveCurrentStep("failed", "running")).toBe("execute");
+  expect(resolveCurrentStep("failed", "awaiting_review")).toBe("review");
+  expect(resolveCurrentStep("cancelled", "clarifying")).toBe("clarify");
+  // 无 status_before_terminal（历史数据）兜底回「完成」步（旧行为）
+  expect(resolveCurrentStep("cancelled", null)).toBe("done");
+  expect(resolveCurrentStep("cancelled", undefined)).toBe("done");
+  // 非终态不受影响
+  expect(resolveCurrentStep("running", "clarifying")).toBe("execute");
+  expect(resolveCurrentStep("done", null)).toBe("done");
 });
 
 test("STEPS 含 6 项，key 顺序与 label 文案正确", () => {

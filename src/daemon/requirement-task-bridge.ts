@@ -15,6 +15,8 @@
 import { onEvent, offEvent } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { getRequirementById, setRequirementStatus, canTransitionStatus, listRequirements } from "../core/requirements";
+import { createComment, nextCommentId } from "../core/requirement-comments";
+import { getTask } from "../core/db";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("requirement-task-bridge");
@@ -66,6 +68,28 @@ export function initRequirementTaskBridge(): void {
       } : undefined);
       log.info("bridge: req=%s %s → %s（task=%s 到 %s）",
         req.id, req.status, reqStatus, taskId, to);
+
+      // 评审知识沉淀（防撞墙-失忆-重撞）：终态时把 task 侧最后一轮评审驳回原话写成需求
+      // 评论（kind=feedback, from_role=agent），scheduler 重跑拼 requirement 文本时会带上，
+      // 让新一轮 design v1 即带着上轮发现的架构约束。沉淀失败不阻塞状态同步。
+      if (isTerminal) {
+        try {
+          const task = getTask(taskId);
+          const rejection = task?.["rejection_reason"];
+          if (typeof rejection === "string" && rejection.trim()) {
+            createComment({
+              id: nextCommentId(),
+              requirement_id: req.id,
+              kind: "feedback",
+              from_role: "agent",
+              body: `【执行评审遗留 · task ${taskId}】${note ?? to}\n\n最后一轮评审驳回理由（重跑时方案必须规避）：\n\n${rejection.slice(0, 4000)}`,
+            });
+            log.info("bridge: 已沉淀评审遗留为需求评论 req=%s task=%s", req.id, taskId);
+          }
+        } catch (e: unknown) {
+          log.warn("bridge: 沉淀评审遗留失败 req=%s: %s", req.id, (e as Error).message);
+        }
+      }
     } catch (e: unknown) {
       log.error("bridge: 同步 requirement 状态失败 req=%s: %s", req.id, (e as Error).message);
     }

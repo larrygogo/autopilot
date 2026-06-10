@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getTask, updateTask } from "@autopilot/core/db";
 import { updateRequirement } from "@autopilot/core/requirements";
-import { transition } from "@autopilot/core/state-machine";
+import { transition, forceTransition } from "@autopilot/core/state-machine";
 import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
 import { runInBackground } from "@autopilot/core/runner";
 import { agentForPhase } from "@autopilot/agents/registry";
@@ -178,20 +178,18 @@ export async function run_review(taskId: string): Promise<void> {
     const maxRejections = reviewPhase?.max_rejections ?? 3;
 
     if (newCount >= maxRejections) {
-      // spec §10.X follow-up：触顶时 surface 给用户（notify driver 推系统通知，
-      // 让用户知道 task 是因 reject 触顶被 cancel，而不是悄悄消失）
+      // 触顶 = 停下报人：转 failed（可重试终态，用户补约束后可一键重新入队），
+      // 不再 cancel（cancelled 是死终态，会把「撞墙需要人介入」表达成「用户不想要了」）。
       try {
         await notify(
           task,
-          `方案评审反复驳回 ${newCount} 次（≥ ${maxRejections}），任务被取消。最近一次理由：${reason.slice(0, 200)}`,
+          `方案评审反复驳回 ${newCount} 次（≥ ${maxRejections}），任务已暂停等待人工处理。最近一次理由：${reason.slice(0, 200)}`,
           "task-failed",
         );
-      } catch { /* notify 失败不阻塞 cancel */ }
-      transition(taskId, "cancel", {
-        transitions,
-        note: `方案评审驳回 ${newCount} 次，已取消`,
-        extraUpdates: { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason },
-      });
+      } catch { /* notify 失败不阻塞 */ }
+      // forceTransition 不带 extraUpdates，先落 extra（驳回详情供 bridge 沉淀回需求评论）
+      updateTask(taskId, { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason });
+      forceTransition(taskId, "failed", `方案评审驳回 ${newCount} 次，已暂停等待人工处理`);
     } else {
       transition(taskId, "review_reject", {
         transitions,
@@ -309,19 +307,16 @@ export async function run_code_review(taskId: string): Promise<void> {
     const maxRejections = codeReviewPhase?.max_rejections ?? 3;
 
     if (newCount >= maxRejections) {
-      // spec §10.X follow-up：触顶时 surface 给用户
+      // 触顶 = 停下报人：转 failed（可重试终态），同 review 触顶分支
       try {
         await notify(
           task,
-          `代码审查反复驳回 ${newCount} 次（≥ ${maxRejections}），任务被取消。最近一次理由：${reason.slice(0, 200)}`,
+          `代码审查反复驳回 ${newCount} 次（≥ ${maxRejections}），任务已暂停等待人工处理。最近一次理由：${reason.slice(0, 200)}`,
           "task-failed",
         );
-      } catch { /* notify 失败不阻塞 cancel */ }
-      transition(taskId, "cancel", {
-        transitions,
-        note: `代码审查驳回 ${newCount} 次，已取消`,
-        extraUpdates: { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason },
-      });
+      } catch { /* notify 失败不阻塞 */ }
+      updateTask(taskId, { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason });
+      forceTransition(taskId, "failed", `代码审查驳回 ${newCount} 次，已暂停等待人工处理`);
     } else {
       transition(taskId, "code_review_reject", {
         transitions,

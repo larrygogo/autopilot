@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2 } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog } from "@/hooks/useApi";
+import { TaskFileDiffsCard } from "@/components/TaskFileDiffsCard";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea, Input } from "@/components/ui/input";
 import { TaskDetail } from "@/pages/TaskDetail";
 import { StepBar } from "@/components/StepBar";
-import { statusToStep, stepPosition, STEPS, type ReqStep } from "@/lib/requirement-steps";
+import { stepPosition, resolveCurrentStep, STEPS, type ReqStep } from "@/lib/requirement-steps";
 import { NextStepCTA } from "@/components/NextStepCTA";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -437,18 +438,20 @@ export function RequirementDetail() {
   const [traceOpen, setTraceOpen] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [selectedStep, setSelectedStep] = useState<ReqStep | null>(null);
+  const [statusLogs, setStatusLogs] = useState<RequirementStatusLog[]>([]);
   const prevStatusRef = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
     if (!opts.silent) setLoading(true);
     try {
-      const [data, repoList, sub, qs, rd] = await Promise.all([
+      const [data, repoList, sub, qs, rd, slogs] = await Promise.all([
         api.getRequirement(id),
         api.listWorkspaces(),
         api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
         api.listQuestions(id).catch(() => [] as Question[]),
         api.getClarifierRound(id).catch(() => null),
+        api.listRequirementStatusLogs(id).catch(() => [] as RequirementStatusLog[]),
       ]);
       setReq(data.requirement);
       setFeedbacks(data.feedbacks);
@@ -458,6 +461,7 @@ export function RequirementDetail() {
       setSubPrs(sub);
       setQuestions(qs);
       setRound(rd);
+      setStatusLogs(slogs);
     } catch (e: unknown) {
       if (!opts.silent) toast.error("加载失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -547,15 +551,15 @@ export function RequirementDetail() {
   // 默认选中当前步；status 变化时，若用户没手动切走则跟随到新当前步，否则不打断。
   useEffect(() => {
     if (!req) return;
-    const cur = statusToStep(req.status);
+    const cur = resolveCurrentStep(req.status, req.status_before_terminal);
     const prev = prevStatusRef.current;
     prevStatusRef.current = req.status;
     if (prev === undefined) {
-      setSelectedStep(cur); // 初次加载：默认当前步
+      setSelectedStep(cur); // 初次加载：默认当前步（终态时为死亡步）
       return;
     }
     if (prev !== req.status) {
-      const prevStep = statusToStep(prev);
+      const prevStep = resolveCurrentStep(prev, null);
       setSelectedStep((sel) => (sel === null || sel === prevStep ? cur : sel));
     }
   }, [req?.status]);
@@ -874,14 +878,21 @@ export function RequirementDetail() {
   if (loading) return <div className="p-6 text-sm text-muted-foreground">加载中…</div>;
   if (!req) return <div className="p-6 text-sm text-muted-foreground">需求不存在</div>;
 
-  const currentStep = statusToStep(req.status);
+  const currentStep = resolveCurrentStep(req.status, req.status_before_terminal);
   const activeStep: ReqStep = selectedStep ?? currentStep;
   const isTerminal = TERMINAL_STATUSES.has(req.status);
+  const isAborted = req.status === "cancelled" || req.status === "failed";
   const openQuestions = questions.filter((q) => q.status === "open");
   const resolvedQuestions = questions.filter((q) => q.status === "resolved");
   // spec 在澄清/审批/排队步是主角（主区已渲染 specCard），其余步降为侧栏只读参照。
   // 跟随 activeStep，避免回看早期 tab 时主区+侧栏双重渲染 spec 卡。
-  const specInMain = activeStep === "clarify" || activeStep === "approve" || activeStep === "queue";
+  // 审批/排队步在 past（回看）模式下主区显示该步特异记录（审批时间/排队时间），spec 降侧栏
+  const activeStepPos = stepPosition(activeStep, currentStep);
+  const specInMain = activeStep === "clarify"
+    || ((activeStep === "approve" || activeStep === "queue") && activeStepPos !== "past");
+  // 需求级状态日志派生：审批通过 / 开始执行的时间点（migration 030 起记录，历史需求可能无记录）
+  const approvalLog = [...statusLogs].reverse().find((l) => l.to_status === "queued");
+  const startRunLog = [...statusLogs].reverse().find((l) => l.from_status === "queued" && l.to_status === "running");
 
   /** 滚到某个锚点（NextStepCTA 在 awaiting_review/fix_revision 时跳反馈区、有未答问题时跳问答区） */
   function scrollToSection(id: string) {
@@ -1281,7 +1292,7 @@ export function RequirementDetail() {
 
       {/* 步骤进度条：6 步可点击，默认当前步 */}
       <div className="mb-5 rounded-lg border border-border bg-card/40 px-4 py-3">
-        <StepBar status={req.status} selected={activeStep} onSelect={setSelectedStep} />
+        <StepBar status={req.status} statusBeforeTerminal={req.status_before_terminal} selected={activeStep} onSelect={setSelectedStep} />
       </div>
 
       {/* 下一步主 CTA banner */}
@@ -1311,13 +1322,61 @@ export function RequirementDetail() {
             </button>
           )}
 
+          {/* 终态卡：显示在死亡步（✗ 所在步），失败/取消原因与该步上下文同屏 */}
+          {isAborted && activeStep === currentStep && (
+            <Card className="p-5">
+              {req.status === "failed" && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-destructive">执行失败</p>
+                  {req.status_reason && (
+                    <div className="rounded-lg bg-destructive/8 p-2.5">
+                      <p className="break-words text-xs leading-relaxed text-foreground/85">{req.status_reason}</p>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">可在上方「重新入队执行」重试，或退回草稿改规约。</p>
+                </div>
+              )}
+              {req.status === "cancelled" && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="font-medium">需求已取消</span>
+                    <span
+                      className={
+                        "rounded border px-1.5 py-0.5 font-mono text-[9px] "
+                        + (req.status_reason && req.status_reason_source !== "user"
+                          ? "border-warning/60 text-warning"
+                          : "border-border text-muted-foreground")
+                      }
+                      title="内核状态：cancelled（trigger: cancel）"
+                    >
+                      {req.status_reason_source === "user" || !req.status_reason ? "手动取消" : "系统自动止损"}
+                    </span>
+                  </div>
+                  {req.status_reason && (
+                    <div className="rounded-lg bg-muted/50 p-2.5">
+                      <p className="break-words text-xs leading-relaxed text-foreground/85">{req.status_reason}</p>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {req.task_id
+                      ? "详细原因（驳回轨迹 / reviewer 原话）见下方执行记录。已取消的需求不可重启，如需继续请新建需求。"
+                      : "已取消的需求不可重启，如需继续请新建需求。"}
+                  </p>
+                </div>
+              )}
+            </Card>
+          )}
+
           {(() => {
             const pos = stepPosition(activeStep, currentStep);
             if (pos === "future") {
               const label = STEPS.find((s) => s.key === activeStep)?.label ?? "";
+              const curLabel = STEPS.find((s) => s.key === currentStep)?.label ?? "";
               return (
                 <Card className="p-6 text-center text-sm text-muted-foreground">
-                  「{label}」尚未开始。完成前序步骤后会进入这一步。
+                  {isAborted
+                    ? `需求已在「${curLabel}」步终止，未到达「${label}」。`
+                    : `「${label}」尚未开始。完成前序步骤后会进入这一步。`}
                 </Card>
               );
             }
@@ -1360,18 +1419,44 @@ export function RequirementDetail() {
                       </div>
                     </Card>
                   )}
-                  {specCard}
-                  {!readonly && req.status === "awaiting_approval" && (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      size="sm"
-                      onClick={rejectApproval}
-                      disabled={actionBusy}
-                      title="审批通过的主按钮在上方"
-                    >
-                      {actionBusy ? "处理中…" : "↩ 驳回，返回草稿"}
-                    </Button>
+                  {readonly ? (
+                    /* 回看模式：审批步的特异信息是「何时、以何种方式通过审批」，spec 在侧栏 */
+                    <Card className="p-5">
+                      {approvalLog ? (
+                        <div className="flex items-center gap-2 text-sm">
+                          <CheckCircle2 className="h-4 w-4 text-success" />
+                          <span className="font-medium">
+                            {approvalLog.from_status === "awaiting_approval" ? "已通过人工审批" : "已直接入队（跳过人工审批）"}
+                          </span>
+                          <span
+                            className="ml-auto font-mono text-[11px] text-muted-foreground"
+                            title={`${approvalLog.from_status} → ${approvalLog.to_status}`}
+                          >
+                            {new Date(approvalLog.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          审批时间未记录（该需求的审批发生在状态日志上线之前）。
+                        </p>
+                      )}
+                    </Card>
+                  ) : (
+                    <>
+                      {specCard}
+                      {req.status === "awaiting_approval" && (
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          size="sm"
+                          onClick={rejectApproval}
+                          disabled={actionBusy}
+                          title="审批通过的主按钮在上方"
+                        >
+                          {actionBusy ? "处理中…" : "↩ 驳回，返回草稿"}
+                        </Button>
+                      )}
+                    </>
                   )}
                 </>
               );
@@ -1380,12 +1465,52 @@ export function RequirementDetail() {
             if (activeStep === "queue") {
               return (
                 <>
-                  {specCard}
-                  {taskRecord}
-                  {!readonly && req.status === "queued" && (
-                    <Button variant="outline" className="w-full" size="sm" onClick={recallToReady} disabled={actionBusy}>
-                      {actionBusy ? "处理中…" : "撤回（返回已澄清）"}
-                    </Button>
+                  {readonly ? (
+                    /* 回看模式：排队步的特异信息是「何时入队、何时被调度开跑、等了多久」 */
+                    <Card className="space-y-2 p-5">
+                      {approvalLog || startRunLog ? (
+                        <>
+                          {approvalLog && (
+                            <div className="flex items-center justify-between gap-2 text-sm">
+                              <span>进入队列</span>
+                              <span className="font-mono text-[11px] text-muted-foreground">
+                                {new Date(approvalLog.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                          {startRunLog && (
+                            <div className="flex items-center justify-between gap-2 text-sm">
+                              <span>调度器开始执行</span>
+                              <span className="font-mono text-[11px] text-muted-foreground">
+                                {new Date(startRunLog.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                          )}
+                          {approvalLog && startRunLog && (
+                            <div className="flex items-center justify-between gap-2 border-t border-border pt-2 text-xs text-muted-foreground">
+                              <span>排队等待</span>
+                              <span className="font-mono">
+                                {Math.max(0, Math.round((startRunLog.created_at - approvalLog.created_at) / 1000))}s
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          排队时间未记录（该需求的入队发生在状态日志上线之前）。
+                        </p>
+                      )}
+                    </Card>
+                  ) : (
+                    <>
+                      {specCard}
+                      {taskRecord}
+                      {req.status === "queued" && (
+                        <Button variant="outline" className="w-full" size="sm" onClick={recallToReady} disabled={actionBusy}>
+                          {actionBusy ? "处理中…" : "撤回（返回已澄清）"}
+                        </Button>
+                      )}
+                    </>
                   )}
                 </>
               );
@@ -1429,6 +1554,8 @@ export function RequirementDetail() {
             if (activeStep === "review") {
               return (
                 <>
+                  {/* 验收的主内容：按文件查看本次交付的全部代码变更 */}
+                  {req.task_id && <TaskFileDiffsCard taskId={req.task_id} reloadKey={req.status} />}
                   {subPrCard}
                   {!readonly && (
                     <Card className="p-5">
@@ -1473,8 +1600,8 @@ export function RequirementDetail() {
             // activeStep === "done"
             return (
               <>
-                <Card className="p-5">
-                  {req.status === "done" && (
+                {req.status === "done" && (
+                  <Card className="p-5">
                     <div className="flex items-center gap-2 text-sm">
                       <CheckCircle2 className="h-4 w-4 text-success" />
                       <span className="font-medium">需求已完成</span>
@@ -1490,47 +1617,8 @@ export function RequirementDetail() {
                         </a>
                       )}
                     </div>
-                  )}
-                  {req.status === "failed" && (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium text-destructive">执行失败</p>
-                      {req.status_reason && (
-                        <div className="rounded-lg bg-destructive/8 p-2.5">
-                          <p className="break-words text-xs leading-relaxed text-foreground/85">{req.status_reason}</p>
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground">可在上方「重新入队执行」重试，或退回草稿改规约。</p>
-                    </div>
-                  )}
-                  {req.status === "cancelled" && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="font-medium">需求已取消</span>
-                        <span
-                          className={
-                            "rounded border px-1.5 py-0.5 font-mono text-[9px] "
-                            + (req.status_reason && req.status_reason_source !== "user"
-                              ? "border-warning/60 text-warning"
-                              : "border-border text-muted-foreground")
-                          }
-                          title="内核状态：cancelled（trigger: cancel）"
-                        >
-                          {req.status_reason_source === "user" || !req.status_reason ? "手动取消" : "系统自动止损"}
-                        </span>
-                      </div>
-                      {req.status_reason && (
-                        <div className="rounded-lg bg-muted/50 p-2.5">
-                          <p className="break-words text-xs leading-relaxed text-foreground/85">{req.status_reason}</p>
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        {req.task_id
-                          ? "详细原因（驳回轨迹 / reviewer 原话）见下方执行记录。已取消的需求不可重启，如需继续请新建需求。"
-                          : "已取消的需求不可重启，如需继续请新建需求。"}
-                      </p>
-                    </div>
-                  )}
-                </Card>
+                  </Card>
+                )}
                 {subPrCard}
                 {taskRecord}
                 {feedbackCard}

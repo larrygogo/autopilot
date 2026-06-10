@@ -116,3 +116,45 @@ export const LEVEL_TEXT: Record<Level, string> = {
   ERROR: "text-destructive",
   DEBUG: "text-muted-foreground",
 };
+
+// ── 状态机日志中文化（业务标签叠加内核名：UI 显示中文，内核名 hover 露出）────
+// task status / trigger 是规则化命名（pending_<phase> / <phase>_complete …），
+// 按规则翻译 + phase label 替换；未命中规则原样返回（兜底永不丢信息）。
+
+export function taskStatusZh(status: string, labelOf: (phase: string) => string): string {
+  if (status === "done") return "完成";
+  if (status === "failed") return "失败";
+  if (status === "cancelled" || status === "canceled") return "已取消";
+  let m = status.match(/^pending_(.+)$/);
+  if (m) return `等待${labelOf(m[1])}`;
+  m = status.match(/^running_(.+)$/);
+  if (m) return `${labelOf(m[1])}进行中`;
+  m = status.match(/^awaiting_(.+)$/);
+  if (m) return `${labelOf(m[1])}等待人工`;
+  m = status.match(/^waiting_(.+)$/);
+  if (m) return `等待并行组（${labelOf(m[1])}）`;
+  m = status.match(/^failed_(.+)$/);
+  if (m) return `${labelOf(m[1])}失败`;
+  m = status.match(/^(.+)_rejected$/);
+  if (m) return `${labelOf(m[1])}被驳回`;
+  return status;
+}
+
+export function taskTriggerZh(trigger: string, labelOf: (phase: string) => string): string {
+  if (trigger === "cancel") return "取消";
+  if (trigger === "fail") return "失败";
+  if (trigger === "force_transition") return "强制转移";
+  let m = trigger.match(/^start_(.+)$/);
+  if (m) return `开始${labelOf(m[1])}`;
+  m = trigger.match(/^retry_(.+)$/);
+  if (m) return `重做${labelOf(m[1])}`;
+  m = trigger.match(/^(.+)_complete$/);
+  if (m) return `${labelOf(m[1])}完成`;
+  m = trigger.match(/^(.+)_reject_user$/);
+  if (m) return `${labelOf(m[1])}人工驳回`;
+  m = trigger.match(/^(.+)_reject$/);
+  if (m) return `${labelOf(m[1])}驳回`;
+  m = trigger.match(/^(.+)_pass$/);
+  if (m) return `${labelOf(m[1])}人工通过`;
+  return trigger;
+}
