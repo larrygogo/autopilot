@@ -1,13 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, FolderTree, FileText, Bot, History, Radio, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2, MousePointerClick } from "lucide-react";
+import { ArrowLeft, FolderTree, Bot, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2 } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { StatusBadge } from "@/components/StatusBadge";
-import { LogTimeline } from "@/components/LogTimeline";
-import { PhasePipeline, type PhasePipelineRunStatus } from "@/components/PhasePipeline";
+import { type PhasePipelineRunStatus } from "@/components/PhasePipeline";
 import { PhaseDetailDrawer, type DrawerPhaseInfo, type PhaseRunStatus } from "@/components/PhaseDetailDrawer";
 import { SandboxBrowser } from "@/components/SandboxBrowser";
-import { PhaseLogsViewer } from "@/components/PhaseLogsViewer";
 import { AgentCallsViewer } from "@/components/AgentCallsViewer";
 import { ConfirmDialog } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
@@ -15,11 +13,10 @@ import { modShortcut } from "@/lib/platform";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
 import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { TaskOutcomeCard } from "@/components/TaskOutcomeCard";
-import { TaskPhaseTimeline } from "@/components/TaskPhaseTimeline";
+import { TaskRunView } from "@/components/TaskRunView";
 import { useTaskPhaseEvents } from "@/hooks/useTaskPhaseEvents";
 import { cn } from "@/lib/utils";
 
@@ -50,43 +47,13 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
   const [logs, setLogs] = useState<any[]>([]);
   const [graph, setGraph] = useState<any>(null);
   const [workflowDetail, setWorkflowDetail] = useState<any>(null);
-  const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
   const [drawerPhase, setDrawerPhase] = useState<string | null>(null);
-  const [liveLogs, setLiveLogs] = useState<string[]>([]);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-
-  const liveLogRef = useRef<HTMLDivElement>(null);
-  // 实时日志采用时间倒序（新在顶）；sticky = 保持停在顶部追最新
-  const stickToTopRef = useRef(true);
 
   useEffect(() => {
     api.getTask(taskId).then(setTask).catch(() => {});
     api.getTaskLogs(taskId).then(setLogs).catch(() => {});
-    stickToTopRef.current = true;
-    setLiveLogs([]);
-
-    // baseline：拉所有阶段日志的最近 50 行作为初始内容，避免实时日志一片空白
-    (async () => {
-      try {
-        const phases = await api.getPhaseLogsList(taskId);
-        const ordered = [...phases].sort((a, b) => a.mtime - b.mtime);
-        const lines: string[] = [];
-        for (const p of ordered) {
-          try {
-            const { content } = await api.getPhaseLog(taskId, p.phase, 50);
-            for (const line of content.split("\n")) {
-              if (line.trim()) lines.push(line);
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-        if (lines.length) setLiveLogs(lines.slice(-300));
-      } catch {
-        /* ignore */
-      }
-    })();
   }, [taskId]);
 
   const [phaseStats, setPhaseStats] = useState<Record<string, { count: number; p50_ms: number }> | undefined>(undefined);
@@ -99,10 +66,6 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
   }, [task?.workflow]);
 
   const { events: phaseEvents, refresh: refreshPhaseEvents } = useTaskPhaseEvents(taskId);
-  const workflowPhasesList = useMemo<string[]>(() => {
-    const list = (workflowDetail?.phases as Array<{ name?: string }> | undefined) ?? [];
-    return list.map((p) => p?.name ?? "").filter(Boolean);
-  }, [workflowDetail]);
 
   useEffect(() => {
     if (!task?.status) return;
@@ -110,33 +73,12 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
   }, [task?.status, refreshPhaseEvents]);
 
   useEffect(() => {
-    const unsub1 = subscribe(`task:${taskId}`, () => {
+    const unsub = subscribe(`task:${taskId}`, () => {
       api.getTask(taskId).then(setTask).catch(() => {});
       api.getTaskLogs(taskId).then(setLogs).catch(() => {});
     });
-    const unsub2 = subscribe(`log:${taskId}`, (event: any) => {
-      if (event.type === "log:entry") {
-        setLiveLogs((prev) => [...prev.slice(-500), event.payload.message]);
-      }
-    });
-    return () => {
-      unsub1();
-      unsub2();
-    };
+    return unsub;
   }, [taskId, subscribe]);
-
-  useEffect(() => {
-    const el = liveLogRef.current;
-    if (!el || !stickToTopRef.current) return;
-    el.scrollTop = 0;
-  }, [liveLogs]);
-
-  const onLogScroll = () => {
-    const el = liveLogRef.current;
-    if (!el) return;
-    const atTop = el.scrollTop < 16;
-    stickToTopRef.current = atTop;
-  };
 
   const doCancel = async () => {
     try {
@@ -375,14 +317,6 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
       {/* 任务状态摘要（当前阶段 / 耗时 / 失败原因） */}
       <TaskProgressCard taskId={taskId} showDetailLink={false} showActions={false} />
 
-      <TaskPhaseTimeline
-        workflowPhases={workflowPhasesList}
-        events={phaseEvents}
-        phaseStats={phaseStats}
-        frozen={isTerminal(task.status, graph?.terminalStates)}
-        terminalTime={task.updated_at}
-      />
-
       {task.dangling && task.status?.startsWith("running_") && (
         <DanglingBanner taskId={taskId} toast={toast} />
       )}
@@ -405,8 +339,26 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
         />
       )}
 
-      {/* 基本信息 — metadata block 风 */}
-      <Card className="mb-4">
+      {/* 执行视图（GA 式）：左 phase 导航 + 右折叠日志流 */}
+      {workflowDetail?.phases && (
+        <TaskRunView
+          taskId={taskId}
+          taskStatus={task.status}
+          workflowPhases={workflowDetail.phases}
+          phaseRunStatuses={phaseRunStatuses}
+          phaseEvents={phaseEvents}
+          phaseStats={phaseStats}
+          logs={logs}
+          subscribe={subscribe}
+          onInfoPhase={setDrawerPhase}
+        />
+      )}
+
+      {/* Tabs（沙盒 / Agent 调用） */}
+      <TaskDetailTabs taskId={taskId} />
+
+      {/* 基本信息 — metadata block 风（低频查看，沉到执行视图之后） */}
+      <Card className="mb-4 mt-4">
         <div className="border-b border-border px-4 py-2.5">
           <span className="bp-label">基本信息 · METADATA</span>
         </div>
@@ -444,40 +396,6 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
           </details>
         )}
       </Card>
-
-      {/* 流水线（点击节点弹详情） */}
-      {workflowDetail?.phases && (
-        <Card className="mb-4">
-          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
-            <span className="bp-label">流水线 · PIPELINE</span>
-            <span className="inline-flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
-              <MousePointerClick className="h-3 w-3" />
-              点击节点查看阶段状态
-            </span>
-          </div>
-          <div className="p-4">
-            <PhasePipeline
-              phases={workflowDetail.phases}
-              highlight={hoveredPhase}
-              onHoverPhase={setHoveredPhase}
-              currentState={task.status}
-              phaseStatuses={phaseRunStatuses}
-              onPhaseClick={setDrawerPhase}
-            />
-          </div>
-        </Card>
-      )}
-
-      {/* Tabs */}
-      <TaskDetailTabs
-        taskId={taskId}
-        taskStatus={task.status}
-        logs={logs}
-        liveLogs={liveLogs}
-        liveLogRef={liveLogRef}
-        stickToTopRef={stickToTopRef}
-        onLogScroll={onLogScroll}
-      />
 
       {/* 危险操作区 —— 仅整页（孤儿任务兜底）显示。embedded 进需求页时，删除走需求页的
           「删除此工作」统一入口（需求+任务一起删），此处隐藏避免重复且不一致的删除路径。 */}
@@ -606,45 +524,15 @@ function findPhaseStartTime(
 // Tabs
 // ──────────────────────────────────────────────
 
-type DetailTab = "sandbox" | "phase-logs" | "agent-calls" | "transitions" | "live";
+type DetailTab = "sandbox" | "agent-calls";
 
-interface TaskDetailTabsProps {
-  taskId: string;
-  /** 当前任务状态，传给 PhaseLogsViewer 用来判定选中 phase 是否还在跑 */
-  taskStatus?: string;
-  logs: any[];
-  liveLogs: string[];
-  liveLogRef: React.RefObject<HTMLDivElement | null>;
-  stickToTopRef: React.MutableRefObject<boolean>;
-  onLogScroll: () => void;
-}
-
-function TaskDetailTabs({
-  taskId,
-  taskStatus,
-  logs,
-  liveLogs,
-  liveLogRef,
-  stickToTopRef,
-  onLogScroll,
-}: TaskDetailTabsProps) {
+/** 辅助视图 tabs。阶段/实时/状态日志已由 TaskRunView（GA 式执行视图）吸收。 */
+function TaskDetailTabs({ taskId }: { taskId: string }) {
   const [tab, setTab] = useState<DetailTab>("sandbox");
 
-  const [unreadLive, setUnreadLive] = useState(0);
-  const prevLiveLenRef = useRef(liveLogs.length);
-  useEffect(() => {
-    const grew = liveLogs.length - prevLiveLenRef.current;
-    prevLiveLenRef.current = liveLogs.length;
-    if (grew > 0 && tab !== "live") setUnreadLive((n) => n + grew);
-    if (tab === "live") setUnreadLive(0);
-  }, [liveLogs.length, tab]);
-
-  const triggers: Array<{ key: DetailTab; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }> = [
+  const triggers: Array<{ key: DetailTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { key: "sandbox", label: "沙盒", icon: FolderTree },
-    { key: "phase-logs", label: "阶段日志", icon: FileText },
     { key: "agent-calls", label: "Agent 调用", icon: Bot },
-    { key: "transitions", label: "状态日志", icon: History, badge: logs.length || undefined },
-    { key: "live", label: "实时日志", icon: Radio, badge: unreadLive || undefined },
   ];
 
   return (
@@ -654,11 +542,6 @@ function TaskDetailTabs({
           <TabsTrigger key={t.key} value={t.key} className="gap-1.5">
             <t.icon className="h-3.5 w-3.5" />
             {t.label}
-            {t.badge != null && t.badge > 0 && (
-              <Badge variant="default" className="ml-1 px-1.5 py-0">
-                {t.badge}
-              </Badge>
-            )}
           </TabsTrigger>
         ))}
       </TabsList>
@@ -667,58 +550,8 @@ function TaskDetailTabs({
         <SandboxBrowser taskId={taskId} />
       </TabsContent>
 
-      <TabsContent value="phase-logs" className="mt-0">
-        <PhaseLogsViewer taskId={taskId} taskStatus={taskStatus} />
-      </TabsContent>
-
       <TabsContent value="agent-calls" className="mt-0">
         <AgentCallsViewer taskId={taskId} />
-      </TabsContent>
-
-      <TabsContent value="transitions" className="mt-0">
-        <Card>
-          <div className="border-b border-border px-4 py-2.5">
-            <span className="bp-label">状态日志 · TRANSITIONS</span>
-          </div>
-          <div className="p-4">
-            <LogTimeline logs={logs} />
-          </div>
-        </Card>
-      </TabsContent>
-
-      <TabsContent value="live" className="mt-0">
-        <Card>
-          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
-            <span className="bp-label">实时日志 · LIVE STREAM</span>
-            <span className="font-mono text-[10px] text-muted-foreground">
-              {liveLogs.length === 0
-                ? "暂无；运行中任务会推送到此"
-                : stickToTopRef.current
-                ? "自动跟随中（向下滚暂停）"
-                : "手动暂停（滚回顶部恢复）"}
-            </span>
-          </div>
-          <div className="p-4">
-            <div
-              ref={liveLogRef}
-              onScroll={onLogScroll}
-              className="scrollbar-thin max-h-80 overflow-auto border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed"
-            >
-              {liveLogs.length === 0 ? (
-                <p className="text-muted-foreground">等待中…</p>
-              ) : (
-                liveLogs
-                  .slice()
-                  .reverse()
-                  .map((line, i) => (
-                    <div key={liveLogs.length - 1 - i} className="whitespace-pre text-foreground">
-                      {line}
-                    </div>
-                  ))
-              )}
-            </div>
-          </div>
-        </Card>
       </TabsContent>
     </Tabs>
   );
