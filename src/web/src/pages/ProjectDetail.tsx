@@ -70,6 +70,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [reqDialogOpen, setReqDialogOpen] = useState(false);
   const [reqDesc, setReqDesc] = useState("");
   const [savingReq, setSavingReq] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
   // 新建 / 编辑工作区 dialog
   const [cbDialogOpen, setCbDialogOpen] = useState(false);
@@ -134,6 +135,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
   const closeReqDialog = () => {
     if (savingReq) return;
+    setPendingFiles([]);
     setReqDialogOpen(false);
   };
 
@@ -150,7 +152,16 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     try {
       const req = await api.createRequirement({ project_id: projectId, title, spec_md: desc });
       toast.success(`已创建需求「${title}」`);
+      // 若有预选文件，创建后立即上传（失败不阻断导航）
+      if (pendingFiles.length > 0) {
+        try {
+          await api.uploadAttachments(req.id, pendingFiles);
+        } catch (e: unknown) {
+          toast.error("附件上传失败", (e as Error)?.message ?? String(e));
+        }
+      }
       setReqDialogOpen(false);
+      setPendingFiles([]);
       navigate(`/requirements/${req.id}`);
     } catch (e: unknown) {
       toast.error("创建失败", (e as Error)?.message ?? String(e));
@@ -705,6 +716,44 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
               <p className="font-mono text-[10px] text-muted-foreground">
                 Ctrl/⌘+Enter 提交 · 标题会自动从首行截取，AI 后续会优化
               </p>
+            </div>
+            {/* 附件预选：创建后自动上传 */}
+            <div className="space-y-2">
+              <label className="font-mono text-[11px] text-muted-foreground">附件（可选）</label>
+              {pendingFiles.length > 0 && (
+                <div className="space-y-1">
+                  {pendingFiles.map((f, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded border border-border px-2.5 py-1.5">
+                      <span className="flex-1 truncate font-mono text-[11px]">{f.name}</span>
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div
+                className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-border px-3 py-2.5 hover:border-accent/60 hover:bg-muted/30 transition-colors"
+                onClick={() => {
+                  const input = document.createElement("input");
+                  input.type = "file";
+                  input.multiple = true;
+                  input.onchange = () => {
+                    const files = Array.from(input.files ?? []);
+                    setPendingFiles((prev) => [...prev, ...files]);
+                  };
+                  input.click();
+                }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLElement).click(); }}
+              >
+                <span className="font-mono text-[11px] text-muted-foreground">+ 选择文件（图片 / PDF / Office / 代码，最大 200MB）</span>
+              </div>
             </div>
           </div>
           <DialogFooter>

@@ -19,6 +19,7 @@ import {
 } from "./clarifier-progress";
 import { buildClarifierAgent } from "./clarifier-agent";
 import { parseLlmYamlWrapper } from "../core/llm-yaml";
+import { listAttachments, buildAttachmentContext } from "../core/requirement-attachments";
 
 const log = createLogger("requirement-clarifier");
 
@@ -90,6 +91,7 @@ function buildPrompt(opts: {
   title: string;
   specMd: string;
   qaHistory: string;
+  attachmentContext: string;
 }): string {
   const ctxLines: string[] = [];
   ctxLines.push(`项目名称：${opts.projectName}`);
@@ -100,6 +102,11 @@ function buildPrompt(opts: {
     ctxLines.push("## 工作区文档");
     ctxLines.push(opts.workspaceContext);
   }
+
+  // 附件上下文段落（图片注入路径，文档内联文本）
+  const attachmentSection = opts.attachmentContext
+    ? ["# 附件", "", opts.attachmentContext, ""]
+    : [];
 
   return [
     "你是一位软件需求分析师，正在持续优化一份需求规约（spec_md）并一问一答地澄清需求。",
@@ -148,6 +155,7 @@ function buildPrompt(opts: {
     "# 上下文",
     ctxLines.join("\n"),
     "",
+    ...attachmentSection,
     "# 需求标题",
     opts.title,
     "",
@@ -274,6 +282,10 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
       return `Q${i + 1}：${q.body}\nA${i + 1}：${userReply}`;
     }).join("\n\n");
 
+  // 读取需求的所有附件，构建 prompt 段落
+  const attachments = listAttachments(reqId);
+  const attachmentContext = buildAttachmentContext(attachments);
+
   const prompt = buildPrompt({
     projectName: project.name,
     projectDescription: project.description,
@@ -282,6 +294,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     title: req.title,
     specMd: req.spec_md ?? "",
     qaHistory,
+    attachmentContext,
   });
 
   setPhase(reqId, "calling-llm", { attempt: 0, prompt });
