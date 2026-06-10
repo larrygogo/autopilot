@@ -11,6 +11,7 @@
     "daemon": "bun run src/daemon/index.ts",
     "tui": "bun run src/cli/index.ts tui",
     "build:web": "cd src/web && bunx vite build --outDir ../../web-dist",
+    "dev:web": "cd src/web && bunx vite",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "coverage:rpc": "bun run bin/coverage-matrix.ts",
