@@ -5,6 +5,7 @@ import { api, type Requirement, type RequirementFeedback, type RequirementSubPr,
 import { AttachmentUploader } from "@/components/AttachmentUploader";
 import { AttachmentList } from "@/components/AttachmentList";
 import { TaskFileDiffsCard } from "@/components/TaskFileDiffsCard";
+import { SandboxBrowser } from "@/components/SandboxBrowser";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -57,28 +58,6 @@ const STATUS_VARIANT: Record<
 };
 
 const TERMINAL_STATUSES = new Set(["done", "cancelled"]);
-
-function MetaRow({
-  k,
-  v,
-  last,
-}: {
-  k: React.ReactNode;
-  v: React.ReactNode;
-  last?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "grid grid-cols-[88px_1fr] gap-3 px-3.5 py-2",
-        !last && "border-b border-border",
-      )}
-    >
-      <div className="text-muted-foreground">{k}</div>
-      <div className="text-foreground">{v}</div>
-    </div>
-  );
-}
 
 const SOURCE_LABEL: Record<string, string> = {
   manual: "手动",
@@ -912,12 +891,6 @@ export function RequirementDetail() {
   const isAborted = req.status === "cancelled" || req.status === "failed";
   const openQuestions = questions.filter((q) => q.status === "open");
   const resolvedQuestions = questions.filter((q) => q.status === "resolved");
-  // spec 在澄清/审批/排队步是主角（主区已渲染 specCard），其余步降为侧栏只读参照。
-  // 跟随 activeStep，避免回看早期 tab 时主区+侧栏双重渲染 spec 卡。
-  // 审批/排队步在 past（回看）模式下主区显示该步特异记录（审批时间/排队时间），spec 降侧栏
-  const activeStepPos = stepPosition(activeStep, currentStep);
-  const specInMain = activeStep === "clarify"
-    || ((activeStep === "approve" || activeStep === "queue") && activeStepPos !== "past");
   // 需求级状态日志派生：审批通过 / 开始执行的时间点（migration 030 起记录，历史需求可能无记录）
   const approvalLog = [...statusLogs].reverse().find((l) => l.to_status === "queued");
   const startRunLog = [...statusLogs].reverse().find((l) => l.from_status === "queued" && l.to_status === "running");
@@ -1343,11 +1316,38 @@ export function RequirementDetail() {
               <ExternalLink className="h-3 w-3" />
             </a>
           )}
-          {req.task_id && (
-            <span className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
-              TASK {req.task_id.slice(0, 8)}…
-            </span>
-          )}
+        </div>
+        {/* 元信息：紧凑横排（原右侧栏 meta 卡内容；状态/项目已在上方 Badge 行不重复）。
+            不再露 TASK id —— 用户视角「需求」就是这件工作本身，task 是内核执行概念 */}
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground">
+          <span>ID <code className="text-accent">{req.id}</code></span>
+          <span>
+            工作区{" "}
+            {req.workspace_id
+              ? (projectCodebases.find((cb) => cb.id === req.workspace_id)?.alias ?? req.workspace_id)
+              : "未关联"}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            工作流{" "}
+            {canEditRequirementContent(req.status) ? (
+              <select
+                value={req.workflow ?? "dev"}
+                onChange={(e) => void changeWorkflow(e.target.value)}
+                disabled={savingWorkflow || workflowOptions.length === 0}
+                className="rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[11px] focus:border-accent focus:outline-none"
+                title="该需求入队后用哪个工作流执行；审批后冻结"
+              >
+                {workflowOptions.length === 0 && <option value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</option>}
+                {workflowOptions.map((w) => (
+                  <option key={w.name} value={w.name}>{w.name}</option>
+                ))}
+              </select>
+            ) : (
+              <code title="审批后工作流随内容冻结">{req.workflow ?? "dev"}</code>
+            )}
+          </span>
+          <span>创建 {new Date(req.created_at).toLocaleString()}</span>
+          <span>更新 {new Date(req.updated_at).toLocaleString()}</span>
         </div>
       </header>
 
@@ -1369,10 +1369,10 @@ export function RequirementDetail() {
         onScrollToFeedback={() => scrollToSection("feedback-section")}
       />
 
-      {/* 主体：主区（当前阶段内容）+ 侧栏（常驻锚点） */}
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+      {/* 主体：单列（元信息已上移标题下、危险区沉底，不再有右侧栏） */}
+      <div className="mt-6">
         {/* 主区：随选中步骤切换；过去步只读，未到达占位 */}
-        <div className="lg:col-span-2 space-y-4 min-w-0">
+        <div className="space-y-4 min-w-0">
           {activeStep !== currentStep && (
             <button
               type="button"
@@ -1618,50 +1618,38 @@ export function RequirementDetail() {
             if (activeStep === "review") {
               return (
                 <>
-                  {/* 验收的主内容：按文件查看本次交付的全部代码变更 */}
-                  {req.task_id && <TaskFileDiffsCard taskId={req.task_id} reloadKey={req.status} />}
-                  {subPrCard}
+                  {/* 验收步 = 看改动本身：只显示按文件 diff + 一行决策条（其余执行细节在执行步） */}
                   {!readonly && (
-                    <Card className="p-5">
-                      <p className="mb-2 text-sm font-medium">PR 审查</p>
-                      <Textarea
-                        value={feedbackBody}
-                        onChange={(e) => setFeedbackBody(e.target.value)}
-                        placeholder="填写审查意见或修改建议…"
-                        className="min-h-[80px] text-xs"
-                        disabled={submittingFeedback}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
-                        }}
-                      />
-                      <div className="mt-2 space-y-2">
-                        <Button
-                          variant="outline"
-                          className="w-full"
-                          size="sm"
-                          onClick={() => void inject()}
-                          disabled={submittingFeedback || !feedbackBody.trim()}
-                        >
-                          {submittingFeedback ? "提交中…" : "注入反馈"}
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card/40 px-4 py-2.5">
+                      <span className="text-sm font-medium">
+                        验收
+                        {req.pr_url && (
+                          <a href={req.pr_url} target="_blank" rel="noreferrer" className="ml-3 inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline">
+                            PR #{req.pr_number}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )}
+                      </span>
+                      <div className="flex gap-2">
+                        <Button variant="default" size="sm" className="text-xs" onClick={() => void markDone()} disabled={actionBusy}>
+                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> 验收通过 · 完成
                         </Button>
-                        <div className="flex gap-2">
-                          <Button variant="default" className="flex-1 text-xs" size="sm" onClick={() => void markDone()} disabled={actionBusy}>
-                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> PR 已合并 · 完成
-                          </Button>
-                          <Button variant="outline" className="flex-1 text-xs" size="sm" onClick={() => void requestFix()} disabled={actionBusy}>
-                            ↩ 要求修改
-                          </Button>
-                        </div>
+                        <Button variant="outline" size="sm" className="text-xs" onClick={() => void requestFix()} disabled={actionBusy}>
+                          ↩ 要求修改
+                        </Button>
                       </div>
-                    </Card>
+                    </div>
                   )}
-                  {taskRecord}
-                  {feedbackCard}
+                  {req.task_id ? (
+                    <TaskFileDiffsCard taskId={req.task_id} reloadKey={req.status} />
+                  ) : (
+                    <Card className="p-6 text-center text-sm text-muted-foreground">无关联执行，没有可验收的改动。</Card>
+                  )}
                 </>
               );
             }
 
-            // activeStep === "done"
+            // activeStep === "done"：完成步 = 交付结果 + 产物文件（执行细节回执行步看）
             return (
               <>
                 {req.status === "done" && (
@@ -1683,99 +1671,44 @@ export function RequirementDetail() {
                     </div>
                   </Card>
                 )}
-                {subPrCard}
-                {taskRecord}
-                {feedbackCard}
+                {req.task_id && <SandboxBrowser taskId={req.task_id} taskStatus={undefined} />}
               </>
             );
           })()}
         </div>
 
-        {/* 侧栏：常驻锚点（元信息 + 非主区时的 spec + 危险区） */}
-        <aside className="space-y-4 min-w-0">
-          <div className="w-full rounded-lg border border-border bg-card/40 text-[13px]">
-            <MetaRow k="ID" v={<code className="font-mono text-accent">{req.id}</code>} />
-            {project && (
-              <MetaRow k="项目" v={<code className="text-foreground">{project.name}</code>} />
-            )}
-            <MetaRow
-              k="工作区"
-              v={
-                req.workspace_id
-                  ? (projectCodebases.find((cb) => cb.id === req.workspace_id)?.alias ?? req.workspace_id)
-                  : <span className="text-muted-foreground">未关联</span>
-              }
-            />
-            <MetaRow k="状态" v={STATUS_LABEL[req.status] ?? req.status} />
-            <MetaRow
-              k="工作流"
-              v={
-                canEditRequirementContent(req.status) ? (
-                  <select
-                    value={req.workflow ?? "dev"}
-                    onChange={(e) => void changeWorkflow(e.target.value)}
-                    disabled={savingWorkflow || workflowOptions.length === 0}
-                    className="w-full rounded-md border border-border bg-card px-2 py-1 font-mono text-[11px] focus:border-accent focus:outline-none"
-                    title="该需求入队后用哪个工作流执行；审批后冻结"
-                  >
-                    {workflowOptions.length === 0 && <option value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</option>}
-                    {workflowOptions.map((w) => (
-                      <option key={w.name} value={w.name}>{w.name}{w.description ? ` — ${w.description.slice(0, 24)}` : ""}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <code className="font-mono text-[11px]" title="审批后工作流随内容冻结">
-                    {req.workflow ?? "dev"}
-                  </code>
-                )
-              }
-            />
-            <MetaRow
-              k="创建"
-              v={<span className="font-mono text-[11px] text-muted-foreground">{new Date(req.created_at).toLocaleString()}</span>}
-            />
-            <MetaRow
-              k="更新"
-              v={<span className="font-mono text-[11px] text-muted-foreground">{new Date(req.updated_at).toLocaleString()}</span>}
-              last
-            />
-          </div>
-
-          {/* 非澄清/待发期，spec 降到侧栏只读参照 */}
-          {!specInMain && specCard}
-
-          {/* 危险区：破坏性操作收进折叠，避免误触与噪音 */}
-          <details className="group rounded-lg border border-destructive/30 bg-destructive/5">
-            <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 text-xs text-muted-foreground transition-colors hover:text-destructive [&::-webkit-details-marker]:hidden">
-              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
-              <span>危险区</span>
-            </summary>
-            <div className="space-y-2 border-t border-destructive/20 p-4">
-              {!isTerminal && (
-                <Button
-                  variant="destructive"
-                  className="w-full"
-                  size="sm"
-                  onClick={cancel}
-                  disabled={actionBusy}
-                >
-                  取消需求
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
-                size="sm"
-                onClick={() => setDeleteOpen(true)}
-                disabled={actionBusy}
-              >
-                <Trash2 className="mr-1 h-3.5 w-3.5" />
-                删除此工作
-              </Button>
-            </div>
-          </details>
-        </aside>
       </div>
+
+      {/* 危险区：破坏性操作收进折叠沉底（原右侧栏内容，meta 已上移到标题下） */}
+      <details className="group mt-6 max-w-md rounded-lg border border-destructive/30 bg-destructive/5">
+        <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 text-xs text-muted-foreground transition-colors hover:text-destructive [&::-webkit-details-marker]:hidden">
+          <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+          <span>危险区</span>
+        </summary>
+        <div className="space-y-2 border-t border-destructive/20 p-4">
+          {!isTerminal && (
+            <Button
+              variant="destructive"
+              className="w-full"
+              size="sm"
+              onClick={cancel}
+              disabled={actionBusy}
+            >
+              取消需求
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+            size="sm"
+            onClick={() => setDeleteOpen(true)}
+            disabled={actionBusy}
+          >
+            <Trash2 className="mr-1 h-3.5 w-3.5" />
+            删除此工作
+          </Button>
+        </div>
+      </details>
 
       {/* spec_md 修订历史 Sheet */}
       <SpecRevisionsSheet
