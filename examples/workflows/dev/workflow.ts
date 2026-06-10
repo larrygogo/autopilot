@@ -273,15 +273,31 @@ export async function run_code_review(taskId: string): Promise<void> {
   runGit(["add", "-A"], repoPath);
   // base 用 origin/<branch>：clone 后远程跟踪 ref 对默认+非默认分支都在（本地只建了默认分支）。
   const diffResult = runGit(["diff", "--cached", "--no-ext-diff", `origin/${defaultBranch}`], repoPath);
-  const gitDiff = diffResult.stdout.slice(0, 80000);
+  const fullDiffLen = diffResult.stdout.length;
+  const DIFF_CAP = 80000;
+  const gitDiff = diffResult.stdout.slice(0, DIFF_CAP);
+  const diffTruncated = fullDiffLen > DIFF_CAP;
+  // 全量 stat（很小）给 reviewer 文件级全景——大改动 diff 截断时，排在尾部的文件
+  // （迁移/前端组件等）会整个消失，reviewer 盲判「未实现」三连驳（dogfood：req-011
+  // 第三轮 108KB diff，被指「缺失」的 migration/上传组件全都存在，只是被切掉了）。
+  const statResult = runGit(["diff", "--cached", "--stat", `origin/${defaultBranch}`], repoPath);
+  const gitDiffStat = statResult.stdout.slice(0, 8000);
 
   const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
 
+  const truncationNotice = diffTruncated
+    ? `\n\n⚠ **注意：完整 diff 共 ${Math.round(fullDiffLen / 1024)}KB，上面只内联了前 ${Math.round(DIFF_CAP / 1024)}KB**。` +
+      `「变更文件全景」里列出但未出现在内联 diff 中的文件**不代表未实现**——你在仓库工作目录里，` +
+      `必须用 \`git diff --cached origin/${defaultBranch} -- <文件路径>\` 或 Read 工具自查这些文件的实际改动后再下结论。` +
+      `**禁止以「diff 中未见到」为由认定功能缺失或驳回。**`
+    : "";
+
   const prompt =
     `你是一位代码审查专家。请审查以下代码变更是否符合技术方案要求。\n\n` +
     `## 技术方案\n${planContent}\n\n` +
-    `## 代码变更\n\`\`\`diff\n${gitDiff}\n\`\`\`\n\n` +
+    `## 变更文件全景（git diff --stat 全量）\n\`\`\`\n${gitDiffStat}\n\`\`\`\n\n` +
+    `## 代码变更\n\`\`\`diff\n${gitDiff}\n\`\`\`${truncationNotice}\n\n` +
     `请从以下维度审查：正确性、代码质量、安全性、测试覆盖。\n\n` +
     `最后必须输出以下结论之一（独占一行）：\n` +
     `- ${REVIEW_RESULT_PASS}\n` +
