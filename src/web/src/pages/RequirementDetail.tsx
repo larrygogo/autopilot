@@ -9,7 +9,6 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea, Input } from "@/components/ui/input";
 import { TaskDetail } from "@/pages/TaskDetail";
-import { statusToStage } from "@/components/StageRail";
 import { StepBar } from "@/components/StepBar";
 import { statusToStep, stepPosition, STEPS, type ReqStep } from "@/lib/requirement-steps";
 import { NextStepCTA } from "@/components/NextStepCTA";
@@ -875,14 +874,14 @@ export function RequirementDetail() {
   if (loading) return <div className="p-6 text-sm text-muted-foreground">加载中…</div>;
   if (!req) return <div className="p-6 text-sm text-muted-foreground">需求不存在</div>;
 
-  const stage = statusToStage(req.status);
   const currentStep = statusToStep(req.status);
   const activeStep: ReqStep = selectedStep ?? currentStep;
   const isTerminal = TERMINAL_STATUSES.has(req.status);
   const openQuestions = questions.filter((q) => q.status === "open");
   const resolvedQuestions = questions.filter((q) => q.status === "resolved");
-  // spec 在澄清/待发期是主角（频繁读写），其余阶段降为侧栏只读参照。
-  const specInMain = stage === "clarify" || stage === "ready";
+  // spec 在澄清/审批/排队步是主角（主区已渲染 specCard），其余步降为侧栏只读参照。
+  // 跟随 activeStep，避免回看早期 tab 时主区+侧栏双重渲染 spec 卡。
+  const specInMain = activeStep === "clarify" || activeStep === "approve" || activeStep === "queue";
 
   /** 滚到某个锚点（NextStepCTA 在 awaiting_review/fix_revision 时跳反馈区、有未答问题时跳问答区） */
   function scrollToSection(id: string) {

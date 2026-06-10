@@ -1,9 +1,10 @@
 import { test, expect } from "bun:test";
 import { statusToStep, stepPosition, STEP_ORDER, STEPS } from "./requirement-steps";
 
-test("statusToStep: 11 个 status 映射到 6 步", () => {
+test("statusToStep: 12 个 status 映射到 6 步", () => {
   expect(statusToStep("drafting")).toBe("clarify");
   expect(statusToStep("clarifying")).toBe("clarify");
+  expect(statusToStep("investigating")).toBe("clarify");
   expect(statusToStep("ready")).toBe("approve");
   expect(statusToStep("awaiting_approval")).toBe("approve");
   expect(statusToStep("queued")).toBe("queue");

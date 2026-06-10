@@ -18,6 +18,7 @@ export function statusToStep(status: string): ReqStep {
   switch (status) {
     case "drafting":
     case "clarifying":
+    case "investigating":
       return "clarify";
     case "ready":
     case "awaiting_approval":
