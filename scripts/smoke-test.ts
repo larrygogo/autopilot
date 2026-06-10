@@ -22,7 +22,6 @@ import { Database } from "bun:sqlite";
 
 const REPO = process.cwd();
 const tmpHome = join(tmpdir(), `autopilot-smoke-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-const tmpCodebase = join(tmpdir(), `autopilot-smoke-cb-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
 let stepNum = 0;
 function step(name: string): void {
@@ -62,7 +61,6 @@ function assertContains(text: string, needle: string, label: string): void {
 
 function cleanup(): void {
   if (existsSync(tmpHome)) rmSync(tmpHome, { recursive: true, force: true });
-  if (existsSync(tmpCodebase)) rmSync(tmpCodebase, { recursive: true, force: true });
 }
 
 async function main(): Promise<void> {
@@ -183,11 +181,10 @@ async function main(): Promise<void> {
   }
 
   // ────────────────────────────────────────────────
-  step("autopilot workspace create —— path 不存在时本地校验 exit 2");
+  step("autopilot workspace create —— 缺 --remote/--github 时本地校验 exit 2");
   // ────────────────────────────────────────────────
-  const fakePath = join(tmpdir(), `nonexistent-${Date.now()}`);
-  const cFakeR = runCli(["workspace", "create", "myrepo", fakePath, "--port", "19999"], 2);
-  assertContains(cFakeR.stderr, "path 不存在", "workspace create 报 path 错误");
+  const cFakeR = runCli(["workspace", "create", "myrepo", "--port", "19999"], 2);
+  assertContains(cFakeR.stderr, "--remote", "workspace create 报缺远程 URL 错误");
 
   // ────────────────────────────────────────────────
   step("autopilot req new --help —— 无 daemon 也能看 help");

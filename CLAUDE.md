@@ -154,14 +154,14 @@ autopilot/
 
 > **命名说明（2026-06 Phase 2 改名）**：内核「用户代码库」概念全量改名 **Workspace**（表 `workspaces`、id `ws-NNN`、列 `workspace_id`/`parent_workspace_id`、RPC `workspaces.*`、CLI `autopilot workspace`）。注意与**任务运行沙盒** `sandbox`（每 task 的独立运行目录，Phase 1 由旧 `workspace` 改名而来）区分：**workspace = 用户的源码仓库，sandbox = 任务的临时执行目录**，互不相干。`.worktree.json` 里历史字段名保持兼容旧 `codebase_*` 读取。
 >
-> **sandbox = 任务级共用 clone（原则：用户仓库零痕迹）**：`sandbox.git=true` 时 task 启动（`ensureTaskSandbox`）把 workspace 仓库 `git clone --local` 到 `runtime/tasks/<id>/workspace`（独立 .git、硬链接 object）。**一个任务的所有 phase 共用这一个 clone**——各 phase 直接在工作树改文件、跨 phase 可见，`submit_pr` 才 `git add -A && commit && push`；重跑删 workspace 重新 clone。**源仓库全程零痕迹**（不在源仓库 .git 留 worktree 注册/临时分支，删除纯 rmSync），交付 push 规范分支 `feat/<需求>` + PR。`.worktree.json` 记 `mode:"clone"`。
+> **sandbox = 任务级共用 clone（原则：用户仓库零痕迹）**：`sandbox.git=true` 时 task 启动（`ensureTaskSandbox`）把 workspace 的 `remote_url` 远程 `git clone` 到 `runtime/tasks/<id>/workspace`（完整克隆非浅克隆；2026-06 起 workspace 仅凭远程 URL 注册、无本地 path，早期 `git clone --local` 硬链接模式已随之移除）。**一个任务的所有 phase 共用这一个 clone**——各 phase 直接在工作树改文件、跨 phase 可见，`submit_pr` 才 `git add -A && commit && push`；重跑删 workspace 重新 clone。**源仓库全程零痕迹**（不在源仓库 .git 留 worktree 注册/临时分支，删除纯 rmSync），交付 push 规范分支 `feat/<需求>` + PR。`.worktree.json` 记 `mode:"clone"`。
 >
 > **历史**：早期用 git worktree（污染源仓库，已废弃）；2026-06 曾试「agent 级即用即焚副本 + cumulative.patch 全量 patch」模型，因复杂度高、bug 多（深度审计 EPH-01~08），2026-06-09 **revert 回任务级共用 clone**（见 `docs/superpowers/specs/2026-06-09-shared-task-sandbox-design.md`）。**并行块在共用沙盒下不隔离子阶段工作树，暂不支持并行写（YAGNI）**。
 
 | 实体 | 表 | ID 前缀 | 说明 |
 |------|-----|---------|------|
 | Project | `projects` | `proj-NNN` | 顶层工作空间。`proj-default` 是兜底项目（无归属的快捷任务挂这里） |
-| Workspace | `workspaces` | `ws-NNN` | 物理 Git 目录（用户源码仓库），归属某 Project |
+| Workspace | `workspaces` | `ws-NNN` | 用户源码仓库（凭 `remote_url` 注册，任务执行时远程 clone），归属某 Project |
 | Requirement | `requirements` | `req-NNN` | 挂 project_id + workspace_id（多对多 via requirement_workspaces）。**是每个 Task 的前置** |
 | Task | `tasks` | 8 位短 id | 执行单元。**必有 `requirement_id`（非空）**，由某需求衍生 |
 | Question | `requirement_questions` | `qst-NNN` | Agent 调查期提问，含多轮回复 |
@@ -311,8 +311,9 @@ autopilot daemon stop    # 优先走 daemon.shutdown RPC 优雅停机（daemon �
 # Project / Workspace / Requirement（纯 CLI 路径，不必开浏览器；dogfood-bug20/21）
 autopilot project create <name> [-d desc]
 autopilot project list / delete <id>
-autopilot workspace create <alias> <path> [-b branch] [-p project-id] [--github owner/repo]
-# 缺省 -b / --github 时自动从 path 的 git 仓库识别（默认分支取 origin/HEAD→当前分支→main；GitHub 取 origin 远程）
+autopilot workspace create <alias> --remote <url> [-b branch] [-p project-id]   # 或 --github owner/repo
+# 仅凭远程 URL 注册（无需本地预先 clone）；写 DB 前 probeRemote 验证可达性，缺省 -b 时自动探测远程 HEAD 默认分支
+autopilot workspace update <id> [--remote <url>] [--branch <branch>] [--alias <alias>]
 autopilot workspace list / delete <id> / health <id>
 autopilot req new --from-prompt "<需求>" [--no-extract] [-p project-id] [-c workspace-id]
 autopilot req show <id>                  # 详情（状态/终态原因/关联任务/工作流）
