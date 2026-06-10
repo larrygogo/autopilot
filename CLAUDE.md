@@ -42,6 +42,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **WebSocket 实时推送**：频道订阅模式（`task:*`、`log:{taskId}` 等）推送状态变化和日志
 - **TUI**：ink (React for CLI) 终端 UI，WebSocket 连接 daemon
 - **Web UI**：React + Vite SPA，daemon 自身 serve 静态资源。**视觉风格 = claude.ai 质感**（暖象牙奶油底 / 深色暖炭灰、珊瑚橘 `#D97757` 强调、圆角、柔阴影、去大写去虚线）——token 在 `src/web/src/index.css`。早期的「蓝图工程图纸」风（直角/硬阴影/网格/大写压缩体）**已废弃，勿重新引入**
+- **执行视图 = 线性时间线**（`TaskRunView`，2026-06-10 重构）：每轮 phase 执行（含驳回重做）按实际发生顺序独立成块往下追加（不在原 section 上 ×N 折叠），日志按本轮时间窗切片（logger 落盘 UTC 字符串，`parseLineTs` 必须按 UTC 解析），agent 调用按时间窗内联到对应轮；未执行 phase 灰色占位垫底；daemon 重启被打断的轮次标 `aborted`（灰圈）。纯逻辑在 `src/web/src/lib/run-view-logic.ts`（buildTimeline / filterLinesToWindow / assignAgentCalls）
 - **插件化工作流**：`AUTOPILOT_HOME/workflows/`（用户）工作流自动发现
 - **YAML 工作流定义**：`workflow.yaml` 定义结构，`workflow.ts` 只写阶段函数
 - **工作流注册中心**：`src/core/registry.ts` 自动发现、注册、查询工作流
@@ -170,6 +171,14 @@ autopilot/
   `drafting → clarifying → ready → (awaiting_approval) → queued → running → awaiting_review ⇄ fix_revision → done`，另有 `cancelled` / `failed`（failed 可回 queued/awaiting_approval 重试）。
   ⚠️ 不是早期文档写的 `draft/investigating` —— 那是过期简化，别照它写过滤逻辑。
 - Task 状态机：`pending_* → running_* → running_await_review → done/failed/cancelled`（phase 名内联在 status 里）。
+- **失败可见性与防「撞墙-失忆-重撞」（2026-06-10 dogfood 落地）**：
+  - 需求终态原因三列（migration 028/029）：`status_reason`（短摘要）+ `status_reason_source`（user/task/system）+ `status_before_terminal`（步骤条把 ✗ 画在死亡步）；failed 重试时三列自动清空
+  - 需求级状态转移日志 `requirement_status_logs`（migration 030，与 task_logs 对称）：审批/排队时间点、审计
+  - workflow 驳回触顶 = **停下报人**：转 `failed`（可重试）而非 cancel 死终态（examples/workflows/dev/workflow.ts 两处触顶分支用 forceTransition）
+  - **评审知识沉淀**：bridge 在任务终态时把 `rejection_reason` 写成需求评论（kind=feedback, from_role=agent）；scheduler 重跑拼「历史执行评审遗留」（最近 3 条）进需求文本 → design v1 即带上轮架构约束
+  - 任务终态概览 `tasks.outcome`：`terminal_reason`（failed/cancelled 都取）+ `rejection_reason/rejection_counts`
+- **审批后内容冻结**：title/spec/workspace/workflow 在 queued 及之后不可编辑（RPC requirements.update 闸门 + chat 工具守卫 + Web 按钮显隐）；**failed 例外**（补约束重试是设计用途）。审批=对 spec 签字，执行内容以入队快照为准。
+- **需求级工作流选择**（migration 031）：`requirements.workflow` 列（NULL=默认 dev），调度器消费；failed 后可换工作流重试（resetTaskForRerun 支持迁移 task 到新工作流）。
 - 快捷起任务（`task start "<描述>"` / 一句话发包 `startAdHoc`）也**先建真需求**：`runClarifierExtract` 把描述抽成 title+spec → 建需求（进需求池）→ 有 workspace 走调度器（`requirement-scheduler`，同仓库串行）、纯 adhoc 直接起。CLI 参数/退出码不变。helper 在 `src/daemon/start-from-prompt.ts`。
 - 当前为 Phase 1（应用层强制 `requirement_id` 非空 + 迁移 023 回填历史游离任务，可回退）。**Phase 2 未做**：DB 列改 NOT NULL + FK（表重建、不可逆），dogfood 确认无新游离任务再单独上。
 
@@ -296,7 +305,8 @@ autopilot daemon run
 # 启动 daemon（后台）
 autopilot daemon start
 autopilot daemon status
-autopilot daemon stop
+autopilot daemon stop    # 优先走 daemon.shutdown RPC 优雅停机（daemon 自己关 socket 后 exit 0），
+                         # 失联才回落 SIGTERM——Windows 硬杀会留 zombie LISTEN socket（已根治 e7cf6a4）
 
 # Project / Workspace / Requirement（纯 CLI 路径，不必开浏览器；dogfood-bug20/21）
 autopilot project create <name> [-d desc]
@@ -305,6 +315,9 @@ autopilot workspace create <alias> <path> [-b branch] [-p project-id] [--github 
 # 缺省 -b / --github 时自动从 path 的 git 仓库识别（默认分支取 origin/HEAD→当前分支→main；GitHub 取 origin 远程）
 autopilot workspace list / delete <id> / health <id>
 autopilot req new --from-prompt "<需求>" [--no-extract] [-p project-id] [-c workspace-id]
+autopilot req show <id>                  # 详情（状态/终态原因/关联任务/工作流）
+autopilot req set-workflow <id> <name>   # 设置执行工作流（审批后冻结；failed 可改后重试）
+autopilot req set-title <id> <title>
 
 # 任务管理（通过 daemon API）
 # 注：每个任务必有需求。task start 只给 title 时会自动抽成一条真需求再起任务（无游离任务）
