@@ -462,6 +462,10 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
       async (args) => {
         const r = getRequirementById(args.req_id);
         if (!r) return err(`需求不存在：${args.req_id}`);
+        // 审批后内容冻结（与 RPC requirements.update 闸门同规则）：执行内容以入队快照为准
+        if (!["drafting", "clarifying", "ready", "awaiting_approval", "failed"].includes(r.status)) {
+          return err(`需求已通过审批（当前状态 ${r.status}），spec 不可再修改；失败（failed）后才可修改重试`);
+        }
         updateRequirement(args.req_id, { spec_md: args.spec_md });
         if (r.status === "drafting") {
           try {

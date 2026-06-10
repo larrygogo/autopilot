@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea, Input } from "@/components/ui/input";
 import { TaskDetail } from "@/pages/TaskDetail";
 import { StepBar } from "@/components/StepBar";
-import { stepPosition, resolveCurrentStep, STEPS, type ReqStep } from "@/lib/requirement-steps";
+import { stepPosition, resolveCurrentStep, canEditRequirementContent, STEPS, type ReqStep } from "@/lib/requirement-steps";
 import { NextStepCTA } from "@/components/NextStepCTA";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -921,7 +921,7 @@ export function RequirementDetail() {
             <History className="h-3.5 w-3.5" />
             修订历史
           </Button>
-          {!editingSpec && (
+          {!editingSpec && canEditRequirementContent(req.status) && (
             <Button
               variant="outline"
               size="sm"
@@ -932,6 +932,14 @@ export function RequirementDetail() {
             >
               编辑
             </Button>
+          )}
+          {!editingSpec && !canEditRequirementContent(req.status) && (
+            <span
+              className="font-mono text-[10px] text-muted-foreground"
+              title="审批通过后规约冻结：执行内容以入队时的快照为准。失败（failed）后可修改再重试。"
+            >
+              已冻结
+            </span>
           )}
         </div>
       </div>
@@ -1246,16 +1254,18 @@ export function RequirementDetail() {
             <h1 className="break-words font-display text-3xl font-bold leading-[1.1] sm:text-4xl">
               {req.title}
             </h1>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="mt-1.5 shrink-0 gap-1.5 text-muted-foreground hover:text-foreground"
-              title="编辑标题"
-              onClick={() => { setTitleDraft(req.title); setEditingTitle(true); }}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              <span className="text-xs">编辑</span>
-            </Button>
+            {canEditRequirementContent(req.status) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-1.5 shrink-0 gap-1.5 text-muted-foreground hover:text-foreground"
+                title="编辑标题"
+                onClick={() => { setTitleDraft(req.title); setEditingTitle(true); }}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                <span className="text-xs">编辑</span>
+              </Button>
+            )}
           </div>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">

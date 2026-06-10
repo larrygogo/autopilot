@@ -948,6 +948,24 @@ export function registerCoreRpcMethods(): void {
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      // 审批后内容冻结：审批 = 用户对这份 spec 签字，之后改 title/spec/workspace 会让
+      // 「页面上的需求 ≠ agent 实际执行的快照」（req-008 串味事故的根源之一）。
+      // failed 例外 —— 补充约束后重试正是 failed 的设计用途（评审遗留沉淀 + 改 spec + 重新入队）。
+      const wantsContentEdit =
+        typeof p.title === "string" || typeof p.spec_md === "string"
+        || p.workspace_id !== undefined || p.codebase_id !== undefined;
+      if (wantsContentEdit) {
+        const cur = getRequirementById(p.id);
+        if (!cur) throw new RpcError("NOT_FOUND", "requirement not found");
+        const EDITABLE_STATUSES = new Set(["drafting", "clarifying", "ready", "awaiting_approval", "failed"]);
+        if (!EDITABLE_STATUSES.has(cur.status)) {
+          throw new RpcError(
+            "INVALID_STATE",
+            `需求已通过审批（当前状态 ${cur.status}），标题/规约/工作区不可再编辑。` +
+            `执行内容以入队时的快照为准；如需变更请取消后新建需求，或等失败（failed）后修改再重试。`,
+          );
+        }
+      }
       const updated = coreUpdateRequirement(p.id, {
         title: typeof p.title === "string" ? p.title : undefined,
         spec_md: typeof p.spec_md === "string" ? p.spec_md : undefined,

@@ -50,6 +50,15 @@ export function resolveCurrentStep(status: string, statusBeforeTerminal?: string
   return statusToStep(status);
 }
 
+/**
+ * 需求内容（title / spec / workspace）是否可编辑：审批通过即冻结——审批是用户对这份
+ * spec 的签字，之后修改会让页面内容与 agent 执行快照脱节。failed 例外（补约束重试）。
+ * 与 daemon RPC requirements.update 的闸门同规则（那边是权威，这里只管入口显隐）。
+ */
+export function canEditRequirementContent(status: string): boolean {
+  return ["drafting", "clarifying", "ready", "awaiting_approval", "failed"].includes(status);
+}
+
 export type StepPosition = "past" | "current" | "future";
 
 /** selected 相对 current 的时间位置，决定只读 / 可操作 / 占位。 */
