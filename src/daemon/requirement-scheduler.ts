@@ -102,7 +102,7 @@ async function tickGroup(groupId: string): Promise<void> {
   const existing = candidate.task_id ? getTask(candidate.task_id) : null;
   if (existing) {
     try {
-      resetTaskForRerun(existing.id, { requirement });
+      resetTaskForRerun(existing.id, { requirement, title: candidate.title });
       updateRequirement(candidate.id, { schedule_error: null });
       setRequirementStatus(candidate.id, "running");
       log.info("tickRepo: 重跑 requirement %s → 复用 task %s on workspace %s",

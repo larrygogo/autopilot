@@ -217,8 +217,9 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
  * 再从首阶段启动。运行记录（task_phase_events / task_logs）随重跑清空，权威审计在 manifest / artifacts。
  *
  * @param opts.requirement 重跑时刷新的需求文本（spec 可能已更新）；省略则沿用 task 已存的。
+ * @param opts.title 重跑时刷新的标题（需求改名后沿用旧 title 会污染交付 commit message / PR 标题）；省略则沿用。
  */
-export function resetTaskForRerun(taskId: string, opts: { requirement?: string } = {}): void {
+export function resetTaskForRerun(taskId: string, opts: { requirement?: string; title?: string } = {}): void {
   const task = getTask(taskId);
   if (!task) throw new StartTaskError(`task 不存在：${taskId}`, 404);
 
@@ -243,6 +244,9 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
     pr_number: null,
   };
   if (opts.requirement !== undefined) clear["requirement"] = opts.requirement;
+  if (opts.title !== undefined) {
+    clear["title"] = opts.title;       // tasks 表列
+  }
   updateTask(taskId, clear);
 
   // 1b. 重跑=全新一轮：清 requirement 残留的 pr_url/pr_number（旧 PR 已被 deleteRemoteDeliverBranch
@@ -294,7 +298,7 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string }
       if (ws) workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch, github_owner: ws.github_owner, github_repo: ws.github_repo };
     }
     // 重新 clone 干净工作树（替即焚的"重置 patch 元数据"）。
-    ensureTaskSandbox(taskId, task.workflow, wf.sandbox, workspace, deliverBranchName(String(task.title ?? ""), taskId));
+    ensureTaskSandbox(taskId, task.workflow, wf.sandbox, workspace, deliverBranchName(String(opts.title ?? task.title ?? ""), taskId));
     const meta = getTaskWorktreeMeta(taskId);
     if (meta) {
       updateTask(taskId, {
