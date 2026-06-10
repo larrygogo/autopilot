@@ -44,7 +44,6 @@ import {
   ChevronRight,
   Folder,
   ListChecks,
-  FileText,
 } from "lucide-react";
 import { api, type Project } from "./hooks/useApi";
 
@@ -67,9 +66,6 @@ const ProjectDetail = lazy(() =>
 );
 const RequirementDetail = lazy(() =>
   import("./pages/RequirementDetail").then((m) => ({ default: m.RequirementDetail })),
-);
-const Requirements = lazy(() =>
-  import("./pages/Requirements").then((m) => ({ default: m.Requirements })),
 );
 
 interface NavItem {
@@ -95,7 +91,6 @@ const NAV_GROUPS: NavGroupDef[] = [
       { path: "/now", label: "现在", icon: Sparkles, end: true },
       { path: "/start", label: "开始", icon: FilePlus, end: true },
       { path: "/tasks", label: "流水线", icon: ListChecks, end: true },
-      { path: "/requirements", label: "需求", icon: FileText, end: true },
       { path: "/library", label: "项目", icon: FolderOpen, expandable: "projects" },
     ],
   },
@@ -134,7 +129,6 @@ function titleForPath(pathname: string): string {
   if (pathname.startsWith("/providers")) return "提供商";
   if (pathname.startsWith("/agents")) return "智能体";
   if (pathname.startsWith("/settings")) return "设置";
-  if (pathname === "/requirements") return "需求";
   if (pathname.startsWith("/requirements/")) return "需求详情";
   return "Autopilot";
 }
@@ -266,7 +260,6 @@ function AppInner() {
                   }
                 />
                 <Route path="/projects/:id" element={<ProjectDetailRoute />} />
-                <Route path="/requirements" element={<Requirements />} />
                 <Route path="/requirements/:id" element={<RequirementDetail />} />
                 <Route path="/projects" element={<Navigate to="/library?tab=projects" replace />} />
                 <Route path="/tasks" element={<Tasks />} />
