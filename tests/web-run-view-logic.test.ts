@@ -6,7 +6,7 @@ import { describe, it, expect } from "bun:test";
 import {
   createExpandState, applyStatusTransitions, toggleManual, isExpanded,
   shouldFollow, resolveLogPhase, phaseRounds, fmtDuration,
-  LEVEL_RE, extractLevel, isNeverRun,
+  LEVEL_RE, extractLevel, isNeverRun, localizeLineTs,
   type ExpandState, type PhaseRunState,
 } from "../src/web/src/lib/run-view-logic";
 
@@ -154,6 +154,17 @@ it("isNeverRun: 只有 idle/pending 算从未执行；aborted 是被打断的已
   expect(isNeverRun("done")).toBe(false);
   expect(isNeverRun("failed")).toBe(false);
   expect(isNeverRun("awaiting")).toBe(false);
+});
+
+it("localizeLineTs: 行首 UTC 时间戳转本地显示，时刻不变、后缀不动；无时间戳行原样", () => {
+  const line = "2026-06-10 14:43:28 [INFO] [开发] hello";
+  const out = localizeLineTs(line);
+  // 前缀按本地时区解析回来 === 原 UTC 时刻（任意时区下成立）
+  const m = out.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/);
+  expect(m).not.toBeNull();
+  expect(new Date(m![1].replace(" ", "T")).getTime()).toBe(new Date("2026-06-10T14:43:28Z").getTime());
+  expect(out.slice(m![1].length)).toBe(" [INFO] [开发] hello");
+  expect(localizeLineTs("  continuation line")).toBe("  continuation line");
 });
 
 it("assignAgentCalls: 按 phase + 时间窗分发；窗口对不上时落到该 phase 最后一轮", () => {

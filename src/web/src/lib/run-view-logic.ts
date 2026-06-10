@@ -234,6 +234,19 @@ export function parseLineTs(line: string): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
+/** 行首 UTC 时间戳 → 本地时区同格式显示（仅显示层；窗口切片仍用原始 UTC 行）。
+ *  logger 落盘 UTC（跨时区/夏令时稳定），用户看的应是本地时间。 */
+export function localizeLineTs(line: string): string {
+  const m = line.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+  if (!m) return line;
+  const t = new Date(`${m[1]}T${m[2]}Z`);
+  if (Number.isNaN(t.getTime())) return line;
+  const p = (n: number) => String(n).padStart(2, "0");
+  const local = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ` +
+    `${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`;
+  return local + line.slice(m[0].length);
+}
+
 /**
  * 把 phase.log 的行流按 run 时间窗切片（同 phase 多轮日志混在一个文件里）。
  * 无时间戳的行跟随最近一条有时间戳行的归属；窗口两端各放宽 2s（写盘/时钟毫秒抖动）。
