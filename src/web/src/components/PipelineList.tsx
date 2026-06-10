@@ -59,6 +59,16 @@ export function reqMeta(status: string): { Icon: typeof Loader2; tone: Tone; lab
   return { Icon: FileText, tone: "muted", label: status };
 }
 
+/** id → 名称映射（页面注入）：行卡 secondary 显示项目名 / 仓库别名 / 工作流中文 label */
+export interface PipelineNameMaps {
+  /** project_id → 项目名 */
+  projects?: Record<string, string>;
+  /** workspace_id → 仓库别名 */
+  workspaces?: Record<string, string>;
+  /** workflow name → 中文 label */
+  workflows?: Record<string, string>;
+}
+
 export interface TimedRow { key: string; ts: number; node: ReactNode; }
 
 /** 把行列表分桶渲染（带时段小标题）。入参应已按时间倒序。 */
@@ -139,9 +149,15 @@ export function RowCard({
   );
 }
 
-export function RequirementRow({ req, now }: { req: Requirement; now: number }) {
+export function RequirementRow({ req, now, maps }: { req: Requirement; now: number; maps?: PipelineNameMaps }) {
   const { Icon, tone, label, spin } = reqMeta(req.status);
-  const secondary = [req.id, req.task_id ? `${req.task_id} →` : null].filter(Boolean).join(" · ");
+  const wfName = req.workflow ?? "dev";
+  const secondary = [
+    req.id,
+    maps?.projects?.[req.project_id],
+    req.workspace_id ? maps?.workspaces?.[req.workspace_id] : null,
+    maps?.workflows?.[wfName] ?? (maps?.workflows ? wfName : null), // 有映射但无 label 时退回内核名
+  ].filter(Boolean).join(" · ");
   const card = reqCardSpec(req);
   return (
     <RowCard
@@ -240,11 +256,11 @@ function ReqCardActionButton({ req, action }: { req: Requirement; action: ReqCar
   );
 }
 
-export function TaskRow({ task, now }: { task: PipelineTask; now: number }) {
+export function TaskRow({ task, now, maps }: { task: PipelineTask; now: number; maps?: PipelineNameMaps }) {
   const { Icon, tone, label } = taskMeta(task.status);
   const phase = parsePhase(task.status);
   const secondary = [
-    task.workflow,
+    maps?.workflows?.[task.workflow] ?? task.workflow, // 工作流中文 label（无映射退回内核名）
     phase || null,
     task.requirement_id ? `← ${task.requirement_id}` : null,
   ].filter(Boolean).join(" · ");

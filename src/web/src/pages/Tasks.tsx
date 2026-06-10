@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { tsToMs } from "@/lib/pipeline-time";
 import {
   TimeGroupedList, RequirementRow, TaskRow,
-  type PipelineTask, type TimedRow,
+  type PipelineTask, type TimedRow, type PipelineNameMaps,
 } from "@/components/PipelineList";
 
 /**
@@ -46,6 +46,21 @@ export function Tasks() {
   const [workflowFilter, setWorkflowFilter] = useState<string | null>(null);
   /** 当前激活的 tab（默认「全部」总览） */
   const [tab, setTab] = useState<string>("all");
+  /** id → 名称映射（行卡显示项目名/仓库别名/工作流中文），一次性拉取 */
+  const [nameMaps, setNameMaps] = useState<PipelineNameMaps>({});
+  useEffect(() => {
+    Promise.all([
+      api.listProjects().catch(() => ({ projects: [] as Array<{ id: string; name: string }> })),
+      api.listWorkspaces().catch(() => [] as Array<{ id: string; alias: string }>),
+      api.listWorkflows().catch(() => [] as Array<{ name: string; label?: string }>),
+    ]).then(([p, ws, wf]) => {
+      setNameMaps({
+        projects: Object.fromEntries(p.projects.map((x) => [x.id, x.name])),
+        workspaces: Object.fromEntries(ws.map((x) => [x.id, x.alias])),
+        workflows: Object.fromEntries(wf.map((x) => [x.name, x.label ?? x.name])),
+      });
+    });
+  }, []);
 
   const refresh = () => {
     setLoading(true);
@@ -131,8 +146,8 @@ export function Tasks() {
   /** 把一个 tab 的需求+任务合成按时间倒序的行列表 */
   const rowsOf = (t: PipelineTab): TimedRow[] =>
     [
-      ...t.reqs.map((r) => ({ key: `r-${r.id}`, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} now={now} /> })),
-      ...t.tasks.map((tk) => ({ key: `t-${tk.id}`, ts: tsToMs(tk.updated_at), node: <TaskRow task={tk} now={now} /> })),
+      ...t.reqs.map((r) => ({ key: `r-${r.id}`, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} now={now} maps={nameMaps} /> })),
+      ...t.tasks.map((tk) => ({ key: `t-${tk.id}`, ts: tsToMs(tk.updated_at), node: <TaskRow task={tk} now={now} maps={nameMaps} /> })),
     ].sort((a, b) => b.ts - a.ts);
 
   const allRows = useMemo(() => tabs.flatMap(rowsOf).sort((a, b) => b.ts - a.ts), [tabs, now]);
