@@ -359,46 +359,6 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
       {/* 沙盒产物（Agent 调用已内联到执行时间线各轮中） */}
       <TaskDetailTabs taskId={taskId} taskStatus={task.status} />
 
-      {/* 基本信息 — metadata block 风（低频查看，沉到执行视图之后） */}
-      <Card className="mb-4 mt-4">
-        <div className="border-b border-border px-4 py-2.5">
-          <span className="bp-label">基本信息 · METADATA</span>
-        </div>
-        <dl className="grid grid-cols-1 gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-2">
-          <Field label="ID">
-            <code className="font-mono text-accent">{task.id}</code>
-          </Field>
-          <Field label="标题">{task.title}</Field>
-          <Field label="工作流">
-            {workflowDetail?.label ? (
-              <span className="flex items-baseline gap-2 min-w-0">
-                <span className="truncate">{workflowDetail.label}</span>
-                <code className="font-mono text-[10px] text-muted-foreground truncate">
-                  {task.workflow}
-                </code>
-              </span>
-            ) : (
-              <code className="font-mono">{task.workflow}</code>
-            )}
-          </Field>
-          <Field label="状态">
-            <StatusBadge status={task.status} />
-          </Field>
-          <Field label="创建时间">{new Date(task.created_at).toLocaleString()}</Field>
-          <Field label="更新时间">{new Date(task.updated_at).toLocaleString()}</Field>
-        </dl>
-        {task.requirement && (
-          <details className="mx-4 mb-4 border-t border-border pt-3 text-sm">
-            <summary className="cursor-pointer select-none bp-label">
-              需求详情（{task.requirement.length} 字符）
-            </summary>
-            <pre className="scrollbar-thin mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words border border-border bg-muted/40 p-3 font-mono text-xs">
-              {task.requirement}
-            </pre>
-          </details>
-        )}
-      </Card>
-
       {/* 危险操作区 —— 仅整页（孤儿任务兜底）显示。embedded 进需求页时，删除走需求页的
           「删除此工作」统一入口（需求+任务一起删），此处隐藏避免重复且不一致的删除路径。 */}
       {!embedded && (
@@ -479,17 +439,6 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
         elapsedMs={drawerElapsedMs}
         errorMessage={drawerErrorMessage}
       />
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2">
-      <dt className="w-20 shrink-0 font-mono text-[10px] text-muted-foreground">
-        {label}
-      </dt>
-      <dd className="min-w-0 flex-1 truncate">{children}</dd>
     </div>
   );
 }

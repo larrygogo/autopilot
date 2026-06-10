@@ -52,8 +52,8 @@ afterEach(() => {
   if (existsSync(tmpHome)) rmSync(tmpHome, { recursive: true, force: true });
 });
 
-describe("cancelRequirementWithTasks（SC-1：cancel 级联停 task）", () => {
-  it("取消运行中需求时级联取消其名下任务", () => {
+describe("cancelRequirementWithTasks（取消=只保留需求本身，清空执行痕迹）", () => {
+  it("取消运行中需求：任务被停止并连根清除，需求保留且 task_id 清空", () => {
     createProject({ id: "proj-001", name: "p" });
     createWorkspace({ id: "cb-001", project_id: "proj-001", alias: "r", path: "/tmp/r", default_branch: "main" });
     const reqId = nextRequirementId();
@@ -67,7 +67,8 @@ describe("cancelRequirementWithTasks（SC-1：cancel 级联停 task）", () => {
     const { requirement } = cancelRequirementWithTasks(reqId);
 
     expect(requirement.status).toBe("cancelled");
-    expect(getTask("tk-001")?.status).toBe("cancelled"); // 级联停 task，不再游离运行
+    expect(requirement.task_id).toBe(null);          // 执行关联清空
+    expect(getTask("tk-001")).toBeFalsy();            // 任务记录被连根清除（取消只留需求本身）
   });
 
   it("名下无存活任务时仅置需求 cancelled（不报错）", () => {

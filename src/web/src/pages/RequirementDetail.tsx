@@ -816,7 +816,11 @@ export function RequirementDetail() {
 
   async function cancel() {
     if (!id) return;
-    if (!confirm(`确认取消需求「${req?.title}」？`)) return;
+    if (!confirm(
+      `确认取消需求「${req?.title}」？\n\n` +
+      `取消后仅保留需求本身（规约 / 评论 / 附件），执行记录与沙盒将被清空。` +
+      `已取消的需求不可重新启动。`,
+    )) return;
     if (busyRef.current) return;
     busyRef.current = true;
     setActionBusy(true);
@@ -839,8 +843,8 @@ export function RequirementDetail() {
     setActionBusy(true);
     try {
       const res = await api.deleteRequirement(id);
-      const extra = res.deletedTasks > 0 ? `（含 ${res.deletedTasks} 个任务）` : "";
-      toast.success(`已删除此工作${extra}`);
+      const extra = res.deletedTasks > 0 ? `（含 ${res.deletedTasks} 条执行记录）` : "";
+      toast.success(`需求已删除${extra}`);
       navigate(req.project_id ? `/projects/${req.project_id}` : "/projects");
     } catch (e: unknown) {
       toast.error("删除失败", (e as Error)?.message ?? String(e));
@@ -1274,22 +1278,48 @@ export function RequirementDetail() {
             </div>
           </div>
         ) : (
-          <div className="flex items-start gap-2">
-            <h1 className="break-words font-display text-3xl font-bold leading-[1.1] sm:text-4xl">
-              {req.title}
-            </h1>
-            {canEditRequirementContent(req.status) && (
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-2">
+              <h1 className="break-words font-display text-3xl font-bold leading-[1.1] sm:text-4xl">
+                {req.title}
+              </h1>
+              {canEditRequirementContent(req.status) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1.5 shrink-0 gap-1.5 text-muted-foreground hover:text-foreground"
+                  title="编辑标题"
+                  onClick={() => { setTitleDraft(req.title); setEditingTitle(true); }}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span className="text-xs">编辑</span>
+                </Button>
+              )}
+            </div>
+            {/* 需求级操作：取消（非终态）/ 删除，常驻右上（原危险区折叠已移除） */}
+            <div className="flex shrink-0 gap-2 pt-1">
+              {!isTerminal && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={cancel}
+                  disabled={actionBusy}
+                >
+                  取消需求
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
-                className="mt-1.5 shrink-0 gap-1.5 text-muted-foreground hover:text-foreground"
-                title="编辑标题"
-                onClick={() => { setTitleDraft(req.title); setEditingTitle(true); }}
+                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setDeleteOpen(true)}
+                disabled={actionBusy}
               >
-                <Pencil className="h-3.5 w-3.5" />
-                <span className="text-xs">编辑</span>
+                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                删除需求
               </Button>
-            )}
+            </div>
           </div>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
@@ -1679,36 +1709,6 @@ export function RequirementDetail() {
 
       </div>
 
-      {/* 危险区：破坏性操作收进折叠沉底（原右侧栏内容，meta 已上移到标题下） */}
-      <details className="group mt-6 max-w-md rounded-lg border border-destructive/30 bg-destructive/5">
-        <summary className="flex cursor-pointer items-center gap-2 px-4 py-2.5 text-xs text-muted-foreground transition-colors hover:text-destructive [&::-webkit-details-marker]:hidden">
-          <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
-          <span>危险区</span>
-        </summary>
-        <div className="space-y-2 border-t border-destructive/20 p-4">
-          {!isTerminal && (
-            <Button
-              variant="destructive"
-              className="w-full"
-              size="sm"
-              onClick={cancel}
-              disabled={actionBusy}
-            >
-              取消需求
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
-            size="sm"
-            onClick={() => setDeleteOpen(true)}
-            disabled={actionBusy}
-          >
-            <Trash2 className="mr-1 h-3.5 w-3.5" />
-            删除此工作
-          </Button>
-        </div>
-      </details>
 
       {/* spec_md 修订历史 Sheet */}
       <SpecRevisionsSheet
@@ -1727,17 +1727,17 @@ export function RequirementDetail() {
         onSaved={() => void refresh({ silent: true })}
       />
 
-      {/* 删除此工作确认（需求 + 任务统一删除）*/}
+      {/* 删除需求确认（需求 + 名下执行记录统一删除）*/}
       <ConfirmDialog
         open={deleteOpen}
-        title={`删除此工作「${req.title}」？`}
+        title={`删除需求「${req.title}」？`}
         danger
         confirmText="确认删除"
         message={
           <div className="space-y-2">
             <p>
-              将<strong className="text-destructive">永久删除</strong>此需求及其名下全部任务
-              （DB 记录、阶段日志、agent 调用、workspace 文件、评论与反馈）。
+              将<strong className="text-destructive">永久删除</strong>此需求及其全部执行记录
+              （规约、评论、附件、阶段日志、agent 调用、沙盒文件）。
             </p>
             {(req.status === "running" || req.status === "fix_revision") && (
               <p className="text-xs font-semibold text-foreground">

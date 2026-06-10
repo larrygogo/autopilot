@@ -13,7 +13,8 @@
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { getTask, updateTask, closeOpenPhaseEvents, listRootTasksByRequirementIds } from "../core/db";
-import { setRequirementStatus, setRequirementStatusReason, type Requirement } from "../core/requirements";
+import { setRequirementStatus, setRequirementStatusReason, updateRequirement, type Requirement } from "../core/requirements";
+import { forceDeleteTasksForRequirement } from "../core/task-delete";
 import { transition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { abortRun } from "../core/task-lifecycle";
@@ -127,16 +128,24 @@ export function cancelTasksForRequirements(reqIds: string[]): { cancelled: numbe
 // ──────────────────────────────────────────────
 
 /**
- * 取消需求：先级联停名下运行中任务（best-effort），再置需求为 cancelled。RPC + REST 共用，
- * 避免任一侧漏掉级联（SC-1）。否则取消后 task 继续烧 token / 占 sandbox，且 scheduler 的
- * active 过滤不含 cancelled，可能并发起第二个 task；task 最终 transition 时撞终态需求留不一致。
+ * 取消需求 = 放弃本次执行，**只保留需求本身**（标题/规约/评论/附件/评审遗留沉淀）：
+ * 1) 级联停名下运行中任务（abort agent，SC-1）
+ * 2) 连根清掉任务记录/沙盒/日志（执行痕迹不保留——取消的需求不可重启，残留只是噪音和磁盘占用）
+ * 3) 清需求上的执行关联（task_id / pr_url），置 cancelled（user 原因）
+ * RPC + REST 共用。
  */
 export function cancelRequirementWithTasks(reqId: string, reason?: string): { requirement: Requirement } {
   cancelTasksForRequirements([reqId]);
+  // 停 task 触发的 bridge 同步会先把需求置 cancelled 并沉淀评审遗留评论（保留——那是需求的知识），
+  // 然后这里清空执行痕迹本体
+  try {
+    forceDeleteTasksForRequirement(reqId);
+  } catch (e: unknown) {
+    log.warn("cancelRequirementWithTasks: 清理任务痕迹失败（不阻塞取消）req=%s: %s", reqId, (e as Error).message);
+  }
+  updateRequirement(reqId, { task_id: null, pr_url: null, pr_number: null });
   const userReason = reason?.trim() || "用户手动取消";
-  // 级联停 task 会同步触发 bridge 抢先把需求置 cancelled（bridge 把 "API cancel" 映射成
-  // 「任务被手动取消」），同状态时 setRequirementStatus early-return 写不进这里的 user
-  // 原因 —— 下面按值补写覆盖：取消需求的入口语义（含用户填的理由）优先于级联兜底文案。
+  // bridge 抢先置 cancelled 时 setRequirementStatus 同状态 early-return 写不进 user 原因，按值补写覆盖
   let requirement = setRequirementStatus(reqId, "cancelled", { reason: userReason, reason_source: "user" });
   if (requirement.status_reason !== userReason || requirement.status_reason_source !== "user") {
     setRequirementStatusReason(reqId, userReason, "user");

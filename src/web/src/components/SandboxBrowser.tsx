@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import {
   RefreshCw,
   Download,
-  Trash2,
   Folder,
   FileText,
   CornerLeftUp,
@@ -11,7 +10,6 @@ import {
 import { api, type SandboxEntry } from "../hooks/useApi";
 import { CodeViewer } from "./CodeViewer";
 import { useToast } from "./Toast";
-import { ConfirmDialog } from "./Modal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -51,7 +49,6 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [file, setFile] = useState<FileView | null>(null);
   const [loadingFile, setLoadingFile] = useState(false);
-  const [confirmRelease, setConfirmRelease] = useState(false);
 
   const loadTree = async (path: string, rootOverride?: SandboxRoot) => {
     setLoading(true);
@@ -159,15 +156,8 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
               打包下载
             </a>
           </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setConfirmRelease(true)}
-            title="删除沙盒产物目录（不影响任务记录与日志）"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            释放
-          </Button>
+          {/* 不提供手动「释放」：沙盒清理交给保留策略（workspace_retention）和删除需求级联，
+              避免误删正在验收/回看的产物 */}
         </div>
       </div>
 
@@ -331,37 +321,6 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
         </div>
       </div>
 
-      <ConfirmDialog
-        open={confirmRelease}
-        title="释放沙盒产物"
-        message={
-          <div className="space-y-2">
-            <p>将删除此任务的沙盒产物目录（产物文件 + 累积代码 patch + 即焚副本残留）：</p>
-            <pre className="overflow-x-auto border border-border bg-muted/40 px-2 py-1.5 font-mono text-[11px]">
-              {`~/.autopilot/runtime/tasks/${taskId}/artifacts`}
-            </pre>
-            <p className="text-xs text-muted-foreground">
-              任务记录、状态日志、阶段日志、Agent 调用记录都保留。任务运行中无法释放。此操作不可恢复。
-            </p>
-          </div>
-        }
-        confirmText="释放"
-        danger
-        onConfirm={async () => {
-          try {
-            const res = await api.deleteSandbox(taskId);
-            if (res.removed) toast.success("已释放沙盒产物");
-            else toast.info("沙盒产物不存在或已清理");
-            setFile(null);
-            loadTree("");
-          } catch (e: unknown) {
-            toast.error("释放失败", (e as Error)?.message ?? String(e));
-          } finally {
-            setConfirmRelease(false);
-          }
-        }}
-        onCancel={() => setConfirmRelease(false)}
-      />
     </Card>
   );
 }
