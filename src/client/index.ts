@@ -29,6 +29,7 @@ export class AutopilotClient {
   // ── 便捷方法：代理 HTTP ──
 
   get getStatus() { return this.http.getStatus.bind(this.http); }
+  get shutdownDaemon() { return this.http.shutdownDaemon.bind(this.http); }
   get listTasks() { return this.http.listTasks.bind(this.http); }
   get getTask() { return this.http.getTask.bind(this.http); }
   get startTask() { return this.http.startTask.bind(this.http); }
@@ -69,6 +70,12 @@ export class AutopilotClient {
   get healthcheckWorkspace() { return this.http.healthcheckWorkspace.bind(this.http); }
 
   // ── 便捷方法：代理 WebSocket ──
+
+  /** 关闭底层连接（RPC WS + 订阅 WS）。短命 CLI 调完即走时用，防进程挂存活连接。 */
+  close(): void {
+    try { this.http.close(); } catch { /* ignore */ }
+    try { this.ws.disconnect(); } catch { /* ignore */ }
+  }
 
   connect(): void { this.ws.connect(); }
   disconnect(): void { this.ws.disconnect(); }

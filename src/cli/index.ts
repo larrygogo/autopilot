@@ -138,10 +138,55 @@ daemon
     console.log(`  查看监听地址与状态：autopilot daemon status`);
   });
 
+/**
+ * 优先尝试优雅停机：RPC daemon.shutdown → daemon 自己 server.stop() 关闭全部 socket
+ * 后 exit 0 → supervisor classifyExit=exit_clean 一并退出。
+ * 动机（2026-06-10 事故）：Windows 下 SIGTERM 是 TerminateProcess 硬杀，daemon 死时
+ * 若有活跃 WS/HTTP 连接，内核可能留下无主 zombie LISTEN socket（CLOSE_WAIT 无超时
+ * 永不自愈），端口直到重启机器都不可用。成功返回 true；daemon 不可达/超时返回 false
+ * 由调用方走 SIGTERM 兜底。
+ */
+async function tryGracefulShutdown(): Promise<boolean> {
+  const info = readListenInfo();
+  if (!info) return false;
+  const supPid = readSupervisorPid();
+  const daemonPid = readPid();
+  if (!daemonPid || !isProcessAlive(daemonPid)) return false;
+
+  const client = new AutopilotClient({ host: info.host, port: info.port });
+  try {
+    const r = await client.shutdownDaemon();
+    if (!r.ok) return false;
+  } catch {
+    return false;
+  } finally {
+    try { client.close(); } catch { /* ignore */ }
+  }
+  // 等 daemon（+supervisor，如有）真正退出
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    await Bun.sleep(200);
+    const dDead = !isProcessAlive(daemonPid);
+    const sDead = !supPid || !isProcessAlive(supPid);
+    if (dDead && sDead) {
+      removePid();
+      removeSupervisorPid();
+      removeListenInfo();
+      return true;
+    }
+  }
+  return false;
+}
+
 daemon
   .command("stop")
   .description("停止 daemon（若 supervisor 在运行则一并停止）")
   .action(async () => {
+    if (await tryGracefulShutdown()) {
+      console.log("daemon 已优雅停止。");
+      return;
+    }
+
     const supPid = readSupervisorPid();
     const daemonPid = readPid();
 
@@ -192,6 +237,8 @@ daemon
  * 优雅停止 daemon / supervisor。返回成功与否。供 stop 和 restart 子命令复用。
  */
 async function stopDaemonProcess(): Promise<boolean> {
+  if (await tryGracefulShutdown()) return true;
+
   const supPid = readSupervisorPid();
   const daemonPid = readPid();
 

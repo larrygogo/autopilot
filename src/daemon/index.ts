@@ -65,6 +65,20 @@ export function requestRestart(delayMs = 100): boolean {
 }
 
 /**
+ * 由 RPC 触发 daemon 优雅退出（exit 0 → supervisor classifyExit=exit_clean 一并退出）。
+ * 与 SIGTERM 路径的关键区别：Windows 下 SIGTERM 是 TerminateProcess（硬杀，cleanup
+ * handler 跑不到），进程死时若有活跃 WS/HTTP 连接，内核可能留下无主的 zombie LISTEN
+ * socket（CLOSE_WAIT 无超时，永不自愈，端口直到重启机器都不可用——2026-06-10 事故）。
+ * 走本路径 daemon 自己 server.stop() 正常关闭全部 socket，不会产生 zombie。
+ */
+export function requestShutdown(delayMs = 150): boolean {
+  if (!_activeShutdown) return false;
+  const fn = _activeShutdown;
+  setTimeout(() => fn(0), delayMs);
+  return true;
+}
+
+/**
  * 检查并消费 restart.flag。返回 true 表示这次启动是主动 respawn 的延续。
  * 调用方负责在消费后决定是否对 running_* task 做自动重启。
  */

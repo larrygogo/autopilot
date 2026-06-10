@@ -43,7 +43,7 @@ import {
   type ScheduleType,
 } from "../core/schedules";
 import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig } from "../core/config";
-import { requestRestart } from "./index";
+import { requestRestart, requestShutdown } from "./index";
 import { loadApiToken } from "../core/api-token";
 import {
   listSandboxDir,
@@ -219,6 +219,15 @@ export function registerCoreRpcMethods(): void {
     description: "请求 supervisor 重启 daemon（exit code 75 触发 respawn）；裸跑模式下退化为 stop",
     handler: () => {
       const ok = requestRestart(150);
+      return { ok, scheduled_in_ms: 150 };
+    },
+  });
+
+  registerRpcMethod({
+    method: "daemon.shutdown",
+    description: "优雅停机（daemon 自己关 server/socket 后 exit 0，supervisor 一并退出）。CLI stop 优先走此路径，避免 Windows 硬杀产生 zombie LISTEN socket",
+    handler: () => {
+      const ok = requestShutdown(150);
       return { ok, scheduled_in_ms: 150 };
     },
   });
