@@ -144,6 +144,7 @@ import { up as m015 } from "../src/migrations/015-clarifier-error";
 import { up as m021 } from "../src/migrations/021-requirement-comments";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as m032 } from "../src/migrations/032-requirement-attachments";
+import { up as m033 } from "../src/migrations/033-requirement-sessions";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import {
@@ -160,7 +161,7 @@ import {
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m021, m024, m032].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m021, m024, m032, m033].forEach(fn => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "P" });
 }
@@ -190,14 +191,15 @@ describe("clarifier-progress: 集成 runClarifierRound", () => {
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "初稿" });
     setRequirementStatus("r1", "clarifying");
 
-    _setClarifyFnForTest(async () =>
-      JSON.stringify({
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => ({
+      rawText: JSON.stringify({
         new_spec_md: "改了",
         summary: "x",
         next_question: { agent_text: "Q1?", suggestions: [] },
         done: false,
       }),
-    );
+      newSessionRef: undefined,
+    }));
 
     await runClarifierRound("r1");
 
@@ -224,16 +226,19 @@ describe("clarifier-progress: 集成 runClarifierRound", () => {
     setRequirementStatus("r1", "clarifying");
 
     let calls = 0;
-    _setClarifyFnForTest(async () => {
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => {
       calls++;
       return calls === 1
-        ? "不是 JSON"
-        : JSON.stringify({
-            new_spec_md: "改了",
-            summary: "x",
-            next_question: { agent_text: "Q?", suggestions: [] },
-            done: false,
-          });
+        ? { rawText: "不是 JSON", newSessionRef: undefined }
+        : {
+            rawText: JSON.stringify({
+              new_spec_md: "改了",
+              summary: "x",
+              next_question: { agent_text: "Q?", suggestions: [] },
+              done: false,
+            }),
+            newSessionRef: undefined,
+          };
     });
 
     await runClarifierRound("r1");
@@ -263,7 +268,7 @@ describe("clarifier-progress: 集成 runClarifierRound", () => {
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "初稿" });
     setRequirementStatus("r1", "clarifying");
 
-    _setClarifyFnForTest(async () => "totally not JSON");
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => ({ rawText: "totally not JSON", newSessionRef: undefined }));
 
     await runClarifierRound("r1");
 
@@ -291,15 +296,18 @@ describe("clarifier-progress: 集成 runClarifierRound", () => {
     createQuestion({ id: "qst-pre", requirement_id: "r1", agent_text: "Q?", suggestions: [] });
     setActiveQuestionId("r1", "qst-pre");
 
-    _setClarifyFnForTest(async () => {
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => {
       createQuestion({ id: "qst-concurrent", requirement_id: "r1", agent_text: "并发的", suggestions: [] });
       setActiveQuestionId("r1", "qst-concurrent");
-      return JSON.stringify({
-        new_spec_md: "改了",
-        summary: "x",
-        next_question: { agent_text: "Q?", suggestions: [] },
-        done: false,
-      });
+      return {
+        rawText: JSON.stringify({
+          new_spec_md: "改了",
+          summary: "x",
+          next_question: { agent_text: "Q?", suggestions: [] },
+          done: false,
+        }),
+        newSessionRef: undefined,
+      };
     });
 
     await runClarifierRound("r1");

@@ -21,6 +21,7 @@ import { up as m014 } from "../src/migrations/014-resolve-orphan-open-questions"
 import { up as m021 } from "../src/migrations/021-requirement-comments";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as m032 } from "../src/migrations/032-requirement-attachments";
+import { up as m033 } from "../src/migrations/033-requirement-sessions";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createRequirement, setRequirementStatus, getRequirementById, setActiveQuestionId } from "../src/core/requirements";
@@ -33,7 +34,7 @@ import { _setClarifyFnForTest } from "../src/daemon/requirement-clarifier";
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m021, m024, m032].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m021, m024, m032, m033].forEach(fn => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "P" });
 }
@@ -69,9 +70,9 @@ describe("clarifier RPC method", () => {
     setRequirementStatus("r1", "clarifying");
 
     let invoked = false;
-    _setClarifyFnForTest(async () => {
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => {
       invoked = true;
-      return JSON.stringify({ new_spec_md: "重写后", summary: "重做", next_question: { agent_text: "新问题?", suggestions: [] }, done: false });
+      return { rawText: JSON.stringify({ new_spec_md: "重写后", summary: "重做", next_question: { agent_text: "新问题?", suggestions: [] }, done: false }), newSessionRef: undefined };
     });
 
     const r = await invokeRpcMethod("requirements.retryClarify", { id: "r1" });

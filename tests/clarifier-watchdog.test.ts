@@ -17,6 +17,7 @@ import { up as m015 } from "../src/migrations/015-clarifier-error";
 import { up as m021 } from "../src/migrations/021-requirement-comments";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as m032 } from "../src/migrations/032-requirement-attachments";
+import { up as m033 } from "../src/migrations/033-requirement-sessions";
 import { _setDbForTest, getDb } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import {
@@ -32,7 +33,7 @@ import { runClarifierWatchdog } from "../src/daemon/clarifier-watchdog";
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m021, m024, m032].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m021, m024, m032, m033].forEach(fn => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "P" });
 }
@@ -55,14 +56,17 @@ describe("clarifier-watchdog", () => {
     resolveQuestion("q1"); // q1 已 resolved，但 active 仍指向 q1（模拟不一致）
 
     let invoked = 0;
-    _setClarifyFnForTest(async () => {
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => {
       invoked++;
-      return JSON.stringify({
-        new_spec_md: "更新后的 spec",
-        summary: "记入答案",
-        next_question: { agent_text: "下一题?", suggestions: [] },
-        done: false,
-      });
+      return {
+        rawText: JSON.stringify({
+          new_spec_md: "更新后的 spec",
+          summary: "记入答案",
+          next_question: { agent_text: "下一题?", suggestions: [] },
+          done: false,
+        }),
+        newSessionRef: undefined,
+      };
     });
 
     await runClarifierWatchdog();
@@ -81,14 +85,17 @@ describe("clarifier-watchdog", () => {
     getDb().run("UPDATE requirements SET updated_at = ? WHERE id = 'r2'", [Date.now() - 130_000]);
 
     let invoked = 0;
-    _setClarifyFnForTest(async () => {
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => {
       invoked++;
-      return JSON.stringify({
-        new_spec_md: "ok",
-        summary: null,
-        next_question: { agent_text: "Q1?", suggestions: [] },
-        done: false,
-      });
+      return {
+        rawText: JSON.stringify({
+          new_spec_md: "ok",
+          summary: null,
+          next_question: { agent_text: "Q1?", suggestions: [] },
+          done: false,
+        }),
+        newSessionRef: undefined,
+      };
     });
 
     await runClarifierWatchdog();
@@ -103,7 +110,7 @@ describe("clarifier-watchdog", () => {
     // updated_at 刚刚（< 120s 前）
 
     let invoked = 0;
-    _setClarifyFnForTest(async () => { invoked++; return JSON.stringify({ new_spec_md: "", summary: null, next_question: null, done: true }); });
+    _setClarifyFnForTest(async () => { invoked++; return { rawText: JSON.stringify({ new_spec_md: "", summary: null, next_question: null, done: true }), newSessionRef: undefined }; });
 
     await runClarifierWatchdog();
     await new Promise(r => setTimeout(r, 50));
@@ -120,7 +127,7 @@ describe("clarifier-watchdog", () => {
     );
 
     let invoked = 0;
-    _setClarifyFnForTest(async () => { invoked++; return JSON.stringify({ new_spec_md: "", summary: null, next_question: null, done: true }); });
+    _setClarifyFnForTest(async () => { invoked++; return { rawText: JSON.stringify({ new_spec_md: "", summary: null, next_question: null, done: true }), newSessionRef: undefined }; });
 
     await runClarifierWatchdog();
     await new Promise(r => setTimeout(r, 50));
@@ -133,7 +140,7 @@ describe("clarifier-watchdog", () => {
     getDb().run("UPDATE requirements SET updated_at = ? WHERE id = 'r5'", [Date.now() - 130_000]);
 
     let invoked = 0;
-    _setClarifyFnForTest(async () => { invoked++; return JSON.stringify({ new_spec_md: "", summary: null, next_question: null, done: true }); });
+    _setClarifyFnForTest(async () => { invoked++; return { rawText: JSON.stringify({ new_spec_md: "", summary: null, next_question: null, done: true }), newSessionRef: undefined }; });
 
     await runClarifierWatchdog();
     await new Promise(r => setTimeout(r, 50));

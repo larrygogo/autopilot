@@ -17,6 +17,7 @@ import { up as m015 } from "../src/migrations/015-clarifier-error";
 import { up as m021 } from "../src/migrations/021-requirement-comments";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as m032 } from "../src/migrations/032-requirement-attachments";
+import { up as m033 } from "../src/migrations/033-requirement-sessions";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createRequirement, getRequirementById, setRequirementStatus } from "../src/core/requirements";
@@ -27,7 +28,7 @@ import { runClarifierRound, _setClarifyFnForTest } from "../src/daemon/requireme
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m021, m024, m032].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m021, m024, m032, m033].forEach(fn => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "测试项目" });
 }
@@ -47,11 +48,14 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "初稿" });
     setRequirementStatus("r1", "clarifying");
 
-    _setClarifyFnForTest(async () => JSON.stringify({
-      new_spec_md: "改造后的需求\n## 现状\n初稿",
-      summary: "结构化为标题 + 章节",
-      next_question: { agent_text: "目标用户是谁？", suggestions: ["开发者", "运维"] },
-      done: false,
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => ({
+      rawText: JSON.stringify({
+        new_spec_md: "改造后的需求\n## 现状\n初稿",
+        summary: "结构化为标题 + 章节",
+        next_question: { agent_text: "目标用户是谁？", suggestions: ["开发者", "运维"] },
+        done: false,
+      }),
+      newSessionRef: undefined,
     }));
 
     await runClarifierRound("r1");
@@ -76,11 +80,14 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "已经够清楚了" });
     setRequirementStatus("r1", "clarifying");
 
-    _setClarifyFnForTest(async () => JSON.stringify({
-      new_spec_md: "已经够清楚了",
-      summary: null,
-      next_question: null,
-      done: true,
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => ({
+      rawText: JSON.stringify({
+        new_spec_md: "已经够清楚了",
+        summary: null,
+        next_question: null,
+        done: true,
+      }),
+      newSessionRef: undefined,
     }));
 
     await runClarifierRound("r1");
@@ -94,11 +101,14 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "同样的内容" });
     setRequirementStatus("r1", "clarifying");
 
-    _setClarifyFnForTest(async () => JSON.stringify({
-      new_spec_md: "同样的内容",
-      summary: null,
-      next_question: { agent_text: "更多细节？", suggestions: [] },
-      done: false,
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => ({
+      rawText: JSON.stringify({
+        new_spec_md: "同样的内容",
+        summary: null,
+        next_question: { agent_text: "更多细节？", suggestions: [] },
+        done: false,
+      }),
+      newSessionRef: undefined,
     }));
 
     await runClarifierRound("r1");
@@ -114,9 +124,9 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     const originalQuestionCount = listQuestionsByRequirement("r1").length;
 
     let calls = 0;
-    _setClarifyFnForTest(async () => {
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => {
       calls++;
-      return "这不是 JSON，是一段文本";
+      return { rawText: "这不是 JSON，是一段文本", newSessionRef: undefined };
     });
 
     const errors: Array<{ id: string; reason: string }> = [];
@@ -144,9 +154,9 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "" });
 
     let calls = 0;
-    _setClarifyFnForTest(async () => {
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => {
       calls++;
-      return JSON.stringify({ new_spec_md: "", summary: null, next_question: null, done: true });
+      return { rawText: JSON.stringify({ new_spec_md: "", summary: null, next_question: null, done: true }), newSessionRef: undefined };
     });
 
     await runClarifierRound("r1");
@@ -170,16 +180,19 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     setActiveQuestionId("r1", "qst-pre");
 
     // 准备一份 mock，在 AI "返回"前先模拟"另一并发 round"已完成
-    _setClarifyFnForTest(async () => {
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => {
       // 模拟并发 round A 的写入
       createQuestion({ id: "qst-concurrent", requirement_id: "r1", agent_text: "A 写入的", suggestions: [] });
       setActiveQuestionId("r1", "qst-concurrent");
-      return JSON.stringify({
-        new_spec_md: "B round 的 spec（应被丢弃）",
-        summary: "B 改了 spec",
-        next_question: { agent_text: "B 的问题", suggestions: [] },
-        done: false,
-      });
+      return {
+        rawText: JSON.stringify({
+          new_spec_md: "B round 的 spec（应被丢弃）",
+          summary: "B 改了 spec",
+          next_question: { agent_text: "B 的问题", suggestions: [] },
+          done: false,
+        }),
+        newSessionRef: undefined,
+      };
     });
 
     await runClarifierRound("r1");
@@ -200,15 +213,18 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     const originalQuestionCount = listQuestionsByRequirement("r1").length;
 
     // AI 返回前模拟状态切换（mock 内 setRequirementStatus）
-    _setClarifyFnForTest(async () => {
+    _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => {
       // 在 AI "回复"前把 status 改了
       setRequirementStatus("r1", "awaiting_approval");
-      return JSON.stringify({
-        new_spec_md: "AI 想改",
-        summary: "想加章节",
-        next_question: { agent_text: "?", suggestions: [] },
-        done: false,
-      });
+      return {
+        rawText: JSON.stringify({
+          new_spec_md: "AI 想改",
+          summary: "想加章节",
+          next_question: { agent_text: "?", suggestions: [] },
+          done: false,
+        }),
+        newSessionRef: undefined,
+      };
     });
 
     await runClarifierRound("r1");

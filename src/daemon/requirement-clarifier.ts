@@ -20,6 +20,13 @@ import {
 import { buildClarifierAgent } from "./clarifier-agent";
 import { parseLlmYamlWrapper } from "../core/llm-yaml";
 import { listAttachments, buildAttachmentContext } from "../core/requirement-attachments";
+import {
+  getSession,
+  upsertSession,
+  deleteSession,
+  type ConversationTurn,
+} from "../core/requirement-sessions";
+import type { ProviderName } from "../core/config";
 
 const log = createLogger("requirement-clarifier");
 
@@ -37,7 +44,12 @@ const log = createLogger("requirement-clarifier");
 // AI 调用层（可测试注入）
 // ──────────────────────────────────────────────
 
-type ClarifyFn = (prompt: string, reqId: string) => Promise<string>;
+// C-2 修复：统一返回对象；rawText = 原始 LLM 输出文本，同时用于解析和 snapshot
+type ClarifyFn = (
+  prompt: string,
+  reqId: string,
+  sessionRef?: string,
+) => Promise<{ rawText: string; newSessionRef?: string }>;
 
 let _clarifyFn: ClarifyFn = callClaude;
 
@@ -45,25 +57,40 @@ export function _setClarifyFnForTest(fn: ClarifyFn | null): void {
   _clarifyFn = fn ?? callClaude;
 }
 
-async function callClaude(prompt: string, reqId: string): Promise<string> {
-  // 通过 agent 系统调用。merge 顺序：req-level override > 全局 agents.clarifier > 默认 (anthropic + provider 默认 model)
+async function callClaude(
+  prompt: string,
+  reqId: string,
+  sessionRef?: string,
+): Promise<{ rawText: string; newSessionRef?: string }> {
+  // 通过 agent 系统调用。merge 顺序：req-level override > 默认 (anthropic + provider 默认 model)
   let agent;
+  let resolvedProvider: ProviderName;
   try {
     const req = getRequirementById(reqId);
-    const override: { provider?: "anthropic" | "openai" | "google"; model?: string } = {};
-    if (req?.clarifier_provider) override.provider = req.clarifier_provider as "anthropic" | "openai" | "google";
+    const override: { provider?: ProviderName; model?: string } = {};
+    if (req?.clarifier_provider) override.provider = req.clarifier_provider as ProviderName;
     if (req?.clarifier_model) override.model = req.clarifier_model;
     agent = buildClarifierAgent(override);
+    // N-2 修复：从 agent 实例读取实际 provider，避免与 buildClarifierAgent() 内部推导逻辑 desync
+    resolvedProvider = (agent.config.provider ?? "anthropic") as ProviderName;
   } catch (e: unknown) {
     throw new Error(`无法初始化 clarifier agent：${e instanceof Error ? e.message : String(e)}`);
   }
 
-  const result = await agent.run(prompt);
-  const text = result.text.trim();
-  if (!text) {
-    throw new Error("clarifier agent 返回空");
+  if (resolvedProvider === "anthropic") {
+    // Anthropic：chat() 已实现，支持 providerSessionId 续 session
+    const result = await agent.chat(prompt, { providerSessionId: sessionRef });
+    const rawText = result.text.trim();
+    if (!rawText) throw new Error("clarifier agent 返回空");
+    return { rawText, newSessionRef: result.providerSessionId };
+  } else {
+    // OpenAI/Google：chat() 未实现（base.ts 抛错），沿用 run()，不做 session 跟踪
+    // 传入的 sessionRef 被忽略；返回 newSessionRef = undefined
+    const result = await agent.run(prompt);
+    const rawText = result.text.trim();
+    if (!rawText) throw new Error("clarifier agent 返回空");
+    return { rawText, newSessionRef: undefined };
   }
-  return text;
 }
 
 // ──────────────────────────────────────────────
@@ -92,6 +119,7 @@ function buildPrompt(opts: {
   specMd: string;
   qaHistory: string;
   attachmentContext: string;
+  messagesReplay?: ConversationTurn[];  // session 失效时注入历史对话（与 qaHistory 互斥）
 }): string {
   const ctxLines: string[] = [];
   ctxLines.push(`项目名称：${opts.projectName}`);
@@ -164,7 +192,50 @@ function buildPrompt(opts: {
     "",
     opts.qaHistory ? "# 已完成的 Q&A 历史\n\n" + opts.qaHistory : "# 已完成的 Q&A 历史\n\n(暂无)",
     "",
+    // I-1 修复：messagesReplay 段（替换 qaHistory，两段互斥，避免重叠）
+    ...(opts.messagesReplay && opts.messagesReplay.length > 0
+      ? [
+          "",
+          "# 上一次澄清会话记录（会话中断，以下为历史对话）",
+          "以下是此前澄清会话的完整消息历史，请在此基础上继续：",
+          "",
+          ...opts.messagesReplay.map((t, i) =>
+            `[${t.role === "user" ? "用户输入" : "助手输出"} · 第 ${Math.floor(i / 2) + 1} 轮]\n${t.content}`
+          ),
+          "",
+          "---（历史记录结束）---",
+        ]
+      : []),
+    "",
     "请直接输出 YAML：",
+  ].join("\n");
+}
+
+// ──────────────────────────────────────────────
+// 增量 prompt（session 复用时仅发送新回复 + 继续指令）
+// ──────────────────────────────────────────────
+
+function buildIncrementalPrompt(opts: {
+  roundNumber: number;   // 当前是第几个 Q&A 轮次（已完成的 Q 数量）
+  questionText: string;  // agent 上一轮提的问题
+  userReply: string;     // 用户的回答
+  currentSpecMd: string; // 当前最新 spec_md（可能被用户手动编辑）
+  currentTitle: string;  // 当前需求标题
+}): string {
+  return [
+    `用户已回答第 ${opts.roundNumber} 个问题。`,
+    "",
+    `问题：${opts.questionText}`,
+    `回答：${opts.userReply}`,
+    "",
+    "当前 spec_md（可能因用户手动修改与你上次看到的不同）：",
+    opts.currentSpecMd || "(空)",
+    "",
+    "当前需求标题：",
+    opts.currentTitle,
+    "",
+    "请根据此回答更新 spec_md，并决定是否需要继续追问。",
+    "以相同 YAML 格式输出（字段含义与首轮相同）：",
   ].join("\n");
 }
 
@@ -286,34 +357,97 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   const attachments = listAttachments(reqId);
   const attachmentContext = buildAttachmentContext(attachments);
 
-  const prompt = buildPrompt({
+  // ── ① session 查询 & 消息选择 ─────────────────────────────────────
+  const session = getSession(reqId, "clarifying");
+  const activeSessionRef = session?.agent_session_ref ?? undefined;
+
+  // N-1 修复：预计算 isAnthropicProvider，用于守卫 replay 触发条件
+  // 与 callClaude 内的 resolvedProvider 推导逻辑保持一致：req 级覆盖 > 默认 "anthropic"
+  const isAnthropicProvider =
+    ((req.clarifier_provider as ProviderName | undefined) ?? "anthropic") === "anthropic";
+
+  // hasPriorQA：本轮前有已解答的问题（= session 里已有先验 Q&A，可走增量路径）
+  // 设计前提：每轮最多一个 active question（_inflightRounds 进程内锁 + setActiveQuestionId 保证）
+  const hasPriorQA = allQuestionsResolved.length > 0;
+  // useIncremental 仅在 Anthropic + 有效 session + 有历史 Q&A 时为 true
+  const useIncremental = isAnthropicProvider && !!activeSessionRef && hasPriorQA;
+
+  // ── 增量消息（仅新回复 + 继续指令）────────────────────────────────────
+  let incrementalPrompt: string | null = null;
+  if (useIncremental) {
+    const lastQ = allQuestionsResolved[allQuestionsResolved.length - 1];
+    const lastReply = listComments(reqId, { kind: "question", parent_id: lastQ.id })
+      .find(r => r.from_role === "user")?.body ?? "(未回复)";
+    incrementalPrompt = buildIncrementalPrompt({
+      roundNumber: allQuestionsResolved.length,
+      questionText: lastQ.body,
+      userReply: lastReply,
+      currentSpecMd: req.spec_md ?? "",
+      currentTitle: req.title,
+    });
+  }
+
+  // ── 全量 prompt（首轮 / session 失效 fallback）────────────────────────
+  // N-1 修复：replay 触发条件加 isAnthropicProvider 守卫
+  //   Anthropic + session 失效 + 有 snapshot → 用 replay 替换 qaHistory（互斥，避免重叠）
+  //   非 Anthropic（无论是否有 snapshot）→ 始终走 qaHistory 原路径，行为完全不变
+  const hasSnapshot = (session?.messages_snapshot?.length ?? 0) > 0;
+  const useReplay = isAnthropicProvider && !activeSessionRef && hasSnapshot;
+  const fullPrompt = buildPrompt({
     projectName: project.name,
     projectDescription: project.description,
     workspaceAlias: workspace?.alias ?? null,
     workspaceContext: workspace?.path ? readWorkspaceContext(workspace.path) : null,
     title: req.title,
     specMd: req.spec_md ?? "",
-    qaHistory,
+    // useReplay 时 qaHistory 传空：历史信息由 messagesReplay 段落承载，两者互斥
+    qaHistory: useReplay ? "" : qaHistory,
     attachmentContext,
+    messagesReplay: useReplay ? session!.messages_snapshot : [],
   });
 
-  setPhase(reqId, "calling-llm", { attempt: 0, prompt });
+  // ── ② 重试循环 ─────────────────────────────────────────────────────
+  // 尝试顺序：
+  //   有 session + 有 Q&A → [增量+session, 全量+无session]
+  //   无 session / 首轮   → [全量+无session, 全量+无session]（保留原 2 次重试语义）
+  const attempts: Array<{ prompt: string; sessionRef?: string; label: string }> = [];
+
+  if (useIncremental && incrementalPrompt) {
+    attempts.push({ prompt: incrementalPrompt, sessionRef: activeSessionRef, label: "增量+session" });
+    attempts.push({ prompt: fullPrompt,        sessionRef: undefined,        label: "全量+新session(fallback)" });
+  } else {
+    attempts.push({ prompt: fullPrompt, sessionRef: undefined, label: "全量+新session(首轮)" });
+    attempts.push({ prompt: fullPrompt, sessionRef: undefined, label: "全量+新session(retry)" });
+  }
 
   let result: ClarifyResult | null = null;
   let lastError: Error | null = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let resolvedSessionRef: string | undefined;
+  let resolvedPromptUsed: string = fullPrompt;
+  let resolvedRawText = "";   // 原始 LLM 输出文本，用于 snapshot（C-2 修复）
+
+  for (let i = 0; i < attempts.length; i++) {
+    const { prompt: attemptPrompt, sessionRef: attemptRef, label } = attempts[i];
     try {
-      if (attempt > 0) {
-        setPhase(reqId, "calling-llm", { attempt: 1 });
-      }
-      const raw = await _clarifyFn(prompt, reqId);
-      result = parseClarifyResult(raw);
+      setPhase(reqId, "calling-llm", { attempt: i as 0 | 1, prompt: attemptPrompt });
+
+      const { rawText, newSessionRef } = await _clarifyFn(attemptPrompt, reqId, attemptRef);
+      result = parseClarifyResult(rawText);
+      resolvedRawText     = rawText;
+      resolvedSessionRef  = newSessionRef ?? (attemptRef ?? undefined);
+      resolvedPromptUsed  = attemptPrompt;
       break;
     } catch (e: unknown) {
       lastError = e instanceof Error ? e : new Error(String(e));
-      log.warn("clarifier: req=%s 第 %d 次解析失败: %s", reqId, attempt + 1, lastError.message);
-      if (attempt === 0) {
+      log.warn("clarifier: req=%s 第 %d 次（%s）失败: %s", reqId, i + 1, label, lastError.message);
+      if (i === 0) {
         setPhase(reqId, "parsing", { attempt: 1, last_parse_error: lastError.message });
+      }
+
+      // 第一次失败且用了 session → 清除失效 session_ref，下次循环走全量
+      if (i === 0 && attemptRef) {
+        log.info("clarifier: req=%s session %s 疑似失效，清除 agent_session_ref，下次走全量", reqId, attemptRef);
+        upsertSession(reqId, "clarifying", { agent_session_ref: null });
       }
     }
   }
@@ -327,6 +461,25 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     });
     endRound(reqId, "errored");
     return;
+  }
+
+  // ── ③ Session 持久化 ─────────────────────────────────────────────
+  if (result) {
+    // 无论 provider 类型都写 session：
+    //   Anthropic  → resolvedSessionRef = "session-xxx"（用于下次 resume）
+    //   非 Anthropic → resolvedSessionRef = undefined → agent_session_ref 写 null（snapshot 留存供审计）
+    // N-3 修复：直接复用 ① 中已获取的 session 变量，避免重复 DB 查询
+    const prevSnapshot = session?.messages_snapshot ?? [];
+    const newSnapshot: ConversationTurn[] = [
+      ...prevSnapshot,
+      { role: "user",      content: resolvedPromptUsed },
+      { role: "assistant", content: resolvedRawText },
+    ];
+    // upsertSession 内部会做 SNAPSHOT_MAX_TURNS 截断
+    upsertSession(reqId, "clarifying", {
+      agent_session_ref: resolvedSessionRef ?? null,
+      messages_snapshot: newSnapshot,
+    });
   }
 
   // Race protection: status may have changed (e.g. user called finish-clarification)
@@ -413,6 +566,12 @@ export function initRequirementClarifier(): void {
   _statusHandler = (event: AutopilotEvent) => {
     if (event.type !== "requirement:status-changed") return;
     const { id, to } = event.payload;
+
+    // 终态 → 清理 session（done/cancelled/failed）
+    if (to === "done" || to === "cancelled" || to === "failed") {
+      deleteSession(id, "clarifying");
+    }
+
     if (to !== "clarifying") return;
     runClarifierRound(id).catch((e: unknown) => {
       log.error("clarifier: status-changed handler 失败 req=%s: %s", id, (e as Error).message);
