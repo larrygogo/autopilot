@@ -55,11 +55,14 @@ export function initRequirementTaskBridge(): void {
     }
 
     try {
-      // 终态同步时把 task 侧的「为什么」（transition note）带给需求，让需求页直接可见
+      // 终态同步时把 task 侧的「为什么」（transition note）带给需求，让需求页直接可见。
+      // "API cancel" 是 cancelTaskAction 写死的手动取消契约（task-actions.ts）——根因是
+      // 用户操作，映射成 user 来源，避免需求侧显示成「系统自动取消」吓到用户。
       const isTerminal = reqStatus === "cancelled" || reqStatus === "failed";
+      const isManualTaskCancel = note === "API cancel";
       setRequirementStatus(req.id, reqStatus, isTerminal ? {
-        reason: note ?? `任务 ${taskId} ${to}（trigger: ${trigger}）`,
-        reason_source: "task",
+        reason: isManualTaskCancel ? "任务被手动取消" : note ?? `任务 ${taskId} ${to}（trigger: ${trigger}）`,
+        reason_source: isManualTaskCancel ? "user" : "task",
       } : undefined);
       log.info("bridge: req=%s %s → %s（task=%s 到 %s）",
         req.id, req.status, reqStatus, taskId, to);

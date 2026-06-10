@@ -128,6 +128,23 @@ describe("requirement-task-bridge 终态同步带原因（req-008 链路复现�
     expect(r.status_reason_source).toBe("task");
   });
 
+  it("task 手动取消（note='API cancel'）→ 映射为 user 来源 + 友好文案", () => {
+    enableBus();
+    initRequirementTaskBridge();
+    const { reqId, taskId } = makeRunningRequirement();
+
+    const { transition } = require("../src/core/state-machine");
+    transition(taskId!, "cancel", {
+      transitions: { running_design: [["cancel", "cancelled"]] },
+      note: "API cancel",
+    });
+
+    const r = getRequirementById(reqId)!;
+    expect(r.status).toBe("cancelled");
+    expect(r.status_reason).toBe("任务被手动取消");
+    expect(r.status_reason_source).toBe("user");
+  });
+
   it("task failed transition 无 note → fallback 描述串", () => {
     enableBus();
     initRequirementTaskBridge();
@@ -242,6 +259,36 @@ describe("migration 028 幂等 + 历史回填", () => {
       .query<{ status_reason: string | null }, []>("SELECT status_reason FROM requirements WHERE id = 'req-m1'")
       .get()!;
     expect(row2.status_reason).toBe("手工改过");
+    freshDb.close();
+  });
+
+  it("回填把 'API cancel'（手动取消任务级联）映射成 user 来源", () => {
+    const freshDb = new Database(":memory:");
+    for (const m of ALL_MIGRATIONS) m(freshDb);
+
+    const ts = Date.now();
+    freshDb.run("INSERT INTO projects (id, name, created_at, updated_at) VALUES ('proj-m2', 'm', ?, ?)", [ts, ts]);
+    freshDb.run(
+      "INSERT INTO requirements (id, project_id, title, status, spec_md, task_id, created_at, updated_at) VALUES ('req-m2', 'proj-m2', 't', 'cancelled', '', 'tk-m2', ?, ?)",
+      [ts, ts],
+    );
+    freshDb.run(
+      "INSERT INTO tasks (id, title, workflow, status, created_at, updated_at) VALUES ('tk-m2', 't', 'dev', 'cancelled', ?, ?)",
+      [String(ts), String(ts)],
+    );
+    freshDb.run(
+      "INSERT INTO task_logs (task_id, from_status, to_status, trigger_name, note, created_at) VALUES ('tk-m2', 'running_design', 'cancelled', 'cancel', 'API cancel', ?)",
+      [String(ts)],
+    );
+
+    migrate028(freshDb);
+    const row = freshDb
+      .query<{ status_reason: string | null; status_reason_source: string | null }, []>(
+        "SELECT status_reason, status_reason_source FROM requirements WHERE id = 'req-m2'",
+      )
+      .get()!;
+    expect(row.status_reason).toBe("任务被手动取消");
+    expect(row.status_reason_source).toBe("user");
     freshDb.close();
   });
 });

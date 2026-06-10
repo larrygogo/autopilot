@@ -134,11 +134,11 @@ export function cancelTasksForRequirements(reqIds: string[]): { cancelled: numbe
 export function cancelRequirementWithTasks(reqId: string, reason?: string): { requirement: Requirement } {
   cancelTasksForRequirements([reqId]);
   const userReason = reason?.trim() || "用户手动取消";
-  // 级联停 task 会同步触发 bridge 抢先把需求置 cancelled（带 task 来源的 "API cancel"），
-  // 同状态时 setRequirementStatus early-return 不写 user 原因 —— 下面补写覆盖：
-  // 这次取消的根因是用户操作，user 来源语义正确。
+  // 级联停 task 会同步触发 bridge 抢先把需求置 cancelled（bridge 把 "API cancel" 映射成
+  // 「任务被手动取消」），同状态时 setRequirementStatus early-return 写不进这里的 user
+  // 原因 —— 下面按值补写覆盖：取消需求的入口语义（含用户填的理由）优先于级联兜底文案。
   let requirement = setRequirementStatus(reqId, "cancelled", { reason: userReason, reason_source: "user" });
-  if (requirement.status_reason_source !== "user") {
+  if (requirement.status_reason !== userReason || requirement.status_reason_source !== "user") {
     setRequirementStatusReason(reqId, userReason, "user");
     requirement = { ...requirement, status_reason: userReason, status_reason_source: "user" };
   }

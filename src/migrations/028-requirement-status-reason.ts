@@ -30,4 +30,8 @@ export function up(db: Database): void {
   );
   // 子查询没命中 note 的行会被置回 NULL reason + 'task' source，把 source 一并清掉
   db.run("UPDATE requirements SET status_reason_source = NULL WHERE status_reason IS NULL");
+  // "API cancel" 是 cancelTaskAction 手动取消任务的固定 note —— 根因是用户操作，映射成 user 来源
+  db.run(
+    "UPDATE requirements SET status_reason = '任务被手动取消', status_reason_source = 'user' WHERE status_reason = 'API cancel'",
+  );
 }
