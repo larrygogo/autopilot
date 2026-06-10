@@ -353,7 +353,9 @@ export async function run_submit_pr(taskId: string): Promise<void> {
 
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
-  const diffStatResult = runGit(["diff", `${defaultBranch}...HEAD`, "--stat"], repoPath);
+  // base 用 origin/<branch>：clone 只创建源仓库 HEAD 所指分支，源仓库 checkout 在
+  // 非默认分支时本地没有 <defaultBranch> ref，裸引用直接 fatal（与 code_review 同理）。
+  const diffStatResult = runGit(["diff", `origin/${defaultBranch}...HEAD`, "--stat"], repoPath);
   const gitDiffStat = diffStatResult.stdout.slice(0, 3000);
 
   const agent = agentForPhase(task.workflow, "submit_pr");
