@@ -32,9 +32,24 @@ test("选中步骤有下划线高亮", () => {
   expect(html).toContain("underline");
 });
 
-test("failed 时完成步标红", () => {
+test("failed 时完成步：圈与标签都标红（含选中态）", () => {
   const html = renderToStaticMarkup(
     <StepBar status="failed" selected="done" onSelect={() => {}} />,
   );
-  expect(html).toContain("bg-destructive");
+  expect(html).toContain("bg-destructive"); // 圈红
+  expect(html).toContain("font-medium text-destructive"); // 标签也红（旧 bug 会漏）
+});
+
+test("cancelled 时完成步同样标红", () => {
+  const html = renderToStaticMarkup(
+    <StepBar status="cancelled" selected="done" onSelect={() => {}} />,
+  );
+  expect(html).toContain("font-medium text-destructive");
+});
+
+test("running 时恰好 3 个步骤为 done 态", () => {
+  const html = renderToStaticMarkup(
+    <StepBar status="running" selected="execute" onSelect={() => {}} />,
+  );
+  expect((html.match(/bg-success\/15/g) || []).length).toBe(3); // 澄清/审批/排队
 });

@@ -58,15 +58,16 @@ export function StepBar({
               <span
                 className={cn(
                   "whitespace-nowrap text-xs transition-colors",
-                  isSelected
-                    ? "font-semibold text-foreground underline underline-offset-4"
-                    : isAbortedTail
-                      ? "font-medium text-destructive"
+                  isAbortedTail
+                    ? "font-medium text-destructive"
+                    : isSelected
+                      ? "font-semibold text-foreground"
                       : active
                         ? "font-medium text-foreground"
                         : done
                           ? "text-muted-foreground"
                           : "text-muted-foreground/60",
+                  isSelected && "underline underline-offset-4",
                 )}
               >
                 {s.label}
