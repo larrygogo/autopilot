@@ -230,7 +230,8 @@ function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode 
             "rounded-2xl rounded-tl-sm bg-muted px-4 py-3 text-sm leading-relaxed",
             q.status === "resolved" && "opacity-60"
           )}>
-            {q.agent_text}
+            {/* AI 提问是 markdown（粗体/表格/代码片段），渲染而非裸文本 */}
+            <MarkdownView content={q.agent_text} />
           </div>
           {q.status === "open" && q.suggestions.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
