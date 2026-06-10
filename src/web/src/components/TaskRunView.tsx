@@ -114,7 +114,7 @@ export function TaskRunView(props: TaskRunViewProps) {
   const [expand, setExpand] = useState(createExpandState);
   useEffect(() => {
     const statuses: Record<string, PhaseRunState> = {};
-    for (const r of runsLive) statuses[r.key] = r.state;
+    for (const r of runsLive) statuses[r.key] = r.state === "aborted" ? "idle" : r.state;
     for (const p of pending) statuses[`pending-${p}`] = "idle";
     setExpand((prev) => applyStatusTransitions(prev, statuses));
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
