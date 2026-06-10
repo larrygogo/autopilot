@@ -1424,17 +1424,18 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "sandboxes.tree",
-    description: "列任务 sandbox 子目录（默认根目录）",
+    description: "列任务 sandbox 子目录。root=artifacts（产物归档，默认）/ workspace（代码 clone 工作树）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const relPath = typeof p.path === "string" ? p.path : "";
+      const root = p.root === "workspace" ? "workspace" as const : "artifacts" as const;
       try {
-        return { path: relPath, entries: listSandboxDir(p.id, relPath) };
+        return { path: relPath, entries: listSandboxDir(p.id, relPath, root) };
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        // 产物目录懒创建：任务早期 / 重跑清空后目录还不存在是常态，返回空列表
-        // 让 UI 显示「暂无产物」，而不是红色报错吓用户
+        // 目录懒创建/已清理：任务早期、重跑清空、终态释放后不存在是常态，返回空列表
+        // 让 UI 显示空态，而不是红色报错吓用户
         if (/不存在|ENOENT/i.test(msg)) return { path: relPath, entries: [] };
         throw new RpcError("INVALID_PARAM", msg);
       }
@@ -1443,13 +1444,14 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "sandboxes.file",
-    description: "读 sandbox 内单个文件（text）",
+    description: "读 sandbox 内单个文件（text）。root 同 sandboxes.tree",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (typeof p.path !== "string" || !p.path) throw new RpcError("INVALID_PARAM", "需要 path");
+      const root = p.root === "workspace" ? "workspace" as const : "artifacts" as const;
       try {
-        return readSandboxFile(p.id, p.path);
+        return readSandboxFile(p.id, p.path, root);
       } catch (e: unknown) {
         throw new RpcError("INVALID_PARAM", e instanceof Error ? e.message : String(e));
       }

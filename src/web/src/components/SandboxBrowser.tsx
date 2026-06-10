@@ -38,9 +38,13 @@ function formatSize(bytes?: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
+type SandboxRoot = "artifacts" | "workspace";
+
 export function SandboxBrowser({ taskId, taskStatus }: Props) {
   const toast = useToast();
   const taskActive = !!taskStatus && (taskStatus.startsWith("running_") || taskStatus.startsWith("pending_") || taskStatus.startsWith("awaiting_") || taskStatus.startsWith("waiting_"));
+  // 两个根：产物（artifacts/，阶段完成后归档）/ 代码（workspace/，agent 实际改代码的 clone 工作树）
+  const [root, setRoot] = useState<SandboxRoot>("artifacts");
   const [cwd, setCwd] = useState<string>("");
   const [entries, setEntries] = useState<SandboxEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,11 +53,11 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
   const [loadingFile, setLoadingFile] = useState(false);
   const [confirmRelease, setConfirmRelease] = useState(false);
 
-  const loadTree = async (path: string) => {
+  const loadTree = async (path: string, rootOverride?: SandboxRoot) => {
     setLoading(true);
     setErr(null);
     try {
-      const res = await api.getSandboxTree(taskId, path);
+      const res = await api.getSandboxTree(taskId, path, rootOverride ?? root);
       setEntries(res.entries);
       setCwd(res.path);
     } catch (e: unknown) {
@@ -62,6 +66,13 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const switchRoot = (next: SandboxRoot) => {
+    if (next === root) return;
+    setRoot(next);
+    setFile(null);
+    loadTree("", next);
   };
 
   useEffect(() => {
@@ -73,7 +84,7 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
     const fullPath = cwd ? `${cwd}/${entry.name}` : entry.name;
     setLoadingFile(true);
     try {
-      const res = await api.getSandboxFile(taskId, fullPath);
+      const res = await api.getSandboxFile(taskId, fullPath, root);
       setFile({ path: fullPath, ...res });
     } catch (e: unknown) {
       toast.error("打开失败", (e as Error)?.message ?? String(e));
@@ -106,7 +117,27 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
     <Card>
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
-        <span className="bp-label">沙盒 · 产物文件</span>
+        <div className="flex items-center gap-3">
+          <span className="bp-label">沙盒</span>
+          {/* 根切换：产物（阶段归档）/ 代码（clone 工作树） */}
+          <div className="flex items-center overflow-hidden rounded-md border border-border">
+            {([["artifacts", "产物"], ["workspace", "代码"]] as Array<[SandboxRoot, string]>).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => switchRoot(key)}
+                aria-pressed={root === key}
+                title={key === "artifacts" ? "阶段产物归档（artifacts/）" : "代码沙盒：从你仓库 clone 的工作树，agent 实际改代码的地方（workspace/）"}
+                className={cn(
+                  "border-r border-border px-2.5 py-1 font-mono text-[10px] transition-colors last:border-r-0",
+                  root === key ? "bg-foreground/8 text-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex items-center gap-1.5">
           <Button
             variant="ghost"
@@ -142,11 +173,11 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
 
       <div className="p-4">
         {/* 运行期说明：产物目录 = 已完成阶段的归档，正在跑的阶段（如 02-develop）
-            要等该阶段结束才出现在这里 —— 实时输出在上方执行时间线 */}
-        {taskActive && (
+            要等该阶段结束才出现在这里 —— 实时输出在上方执行时间线；代码改动切「代码」根看 */}
+        {taskActive && root === "artifacts" && (
           <p className="mb-3 rounded-lg bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
             任务执行中：这里只列<span className="text-foreground/80">已完成阶段</span>的归档产物（日志 / 报告），
-            正在运行的阶段要等它结束后才会出现。实时输出请看上方执行时间线对应轮次。
+            正在运行的阶段要等它结束后才会出现。实时输出看上方执行时间线；正在写的代码切「代码」根看。
           </p>
         )}
         {/* 面包屑 */}
@@ -159,7 +190,7 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
               loadTree("");
             }}
           >
-            产物
+            {root === "workspace" ? "代码" : "产物"}
           </button>
           {crumbs.map((seg, i) => (
             <React.Fragment key={i}>
@@ -196,7 +227,11 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
               </p>
             ) : entries.length === 0 && !err ? (
               <p className="p-3 font-mono text-xs text-muted-foreground">
-                {cwd ? "（空目录）" : "（暂无产物，任务尚未产出文档）"}
+                {cwd
+                  ? "（空目录）"
+                  : root === "workspace"
+                    ? "（代码沙盒不存在：任务尚未 clone，或终态后已释放）"
+                    : "（暂无产物，任务尚未产出文档）"}
               </p>
             ) : (
               <ul className="divide-y divide-border">

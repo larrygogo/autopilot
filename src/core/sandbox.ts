@@ -454,10 +454,12 @@ export interface SandboxEntry {
  * 防越界：解析后必须仍位于 sandbox 根目录下；拒绝含 NUL 字符的路径。
  * @returns 绝对路径或 null（路径非法）
  */
-export function resolveSandboxPath(taskId: string, relPath: string): string | null {
-  // 「沙盒」tab 展示的是任务文件夹产物（artifacts/），不是代码 clone（workspace/）。
-  const ws = getTaskArtifactsDir(taskId);
-  const root = resolve(ws);
+/** 沙盒浏览的两个根：artifacts = 阶段产物归档；workspace = 代码 clone（agent 实际改代码的工作树）。 */
+export type SandboxRoot = "artifacts" | "workspace";
+
+export function resolveSandboxPath(taskId: string, relPath: string, rootKind: SandboxRoot = "artifacts"): string | null {
+  const base = rootKind === "workspace" ? getTaskSandbox(taskId) : getTaskArtifactsDir(taskId);
+  const root = resolve(base);
   if (relPath.includes("\0")) return null;
   const trimmed = relPath.replace(/^[/\\]+/, "");
   const candidate = resolve(root, trimmed || ".");
@@ -468,8 +470,8 @@ export function resolveSandboxPath(taskId: string, relPath: string): string | nu
 /**
  * 列目录直接子项（单层，按名称字典序）。目录不存在时抛错。
  */
-export function listSandboxDir(taskId: string, relPath: string): SandboxEntry[] {
-  const abs = resolveSandboxPath(taskId, relPath);
+export function listSandboxDir(taskId: string, relPath: string, rootKind: SandboxRoot = "artifacts"): SandboxEntry[] {
+  const abs = resolveSandboxPath(taskId, relPath, rootKind);
   if (!abs) throw new Error("非法路径");
   if (!existsSync(abs)) throw new Error("路径不存在");
   const info = statSync(abs);
@@ -477,6 +479,8 @@ export function listSandboxDir(taskId: string, relPath: string): SandboxEntry[] 
 
   const entries: SandboxEntry[] = [];
   for (const name of readdirSync(abs)) {
+    // 代码根的顶层隐藏 .git（巨大且无浏览价值；改动统计走验收 diff 视图）
+    if (rootKind === "workspace" && name === ".git" && !relPath.replace(/^[/\\]+/, "")) continue;
     const full = join(abs, name);
     try {
       const s = statSync(full);
@@ -510,8 +514,8 @@ export const MAX_PREVIEW_BYTES = 1024 * 1024; // 1 MB
 /**
  * 读取文件供 UI 预览。超过上限不读内容；二进制检测失败返回空 content。
  */
-export function readSandboxFile(taskId: string, relPath: string): SandboxFileInfo {
-  const abs = resolveSandboxPath(taskId, relPath);
+export function readSandboxFile(taskId: string, relPath: string, rootKind: SandboxRoot = "artifacts"): SandboxFileInfo {
+  const abs = resolveSandboxPath(taskId, relPath, rootKind);
   if (!abs) throw new Error("非法路径");
   if (!existsSync(abs)) throw new Error("文件不存在");
   const info = statSync(abs);
