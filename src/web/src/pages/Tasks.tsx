@@ -50,14 +50,14 @@ export function Tasks() {
   const [nameMaps, setNameMaps] = useState<PipelineNameMaps>({});
   useEffect(() => {
     Promise.all([
-      api.listProjects().catch(() => ({ projects: [] as Array<{ id: string; name: string }> })),
-      api.listWorkspaces().catch(() => [] as Array<{ id: string; alias: string }>),
-      api.listWorkflows().catch(() => [] as Array<{ name: string; label?: string }>),
-    ]).then(([p, ws, wf]) => {
+      api.listProjects().catch(() => []),
+      api.listWorkspaces().catch(() => []),
+      api.listWorkflows().catch(() => []),
+    ]).then(([projects, workspaces, workflows]) => {
       setNameMaps({
-        projects: Object.fromEntries(p.projects.map((x) => [x.id, x.name])),
-        workspaces: Object.fromEntries(ws.map((x) => [x.id, x.alias])),
-        workflows: Object.fromEntries(wf.map((x) => [x.name, x.label ?? x.name])),
+        projects: Object.fromEntries(projects.map((x) => [x.id, x.name])),
+        workspaces: Object.fromEntries(workspaces.map((x) => [x.id, x.alias])),
+        workflows: Object.fromEntries(workflows.map((x) => [x.name, x.label ?? x.name])),
       });
     });
   }, []);
