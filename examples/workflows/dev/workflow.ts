@@ -56,14 +56,23 @@ function getRejectionCounts(task: ReturnType<typeof getTask>): Record<string, nu
 }
 
 /**
- * 计算指定 phase 的产物目录：workspace/<NN-phase>/，幂等创建。
+ * 计算指定 phase 的产物目录路径：workspace/<NN-phase>/。不创建目录——
+ * 只读场景（检查上一轮产物是否存在）用这个，避免在沙盒里提前长出
+ * 还没跑到的阶段的空目录（如 develop 期出现 03-code_review）。
  */
-function phaseDir(taskId: string, workflowName: string, phaseName: string): string {
+function phasePath(taskId: string, workflowName: string, phaseName: string): string {
   const wf = getWorkflow(workflowName);
   if (!wf) throw new Error(`workflow not found: ${workflowName}`);
   const idx = getPhaseIndex(wf, phaseName);
   if (idx < 0) throw new Error(`phase not found in workflow: ${phaseName}`);
-  const dir = join(getTaskArtifactsDir(taskId), `${String(idx).padStart(2, "0")}-${phaseName}`);
+  return join(getTaskArtifactsDir(taskId), `${String(idx).padStart(2, "0")}-${phaseName}`);
+}
+
+/**
+ * 计算指定 phase 的产物目录：workspace/<NN-phase>/，幂等创建。写产物前调用。
+ */
+function phaseDir(taskId: string, workflowName: string, phaseName: string): string {
+  const dir = phasePath(taskId, workflowName, phaseName);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -100,7 +109,7 @@ export async function run_design(taskId: string): Promise<void> {
 
   // 驳回历史：上一次 reviewer 驳回意见
   let rejectionHistory = "";
-  const reviewDir = phaseDir(taskId, task.workflow, "review");
+  const reviewDir = phasePath(taskId, task.workflow, "review");
   const reviewPath = join(reviewDir, "plan_review.md");
   const rejectionCounts = getRejectionCounts(task);
   const designRejections = rejectionCounts["design"] ?? 0;
@@ -136,7 +145,7 @@ export async function run_review(taskId: string): Promise<void> {
 
   const repoPath = getCurrentSandboxDir() ?? (task["repo_path"] as string);
 
-  const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
+  const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
   const requirement = ((task["requirement"] as string | undefined) ?? "").trim();
 
@@ -212,7 +221,7 @@ export async function run_develop(taskId: string): Promise<void> {
   // worktree 模式：sandbox 是基于 default_branch 派生的独立分支工作树，工作树天然
   // 干净、已在自己的分支（autopilot/<taskId>）上 —— 无需 checkout/pull/stash/建分支。
 
-  const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
+  const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
 
   // reject 重做时把上一轮 code_review 反馈拼进 prompt — dogfood-bug7：
@@ -221,7 +230,7 @@ export async function run_develop(taskId: string): Promise<void> {
   // 现在显式告诉 developer 这是 reject 重做轮 + 上轮 reviewer 的具体抱怨，
   // 让它知道要去 specifically address critical 问题。
   const codeReviewReportPath = join(
-    phaseDir(taskId, task.workflow, "code_review"),
+    phasePath(taskId, task.workflow, "code_review"),
     "code_review_report.md",
   );
   const hasPriorReview = existsSync(codeReviewReportPath);
@@ -266,7 +275,7 @@ export async function run_code_review(taskId: string): Promise<void> {
   const diffResult = runGit(["diff", "--cached", "--no-ext-diff", `origin/${defaultBranch}`], repoPath);
   const gitDiff = diffResult.stdout.slice(0, 80000);
 
-  const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
+  const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
 
   const prompt =
@@ -346,7 +355,7 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   // GitHub 自动 close 旧 PR），新一轮 push 到全新分支不会有 non-fast-forward 冲突。
   runGit(["push", "-u", "origin", branch], repoPath);
 
-  const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
+  const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
   // base 用 origin/<branch>：clone 只创建源仓库 HEAD 所指分支，源仓库 checkout 在
   // 非默认分支时本地没有 <defaultBranch> ref，裸引用直接 fatal（与 code_review 同理）。

@@ -27,11 +27,16 @@ import { getPhaseIndex } from "@autopilot/core/artifacts";
 const PASS = "REVIEW_RESULT: PASS";
 const REJECT = "REVIEW_RESULT: REJECT";
 
-function phaseDir(taskId: string, workflowName: string, phaseName: string): string {
+/** 只算路径不建目录（只读场景用，避免提前长出未到达阶段的空目录）。 */
+function phasePath(taskId: string, workflowName: string, phaseName: string): string {
   const wf = getWorkflow(workflowName);
   if (!wf) throw new Error(`workflow not found: ${workflowName}`);
   const idx = getPhaseIndex(wf, phaseName);
-  const dir = join(getTaskSandbox(taskId), `${String(idx).padStart(2, "0")}-${phaseName}`);
+  return join(getTaskSandbox(taskId), `${String(idx).padStart(2, "0")}-${phaseName}`);
+}
+
+function phaseDir(taskId: string, workflowName: string, phaseName: string): string {
+  const dir = phasePath(taskId, workflowName, phaseName);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -96,7 +101,7 @@ export async function run_plan(taskId: string): Promise<void> {
   const planRejections = counts["plan"] ?? 0;
 
   const dir = phaseDir(taskId, task.workflow, "plan");
-  const reviewMdPath = join(phaseDir(taskId, task.workflow, "review"), "plan_review.md");
+  const reviewMdPath = join(phasePath(taskId, task.workflow, "review"), "plan_review.md");
   if (planRejections > 0 && existsSync(reviewMdPath)) {
     const prev = readFileSync(reviewMdPath, "utf-8");
     rejectionHistory += `\n\n## 上次 reviewer 驳回意见（第 ${planRejections} 次）\n${prev}`;

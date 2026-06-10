@@ -87,12 +87,17 @@ function submoduleHasChanges(sm: SubmoduleInfo): boolean {
 /**
  * 计算指定 phase 的产物目录：workspace/<NN-phase>/，幂等创建。
  */
-function phaseDir(taskId: string, workflowName: string, phaseName: string): string {
+/** 只算路径不建目录（只读场景用，避免提前长出未到达阶段的空目录）。 */
+function phasePath(taskId: string, workflowName: string, phaseName: string): string {
   const wf = getWorkflow(workflowName);
   if (!wf) throw new Error(`workflow not found: ${workflowName}`);
   const idx = getPhaseIndex(wf, phaseName);
   if (idx < 0) throw new Error(`phase not found in workflow: ${phaseName}`);
-  const dir = join(getTaskSandbox(taskId), `${String(idx).padStart(2, "0")}-${phaseName}`);
+  return join(getTaskSandbox(taskId), `${String(idx).padStart(2, "0")}-${phaseName}`);
+}
+
+function phaseDir(taskId: string, workflowName: string, phaseName: string): string {
+  const dir = phasePath(taskId, workflowName, phaseName);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -173,7 +178,7 @@ export async function run_design(taskId: string): Promise<void> {
 
   // 驳回历史：上一次 reviewer 驳回意见
   let rejectionHistory = "";
-  const reviewDir = phaseDir(taskId, task.workflow, "review");
+  const reviewDir = phasePath(taskId, task.workflow, "review");
   const reviewPath = join(reviewDir, "plan_review.md");
   const rejectionCounts = getRejectionCounts(task);
   const designRejections = rejectionCounts["design"] ?? 0;
