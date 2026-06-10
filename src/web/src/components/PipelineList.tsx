@@ -1,11 +1,13 @@
 // 流水线风列表的共享件：状态色调、行卡片、时间分组容器。
 // Tasks 页（需求+任务混合）与 ProjectDetail 页（纯需求）共用。
-import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useState, type ReactNode, type MouseEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Loader2, Hand, Search, Clock, FileText, AlertCircle, CheckCircle2, XCircle } from "lucide-react";
-import type { Requirement } from "@/hooks/useApi";
+import { api, type Requirement } from "@/hooks/useApi";
+import { useToast } from "@/components/Toast";
 import { cn } from "@/lib/utils";
 import { relTime, tsToMs, bucketOf, BUCKET_ORDER, BUCKET_LABEL, type TimeBucket } from "@/lib/pipeline-time";
+import { reqCardSpec, type ReqCardAction } from "@/lib/requirement-card";
 
 export interface PipelineTask {
   id: string;
@@ -89,9 +91,9 @@ export function TimeGroupedList({ rows, now }: { rows: TimedRow[]; now: number }
   );
 }
 
-/** Claude Code 风卡片外壳：头像图标 + 标题 + 相对时间 + 状态行 + 可选预览 */
+/** Claude Code 风卡片外壳：头像图标 + 标题 + 相对时间 + 状态行 + 可选预览 + 可选特化区 */
 export function RowCard({
-  to, Icon, tone, spin, title, time, statusLabel, secondary, preview,
+  to, Icon, tone, spin, title, time, statusLabel, secondary, preview, extra,
 }: {
   to: string;
   Icon: typeof Loader2;
@@ -102,6 +104,8 @@ export function RowCard({
   statusLabel: string;
   secondary?: string;
   preview?: string | null;
+  /** 状态特化区（提示条 / 行内动作），渲染在 preview 之后 */
+  extra?: ReactNode;
 }) {
   const t = TONE[tone];
   return (
@@ -128,6 +132,7 @@ export function RowCard({
               <p className="line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">{preview}</p>
             </div>
           )}
+          {extra}
         </div>
       </div>
     </Link>
@@ -137,6 +142,7 @@ export function RowCard({
 export function RequirementRow({ req, now }: { req: Requirement; now: number }) {
   const { Icon, tone, label, spin } = reqMeta(req.status);
   const secondary = [req.id, req.task_id ? `${req.task_id} →` : null].filter(Boolean).join(" · ");
+  const card = reqCardSpec(req);
   return (
     <RowCard
       to={`/requirements/${req.id}`}
@@ -147,7 +153,90 @@ export function RequirementRow({ req, now }: { req: Requirement; now: number }) 
       time={relTime(tsToMs(req.updated_at), now)}
       statusLabel={label}
       secondary={secondary}
+      preview={card.preview}
+      extra={(card.notice || card.actions.length > 0) && (
+        <div className="mt-2.5 space-y-2">
+          {card.notice && (
+            <p className={cn(
+              "rounded-lg px-3 py-2 text-[12px] leading-relaxed",
+              card.notice.tone === "error"
+                ? "bg-destructive/8 text-destructive"
+                : "bg-muted/50 text-muted-foreground",
+            )}>
+              {card.notice.text}
+            </p>
+          )}
+          {card.actions.length > 0 && (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {card.actions.map((a) => (
+                <ReqCardActionButton key={a.key} req={req} action={a} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     />
+  );
+}
+
+/**
+ * 需求卡片的行内快捷动作。动作语义与需求详情页同源（approve=enqueue、
+ * reject=回 drafting、retry=重新入队、retryClarify=POST retry-clarify）。
+ * 成功后不手动刷列表 —— 两页都订阅 requirement:*，WS 推送自动刷新。
+ */
+function ReqCardActionButton({ req, action }: { req: Requirement; action: ReqCardAction }) {
+  const toast = useToast();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const destructive = action.key === "reject";
+
+  const run = async (e: MouseEvent) => {
+    // 卡片整体是 Link，行内按钮必须拦截冒泡与默认跳转
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+
+    if (action.key === "answer") { navigate(`/requirements/${req.id}`); return; }
+    if (action.key === "viewTask") { if (req.task_id) navigate(`/tasks/${req.task_id}`); return; }
+    if (action.key === "openPr") { if (req.pr_url) window.open(req.pr_url, "_blank", "noopener"); return; }
+
+    setBusy(true);
+    try {
+      if (action.key === "approve") {
+        await api.enqueueRequirement(req.id);
+        toast.success(`已审批通过 · ${req.id} 进入队列`);
+      } else if (action.key === "retry") {
+        await api.enqueueRequirement(req.id);
+        toast.success(`已重新入队 · ${req.id}`);
+      } else if (action.key === "reject") {
+        await api.transitionRequirement(req.id, "drafting");
+        toast.success(`已驳回 · ${req.id} 返回草稿`);
+      } else if (action.key === "retryClarify") {
+        const res = await fetch(`/api/requirements/${encodeURIComponent(req.id)}/retry-clarify`, { method: "POST" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        toast.success(`已重试澄清 · ${req.id}`);
+      }
+    } catch (err: unknown) {
+      toast.error("操作失败", (err as Error)?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={run}
+      disabled={busy}
+      className={cn(
+        "rounded-md border px-2.5 py-1 font-mono text-[11px] transition-colors disabled:opacity-50",
+        destructive
+          ? "border-destructive/40 text-destructive hover:border-destructive hover:bg-destructive/8"
+          : "border-border text-foreground hover:border-accent hover:bg-accent/8",
+      )}
+    >
+      {busy ? "处理中…" : action.label}
+    </button>
   );
 }
 

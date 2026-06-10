@@ -5,6 +5,7 @@ import {
   FolderOpen, Trash2, Pencil, List, Archive, Loader2, Hand,
 } from "lucide-react";
 import { api, type Project, type Workspace, type Requirement } from "@/hooks/useApi";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { TimeGroupedList, RequirementRow, type TimedRow } from "@/components/PipelineList";
 import { tsToMs } from "@/lib/pipeline-time";
@@ -101,6 +102,15 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // WS：需求状态变化（含卡片行内动作触发的）→ 静默重拉需求列表，不闪整页 loading
+  const { subscribe } = useWebSocket();
+  useEffect(() => {
+    const unsub = subscribe("requirement:*", () => {
+      api.listProjectRequirements(projectId).then(setRequirements).catch(() => {});
+    });
+    return unsub;
+  }, [projectId, subscribe]);
 
   // 需求 4 段 tab 分桶（与流水线页同构；项目页需求自己代表全生命周期）
   const reqBuckets = useMemo(() => {
