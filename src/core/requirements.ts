@@ -96,7 +96,8 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   fix_revision: ["awaiting_review", "failed", "cancelled"],
   done: [],
   cancelled: [],
-  failed: ["queued", "awaiting_approval"],
+  // failed → cancelled：失败后用户决定放弃（取消=只留需求本身）；queued/awaiting_approval 是重试出口
+  failed: ["queued", "awaiting_approval", "cancelled"],
 };
 
 export function canTransitionStatus(from: string, to: string): boolean {
