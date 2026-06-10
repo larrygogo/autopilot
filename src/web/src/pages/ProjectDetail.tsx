@@ -1,10 +1,14 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw, ExternalLink,
-  FolderOpen, Trash2, Pencil,
+  ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw,
+  FolderOpen, Trash2, Pencil, List, Archive, Loader2, Hand,
 } from "lucide-react";
 import { api, type Project, type Workspace, type Requirement } from "@/hooks/useApi";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { TimeGroupedList, RequirementRow, type TimedRow } from "@/components/PipelineList";
+import { tsToMs } from "@/lib/pipeline-time";
+import { projectReqTab, type ProjectReqTab } from "@/lib/requirement-buckets";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -26,39 +30,6 @@ import { cn } from "@/lib/utils";
 interface ProjectDetailProps {
   projectId: string;
 }
-
-const STATUS_LABEL: Record<string, string> = {
-  drafting: "草稿",
-  clarifying: "澄清中",
-  ready: "已澄清",
-  investigating: "调查中",
-  awaiting_approval: "待审批",
-  queued: "排队中",
-  running: "执行中",
-  awaiting_review: "待 PR review",
-  fix_revision: "修复中",
-  done: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-};
-
-const STATUS_VARIANT: Record<
-  string,
-  "default" | "secondary" | "destructive" | "outline" | "success" | "warning" | "info" | "muted"
-> = {
-  drafting: "outline",
-  clarifying: "info",
-  ready: "success",
-  investigating: "info",
-  awaiting_approval: "warning",
-  queued: "secondary",
-  running: "info",
-  awaiting_review: "warning",
-  fix_revision: "warning",
-  done: "success",
-  failed: "destructive",
-  cancelled: "muted",
-};
 
 interface CbForm {
   alias: string;
@@ -86,6 +57,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [reqTab, setReqTab] = useState<string>("all");
 
   // 编辑项目 dialog
   const [projDialogOpen, setProjDialogOpen] = useState(false);
@@ -129,6 +101,19 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // 需求 4 段 tab 分桶（与流水线页同构；项目页需求自己代表全生命周期）
+  const reqBuckets = useMemo(() => {
+    const buckets: Record<ProjectReqTab, Requirement[]> = { human: [], running: [], archived: [] };
+    for (const r of requirements) buckets[projectReqTab(r.status)].push(r);
+    return buckets;
+  }, [requirements]);
+
+  const now = Date.now();
+  const rowsOf = (list: Requirement[]): TimedRow[] =>
+    list
+      .map((r) => ({ key: r.id, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} now={now} /> }))
+      .sort((a, b) => b.ts - a.ts);
 
   // ── 需求 ──────────────────────────────────────
 
@@ -580,30 +565,47 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             )}
           </Card>
         ) : (
-          <Card className="overflow-hidden">
-            <div className="divide-y divide-foreground/20">
-              {requirements.map((req) => (
-                <div
-                  key={req.id}
-                  className="group flex cursor-pointer items-center justify-between gap-3 border-l-2 border-transparent px-4 py-3 transition-colors hover:border-accent hover:bg-accent/8"
-                  onClick={() => navigate(`/requirements/${req.id}`)}
-                >
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <p className="truncate text-sm font-medium">{req.title}</p>
-                    <p className="font-mono text-[10px] text-muted-foreground">
-                      {new Date(req.created_at).toLocaleDateString("zh-CN")}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Badge variant={STATUS_VARIANT[req.status] ?? "outline"}>
-                      {STATUS_LABEL[req.status] ?? req.status}
-                    </Badge>
-                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground/50 transition-colors group-hover:text-accent" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
+          <Tabs value={reqTab} onValueChange={setReqTab}>
+            <TabsList className="w-full justify-start overflow-x-auto overflow-y-hidden">
+              <TabsTrigger value="all" className="gap-1.5">
+                <List className="h-3.5 w-3.5 text-foreground/70" />
+                全部
+                <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{requirements.length}</span>
+              </TabsTrigger>
+              <TabsTrigger value="human" className="gap-1.5">
+                <Hand className="h-3.5 w-3.5 text-warning" />
+                等待人工
+                <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{reqBuckets.human.length}</span>
+              </TabsTrigger>
+              <TabsTrigger value="running" className="gap-1.5">
+                <Loader2 className="h-3.5 w-3.5 text-accent" />
+                运行中
+                <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{reqBuckets.running.length}</span>
+              </TabsTrigger>
+              <TabsTrigger value="archived" className="gap-1.5">
+                <Archive className="h-3.5 w-3.5 text-muted-foreground" />
+                归档
+                <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{reqBuckets.archived.length}</span>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="all">
+              <TimeGroupedList rows={rowsOf(requirements)} now={now} />
+            </TabsContent>
+            {([
+              ["human", reqBuckets.human, "没有等你处理的需求"],
+              ["running", reqBuckets.running, "没有正在推进的需求"],
+              ["archived", reqBuckets.archived, "还没有归档的需求"],
+            ] as Array<[string, Requirement[], string]>).map(([key, list, empty]) => (
+              <TabsContent key={key} value={key}>
+                {list.length > 0 ? (
+                  <TimeGroupedList rows={rowsOf(list)} now={now} />
+                ) : (
+                  <p className="py-10 text-center font-mono text-[11px] text-muted-foreground">{empty}</p>
+                )}
+              </TabsContent>
+            ))}
+          </Tabs>
         )}
       </section>
 
