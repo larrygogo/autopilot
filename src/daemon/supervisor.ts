@@ -27,6 +27,12 @@ import {
 /** daemon 主动请求 respawn 的退出码（参考 sysexits.h EX_TEMPFAIL） */
 export const RESTART_SENTINEL_CODE = 75;
 
+/**
+ * daemon 确定性配置错误的退出码（如 SEC-6 启动安全门拦截）。
+ * 配置不改重启一万次结果也一样，supervisor 看到此码直接停下报人，不进退避循环。
+ */
+export const FATAL_CONFIG_CODE = 2;
+
 export const BASE_BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000];
 export const CRASH_LOOP_WINDOW_MS = 30_000;
 export const CRASH_LOOP_THRESHOLD = 10;
@@ -39,19 +45,21 @@ function nextBackoff(attempt: number): number {
 // 纯函数决策层（便于单测覆盖；runSupervisor 内部直接调用）
 // ──────────────────────────────────────────────
 
-export type ExitClassification = "exit_clean" | "respawn_immediate" | "crash";
+export type ExitClassification = "exit_clean" | "respawn_immediate" | "fatal_config" | "crash";
 
 /**
  * 子进程退出码 → supervisor 动作。
  * - shuttingDown=true：不管 exitCode 都 exit_clean（信号传递完成）
  * - exit 0：optional 退出
  * - exit 75：主动 respawn，不退避
+ * - exit 2：确定性配置错误（SEC-6 等），重启无意义，supervisor 停下报人
  * - 其他：视为崩溃
  */
 export function classifyExit(exitCode: number | null, shuttingDown: boolean): ExitClassification {
   if (shuttingDown) return "exit_clean";
   if (exitCode === 0) return "exit_clean";
   if (exitCode === RESTART_SENTINEL_CODE) return "respawn_immediate";
+  if (exitCode === FATAL_CONFIG_CODE) return "fatal_config";
   return "crash";
 }
 
@@ -138,6 +146,13 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
     if (classification === "respawn_immediate") {
       console.log(`daemon 主动请求 respawn (code=${RESTART_SENTINEL_CODE})，立即重启`);
       continue;
+    }
+    if (classification === "fatal_config") {
+      console.error(
+        `daemon 因配置错误退出 (code=${exitCode})，不自动重启。` +
+        `原因见 runtime/logs/daemon.log，修复配置后用 autopilot daemon start 重新启动`,
+      );
+      break;
     }
 
     // crash 分支：用纯函数算 backoff

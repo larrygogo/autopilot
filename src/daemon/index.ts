@@ -27,7 +27,7 @@ import { initMcpRuntime, disposeMcpRuntime } from "./mcp-runtime";
 import { createDefaultAggregator, type Aggregator } from "../core/now-aggregator";
 import { setNowAggregator } from "./routes-now";
 import type { AutopilotEvent } from "./protocol";
-import { RESTART_SENTINEL_CODE } from "./supervisor";
+import { RESTART_SENTINEL_CODE, FATAL_CONFIG_CODE } from "./supervisor";
 import { writeFileSync, existsSync, unlinkSync } from "fs";
 
 // ──────────────────────────────────────────────
@@ -143,6 +143,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   {
     const tokenState = getApiTokenState();
     if (startupAuthBlocked(host, tokenState.is_set, hasAnyUser(), !!opts.insecureNoAuth)) {
+      // supervisor 模式下子进程 stderr 被 ignore，console.error 用户看不到；
+      // 必须同时写 daemon.log，否则表象只是"无法启动"（2026-06-10 事故）
+      log.error(
+        "SEC-6 启动安全门拦截：host=%s 对外暴露但未设防（无 API token / 无登录用户），daemon 退出 (code=2)。" +
+        "解法：Web 设置页生成 token / 写 runtime/api-token 文件 / 设 AUTOPILOT_API_TOKEN / 切回 127.0.0.1 / --insecure-no-auth",
+        host,
+      );
       console.error(`
 错误：daemon 配置为监听 ${host}（对外暴露），但既未设置 API token、也无登录用户。
 
@@ -155,7 +162,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   4. 切回 127.0.0.1（autopilot daemon stop && autopilot daemon run，或改 config.yaml）
   5. 明知风险仍要继续：autopilot daemon run --insecure-no-auth
 `);
-      process.exit(2);
+      process.exit(FATAL_CONFIG_CODE);
     }
   }
 

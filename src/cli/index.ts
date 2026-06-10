@@ -84,22 +84,37 @@ const daemon = program.command("daemon").description("daemon 生命周期管理"
 
 daemon
   .command("run")
-  .description("前台启动 daemon")
-  .option("-p, --port <port>", "端口", String(DEFAULT_PORT))
-  .option("-H, --host <host>", "主机", DEFAULT_HOST)
-  .action(async (opts: { port: string; host: string }) => {
+  .description("前台启动 daemon（缺省时监听地址由 config.yaml 的 daemon 段决定）")
+  .option("-p, --port <port>", "端口")
+  .option("-H, --host <host>", "主机")
+  .option("--insecure-no-auth", "明知风险：对外暴露且不设鉴权时仍然启动")
+  .action(async (opts: { port?: string; host?: string; insecureNoAuth?: boolean }) => {
     const { startDaemon } = await import("../daemon/index");
-    await startDaemon({ host: opts.host, port: parseInt(opts.port, 10) });
+    // 不给 CLI 默认值：显式参数 > env > config.yaml > 内置默认 的优先级链由
+    // startDaemon 统一裁决；CLI 默认 127.0.0.1 会掩盖 config 的 host 配置，
+    // 导致 daemon run 与 daemon start 监听地址不一致（2026-06-10 事故排查假象）
+    await startDaemon({
+      host: opts.host,
+      port: opts.port ? parseInt(opts.port, 10) : undefined,
+      insecureNoAuth: opts.insecureNoAuth,
+    });
+    // startDaemon resolve ≠ daemon 结束（server/定时器还在跑，退出走它自己的
+    // SIGINT/SIGTERM handler 里的 process.exit）。这里必须挂起，否则文件末尾
+    // parseAsync().then() 的"短命令 50ms 强制退出"兜底会把前台 daemon 杀掉。
+    await new Promise(() => {});
   });
 
 daemon
   .command("supervise")
-  .description("前台启动 supervisor（崩溃自动重启 daemon）")
-  .option("-p, --port <port>", "端口", String(DEFAULT_PORT))
-  .option("-H, --host <host>", "主机", DEFAULT_HOST)
-  .action(async (opts: { port: string; host: string }) => {
+  .description("前台启动 supervisor（崩溃自动重启 daemon；缺省监听地址由 config.yaml 决定）")
+  .option("-p, --port <port>", "端口")
+  .option("-H, --host <host>", "主机")
+  .action(async (opts: { port?: string; host?: string }) => {
     const { runSupervisor } = await import("../daemon/supervisor");
-    await runSupervisor({ host: opts.host, port: parseInt(opts.port, 10) });
+    await runSupervisor({
+      host: opts.host,
+      port: opts.port ? parseInt(opts.port, 10) : undefined,
+    });
   });
 
 daemon

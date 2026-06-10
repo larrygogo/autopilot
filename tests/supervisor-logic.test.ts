@@ -36,9 +36,16 @@ describe("classifyExit", () => {
     expect(classifyExit(RESTART_SENTINEL_CODE, false)).toBe("respawn_immediate");
   });
 
+  it("exit 2 (FATAL_CONFIG) → fatal_config，确定性配置错误不重启", () => {
+    expect(classifyExit(2, false)).toBe("fatal_config");
+  });
+
+  it("shuttingDown=true 时 exit 2 也是 exit_clean", () => {
+    expect(classifyExit(2, true)).toBe("exit_clean");
+  });
+
   it("其他非零退出码 → crash", () => {
     expect(classifyExit(1, false)).toBe("crash");
-    expect(classifyExit(2, false)).toBe("crash");
     expect(classifyExit(139, false)).toBe("crash"); // SIGSEGV
     expect(classifyExit(143, false)).toBe("crash"); // SIGTERM 杀死
     expect(classifyExit(null, false)).toBe("crash"); // 异常退出 exitCode 可能为 null
