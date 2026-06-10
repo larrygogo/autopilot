@@ -530,7 +530,9 @@ export const api = {
   // [WS-RPC] projects.createWithWorkspace — 原子创建项目 + 工作区
   createProjectWithWorkspace: (body: {
     name: string;
-    path: string;
+    remote_url: string;
+    /** 历史兼容；新流程不再传 */
+    path?: string;
     alias?: string;
     description?: string;
   }) =>
@@ -547,7 +549,7 @@ export const api = {
   // [WS-RPC] projects.addWorkspace
   createProjectWorkspace: (
     projectId: string,
-    body: { alias: string; path: string; default_branch?: string; github_owner?: string | null; github_repo?: string | null },
+    body: { alias: string; remote_url: string; default_branch?: string; github_owner?: string | null; github_repo?: string | null },
   ) =>
     requestRpc<{ workspace: Workspace }>("projects.addWorkspace", { id: projectId, ...body }).then((r) => r.workspace),
   // [WS-RPC] workspaces.delete —— 默认拒删 in-use workspace；force=true 才允许级联清空
@@ -586,7 +588,7 @@ export const api = {
   // [WS-RPC] workspaces.update
   updateWorkspace: (id: string, body: Partial<{
     alias: string;
-    path: string;
+    remote_url: string | null;
     default_branch: string;
     github_owner: string | null;
     github_repo: string | null;
@@ -995,7 +997,10 @@ export interface Workspace {
   id: string;
   project_id: string;
   alias: string;
-  path: string;
+  /** 历史字段，新 workspace 可能为 null */
+  path: string | null;
+  /** 远程仓库 URL（主字段） */
+  remote_url: string | null;
   default_branch: string;
   github_owner: string | null;
   github_repo: string | null;
@@ -1003,7 +1008,7 @@ export interface Workspace {
   submodule_path: string | null;
   created_at: number;
   updated_at: number;
-  /** 列表接口运行时计算：本地路径当前是否存在（用于自动无感提示路径失效） */
+  /** 列表接口运行时计算：remote_url 是否已填写 */
   path_exists?: boolean;
 }
 

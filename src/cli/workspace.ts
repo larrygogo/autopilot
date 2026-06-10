@@ -1,6 +1,4 @@
 import type { Command } from "commander";
-import { existsSync } from "fs";
-import { resolve } from "path";
 import { AutopilotClient, DEFAULT_PORT } from "../client/index";
 import { readListenInfo } from "../daemon/pid";
 
@@ -47,24 +45,22 @@ export function registerWorkspaceCommands(program: Command): void {
         return;
       }
       if (workspaces.length === 0) {
-        console.log("暂无 workspace。用 `autopilot workspace create <alias> <path>` 注册一个。");
+        console.log("暂无 workspace。用 `autopilot workspace create <alias> --remote <url>` 注册一个。");
         return;
       }
 
-      const cols = ["id", "alias", "path", "default_branch", "project_id"] as const;
+      const cols = ["id", "alias", "remote_url", "default_branch", "project_id"] as const;
       const widths = cols.map((c) =>
         Math.max(c.length, ...workspaces.map((ws) => String((ws as unknown as Record<string, unknown>)[c] ?? "").length)),
       );
-      // path 列截到 50
-      const truncated = widths.map((w, i) => (cols[i] === "path" ? Math.min(w, 50) : w));
-      console.log(cols.map((c, i) => c.padEnd(truncated[i]!)).join("  "));
-      console.log(truncated.map((w) => "-".repeat(w)).join("  "));
+      console.log(cols.map((c, i) => c.padEnd(widths[i]!)).join("  "));
+      console.log(widths.map((w) => "-".repeat(w)).join("  "));
       for (const c of workspaces) {
         const row = cols
           .map((col, i) => {
             let v = String((c as unknown as Record<string, unknown>)[col] ?? "");
-            if (v.length > truncated[i]!) v = v.slice(0, truncated[i]! - 1) + "…";
-            return v.padEnd(truncated[i]!);
+            if (v.length > widths[i]!) v = v.slice(0, widths[i]! - 1) + "…";
+            return v.padEnd(widths[i]!);
           })
           .join("  ");
         console.log(row);
@@ -73,44 +69,57 @@ export function registerWorkspaceCommands(program: Command): void {
     });
 
   ws
-    .command("create <alias> <path>")
-    .description("注册本地 git 仓库为 workspace（默认分支 / GitHub 远程自动从 path 识别）")
-    .option("-b, --branch <name>", "默认分支（缺省自动探测 origin/HEAD → 当前分支 → main）")
-    .option("-p, --project <id>", "归属 project（默认取第一个 project；--no-project 走全局）")
-    .option("--no-project", "不挂任何 project（workspace 走 project_id=null）")
-    .option("--github <owner/repo>", "GitHub 仓库（可选，用于 submit_pr）")
+    .command("create <alias>")
+    .description("注册远程 git 仓库为 workspace（写 DB 前验证远程可达性）")
+    .option("--remote <url>", "远程仓库 git URL（https://... 或 git@...）")
+    .option("--github <owner/repo>", "GitHub 仓库（简写，等价于 --remote https://github.com/owner/repo.git）")
+    .option("-b, --branch <name>", "默认分支（省略时自动探测远程 HEAD）")
+    .option("-p, --project <id>", "归属 project（默认取第一个）")
+    .option("--no-project", "不挂任何 project")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
     .option("--json", "原始 JSON 输出")
     .action(
       async (
         alias: string,
-        rawPath: string,
-        opts: { branch?: string; project?: string | false; github?: string; port: string; json?: boolean },
+        opts: { remote?: string; github?: string; branch?: string; project?: string | false; port: string; json?: boolean },
       ) => {
         if (!alias.trim()) {
           console.error("错误：alias 不能为空");
           process.exit(2);
         }
-        const abs = resolve(rawPath);
-        if (!existsSync(abs)) {
-          console.error(`错误：path 不存在：${abs}`);
+
+        // 解析 remote_url
+        let remoteUrl: string | undefined;
+        if (opts.remote) {
+          remoteUrl = opts.remote.trim();
+        } else if (opts.github) {
+          const gh = parseGithub(opts.github);
+          if (!gh) {
+            console.error(`错误：--github 格式应为 owner/repo，收到：${opts.github}`);
+            process.exit(2);
+          }
+          remoteUrl = `https://github.com/${gh.owner}/${gh.repo}.git`;
+        }
+
+        if (!remoteUrl) {
+          console.error("错误：必须提供 --remote <url> 或 --github owner/repo");
           process.exit(2);
         }
 
         const client = getClient(opts.port);
         await ensureDaemon(client);
 
-        // 解析 project_id：显式 --no-project → null，--project=<id> 用之，否则取第一个 project
+        // 解析 project_id
         let projectId: string | undefined;
         if (opts.project === false) {
-          projectId = undefined; // 不挂 project
+          projectId = undefined;
         } else if (typeof opts.project === "string" && opts.project) {
           projectId = opts.project;
         } else {
           try {
             const { projects } = await client.listProjects();
             if (projects.length === 0) {
-              console.error("错误：未找到任何 project。请先 `autopilot project create <name>`，或加 --no-project 走全局 workspace。");
+              console.error("错误：未找到 project。请先 `autopilot project create <name>`，或加 --no-project。");
               process.exit(2);
             }
             projectId = projects[0]!.id;
@@ -121,40 +130,72 @@ export function registerWorkspaceCommands(program: Command): void {
           }
         }
 
-        const gh = parseGithub(opts.github);
-        if (opts.github && !gh) {
-          console.error(`错误：--github 格式应为 owner/repo，收到：${opts.github}`);
-          process.exit(2);
-        }
-
         try {
           const body: Parameters<typeof client.createWorkspace>[0] = {
             alias: alias.trim(),
-            path: abs,
+            remote_url: remoteUrl,
           };
-          // 只在显式 -b 时传 branch；缺省让服务端从 git 探测
-          if (opts.branch && opts.branch.trim()) body.default_branch = opts.branch.trim();
+          if (opts.branch?.trim()) body.default_branch = opts.branch.trim();
           if (projectId) body.project_id = projectId;
-          if (gh) {
-            body.github_owner = gh.owner;
-            body.github_repo = gh.repo;
-          }
+
           const { workspace } = await client.createWorkspace(body);
           if (opts.json) {
             console.log(JSON.stringify(workspace, null, 2));
           } else {
-            const autoBranch = !opts.branch || !opts.branch.trim();
-            const autoGithub = !gh && workspace.github_owner && workspace.github_repo;
-            console.log(`已注册 workspace：${workspace.id}  alias=${workspace.alias}  path=${workspace.path}`);
-            console.log(`  default_branch=${workspace.default_branch}${autoBranch ? "  (自动识别)" : ""}`);
+            console.log(`已注册 workspace：${workspace.id}  alias=${workspace.alias}`);
+            console.log(`  remote_url=${workspace.remote_url}`);
+            console.log(`  default_branch=${workspace.default_branch}${!opts.branch ? "  (自动探测)" : ""}`);
             if (workspace.github_owner && workspace.github_repo) {
-              console.log(`  github=${workspace.github_owner}/${workspace.github_repo}${autoGithub ? "  (自动识别)" : ""}`);
+              console.log(`  github=${workspace.github_owner}/${workspace.github_repo}`);
             }
-            console.log(`\n下一步：autopilot req new "需求描述"   # 在 cwd 内会自动推断 workspace`);
-            console.log(`     或：autopilot task start "标题" --repo ${workspace.alias} -r "需求详情" -w dev`);
+            console.log(`\n下一步：autopilot req new "需求描述"`);
           }
         } catch (e: unknown) {
           console.error(`注册失败：${e instanceof Error ? e.message : String(e)}`);
+          process.exit(1);
+        }
+      },
+    );
+
+  ws
+    .command("update <id>")
+    .description("更新 workspace（--remote 更换远程地址；-b 更换默认分支）")
+    .option("--remote <url>", "新的远程仓库 URL（写入前执行 git ls-remote 验证）")
+    .option("-b, --branch <name>", "更换默认分支")
+    .option("--alias <name>", "重命名别名")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .option("--json", "原始 JSON 输出")
+    .action(
+      async (
+        id: string,
+        opts: { remote?: string; branch?: string; alias?: string; port: string; json?: boolean },
+      ) => {
+        if (!opts.remote && !opts.branch && !opts.alias) {
+          console.error("错误：请至少提供一个更新选项（--remote / -b / --alias）");
+          process.exit(2);
+        }
+
+        const client = getClient(opts.port);
+        await ensureDaemon(client);
+
+        try {
+          const body: Record<string, unknown> = {};
+          if (opts.remote) body.remote_url = opts.remote.trim();
+          if (opts.branch) body.default_branch = opts.branch.trim();
+          if (opts.alias) body.alias = opts.alias.trim();
+
+          const { workspace } = await client.updateWorkspace(id, body);
+          if (opts.json) {
+            console.log(JSON.stringify(workspace, null, 2));
+          } else {
+            console.log(`已更新 workspace：${id}`);
+            if (workspace) {
+              console.log(`  alias=${workspace.alias}  default_branch=${workspace.default_branch}`);
+              if (workspace.remote_url) console.log(`  remote_url=${workspace.remote_url}`);
+            }
+          }
+        } catch (e: unknown) {
+          console.error(`更新失败：${e instanceof Error ? e.message : String(e)}`);
           process.exit(1);
         }
       },

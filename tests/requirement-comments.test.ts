@@ -19,6 +19,7 @@ import { up as m009 } from "../src/migrations/009-nullable-codebase";
 import { up as m010 } from "../src/migrations/010-question-suggestions";
 import { up as m021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createWorkspace } from "../src/core/workspaces";
@@ -37,7 +38,7 @@ describe("requirement_comments CRUD", () => {
 
   beforeAll(() => {
     db = new Database(":memory:");
-    [m001, m004, m005, m006, m007, m008, m009, m010, m021, migrate024].forEach((fn) => fn(db));
+    [m001, m004, m005, m006, m007, m008, m009, m010, m021, migrate024, migrate033].forEach((fn) => fn(db));
     _setDbForTest(db);
     createProject({ id: "proj-1", name: "P" });
     createWorkspace({ id: "cb-1", project_id: "proj-1", alias: "a", path: "/tmp/a", default_branch: "main" });
@@ -238,6 +239,7 @@ describe("requirement_comments migration 021 数据迁移", () => {
     const db = new Database(":memory:");
     [m001, m004, m005, m006, m007, m008].forEach((fn) => fn(db));
     migrate024(db);
+    migrate033(db);
     db.run("INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', 'P', 0, 0)");
     db.run("INSERT INTO workspaces (id, project_id, alias, path, default_branch, created_at, updated_at) VALUES ('cb1', 'p1', 'a', '/tmp/a', 'main', 0, 0)");
     db.run("INSERT INTO requirements (id, project_id, workspace_id, title, status, spec_md, created_at, updated_at) VALUES ('req-m2', 'p1', 'cb1', 'T', 'drafting', '', 0, 0)");

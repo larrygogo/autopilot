@@ -23,6 +23,7 @@ import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { checkWorkspaceHealth, parseGithubFromRemote, detectWorkspaceGit, redactRemoteUrl } from "../src/core/workspace-health";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -43,10 +44,11 @@ function runAllMigrations(db: Database): void {
   migrate010(db);
   migrate011(db);
   migrate024(db);
+  migrate033(db);
 }
 
 describe("migration produces workspaces table", () => {
-  it("含约定的 11 个字段", () => {
+  it("含约定的 12 个字段", () => {
     const db = new Database(":memory:");
     runAllMigrations(db);
     const cols = db
@@ -64,6 +66,7 @@ describe("migration produces workspaces table", () => {
       "parent_workspace_id",
       "path",
       "project_id",
+      "remote_url",
       "submodule_path",
       "updated_at",
     ]);

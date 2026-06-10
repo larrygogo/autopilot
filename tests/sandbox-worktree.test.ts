@@ -62,7 +62,7 @@ describe("ensureTaskSandbox git worktree 模式", () => {
 import { ensureTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync } from "fs";
 const cfg = { git: true, branch_prefix: "autopilot/" };
-const codebase = { id: "cb-1", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
+const codebase = { id: "cb-1", remote_url: ${JSON.stringify(codebasePath)}, default_branch: "main" };
 const ws = ensureTaskSandbox("t-wt-1", "wf", cfg, codebase);
 const meta = getTaskWorktreeMeta("t-wt-1");
 console.log(JSON.stringify({ ws, exists: existsSync(ws), hasGit: existsSync(ws + "/.git"), meta }));
@@ -90,7 +90,7 @@ console.log(JSON.stringify({ ws, exists: existsSync(ws), hasGit: existsSync(ws +
 
     const script = `
 import { ensureTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
-const codebase = { id: "cb-1", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
+const codebase = { id: "cb-1", remote_url: ${JSON.stringify(codebasePath)}, default_branch: "main" };
 ensureTaskSandbox("t-wt-2", "wf", { git: true }, codebase);
 console.log(JSON.stringify({ meta: getTaskWorktreeMeta("t-wt-2") }));
 `;
@@ -113,7 +113,7 @@ console.log(JSON.stringify({ meta: getTaskWorktreeMeta("t-wt-2") }));
 import { ensureTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync, readdirSync } from "fs";
 const cfg = { git: true };
-const codebase = { id: "cb-non-git", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
+const codebase = { id: "cb-non-git", remote_url: ${JSON.stringify(codebasePath)}, default_branch: "main" };
 const ws = ensureTaskSandbox("t-wt-3", "wf", cfg, codebase);
 console.log(JSON.stringify({
   exists: existsSync(ws),
@@ -162,7 +162,7 @@ console.log(JSON.stringify({
     const script = `
 import { ensureTaskSandbox, removeTaskWorktree, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync } from "fs";
-const codebase = { id: "cb-1", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
+const codebase = { id: "cb-1", remote_url: ${JSON.stringify(codebasePath)}, default_branch: "main" };
 const ws = ensureTaskSandbox("t-wt-5", "wf", { git: true }, codebase);
 const before = getTaskWorktreeMeta("t-wt-5");
 const removed = removeTaskWorktree("t-wt-5");
@@ -207,7 +207,7 @@ console.log(JSON.stringify({ removed: removeTaskWorktree("t-no-wt") }));
     const script = `
 import { ensureTaskSandbox, deleteTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync } from "fs";
-const codebase = { id: "cb-1", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
+const codebase = { id: "cb-1", remote_url: ${JSON.stringify(codebasePath)}, default_branch: "main" };
 const ws = ensureTaskSandbox("t-wt-6", "wf", { git: true }, codebase);
 const created = getTaskWorktreeMeta("t-wt-6") !== null;
 const deleted = deleteTaskSandbox("t-wt-6");
@@ -238,7 +238,7 @@ import { ensureTaskSandbox, getTaskWorktreeMeta } from "${WORKSPACE_MODULE}";
 import { existsSync } from "fs";
 import { join } from "path";
 const cfg = { git: true, template: "tpl" };
-const codebase = { id: "cb-1", path: ${JSON.stringify(codebasePath)}, default_branch: "main" };
+const codebase = { id: "cb-1", remote_url: ${JSON.stringify(codebasePath)}, default_branch: "main" };
 const ws = ensureTaskSandbox("t-wt-7", "wf-mix", cfg, codebase);
 console.log(JSON.stringify({
   meta: getTaskWorktreeMeta("t-wt-7"),

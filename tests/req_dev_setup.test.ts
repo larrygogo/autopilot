@@ -10,6 +10,7 @@ import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 
@@ -28,6 +29,7 @@ describe("setup_req_dev_task", () => {
     migrate007(sqlite);
     migrate008(sqlite);
     migrate024(sqlite);
+    migrate033(sqlite);
     createProject({ id: "proj-001", name: "test-proj" });
     createWorkspace({
       id: "cb-001",
@@ -88,6 +90,7 @@ describe("setup_req_dev_task 注入 submodules（P5.2）", () => {
     migrate007(sqlite);
     migrate008(sqlite);
     migrate024(sqlite);
+    migrate033(sqlite);
     createProject({ id: "proj-sub", name: "sub-proj" });
   });
 

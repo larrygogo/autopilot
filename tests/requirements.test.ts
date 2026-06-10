@@ -11,6 +11,7 @@ import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
@@ -144,6 +145,7 @@ describe("requirements CRUD + 状态机", () => {
     migrate010(testDb);
     migrate021(testDb);
     migrate024(testDb);
+    migrate033(testDb);
     // 准备关联的 project + codebase 记录
     createProject({ id: "proj-001", name: "test-proj" });
     createWorkspace({ id: "cb-001", project_id: "proj-001", alias: "test", path: "/tmp/x", default_branch: "main" });
@@ -299,6 +301,7 @@ describe("requirements 适配 project + codebase（P1 Task 14）", () => {
     migrate007(testDb);
     migrate008(testDb);
     migrate024(testDb);
+    migrate033(testDb);
   });
 
   afterAll(() => {
@@ -375,6 +378,7 @@ describe("deleteRequirement 级联删除", () => {
     migrate010(testDb);
     migrate021(testDb);
     migrate024(testDb);
+    migrate033(testDb);
   });
 
   afterAll(() => {

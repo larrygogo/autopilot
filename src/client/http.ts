@@ -36,7 +36,10 @@ export interface Workspace {
   id: string;
   project_id: string;
   alias: string;
-  path: string;
+  /** 历史字段，新 workspace 可能为 null */
+  path: string | null;
+  /** 远程仓库 URL（主字段） */
+  remote_url: string | null;
   default_branch: string;
   github_owner: string | null;
   github_repo: string | null;
@@ -293,7 +296,10 @@ export class HttpClient {
 
   async createWorkspace(body: {
     alias: string;
-    path: string;
+    /** 历史兼容；新建流程不再要求 */
+    path?: string | null;
+    /** 远程仓库 URL（新建流程主入口） */
+    remote_url?: string | null;
     default_branch?: string;
     github_owner?: string | null;
     github_repo?: string | null;
@@ -305,7 +311,8 @@ export class HttpClient {
 
   async updateWorkspace(id: string, body: Partial<{
     alias: string;
-    path: string;
+    path: string | null;
+    remote_url: string | null;
     default_branch: string;
     github_owner: string | null;
     github_repo: string | null;

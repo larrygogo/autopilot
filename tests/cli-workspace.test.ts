@@ -51,17 +51,16 @@ describe("autopilot workspace （dogfood-bug21）", () => {
     expect(r.stderr).toContain("daemon");
   });
 
-  it("`workspace create` path 不存在时 exit 2 并报清晰错误（本地校验 short-circuit）", () => {
+  it("`workspace create` 缺少 --remote 或 --github 时 exit 2 并报清晰错误", () => {
     runCli("init");
-    const fakePath = join(tmpdir(), `autopilot-not-exist-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    const r = runCli("workspace", "create", "myrepo", fakePath, "--port", "19999");
+    const r = runCli("workspace", "create", "myrepo", "--port", "19999");
     expect(r.exitCode).toBe(2);
-    expect(r.stderr).toContain("path 不存在");
+    expect(r.stderr).toContain("--remote");
   });
 
   it("`workspace create` alias 为空时 exit 2", () => {
     runCli("init");
-    const r = runCli("workspace", "create", "   ", tmpHome, "--port", "19999");
+    const r = runCli("workspace", "create", "   ", "--remote", "https://github.com/foo/bar.git", "--port", "19999");
     expect(r.exitCode).toBe(2);
     expect(r.stderr).toContain("alias 不能为空");
   });

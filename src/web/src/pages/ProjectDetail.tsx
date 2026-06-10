@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw,
-  FolderOpen, Trash2, Pencil, List, Archive, Loader2, Hand,
+  Trash2, Pencil, List, Archive, Loader2, Hand,
 } from "lucide-react";
 import { api, type Project, type Workspace, type Requirement } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -24,7 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FolderPicker } from "@/components/FolderPicker";
 import { ConfirmDialog } from "@/components/Modal";
 import { cn } from "@/lib/utils";
 
@@ -34,19 +33,13 @@ interface ProjectDetailProps {
 
 interface CbForm {
   alias: string;
-  path: string;
+  remote_url: string;
   default_branch: string;
   github_owner: string;
   github_repo: string;
 }
 
-const EMPTY_CB: CbForm = { alias: "", path: "", default_branch: "main", github_owner: "", github_repo: "" };
-
-/** 取路径最后一段作为文件夹名（兼容 Windows \ 和 POSIX /，忽略结尾分隔符） */
-function folderName(p: string): string {
-  const trimmed = p.trim().replace(/[\\/]+$/, "");
-  return trimmed.split(/[\\/]/).pop() ?? "";
-}
+const EMPTY_CB: CbForm = { alias: "", remote_url: "", default_branch: "main", github_owner: "", github_repo: "" };
 
 
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
@@ -77,10 +70,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [editingCb, setEditingCb] = useState<Workspace | null>(null);
   const [cbForm, setCbForm] = useState<CbForm>(EMPTY_CB);
   const [savingCb, setSavingCb] = useState(false);
-  const [detectingCb, setDetectingCb] = useState(false);
   const [cbDetectHint, setCbDetectHint] = useState<string | null>(null);
-  const [lastDetectedPath, setLastDetectedPath] = useState("");
-  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [deletingCbId, setDeletingCbId] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -212,7 +202,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       setEditingCb(cb);
       setCbForm({
         alias: cb.alias,
-        path: cb.path,
+        remote_url: cb.remote_url ?? "",
         default_branch: cb.default_branch,
         github_owner: cb.github_owner ?? "",
         github_repo: cb.github_repo ?? "",
@@ -221,8 +211,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       setEditingCb(null);
       setCbForm(EMPTY_CB);
     }
-    // 编辑时以已存路径为基线（同路径失焦不重识别、不覆盖已存值）；新建从空开始
-    setLastDetectedPath(cb?.path ?? "");
     setCbDetectHint(null);
     setCbDialogOpen(true);
   };
@@ -234,62 +222,16 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     setCbDetectHint(null);
   };
 
-  /**
-   * 从路径自动识别 git 信息，回填默认分支 / GitHub。
-   * 仅在「路径相对上次识别变化」时触发——换目录就用新仓库的值覆盖（分支/GitHub
-   * 跟随当前目录，不残留上一个仓库）；同一路径重复失焦不重识别，避免覆盖手动微调。
-   */
-  const detectCbFromPath = async (rawPath: string) => {
-    const path = rawPath.trim();
-    if (!path || path === lastDetectedPath) return;
-    const prevBase = folderName(lastDetectedPath);
-    setLastDetectedPath(path);
-    // 别名默认取文件夹名（仅新建）：空、或仍是上个目录的自动名时跟随；用户手填的保留
-    if (!editingCb) {
-      const base = folderName(path);
-      if (base) {
-        setCbForm((f) => ({
-          ...f,
-          alias: !f.alias.trim() || f.alias.trim() === prevBase ? base : f.alias,
-        }));
-      }
-    }
-    setDetectingCb(true);
-    setCbDetectHint(null);
-    try {
-      const info = await api.detectWorkspace(path);
-      if (!info.is_git) {
-        setCbDetectHint("该路径不是 git 仓库，未能自动识别。");
-        return;
-      }
-      // 换了目录 → 用新仓库的值覆盖（识别不到则回退 main / 清空 GitHub）
-      setCbForm((f) => ({
-        ...f,
-        default_branch: info.default_branch ?? "main",
-        github_owner: info.github_owner ?? "",
-        github_repo: info.github_repo ?? "",
-      }));
-      const parts: string[] = [];
-      if (info.default_branch) parts.push(`默认分支 ${info.default_branch}`);
-      if (info.remote_url) parts.push(`远程 ${info.remote_url}`);
-      setCbDetectHint(parts.length ? `已识别：${parts.join("；")}` : "已识别为 git 仓库（无 origin 远程）。");
-    } catch (e: unknown) {
-      setCbDetectHint(null);
-    } finally {
-      setDetectingCb(false);
-    }
-  };
-
   const saveCb = async () => {
     const alias = cbForm.alias.trim();
-    const path = cbForm.path.trim();
+    const remoteUrl = cbForm.remote_url.trim();
     if (!alias) { toast.error("验证失败", "别名不能为空"); return; }
-    if (!path) { toast.error("验证失败", "路径不能为空"); return; }
+    if (!remoteUrl) { toast.error("验证失败", "远程地址不能为空"); return; }
     setSavingCb(true);
     try {
       if (editingCb) {
         await api.updateWorkspace(editingCb.id, {
-          path,
+          remote_url: remoteUrl,
           default_branch: cbForm.default_branch.trim() || "main",
           github_owner: cbForm.github_owner.trim() || null,
           github_repo: cbForm.github_repo.trim() || null,
@@ -298,7 +240,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       } else {
         await api.createProjectWorkspace(projectId, {
           alias,
-          path,
+          remote_url: remoteUrl,
           default_branch: cbForm.default_branch.trim() || "main",
           github_owner: cbForm.github_owner.trim() || null,
           github_repo: cbForm.github_repo.trim() || null,
@@ -474,7 +416,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                 <thead>
                   <tr className="border-b border-border bg-secondary/50 text-left font-mono text-[10px] text-foreground/70">
                     <th className="px-4 py-2.5 font-semibold">别名</th>
-                    <th className="hidden px-4 py-2.5 font-semibold md:table-cell">路径</th>
+                    <th className="hidden px-4 py-2.5 font-semibold md:table-cell">远程地址</th>
                     <th className="hidden px-4 py-2.5 font-semibold sm:table-cell">分支</th>
                     <th className="px-4 py-2.5 font-semibold text-right">操作</th>
                   </tr>
@@ -488,30 +430,22 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                       <td className="px-4 py-2.5 font-mono text-sm font-medium">
                         <div className="flex flex-col gap-0.5 md:gap-0">
                           <span>{cb.alias}</span>
-                          {/* mobile 下路径列被隐藏，把路径附在别名下面，让用户至少能识别 */}
+                          {/* mobile 下远程地址列被隐藏，把地址附在别名下面 */}
                           <span
                             className="block truncate text-[10px] font-normal text-muted-foreground md:hidden"
-                            title={cb.path}
+                            title={cb.remote_url ?? ""}
                           >
-                            {cb.path}
+                            {cb.remote_url ?? <span className="text-orange-500">未填远程地址</span>}
                           </span>
-                          {cb.path_exists === false && (
-                            <span className="text-[10px] font-normal text-destructive md:hidden">路径不存在</span>
-                          )}
                         </div>
                       </td>
-                      <td className="hidden max-w-[240px] px-4 py-2.5 md:table-cell">
+                      <td className="hidden max-w-[320px] px-4 py-2.5 md:table-cell">
                         <span
                           className="block truncate font-mono text-xs text-muted-foreground"
-                          title={cb.path}
+                          title={cb.remote_url ?? ""}
                         >
-                          {cb.path}
+                          {cb.remote_url ?? <span className="text-orange-500">未填远程地址</span>}
                         </span>
-                        {cb.path_exists === false && (
-                          <span className="mt-0.5 block font-mono text-[10px] text-destructive" title="本地路径当前不存在（可能已被删除或移动）">
-                            ⚠ 路径不存在
-                          </span>
-                        )}
                       </td>
                       <td className="hidden px-4 py-2.5 sm:table-cell">
                         <Badge variant="secondary">{cb.default_branch}</Badge>
@@ -773,83 +707,51 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <DialogDescription>
               {editingCb
                 ? `修改工作区「${editingCb.alias}」的配置。`
-                : `将一个 Git 仓库目录关联到项目「${project?.name}」。`}
+                : `将一个远程 Git 仓库关联到项目「${project?.name}」。`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="cb-path">
-                路径 <span className="text-destructive">*</span>
-              </Label>
-              <div className="flex items-center gap-2">
+            {/* 别名 */}
+            {!editingCb && (
+              <div className="space-y-1.5">
+                <Label htmlFor="cb-alias">
+                  别名 <span className="text-destructive">*</span>
+                </Label>
                 <Input
-                  id="cb-path"
-                  placeholder="例如：/home/user/projects/frontend"
-                  value={cbForm.path}
-                  onChange={(e) => setCbForm((f) => ({ ...f, path: e.target.value }))}
-                  onBlur={(e) => void detectCbFromPath(e.target.value)}
-                  className="flex-1"
+                  id="cb-alias"
+                  placeholder="例如：frontend"
+                  value={cbForm.alias}
+                  onChange={(e) => setCbForm((f) => ({ ...f, alias: e.target.value }))}
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={() => setFolderPickerOpen(true)}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                  浏览…
-                </Button>
-              </div>
-            </div>
-            {cbForm.path.trim() && (
-              <div className="space-y-1 rounded-md border border-border bg-muted/30 px-3 py-2">
-                {detectingCb ? (
-                  <p className="text-xs text-muted-foreground">正在从 Git 识别…</p>
-                ) : (
-                  <>
-                    <p className="text-xs text-muted-foreground">
-                      将采用：别名 <span className="font-mono text-foreground">{cbForm.alias || folderName(cbForm.path)}</span>
-                      {" · 默认分支 "}
-                      <span className="font-mono text-foreground">{cbForm.default_branch || "main"}</span>
-                      {cbForm.github_owner && cbForm.github_repo && (
-                        <>
-                          {" · GitHub "}
-                          <span className="font-mono text-foreground">{cbForm.github_owner}/{cbForm.github_repo}</span>
-                        </>
-                      )}
-                    </p>
-                    {cbDetectHint && (
-                      <p className="text-[11px] text-muted-foreground/80">{cbDetectHint}</p>
-                    )}
-                    {editingCb && (
-                      <p className="text-[11px] text-muted-foreground/80">别名创建后不可修改；分支 / GitHub 随路径自动识别。</p>
-                    )}
-                  </>
-                )}
               </div>
             )}
+            {/* 远程地址 */}
+            <div className="space-y-1.5">
+              <Label htmlFor="cb-remote">
+                远程仓库地址 <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="cb-remote"
+                placeholder="https://github.com/owner/repo.git 或 git@github.com:owner/repo.git"
+                value={cbForm.remote_url}
+                onChange={(e) => setCbForm((f) => ({ ...f, remote_url: e.target.value }))}
+              />
+              {cbDetectHint && (
+                <p className="text-xs text-muted-foreground mt-1">{cbDetectHint}</p>
+              )}
+              <p className="text-[11px] text-muted-foreground/80">
+                写入前会执行 git ls-remote 验证远程可达性；默认分支将自动探测。
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeCbDialog} disabled={savingCb}>取消</Button>
-            <Button onClick={() => void saveCb()} disabled={savingCb || !cbForm.path.trim()}>
+            <Button onClick={() => void saveCb()} disabled={savingCb || !cbForm.remote_url.trim()}>
               {savingCb ? (editingCb ? "保存中…" : "添加中…") : (editingCb ? "保存" : "添加")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* 文件夹选择器 */}
-      <FolderPicker
-        open={folderPickerOpen}
-        initialPath={cbForm.path || undefined}
-        onSelect={(path) => {
-          setCbForm((f) => ({ ...f, path }));
-          setFolderPickerOpen(false);
-          void detectCbFromPath(path);
-        }}
-        onCancel={() => setFolderPickerOpen(false)}
-      />
     </div>
   );
 }

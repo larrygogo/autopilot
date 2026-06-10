@@ -136,7 +136,7 @@ export function setup_req_dev_task(args: ReqDevSetupArgs): Record<string, unknow
   const submodules = listSubmodules(workspaceArg).map((sm): SubmoduleInfo => ({
     id: sm.id,
     alias: sm.alias,
-    path: sm.path,
+    path: sm.path ?? "",
     submodule_path: sm.submodule_path ?? "",
     default_branch: sm.default_branch,
     github_owner: sm.github_owner ?? "",

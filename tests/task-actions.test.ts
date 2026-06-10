@@ -19,6 +19,7 @@ import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate028 } from "../src/migrations/028-requirement-status-reason";
 import { up as migrate029 } from "../src/migrations/029-requirement-status-before-terminal";
 import { up as migrate030 } from "../src/migrations/030-requirement-status-logs";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest, createTask, getTask } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createWorkspace } from "../src/core/workspaces";
@@ -38,7 +39,7 @@ beforeEach(() => {
   mkdirSync(tmpHome, { recursive: true });
   process.env.AUTOPILOT_HOME = tmpHome;
   db = new Database(":memory:");
-  for (const m of [migrate001, migrate002, migrate004, migrate005, migrate006, migrate007, migrate008, migrate009, migrate010, migrate018, migrate019, migrate021, migrate024, migrate028, migrate029, migrate030]) {
+  for (const m of [migrate001, migrate002, migrate004, migrate005, migrate006, migrate007, migrate008, migrate009, migrate010, migrate018, migrate019, migrate021, migrate024, migrate028, migrate029, migrate030, migrate033]) {
     m(db);
   }
   _setDbForTest(db);

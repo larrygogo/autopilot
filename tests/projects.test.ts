@@ -14,6 +14,7 @@ import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
 import { up as migrate019 } from "../src/migrations/019-task-requirement-id";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import {
   createProject, getProjectById, listProjects,
   updateProject, deleteProject, nextProjectId,
@@ -42,6 +43,7 @@ describe("projects CRUD", () => {
     migrate019(sqlite); // tasks.requirement_id：deleteProject 级联强删任务时按此列收集
     migrate021(sqlite);
     migrate024(sqlite);
+    migrate033(sqlite);
   });
 
   afterAll(() => {
