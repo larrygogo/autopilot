@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, Hand, Search, X, List, Archive, AlertCircle, CheckCircle2, XCircle, Clock, FileText } from "lucide-react";
+import { Loader2, Hand, Search, X, List, Archive } from "lucide-react";
 import { api, type Requirement } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
@@ -8,20 +8,11 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PageHero } from "@/components/PageHero";
 import { cn } from "@/lib/utils";
-
-interface Task {
-  id: string;
-  title: string;
-  workflow: string;
-  status: string;
-  requirement_id?: string | null;
-  requirement?: string;
-  created_at: string;
-  updated_at: string;
-  started_at?: string | null;
-  pr_url?: string | null;
-  dangling?: boolean;
-}
+import { tsToMs } from "@/lib/pipeline-time";
+import {
+  TimeGroupedList, RequirementRow, TaskRow,
+  type PipelineTask, type TimedRow,
+} from "@/components/PipelineList";
 
 /**
  * 流水线 — 一条工作从「需求」到「任务」的全生命周期全景视图。
@@ -32,109 +23,9 @@ interface Task {
  *  - 运行中：调查中(需求) + 进行中/待执行(任务)（AI 自动推进）
  *  - 归档：已完成/已取消
  * Now 仍独立留给"需要你拍板"的决策收件箱，本页是"所有在途工作"的全景。
+ *
+ * 卡片 / 时间分组件在 components/PipelineList.tsx（与项目详情页共用）。
  */
-
-// 卡片状态色调：头像图标色 + 状态点 bg
-const TONE = {
-  accent: { text: "text-accent", dot: "bg-accent" },
-  warning: { text: "text-warning", dot: "bg-warning" },
-  destructive: { text: "text-destructive", dot: "bg-destructive" },
-  success: { text: "text-success", dot: "bg-success" },
-  info: { text: "text-info", dot: "bg-info" },
-  muted: { text: "text-muted-foreground", dot: "bg-muted-foreground" },
-} as const;
-type Tone = keyof typeof TONE;
-
-function taskMeta(status: string): { Icon: typeof Loader2; tone: Tone; label: string } {
-  if (status.startsWith("running_")) return { Icon: Loader2, tone: "accent", label: "运行中" };
-  if (status.startsWith("awaiting_")) return { Icon: Hand, tone: "warning", label: "等待人工" };
-  if (status === "failed" || status.startsWith("failed_")) return { Icon: AlertCircle, tone: "destructive", label: "失败" };
-  if (status.startsWith("pending_")) return { Icon: Clock, tone: "muted", label: "待执行" };
-  if (status === "done") return { Icon: CheckCircle2, tone: "success", label: "已完成" };
-  return { Icon: XCircle, tone: "muted", label: "已取消" };
-}
-function reqMeta(status: string): { Icon: typeof Loader2; tone: Tone; label: string } {
-  if (status === "queued") return { Icon: Clock, tone: "accent", label: "待执行" };
-  if (status === "awaiting_approval") return { Icon: Hand, tone: "warning", label: "待审批" };
-  if (status === "ready") return { Icon: Hand, tone: "warning", label: "待入队" };
-  if (status === "clarifying") return { Icon: Search, tone: "info", label: "调查中" };
-  if (status === "drafting") return { Icon: FileText, tone: "muted", label: "草稿" };
-  return { Icon: FileText, tone: "muted", label: status };
-}
-
-/** 相对时间（中文）：刚刚 / N分钟前 / N小时前 / N天前 / N周前 / N个月前 */
-function relTime(ms: number, now: number): string {
-  const d = Math.max(0, now - ms);
-  const min = Math.floor(d / 60_000);
-  if (min < 1) return "刚刚";
-  if (min < 60) return `${min}分钟前`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h}小时前`;
-  const day = Math.floor(h / 24);
-  if (day < 7) return `${day}天前`;
-  const w = Math.floor(day / 7);
-  if (w < 5) return `${w}周前`;
-  return `${Math.floor(day / 30)}个月前`;
-}
-
-// ──────────── 列表内按时间分组（今天 / 昨天 / 一周内 / 一月内 / 更早） ────────────
-type TimeBucket = "today" | "yesterday" | "week" | "month" | "earlier";
-const BUCKET_ORDER: TimeBucket[] = ["today", "yesterday", "week", "month", "earlier"];
-const BUCKET_LABEL: Record<TimeBucket, string> = {
-  today: "今天", yesterday: "昨天", week: "一周内", month: "一月内", earlier: "更早",
-};
-
-/** 归一化到 ms：需求的 ts 是数字 epoch，任务的是 ISO 字符串；秒级时间戳自动 *1000 */
-function tsToMs(ts: string | number | null | undefined): number {
-  if (ts == null) return 0;
-  const n = typeof ts === "number" ? ts : Date.parse(ts);
-  if (!Number.isFinite(n)) return 0;
-  return n < 1e12 ? n * 1000 : n;
-}
-
-function bucketOf(ms: number, now: number): TimeBucket {
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const startToday = start.getTime();
-  const DAY = 86_400_000;
-  if (ms >= startToday) return "today";
-  if (ms >= startToday - DAY) return "yesterday";
-  if (ms >= startToday - 6 * DAY) return "week";
-  if (ms >= startToday - 29 * DAY) return "month";
-  return "earlier";
-}
-
-interface TimedRow { key: string; ts: number; node: ReactNode; }
-
-/** 把行列表分桶渲染（带时段小标题）。入参应已按时间倒序。 */
-function TimeGroupedList({ rows, now }: { rows: TimedRow[]; now: number }) {
-  const byBucket = new Map<TimeBucket, TimedRow[]>();
-  for (const r of rows) {
-    const b = bucketOf(r.ts, now);
-    const arr = byBucket.get(b);
-    if (arr) arr.push(r);
-    else byBucket.set(b, [r]);
-  }
-  const sections = BUCKET_ORDER.filter((b) => byBucket.has(b));
-  return (
-    <div className="space-y-4">
-      {sections.map((b) => {
-        const items = byBucket.get(b)!;
-        return (
-          <div key={b}>
-            <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-              {BUCKET_LABEL[b]}
-              <span className="font-mono text-[10px] text-muted-foreground/60">{items.length}</span>
-            </p>
-            <ul className="space-y-2">
-              {items.map((r) => <li key={r.key}>{r.node}</li>)}
-            </ul>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 interface PipelineTab {
   key: string;
@@ -142,12 +33,12 @@ interface PipelineTab {
   icon: typeof Loader2;
   iconClass: string;
   reqs: Requirement[];
-  tasks: Task[];
+  tasks: PipelineTask[];
 }
 
 export function Tasks() {
   const { subscribe } = useWebSocket();
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<PipelineTask[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -161,7 +52,7 @@ export function Tasks() {
     setError(null);
     Promise.all([api.listTasks(), api.listRequirements()])
       .then(([tlist, rlist]) => {
-        setTasks(tlist as Task[]);
+        setTasks(tlist as PipelineTask[]);
         setRequirements(rlist as Requirement[]);
       })
       .catch((e: unknown) => setError((e as Error)?.message ?? String(e)))
@@ -219,9 +110,9 @@ export function Tasks() {
       if (s === "queued") reqRunning.push(r); // 已审批、即将起任务
       else reqHuman.push(r); // drafting/clarifying/ready/awaiting_approval/failed 等 → 球在你这
     }
-    const taskHuman: Task[] = [];
-    const taskRunning: Task[] = [];
-    const archived: Task[] = [];
+    const taskHuman: PipelineTask[] = [];
+    const taskRunning: PipelineTask[] = [];
+    const archived: PipelineTask[] = [];
     for (const t of filteredTasks) {
       const s = t.status;
       if (s.startsWith("awaiting_") || s === "failed" || s.startsWith("failed_")) taskHuman.push(t);
@@ -404,93 +295,3 @@ export function Tasks() {
   );
 }
 
-/** Claude Code 风卡片外壳：头像图标 + 标题 + 相对时间 + 状态行 + 可选预览 */
-function RowCard({
-  to, Icon, tone, spin, title, time, statusLabel, secondary, preview,
-}: {
-  to: string;
-  Icon: typeof Loader2;
-  tone: Tone;
-  spin?: boolean;
-  title: string;
-  time: string;
-  statusLabel: string;
-  secondary?: string;
-  preview?: string | null;
-}) {
-  const t = TONE[tone];
-  return (
-    <Link
-      to={to}
-      className="block rounded-xl border border-border bg-card px-4 py-3.5 transition-colors hover:border-accent"
-    >
-      <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-          <Icon className={cn("h-[18px] w-[18px]", t.text, spin && "animate-spin")} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start gap-2">
-            <p className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-snug">{title}</p>
-            <span className="mt-0.5 shrink-0 text-[11px] text-muted-foreground">{time}</span>
-          </div>
-          <div className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground">
-            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", t.dot)} />
-            <span className={cn("shrink-0 font-medium", t.text)}>{statusLabel}</span>
-            {secondary && <span className="truncate font-mono text-[11px]">· {secondary}</span>}
-          </div>
-          {preview && (
-            <div className="mt-2.5 rounded-lg bg-muted/50 px-3 py-2">
-              <p className="line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">
-                {preview}
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-    </Link>
-  );
-}
-
-function RequirementRow({ req, now }: { req: Requirement; now: number }) {
-  const { Icon, tone, label } = reqMeta(req.status);
-  const secondary = [req.id, req.task_id ? `${req.task_id} →` : null].filter(Boolean).join(" · ");
-  return (
-    <RowCard
-      to={`/requirements/${req.id}`}
-      Icon={Icon}
-      tone={tone}
-      title={req.title}
-      time={relTime(tsToMs(req.updated_at), now)}
-      statusLabel={label}
-      secondary={secondary}
-    />
-  );
-}
-
-function TaskRow({ task, now }: { task: Task; now: number }) {
-  const { Icon, tone, label } = taskMeta(task.status);
-  const phase = parsePhase(task.status);
-  const secondary = [
-    task.workflow,
-    phase || null,
-    task.requirement_id ? `← ${task.requirement_id}` : null,
-  ].filter(Boolean).join(" · ");
-  return (
-    <RowCard
-      to={`/tasks/${task.id}`}
-      Icon={Icon}
-      tone={tone}
-      spin={task.status.startsWith("running_")}
-      title={task.title}
-      time={relTime(tsToMs(task.updated_at), now)}
-      statusLabel={label}
-      secondary={secondary}
-      preview={task.requirement ?? null}
-    />
-  );
-}
-
-function parsePhase(status: string): string | null {
-  const m = status.match(/^(?:running|pending|awaiting|failed)_(.+)$/);
-  return m ? m[1] : null;
-}
