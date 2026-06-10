@@ -357,7 +357,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
       )}
 
       {/* 沙盒产物（Agent 调用已内联到执行时间线各轮中） */}
-      <TaskDetailTabs taskId={taskId} />
+      <TaskDetailTabs taskId={taskId} taskStatus={task.status} />
 
       {/* 基本信息 — metadata block 风（低频查看，沉到执行视图之后） */}
       <Card className="mb-4 mt-4">
@@ -528,14 +528,14 @@ function findPhaseStartTime(
 
 /** 辅助视图：沙盒产物浏览。阶段/实时/状态日志由 TaskRunView（线性时间线）吸收，
  *  Agent 调用已内联到时间线各轮 section 中（完整 prompt/结果），不再单独成 tab。 */
-function TaskDetailTabs({ taskId }: { taskId: string }) {
+function TaskDetailTabs({ taskId, taskStatus }: { taskId: string; taskStatus?: string }) {
   return (
     <div>
       <div className="mb-3 flex items-center gap-1.5 text-sm font-medium">
         <FolderTree className="h-3.5 w-3.5" />
         沙盒
       </div>
-      <SandboxBrowser taskId={taskId} />
+      <SandboxBrowser taskId={taskId} taskStatus={taskStatus} />
     </div>
   );
 }

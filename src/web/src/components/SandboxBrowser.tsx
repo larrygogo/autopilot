@@ -18,6 +18,9 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   taskId: string;
+  /** task.status：非终态时在产物列表头显示「运行中阶段完成后才归档」说明，
+   *  消除「开发在跑为什么没有 02-develop」的困惑（产物目录 = 已完成阶段的归档） */
+  taskStatus?: string;
 }
 
 interface FileView {
@@ -35,8 +38,9 @@ function formatSize(bytes?: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-export function SandboxBrowser({ taskId }: Props) {
+export function SandboxBrowser({ taskId, taskStatus }: Props) {
   const toast = useToast();
+  const taskActive = !!taskStatus && (taskStatus.startsWith("running_") || taskStatus.startsWith("pending_") || taskStatus.startsWith("awaiting_") || taskStatus.startsWith("waiting_"));
   const [cwd, setCwd] = useState<string>("");
   const [entries, setEntries] = useState<SandboxEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -137,6 +141,14 @@ export function SandboxBrowser({ taskId }: Props) {
       </div>
 
       <div className="p-4">
+        {/* 运行期说明：产物目录 = 已完成阶段的归档，正在跑的阶段（如 02-develop）
+            要等该阶段结束才出现在这里 —— 实时输出在上方执行时间线 */}
+        {taskActive && (
+          <p className="mb-3 rounded-lg bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            任务执行中：这里只列<span className="text-foreground/80">已完成阶段</span>的归档产物（日志 / 报告），
+            正在运行的阶段要等它结束后才会出现。实时输出请看上方执行时间线对应轮次。
+          </p>
+        )}
         {/* 面包屑 */}
         <div className="scrollbar-thin mb-3 flex flex-nowrap items-center gap-1 overflow-x-auto border border-border bg-muted/40 px-2 py-1.5 font-mono text-xs">
           <button
