@@ -1,16 +1,17 @@
-// GitHub Actions job 形态的任务执行视图：左 phase 导航 + 右折叠日志 section 流。
+// 线性执行时间线形态的任务执行视图：左导航 + 右侧按实际执行顺序铺开的折叠 section 流。
+// 每轮 phase 执行（含驳回重做）是独立 section 往下追加；日志按轮切片；agent 调用内联。
 // 数据全部由 TaskDetail 注入（task / workflowDetail / phaseRunStatuses / events / stats / logs）。
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
-import { api, type TaskPhaseEvent } from "@/hooks/useApi";
+import { api, type TaskPhaseEvent, type AgentCallSummary } from "@/hooks/useApi";
 import { LogTimeline } from "@/components/LogTimeline";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
 import {
   createExpandState, applyStatusTransitions, toggleManual, isExpanded,
-  resolveLogPhase, phaseRounds, fmtDuration,
-  ALL_LEVELS, LEVEL_TEXT, type Level, type PhaseRunState,
+  resolveLogPhase, fmtDuration, buildTimeline, assignAgentCalls,
+  ALL_LEVELS, LEVEL_TEXT, type Level, type PhaseRunState, type ExecutionRun,
 } from "@/lib/run-view-logic";
 import { RunPhaseNavSidebar, type NavEntry, type PhaseVisualState } from "@/components/RunPhaseNav";
 import { RunPhaseSection } from "@/components/RunPhaseSection";
@@ -77,14 +78,47 @@ export function TaskRunView(props: TaskRunViewProps) {
   const stateOf = (name: string): PhaseRunState =>
     (KNOWN_STATES.has(phaseRunStatuses[name] ?? "") ? (phaseRunStatuses[name] as PhaseRunState) : "idle");
 
-  // 展开状态机（spec B5）
+  // 线性执行时间线：每轮 phase 执行独立成块（驳回重做往下追加）；pending = 未执行占位。
+  // 每个 phase 最后一轮的 state 用 phaseRunStatuses 实时态覆盖（awaiting/running 即时反映）。
+  const { runs, pending } = useMemo(
+    () => buildTimeline(phaseEvents, flat.map((p) => p.name)),
+    [phaseEvents, flat],
+  );
+  const runsLive = useMemo<ExecutionRun[]>(() => {
+    const lastByPhase = new Map<string, string>();
+    for (const r of runs) lastByPhase.set(r.phase, r.key);
+    return runs.map((r) => {
+      if (lastByPhase.get(r.phase) !== r.key) return r;
+      const cur = phaseRunStatuses[r.phase];
+      if (cur === "running" || cur === "awaiting" || cur === "failed" || cur === "done") {
+        return r.state === cur ? r : { ...r, state: cur as ExecutionRun["state"] };
+      }
+      return r;
+    });
+  }, [runs, phaseRunStatuses]);
+
+  // agent 调用摘要：拉一次 + 任务活跃期轮询，按时间窗分发到各轮
+  const [agentCalls, setAgentCalls] = useState<AgentCallSummary[]>([]);
+  const isTaskActive = taskStatus.startsWith("running_") || taskStatus.startsWith("pending_") || taskStatus.startsWith("awaiting_");
+  useEffect(() => {
+    let stop = false;
+    const load = () => api.listAgentCalls(taskId).then((c) => { if (!stop) setAgentCalls(c); }).catch(() => { /* 拉不到不阻塞 */ });
+    void load();
+    if (!isTaskActive) return () => { stop = true; };
+    const t = setInterval(load, 8000);
+    return () => { stop = true; clearInterval(t); };
+  }, [taskId, isTaskActive]);
+  const callsByRun = useMemo(() => assignAgentCalls(agentCalls, runsLive), [agentCalls, runsLive]);
+
+  // 展开状态机（spec B5；key = run.key / pending-<phase>）
   const [expand, setExpand] = useState(createExpandState);
   useEffect(() => {
     const statuses: Record<string, PhaseRunState> = {};
-    for (const p of flat) statuses[p.name] = stateOf(p.name);
+    for (const r of runsLive) statuses[r.key] = r.state;
+    for (const p of pending) statuses[`pending-${p}`] = "idle";
     setExpand((prev) => applyStatusTransitions(prev, statuses));
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [phaseRunStatuses, flat]);
+  }, [runsLive, pending]);
 
   // WS 增量分发（per-phase 缓冲；phase 离开 running 时清空——轮询全量已含其内容）
   const [liveByPhase, setLiveByPhase] = useState<Record<string, string[]>>({});
@@ -132,25 +166,18 @@ export function TaskRunView(props: TaskRunViewProps) {
     return () => clearInterval(t);
   }, [anyTicking]);
 
-  // 耗时文案（events 的 ts 兼容秒级/ms 级）
-  const toMs = (n: number) => (n < 1e12 ? n * 1000 : n);
-  const durationOf = (name: string): string => {
-    const evs = phaseEvents.filter((e) => e.phase === name);
-    const last = evs[evs.length - 1];
-    if (!last) return "—";
-    const startMs = toMs(last.started_at);
-    const endMs = last.ended_at ? toMs(last.ended_at) : null;
-    const st = stateOf(name);
-    if (st === "running") {
-      const base = fmtDuration(Date.now() - startMs);
-      const p50 = phaseStats?.[name]?.p50_ms;
+  // 每轮耗时文案
+  const durationOfRun = (r: ExecutionRun): string => {
+    if (r.state === "running") {
+      const base = fmtDuration(Date.now() - r.startedMs);
+      const p50 = phaseStats?.[r.phase]?.p50_ms;
       return p50 ? `${base} · 常约${fmtDuration(p50)}` : base;
     }
-    if (st === "awaiting") {
-      const ran = endMs ? fmtDuration(endMs - startMs) : "—";
-      return `${ran} · 已等 ${fmtDuration(Date.now() - (endMs ?? startMs))}`;
+    if (r.state === "awaiting") {
+      const ran = r.endedMs ? fmtDuration(r.endedMs - r.startedMs) : "—";
+      return `${ran} · 已等 ${fmtDuration(Date.now() - (r.endedMs ?? r.startedMs))}`;
     }
-    if (endMs) return fmtDuration(endMs - startMs);
+    if (r.endedMs) return fmtDuration(r.endedMs - r.startedMs);
     return "—";
   };
 
@@ -166,27 +193,30 @@ export function TaskRunView(props: TaskRunViewProps) {
     }
   };
 
-  // 导航 entries（并行组带 header）
+  // 导航 entries：与右侧线性时间线一一对应（每轮一项 + 未执行占位）
   const entries = useMemo<NavEntry[]>(() => {
     const out: NavEntry[] = [];
-    let lastGroup: string | undefined;
-    for (const p of flat) {
-      if (p.group && p.group !== lastGroup) out.push({ kind: "group", header: { group: p.group, label: p.groupLabel } });
-      lastGroup = p.group;
+    for (const r of runsLive) {
+      const base = phaseLabelOf(r.phase);
       out.push({
         kind: "phase",
         item: {
-          name: p.name,
-          label: p.label,
-          state: stateOf(p.name) as PhaseVisualState,
-          durationText: durationOf(p.name),
-          group: p.group,
+          name: r.key,
+          label: r.totalAttempts > 1 ? `${base} · 第${r.attempt}轮` : base,
+          state: r.state as PhaseVisualState,
+          durationText: durationOfRun(r),
         },
+      });
+    }
+    for (const p of pending) {
+      out.push({
+        kind: "phase",
+        item: { name: `pending-${p}`, label: phaseLabelOf(p), state: "idle" as PhaseVisualState, durationText: "—" },
       });
     }
     return out;
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [flat, phaseRunStatuses, phaseEvents, phaseStats, anyTicking ? Date.now() : 0]);
+  }, [runsLive, pending, phaseStats, anyTicking ? Date.now() : 0]);
 
   // 点击导航：展开 + 滚动定位；scroll-spy 跟随视口
   const [activePhase, setActivePhase] = useState<string | null>(null);
@@ -224,49 +254,56 @@ export function TaskRunView(props: TaskRunViewProps) {
     return () => obs.disconnect();
   }, [entries.length]);
 
-  const renderSection = (p: FlatPhase) => (
-    <div key={p.name} ref={(el) => { sectionRefs.current[p.name] = el; }} data-phase={p.name}>
+  // section 流：线性时间线 —— 每轮执行按发生顺序往下排，未执行 phase 灰色占位垫底
+  const labelOfPhase = (name: string): string | undefined => flat.find((p) => p.name === name)?.label;
+
+  const renderRun = (r: ExecutionRun) => (
+    <div key={r.key} ref={(el) => { sectionRefs.current[r.key] = el; }} data-phase={r.key}>
       <RunPhaseSection
         taskId={taskId}
-        name={p.name}
-        label={p.label}
-        runState={stateOf(p.name) as PhaseVisualState}
-        rounds={phaseRounds(phaseEvents, p.name)}
-        durationText={durationOf(p.name)}
-        expanded={isExpanded(expand, p.name)}
-        onToggle={() => setExpand((prev) => toggleManual(prev, p.name))}
-        onInfo={() => onInfoPhase(p.name)}
-        liveLines={liveByPhase[p.name] ?? []}
+        name={r.phase}
+        label={labelOfPhase(r.phase)}
+        runState={r.state as PhaseVisualState}
+        attempt={r.attempt}
+        totalAttempts={r.totalAttempts}
+        durationText={durationOfRun(r)}
+        windowStartMs={r.startedMs}
+        windowEndMs={r.endedMs}
+        agentCalls={callsByRun[r.key]}
+        expanded={isExpanded(expand, r.key)}
+        onToggle={() => setExpand((prev) => toggleManual(prev, r.key))}
+        onInfo={() => onInfoPhase(r.phase)}
+        liveLines={r.state === "running" ? liveByPhase[r.phase] ?? [] : []}
         filterQuery={query}
         filterLevels={levels}
-        errorNote={stateOf(p.name) === "failed" ? errorNote : undefined}
-        onRetry={stateOf(p.name) === "failed" ? retryPhase : undefined}
+        errorNote={r.state === "failed" ? errorNote : undefined}
+        onRetry={r.state === "failed" ? retryPhase : undefined}
       />
     </div>
   );
 
-  // section 流：按 flat 顺序，相邻同组包浅容器
-  const sectionFlow: ReactNode[] = [];
-  for (let i = 0; i < flat.length; ) {
-    const p = flat[i];
-    if (p.group) {
-      const groupItems: FlatPhase[] = [];
-      const g = p.group;
-      while (i < flat.length && flat[i].group === g) {
-        groupItems.push(flat[i]);
-        i += 1;
-      }
-      sectionFlow.push(
-        <div key={`grp-${g}`} className="space-y-2 rounded-xl border border-border bg-muted/20 p-2">
-          <p className="px-1 font-mono text-[10px] text-muted-foreground">{groupItems[0].groupLabel ?? g} · PARALLEL</p>
-          {groupItems.map(renderSection)}
-        </div>,
-      );
-    } else {
-      sectionFlow.push(renderSection(p));
-      i += 1;
-    }
-  }
+  const renderPending = (name: string) => (
+    <div key={`pending-${name}`} ref={(el) => { sectionRefs.current[`pending-${name}`] = el; }} data-phase={`pending-${name}`}>
+      <RunPhaseSection
+        taskId={taskId}
+        name={name}
+        label={labelOfPhase(name)}
+        runState={"idle" as PhaseVisualState}
+        durationText="—"
+        expanded={isExpanded(expand, `pending-${name}`)}
+        onToggle={() => setExpand((prev) => toggleManual(prev, `pending-${name}`))}
+        onInfo={() => onInfoPhase(name)}
+        liveLines={[]}
+        filterQuery={query}
+        filterLevels={levels}
+      />
+    </div>
+  );
+
+  const sectionFlow: ReactNode[] = [
+    ...runsLive.map(renderRun),
+    ...pending.map(renderPending),
+  ];
 
   return (
     <div className="@container mb-4">

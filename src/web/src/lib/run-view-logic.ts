@@ -158,3 +158,116 @@ export function taskTriggerZh(trigger: string, labelOf: (phase: string) => strin
   if (m) return `${labelOf(m[1])}人工通过`;
   return trigger;
 }
+
+// ── 线性执行时间线（每轮执行独立成块，驳回重试往下追加而非原地 ×N）────────
+
+export interface PhaseEventLike {
+  id: number;
+  phase: string;
+  status: "running" | "done" | "awaiting" | "failed";
+  started_at: number;
+  ended_at: number | null;
+}
+
+export interface ExecutionRun {
+  /** 唯一 key（event id） */
+  key: string;
+  phase: string;
+  /** 同 phase 第几轮（1-based） */
+  attempt: number;
+  /** 同 phase 总轮数 */
+  totalAttempts: number;
+  state: "running" | "done" | "awaiting" | "failed";
+  startedMs: number;
+  endedMs: number | null;
+}
+
+const toMs = (n: number) => (n < 1e12 ? n * 1000 : n);
+
+/**
+ * task_phase_events → 线性执行时间线。runs 按实际开始时间排序（驳回重做按发生顺序
+ * 往下追加）；pending = 从未执行过的 phase 名（按工作流定义顺序，渲染为未开始占位）。
+ */
+export function buildTimeline(
+  events: PhaseEventLike[],
+  phaseOrder: string[],
+): { runs: ExecutionRun[]; pending: string[] } {
+  const sorted = [...events].sort((a, b) => toMs(a.started_at) - toMs(b.started_at) || a.id - b.id);
+  const counts = new Map<string, number>();
+  for (const e of sorted) counts.set(e.phase, (counts.get(e.phase) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  const runs: ExecutionRun[] = sorted.map((e) => {
+    const attempt = (seen.get(e.phase) ?? 0) + 1;
+    seen.set(e.phase, attempt);
+    return {
+      key: `run-${e.id}`,
+      phase: e.phase,
+      attempt,
+      totalAttempts: counts.get(e.phase) ?? 1,
+      state: e.status,
+      startedMs: toMs(e.started_at),
+      endedMs: e.ended_at === null ? null : toMs(e.ended_at),
+    };
+  });
+  const ran = new Set(runs.map((r) => r.phase));
+  const pending = phaseOrder.filter((p) => !ran.has(p));
+  return { runs, pending };
+}
+
+/** 日志行首时间戳（"2026-06-10 05:50:44 …"）→ ms；无时间戳返回 null（延续行） */
+export function parseLineTs(line: string): number | null {
+  const m = line.match(/^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/);
+  if (!m) return null;
+  const t = new Date(m[1].replace(" ", "T")).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+/**
+ * 把 phase.log 的行流按 run 时间窗切片（同 phase 多轮日志混在一个文件里）。
+ * 无时间戳的行跟随最近一条有时间戳行的归属；窗口两端各放宽 2s（写盘/时钟毫秒抖动）。
+ */
+export function filterLinesToWindow(lines: string[], startMs: number, endMs: number | null): string[] {
+  const SLACK = 2000;
+  const out: string[] = [];
+  let inWindow = false;
+  for (const line of lines) {
+    const ts = parseLineTs(line);
+    if (ts !== null) {
+      inWindow = ts >= startMs - SLACK && (endMs === null || ts <= endMs + SLACK);
+    }
+    if (inWindow) out.push(line);
+  }
+  return out;
+}
+
+export interface AgentCallLike {
+  seq: number;
+  ts: string;            // ISO（调用完成时刻）
+  phase?: string;
+  elapsed_ms?: number;
+}
+
+/**
+ * agent 调用分发到 run：phase 匹配 + 调用时间区间 [ts-elapsed, ts] 与 run 窗口相交。
+ * 匹配不到窗口（时钟抖动/历史数据）时落到该 phase 的最后一轮。
+ */
+export function assignAgentCalls<T extends AgentCallLike>(
+  calls: T[],
+  runs: ExecutionRun[],
+): Record<string, T[]> {
+  const out: Record<string, T[]> = {};
+  const SLACK = 2000;
+  for (const c of calls) {
+    const phase = c.phase;
+    if (!phase) continue;
+    const endMs = new Date(c.ts).getTime();
+    const startMs = endMs - (c.elapsed_ms ?? 0);
+    const candidates = runs.filter((r) => r.phase === phase);
+    const hit = candidates.find((r) =>
+      startMs <= (r.endedMs ?? Infinity) + SLACK && endMs >= r.startedMs - SLACK,
+    ) ?? candidates[candidates.length - 1];
+    if (!hit) continue;
+    (out[hit.key] ??= []).push(c);
+  }
+  return out;
+}

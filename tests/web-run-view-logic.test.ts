@@ -94,3 +94,71 @@ describe("extractLevel（从 PhaseLogsViewer 平移）", () => {
     expect(LEVEL_RE.test(" [ERROR] ")).toBe(true);
   });
 });
+
+// ── 线性执行时间线 ────────────────────────────────────────────
+
+import { buildTimeline, parseLineTs, filterLinesToWindow, assignAgentCalls } from "../src/web/src/lib/run-view-logic";
+
+it("buildTimeline: 驳回重做按发生顺序铺开，每轮独立 + 未执行 phase 进 pending", () => {
+  const T = 1781000000000;
+  const events = [
+    { id: 1, phase: "design", status: "done" as const, started_at: T, ended_at: T + 60_000 },
+    { id: 2, phase: "review", status: "done" as const, started_at: T + 61_000, ended_at: T + 90_000 },
+    { id: 3, phase: "design", status: "done" as const, started_at: T + 91_000, ended_at: T + 150_000 },
+    { id: 4, phase: "review", status: "running" as const, started_at: T + 151_000, ended_at: null },
+  ];
+  const { runs, pending } = buildTimeline(events, ["design", "review", "develop", "submit_pr"]);
+  expect(runs.map((r) => `${r.phase}#${r.attempt}`)).toEqual(["design#1", "review#1", "design#2", "review#2"]);
+  expect(runs[0].totalAttempts).toBe(2);
+  expect(runs[3].state).toBe("running");
+  expect(runs[3].endedMs).toBe(null);
+  expect(pending).toEqual(["develop", "submit_pr"]);
+});
+
+it("buildTimeline: 秒级时间戳归一为毫秒", () => {
+  const { runs } = buildTimeline(
+    [{ id: 1, phase: "a", status: "done" as const, started_at: 1781000000, ended_at: 1781000060 }],
+    ["a"],
+  );
+  expect(runs[0].startedMs).toBe(1781000000000);
+  expect(runs[0].endedMs).toBe(1781000060000);
+});
+
+it("parseLineTs: 解析行首时间戳，无时间戳返回 null", () => {
+  expect(parseLineTs("2026-06-10 05:50:44 [INFO] hello")).toBe(new Date("2026-06-10T05:50:44").getTime());
+  expect(parseLineTs("    continuation line")).toBe(null);
+});
+
+it("filterLinesToWindow: 按时间窗切片，延续行跟随归属", () => {
+  const at = (s: string) => new Date(`2026-06-10T${s}`).getTime();
+  const lines = [
+    "2026-06-10 10:00:00 [INFO] round1 start",
+    "  round1 detail",
+    "2026-06-10 10:05:00 [INFO] round1 end",
+    "2026-06-10 10:10:00 [INFO] round2 start",
+    "  round2 detail",
+  ];
+  const round1 = filterLinesToWindow(lines, at("10:00:00"), at("10:05:30"));
+  expect(round1).toEqual(lines.slice(0, 3));
+  const round2 = filterLinesToWindow(lines, at("10:09:00"), null);
+  expect(round2).toEqual(lines.slice(3));
+});
+
+it("assignAgentCalls: 按 phase + 时间窗分发；窗口对不上时落到该 phase 最后一轮", () => {
+  const T = 1781000000000;
+  const runs = buildTimeline(
+    [
+      { id: 1, phase: "design", status: "done" as const, started_at: T, ended_at: T + 100_000 },
+      { id: 2, phase: "design", status: "done" as const, started_at: T + 200_000, ended_at: T + 300_000 },
+    ],
+    ["design"],
+  ).runs;
+  const calls = [
+    { seq: 1, ts: new Date(T + 90_000).toISOString(), phase: "design", elapsed_ms: 80_000 },  // 第 1 轮内
+    { seq: 2, ts: new Date(T + 290_000).toISOString(), phase: "design", elapsed_ms: 80_000 }, // 第 2 轮内
+    { seq: 3, ts: new Date(T + 999_000).toISOString(), phase: "design", elapsed_ms: 1000 },   // 窗外 → 最后一轮
+  ];
+  const byRun = assignAgentCalls(calls, runs);
+  expect(byRun[runs[0].key]?.map((c) => c.seq)).toEqual([1]);
+  expect(byRun[runs[1].key]?.map((c) => c.seq)).toEqual([2, 3]);
+});

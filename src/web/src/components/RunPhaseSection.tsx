@@ -1,12 +1,14 @@
-// GA 式执行视图的单个 phase 折叠 section：header（状态/耗时/ⓘ/chevron）+
-// 日志区（懒加载 + running 时轮询/WS 增量 + 底部追尾）。
+// 线性执行时间线的单轮执行折叠 section：header（状态/轮次/耗时/ⓘ/chevron）+
+// agent 调用内联摘要 + 本轮日志区（懒加载 + running 时轮询/WS 增量 + 底部追尾）。
+// 同一 phase 驳回重做的每一轮是独立 section（往下追加），日志按本轮时间窗切片。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, ChevronDown, Info, RotateCcw, Loader2 } from "lucide-react";
-import { api } from "@/hooks/useApi";
+import { ChevronRight, ChevronDown, Info, RotateCcw, Loader2, Bot } from "lucide-react";
+import { api, type AgentCallSummary } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  shouldFollow, extractLevel, LEVEL_TEXT, ALL_LEVELS, type Level,
+  shouldFollow, extractLevel, filterLinesToWindow, fmtDuration,
+  LEVEL_TEXT, ALL_LEVELS, type Level,
 } from "@/lib/run-view-logic";
 import { PhaseStatusIcon, type PhaseVisualState } from "@/components/RunPhaseNav";
 
@@ -17,8 +19,15 @@ export interface RunPhaseSectionProps {
   name: string;                 // 内核 phase name
   label?: string;               // 业务标签
   runState: PhaseVisualState;
-  rounds: number;               // 执行轮数（>1 显 ×N）
+  /** 本轮是同 phase 的第几轮 / 共几轮（>1 时显示「第 N 轮」） */
+  attempt?: number;
+  totalAttempts?: number;
   durationText: string;         // 已格式化耗时（含 P50 / 已等 后缀），"—" 表示未开始
+  /** 本轮时间窗（按窗切日志；未执行占位 section 不传） */
+  windowStartMs?: number;
+  windowEndMs?: number | null;
+  /** 本轮的 agent 调用摘要（内联显示） */
+  agentCalls?: AgentCallSummary[];
   expanded: boolean;
   onToggle: () => void;
   onInfo: () => void;           // 开 PhaseDetailDrawer
@@ -29,9 +38,51 @@ export interface RunPhaseSectionProps {
   onRetry?: () => void;         // failed 时的重试
 }
 
+/** agent 调用内联摘要行：默认一行，点击展开 prompt/result 预览 */
+function AgentCallInline({ call }: { call: AgentCallSummary }) {
+  const [open, setOpen] = useState(false);
+  const tokens = call.usage
+    ? `${call.usage.input_tokens ?? 0}→${call.usage.output_tokens ?? 0} tok`
+    : null;
+  const cost = call.usage?.total_cost_usd != null ? `$${call.usage.total_cost_usd.toFixed(4)}` : null;
+  return (
+    <div className={cn("rounded-lg border border-border/60 bg-muted/30", call.error && "border-destructive/40")}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[11px]"
+      >
+        <Bot className="h-3.5 w-3.5 shrink-0 text-accent" />
+        <span className="text-foreground/85">{call.agent}</span>
+        {call.model && <span className="text-muted-foreground">{call.model}</span>}
+        <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground">
+          {call.error && <span className="text-destructive">出错</span>}
+          {tokens && <span>{tokens}</span>}
+          {cost && <span>{cost}</span>}
+          {call.elapsed_ms != null && <span>{fmtDuration(call.elapsed_ms)}</span>}
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-1.5 border-t border-border/60 px-2.5 py-2 font-mono text-[11px]">
+          <div>
+            <span className="text-muted-foreground">prompt：</span>
+            <span className="break-words text-foreground/80">{call.prompt_preview || "（空）"}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">结果：</span>
+            <span className="break-words text-foreground/80">{call.result_preview || "（无）"}</span>
+          </div>
+          {call.error && <div className="break-words text-destructive">error：{call.error}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RunPhaseSection(props: RunPhaseSectionProps) {
   const {
-    taskId, name, label, runState, rounds, durationText,
+    taskId, name, label, runState, attempt, totalAttempts, durationText,
+    windowStartMs, windowEndMs, agentCalls,
     expanded, onToggle, onInfo, liveLines, filterQuery, filterLevels,
     errorNote, onRetry,
   } = props;
@@ -72,9 +123,13 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [expanded, isRunning, taskId, name]);
 
-  // 行合并 + 过滤
+  // 行合并 + 本轮时间窗切片 + 过滤。phase.log 是同 phase 全部轮次混写的一个文件，
+  // 传了 windowStartMs 时只保留落在本轮窗口内的行（无时间戳行跟随前一条归属）。
   const lines = useMemo(() => {
-    const base = (content ?? "").split("\n");
+    let base = (content ?? "").split("\n");
+    if (windowStartMs !== undefined) {
+      base = filterLinesToWindow(base, windowStartMs, windowEndMs ?? null);
+    }
     const all = isRunning ? [...base, ...liveLines] : base;
     const q = filterQuery.trim().toLowerCase();
     return all.filter((line) => {
@@ -84,7 +139,7 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
       if (q && !line.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [content, liveLines, isRunning, filterQuery, filterLevels]);
+  }, [content, liveLines, isRunning, filterQuery, filterLevels, windowStartMs, windowEndMs]);
 
   const matchCount = filterQuery.trim() ? lines.length : null;
 
@@ -142,9 +197,9 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
         <PhaseStatusIcon state={runState} />
         <span className="min-w-0 truncate text-[13px] font-medium">{label ?? name}</span>
         {label && <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{name}</span>}
-        {rounds > 1 && (
-          <span className="shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground" title={`第 ${rounds} 次执行`}>
-            ×{rounds}
+        {attempt !== undefined && (totalAttempts ?? 1) > 1 && (
+          <span className="shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground" title={`本阶段共执行 ${totalAttempts} 轮，这是第 ${attempt} 轮`}>
+            第 {attempt} 轮
           </span>
         )}
         <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
@@ -176,6 +231,12 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
         <div className="border-t border-border px-3 pb-3 pt-2">
           {runState === "failed" && errorNote && (
             <p className="mb-2 rounded-lg bg-destructive/8 px-3 py-2 text-xs text-destructive">{errorNote}</p>
+          )}
+          {/* 本轮 agent 调用（内联摘要，点击展开 prompt/result 预览） */}
+          {agentCalls && agentCalls.length > 0 && (
+            <div className="mb-2 space-y-1.5">
+              {agentCalls.map((c) => <AgentCallInline key={c.seq} call={c} />)}
+            </div>
           )}
           {notStarted ? (
             <p className="py-4 text-center font-mono text-[11px] text-muted-foreground">尚未开始</p>
