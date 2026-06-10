@@ -36,6 +36,7 @@ const ALLOWLIST = new Set([
   "src/migrations/027-fix-requirement-sub-prs-fk.ts", // 修悬空 FK：requirement_sub_prs 重建（DDL + INSERT...SELECT 一次性数据 copy，无 manifest 同步需求）
   "src/migrations/028-requirement-status-reason.ts", // 需求终态原因：加列 + 从 task_logs 回填历史终态需求（一次性数据迁移）
   "src/migrations/029-requirement-status-before-terminal.ts", // 死亡步定位：加列 + 从 task_logs 回填（一次性数据迁移）
+  "src/migrations/033-workspace-remote-url.ts", // workspace 添加 remote_url 列 + 从本地 path 探测回填（一次性数据迁移）
   "src/core/now-dismiss.ts",       // now_dismissed_cards 表：SQLite 即权威源，dismiss 状态无 manifest 同步需求
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
 ]);

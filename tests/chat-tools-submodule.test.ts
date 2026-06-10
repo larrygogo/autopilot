@@ -8,6 +8,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest } from "../src/core/db";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
@@ -26,6 +27,7 @@ describe("chat tool create_requirement_draft 子模块校验", () => {
     migrate008(db);
     migrate021(db);
     migrate024(db);
+    migrate033(db);
     _setDbForTest(db);
 
     createProject({ id: "proj-001", name: "test-proj" });

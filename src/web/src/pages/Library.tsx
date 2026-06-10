@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FolderOpen, Layers, Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { Layers, Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,7 +14,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FolderPicker } from "@/components/FolderPicker";
 import { api, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { cn } from "@/lib/utils";
@@ -27,11 +26,11 @@ interface FormState {
   name: string;
   description: string;
   // 仅新建场景使用（edit 模式不显示这两字段）
-  path: string;
+  remote_url: string;
   alias: string;
 }
 
-const EMPTY_FORM: FormState = { name: "", description: "", path: "", alias: "" };
+const EMPTY_FORM: FormState = { name: "", description: "", remote_url: "", alias: "" };
 
 function ProjectsTab() {
   const navigate = useNavigate();
@@ -46,7 +45,7 @@ function ProjectsTab() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+
 
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleteInput, setDeleteInput] = useState("");
@@ -81,7 +80,7 @@ function ProjectsTab() {
   const openEditDialog = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingProject(p);
-    setForm({ name: p.name, description: p.description ?? "", path: "", alias: "" });
+    setForm({ name: p.name, description: p.description ?? "", remote_url: "", alias: "" });
     setDialogOpen(true);
   };
 
@@ -89,15 +88,6 @@ function ProjectsTab() {
     if (saving) return;
     setDialogOpen(false);
     setEditingProject(null);
-    setFolderPickerOpen(false);
-  };
-
-  // 路径输入框 onBlur：仅在 alias 为空时自动填入 basename
-  const handlePathBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    const p = e.target.value.trim();
-    if (!p || form.alias) return;
-    const base = p.replace(/[/\\]+$/, "").split(/[/\\]/).pop() ?? "";
-    if (base) setForm((f) => ({ ...f, alias: base }));
   };
 
   const save = async () => {
@@ -116,16 +106,16 @@ function ProjectsTab() {
         });
         toast.success(`已更新项目「${name}」`);
       } else {
-        // 新建：必须提供路径
-        const path = form.path.trim();
-        if (!path) {
-          toast.error("验证失败", "工作区路径不能为空");
+        // 新建：必须提供远程地址
+        const remoteUrl = form.remote_url.trim();
+        if (!remoteUrl) {
+          toast.error("验证失败", "远程仓库地址不能为空");
           setSaving(false);
           return;
         }
         await api.createProjectWithWorkspace({
           name,
-          path,
+          remote_url: remoteUrl,
           alias: form.alias.trim() || undefined,
           description: form.description.trim() || undefined,
         });
@@ -301,35 +291,22 @@ function ProjectsTab() {
               />
             </div>
 
-            {/* 路径 + alias 字段：仅新建时显示 */}
+            {/* 远程地址 + alias 字段：仅新建时显示 */}
             {!editingProject && (
               <>
                 <div className="space-y-1.5">
-                  <Label htmlFor="project-path">
-                    工作区路径 <span className="text-destructive">*</span>
+                  <Label htmlFor="project-remote">
+                    远程仓库地址 <span className="text-destructive">*</span>
                   </Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="project-path"
-                      placeholder="/code/myapp"
-                      value={form.path}
-                      onChange={(e) => setForm((f) => ({ ...f, path: e.target.value }))}
-                      onBlur={handlePathBlur}
-                      onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
-                      className="flex-1"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setFolderPickerOpen(true)}
-                      title="浏览目录"
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  <Input
+                    id="project-remote"
+                    placeholder="https://github.com/owner/repo.git"
+                    value={form.remote_url}
+                    onChange={(e) => setForm((f) => ({ ...f, remote_url: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
+                  />
                   <p className="text-xs text-muted-foreground">
-                    路径须在本机存在（不必须是 git 仓库）
+                    写入前会执行 git ls-remote 验证远程可达性
                   </p>
                 </div>
 
@@ -337,7 +314,7 @@ function ProjectsTab() {
                   <Label htmlFor="project-alias">工作区别名（可选）</Label>
                   <Input
                     id="project-alias"
-                    placeholder={form.path ? (form.path.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "workspace") : "自动从目录名推导"}
+                    placeholder="自动从仓库名推导"
                     value={form.alias}
                     onChange={(e) => setForm((f) => ({ ...f, alias: e.target.value }))}
                     onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
@@ -357,27 +334,6 @@ function ProjectsTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* FolderPicker 弹窗（仅新建时） */}
-      {!editingProject && (
-        <FolderPicker
-          open={folderPickerOpen}
-          initialPath={form.path || undefined}
-          onSelect={(selected) => {
-            setForm((f) => {
-              const base = selected.replace(/[/\\]+$/, "").split(/[/\\]/).pop() ?? "";
-              return {
-                ...f,
-                path: selected,
-                // 仅 alias 为空时自动填充 basename
-                alias: f.alias || base,
-              };
-            });
-            setFolderPickerOpen(false);
-          }}
-          onCancel={() => setFolderPickerOpen(false)}
-        />
-      )}
 
       {/* 删除确认 dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) closeDeleteDialog(); }}>

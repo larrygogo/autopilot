@@ -8,7 +8,10 @@ export interface Workspace {
   id: string;
   project_id: string;
   alias: string;
-  path: string;
+  /** 本地路径（历史字段，新建时不再写入；后续仅用于存量迁移参考） */
+  path: string | null;
+  /** 远程仓库 URL（新主键字段）；NULL 表示软失效工作区（需补填后可用） */
+  remote_url: string | null;
   default_branch: string;
   github_owner: string | null;
   github_repo: string | null;
@@ -22,7 +25,10 @@ export interface CreateWorkspaceOpts {
   id: string;
   project_id: string;
   alias: string;
-  path: string;
+  /** 历史兼容：内部/测试可传；新建流程不再要求 */
+  path?: string | null;
+  /** 远程仓库 URL（新建流程主入口） */
+  remote_url?: string | null;
   default_branch?: string;
   github_owner?: string | null;
   github_repo?: string | null;
@@ -32,7 +38,9 @@ export interface CreateWorkspaceOpts {
 
 export interface UpdateWorkspaceOpts {
   alias?: string;
-  path?: string;
+  /** 历史兼容，不再推荐写入 */
+  path?: string | null;
+  remote_url?: string | null;
   default_branch?: string;
   github_owner?: string | null;
   github_repo?: string | null;
@@ -100,13 +108,14 @@ export function createWorkspace(opts: CreateWorkspaceOpts): Workspace {
   const db = getDb();
   const ts = nowMs();
   db.run(
-    "INSERT INTO workspaces (id, project_id, alias, path, default_branch, github_owner, github_repo, parent_workspace_id, submodule_path, created_at, updated_at) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO workspaces (id, project_id, alias, path, remote_url, default_branch, github_owner, github_repo, parent_workspace_id, submodule_path, created_at, updated_at) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       opts.id,
       opts.project_id,
       opts.alias,
-      opts.path,
+      opts.path ?? null,           // 历史兼容；新建传 null
+      opts.remote_url ?? null,     // 新主键
       opts.default_branch ?? "main",
       opts.github_owner ?? null,
       opts.github_repo ?? null,
@@ -174,6 +183,7 @@ export function updateWorkspace(id: string, opts: UpdateWorkspaceOpts): Workspac
 
   if (opts.alias !== undefined) { fields.push("alias = ?"); vals.push(opts.alias); }
   if (opts.path !== undefined) { fields.push("path = ?"); vals.push(opts.path); }
+  if (opts.remote_url !== undefined) { fields.push("remote_url = ?"); vals.push(opts.remote_url); }
   if (opts.default_branch !== undefined) { fields.push("default_branch = ?"); vals.push(opts.default_branch); }
   if (opts.github_owner !== undefined) { fields.push("github_owner = ?"); vals.push(opts.github_owner); }
   if (opts.github_repo !== undefined) { fields.push("github_repo = ?"); vals.push(opts.github_repo); }

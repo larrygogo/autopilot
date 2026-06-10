@@ -296,6 +296,51 @@ export function saveProvider(name: ProviderName, cfg: ProviderConfig): void {
   writeDocument(doc);
 }
 
+// ──────────────────────────────────────────────
+// git 凭据配置
+// ──────────────────────────────────────────────
+
+export interface GitConfig {
+  /**
+   * 私有仓库 HTTPS clone 用 token（全局共用）。
+   * HTTP URL clone 时自动注入：https://oauth2:<token>@<host>/...
+   * SSH URL 不使用（走系统 SSH key）。
+   * 未设置时退回系统 git 凭证（~/.gitconfig credential helper / gh CLI 等）。
+   */
+  token?: string;
+}
+
+/**
+ * 读取 config.yaml 的 git 段。
+ */
+export function loadGitConfig(): GitConfig {
+  try {
+    const raw = loadConfig();
+    const section = raw["git"];
+    if (!section || typeof section !== "object" || Array.isArray(section)) return {};
+    const s = section as Record<string, unknown>;
+    const out: GitConfig = {};
+    if (typeof s.token === "string" && s.token.trim()) out.token = s.token.trim();
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 写入 git 段配置（token 为 undefined 时删除键）。
+ */
+export function saveGitConfig(cfg: GitConfig): void {
+  const doc = loadDocument();
+  const clean = stripUndefined(cfg as Record<string, unknown>);
+  if (Object.keys(clean).length === 0) {
+    if (doc.hasIn(["git"])) doc.deleteIn(["git"]);
+  } else {
+    doc.setIn(["git"], clean);
+  }
+  writeDocument(doc);
+}
+
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {

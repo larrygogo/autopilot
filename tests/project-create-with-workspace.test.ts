@@ -26,6 +26,7 @@ import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import {
   createProject,
   getProjectById,
@@ -54,6 +55,7 @@ function runAllMigrations(db: Database): void {
   migrate010(db);
   migrate011(db);
   migrate024(db);
+  migrate033(db);
 }
 
 // ── 模拟 generateUniqueAlias 逻辑（与 rpc-methods.ts 保持一致） ──

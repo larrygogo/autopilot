@@ -48,6 +48,9 @@ export function discoverSubmodules(parentWorkspaceId: string): DiscoverResult {
   if (parent.parent_workspace_id) {
     throw new Error(`不支持嵌套子模块：workspace ${parentWorkspaceId} 自身就是子模块`);
   }
+  if (!parent.path) {
+    throw new Error(`workspace ${parentWorkspaceId} 无本地路径，无法发现子模块（远程模式下不支持子模块自动发现）`);
+  }
 
   const entries = parseGitmodulesFile(parent.path);
   const existing = listSubmodules(parentWorkspaceId);

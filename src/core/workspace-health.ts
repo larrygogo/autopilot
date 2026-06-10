@@ -20,12 +20,59 @@ export interface WorkspaceHealth {
  * 注：当前用 spawnSync 同步实现；async 签名预留未来切真异步空间，
  * 单次健康检查耗时 ms 级，不阻塞 daemon 其他处理。
  */
-export async function checkWorkspaceHealth(path: string): Promise<WorkspaceHealth> {
+/**
+ * 检查 workspace 健康度。
+ *
+ * 支持两种签名（重载）：
+ *   - 传 string（旧 path 模式）：本地路径检查（内部迁移过渡用）
+ *   - 传 Workspace-like 对象（新模式）：基于 remote_url 的远程可达性检查
+ *
+ * remote_url 为 NULL → 直接返回 unhealthy（软失效 workspace）。
+ * remote_url 不为空 → 执行 git ls-remote 验证远程可达性。
+ */
+export async function checkWorkspaceHealth(
+  workspaceOrPath: { path: string | null; remote_url: string | null; github_owner: string | null; github_repo: string | null } | string,
+  token?: string | null,
+): Promise<WorkspaceHealth> {
+  // 旧版兼容：传字符串 path 时走原有本地逻辑（内部迁移过渡用）
+  if (typeof workspaceOrPath === "string") {
+    return _checkWorkspaceHealthByPath(workspaceOrPath);
+  }
+
+  const ws = workspaceOrPath;
+  if (!ws.remote_url) {
+    return {
+      healthy: false,
+      issues: ["remote_url 未填写（软失效工作区）；请用 autopilot workspace update <id> --remote <url> 补填远程地址"],
+      github_owner: ws.github_owner,
+      github_repo: ws.github_repo,
+    };
+  }
+
+  const result = probeRemote(ws.remote_url, token);
+  if (!result.ok) {
+    return {
+      healthy: false,
+      issues: [`远程不可达：${result.error ?? "git ls-remote 失败"}`],
+      github_owner: ws.github_owner,
+      github_repo: ws.github_repo,
+    };
+  }
+
+  return {
+    healthy: true,
+    issues: [],
+    github_owner: ws.github_owner,
+    github_repo: ws.github_repo,
+  };
+}
+
+/** 旧版本地路径健康检查（内部兼容用） */
+async function _checkWorkspaceHealthByPath(path: string): Promise<WorkspaceHealth> {
   const issues: string[] = [];
   let owner: string | null = null;
   let repo: string | null = null;
 
-  // 1. path 存在
   if (!existsSync(path)) {
     return { healthy: false, issues: [`路径不存在：${path}`], github_owner: null, github_repo: null };
   }
@@ -35,7 +82,6 @@ export async function checkWorkspaceHealth(path: string): Promise<WorkspaceHealt
     return { healthy: false, issues: [`路径不是目录：${path}`], github_owner: null, github_repo: null };
   }
 
-  // 2. 是 git 仓库
   const isGitProc = Bun.spawnSync(["git", "rev-parse", "--is-inside-work-tree"], {
     cwd: path, stderr: "pipe",
   });
@@ -45,7 +91,6 @@ export async function checkWorkspaceHealth(path: string): Promise<WorkspaceHealt
     return { healthy: false, issues, github_owner: null, github_repo: null };
   }
 
-  // 3. origin 远端（`git config --get` 取原文，不施加 insteadOf 重写，避免读到注入的凭据，H2）
   const remoteProc = Bun.spawnSync(["git", "config", "--get", "remote.origin.url"], {
     cwd: path, stderr: "pipe",
   });
@@ -169,4 +214,68 @@ export function parseGithubFromRemote(url: string): { owner: string; repo: strin
   m = u.match(/^[^@\s:/]+@github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
   if (m) return { owner: m[1], repo: m[2] };
   return null;
+}
+
+// ──────────────────────────────────────────────
+// 远程仓库探测（probeRemote）+ Token 注入（buildAuthUrl）
+// ──────────────────────────────────────────────
+
+export interface ProbeResult {
+  /** 远程可达且鉴权通过 */
+  ok: boolean;
+  /** 探测到的默认分支（解析 HEAD 指向）；探测失败或无 HEAD 时为 null */
+  defaultBranch: string | null;
+  /** 失败原因（供用户提示） */
+  error?: string;
+}
+
+/**
+ * 探测远程 git 仓库可达性，同时解析默认分支。
+ *
+ * 执行：`git ls-remote --symref <url> HEAD`
+ * 一次调用兼顾：
+ *   - 可达性验证（非零退出码 = 不可达/鉴权失败）
+ *   - 默认分支探测（解析 `ref: refs/heads/<branch>  HEAD` 行）
+ *
+ * token 注入：HTTP(S) URL + token 存在时，在 URL 中临时注入凭据（仅此次 git 调用，不落库）。
+ */
+export function probeRemote(remoteUrl: string, token?: string | null): ProbeResult {
+  if (!remoteUrl || !remoteUrl.trim()) {
+    return { ok: false, defaultBranch: null, error: "远程地址为空" };
+  }
+
+  const url = buildAuthUrl(remoteUrl.trim(), token ?? null);
+
+  const proc = Bun.spawnSync(
+    ["git", "ls-remote", "--symref", url, "HEAD"],
+    { stdout: "pipe", stderr: "pipe", timeout: 15_000 },
+  );
+
+  if (proc.exitCode !== 0) {
+    const stderr = new TextDecoder().decode(proc.stderr ?? new Uint8Array()).trim();
+    // 脱敏：把 token-injected URL 从错误信息中去除
+    const safeErr = token ? stderr.replace(token, "***") : stderr;
+    const firstLine = safeErr.split("\n")[0] ?? "";
+    return { ok: false, defaultBranch: null, error: firstLine || "git ls-remote 失败" };
+  }
+
+  const output = new TextDecoder().decode(proc.stdout ?? new Uint8Array()).trim();
+  // 解析 "ref: refs/heads/<branch>  HEAD" 行
+  const m = output.match(/^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/m);
+  const defaultBranch = m ? m[1] : null;
+
+  return { ok: true, defaultBranch };
+}
+
+/**
+ * 为 HTTPS URL 注入 token（临时，只用于命令行参数，不落库）。
+ * SSH URL 原样返回（走系统 SSH key）。
+ */
+export function buildAuthUrl(url: string, token: string | null): string {
+  if (!token || !token.trim()) return url;
+  // 仅 https:// 协议注入；ssh:// / git:// / scp-style 不处理
+  if (!url.startsWith("https://")) return url;
+  // 格式：https://oauth2:<token>@<rest>
+  // token 需 URL 编码：含 @/:/ 等字符时（如旧版 GitLab tokens）防止 URL 畸形
+  return url.replace(/^https:\/\//, `https://oauth2:${encodeURIComponent(token)}@`);
 }

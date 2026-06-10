@@ -42,7 +42,7 @@ import {
   isValidTimezone,
   type ScheduleType,
 } from "../core/schedules";
-import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig } from "../core/config";
+import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig } from "../core/config";
 import { requestRestart, requestShutdown } from "./index";
 import { loadApiToken } from "../core/api-token";
 import {
@@ -66,7 +66,7 @@ import {
 import { listRequirementsByProject } from "../core/requirements";
 import { listWorkspaces, getWorkspaceById, getWorkspaceByAlias, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, projectHasTopWorkspace, getTopWorkspaceForProject } from "../core/workspaces";
 import { listSubmodules, discoverSubmodules } from "../core/submodules";
-import { checkWorkspaceHealth, detectWorkspaceGit } from "../core/workspace-health";
+import { checkWorkspaceHealth, detectWorkspaceGit, probeRemote, parseGithubFromRemote } from "../core/workspace-health";
 import {
   listSessions as listChatSessions,
   deleteSession as deleteChatSession,
@@ -1670,7 +1670,7 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "projects.createWithWorkspace",
-    description: "原子性创建 Project + 顶层 Workspace（路径先校验，DB 事务 all-or-nothing，alias 冲突静默处理）",
+    description: "原子性创建 Project + 顶层 Workspace（远程可达性先校验，DB 事务 all-or-nothing，alias 冲突静默处理）",
     handler: (params) => {
       const p = asObj(params);
 
@@ -1678,21 +1678,35 @@ export function registerCoreRpcMethods(): void {
       const name = typeof p.name === "string" ? p.name.trim() : "";
       if (!name) throw new RpcError("INVALID_PARAM", "name 必填");
 
+      // 解析 remote_url：优先 remote_url，其次从 path 探测（向后兼容）
+      let remoteUrl: string | null = null;
       const rawPath = typeof p.path === "string" ? p.path.trim() : "";
-      if (!rawPath) throw new RpcError("INVALID_PARAM", "path 必填");
-
-      // ── 路径校验（在任何 DB 写操作前，失败则整体不建）──
-      if (!existsSync(rawPath)) {
-        throw new RpcError("PATH_NOT_FOUND", `路径不存在：${rawPath}`);
+      if (typeof p.remote_url === "string" && p.remote_url.trim()) {
+        remoteUrl = p.remote_url.trim();
+      } else if (rawPath) {
+        // 兼容旧调用：有 path 则从本地探测
+        const detected = detectWorkspaceGit(rawPath);
+        if (detected.remote_url) remoteUrl = detected.remote_url;
+      }
+      if (!remoteUrl) {
+        throw new RpcError("INVALID_PARAM", "请提供 remote_url 或本地 git 仓库 path");
       }
 
-      // ── alias 基础值：显式传入优先，否则从路径 basename 推导 ──
+      // Fail fast：写 DB 前验证远程可达性 + 探测默认分支
+      const gitCfg = loadGitConfig();
+      const probe = probeRemote(remoteUrl, gitCfg.token);
+      if (!probe.ok) {
+        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.yaml 配置 git.token`);
+      }
+
+      // ── alias 基础值：显式传入优先，否则从 remote_url 推导 ──
       const baseAlias = (typeof p.alias === "string" && p.alias.trim())
         ? p.alias.trim()
-        : (basename(rawPath) || "workspace");
+        : (remoteUrl.split("/").pop()?.replace(/\.git$/, "") || "workspace");
 
-      // ── git 信息探测（纯读，失败不阻塞）──
-      const detected = detectWorkspaceGit(rawPath);
+      // 解析 GitHub owner/repo
+      const parsed = parseGithubFromRemote(remoteUrl);
+      const defaultBranch = probe.defaultBranch ?? "main";
       const description = (p.description as string | null | undefined) ?? null;
 
       const db = getDb();
@@ -1700,7 +1714,6 @@ export function registerCoreRpcMethods(): void {
       let workspace!: ReturnType<typeof createWorkspace>;
 
       // ── 原子性事务：ID 生成 + 双表写入全在事务内 ──
-      // 内部用 _step 标记当前执行阶段，catch 时据此映射精确错误码
       let _step: "project" | "workspace" = "project";
       try {
         db.transaction(() => {
@@ -1720,16 +1733,15 @@ export function registerCoreRpcMethods(): void {
             id: workspaceId,
             project_id: projectId,
             alias,
-            path: rawPath,
-            // best-effort：非 git 目录回退 "main"，用户可事后 workspace update 修正
-            default_branch: detected?.default_branch ?? "main",
-            github_owner: detected?.github_owner ?? null,
-            github_repo: detected?.github_repo ?? null,
+            path: rawPath || "",
+            remote_url: remoteUrl,
+            default_branch: defaultBranch,
+            github_owner: parsed?.owner ?? null,
+            github_repo: parsed?.repo ?? null,
           });
         })();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        // 根据 _step 准确映射错误码：项目写入失败 vs 工作区写入失败
         if (_step === "project") {
           throw new RpcError("PROJECT_CREATE_FAILED", `项目创建失败：${msg}`);
         }
@@ -1795,7 +1807,7 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
-      return { workspaces: listWorkspaces({ projectId: p.id }).map((ws) => ({ ...ws, path_exists: existsSync(ws.path) })) };
+      return { workspaces: listWorkspaces({ projectId: p.id }).map((ws) => ({ ...ws, path_exists: !!ws.remote_url })) };
     },
   });
 
@@ -1862,7 +1874,11 @@ export function registerCoreRpcMethods(): void {
   registerRpcMethod({
     method: "workspaces.list",
     description: "列出所有 workspace（与 GET /api/workspaces 等价；返回数组，无 envelope）",
-    handler: () => listWorkspaces().map((ws) => ({ ...ws, path_exists: existsSync(ws.path) })),
+    handler: () => listWorkspaces().map((ws) => ({
+      ...ws,
+      // 向后兼容：path_exists 改为基于 remote_url 是否填写的简单判断
+      path_exists: !!ws.remote_url,
+    })),
   });
 
   registerRpcMethod({
@@ -1890,34 +1906,65 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "workspaces.create",
-    description: "创建 workspace（与 POST /api/workspaces 等价）；未显式给 default_branch / github 时自动从 path 探测",
+    description: "创建 workspace；需提供 remote_url 或 --github owner/repo；写 DB 前执行 git ls-remote 可达性验证",
     handler: (params) => {
       const p = asObj(params);
       const alias = typeof p.alias === "string" ? p.alias.trim() : "";
-      const pathField = typeof p.path === "string" ? p.path.trim() : "";
-      if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
+      if (!alias) throw new RpcError("INVALID_PARAM", "alias 必填");
+
       const projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
       // 1:1：每个项目仅允许一个工作区（submodule 不计入）
       if (projectId && projectHasTopWorkspace(projectId)) {
         throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
       }
-      // 服务端兜底探测：CLI/Web 没传的字段自动从 git 仓库识别（显式传值优先）
-      const detected = detectWorkspaceGit(pathField);
+
+      // 解析 remote_url：优先显式传入，其次从 github owner/repo 构造，再回退本地 path 探测
+      let remoteUrl: string | null = null;
+      if (typeof p.remote_url === "string" && p.remote_url.trim()) {
+        remoteUrl = p.remote_url.trim();
+      } else if (typeof p.github === "string" && p.github.includes("/")) {
+        const [owner, repo] = p.github.split("/");
+        remoteUrl = `https://github.com/${owner}/${repo}.git`;
+      } else if (typeof p.github_owner === "string" && typeof p.github_repo === "string") {
+        remoteUrl = `https://github.com/${p.github_owner}/${p.github_repo}.git`;
+      } else if (typeof p.path === "string" && p.path.trim()) {
+        // 兼容旧调用：有 path 则从本地探测
+        const detected = detectWorkspaceGit(p.path.trim());
+        if (detected.remote_url) remoteUrl = detected.remote_url;
+      }
+
+      if (!remoteUrl) {
+        throw new RpcError("INVALID_PARAM", "请提供 remote_url 或 --github owner/repo（格式：owner/repo）");
+      }
+
+      // Fail fast：写 DB 前验证远程可达性 + 探测默认分支
+      const gitCfg = loadGitConfig();
+      const probe = probeRemote(remoteUrl, gitCfg.token);
+      if (!probe.ok) {
+        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.yaml 配置 git.token`);
+      }
+
+      // 默认分支：显式指定 > probe 探测 > "main"
       const explicitBranch = typeof p.default_branch === "string" && p.default_branch.trim()
         ? p.default_branch.trim() : null;
+      const defaultBranch = explicitBranch ?? probe.defaultBranch ?? "main";
+
+      // 解析 github owner/repo（从 remote_url 中提取）
       let github_owner = (p.github_owner as string | null | undefined) ?? null;
       let github_repo = (p.github_repo as string | null | undefined) ?? null;
-      if (!github_owner && !github_repo && detected.github_owner && detected.github_repo) {
-        github_owner = detected.github_owner;
-        github_repo = detected.github_repo;
+      if (!github_owner || !github_repo) {
+        const parsed = parseGithubFromRemote(remoteUrl);
+        if (parsed) { github_owner = parsed.owner; github_repo = parsed.repo; }
       }
+
       try {
         const workspace = createWorkspace({
           id: nextWorkspaceId(),
           project_id: projectId,
           alias,
-          path: pathField,
-          default_branch: explicitBranch ?? detected.default_branch ?? "main",
+          path: typeof p.path === "string" && p.path.trim() ? p.path.trim() : "",
+          remote_url: remoteUrl,
+          default_branch: defaultBranch,
           github_owner,
           github_repo,
         });
@@ -1949,8 +1996,22 @@ export function registerCoreRpcMethods(): void {
       }
       if (p.path !== undefined) {
         const trimmed = typeof p.path === "string" ? p.path.trim() : "";
-        if (!trimmed) throw new RpcError("INVALID_PARAM", "path 不能为空");
-        patch.path = trimmed;
+        if (trimmed) patch.path = trimmed;
+      }
+      if (p.remote_url !== undefined) {
+        const rawUrl = typeof p.remote_url === "string" ? p.remote_url.trim() : "";
+        if (!rawUrl) throw new RpcError("INVALID_PARAM", "remote_url 不能为空字符串（传 null 可清空）");
+        // 验证新 remote_url 可达性（与 create 对称）
+        const gitCfg = loadGitConfig();
+        const probe = probeRemote(rawUrl, gitCfg.token);
+        if (!probe.ok) {
+          throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或 config.yaml 的 git.token`);
+        }
+        patch.remote_url = rawUrl;
+        // 若 default_branch 未显式指定，用 probe 探测到的默认分支
+        if (p.default_branch === undefined && probe.defaultBranch) {
+          patch.default_branch = probe.defaultBranch;
+        }
       }
       if (p.default_branch !== undefined) {
         const trimmed = typeof p.default_branch === "string" ? p.default_branch.trim() : "";
@@ -2020,13 +2081,8 @@ export function registerCoreRpcMethods(): void {
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const workspace = getWorkspaceById(p.id);
       if (!workspace) throw new RpcError("NOT_FOUND", "workspace not found");
-      const health = await checkWorkspaceHealth(workspace.path);
-      const patch: { github_owner?: string; github_repo?: string } = {};
-      if (health.github_owner && !workspace.github_owner) patch.github_owner = health.github_owner;
-      if (health.github_repo && !workspace.github_repo) patch.github_repo = health.github_repo;
-      if (patch.github_owner !== undefined || patch.github_repo !== undefined) {
-        updateWorkspace(p.id, patch);
-      }
+      const gitCfg = loadGitConfig();
+      const health = await checkWorkspaceHealth(workspace, gitCfg.token);
       if (health.healthy && !workspace.parent_workspace_id) {
         try {
           const dr = discoverSubmodules(workspace.id);

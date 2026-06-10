@@ -47,7 +47,7 @@ import { inferWorkspaceFromCwd } from "../src/cli/requirements-cli";
 import type { Workspace } from "../src/core/workspaces";
 
 const mkCb = (id: string, path: string): Workspace => ({
-  id, path, project_id: "p", alias: "a",
+  id, path, remote_url: null, project_id: "p", alias: "a",
   default_branch: "main", github_owner: null, github_repo: null,
   parent_workspace_id: null, submodule_path: null,
   created_at: 0, updated_at: 0,

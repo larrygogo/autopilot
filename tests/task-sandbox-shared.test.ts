@@ -62,7 +62,7 @@ afterEach(() => {
 describe("共用沙盒 · ensureTaskSandbox 建 clone（Task 1）", () => {
   it("ensureTaskSandbox 对 git 工作流建出含源仓库内容的工作树", () => {
     const id = taskId("shr1");
-    ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", path: srcRepo, default_branch: "main" }, "feat/shr1");
+    ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, "feat/shr1");
     const ws = getTaskSandbox(id);
     expect(existsSync(join(ws, ".git"))).toBe(true);
     expect(existsSync(join(ws, "README.md"))).toBe(true);
@@ -74,7 +74,7 @@ describe("共用沙盒 · 跨 phase 直接可见（Task 2）", () => {
   it("phase1 在共用 clone 改文件，phase2 在同一 clone 直接看到（无 patch 中转）", async () => {
     const { runWithTaskContext, getCurrentSandboxDir } = await import("../src/core/task-context");
     const id = taskId("shr2");
-    ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", path: srcRepo, default_branch: "main" }, "feat/shr2");
+    ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, "feat/shr2");
     const ws = getTaskSandbox(id);
 
     // 模拟 runner：phase1 在注入的共用沙盒里写文件
@@ -92,7 +92,7 @@ describe("共用沙盒 · diff 看得到 committed + 新建改动（审计 P1 �
   it("develop 在 clone 里自己 commit 了 + 新建文件 → computeDiffStat 仍统计到", async () => {
     const { computeDiffStat } = await import("../src/daemon/task-outcome");
     const id = taskId("shrcr");
-    ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", path: srcRepo, default_branch: "main" }, `feat/${id}`);
+    ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, `feat/${id}`);
     const ws = getTaskSandbox(id);
     const gitc = (args: string[]) => Bun.spawnSync(["git", "-C", ws, ...args], { stdout: "pipe", stderr: "pipe" });
     gitc(["config", "user.email", "t@t.io"]);
@@ -131,10 +131,10 @@ describe("共用沙盒 · 重跑重新 clone（Task 5）", () => {
     } as never);
 
     createProject({ id: "proj-1", name: "p" });
-    createWorkspace({ id: "ws-1", project_id: "proj-1", alias: "r", path: srcRepo, default_branch: "main" });
+    createWorkspace({ id: "ws-1", project_id: "proj-1", alias: "r", path: srcRepo, remote_url: srcRepo, default_branch: "main" });
 
     const id = taskId("shr5");
-    ensureTaskSandbox(id, "shr_wf", { git: true }, { id: "ws-1", path: srcRepo, default_branch: "main" }, `feat/${id}`);
+    ensureTaskSandbox(id, "shr_wf", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, `feat/${id}`);
     const ws = getTaskSandbox(id);
     createTask({ id, title: "t", workflow: "shr_wf", initialStatus: "running_develop", requirementId: undefined });
     updateTask(id, { workspace_id: "ws-1", branch: `feat/${id}`, default_branch: "main", workspace_path: ws });
@@ -180,10 +180,10 @@ describe("共用沙盒 · 全流程集成（真 runner → 共用 clone → phas
     } as never);
 
     createProject({ id: "proj-1", name: "p" });
-    createWorkspace({ id: "ws-1", project_id: "proj-1", alias: "r", path: srcRepo, default_branch: "main" });
+    createWorkspace({ id: "ws-1", project_id: "proj-1", alias: "r", path: srcRepo, remote_url: srcRepo, default_branch: "main" });
 
     const id = taskId("shrint");
-    ensureTaskSandbox(id, "shr_int", { git: true }, { id: "ws-1", path: srcRepo, default_branch: "main" }, `feat/${id}`);
+    ensureTaskSandbox(id, "shr_int", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, `feat/${id}`);
     const ws = getTaskSandbox(id);
     createTask({ id, title: "t", workflow: "shr_int", initialStatus: "running_develop", requirementId: undefined });
     updateTask(id, { workspace_id: "ws-1", branch: `feat/${id}`, default_branch: "main", workspace_path: ws });

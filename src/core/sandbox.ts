@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSyn
 import { join, resolve, sep } from "path";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
+import { loadGitConfig, loadConfig } from "./config";
+import { buildAuthUrl } from "./workspace-health";
 
 // ──────────────────────────────────────────────
 // 任务 sandbox —— 每次任务独立的沙盒目录
@@ -39,9 +41,9 @@ export interface SandboxConfig {
 /** 创建 sandbox（独立 clone）时传入的 workspace 信息（caller 反查后传入，sandbox.ts 不依赖 workspaces.ts） */
 export interface WorkspaceRef {
   id: string;
-  path: string;
+  /** 远程 clone URL（新模型主字段）；不含 token，token 在 clone 时动态注入 */
+  remote_url: string;
   default_branch: string;
-  /** GitHub owner/repo：用于把 clone 的 origin 从本地路径改写成 GitHub url（push/PR 用） */
   github_owner?: string | null;
   github_repo?: string | null;
 }
@@ -192,17 +194,17 @@ export function getTaskWorktreeMeta(taskId: string): WorktreeMeta | null {
 }
 
 /**
- * 为 task 创建独立 clone 沙盒。成功返回 WorktreeMeta(mode=clone)，失败 warn + 返回 null（caller 退化空目录）。
+ * 为 task 创建独立远程 clone 沙盒。成功返回 WorktreeMeta(mode=clone)，失败 warn + 返回 null。
  *
- * 核心：用户仓库**全程零痕迹**——源仓库只被 `git clone --local` 只读一次，之后零交互，
- * 删除时纯 rmSync（不跑任何 `git -C <源仓库>`）。不再在源仓库 .git 留 worktree 注册 / 临时分支。
+ * 核心：直接从远程 git clone（完整 clone，不加 --depth）。
+ * token 注入：HTTPS URL + config.yaml git.token 存在时，临时注入凭证到 clone URL，
+ * clone 后的 .git/config origin 会带 token（push 时也生效）；SSH 走系统 key。
  *
  * 步骤：
- *   1. 校验 workspace 是 git 仓库
- *   2. git clone --local <workspace.path> <wsPath>（硬链接 object，快省空间）
- *   3. 修正 origin → GitHub url（--local origin 指本地路径，否则 push 推回本地仓库）
- *   4. fetch origin 最新 base，基于 origin/<base> 建交付分支（fetch 失败回退本地 base）
- *   5. 写 .worktree.json（mode=clone）让删除路径自包含
+ *   1. 读 git.token 配置，构建含凭证的 clone URL
+ *   2. git clone <authUrl> <wsPath>（完整历史，无 --local / --depth）
+ *   3. 基于 origin/<base> 建交付分支
+ *   4. 写 .worktree.json（mode=clone）
  */
 function tryCreateClone(
   taskId: string,
@@ -215,11 +217,12 @@ function tryCreateClone(
     log.warn("sandbox.git=true 但未提供 workspace（task.extra 无 workspace_id？）；退化空目录 [task=%s]", taskId);
     return null;
   }
-  if (!existsSync(join(workspace.path, ".git"))) {
-    log.warn("sandbox.git=true 但 workspace %s 不是 git 仓库（%s/.git 不存在）；退化空目录 [task=%s]",
-      workspace.id, workspace.path, taskId);
+  if (!workspace.remote_url) {
+    log.warn("sandbox.git=true 但 workspace %s 无 remote_url（软失效工作区）；退化空目录 [task=%s]",
+      workspace.id, taskId);
     return null;
   }
+
   const base = cfg.base ?? workspace.default_branch;
   const branch = deliverBranch ?? `${cfg.branch_prefix ?? "autopilot/"}${taskId}`;
 
@@ -228,36 +231,52 @@ function tryCreateClone(
   if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
   if (existsSync(wsPath)) rmSync(wsPath, { recursive: true, force: true });
 
-  // 1. 本地硬链接 clone —— 源仓库只读，零写入（不碰源 .git 的分支/worktree 注册）
-  const cl = Bun.spawnSync(["git", "clone", "--local", workspace.path, wsPath], { stdout: "pipe", stderr: "pipe" });
+  // 读取 git.token 配置，构建含凭证的 clone URL（HTTPS 注入；SSH 原样）
+  let cloneUrl = workspace.remote_url;
+  let cleanUrl = workspace.remote_url; // 不含 token 的干净 URL，clone 后覆盖 origin
+  try {
+    const gitCfg = loadGitConfig();
+    if (gitCfg.token) {
+      cloneUrl = buildAuthUrl(workspace.remote_url, gitCfg.token);
+    }
+  } catch (e: unknown) {
+    // token 读取失败仅 warn，不阻断 clone（无凭证的公开仓库可正常 clone）
+    log.warn("读取 git.token 失败，将尝试无凭证 clone [task=%s]: %s",
+      taskId, e instanceof Error ? e.message : String(e));
+  }
+
+  // 完整 clone（无 --local / --depth）
+  const cl = Bun.spawnSync(["git", "clone", cloneUrl, wsPath], { stdout: "pipe", stderr: "pipe" });
   if (cl.exitCode !== 0) {
     const stderr = cl.stderr ? new TextDecoder().decode(cl.stderr) : "";
-    log.warn("git clone --local 失败 [task=%s workspace=%s exit=%d]: %s",
-      taskId, workspace.id, cl.exitCode, stderr.slice(0, 300));
+    // 脱敏：若 cloneUrl 含 token，从 stderr 中去除
+    const safeStderr = cloneUrl !== workspace.remote_url
+      ? stderr.replace(cloneUrl, workspace.remote_url)
+      : stderr;
+    log.warn("git clone 失败 [task=%s workspace=%s exit=%d]: %s",
+      taskId, workspace.id, cl.exitCode, safeStderr.slice(0, 300));
     return null;
   }
 
-  // 2. 修正 origin → GitHub（--local 的 origin 指向本地路径，push 会推回本地仓库而非远程）
-  const remoteUrl = resolveRemoteUrl(workspace);
-  if (remoteUrl) {
-    Bun.spawnSync(["git", "-C", wsPath, "remote", "set-url", "origin", remoteUrl], { stderr: "pipe" });
+  // clone 后立即覆盖 origin URL：去掉 token，防止凭证明文持久化在 .git/config
+  if (cloneUrl !== cleanUrl) {
+    Bun.spawnSync(["git", "-C", wsPath, "remote", "set-url", "origin", cleanUrl], { stderr: "pipe" });
   }
 
-  // 3. 基于 base 建交付分支。clone --local 只把源仓库**默认分支**建成本地分支，其余分支是
-  //    origin/<x> 远程跟踪 ref。故 base 优先用 origin/<base>（默认+非默认分支都在），解析不到
-  //    回退本地 base。否则非默认 base（如 develop）会 `checkout -B feat develop` 失败、建不出交付分支。
-  const baseRef = Bun.spawnSync(["git", "-C", wsPath, "rev-parse", "--verify", "--quiet", `origin/${base}`], { stderr: "pipe" }).exitCode === 0
-    ? `origin/${base}` : base;
+  // 基于 origin/<base> 建交付分支（完整 clone 后所有分支均作为 origin/<x> 可用）
+  const baseRef = Bun.spawnSync(
+    ["git", "-C", wsPath, "rev-parse", "--verify", "--quiet", `origin/${base}`],
+    { stderr: "pipe" },
+  ).exitCode === 0 ? `origin/${base}` : base;
+
   const co = Bun.spawnSync(["git", "-C", wsPath, "checkout", "-B", branch, baseRef], { stderr: "pipe" });
   if (co.exitCode !== 0) {
     const stderr = co.stderr ? new TextDecoder().decode(co.stderr) : "";
     log.warn("clone 后建交付分支失败 [task=%s branch=%s base=%s]: %s", taskId, branch, base, stderr.slice(0, 200));
-    // 不致命：工作树仍在 clone 默认分支，run 阶段尽量跑
+    // 不致命：仍在克隆的默认分支，尽量跑
   }
 
-  // 让 autopilot 阶段产物（phaseDir 写的 NN-phase/ 目录）被 git 忽略，避免被 git add -A
-  // 卷入交付 commit 污染 PR。写 clone 本地 .git/info/exclude（对 untracked 产物生效），
-  // 不动用户仓库的 .gitignore。保持"PR 只含需求改动"。
+  // .git/info/exclude：让阶段产物目录不进 PR
   try {
     const excludeFile = join(wsPath, ".git", "info", "exclude");
     if (existsSync(join(wsPath, ".git", "info"))) {
@@ -267,30 +286,17 @@ function tryCreateClone(
 
   const meta: WorktreeMeta = {
     workspace_id: workspace.id,
-    workspace_path: workspace.path,
+    workspace_path: "",   // 远程 clone 模式无本地路径
     branch,
     base,
     created_at: Date.now(),
     mode: "clone",
-    remote_url: remoteUrl ?? null,
+    remote_url: workspace.remote_url,  // 存干净 URL（不含 token）
   };
   writeWorktreeMeta(taskId, meta);
-  log.info("独立 clone 创建 [task=%s workspace=%s branch=%s base=%s remote=%s ws=%s]",
-    taskId, workspace.id, branch, base, remoteUrl ?? "(本地无远程)", wsPath);
+  log.info("远程 clone 创建 [task=%s workspace=%s branch=%s base=%s remote=%s]",
+    taskId, workspace.id, branch, base, workspace.remote_url);
   return meta;
-}
-
-/** 解析 clone 的 push 目标远程 url：优先 workspace 的 GitHub owner/repo，回退源仓库 origin（只读）。 */
-function resolveRemoteUrl(ws: WorkspaceRef): string | null {
-  if (ws.github_owner && ws.github_repo) {
-    return `https://github.com/${ws.github_owner}/${ws.github_repo}.git`;
-  }
-  const p = Bun.spawnSync(["git", "-C", ws.path, "remote", "get-url", "origin"], { stdout: "pipe", stderr: "pipe" });
-  if (p.exitCode === 0) {
-    const u = new TextDecoder().decode(p.stdout ?? new Uint8Array()).trim();
-    if (u) return u;
-  }
-  return null;
 }
 
 
@@ -308,7 +314,8 @@ function readWorktreeMeta(taskId: string): WorktreeMeta | null {
     // 仅用于删除时定位 git 目录，不参与任何 DB 查询，旧 cb- 前缀 id 也无需转换。
     const workspace_id = raw.workspace_id ?? raw.codebase_id;
     const workspace_path = raw.workspace_path ?? raw.codebase_path;
-    if (!workspace_id || !workspace_path) return null;
+    // workspace_id 必须存在；workspace_path 在远程 clone 模式可为空字符串（只检查 undefined/null）
+    if (!workspace_id || workspace_path == null) return null;
     return {
       workspace_id, workspace_path, branch: raw.branch, base: raw.base, created_at: raw.created_at,
       mode: raw.mode, remote_url: raw.remote_url,
@@ -661,8 +668,6 @@ export interface RetentionPolicy {
  */
 export function loadRetentionPolicy(): RetentionPolicy {
   try {
-    // 延迟 import 避免循环
-    const { loadConfig } = require("./config") as typeof import("./config");
     const raw = loadConfig();
     let section = raw["sandbox_retention"];
     if (

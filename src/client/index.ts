@@ -66,6 +66,7 @@ export class AutopilotClient {
   get listWorkspaces() { return this.http.listWorkspaces.bind(this.http); }
   get getWorkspace() { return this.http.getWorkspace.bind(this.http); }
   get createWorkspace() { return this.http.createWorkspace.bind(this.http); }
+  get updateWorkspace() { return this.http.updateWorkspace.bind(this.http); }
   get deleteWorkspace() { return this.http.deleteWorkspace.bind(this.http); }
   get healthcheckWorkspace() { return this.http.healthcheckWorkspace.bind(this.http); }
 

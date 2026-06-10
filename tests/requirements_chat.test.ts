@@ -11,6 +11,7 @@ import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate028 } from "../src/migrations/028-requirement-status-reason";
 import { up as migrate029 } from "../src/migrations/029-requirement-status-before-terminal";
 import { up as migrate030 } from "../src/migrations/030-requirement-status-logs";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
@@ -41,6 +42,7 @@ describe("chat tools 集成（直接走 core 函数验证流程）", () => {
     migrate028(db);
     migrate029(db);
     migrate030(db);
+    migrate033(db);
     createProject({ id: "proj-001", name: "test-proj" });
     createWorkspace({ id: "cb-001", project_id: "proj-001", alias: "test-repo", path: "/tmp/x", default_branch: "main" });
   });
@@ -184,6 +186,7 @@ describe("enqueue 失败回滚", () => {
     migrate008(db);
     migrate021(db);
     migrate024(db);
+    migrate033(db);
     createProject({ id: "proj-rb", name: "rollback-proj" });
     createWorkspace({ id: "cb-rollback", project_id: "proj-rb", alias: "rollback-repo", path: "/tmp/rb", default_branch: "main" });
   });

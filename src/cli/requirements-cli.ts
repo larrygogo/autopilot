@@ -34,9 +34,9 @@ async function readRawTextInteractive(): Promise<string> {
 export function inferWorkspaceFromCwd(workspaces: Workspace[], cwd: string = process.cwd()): string | null {
   const normalize = (p: string) => p.replace(/[\\/]+$/, "");
   const ncwd = normalize(cwd);
-  const matches = workspaces.filter((c) => ncwd.startsWith(normalize(c.path)));
+  const matches = workspaces.filter((c) => c.path && ncwd.startsWith(normalize(c.path)));
   if (matches.length === 0) return null;
-  return matches.sort((a, b) => b.path.length - a.path.length)[0]!.id;
+  return matches.sort((a, b) => (b.path?.length ?? 0) - (a.path?.length ?? 0))[0]!.id;
 }
 
 interface ReqNewOpts {

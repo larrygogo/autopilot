@@ -4,6 +4,9 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import { mkdirSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate004 } from "../src/migrations/004-repos";
 import { up as migrate005 } from "../src/migrations/005-requirements";
@@ -11,14 +14,38 @@ import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest } from "../src/core/db";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
+/** 创建一个临时的 bare git 仓库，可被 git ls-remote 探测 */
+function createBareRepo(): string {
+  const dir = join(tmpdir(), `autopilot-bare-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  Bun.spawnSync(["git", "init", "--bare", "-q", dir], { stdout: "pipe", stderr: "pipe" });
+  // bare 仓库需要至少一个引用，否则 ls-remote 拿不到 HEAD
+  // 在 tmp 创建一个普通仓库，提交一次后 push 到 bare
+  const work = dir + "-work";
+  mkdirSync(work, { recursive: true });
+  const cmds: string[][] = [
+    ["git", "-C", work, "init", "-q", "-b", "main"],
+    ["git", "-C", work, "config", "user.email", "test@autopilot.local"],
+    ["git", "-C", work, "config", "user.name", "Test"],
+    ["git", "-C", work, "commit", "--allow-empty", "-q", "-m", "init"],
+    ["git", "-C", work, "remote", "add", "origin", dir],
+    ["git", "-C", work, "push", "-q", "origin", "main"],
+  ];
+  for (const argv of cmds) Bun.spawnSync(argv, { stdout: "pipe", stderr: "pipe" });
+  rmSync(work, { recursive: true, force: true });
+  return dir;
+}
+
 describe("workspaces.* RPC", () => {
   let db: Database;
+  let bareRepoPath: string;
 
   beforeAll(() => {
     db = new Database(":memory:");
@@ -29,14 +56,19 @@ describe("workspaces.* RPC", () => {
     migrate007(db);
     migrate008(db);
     migrate024(db);
+    migrate033(db);
     _setDbForTest(db);
     registerCoreRpcMethods();
     createProject({ id: "proj-001", name: "P" });
+    bareRepoPath = createBareRepo();
   });
 
   afterAll(() => {
     _setDbForTest(null);
     db.close();
+    if (bareRepoPath) {
+      try { rmSync(bareRepoPath, { recursive: true, force: true }); } catch {}
+    }
   });
 
   beforeEach(() => {
@@ -58,7 +90,7 @@ describe("workspaces.* RPC", () => {
   it("workspaces.create 返回裸 workspace", async () => {
     const r = await invokeRpcMethod("workspaces.create", {
       alias: "demo",
-      path: "/tmp/demo",
+      remote_url: bareRepoPath,
       project_id: "proj-001",
     });
     expect(r.ok).toBe(true);
@@ -70,7 +102,7 @@ describe("workspaces.* RPC", () => {
     }
   });
 
-  it("workspaces.create 缺 alias/path → INVALID_PARAM", async () => {
+  it("workspaces.create 缺 alias/remote_url → INVALID_PARAM", async () => {
     const r = await invokeRpcMethod("workspaces.create", { alias: "demo" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("INVALID_PARAM");

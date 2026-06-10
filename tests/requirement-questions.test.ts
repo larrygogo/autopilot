@@ -12,6 +12,7 @@ import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { createProject } from "../src/core/projects";
 import { createWorkspace } from "../src/core/workspaces";
 import { createRequirement } from "../src/core/requirements";
@@ -33,6 +34,7 @@ describe("requirement-questions 评论线程", () => {
     migrate009(sqlite); migrate010(sqlite);
     migrate021(sqlite);
     migrate024(sqlite);
+    migrate033(sqlite);
 
     const p = createProject({ id: "proj-q", name: "q" });
     const c = createWorkspace({ id: "cb-q", project_id: p.id, alias: "q", path: "/q" });

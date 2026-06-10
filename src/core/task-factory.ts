@@ -162,7 +162,22 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     if (workspaceId) {
       const ws = getWorkspaceById(workspaceId);
       if (ws) {
-        workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch, github_owner: ws.github_owner, github_repo: ws.github_repo };
+        if (!ws.remote_url) {
+          // 软失效工作区：remote_url 为 NULL，拒绝起任务（防止 sandbox 退化空目录悄悄运行）
+          throw new StartTaskError(
+            `Workspace ${workspaceId}（${ws.alias}）缺少远程地址（软失效）。请先执行：\n` +
+            `  autopilot workspace update ${workspaceId} --remote <git-url>\n` +
+            `补填远程地址后重试。`,
+            400,
+          );
+        }
+        workspace = {
+          id: ws.id,
+          remote_url: ws.remote_url,
+          default_branch: ws.default_branch,
+          github_owner: ws.github_owner,
+          github_repo: ws.github_repo,
+        };
       }
     }
   }
@@ -301,7 +316,21 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string; 
       ?? (typeof task["workspace_id"] === "string" ? (task["workspace_id"] as string) : undefined);
     if (wsId) {
       const ws = getWorkspaceById(wsId);
-      if (ws) workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch, github_owner: ws.github_owner, github_repo: ws.github_repo };
+      if (ws) {
+        if (!ws.remote_url) {
+          throw new StartTaskError(
+            `重跑失败：Workspace ${wsId}（${ws.alias}）缺少远程地址。请先 autopilot workspace update ${wsId} --remote <url>`,
+            400,
+          );
+        }
+        workspace = {
+          id: ws.id,
+          remote_url: ws.remote_url,
+          default_branch: ws.default_branch,
+          github_owner: ws.github_owner,
+          github_repo: ws.github_repo,
+        };
+      }
     }
     // 重新 clone 干净工作树（替即焚的"重置 patch 元数据"）。
     ensureTaskSandbox(taskId, targetWorkflow, wf.sandbox, workspace, deliverBranchName(String(opts.title ?? task.title ?? ""), taskId));
