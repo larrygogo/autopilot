@@ -1499,9 +1499,6 @@ export function RequirementDetail() {
                     </div>
                   )}
                   {req.status === "cancelled" && <p className="text-sm text-muted-foreground">需求已取消。</p>}
-                  {req.status !== "done" && req.status !== "failed" && req.status !== "cancelled" && (
-                    <p className="text-sm text-muted-foreground">尚未结束。</p>
-                  )}
                 </Card>
                 {subPrCard}
                 {taskRecord}
