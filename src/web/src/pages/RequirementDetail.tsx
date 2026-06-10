@@ -9,7 +9,9 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea, Input } from "@/components/ui/input";
 import { TaskDetail } from "@/pages/TaskDetail";
-import { StageRail, statusToStage } from "@/components/StageRail";
+import { statusToStage } from "@/components/StageRail";
+import { StepBar } from "@/components/StepBar";
+import { statusToStep, stepPosition, STEPS, type ReqStep } from "@/lib/requirement-steps";
 import { NextStepCTA } from "@/components/NextStepCTA";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -435,6 +437,8 @@ export function RequirementDetail() {
   const [round, setRound] = useState<ClarifierRoundState | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [selectedStep, setSelectedStep] = useState<ReqStep | null>(null);
+  const prevStatusRef = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
@@ -540,6 +544,22 @@ export function RequirementDetail() {
     api.getProject(req.project_id).then(setProject).catch(() => setProject(null));
     api.listProjectWorkspaces(req.project_id).then(setProjectCodebases).catch(() => setProjectCodebases([]));
   }, [req?.project_id]);
+
+  // 默认选中当前步；status 变化时，若用户没手动切走则跟随到新当前步，否则不打断。
+  useEffect(() => {
+    if (!req) return;
+    const cur = statusToStep(req.status);
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = req.status;
+    if (prev === undefined) {
+      setSelectedStep(cur); // 初次加载：默认当前步
+      return;
+    }
+    if (prev !== req.status) {
+      const prevStep = statusToStep(prev);
+      setSelectedStep((sel) => (sel === null || sel === prevStep ? cur : sel));
+    }
+  }, [req?.status]);
 
   const repoAlias = useMemo(() => {
     if (!req) return "";
@@ -856,6 +876,8 @@ export function RequirementDetail() {
   if (!req) return <div className="p-6 text-sm text-muted-foreground">需求不存在</div>;
 
   const stage = statusToStage(req.status);
+  const currentStep = statusToStep(req.status);
+  const activeStep: ReqStep = selectedStep ?? currentStep;
   const isTerminal = TERMINAL_STATUSES.has(req.status);
   const openQuestions = questions.filter((q) => q.status === "open");
   const resolvedQuestions = questions.filter((q) => q.status === "resolved");
@@ -1258,9 +1280,9 @@ export function RequirementDetail() {
         </div>
       </header>
 
-      {/* 阶段导轨：把生命周期 5 段显性成进度，当前阶段高亮 */}
+      {/* 步骤进度条：6 步可点击，默认当前步 */}
       <div className="mb-5 rounded-lg border border-border bg-card/40 px-4 py-3">
-        <StageRail status={req.status} />
+        <StepBar status={req.status} selected={activeStep} onSelect={setSelectedStep} />
       </div>
 
       {/* 下一步主 CTA banner */}
@@ -1278,183 +1300,215 @@ export function RequirementDetail() {
 
       {/* 主体：主区（当前阶段内容）+ 侧栏（常驻锚点） */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* 主区：随 stage 切换，一次只呈现当前阶段 */}
+        {/* 主区：随选中步骤切换；过去步只读，未到达占位 */}
         <div className="lg:col-span-2 space-y-4 min-w-0">
-          {stage === "clarify" && (
-            <>
-              {clarifierStatus}
-              {chatCard}
-              {/* drafting/clarifying 备用路径：跳过 AI 澄清直接收尾（主操作在 CTA） */}
-              <Button
-                variant="outline"
-                className="w-full"
-                size="sm"
-                onClick={markReady}
-                disabled={actionBusy}
-                title="跳过 AI 澄清流程，直接标记为已澄清"
-              >
-                {actionBusy ? "处理中…" : "跳过澄清，标为已澄清"}
-              </Button>
-              {specCard}
-            </>
+          {activeStep !== currentStep && (
+            <button
+              type="button"
+              onClick={() => setSelectedStep(currentStep)}
+              className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+            >
+              ↩ 回到当前步骤（{STEPS.find((s) => s.key === currentStep)?.label}）
+            </button>
           )}
 
-          {stage === "ready" && (
-            <>
-              {req.schedule_error && (
-                <Card className="border-l-4 border-l-destructive p-4">
-                  <div className="flex items-start gap-2">
-                    <span className="shrink-0 text-destructive">⚠</span>
-                    <div className="min-w-0 text-sm">
-                      <p className="font-medium text-destructive">上次起任务失败，已退回</p>
-                      <p className="mt-0.5 break-words text-muted-foreground">{req.schedule_error}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">修复后点上方「入队执行」可重试。</p>
-                    </div>
-                  </div>
+          {(() => {
+            const pos = stepPosition(activeStep, currentStep);
+            if (pos === "future") {
+              const label = STEPS.find((s) => s.key === activeStep)?.label ?? "";
+              return (
+                <Card className="p-6 text-center text-sm text-muted-foreground">
+                  「{label}」尚未开始。完成前序步骤后会进入这一步。
                 </Card>
-              )}
-              {specCard}
-              {req.status === "queued" && (
-                <Button variant="outline" className="w-full" size="sm" onClick={recallToReady} disabled={actionBusy}>
-                  {actionBusy ? "处理中…" : "撤回（返回已澄清）"}
-                </Button>
-              )}
-              {req.status === "awaiting_approval" && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  size="sm"
-                  onClick={rejectApproval}
-                  disabled={actionBusy}
-                  title="审批通过的主按钮在上方"
-                >
-                  {actionBusy ? "处理中…" : "↩ 驳回，返回草稿"}
-                </Button>
-              )}
-            </>
-          )}
+              );
+            }
+            const readonly = pos === "past";
 
-          {stage === "execute" && (
-            <>
-              {subPrCard}
-              {taskRecord}
-              {req.status === "fix_revision" && (
+            if (activeStep === "clarify") {
+              return (
+                <>
+                  {clarifierStatus}
+                  {chatCard}
+                  {!readonly && (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      size="sm"
+                      onClick={markReady}
+                      disabled={actionBusy}
+                      title="跳过 AI 澄清流程，直接标记为已澄清"
+                    >
+                      {actionBusy ? "处理中…" : "跳过澄清，标为已澄清"}
+                    </Button>
+                  )}
+                  {specCard}
+                </>
+              );
+            }
+
+            if (activeStep === "approve") {
+              return (
+                <>
+                  {req.schedule_error && (
+                    <Card className="border-l-4 border-l-destructive p-4">
+                      <div className="flex items-start gap-2">
+                        <span className="shrink-0 text-destructive">⚠</span>
+                        <div className="min-w-0 text-sm">
+                          <p className="font-medium text-destructive">上次起任务失败，已退回</p>
+                          <p className="mt-0.5 break-words text-muted-foreground">{req.schedule_error}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">修复后点上方「入队执行」可重试。</p>
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+                  {specCard}
+                  {!readonly && req.status === "awaiting_approval" && (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      size="sm"
+                      onClick={rejectApproval}
+                      disabled={actionBusy}
+                      title="审批通过的主按钮在上方"
+                    >
+                      {actionBusy ? "处理中…" : "↩ 驳回，返回草稿"}
+                    </Button>
+                  )}
+                </>
+              );
+            }
+
+            if (activeStep === "queue") {
+              return (
+                <>
+                  {specCard}
+                  {taskRecord}
+                  {!readonly && req.status === "queued" && (
+                    <Button variant="outline" className="w-full" size="sm" onClick={recallToReady} disabled={actionBusy}>
+                      {actionBusy ? "处理中…" : "撤回（返回已澄清）"}
+                    </Button>
+                  )}
+                </>
+              );
+            }
+
+            if (activeStep === "execute") {
+              return (
+                <>
+                  {subPrCard}
+                  {taskRecord}
+                  {!readonly && req.status === "fix_revision" && (
+                    <Card className="p-5">
+                      <p className="mb-2 text-xs text-muted-foreground">修复阶段反馈（注入后 Agent 会据此修改）：</p>
+                      <Textarea
+                        value={feedbackBody}
+                        onChange={(e) => setFeedbackBody(e.target.value)}
+                        placeholder="填写修改建议…"
+                        className="min-h-[80px] text-xs"
+                        disabled={submittingFeedback}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
+                        }}
+                      />
+                      <div className="mt-2 flex justify-end">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void inject()}
+                          disabled={submittingFeedback || !feedbackBody.trim()}
+                        >
+                          {submittingFeedback ? "提交中…" : "注入反馈"}
+                        </Button>
+                      </div>
+                    </Card>
+                  )}
+                  {feedbackCard}
+                </>
+              );
+            }
+
+            if (activeStep === "review") {
+              return (
+                <>
+                  {subPrCard}
+                  {!readonly && (
+                    <Card className="p-5">
+                      <p className="mb-2 text-sm font-medium">PR 审查</p>
+                      <Textarea
+                        value={feedbackBody}
+                        onChange={(e) => setFeedbackBody(e.target.value)}
+                        placeholder="填写审查意见或修改建议…"
+                        className="min-h-[80px] text-xs"
+                        disabled={submittingFeedback}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
+                        }}
+                      />
+                      <div className="mt-2 space-y-2">
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          size="sm"
+                          onClick={() => void inject()}
+                          disabled={submittingFeedback || !feedbackBody.trim()}
+                        >
+                          {submittingFeedback ? "提交中…" : "注入反馈"}
+                        </Button>
+                        <div className="flex gap-2">
+                          <Button variant="default" className="flex-1 text-xs" size="sm" onClick={() => void markDone()} disabled={actionBusy}>
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> PR 已合并 · 完成
+                          </Button>
+                          <Button variant="outline" className="flex-1 text-xs" size="sm" onClick={() => void requestFix()} disabled={actionBusy}>
+                            ↩ 要求修改
+                          </Button>
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+                  {taskRecord}
+                  {feedbackCard}
+                </>
+              );
+            }
+
+            // activeStep === "done"
+            return (
+              <>
                 <Card className="p-5">
-                  <p className="mb-2 text-xs text-muted-foreground">修复阶段反馈（注入后 Agent 会据此修改）：</p>
-                  <Textarea
-                    value={feedbackBody}
-                    onChange={(e) => setFeedbackBody(e.target.value)}
-                    placeholder="填写修改建议…"
-                    className="min-h-[80px] text-xs"
-                    disabled={submittingFeedback}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
-                    }}
-                  />
-                  <div className="mt-2 flex justify-end">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void inject()}
-                      disabled={submittingFeedback || !feedbackBody.trim()}
-                    >
-                      {submittingFeedback ? "提交中…" : "注入反馈"}
-                    </Button>
-                  </div>
+                  {req.status === "done" && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <CheckCircle2 className="h-4 w-4 text-success" />
+                      <span className="font-medium">需求已完成</span>
+                      {req.pr_url && (
+                        <a
+                          href={req.pr_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="ml-auto inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline"
+                        >
+                          PR #{req.pr_number}
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {req.status === "failed" && (
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-destructive">执行失败</p>
+                      <p className="text-xs text-muted-foreground">可在上方「重新入队执行」重试，或退回草稿改规约。</p>
+                    </div>
+                  )}
+                  {req.status === "cancelled" && <p className="text-sm text-muted-foreground">需求已取消。</p>}
+                  {req.status !== "done" && req.status !== "failed" && req.status !== "cancelled" && (
+                    <p className="text-sm text-muted-foreground">尚未结束。</p>
+                  )}
                 </Card>
-              )}
-              {feedbackCard}
-            </>
-          )}
-
-          {stage === "review" && (
-            <>
-              {subPrCard}
-              {/* 验收决策：注入审查意见 + 合并 / 要求修改 */}
-              <Card className="p-5">
-                <p className="mb-2 text-sm font-medium">PR 审查</p>
-                <Textarea
-                  value={feedbackBody}
-                  onChange={(e) => setFeedbackBody(e.target.value)}
-                  placeholder="填写审查意见或修改建议…"
-                  className="min-h-[80px] text-xs"
-                  disabled={submittingFeedback}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
-                  }}
-                />
-                <div className="mt-2 space-y-2">
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    size="sm"
-                    onClick={() => void inject()}
-                    disabled={submittingFeedback || !feedbackBody.trim()}
-                  >
-                    {submittingFeedback ? "提交中…" : "注入反馈"}
-                  </Button>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="default"
-                      className="flex-1 text-xs"
-                      size="sm"
-                      onClick={() => void markDone()}
-                      disabled={actionBusy}
-                    >
-                      <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> PR 已合并 · 完成
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="flex-1 text-xs"
-                      size="sm"
-                      onClick={() => void requestFix()}
-                      disabled={actionBusy}
-                    >
-                      ↩ 要求修改
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-              {taskRecord}
-              {feedbackCard}
-            </>
-          )}
-
-          {stage === "done" && (
-            <>
-              <Card className="p-5">
-                {req.status === "done" && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <CheckCircle2 className="h-4 w-4 text-success" />
-                    <span className="font-medium">需求已完成</span>
-                    {req.pr_url && (
-                      <a
-                        href={req.pr_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="ml-auto inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline"
-                      >
-                        PR #{req.pr_number}
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                  </div>
-                )}
-                {req.status === "failed" && (
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-destructive">执行失败</p>
-                    <p className="text-xs text-muted-foreground">可在上方「重新入队执行」重试，或退回草稿改规约。</p>
-                  </div>
-                )}
-                {req.status === "cancelled" && (
-                  <p className="text-sm text-muted-foreground">需求已取消。</p>
-                )}
-              </Card>
-              {subPrCard}
-              {taskRecord}
-              {feedbackCard}
-            </>
-          )}
+                {subPrCard}
+                {taskRecord}
+                {feedbackCard}
+              </>
+            );
+          })()}
         </div>
 
         {/* 侧栏：常驻锚点（元信息 + 非主区时的 spec + 危险区） */}
