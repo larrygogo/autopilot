@@ -38,6 +38,8 @@ export interface Requirement {
   status_reason_source: StatusReasonSource | null;
   /** 转入终态时的 from 状态（步骤条据此把 ✗ 画在死亡步）；failed 重试时清空。 */
   status_before_terminal: string | null;
+  /** 执行用的工作流名；NULL = 未显式选择，调度时回退默认 "dev"。审批后随内容冻结。 */
+  workflow: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -66,6 +68,7 @@ export interface UpdateRequirementOpts {
   clarifier_provider?: string | null;
   clarifier_model?: string | null;
   schedule_error?: string | null;
+  workflow?: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -214,6 +217,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
     "clarifier_provider",
     "clarifier_model",
     "schedule_error",
+    "workflow",
   ] as const;
   for (const k of updatable) {
     if (opts[k] !== undefined) {

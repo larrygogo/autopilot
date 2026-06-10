@@ -218,8 +218,10 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
  *
  * @param opts.requirement 重跑时刷新的需求文本（spec 可能已更新）；省略则沿用 task 已存的。
  * @param opts.title 重跑时刷新的标题（需求改名后沿用旧 title 会污染交付 commit message / PR 标题）；省略则沿用。
+ * @param opts.workflow 重跑时切换工作流（failed 后用户换流程重试）；省略则沿用。重置本就回
+ *   initial_state + 清历史 + 重 clone，换流程是干净的。
  */
-export function resetTaskForRerun(taskId: string, opts: { requirement?: string; title?: string } = {}): void {
+export function resetTaskForRerun(taskId: string, opts: { requirement?: string; title?: string; workflow?: string } = {}): void {
   const task = getTask(taskId);
   if (!task) throw new StartTaskError(`task 不存在：${taskId}`, 404);
 
@@ -228,8 +230,9 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string; 
     throw new StartTaskError(`task ${taskId} 仍在运行中，无法重置重跑`, 409);
   }
 
-  const wf = getWorkflow(task.workflow);
-  if (!wf) throw new StartTaskError(`Workflow "${task.workflow}" not found`, 500);
+  const targetWorkflow = opts.workflow ?? task.workflow;
+  const wf = getWorkflow(targetWorkflow);
+  if (!wf) throw new StartTaskError(`Workflow "${targetWorkflow}" not found`, 500);
 
   // 1. 清执行态：failure_count 是表列，其余在 extra（updateTask 把 null 合并进 extra = 清空）
   const clear: Record<string, unknown> = {
@@ -246,6 +249,9 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string; 
   if (opts.requirement !== undefined) clear["requirement"] = opts.requirement;
   if (opts.title !== undefined) {
     clear["title"] = opts.title;       // tasks 表列
+  }
+  if (targetWorkflow !== task.workflow) {
+    clear["workflow"] = targetWorkflow; // tasks 表列：failed 后换流程重试
   }
   updateTask(taskId, clear);
 
@@ -298,7 +304,7 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string; 
       if (ws) workspace = { id: ws.id, path: ws.path, default_branch: ws.default_branch, github_owner: ws.github_owner, github_repo: ws.github_repo };
     }
     // 重新 clone 干净工作树（替即焚的"重置 patch 元数据"）。
-    ensureTaskSandbox(taskId, task.workflow, wf.sandbox, workspace, deliverBranchName(String(opts.title ?? task.title ?? ""), taskId));
+    ensureTaskSandbox(taskId, targetWorkflow, wf.sandbox, workspace, deliverBranchName(String(opts.title ?? task.title ?? ""), taskId));
     const meta = getTaskWorktreeMeta(taskId);
     if (meta) {
       updateTask(taskId, {
@@ -314,6 +320,7 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string; 
   //     弃 session」保护因 cwd 路径不变而失效，claude --resume 会续到指向已删旧 clone 的陈旧会话。
   //     重跑 = 干净重来，显式关掉该工作流的 agent 连接（清缓存 session），下轮起全新会话。
   if (wf.sandbox?.git) {
+    // 关旧 workflow 的 agent 连接（陈旧 session 指向已删 clone）；换流程时旧名才是有 session 的那个
     void closeAgents(task.workflow).catch(() => { /* best-effort */ });
   }
 

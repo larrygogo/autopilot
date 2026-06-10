@@ -110,10 +110,19 @@ async function tickGroup(groupId: string): Promise<void> {
 
   // req:task 1:1：需求已有存活 task → 复用它重置重跑，不新建第二个（避免一 req 堆多 task）。
   // 首次执行 task_id 为 null 走下面新建；failed/重新入队时 task_id 已写 → 复用重跑。
+  // 需求选定的工作流（NULL = 未显式选择，回退默认 dev）
+  const reqWorkflow = candidate.workflow ?? "dev";
+
   const existing = candidate.task_id ? getTask(candidate.task_id) : null;
   if (existing) {
     try {
-      resetTaskForRerun(existing.id, { requirement, title: candidate.title });
+      resetTaskForRerun(existing.id, {
+        requirement,
+        title: candidate.title,
+        // failed 后用户可换工作流再重试：重跑时把 task 迁到新工作流（reset 本来就重置到
+        // initial_state + 清历史 + 重 clone，换流程是干净的）
+        workflow: reqWorkflow !== existing.workflow ? reqWorkflow : undefined,
+      });
       updateRequirement(candidate.id, { schedule_error: null });
       setRequirementStatus(candidate.id, "running");
       log.info("tickRepo: 重跑 requirement %s → 复用 task %s on workspace %s",
@@ -133,13 +142,8 @@ async function tickGroup(groupId: string): Promise<void> {
 
   let task;
   try {
-    // workflow 名硬编码为 "dev" — 项目现状里 dev 是默认开发工作流，
-    // 用户的 ~/.autopilot/workflows/dev/workflow.yaml 也是这个名。早期叫
-    // "req_dev" 在迁移时漏改了这一处，导致 enqueue 后 tickRepo 抛
-    // "Workflow req_dev not found"。未来要做 per-requirement workflow
-    // 选择时再改成动态读 requirement.workflow 字段。
     task = await startTaskFromTemplate({
-      workflow: "dev",
+      workflow: reqWorkflow,
       title: candidate.title,
       requirement,
       workspace_id: candidateWorkspace.id,

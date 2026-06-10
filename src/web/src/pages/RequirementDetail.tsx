@@ -439,6 +439,8 @@ export function RequirementDetail() {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [selectedStep, setSelectedStep] = useState<ReqStep | null>(null);
   const [statusLogs, setStatusLogs] = useState<RequirementStatusLog[]>([]);
+  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; description: string }[]>([]);
+  const [savingWorkflow, setSavingWorkflow] = useState(false);
   const prevStatusRef = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
@@ -548,6 +550,13 @@ export function RequirementDetail() {
     api.listProjectWorkspaces(req.project_id).then(setProjectCodebases).catch(() => setProjectCodebases([]));
   }, [req?.project_id]);
 
+  // 工作流选项（编辑期下拉用），一次性拉取
+  useEffect(() => {
+    api.listWorkflows()
+      .then((ws) => setWorkflowOptions(ws.map((w) => ({ name: w.name, description: w.description ?? "" }))))
+      .catch(() => { /* 拉不到时下拉退化为只显示当前值 */ });
+  }, []);
+
   // 默认选中当前步；status 变化时，若用户没手动切走则跟随到新当前步，否则不打断。
   useEffect(() => {
     if (!req) return;
@@ -606,6 +615,20 @@ export function RequirementDetail() {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
     } finally {
       setSavingSpec(false);
+    }
+  }
+
+  async function changeWorkflow(name: string) {
+    if (!id) return;
+    setSavingWorkflow(true);
+    try {
+      await api.updateRequirement(id, { workflow: name });
+      await refresh({ silent: true });
+      toast.success(`工作流已切换为 ${name}`);
+    } catch (e: unknown) {
+      toast.error("切换失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setSavingWorkflow(false);
     }
   }
 
@@ -1653,6 +1676,29 @@ export function RequirementDetail() {
               }
             />
             <MetaRow k="状态" v={STATUS_LABEL[req.status] ?? req.status} />
+            <MetaRow
+              k="工作流"
+              v={
+                canEditRequirementContent(req.status) ? (
+                  <select
+                    value={req.workflow ?? "dev"}
+                    onChange={(e) => void changeWorkflow(e.target.value)}
+                    disabled={savingWorkflow || workflowOptions.length === 0}
+                    className="w-full rounded-md border border-border bg-card px-2 py-1 font-mono text-[11px] focus:border-accent focus:outline-none"
+                    title="该需求入队后用哪个工作流执行；审批后冻结"
+                  >
+                    {workflowOptions.length === 0 && <option value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</option>}
+                    {workflowOptions.map((w) => (
+                      <option key={w.name} value={w.name}>{w.name}{w.description ? ` — ${w.description.slice(0, 24)}` : ""}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <code className="font-mono text-[11px]" title="审批后工作流随内容冻结">
+                    {req.workflow ?? "dev"}
+                  </code>
+                )
+              }
+            />
             <MetaRow
               k="创建"
               v={<span className="font-mono text-[11px] text-muted-foreground">{new Date(req.created_at).toLocaleString()}</span>}

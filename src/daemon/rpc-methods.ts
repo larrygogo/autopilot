@@ -953,7 +953,8 @@ export function registerCoreRpcMethods(): void {
       // failed 例外 —— 补充约束后重试正是 failed 的设计用途（评审遗留沉淀 + 改 spec + 重新入队）。
       const wantsContentEdit =
         typeof p.title === "string" || typeof p.spec_md === "string"
-        || p.workspace_id !== undefined || p.codebase_id !== undefined;
+        || p.workspace_id !== undefined || p.codebase_id !== undefined
+        || p.workflow !== undefined;
       if (wantsContentEdit) {
         const cur = getRequirementById(p.id);
         if (!cur) throw new RpcError("NOT_FOUND", "requirement not found");
@@ -961,10 +962,14 @@ export function registerCoreRpcMethods(): void {
         if (!EDITABLE_STATUSES.has(cur.status)) {
           throw new RpcError(
             "INVALID_STATE",
-            `需求已通过审批（当前状态 ${cur.status}），标题/规约/工作区不可再编辑。` +
+            `需求已通过审批（当前状态 ${cur.status}），标题/规约/工作区/工作流不可再编辑。` +
             `执行内容以入队时的快照为准；如需变更请取消后新建需求，或等失败（failed）后修改再重试。`,
           );
         }
+      }
+      // workflow 合法性：必须是已注册工作流（null = 清除显式选择，回退默认 dev）
+      if (typeof p.workflow === "string" && p.workflow && !registryGetWorkflow(p.workflow)) {
+        throw new RpcError("NOT_FOUND", `workflow 不存在：${p.workflow}`);
       }
       const updated = coreUpdateRequirement(p.id, {
         title: typeof p.title === "string" ? p.title : undefined,
@@ -973,6 +978,7 @@ export function registerCoreRpcMethods(): void {
         chat_session_id: (p.chat_session_id as string | null | undefined),
         clarifier_provider: (p.clarifier_provider as string | null | undefined),
         clarifier_model: (p.clarifier_model as string | null | undefined),
+        workflow: (typeof p.workflow === "string" || p.workflow === null) ? p.workflow : undefined,
       });
       if (!updated) throw new RpcError("NOT_FOUND", "requirement not found");
       return { requirement: updated };

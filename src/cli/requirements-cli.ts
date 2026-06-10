@@ -199,6 +199,7 @@ export function registerRequirementCommands(program: Command): void {
           ["状态", r.status],
           ["项目", r.project_id],
           ["工作区", r.workspace_id ?? "(未关联)"],
+          ["工作流", r.workflow ?? "dev（默认）"],
           ["关联任务", r.task_id ?? "(无)"],
           ["PR", r.pr_url ?? "(无)"],
         ];
@@ -216,6 +217,22 @@ export function registerRequirementCommands(program: Command): void {
           console.log("");
           console.log(`任务详情：autopilot task status ${r.task_id}`);
         }
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("set-workflow <id> <workflow>")
+    .description("设置需求的执行工作流（审批后冻结；failed 可改后重试换流程）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, workflow: string, opts: { port: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement } = await client.updateRequirement(id, { workflow });
+        console.log(`✓ 需求 ${requirement.id} 工作流已设为 ${workflow}`);
       } catch (e: unknown) {
         console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
         process.exit(3);

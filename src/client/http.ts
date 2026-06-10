@@ -385,6 +385,7 @@ export class HttpClient {
     title?: string;
     spec_md?: string;
     workspace_id?: string | null;
+    workflow?: string | null;
   }): Promise<{ requirement: { id: string; status: string; title: string } }> {
     return this.call("requirements.update", { id, ...body });
   }

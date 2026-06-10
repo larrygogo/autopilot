@@ -671,6 +671,7 @@ export const api = {
     chat_session_id?: string | null;
     clarifier_provider?: string | null;
     clarifier_model?: string | null;
+    workflow?: string | null;
   }) =>
     requestRpc<{ requirement: Requirement }>("requirements.update", { id, ...body }).then((r) => r.requirement),
 
@@ -1025,6 +1026,8 @@ export interface Requirement {
   status_reason_source: "user" | "task" | "system" | null;
   /** 转入终态时的 from 状态（步骤条据此把 ✗ 画在死亡步）；failed 重试时清空 */
   status_before_terminal: string | null;
+  /** 执行用的工作流名；null = 未显式选择（调度回退默认 dev）。审批后随内容冻结 */
+  workflow: string | null;
   created_at: number;
   updated_at: number;
 }
