@@ -31,6 +31,8 @@ export function startServer(opts: { host: string; port: number }): Server<undefi
   const server = Bun.serve({
     hostname: opts.host,
     port: opts.port,
+    // 文件上传最大 200MB + 少量余量；防止大请求体撑爆内存（Layer 1 闸，配合路由层 200MB 逐文件检查）
+    maxRequestBodySize: 210 * 1024 * 1024,
     // Bun 默认 10s，对空闲 keep-alive 连接过于激进，拉长到 120s
     idleTimeout: 120,
 

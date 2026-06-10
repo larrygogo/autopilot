@@ -48,6 +48,12 @@ import {
   finishClarification,
 } from "../core/requirements";
 import {
+  saveAttachment,
+  listAttachments as listReqAttachments,
+  getAttachmentById as getReqAttachmentById,
+  deleteAttachment as deleteReqAttachment,
+} from "../core/requirement-attachments";
+import {
   listComments,
   createComment,
   getCommentById,
@@ -919,6 +925,76 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       const req2 = getRequirementById(id);
       if (!req2) return error("requirement not found", 404);
       return json({ revisions: listSpecRevisionsByRequirement(id) });
+    }
+
+    // ─────────── Requirement Attachments ───────────
+
+    const reqAttachmentsMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/attachments$/);
+    const reqAttachmentDetailMatch = path.match(/^\/api\/requirements\/([\w-]+)\/attachments\/([\w-]+)$/);
+
+    // GET /api/requirements/:id/attachments
+    if (method === "GET" && reqAttachmentsMatch) {
+      const reqId = reqAttachmentsMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      return json({ attachments: listReqAttachments(reqId) });
+    }
+
+    // POST /api/requirements/:id/attachments （multipart/form-data）
+    if (method === "POST" && reqAttachmentsMatch) {
+      const reqId = reqAttachmentsMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+
+      // Bun 原生 formData()：完整解析 multipart 后再处理，无 busboy race condition
+      let formData: FormData;
+      try {
+        formData = await req.formData();
+      } catch (e: unknown) {
+        return error(`multipart 解析失败：${(e as Error).message}`, 400);
+      }
+
+      const rawFiles = formData.getAll("files");
+      if (rawFiles.length === 0) return error("files 字段必须包含至少一个文件", 400);
+
+      const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB Layer 2 检查
+
+      // 逐文件校验大小（Layer 2 防护）
+      for (const f of rawFiles) {
+        if (!(f instanceof File)) return error("files 字段必须是文件类型", 400);
+        if (f.size > MAX_FILE_SIZE) {
+          return new Response(
+            JSON.stringify({ error: `文件 "${f.name}" 超过 200MB 上限（${(f.size / 1024 / 1024).toFixed(1)}MB）` }),
+            { status: 413, headers: { "Content-Type": "application/json" } },
+          );
+        }
+      }
+
+      // 并行读取全部文件内容为 ArrayBuffer，然后依序保存（保证 ID 单调递增）
+      const buffers = await Promise.all((rawFiles as File[]).map((f) => f.arrayBuffer()));
+
+      const saved = [];
+      for (let i = 0; i < (rawFiles as File[]).length; i++) {
+        const f = rawFiles[i] as File;
+        const buf = buffers[i];
+        const att = await saveAttachment({
+          requirementId: reqId,
+          originalName: f.name,
+          mimeType: f.type || "application/octet-stream",
+          data: buf,
+        });
+        saved.push(att);
+      }
+
+      return json({ attachments: saved }, 201);
+    }
+
+    // DELETE /api/requirements/:reqId/attachments/:attId
+    if (method === "DELETE" && reqAttachmentDetailMatch) {
+      const [, reqId, attId] = reqAttachmentDetailMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      const att = getReqAttachmentById(attId);
+      if (!att || att.requirement_id !== reqId) return error("attachment not found", 404);
+      deleteReqAttachment(attId);
+      return json({ ok: true });
     }
 
     // ─────────── Comments（评论线程：question / feedback / handoff） ───────────

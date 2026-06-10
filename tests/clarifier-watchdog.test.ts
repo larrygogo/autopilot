@@ -16,6 +16,7 @@ import { up as m014 } from "../src/migrations/014-resolve-orphan-open-questions"
 import { up as m015 } from "../src/migrations/015-clarifier-error";
 import { up as m021 } from "../src/migrations/021-requirement-comments";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as m032 } from "../src/migrations/032-requirement-attachments";
 import { _setDbForTest, getDb } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import {
@@ -31,7 +32,7 @@ import { runClarifierWatchdog } from "../src/daemon/clarifier-watchdog";
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m021, m024].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m021, m024, m032].forEach(fn => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "P" });
 }

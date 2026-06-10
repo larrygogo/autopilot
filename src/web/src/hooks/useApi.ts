@@ -126,6 +126,7 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/requirements\/[\w.\-]+\/sub-prs$/,
   /^\/api\/requirements\/[\w.\-]+\/spec-revisions$/,
   /^\/api\/requirements\/[\w.\-]+\/clarifier-round$/,
+  /^\/api\/requirements\/[\w.\-]+\/attachments(\/[\w.\-]+)?$/,
   // 顶层 collection endpoint（list/create，不匹配 /:id 详情）
   /^\/api\/providers(\?.*)?$/,
   /^\/api\/schedules(\?.*)?$/,
@@ -744,6 +745,37 @@ export const api = {
   resolveQuestion: (_reqId: string, qid: string) =>
     requestRpc<{ ok: true }>("comments.resolve", { id: qid }),
 
+  // 附件 — HTTP 多方法（upload 需 multipart，走原生 fetch 不走 WS-RPC）
+  listAttachments: (reqId: string) =>
+    request<{ attachments: Attachment[] }>(`/api/requirements/${reqId}/attachments`)
+      .then((r) => r.attachments),
+
+  uploadAttachments: async (reqId: string, files: File[]): Promise<Attachment[]> => {
+    const formData = new FormData();
+    for (const f of files) formData.append("files", f);
+    let res: Response;
+    try {
+      res = await fetch(`/api/requirements/${reqId}/attachments`, {
+        method: "POST",
+        body: formData,
+        headers: { ...authHeaders() },
+        // 注意：不设 Content-Type，让浏览器自动加 boundary
+      });
+    } catch (e: unknown) {
+      throw new Error(`上传请求失败：${(e as Error)?.message ?? String(e)}`);
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error((body as any).error ?? `HTTP ${res.status}`);
+    }
+    return ((await res.json()) as { attachments: Attachment[] }).attachments;
+  },
+
+  deleteAttachment: (reqId: string, attId: string) =>
+    request<{ ok: boolean }>(`/api/requirements/${reqId}/attachments/${attId}`, {
+      method: "DELETE",
+    }),
+
   // /now state-derivation engine (PR 1 backend)
   // [WS-RPC] now.cards（RPC handler 直接返回数组，不再 wrap cards 字段）
   listNowCards: () => requestRpc<NowCard[]>("now.cards"),
@@ -751,6 +783,18 @@ export const api = {
   dismissNowCard: (cardId: string) =>
     requestRpc<{ ok: true }>("now.dismissCard", { id: cardId }),
 };
+
+export interface Attachment {
+  id: string;
+  requirement_id: string;
+  original_name: string;
+  mime_type: string;
+  file_path: string;
+  file_size: number;
+  category: "image" | "text" | "pdf" | "office";
+  extracted_text: string | null;
+  created_at: number;
+}
 
 export interface WorkflowTemplate {
   name: string;

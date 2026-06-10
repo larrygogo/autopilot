@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2 } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
+import { AttachmentUploader } from "@/components/AttachmentUploader";
+import { AttachmentList } from "@/components/AttachmentList";
 import { TaskFileDiffsCard } from "@/components/TaskFileDiffsCard";
 import { useToast } from "@/components/Toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -441,19 +443,21 @@ export function RequirementDetail() {
   const [statusLogs, setStatusLogs] = useState<RequirementStatusLog[]>([]);
   const [workflowOptions, setWorkflowOptions] = useState<{ name: string; description: string }[]>([]);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const prevStatusRef = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
     if (!opts.silent) setLoading(true);
     try {
-      const [data, repoList, sub, qs, rd, slogs] = await Promise.all([
+      const [data, repoList, sub, qs, rd, slogs, atts] = await Promise.all([
         api.getRequirement(id),
         api.listWorkspaces(),
         api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
         api.listQuestions(id).catch(() => [] as Question[]),
         api.getClarifierRound(id).catch(() => null),
         api.listRequirementStatusLogs(id).catch(() => [] as RequirementStatusLog[]),
+        api.listAttachments(id).catch(() => [] as Attachment[]),
       ]);
       setReq(data.requirement);
       setFeedbacks(data.feedbacks);
@@ -464,6 +468,7 @@ export function RequirementDetail() {
       setQuestions(qs);
       setRound(rd);
       setStatusLogs(slogs);
+      setAttachments(atts);
     } catch (e: unknown) {
       if (!opts.silent) toast.error("加载失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -1162,6 +1167,29 @@ export function RequirementDetail() {
     </>
   );
 
+  // 附件区块：创建阶段 / 澄清阶段均可上传
+  const attachmentSection = req ? (
+    <section className="mt-6">
+      <h3 className="mb-2 font-mono text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        附件
+      </h3>
+      <div className="space-y-2">
+        <AttachmentList
+          requirementId={req.id}
+          attachments={attachments}
+          onDeleted={(attId) => setAttachments((prev) => prev.filter((a) => a.id !== attId))}
+          readOnly={!canEditRequirementContent(req.status)}
+        />
+        {canEditRequirementContent(req.status) && (
+          <AttachmentUploader
+            requirementId={req.id}
+            onUploaded={(newAtts) => setAttachments((prev) => [...prev, ...newAtts])}
+          />
+        )}
+      </div>
+    </section>
+  ) : null;
+
   // 澄清对话 chat
   const chatCard = questions.length > 0 ? (
     <Card id="clarification-section">
@@ -1433,6 +1461,7 @@ export function RequirementDetail() {
                     </Button>
                   )}
                   {specCard}
+                  {attachmentSection}
                 </>
               );
             }
@@ -1477,6 +1506,7 @@ export function RequirementDetail() {
                   ) : (
                     <>
                       {specCard}
+                      {attachmentSection}
                       {req.status === "awaiting_approval" && (
                         <Button
                           variant="outline"
@@ -1537,6 +1567,7 @@ export function RequirementDetail() {
                   ) : (
                     <>
                       {specCard}
+                      {attachmentSection}
                       {taskRecord}
                       {req.status === "queued" && (
                         <Button variant="outline" className="w-full" size="sm" onClick={recallToReady} disabled={actionBusy}>

@@ -23,6 +23,7 @@ const ALLOWLIST = new Set([
   "src/core/requirement-feedbacks.ts", // 旧 shim：转发到 requirement-comments.ts（Phase 2 后保留兼容，无独立写）
   "src/core/requirement-questions.ts", // 旧 shim：转发到 requirement-comments.ts（Phase 2 后保留兼容）
   "src/core/requirement-comments.ts", // 统一评论表：question / feedback / handoff 合并后的 SQLite 权威源
+  "src/core/requirement-attachments.ts", // requirement_attachments 表：SQLite 即权威源，附件 CRUD 无 manifest 同步需求
   "src/core/requirement-sub-prs.ts", // requirement_sub_prs 表：SQLite 即权威源，无 manifest 同步需求
   "src/core/spec-revisions.ts",  // spec_revisions 表：SQLite 即权威源，spec 修订历史无 manifest 同步需求
   "src/core/submodules.ts",      // submodules：通过 createRepo 写 repos 表，SQLite 即权威源
