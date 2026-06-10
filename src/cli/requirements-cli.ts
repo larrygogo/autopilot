@@ -179,6 +179,50 @@ export function registerRequirementCommands(program: Command): void {
     });
 
   req
+    .command("show <id>")
+    .description("查看需求详情（状态 / 终态原因 / 关联任务）")
+    .option("--json", "原始 JSON 输出（脚本友好）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string; json?: boolean }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement: r } = await client.getRequirement(id);
+        if (opts.json) {
+          console.log(JSON.stringify(r, null, 2));
+          return;
+        }
+        const sourceLabel: Record<string, string> = { user: "手动", task: "任务级联", system: "系统" };
+        const fields: Array<[string, unknown]> = [
+          ["ID", r.id],
+          ["标题", r.title],
+          ["状态", r.status],
+          ["项目", r.project_id],
+          ["工作区", r.workspace_id ?? "(未关联)"],
+          ["关联任务", r.task_id ?? "(无)"],
+          ["PR", r.pr_url ?? "(无)"],
+        ];
+        if (r.status_reason) {
+          const src = r.status_reason_source ? sourceLabel[r.status_reason_source] ?? r.status_reason_source : "未知来源";
+          fields.push([`终态原因(${src})`, r.status_reason]);
+        }
+        if (r.schedule_error) fields.push(["调度失败", r.schedule_error]);
+        if (r.clarifier_error) fields.push(["澄清失败", r.clarifier_error]);
+        const labelWidth = Math.max(...fields.map(([k]) => k.length));
+        for (const [k, v] of fields) {
+          console.log(`  ${k.padEnd(labelWidth)}  ${v}`);
+        }
+        if (r.task_id) {
+          console.log("");
+          console.log(`任务详情：autopilot task status ${r.task_id}`);
+        }
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
     .command("set-title <id> <title>")
     .description("修改需求标题")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))

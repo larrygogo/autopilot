@@ -48,7 +48,7 @@ describe("CardSource: completed", () => {
     setDone("task-1", new Date());
     const deltas = await createCompletedSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "running_submit_pr", to: "done", trigger: "pr_submitted" },
+      payload: { taskId: "task-1", from: "running_submit_pr", to: "done", trigger: "pr_submitted", note: null },
     });
     expect(deltas).toHaveLength(1);
     expect(deltas[0].op).toBe("add");
@@ -57,7 +57,7 @@ describe("CardSource: completed", () => {
   it("onEvent: 离开 done（极少见，比如手动改回 pending）产出 remove", async () => {
     const deltas = await createCompletedSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "done", to: "running_design", trigger: "rerun" },
+      payload: { taskId: "task-1", from: "done", to: "running_design", trigger: "rerun", note: null },
     });
     expect(deltas).toHaveLength(1);
     expect(deltas[0].op).toBe("remove");

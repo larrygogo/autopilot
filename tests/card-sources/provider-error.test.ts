@@ -61,7 +61,7 @@ describe("CardSource: provider-error", () => {
   it("无关事件返回空", async () => {
     const deltas = await createProviderErrorSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "t1", from: "a", to: "b", trigger: "t" },
+      payload: { taskId: "t1", from: "a", to: "b", trigger: "t", note: null },
     });
     expect(deltas).toEqual([]);
   });

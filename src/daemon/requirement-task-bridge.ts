@@ -40,7 +40,7 @@ export function initRequirementTaskBridge(): void {
 
   const handler = (event: AutopilotEvent) => {
     if (event.type !== "task:transition") return;
-    const { taskId, to } = event.payload;
+    const { taskId, to, trigger, note } = event.payload;
 
     const reqStatus = targetReqStatus(to);
     if (!reqStatus) return;
@@ -55,7 +55,12 @@ export function initRequirementTaskBridge(): void {
     }
 
     try {
-      setRequirementStatus(req.id, reqStatus);
+      // 终态同步时把 task 侧的「为什么」（transition note）带给需求，让需求页直接可见
+      const isTerminal = reqStatus === "cancelled" || reqStatus === "failed";
+      setRequirementStatus(req.id, reqStatus, isTerminal ? {
+        reason: note ?? `任务 ${taskId} ${to}（trigger: ${trigger}）`,
+        reason_source: "task",
+      } : undefined);
       log.info("bridge: req=%s %s → %s（task=%s 到 %s）",
         req.id, req.status, reqStatus, taskId, to);
     } catch (e: unknown) {

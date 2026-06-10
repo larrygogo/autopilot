@@ -141,7 +141,7 @@ export function transition(
     syncPatchFromTask(taskId),
   );
 
-  emit({ type: "task:transition", payload: { taskId, from: fromStatus, to: toStatus, trigger } });
+  emit({ type: "task:transition", payload: { taskId, from: fromStatus, to: toStatus, trigger, note: opts.note ?? null } });
   appendTaskEvent(taskId, { type: "transition", from: fromStatus, to: toStatus, trigger, note: opts.note });
 
   return [fromStatus, toStatus];
@@ -220,7 +220,7 @@ export function forceTransition(
     syncPatchFromTask(taskId),
   );
 
-  emit({ type: "task:transition", payload: { taskId, from: capturedFromStatus, to: toStatus, trigger: "force_transition" } });
+  emit({ type: "task:transition", payload: { taskId, from: capturedFromStatus, to: toStatus, trigger: "force_transition", note } });
   appendTaskEvent(taskId, { type: "transition", from: capturedFromStatus, to: toStatus, trigger: "force_transition", note });
 }
 

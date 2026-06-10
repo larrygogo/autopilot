@@ -72,19 +72,41 @@ describe("reqCardSpec", () => {
     expect(keysOf({ ...base, status: "done" })).toEqual([]);
   });
 
-  it("failed：失败原因（schedule_error 优先于 clarifier_error）+ 重试", () => {
+  it("failed：失败原因（status_reason 优先于 schedule_error / clarifier_error）+ 重试", () => {
     const input = { ...base, status: "failed", schedule_error: "调度炸了", clarifier_error: "别显示我" };
     const r = reqCardSpec(input);
     expect(r.notice?.tone).toBe("error");
     expect(r.notice?.text).toContain("调度炸了");
     expect(keysOf(input)).toEqual(["retry"]);
+
+    const withReason = { ...input, status_reason: "develop 阶段崩溃", status_reason_source: "task" as const };
+    expect(reqCardSpec(withReason).notice?.text).toContain("develop 阶段崩溃");
   });
 
-  it("cancelled：无特化", () => {
+  it("cancelled：手动取消无特化", () => {
     const r = reqCardSpec({ ...base, status: "cancelled" });
     expect(r.preview).toBe(null);
     expect(r.notice).toBe(null);
     expect(r.actions).toEqual([]);
+    // user 来源的原因也不向用户解释他自己的操作
+    const manual = reqCardSpec({ ...base, status: "cancelled", status_reason: "用户手动取消", status_reason_source: "user" });
+    expect(manual.notice).toBe(null);
+  });
+
+  it("cancelled：task 级联（自动止损）露原因 + 看原因下钻", () => {
+    const input: ReqCardInput = {
+      ...base,
+      status: "cancelled",
+      task_id: "h2wznnwg",
+      status_reason: "代码审查驳回 3 次，已取消",
+      status_reason_source: "task",
+    };
+    const r = reqCardSpec(input);
+    expect(r.notice?.tone).toBe("info");
+    expect(r.notice?.text).toContain("代码审查驳回 3 次");
+    expect(keysOf(input)).toEqual(["viewTask"]);
+    // 无 task_id（system 取消）时只露原因不给下钻
+    expect(keysOf({ ...input, task_id: null })).toEqual([]);
   });
 });
 

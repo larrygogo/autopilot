@@ -98,7 +98,7 @@ describe("now-aggregator", () => {
     };
     agg = createAggregator([src]);
     await agg.start();
-    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x" } });
+    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x", note: null } });
     await new Promise(r => setTimeout(r, 10));
     expect(received).toBeGreaterThan(0);
     expect(agg.getCards().map(c => c.id)).toContain("fake:new");
@@ -114,7 +114,7 @@ describe("now-aggregator", () => {
     };
     agg = createAggregator([src], { emit: (e) => events.push(e.type) });
     await agg.start();
-    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x" } });
+    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x", note: null } });
     await new Promise(r => setTimeout(r, 10));
     expect(events).toContain("now:card_added");
   });
@@ -129,7 +129,7 @@ describe("now-aggregator", () => {
     };
     agg = createAggregator([src]);
     await agg.start();
-    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x" } });
+    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x", note: null } });
     await new Promise(r => setTimeout(r, 10));
     expect(agg.getCards()).toEqual([]);
   });
@@ -145,7 +145,7 @@ describe("now-aggregator", () => {
     agg = createAggregator([src]);
     await agg.start();
     agg.dispose();
-    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x" } });
+    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x", note: null } });
     await new Promise(r => setTimeout(r, 10));
     expect(count).toBe(0);
     agg = undefined as unknown as Aggregator;
@@ -162,7 +162,7 @@ describe("now-aggregator", () => {
     agg = createAggregator([src]);
     await agg.start();
     await agg.start(); // 重复 start
-    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x" } });
+    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x", note: null } });
     await new Promise(r => setTimeout(r, 10));
     expect(count).toBe(1); // 只触发一次，证明 handler 没被重复挂
   });
@@ -202,7 +202,7 @@ describe("now-aggregator", () => {
     agg = createAggregator([src]);
     await agg.start();
     agg.markDismissed("fake:x");
-    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x" } });
+    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x", note: null } });
     await new Promise(r => setTimeout(r, 10));
     expect(agg.getCards()).toEqual([]);
   });
@@ -230,7 +230,7 @@ describe("now-aggregator", () => {
     agg.dispose();
     agg = createAggregator([src, src2]);
     await agg.start();
-    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x" } });
+    emit({ type: "task:transition", payload: { taskId: "t1", from: "a", to: "b", trigger: "x", note: null } });
     await new Promise(r => setTimeout(r, 10));
     expect(isCardDismissed("fake:x")).toBe(false);
   });

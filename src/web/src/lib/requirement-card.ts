@@ -10,6 +10,8 @@ export interface ReqCardInput {
   active_question_id: string | null;
   clarifier_error: string | null;
   schedule_error: string | null;
+  status_reason?: string | null;
+  status_reason_source?: "user" | "task" | "system" | null;
 }
 
 export type ReqCardActionKey =
@@ -109,7 +111,7 @@ export function reqCardSpec(req: ReqCardInput): ReqCardSpec {
   }
 
   if (s === "failed") {
-    const reason = req.schedule_error ?? req.clarifier_error;
+    const reason = req.status_reason ?? req.schedule_error ?? req.clarifier_error;
     return {
       preview: null,
       notice: { text: reason ? `失败：${reason}` : "执行失败", tone: "error" },
@@ -117,6 +119,18 @@ export function reqCardSpec(req: ReqCardInput): ReqCardSpec {
     };
   }
 
-  // cancelled 及未知状态：无特化
+  if (s === "cancelled") {
+    // 用户手动取消无需向他解释自己；task 级联（自动止损）/ system 取消要露原因
+    if (req.status_reason && req.status_reason_source !== "user") {
+      return {
+        preview: null,
+        notice: { text: `自动取消：${req.status_reason}`, tone: "info" },
+        actions: req.task_id ? [{ key: "viewTask", label: "看原因 →" }] : [],
+      };
+    }
+    return { preview: null, notice: null, actions: [] };
+  }
+
+  // 未知状态：无特化
   return { preview: null, notice: null, actions: [] };
 }

@@ -32,9 +32,15 @@ export interface Requirement {
   clarifier_model: string | null;
   /** 调度器起 task 失败（回滚 ready）时记录的原因；成功起 task 时清空。 */
   schedule_error: string | null;
+  /** 进入 cancelled / failed 终态时的人话短摘要（task_logs.note 或用户输入）；failed 重试时清空。 */
+  status_reason: string | null;
+  /** status_reason 的来源：user（用户手动）/ task（任务级联）/ system（调度等系统路径）。 */
+  status_reason_source: StatusReasonSource | null;
   created_at: number;
   updated_at: number;
 }
+
+export type StatusReasonSource = "user" | "task" | "system";
 
 export interface CreateRequirementOpts {
   id: string;
@@ -242,7 +248,11 @@ export function deleteRequirement(id: string): void {
  * 调用方（REST handler / chat tool）应只通过此函数改 status，
  * 不要直接 UPDATE status 列（会跳过校验和事件）。
  */
-export function setRequirementStatus(id: string, to: string): Requirement {
+export function setRequirementStatus(
+  id: string,
+  to: string,
+  opts?: { reason?: string | null; reason_source?: StatusReasonSource },
+): Requirement {
   const cur = getRequirementById(id);
   if (!cur) throw new Error(`requirement not found: ${id}`);
   if (cur.status === to) return cur;
@@ -253,9 +263,40 @@ export function setRequirementStatus(id: string, to: string): Requirement {
     throw new Error(`requirement ${id} 非法状态转换：${cur.status} → ${to}${hint}`);
   }
   const db = getDb();
-  db.run("UPDATE requirements SET status = ?, updated_at = ? WHERE id = ?", [to, nowMs(), id]);
-  emit({ type: "requirement:status-changed", payload: { id, from: cur.status, to } });
+  const isTerminal = to === "cancelled" || to === "failed";
+  const reason = isTerminal ? opts?.reason ?? null : null;
+  if (isTerminal && reason) {
+    db.run(
+      "UPDATE requirements SET status = ?, status_reason = ?, status_reason_source = ?, updated_at = ? WHERE id = ?",
+      [to, reason, opts?.reason_source ?? "system", nowMs(), id],
+    );
+  } else if (cur.status === "failed") {
+    // failed → queued / awaiting_approval 重试：清掉上一轮的失败原因（与 schedule_error 成功清空同理）
+    db.run(
+      "UPDATE requirements SET status = ?, status_reason = NULL, status_reason_source = NULL, updated_at = ? WHERE id = ?",
+      [to, nowMs(), id],
+    );
+  } else {
+    db.run("UPDATE requirements SET status = ?, updated_at = ? WHERE id = ?", [to, nowMs(), id]);
+  }
+  emit({ type: "requirement:status-changed", payload: { id, from: cur.status, to, reason } });
   return getRequirementById(id) as Requirement;
+}
+
+/**
+ * 只更新终态原因两列、不动 status。给「级联停 task 时 bridge 抢先把需求置 cancelled」
+ * 的手动取消路径用：随后用 user 来源覆盖 bridge 写入的 task 来源（这次取消的根因是用户操作）。
+ */
+export function setRequirementStatusReason(
+  id: string,
+  reason: string | null,
+  source: StatusReasonSource | null,
+): void {
+  const db = getDb();
+  db.run(
+    "UPDATE requirements SET status_reason = ?, status_reason_source = ?, updated_at = ? WHERE id = ?",
+    [reason, reason === null ? null : source, nowMs(), id],
+  );
 }
 
 /**

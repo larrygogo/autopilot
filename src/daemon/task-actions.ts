@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { getTask, updateTask, closeOpenPhaseEvents, listRootTasksByRequirementIds } from "../core/db";
-import { setRequirementStatus, type Requirement } from "../core/requirements";
+import { setRequirementStatus, setRequirementStatusReason, type Requirement } from "../core/requirements";
 import { transition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { abortRun } from "../core/task-lifecycle";
@@ -131,9 +131,18 @@ export function cancelTasksForRequirements(reqIds: string[]): { cancelled: numbe
  * 避免任一侧漏掉级联（SC-1）。否则取消后 task 继续烧 token / 占 sandbox，且 scheduler 的
  * active 过滤不含 cancelled，可能并发起第二个 task；task 最终 transition 时撞终态需求留不一致。
  */
-export function cancelRequirementWithTasks(reqId: string): { requirement: Requirement } {
+export function cancelRequirementWithTasks(reqId: string, reason?: string): { requirement: Requirement } {
   cancelTasksForRequirements([reqId]);
-  return { requirement: setRequirementStatus(reqId, "cancelled") };
+  const userReason = reason?.trim() || "用户手动取消";
+  // 级联停 task 会同步触发 bridge 抢先把需求置 cancelled（带 task 来源的 "API cancel"），
+  // 同状态时 setRequirementStatus early-return 不写 user 原因 —— 下面补写覆盖：
+  // 这次取消的根因是用户操作，user 来源语义正确。
+  let requirement = setRequirementStatus(reqId, "cancelled", { reason: userReason, reason_source: "user" });
+  if (requirement.status_reason_source !== "user") {
+    setRequirementStatusReason(reqId, userReason, "user");
+    requirement = { ...requirement, status_reason: userReason, status_reason_source: "user" };
+  }
+  return { requirement };
 }
 
 // ──────────────────────────────────────────────

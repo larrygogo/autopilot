@@ -53,6 +53,8 @@ export class AutopilotClient {
   get dismissNowCard() { return this.http.dismissNowCard.bind(this.http); }
   get createRequirement() { return this.http.createRequirement.bind(this.http); }
   get updateRequirement() { return this.http.updateRequirement.bind(this.http); }
+  get getRequirement() { return this.http.getRequirement.bind(this.http); }
+  get getTaskOutcome() { return this.http.getTaskOutcome.bind(this.http); }
   get extractRequirement() { return this.http.extractRequirement.bind(this.http); }
   get listProjects() { return this.http.listProjects.bind(this.http); }
   get getProject() { return this.http.getProject.bind(this.http); }

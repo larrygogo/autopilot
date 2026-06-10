@@ -697,8 +697,8 @@ export const api = {
     }).then((r) => r.comment),
 
   // [WS-RPC] requirements.cancel
-  cancelRequirement: (id: string) =>
-    requestRpc<{ requirement: Requirement }>("requirements.cancel", { id }).then((r) => r.requirement),
+  cancelRequirement: (id: string, reason?: string) =>
+    requestRpc<{ requirement: Requirement }>("requirements.cancel", { id, ...(reason ? { reason } : {}) }).then((r) => r.requirement),
 
   // [WS-RPC] requirements.subPrs
   listRequirementSubPrs: (id: string) =>
@@ -794,7 +794,12 @@ export interface TaskOutcome {
   total_duration_ms: number;
   top_phases: Array<{ phase: string; duration_ms: number }>;
   sandbox_path: string | null;
-  failure_reason: string | null;
+  /** 进终态的原因（task_logs 最后一条进 failed/cancelled 的 note）；done 为 null */
+  terminal_reason: string | null;
+  /** 最近一次评审驳回原话（markdown）；无则 null */
+  rejection_reason: string | null;
+  /** 各评审阶段累计驳回次数；无则 null */
+  rejection_counts: Record<string, number> | null;
 }
 
 export interface DoctorCheck {
@@ -990,6 +995,10 @@ export interface Requirement {
   clarifier_model: string | null;
   /** 调度器起 task 失败（回滚 ready）时记录的原因；成功起 task 时清空 */
   schedule_error: string | null;
+  /** 进入 cancelled / failed 终态时的人话短摘要；failed 重试时清空 */
+  status_reason: string | null;
+  /** status_reason 来源：user（手动）/ task（任务级联）/ system */
+  status_reason_source: "user" | "task" | "system" | null;
   created_at: number;
   updated_at: number;
 }

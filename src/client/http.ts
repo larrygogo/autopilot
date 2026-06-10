@@ -388,4 +388,13 @@ export class HttpClient {
   }): Promise<{ requirement: { id: string; status: string; title: string } }> {
     return this.call("requirements.update", { id, ...body });
   }
+
+  async getRequirement(id: string): Promise<{ requirement: Requirement }> {
+    return this.call("requirements.get", { id });
+  }
+
+  /** 终态任务的结果概览（含 terminal_reason / rejection_*）；非终态任务抛 NOT_FOUND */
+  async getTaskOutcome(id: string): Promise<import("../daemon/task-outcome").TaskOutcome> {
+    return this.call("tasks.outcome", { id });
+  }
 }

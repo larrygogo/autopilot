@@ -525,6 +525,23 @@ task
           ["关联需求", tt.requirement_id ?? "(无)"],
           ["父任务", tt.parent_task_id ?? "(无)"],
         ];
+        // 终态任务追加「为什么停在这」：取消/失败原因 + 驳回计数（dogfood：req-008 自动止损不可见）
+        if (["done", "failed", "cancelled", "canceled"].includes(String(tt.status))) {
+          try {
+            const outcome = await client.getTaskOutcome(taskId);
+            if (outcome.terminal_reason) {
+              fields.push(["终止原因", outcome.terminal_reason]);
+            }
+            if (outcome.rejection_counts && Object.keys(outcome.rejection_counts).length > 0) {
+              fields.push([
+                "驳回计数",
+                Object.entries(outcome.rejection_counts).map(([k, v]) => `${k} ×${v}`).join(" · "),
+              ]);
+            }
+          } catch {
+            // outcome 拉不到不阻塞基础字段输出
+          }
+        }
         const labelWidth = Math.max(...fields.map(([k]) => k.length));
         for (const [k, v] of fields) {
           console.log(`  ${k.padEnd(labelWidth)}  ${v}`);

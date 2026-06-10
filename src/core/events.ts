@@ -19,7 +19,7 @@ export type AutopilotEvent =
   | { type: "task:created"; payload: { task: Task } }
   | { type: "task:updated"; payload: { task: Task; fields: string[] } }
   | { type: "task:deleted"; payload: { taskId: string; parentTaskId: string | null } }
-  | { type: "task:transition"; payload: { taskId: string; from: string; to: string; trigger: string } }
+  | { type: "task:transition"; payload: { taskId: string; from: string; to: string; trigger: string; note: string | null } }
   | { type: "phase:started"; payload: { taskId: string; phase: string; label: string } }
   | { type: "phase:completed"; payload: { taskId: string; phase: string } }
   | { type: "phase:awaiting"; payload: { taskId: string; phase: string } }
@@ -40,7 +40,7 @@ export type AutopilotEvent =
   | { type: "schedule:fired"; payload: { schedule: Schedule; taskId: string } }
   | { type: "projects:changed"; payload: { id: string; action: "create" | "update" | "delete" } }
   | { type: "workspaces:changed"; payload: { id: string; action: "create" | "update" | "delete" } }
-  | { type: "requirement:status-changed"; payload: { id: string; from: string; to: string } }
+  | { type: "requirement:status-changed"; payload: { id: string; from: string; to: string; reason?: string | null } }
   | { type: "requirement:questions-updated"; payload: { id: string } }
   | { type: "requirement:all-questions-resolved"; payload: { id: string } }
   // ── Clarifier 重设计（PR-A）新增事件 ──

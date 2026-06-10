@@ -990,7 +990,7 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
-      return cancelRequirementWithTasks(p.id);
+      return cancelRequirementWithTasks(p.id, typeof p.reason === "string" ? p.reason : undefined);
     },
   });
 

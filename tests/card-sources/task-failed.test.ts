@@ -48,7 +48,7 @@ describe("CardSource: task-failed", () => {
     setFailed("task-1");
     const deltas = await createTaskFailedSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "running_development", to: "failed", trigger: "error" },
+      payload: { taskId: "task-1", from: "running_development", to: "failed", trigger: "error", note: null },
     });
     expect(deltas).toHaveLength(1);
     expect(deltas[0].op).toBe("add");
@@ -57,7 +57,7 @@ describe("CardSource: task-failed", () => {
   it("onEvent: 离开 failed（重试）产出 remove + clear-dismiss", async () => {
     const deltas = await createTaskFailedSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "failed", to: "pending_development", trigger: "retry" },
+      payload: { taskId: "task-1", from: "failed", to: "pending_development", trigger: "retry", note: null },
     });
     expect(deltas).toHaveLength(2);
     expect(deltas[0].op).toBe("remove");
@@ -68,7 +68,7 @@ describe("CardSource: task-failed", () => {
   it("onEvent: 从 failed 转出额外产出 clear-dismiss 让未来失败重新可见", async () => {
     const deltas = await createTaskFailedSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "failed", to: "pending_development", trigger: "retry" },
+      payload: { taskId: "task-1", from: "failed", to: "pending_development", trigger: "retry", note: null },
     });
     expect(deltas).toHaveLength(2);
     expect(deltas[0].op).toBe("remove");

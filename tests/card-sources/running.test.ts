@@ -48,7 +48,7 @@ describe("CardSource: running", () => {
     createTask({ id: "task-1", title: "T", workflow: "dev", initialStatus: "running_development" });
     const deltas = await createRunningSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "running_design", to: "running_development", trigger: "x" },
+      payload: { taskId: "task-1", from: "running_design", to: "running_development", trigger: "x", note: null },
     });
     expect(deltas).toHaveLength(1);
     expect(deltas[0].op).toBe("add");
@@ -57,7 +57,7 @@ describe("CardSource: running", () => {
   it("onEvent: 进入 running_await_review 产出 remove（让 await-review source 接管）", async () => {
     const deltas = await createRunningSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "running_design", to: "running_await_review", trigger: "x" },
+      payload: { taskId: "task-1", from: "running_design", to: "running_await_review", trigger: "x", note: null },
     });
     expect(deltas).toHaveLength(1);
     expect(deltas[0].op).toBe("remove");
@@ -67,7 +67,7 @@ describe("CardSource: running", () => {
   it("onEvent: 从 running_X 转到非 running（done/failed/canceled）产出 remove", async () => {
     const deltas = await createRunningSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "running_development", to: "done", trigger: "x" },
+      payload: { taskId: "task-1", from: "running_development", to: "done", trigger: "x", note: null },
     });
     expect(deltas).toHaveLength(1);
     expect(deltas[0].op).toBe("remove");
@@ -77,7 +77,7 @@ describe("CardSource: running", () => {
     createTask({ id: "task-1", title: "T", workflow: "dev", initialStatus: "running_development" });
     const deltas = await createRunningSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "running_design", to: "running_development", trigger: "x" },
+      payload: { taskId: "task-1", from: "running_design", to: "running_development", trigger: "x", note: null },
     });
     expect(deltas).toHaveLength(1);
     expect(["add", "update"]).toContain(deltas[0].op);

@@ -24,7 +24,12 @@ export interface TaskOutcome {
   total_duration_ms: number;
   top_phases: TopPhase[];
   sandbox_path: string | null;
-  failure_reason: string | null;
+  /** 进终态的原因（task_logs 最后一条进 failed/cancelled 的 note）；done 为 null。 */
+  terminal_reason: string | null;
+  /** 最近一次评审驳回原话（task.extra.rejection_reason，markdown）；无则 null。 */
+  rejection_reason: string | null;
+  /** 各评审阶段累计驳回次数（task.extra.rejection_counts）；无则 null。 */
+  rejection_counts: Record<string, number> | null;
 }
 
 /**
@@ -82,18 +87,34 @@ export async function computeTaskOutcome(taskId: string): Promise<TaskOutcome | 
     diff_stat = computeDiffStat(sandbox_path, baseBranch);
   }
 
-  // 4) failure_reason
-  let failure_reason: string | null = null;
-  if (status === "failed") {
+  // 4) terminal_reason：failed / cancelled 都取最后一条进终态的 note（done 为 null）
+  let terminal_reason: string | null = null;
+  if (status === "failed" || status === "cancelled") {
     try {
       const row = getDb()
         .query<{ note: string | null }, [string]>(
-          "SELECT note FROM task_logs WHERE task_id = ? AND to_status = 'failed' ORDER BY id DESC LIMIT 1"
+          "SELECT note FROM task_logs WHERE task_id = ? AND to_status IN ('failed', 'cancelled', 'canceled') ORDER BY id DESC LIMIT 1"
         )
         .get(taskId);
-      failure_reason = row?.note ?? null;
+      terminal_reason = row?.note ?? null;
     } catch {
       // tolerated
+    }
+  }
+
+  // 5) 评审驳回详情（workflow 写在 task 顶层动态列里，getTask 已平铺）
+  const taskRec = task as Record<string, unknown>;
+  const rejection_reason = typeof taskRec.rejection_reason === "string" && taskRec.rejection_reason
+    ? taskRec.rejection_reason : null;
+  let rejection_counts: Record<string, number> | null = null;
+  if (typeof taskRec.rejection_counts === "string" && taskRec.rejection_counts) {
+    try {
+      const parsed = JSON.parse(taskRec.rejection_counts);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        rejection_counts = parsed as Record<string, number>;
+      }
+    } catch {
+      // 坏 JSON 容错为 null
     }
   }
 
@@ -106,7 +127,9 @@ export async function computeTaskOutcome(taskId: string): Promise<TaskOutcome | 
     total_duration_ms,
     top_phases,
     sandbox_path,
-    failure_reason,
+    terminal_reason,
+    rejection_reason,
+    rejection_counts,
   };
 }
 

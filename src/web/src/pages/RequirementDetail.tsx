@@ -1492,12 +1492,44 @@ export function RequirementDetail() {
                     </div>
                   )}
                   {req.status === "failed" && (
-                    <div className="space-y-1">
+                    <div className="space-y-2">
                       <p className="text-sm font-medium text-destructive">执行失败</p>
+                      {req.status_reason && (
+                        <div className="rounded-lg bg-destructive/8 p-2.5">
+                          <p className="break-words text-xs leading-relaxed text-foreground/85">{req.status_reason}</p>
+                        </div>
+                      )}
                       <p className="text-xs text-muted-foreground">可在上方「重新入队执行」重试，或退回草稿改规约。</p>
                     </div>
                   )}
-                  {req.status === "cancelled" && <p className="text-sm text-muted-foreground">需求已取消。</p>}
+                  {req.status === "cancelled" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="font-medium">需求已取消</span>
+                        <span
+                          className={
+                            "rounded border px-1.5 py-0.5 font-mono text-[9px] "
+                            + (req.status_reason && req.status_reason_source !== "user"
+                              ? "border-warning/60 text-warning"
+                              : "border-border text-muted-foreground")
+                          }
+                          title="内核状态：cancelled（trigger: cancel）"
+                        >
+                          {req.status_reason_source === "user" || !req.status_reason ? "手动取消" : "系统自动止损"}
+                        </span>
+                      </div>
+                      {req.status_reason && (
+                        <div className="rounded-lg bg-muted/50 p-2.5">
+                          <p className="break-words text-xs leading-relaxed text-foreground/85">{req.status_reason}</p>
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        {req.task_id
+                          ? "详细原因（驳回轨迹 / reviewer 原话）见下方执行记录。已取消的需求不可重启，如需继续请新建需求。"
+                          : "已取消的需求不可重启，如需继续请新建需求。"}
+                      </p>
+                    </div>
+                  )}
                 </Card>
                 {subPrCard}
                 {taskRecord}

@@ -56,7 +56,7 @@ describe("CardSource: await-review", () => {
     setStatus("task-1", "running_await_review");
     const deltas = await createAwaitReviewSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "running_design", to: "running_await_review", trigger: "design_done" },
+      payload: { taskId: "task-1", from: "running_design", to: "running_await_review", trigger: "design_done", note: null },
     });
     expect(deltas).toHaveLength(1);
     expect(deltas[0].op).toBe("add");
@@ -65,7 +65,7 @@ describe("CardSource: await-review", () => {
   it("onEvent: from running_await_review 产出 remove", async () => {
     const deltas = await createAwaitReviewSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "running_await_review", to: "running_development", trigger: "approved" },
+      payload: { taskId: "task-1", from: "running_await_review", to: "running_development", trigger: "approved", note: null },
     });
     expect(deltas).toHaveLength(1);
     expect(deltas[0].op).toBe("remove");
@@ -75,7 +75,7 @@ describe("CardSource: await-review", () => {
   it("onEvent: 既不是去也不是离 await_review 返回空", async () => {
     const deltas = await createAwaitReviewSource().onEvent({
       type: "task:transition",
-      payload: { taskId: "task-1", from: "running_design", to: "running_development", trigger: "x" },
+      payload: { taskId: "task-1", from: "running_design", to: "running_development", trigger: "x", note: null },
     });
     expect(deltas).toEqual([]);
   });
