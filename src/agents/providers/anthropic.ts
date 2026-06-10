@@ -230,7 +230,20 @@ async function spawnClaudeAndConsume(opts: {
   });
 
   const killOnAbort = () => {
-    try { proc.kill(); } catch { /* 已退出 */ }
+    // Windows：必须杀整棵进程树。只 kill 父进程（claude.exe）的话，其 node 子进程
+    // （MCP servers）会继续持有 stdout 管道句柄 → parseNdjsonStream 永不结束 →
+    // agent.run 悬挂，phase 恒 running 且无任何超时日志（2026-06-10 dogfood：
+    // design 轮 idle 超时已触发 kill 却僵死 37 分钟，直到用户手动重启）。
+    try {
+      if (process.platform === "win32" && proc.pid) {
+        Bun.spawnSync(["taskkill", "/F", "/T", "/PID", String(proc.pid)], { stdout: "ignore", stderr: "ignore" });
+      } else {
+        proc.kill();
+      }
+    } catch { /* 已退出 */ }
+    // 双保险：即使子孙进程没死干净，直接取消 stdout 流让 for await 立刻结束，
+    // promise 必定 settle，超时错误才能冒泡到 runner（可见、可重试）
+    try { proc.stdout.cancel(); } catch { /* 流已关 */ }
   };
   // 如果在我们注册 listener 之前 abort 信号已经触发（opts.signal 进来就 aborted、
   // 或 timeout=0 类极端情况），addEventListener 不会重放历史事件 → 子进程会跑飞
