@@ -420,7 +420,8 @@ export function RequirementDetail() {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [selectedStep, setSelectedStep] = useState<ReqStep | null>(null);
   const [statusLogs, setStatusLogs] = useState<RequirementStatusLog[]>([]);
-  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; description: string }[]>([]);
+  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string }[]>([]);
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const prevStatusRef = useRef<string | undefined>(undefined);
@@ -537,7 +538,7 @@ export function RequirementDetail() {
   // 工作流选项（编辑期下拉用），一次性拉取
   useEffect(() => {
     api.listWorkflows()
-      .then((ws) => setWorkflowOptions(ws.map((w) => ({ name: w.name, description: w.description ?? "" }))))
+      .then((ws) => setWorkflowOptions(ws.map((w) => ({ name: w.name, label: w.label, description: w.description ?? "" }))))
       .catch(() => { /* 拉不到时下拉退化为只显示当前值 */ });
   }, []);
 
@@ -816,11 +817,6 @@ export function RequirementDetail() {
 
   async function cancel() {
     if (!id) return;
-    if (!confirm(
-      `确认取消需求「${req?.title}」？\n\n` +
-      `取消后仅保留需求本身（规约 / 评论 / 附件），执行记录与沙盒将被清空。` +
-      `已取消的需求不可重新启动。`,
-    )) return;
     if (busyRef.current) return;
     busyRef.current = true;
     setActionBusy(true);
@@ -1303,7 +1299,7 @@ export function RequirementDetail() {
                   variant="outline"
                   size="sm"
                   className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={cancel}
+                  onClick={() => setCancelOpen(true)}
                   disabled={actionBusy}
                 >
                   取消需求
@@ -1369,11 +1365,14 @@ export function RequirementDetail() {
               >
                 {workflowOptions.length === 0 && <option value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</option>}
                 {workflowOptions.map((w) => (
-                  <option key={w.name} value={w.name}>{w.name}</option>
+                  // 业务标签（中文 label）为主，内核名括注（无 label 的工作流只显示 name）
+                  <option key={w.name} value={w.name}>{w.label ? `${w.label}（${w.name}）` : w.name}</option>
                 ))}
               </select>
             ) : (
-              <code title="审批后工作流随内容冻结">{req.workflow ?? "dev"}</code>
+              <code title={`审批后工作流随内容冻结（内核名：${req.workflow ?? "dev"}）`}>
+                {workflowOptions.find((w) => w.name === (req.workflow ?? "dev"))?.label ?? req.workflow ?? "dev"}
+              </code>
             )}
           </span>
           <span>创建 {new Date(req.created_at).toLocaleString()}</span>
@@ -1725,6 +1724,33 @@ export function RequirementDetail() {
         currentProvider={req.clarifier_provider}
         currentModel={req.clarifier_model}
         onSaved={() => void refresh({ silent: true })}
+      />
+
+      {/* 取消需求确认：取消 = 只保留需求本身，清空执行痕迹 */}
+      <ConfirmDialog
+        open={cancelOpen}
+        title={`取消需求「${req.title}」？`}
+        danger
+        confirmText="确认取消"
+        message={
+          <div className="space-y-2">
+            <p>
+              取消后仅保留<strong>需求本身</strong>（规约、评论、附件），
+              执行记录与沙盒将被<strong className="text-destructive">清空</strong>。
+            </p>
+            {(req.status === "running" || req.status === "fix_revision") && (
+              <p className="text-xs font-semibold text-foreground">
+                任务正在执行中 —— 将先停止运行中的 agent 再清理。
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">已取消的需求不可重新启动。</p>
+          </div>
+        }
+        onConfirm={async () => {
+          await cancel();
+          setCancelOpen(false);
+        }}
+        onCancel={() => setCancelOpen(false)}
       />
 
       {/* 删除需求确认（需求 + 名下执行记录统一删除）*/}
