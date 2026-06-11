@@ -78,7 +78,7 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         <div className="mb-3">
           <h3 className="text-sm font-semibold">常规偏好</h3>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            影响新建任务时的默认值；已创建的任务不受影响。
+            设置默认时区（目前仅用于保存偏好与界面展示）；已创建的任务不受影响。
           </p>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
