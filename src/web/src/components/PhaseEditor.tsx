@@ -1371,7 +1371,7 @@ function ParallelRow(props: ParallelRowProps) {
         />
       </div>
 
-      <div className="mt-3 flex flex-col gap-2 border-l-2 border-accent/30 pl-3">
+      <div className="mt-3 flex flex-col gap-2 border-l-2 border-border pl-3">
         {item.phases.map((sub, j) => {
           const childDrag: DragHandlers = {
             draggable: true,

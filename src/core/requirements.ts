@@ -1,7 +1,8 @@
 import { getDb } from "./db";
 import { emit } from "./event-bus";
 import { resolveComment } from "./requirement-comments";
-import { listWorkspaces } from "./workspaces";
+import { listWorkspaces, type Workspace } from "./workspaces";
+import { deleteRequirementClone } from "./requirement-clone";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -231,7 +232,65 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
   vals.push(nowMs());
   vals.push(id);
   db.run(`UPDATE requirements SET ${fields.join(", ")} WHERE id = ?`, vals);
+  // 改主库时同步关联表（INSERT OR IGNORE，不清旧行——已选的上下文库不能丢）。
+  // 历史一致性洞：create 写关联表而 update 不写，1:N 后该表是集合真相，必须双向同步。
+  if (typeof opts.workspace_id === "string" && opts.workspace_id) {
+    db.run(
+      "INSERT OR IGNORE INTO requirement_workspaces (requirement_id, workspace_id) VALUES (?, ?)",
+      [id, opts.workspace_id],
+    );
+  }
   return getRequirementById(id);
+}
+
+/** 需求关联的代码库集合（含主库），按创建时间升序 */
+export function listRequirementWorkspaces(reqId: string): Workspace[] {
+  return getDb()
+    .query<Workspace, [string]>(
+      "SELECT w.* FROM requirement_workspaces rw JOIN workspaces w ON w.id = rw.workspace_id " +
+        "WHERE rw.requirement_id = ? ORDER BY w.created_at ASC",
+    )
+    .all(reqId);
+}
+
+/** 需求 id → workspace_id[] 映射（RPC 列表响应批量 join 用） */
+export function listRequirementWorkspaceIds(reqIds: string[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  if (reqIds.length === 0) return map;
+  const placeholders = reqIds.map(() => "?").join(",");
+  const rows = getDb()
+    .query<{ requirement_id: string; workspace_id: string }, string[]>(
+      `SELECT requirement_id, workspace_id FROM requirement_workspaces WHERE requirement_id IN (${placeholders})`,
+    )
+    .all(...reqIds);
+  for (const r of rows) {
+    const list = map.get(r.requirement_id) ?? [];
+    list.push(r.workspace_id);
+    map.set(r.requirement_id, list);
+  }
+  return map;
+}
+
+/**
+ * 整体替换需求的代码库集合（PUT 语义）并设置主库（审批阶段反写）。
+ * 入参校验（非空 / primary ∈ 集合 / 同项目 / 状态闸门）由 RPC 层负责。
+ */
+export function setRequirementWorkspaces(reqId: string, wsIds: string[], primaryId: string): void {
+  const db = getDb();
+  db.transaction(() => {
+    db.run("DELETE FROM requirement_workspaces WHERE requirement_id = ?", [reqId]);
+    for (const w of wsIds) {
+      db.run(
+        "INSERT OR IGNORE INTO requirement_workspaces (requirement_id, workspace_id) VALUES (?, ?)",
+        [reqId, w],
+      );
+    }
+    db.run("UPDATE requirements SET workspace_id = ?, updated_at = ? WHERE id = ?", [
+      primaryId,
+      nowMs(),
+      reqId,
+    ]);
+  })();
 }
 
 /**
@@ -248,6 +307,8 @@ export function deleteRequirement(id: string): void {
     db.run("DELETE FROM requirement_workspaces WHERE requirement_id = ?", [id]);
     db.run("DELETE FROM requirements WHERE id = ?", [id]);
   })();
+  // 需求级浅 clone（澄清用）随需求删除清理；失败不阻塞（内部已容错）
+  deleteRequirementClone(id);
 }
 
 /**

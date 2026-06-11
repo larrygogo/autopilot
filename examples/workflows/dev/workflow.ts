@@ -17,7 +17,8 @@ import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
 import { runInBackground } from "@autopilot/core/runner";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
-import { getTaskArtifactsDir } from "@autopilot/core/sandbox";
+import { getTaskArtifactsDir, listTaskRepos, type TaskRepoCtx } from "@autopilot/core/sandbox";
+import { appendSubPr } from "@autopilot/core/requirement-sub-prs";
 import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { notify } from "@autopilot/core/notify";
 
@@ -53,6 +54,41 @@ function getRejectionCounts(task: ReturnType<typeof getTask>): Record<string, nu
   } catch {
     return {};
   }
+}
+
+/**
+ * 任务的代码仓库布局（多代码库需求 = 多个子目录 clone；单库 = 单项指向 workspace/ 根）。
+ * 单一真相在 .worktree.json（listTaskRepos 读），极旧任务无 meta 时用 extra 拼单库兜底。
+ */
+function taskRepos(taskId: string, task: NonNullable<ReturnType<typeof getTask>>): TaskRepoCtx[] {
+  const repos = listTaskRepos(taskId);
+  if (repos.length > 0) return repos;
+  const p = getCurrentSandboxDir() ?? (task["repo_path"] as string);
+  return [{
+    workspace_id: "",
+    alias: "",
+    path: p,
+    dir: "",
+    primary: true,
+    branch: task["branch"] as string,
+    base: (task["default_branch"] as string) ?? "main",
+    remote_url: null,
+  }];
+}
+
+/**
+ * 多仓库布局说明段（拼进 design/develop prompt）。单库返回空串——prompt 与单库时代完全一致。
+ */
+function repoLayoutSection(repos: TaskRepoCtx[]): string {
+  if (repos.length <= 1) return "";
+  const lines = repos
+    .map((r) => `- \`./${r.dir}/\` — ${r.alias}${r.primary ? "（主仓库）" : ""}（base 分支 ${r.base}）`)
+    .join("\n");
+  return (
+    `\n\n## 仓库布局（多仓库任务）\n本任务涉及 ${repos.length} 个仓库，分别克隆在当前目录的子目录下：\n${lines}\n` +
+    `规则：直接在各子目录内修改文件；**不要自己 git commit/push**（每个仓库的改动会由 submit_pr 阶段分别提交并各开一个 PR）；` +
+    `跨仓库接口（API 契约/类型定义）必须两侧同步修改。`
+  );
 }
 
 /**
@@ -124,6 +160,7 @@ export async function run_design(taskId: string): Promise<void> {
     `## 仓库路径\n${repoPath}\n\n` +
     `请先阅读仓库代码了解项目结构，然后输出包含以下内容的技术方案：\n` +
     `1. 需求分析\n2. 技术方案\n3. 实现步骤\n4. 影响范围\n5. 测试计划` +
+    repoLayoutSection(taskRepos(taskId, task)) +
     rejectionHistory;
 
   const agent = agentForPhase(task.workflow, "design");
@@ -236,14 +273,17 @@ export async function run_develop(taskId: string): Promise<void> {
   const hasPriorReview = existsSync(codeReviewReportPath);
   const priorReviewContent = hasPriorReview ? readFileSync(codeReviewReportPath, "utf-8") : "";
 
+  const layoutSection = repoLayoutSection(taskRepos(taskId, task));
   const prompt = hasPriorReview
     ? `你是一位高级开发工程师。**这是 reject 重做轮** —— 上一轮你的提交被代码审查打回，需要根据 review 反馈修改代码。\n\n` +
       `## 技术方案\n${planContent}\n\n` +
       `## 上一轮代码审查反馈（必须 address 所有 Critical 问题）\n${priorReviewContent}\n\n` +
-      `注意：上一轮你的改动已在工作树里（未提交，共用沙盒会保留）。**不要因为"已经改过"就回答"任务已完成"** — review 明确指出了需要补充/修改的具体内容，你必须在现有改动基础上**继续修改**（修文件、补字段、删冗余等），直接改文件即可、**不要自己 git commit**（提交由 submit_pr 阶段统一做）。代码可编译、可运行。`
+      `注意：上一轮你的改动已在工作树里（未提交，共用沙盒会保留）。**不要因为"已经改过"就回答"任务已完成"** — review 明确指出了需要补充/修改的具体内容，你必须在现有改动基础上**继续修改**（修文件、补字段、删冗余等），直接改文件即可、**不要自己 git commit**（提交由 submit_pr 阶段统一做）。代码可编译、可运行。` +
+      layoutSection
     : `你是一位高级开发工程师。请根据以下技术方案进行开发。\n\n` +
       `## 技术方案\n${planContent}\n\n` +
-      `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。`;
+      `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。` +
+      layoutSection;
 
   const agent = agentForPhase(task.workflow, "develop");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
@@ -265,39 +305,47 @@ export async function run_code_review(taskId: string): Promise<void> {
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
   const repoPath = getCurrentSandboxDir() ?? (task["repo_path"] as string);
-  const defaultBranch = (task["default_branch"] as string) ?? "main";
+  // 多代码库：逐库采集 diff（单库 = 长度 1 循环，git 命令序列与单库时代逐条等价）。
   // 共用沙盒：develop 改动留在工作树（可能含 commit / 新建文件）。先 add -A 纳入未跟踪新文件，
   // 再 diff --cached <base> 看相对 base 的全量改动 —— 覆盖 committed + 未提交 + 新建，不依赖
   // agent 把改动留成什么状态。否则 agent 一 commit 或新建文件，工作树 vs HEAD 的 diff 就看空 →
   // code_review 误判"变更未实现"反复驳回 → 任务 cancelled（即焚的 reset -q 归一层删掉后的回归）。
-  runGit(["add", "-A"], repoPath);
-  // base 用 origin/<branch>：clone 后远程跟踪 ref 对默认+非默认分支都在（本地只建了默认分支）。
-  const diffResult = runGit(["diff", "--cached", "--no-ext-diff", `origin/${defaultBranch}`], repoPath);
-  const fullDiffLen = diffResult.stdout.length;
+  const repos = taskRepos(taskId, task);
   const DIFF_CAP = 80000;
-  const gitDiff = diffResult.stdout.slice(0, DIFF_CAP);
-  const diffTruncated = fullDiffLen > DIFF_CAP;
-  // 全量 stat（很小）给 reviewer 文件级全景——大改动 diff 截断时，排在尾部的文件
-  // （迁移/前端组件等）会整个消失，reviewer 盲判「未实现」三连驳（dogfood：req-011
-  // 第三轮 108KB diff，被指「缺失」的 migration/上传组件全都存在，只是被切掉了）。
-  const statResult = runGit(["diff", "--cached", "--stat", `origin/${defaultBranch}`], repoPath);
-  const gitDiffStat = statResult.stdout.slice(0, 8000);
+  const perRepoCap = Math.max(8000, Math.floor(DIFF_CAP / repos.length));
+  let diffSections = "";
+  let statSections = "";
+  let anyTruncated = false;
+  for (const r of repos) {
+    runGit(["add", "-A"], r.path);
+    // base 用 origin/<branch>：clone 后远程跟踪 ref 对默认+非默认分支都在（本地只建了默认分支）。
+    const diffResult = runGit(["diff", "--cached", "--no-ext-diff", `origin/${r.base}`], r.path);
+    const statResult = runGit(["diff", "--cached", "--stat", `origin/${r.base}`], r.path);
+    const head = repos.length > 1 ? `\n### 仓库 ${r.alias}${r.primary ? "（主）" : ""}（目录 ./${r.dir}/）\n` : "";
+    // 全量 stat（很小）给 reviewer 文件级全景——大改动 diff 截断时，排在尾部的文件
+    // （迁移/前端组件等）会整个消失，reviewer 盲判「未实现」三连驳（dogfood：req-011
+    // 第三轮 108KB diff，被指「缺失」的 migration/上传组件全都存在，只是被切掉了）。
+    statSections += `${head}\`\`\`\n${statResult.stdout.slice(0, 8000)}\n\`\`\`\n`;
+    diffSections += `${head}\`\`\`diff\n${diffResult.stdout.slice(0, perRepoCap)}\n\`\`\`\n`;
+    if (diffResult.stdout.length > perRepoCap) anyTruncated = true;
+  }
 
   const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
   const planContent = readFileSync(planPath, "utf-8");
 
-  const truncationNotice = diffTruncated
-    ? `\n\n⚠ **注意：完整 diff 共 ${Math.round(fullDiffLen / 1024)}KB，上面只内联了前 ${Math.round(DIFF_CAP / 1024)}KB**。` +
+  const truncationNotice = anyTruncated
+    ? `\n\n⚠ **注意：部分仓库的完整 diff 超出内联上限（每仓库 ${Math.round(perRepoCap / 1024)}KB），已截断**。` +
       `「变更文件全景」里列出但未出现在内联 diff 中的文件**不代表未实现**——你在仓库工作目录里，` +
-      `必须用 \`git diff --cached origin/${defaultBranch} -- <文件路径>\` 或 Read 工具自查这些文件的实际改动后再下结论。` +
+      `必须进入对应仓库目录用 \`git diff --cached origin/<base> -- <文件路径>\` 或 Read 工具自查这些文件的实际改动后再下结论。` +
       `**禁止以「diff 中未见到」为由认定功能缺失或驳回。**`
     : "";
 
   const prompt =
     `你是一位代码审查专家。请审查以下代码变更是否符合技术方案要求。\n\n` +
     `## 技术方案\n${planContent}\n\n` +
-    `## 变更文件全景（git diff --stat 全量）\n\`\`\`\n${gitDiffStat}\n\`\`\`\n\n` +
-    `## 代码变更\n\`\`\`diff\n${gitDiff}\n\`\`\`${truncationNotice}\n\n` +
+    (repos.length > 1 ? `${repoLayoutSection(repos)}\n\n` : "") +
+    `## 变更文件全景（git diff --stat 全量）\n${statSections}\n` +
+    `## 代码变更\n${diffSections}${truncationNotice}\n\n` +
     `请从以下维度审查：正确性、代码质量、安全性、测试覆盖。\n\n` +
     `最后必须输出以下结论之一（独占一行）：\n` +
     `- ${REVIEW_RESULT_PASS}\n` +
@@ -356,77 +404,113 @@ export async function run_code_review(taskId: string): Promise<void> {
   }
 }
 
-export async function run_submit_pr(taskId: string): Promise<void> {
-  const task = getTask(taskId);
-  if (!task) throw new Error(`任务不存在：${taskId}`);
-
-  const repoPath = getCurrentSandboxDir() ?? (task["repo_path"] as string);
-  const branch = task["branch"] as string;
-  const defaultBranch = (task["default_branch"] as string) ?? "main";
-
-  // 共用沙盒：各 phase 的改动已直接累积在工作树，submit_pr 落成交付 commit（空改动时容错不报错）。
-  runGit(["add", "-A"], repoPath);
-  runGit(["commit", "-m", `feat: ${task.title}`], repoPath, false);
-  // 普通 push（不 --force）：重跑时 resetTaskForRerun 已删远程上一轮交付分支（幂等清旧轮，
-  // GitHub 自动 close 旧 PR），新一轮 push 到全新分支不会有 non-fast-forward 冲突。
-  runGit(["push", "-u", "origin", branch], repoPath);
-
-  const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
-  const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
-  // base 用 origin/<branch>：clone 只创建源仓库 HEAD 所指分支，源仓库 checkout 在
-  // 非默认分支时本地没有 <defaultBranch> ref，裸引用直接 fatal（与 code_review 同理）。
-  const diffStatResult = runGit(["diff", `origin/${defaultBranch}...HEAD`, "--stat"], repoPath);
-  const gitDiffStat = diffStatResult.stdout.slice(0, 3000);
-
-  const agent = agentForPhase(task.workflow, "submit_pr");
-  const prPrompt =
-    `请根据以下信息生成 PR 描述（Markdown 格式）：\n\n` +
-    `## 标题\n${task.title}\n\n` +
-    `## 技术方案摘要\n${planContent.slice(0, 4000)}\n\n` +
-    `## 变更统计\n${gitDiffStat}\n\n` +
-    `请输出完整的 PR body，包含：概述、主要变更、测试说明。`;
-
-  const prResult = await agent.run(prPrompt, { cwd: repoPath, timeout: 300_000 });
-  const prBody = prResult.text;
-
+/** gh pr view 判 OPEN 复用（pr edit）/ 否则 create。失败抛错（调用方按库聚合）。 */
+function ensurePr(repo: TaskRepoCtx, title: string, prBody: string): string {
   // 检查是否已存在 **OPEN** PR：只有 open 的才复用、更新 body（如 review 驳回返工后再 submit）。
   // closed 的必须建新 —— 重跑会删交付分支触发 GitHub 自动 close 旧 PR，gh pr view 仍会返回这个
   // closed PR；若不判 state 就会把改动"更新"到已关闭的 PR 上，等于重跑跑完却没有有效 open PR。
   const existingPr = Bun.spawnSync(
     ["gh", "pr", "view", "--json", "url,state"],
-    { cwd: repoPath, stderr: "pipe" }
+    { cwd: repo.path, stderr: "pipe" }
   );
   const existingOut = new TextDecoder().decode(existingPr.stdout ?? new Uint8Array()).trim();
-
-  let prUrl: string;
   let parsedExisting: { url?: string; state?: string } | null = null;
   if (existingPr.exitCode === 0 && existingOut) {
     try { parsedExisting = JSON.parse(existingOut) as { url?: string; state?: string }; } catch { parsedExisting = null; }
   }
   if (parsedExisting && parsedExisting.state === "OPEN") {
-    prUrl = parsedExisting.url ?? "";
-    Bun.spawnSync(["gh", "pr", "edit", "--body", prBody], { cwd: repoPath });
-  } else {
-    const createProc = Bun.spawnSync(
-      ["gh", "pr", "create", "--title", task.title, "--body", prBody, "--base", defaultBranch, "--head", branch],
-      { cwd: repoPath, stderr: "pipe" }
-    );
-    if (createProc.exitCode !== 0) {
-      const errMsg = new TextDecoder().decode(createProc.stderr ?? new Uint8Array()).trim();
-      throw new Error(`创建 PR 失败：${errMsg}`);
+    Bun.spawnSync(["gh", "pr", "edit", "--body", prBody], { cwd: repo.path });
+    return parsedExisting.url ?? "";
+  }
+  const createProc = Bun.spawnSync(
+    ["gh", "pr", "create", "--title", title, "--body", prBody, "--base", repo.base, "--head", repo.branch],
+    { cwd: repo.path, stderr: "pipe" }
+  );
+  if (createProc.exitCode !== 0) {
+    const errMsg = new TextDecoder().decode(createProc.stderr ?? new Uint8Array()).trim();
+    throw new Error(`创建 PR 失败：${errMsg}`);
+  }
+  return new TextDecoder().decode(createProc.stdout ?? new Uint8Array()).trim();
+}
+
+export async function run_submit_pr(taskId: string): Promise<void> {
+  const task = getTask(taskId);
+  if (!task) throw new Error(`任务不存在：${taskId}`);
+
+  const repos = taskRepos(taskId, task);
+  const reqId = task["requirement_id"] as string | undefined;
+
+  const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
+  const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
+  const agent = agentForPhase(task.workflow, "submit_pr");
+
+  // 逐库交付：commit → push → PR。部分失败 = 已开 PR 落库保留 + 抛错停下报人（重试幂等：
+  // 已 push 的库重入是 fast-forward no-op，OPEN PR 走 edit 复用，appendSubPr 是 UPSERT）。
+  const results: Array<{ repo: TaskRepoCtx; prUrl: string }> = [];
+  const failures: string[] = [];
+  for (const r of repos) {
+    const label = r.alias || "主仓库";
+    try {
+      // 共用沙盒：各 phase 的改动已直接累积在工作树，submit_pr 落成交付 commit（空改动时容错不报错）。
+      runGit(["add", "-A"], r.path);
+      // 该库有无改动：staged 相对 base 有 diff，或已有领先 base 的本地 commit（fix 轮 / agent 自行 commit 过）
+      const staged = runGit(["diff", "--cached", "--quiet", `origin/${r.base}`], r.path, false).exitCode !== 0;
+      const ahead = runGit(["rev-list", "--count", `origin/${r.base}..HEAD`], r.path, false).stdout.trim() !== "0";
+      if (!staged && !ahead) continue; // 该库无改动 → 不开空 PR
+      runGit(["commit", "-m", `feat: ${task.title}`], r.path, false);
+      // 普通 push（不 --force）：重跑时 resetTaskForRerun 已删远程上一轮交付分支（幂等清旧轮，
+      // GitHub 自动 close 旧 PR），新一轮 push 到全新分支不会有 non-fast-forward 冲突。
+      runGit(["push", "-u", "origin", r.branch], r.path);
+
+      // base 用 origin/<branch>：clone 只创建源仓库 HEAD 所指分支，源仓库 checkout 在
+      // 非默认分支时本地没有 <base> ref，裸引用直接 fatal（与 code_review 同理）。
+      const diffStatResult = runGit(["diff", `origin/${r.base}...HEAD`, "--stat"], r.path);
+      const gitDiffStat = diffStatResult.stdout.slice(0, 3000);
+      const multiNote = repos.length > 1
+        ? `\n\n（本需求共涉及 ${repos.length} 个仓库的交付，当前是 ${label}；交付 PR 全集见 autopilot 需求页）`
+        : "";
+      const prPrompt =
+        `请根据以下信息生成 PR 描述（Markdown 格式）：\n\n` +
+        `## 标题\n${task.title}\n\n` +
+        `## 技术方案摘要\n${planContent.slice(0, 4000)}\n\n` +
+        `## 变更统计\n${gitDiffStat}\n\n` +
+        `请输出完整的 PR body，包含：概述、主要变更、测试说明。${multiNote}`;
+      const prResult = await agent.run(prPrompt, { cwd: r.path, timeout: 300_000 });
+
+      const prUrl = ensurePr(r, task.title, prResult.text);
+      results.push({ repo: r, prUrl });
+
+      // 多库：每个 PR（含主库）落 requirement_sub_prs 作为交付 PR 全集；单库零行为变化
+      if (repos.length > 1 && r.workspace_id && reqId) {
+        const n = Number(prUrl.match(/\/pull\/(\d+)/)?.[1] ?? 0);
+        try {
+          appendSubPr({ requirement_id: reqId, child_workspace_id: r.workspace_id, pr_url: prUrl, pr_number: n });
+        } catch (e: unknown) {
+          console.warn(`记录交付 PR 失败 [${label}]：`, e instanceof Error ? e.message : e);
+        }
+      }
+    } catch (e: unknown) {
+      failures.push(`[${label}] ${(e as Error).message}`);
     }
-    prUrl = new TextDecoder().decode(createProc.stdout ?? new Uint8Array()).trim();
   }
 
-  updateTask(taskId, { pr_url: prUrl });
+  if (results.length === 0 && failures.length === 0) {
+    throw new Error("所有仓库均无改动，没有可交付内容");
+  }
+  if (failures.length > 0) {
+    // 停下报人：已开 PR 已落库保留；phase 失败 → 任务 failed → 需求页可见
+    throw new Error(`部分仓库交付失败（已成功 ${results.length} 个，其 PR 已保留）：\n${failures.join("\n")}`);
+  }
 
-  // 回填 PR 到需求：需求页/产出卡从 requirement.pr_url 读，不回填则"需求做完了看不到 PR"。
-  const reqId = task["requirement_id"] as string | undefined;
+  const primaryPr = results.find((x) => x.repo.primary) ?? results[0];
+  updateTask(taskId, { pr_url: primaryPr.prUrl });
+
+  // 回填 PR 到需求：需求页/产出卡从 requirement.pr_url 读（主库 PR 作主显示），不回填则"需求做完了看不到 PR"。
   if (reqId) {
-    const m = prUrl.match(/\/pull\/(\d+)/);
+    const m = primaryPr.prUrl.match(/\/pull\/(\d+)/);
     const prNumber = m ? Number(m[1]) : null;
     try {
-      updateRequirement(reqId, { pr_url: prUrl, pr_number: prNumber });
+      updateRequirement(reqId, { pr_url: primaryPr.prUrl, pr_number: prNumber });
     } catch (e: unknown) {
       console.warn("回填 requirement.pr_url 失败：", e instanceof Error ? e.message : e);
     }
@@ -434,8 +518,9 @@ export async function run_submit_pr(taskId: string): Promise<void> {
 
   // clone 沙盒是独立副本，无需切回 default branch（源仓库与主机 cwd 都不受影响）。
 
+  const noteUrls = results.map((x) => x.prUrl).join(" , ");
   transition(taskId, "submit_pr_complete", {
     transitions: getTransitions(task.workflow),
-    note: `PR 已提交：${prUrl}`,
+    note: `PR 已提交：${noteUrls}`,
   });
 }

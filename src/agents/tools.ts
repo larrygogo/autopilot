@@ -467,7 +467,8 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
           return err(`需求已通过审批（当前状态 ${r.status}），spec 不可再修改；失败（failed）后才可修改重试`);
         }
         updateRequirement(args.req_id, { spec_md: args.spec_md });
-        if (r.status === "drafting") {
+        // 澄清前置：已选代码库才自动转 clarifying（澄清基于代码库 clone 进行）
+        if (r.status === "drafting" && r.workspace_id) {
           try {
             setRequirementStatus(args.req_id, "clarifying");
           } catch (e: unknown) {

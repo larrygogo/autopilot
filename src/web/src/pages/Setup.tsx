@@ -20,7 +20,7 @@ export function Setup() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  // 命名复用 agent 删除后，首跑向导从 3 步简化为 2 步：Provider → 工作区。
+  // 命名复用 agent 删除后，首跑向导从 3 步简化为 2 步：Provider → 代码库。
   // agent 配置不再在向导里单独配，改由每个工作流的 phase 内联编辑（默认 agent 兜底）。
   const [step, setStep] = useState<1 | 2>(1);
   const [report, setReport] = useState<DoctorReportWithDismiss | null>(null);
@@ -78,14 +78,14 @@ export function Setup() {
         // 后端写库前会 git ls-remote 验证可达性（可能耗时数秒）
         await api.setupWorkspace({ name: cbName.trim(), remote_url: cbRemoteUrl.trim() });
       } catch (e: unknown) {
-        toast.error("创建工作区失败", (e as Error)?.message ?? String(e));
+        toast.error("创建代码库失败", (e as Error)?.message ?? String(e));
         return;
       } finally {
         setCbSubmitting(false);
       }
     }
     await api.setupDismiss().catch(() => {});
-    navigate("/now");
+    navigate("/tasks");
   }
 
   // 核心就绪 = 至少启用了一个 provider（命名 agent 检查已移除）
@@ -100,7 +100,7 @@ export function Setup() {
         </p>
       </header>
 
-      <SetupProgress current={step} labels={["Provider", "工作区"]} />
+      <SetupProgress current={step} labels={["Provider", "代码库"]} />
 
       {step === 2 && minimumReady && (
         <div className="mb-4 rounded-md border border-border px-3 py-2 text-xs">
@@ -143,7 +143,7 @@ export function Setup() {
 
       {step === 2 && (
         <section className="space-y-4">
-          <h2 className="text-sm font-bold">2/2 · 添加工作区（可选）</h2>
+          <h2 className="text-sm font-bold">2/2 · 添加代码库（可选）</h2>
           <div>
             <Label htmlFor="cb-name">名称</Label>
             <Input id="cb-name" value={cbName} onChange={(e) => setCbName(e.target.value)} placeholder="my-project" />

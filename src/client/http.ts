@@ -11,9 +11,9 @@ import type { DaemonStatus, GraphData } from "../daemon/protocol";
 import type { SessionManifest, ChatMessage } from "../core/sessions";
 import type { Schedule, ScheduleType } from "../core/schedules";
 import type { Requirement } from "../core/requirements";
-import type { NowCard } from "../core/now-types";
+import type { Notification } from "../core/notification-types";
 import { WsRpcCaller, toWsUrl, WsRpcError } from "./ws-rpc";
-export type { NowCard };
+export type { Notification };
 
 // ──────────────────────────────────────────────
 // 类型定义（保留 HttpClient 历史 shape，不破坏 CLI / 测试调用方）
@@ -358,14 +358,47 @@ export class HttpClient {
     throw new Error("getSessionMessages 暂未迁到 WS RPC（用 getSession 拿全部 messages）");
   }
 
-  // ── /now state-derivation engine ──
-
-  async listNowCards(): Promise<NowCard[]> {
-    return this.call("now.cards");
+  async transitionRequirement(id: string, to: string): Promise<{ requirement: Requirement }> {
+    return this.call("requirements.transition", { id, to });
   }
 
-  async dismissNowCard(cardId: string): Promise<{ ok: true }> {
-    return this.call("now.dismissCard", { id: cardId });
+  async setRequirementWorkspaces(
+    id: string,
+    workspaceIds: string[],
+    primaryWorkspaceId?: string,
+  ): Promise<{ requirement: Requirement & { workspace_ids: string[] }; workspace_ids: string[] }> {
+    return this.call("requirements.setWorkspaces", {
+      id,
+      workspace_ids: workspaceIds,
+      primary_workspace_id: primaryWorkspaceId,
+    });
+  }
+
+  // ── Notifications（事件型通知流） ──
+
+  async listNotifications(opts: {
+    limit?: number;
+    before_id?: number;
+    unread_only?: boolean;
+    include_dismissed?: boolean;
+  } = {}): Promise<{ items: Notification[]; next_before_id: number | null }> {
+    return this.call("notifications.list", opts);
+  }
+
+  async notificationUnreadCount(): Promise<{ count: number }> {
+    return this.call("notifications.unreadCount");
+  }
+
+  async markNotificationsRead(ids: number[]): Promise<{ updated: number }> {
+    return this.call("notifications.markRead", { ids });
+  }
+
+  async markAllNotificationsRead(): Promise<{ updated: number }> {
+    return this.call("notifications.markAllRead");
+  }
+
+  async dismissNotification(id: number): Promise<{ ok: true }> {
+    return this.call("notifications.dismiss", { id });
   }
 
   // ── Requirements ──

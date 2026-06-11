@@ -64,7 +64,7 @@ import {
   DEFAULT_PROJECT_ID,
 } from "../core/projects";
 import { listRequirementsByProject } from "../core/requirements";
-import { listWorkspaces, getWorkspaceById, getWorkspaceByAlias, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, projectHasTopWorkspace, getTopWorkspaceForProject } from "../core/workspaces";
+import { listWorkspaces, getWorkspaceById, getWorkspaceByAlias, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, getTopWorkspaceForProject } from "../core/workspaces";
 import { listSubmodules, discoverSubmodules } from "../core/submodules";
 import { checkWorkspaceHealth, detectWorkspaceGit, probeRemote, parseGithubFromRemote } from "../core/workspace-health";
 import {
@@ -75,6 +75,14 @@ import {
 } from "../core/sessions";
 import { readDaemonFileLog, getDaemonFileLogPath } from "../core/logger";
 import {
+  listNotifications,
+  unreadCount as notificationUnreadCount,
+  markRead as markNotificationsRead,
+  markAllRead as markAllNotificationsRead,
+  dismissNotification,
+} from "../core/notifications";
+import { listUnhealthy } from "../core/provider-health";
+import {
   listRequirements as coreListRequirements,
   getRequirementById,
   createRequirement as coreCreateRequirement,
@@ -83,8 +91,16 @@ import {
   nextRequirementId,
   finishClarification,
   listRequirementStatusLogs,
+  listRequirementWorkspaceIds,
+  setRequirementWorkspaces as coreSetRequirementWorkspaces,
   type Requirement,
 } from "../core/requirements";
+
+/** 给需求响应附 workspace_ids（requirement_workspaces 集合；RPC 层 join，core 返回类型不动） */
+function attachWorkspaceIds<T extends { id: string }>(reqs: T[]): Array<T & { workspace_ids: string[] }> {
+  const map = listRequirementWorkspaceIds(reqs.map((r) => r.id));
+  return reqs.map((r) => ({ ...r, workspace_ids: map.get(r.id) ?? [] }));
+}
 import { listSubPrs } from "../core/requirement-sub-prs";
 import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
 import { getRound as getClarifierRound } from "./clarifier-progress";
@@ -116,8 +132,6 @@ import {
   listAgentCalls,
   getAgentCall,
 } from "../core/task-logs";
-import { getNowAggregator } from "./routes-now";
-import { dismissCard as coreDismissCard } from "../core/now-dismiss";
 import { phaseIndex, parseDecisionCounts, renderDecisionMd } from "./routes";
 import { computeTaskOutcome } from "./task-outcome";
 import {
@@ -208,9 +222,23 @@ export function registerCoreRpcMethods(): void {
           `host "${host}" 不可绑定。可选：localhost / 127.0.0.1 / 0.0.0.0 / ${lanIps.join(" / ") || "(无 LAN IP)"}`,
         );
       }
+      // 切到暴露 host 且未设防 → 自动生成 token 配套（与 SEC-6 启动门同语义：
+      // 不留「配置矛盾等重启引爆」的窗口）。返回一次性明文供调用方展示。
+      let generatedToken: string | null = null;
+      const { isExposedHost: isExposed, getApiTokenState: tokenState, reloadApiToken: reloadToken } =
+        await import("./routes");
+      const { hasAnyUser: anyUser } = await import("../core/auth");
+      let hasUser = false;
+      try { hasUser = anyUser(); } catch { /* users 表未建（极简测试库）→ 视为无用户 */ }
+      if (isExposed(host) && !tokenState().is_set && !hasUser) {
+        const { generateApiToken, saveApiToken } = await import("../core/api-token");
+        generatedToken = generateApiToken();
+        saveApiToken(generatedToken);
+        reloadToken();
+      }
       const cur = loadDaemonConfig();
       saveDaemonConfig({ ...cur, host });
-      return { ok: true, host, restart_required: true };
+      return { ok: true, host, restart_required: true, generated_token: generatedToken };
     },
   });
 
@@ -314,27 +342,69 @@ export function registerCoreRpcMethods(): void {
   // agents.list 已移除（Phase 3：命名复用 agent 机制删除）。
   // Web Agents 页运行时会拿到 METHOD_NOT_FOUND，留待 Phase 4 处理客户端。
 
+  // ── notifications（事件型通知流；旧 now.* 派生快照体系已于 2026-06-11 移除） ──
+
   registerRpcMethod({
-    method: "now.cards",
-    description: "Now 页卡片列表（daemon 未启动时返回空数组）",
-    handler: () => {
-      const agg = getNowAggregator();
-      return agg ? agg.getCards() : [];
+    method: "notifications.list",
+    description: "通知列表（id 倒序游标分页；默认不含已删除）",
+    handler: (params) => {
+      const p = asObj(params);
+      return listNotifications({
+        limit: typeof p.limit === "number" ? p.limit : undefined,
+        before_id: typeof p.before_id === "number" ? p.before_id : undefined,
+        unread_only: p.unread_only === true,
+        include_dismissed: p.include_dismissed === true,
+      });
     },
   });
 
   registerRpcMethod({
-    method: "now.dismissCard",
-    description: "标记 Now 卡片已忽略（持久化 dismiss + 同步 aggregator 内存）",
+    method: "notifications.unreadCount",
+    description: "未读通知数（排除已删除）",
+    handler: () => ({ count: notificationUnreadCount() }),
+  });
+
+  registerRpcMethod({
+    method: "notifications.markRead",
+    description: "标记通知已读（幂等，只动仍未读的行）",
     handler: (params) => {
       const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      coreDismissCard(p.id);
-      // 跟原 HTTP handler 行为一致：同步内存 aggregator，让 markDismissed 触发 emit
-      const agg = getNowAggregator();
-      if (agg) agg.markDismissed(p.id);
+      if (!Array.isArray(p.ids) || p.ids.length === 0 || !p.ids.every((x) => typeof x === "number")) {
+        throw new RpcError("INVALID_PARAM", "需要非空 number[] ids");
+      }
+      const updated = markNotificationsRead(p.ids as number[]);
+      emitBus({ type: "notification:read", payload: { ids: p.ids as number[] } });
+      return { updated };
+    },
+  });
+
+  registerRpcMethod({
+    method: "notifications.markAllRead",
+    description: "全部标为已读（幂等）",
+    handler: () => {
+      const updated = markAllNotificationsRead();
+      emitBus({ type: "notification:all_read", payload: {} });
+      return { updated };
+    },
+  });
+
+  registerRpcMethod({
+    method: "notifications.dismiss",
+    description: "删除（隐藏）一条通知；幂等",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "number") throw new RpcError("INVALID_PARAM", "需要 number id");
+      const ok = dismissNotification(p.id);
+      if (!ok) throw new RpcError("NOT_FOUND", `通知 ${p.id} 不存在`);
+      emitBus({ type: "notification:dismissed", payload: { id: p.id } });
       return { ok: true };
     },
+  });
+
+  registerRpcMethod({
+    method: "providers.health",
+    description: "当前不健康的 provider 列表（轻量内存态，给通知面板 banner 初始拉取）",
+    handler: () => listUnhealthy(),
   });
 
   registerRpcMethod({
@@ -861,7 +931,7 @@ export function registerCoreRpcMethods(): void {
       const project_id = typeof p.project_id === "string" ? p.project_id : undefined;
       const status = typeof p.status === "string" ? p.status : undefined;
       return {
-        requirements: coreListRequirements({ workspace_id, project_id, status }),
+        requirements: attachWorkspaceIds(coreListRequirements({ workspace_id, project_id, status })),
       };
     },
   });
@@ -875,9 +945,53 @@ export function registerCoreRpcMethods(): void {
       const r = getRequirementById(p.id);
       if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
       return {
-        requirement: r,
+        requirement: attachWorkspaceIds([r])[0],
         comments: listComments(p.id),
       };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.setWorkspaces",
+    description: "审批阶段反写需求的代码库集合（整体替换 + 设主库；审批后冻结，failed 例外）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (
+        !Array.isArray(p.workspace_ids) ||
+        p.workspace_ids.length === 0 ||
+        !p.workspace_ids.every((x) => typeof x === "string" && x)
+      ) {
+        throw new RpcError("INVALID_PARAM", "需要非空 string[] workspace_ids");
+      }
+      const wsIds = [...new Set(p.workspace_ids as string[])];
+      const primary =
+        typeof p.primary_workspace_id === "string" && p.primary_workspace_id
+          ? p.primary_workspace_id
+          : wsIds[0];
+      if (!wsIds.includes(primary)) {
+        throw new RpcError("INVALID_PARAM", "primary_workspace_id 必须在 workspace_ids 集合内");
+      }
+      const cur = getRequirementById(p.id);
+      if (!cur) throw new RpcError("NOT_FOUND", "requirement not found");
+      // 审批后冻结（与 requirements.update 同口径；failed 例外 = 重试设计用途）
+      const EDITABLE_STATUSES = new Set(["drafting", "clarifying", "ready", "awaiting_approval", "failed"]);
+      if (!EDITABLE_STATUSES.has(cur.status)) {
+        throw new RpcError(
+          "INVALID_STATE",
+          `需求已通过审批（当前状态 ${cur.status}），代码库集合不可再编辑。执行内容以入队时的快照为准。`,
+        );
+      }
+      for (const wid of wsIds) {
+        const ws = getWorkspaceById(wid);
+        if (!ws) throw new RpcError("NOT_FOUND", `workspace 不存在：${wid}`);
+        if (ws.project_id !== cur.project_id) {
+          throw new RpcError("PRECONDITION_FAILED", `代码库 ${ws.alias}（${wid}）不属于该需求的项目`);
+        }
+      }
+      coreSetRequirementWorkspaces(p.id, wsIds, primary);
+      const updated = getRequirementById(p.id)!;
+      return { requirement: attachWorkspaceIds([updated])[0], workspace_ids: wsIds };
     },
   });
 
@@ -938,7 +1052,7 @@ export function registerCoreRpcMethods(): void {
       // 项目:工作区 1:1 —— 未显式指定时自动派生项目唯一工作区，免去用户手动绑定。
       if (!workspaceId) workspaceId = topWs.id;
       const id = nextRequirementId();
-      coreCreateRequirement({
+      const created = coreCreateRequirement({
         id,
         project_id: projectId,
         workspace_id: workspaceId,
@@ -946,8 +1060,9 @@ export function registerCoreRpcMethods(): void {
         spec_md: typeof p.spec_md === "string" ? p.spec_md : "",
         chat_session_id: (p.chat_session_id as string | null | undefined) ?? null,
       });
-      const clarifying = setRequirementStatus(id, "clarifying");
-      return { requirement: clarifying };
+      // 停在 drafting：澄清依赖代码库 clone，须由用户确认代码库后显式进入澄清
+      // （自动派生的主库只是预选；Web 在需求页确认、CLI 用 req clarify / -c 显式指定时自动开始）
+      return { requirement: created };
     },
   });
 
@@ -1019,7 +1134,12 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (typeof p.to !== "string" || !p.to.trim()) throw new RpcError("INVALID_PARAM", "to 必填");
-      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      const cur = getRequirementById(p.id);
+      if (!cur) throw new RpcError("NOT_FOUND", "requirement not found");
+      // 澄清前置：必须已选代码库（澄清 agent 在代码库浅 clone 中工作）
+      if (p.to.trim() === "clarifying" && !cur.workspace_id) {
+        throw new RpcError("PRECONDITION_FAILED", "请先为需求选择代码库再开始澄清（澄清基于代码库的克隆进行）");
+      }
       return { requirement: setRequirementStatus(p.id, p.to.trim()) };
     },
   });
@@ -1602,11 +1722,7 @@ export function registerCoreRpcMethods(): void {
           projectId = proj.id;
         }
       }
-      // 1:1 守卫（DM-06）：与 workspaces.create / projects.createForProject 一致，把"项目已有
-      // 顶层 workspace"的裸 SQLite UNIQUE 约束错换成结构化 RpcError。
-      if (projectHasTopWorkspace(projectId)) {
-        throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
-      }
+      // 项目:代码库已放开 1:N（迁移 037），不再做 1:1 守卫
       // Fail fast：与 workspaces.create 同款 —— 写 DB 前验证远程可达性 + 探测默认分支
       const gitCfg = loadGitConfig();
       const probe = probeRemote(remoteUrl, gitCfg.token);
@@ -1863,7 +1979,7 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
-      return { requirements: listRequirementsByProject(p.id) };
+      return { requirements: attachWorkspaceIds(listRequirementsByProject(p.id)) };
     },
   });
 
@@ -1878,10 +1994,6 @@ export function registerCoreRpcMethods(): void {
       const alias = typeof p.alias === "string" ? p.alias.trim() : "";
       const pathField = typeof p.path === "string" ? p.path.trim() : "";
       if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
-      // 1:1：每个项目仅允许一个工作区（submodule 不计入）
-      if (projectHasTopWorkspace(p.id)) {
-        throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
-      }
       // 服务端兜底探测：未显式给的字段自动从 git 仓库识别（显式值优先）
       const detected = detectWorkspaceGit(pathField);
       const explicitBranch = typeof p.default_branch === "string" && p.default_branch.trim()
@@ -1958,10 +2070,6 @@ export function registerCoreRpcMethods(): void {
       if (!alias) throw new RpcError("INVALID_PARAM", "alias 必填");
 
       const projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
-      // 1:1：每个项目仅允许一个工作区（submodule 不计入）
-      if (projectId && projectHasTopWorkspace(projectId)) {
-        throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
-      }
 
       // 解析 remote_url：优先显式传入，其次从 github owner/repo 构造，再回退本地 path 探测
       let remoteUrl: string | null = null;

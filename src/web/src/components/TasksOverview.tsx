@@ -91,7 +91,7 @@ export function TasksOverview({
               <li
                 key={t.id}
                 onClick={() => onSelectTask(t.id)}
-                className="flex cursor-pointer items-center gap-3 border-l-2 border-transparent px-2 py-1 font-mono text-xs hover:border-destructive hover:bg-destructive/10"
+                className="flex cursor-pointer items-center gap-3 px-2 py-1 font-mono text-xs hover:bg-destructive/10"
               >
                 <span className="text-muted-foreground">{t.id}</span>
                 <span className="truncate font-sans">{t.title}</span>
@@ -113,7 +113,7 @@ export function TasksOverview({
               <li
                 key={t.id}
                 onClick={() => onSelectTask(t.id)}
-                className="flex cursor-pointer items-center gap-3 border-l-2 border-transparent px-2 py-1 font-mono text-xs hover:border-warning hover:bg-warning/10"
+                className="flex cursor-pointer items-center gap-3 px-2 py-1 font-mono text-xs hover:bg-warning/10"
               >
                 <span className="text-muted-foreground">{t.id}</span>
                 <span className="truncate font-sans">{t.title}</span>

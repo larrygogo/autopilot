@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { MessageSquare, Workflow, Plug, Sliders, Moon, Sun, Plus, FileText, Clock, Folder, MessageCircle, XCircle, RotateCw } from "lucide-react";
+import { Workflow, Plug, Sliders, Moon, Sun, Plus, FileText, Clock, Folder, MessageCircle, XCircle, RotateCw } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -47,6 +47,19 @@ interface Props {
   pathname?: string;
 }
 
+interface ContentProps {
+  /** 内容是否处于激活态（控制数据拉取时机：dialog 打开 / 移动端抽屉切到搜索 tab） */
+  active: boolean;
+  /** 选中任意项后关闭宿主（dialog 或抽屉） */
+  onClose: () => void;
+  onNavigate: (path: string) => void;
+  onSelectTask: (id: string) => void;
+  onNewTask: () => void;
+  pathname?: string;
+  /** 覆盖 CommandList 高度（移动端抽屉内撑满） */
+  listClassName?: string;
+}
+
 /** 从 pathname 提取上下文实体 id（/tasks/:id / /requirements/:id / /projects/:id） */
 function parseContext(pathname?: string): { kind: "task" | "requirement" | "project"; id: string } | null {
   if (!pathname) return null;
@@ -60,6 +73,30 @@ function parseContext(pathname?: string): { kind: "task" | "requirement" | "proj
 }
 
 export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, onNewTask, pathname }: Props) {
+  return (
+    <CommandDialog open={open} onOpenChange={onOpenChange}>
+      <CommandPaletteContent
+        active={open}
+        onClose={() => onOpenChange(false)}
+        onNavigate={onNavigate}
+        onSelectTask={onSelectTask}
+        onNewTask={onNewTask}
+        pathname={pathname}
+      />
+    </CommandDialog>
+  );
+}
+
+/** 搜索 / 命令内容体 —— 桌面端套 CommandDialog，移动端内嵌底部抽屉的「搜索」tab */
+export function CommandPaletteContent({
+  active,
+  onClose,
+  onNavigate,
+  onSelectTask,
+  onNewTask,
+  pathname,
+  listClassName,
+}: ContentProps) {
   const { resolved, toggle } = useTheme();
   const toast = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -68,15 +105,15 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
   const [projects, setProjects] = useState<Project[]>([]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!active) return;
     api.listTasks({ limit: "30" }).then((list) => setTasks(list as Task[])).catch(() => {});
     api.listWorkflows().then((list: any) => setWorkflows((list ?? []) as Workflow[])).catch(() => {});
     api.listRequirements().then((list: any) => setRequirements((list ?? []) as Requirement[])).catch(() => {});
     api.listProjects().then((list) => setProjects(list as Project[])).catch(() => {});
-  }, [open]);
+  }, [active]);
 
   const run = (fn: () => void | Promise<void>) => () => {
-    onOpenChange(false);
+    onClose();
     void fn();
   };
 
@@ -110,19 +147,18 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
 
   const pages = useMemo(
     () => [
-      { path: "/chat", label: "对话", icon: MessageSquare },
       { path: "/schedules", label: "定时任务", icon: Clock },
       { path: "/workflows", label: "工作流", icon: Workflow },
-      { path: "/providers", label: "提供商", icon: Plug },
+      { path: "/settings/providers", label: "提供商", icon: Plug },
       { path: "/settings", label: "通用设置", icon: Sliders },
     ],
     [],
   );
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange}>
+    <>
       <CommandInput placeholder="跳转、搜索任务 / 需求 / 项目、执行命令…" />
-      <CommandList>
+      <CommandList className={listClassName}>
         <CommandEmpty>没有匹配结果</CommandEmpty>
 
         {/* 上下文敏感动作 — 仅 TaskDetail 页时显示，让键盘流用户不必鼠标点 task 卡 */}
@@ -245,6 +281,6 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
           </>
         )}
       </CommandList>
-    </CommandDialog>
+    </>
   );
 }

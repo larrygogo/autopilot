@@ -532,8 +532,15 @@ function serveStatic(urlPath: string): Response | null {
   if (requestedFile && existsSync(requestedFile)) {
     const ext = requestedFile.substring(requestedFile.lastIndexOf("."));
     const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
+    // SPA 缓存策略：不设头时浏览器走启发式缓存，index.html 被缓存 → 发版后仍引用
+    // 旧 hash bundle，「改了没生效」反复发作。带内容 hash 的 /assets/* 可永久缓存
+    // （hash 变路径即变）；HTML 必须每次协商。
+    const isHashedAsset = /[/\\]assets[/\\]/.test(requestedFile);
+    const cacheControl = isHashedAsset
+      ? "public, max-age=31536000, immutable"
+      : "no-cache";
     return new Response(Bun.file(requestedFile), {
-      headers: { "Content-Type": contentType },
+      headers: { "Content-Type": contentType, "Cache-Control": cacheControl },
     });
   }
 
@@ -542,7 +549,7 @@ function serveStatic(urlPath: string): Response | null {
     const indexPath = join(rootDir, "index.html");
     if (existsSync(indexPath)) {
       return new Response(Bun.file(indexPath), {
-        headers: { "Content-Type": "text/html" },
+        headers: { "Content-Type": "text/html", "Cache-Control": "no-cache" },
       });
     }
   }
@@ -607,15 +614,9 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
   }
 
   try {
-    // ── /now 路由（PR 1：状态推导引擎）──
+    // ── /api/now/* 已随旧 Now 体系移除（通知走 WS RPC notifications.*）──
     if (path.startsWith("/api/now/")) {
-      const { handleNowRequest } = await import("./routes-now");
-      const nowRes = await handleNowRequest(req, url);
-      if (nowRes) {
-        const headers = new Headers(nowRes.headers);
-        for (const [k, v] of Object.entries(cors)) headers.set(k, v);
-        return new Response(nowRes.body, { status: nowRes.status, headers });
-      }
+      return error("Removed: use WS RPC `notifications.*`", 410);
     }
 
     // ── API Routes ──
@@ -828,7 +829,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       if (!workspaceId) workspaceId = topWs.id;
       const id = nextRequirementId();
       try {
-        createRequirement({
+        const created = createRequirement({
           id,
           project_id: projectId,
           workspace_id: workspaceId,
@@ -836,9 +837,8 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
           spec_md: body.spec_md ?? "",
           chat_session_id: body.chat_session_id ?? null,
         });
-        // 自动进入澄清流程（触发 requirement-clarifier 后台生成问题）
-        const clarifying = setRequirementStatus(id, "clarifying");
-        return json({ requirement: clarifying }, 201);
+        // 停在 drafting：澄清依赖代码库 clone，须由用户确认代码库后显式转 clarifying
+        return json({ requirement: created }, 201);
       } catch (e: unknown) {
         return error((e as Error).message, 500);
       }

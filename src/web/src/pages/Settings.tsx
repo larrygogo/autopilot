@@ -22,7 +22,11 @@ import { getApiToken, setApiToken, clearApiToken, shouldUseToken } from "@/lib/a
 import { setRestarting } from "@/lib/ws-singleton";
 
 // 保留 embedded 参数签名以兼容旧调用
-export function Settings(_props: { embedded?: boolean } = {}) {
+export function Settings({
+  section = "general",
+}: {
+  section?: "general" | "scheduler" | "network" | "daemon";
+}) {
   const toast = useToast();
 
   const [defaultsTz, setDefaultsTz] = useState<string | null>(null);
@@ -34,6 +38,7 @@ export function Settings(_props: { embedded?: boolean } = {}) {
   const [configPath, setConfigPath] = useState<string | null>(null);
 
   useEffect(() => {
+    if (section !== "general") return;
     api.getDefaults()
       .then((res) => {
         setDefaultsTz(res.timezone);
@@ -41,7 +46,7 @@ export function Settings(_props: { embedded?: boolean } = {}) {
       })
       .catch((e) => toast.error("加载默认偏好失败", (e as Error)?.message ?? String(e)))
       .finally(() => setDefaultsLoading(false));
-  }, []);
+  }, [section]);
 
   const saveDefaults = async (tz: string | null) => {
     setDefaultsSaving(true);
@@ -57,10 +62,12 @@ export function Settings(_props: { embedded?: boolean } = {}) {
   };
 
   useEffect(() => {
+    if (section !== "daemon") return;
     api.getStatus().then(setStatus).catch(() => {});
-  }, []);
+  }, [section]);
 
   useEffect(() => {
+    if (section !== "daemon") return;
     // 用 getConfig 触发后端返回 yaml，间接拿到当前用的 config 路径
     // 实际上 daemon status 已含 config 路径，先用一个简单兜底
     api.getConfig().then((res) => {
@@ -69,10 +76,73 @@ export function Settings(_props: { embedded?: boolean } = {}) {
     }).catch(() => {
       setConfigPath("~/.autopilot/config.yaml");
     });
-  }, []);
+  }, [section]);
 
+  if (section === "scheduler") {
+    return <SchedulerCard />;
+  }
+
+  if (section === "network") {
+    return <NetworkAccessCard />;
+  }
+
+  if (section === "daemon") {
+    return (
+      <div className="w-full">
+        {status && (
+          <Card className="mb-4 p-4">
+            <h3 className="mb-3 text-sm font-semibold">Daemon 信息</h3>
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
+              <InfoField
+                label="版本"
+                value={status.git_sha ? `${status.version} · ${status.git_sha}` : status.version}
+                mono
+              />
+              <InfoField label="PID" value={String(status.pid)} mono />
+              <InfoField
+                label="启动于"
+                value={status.started_at_iso ? new Date(status.started_at_iso).toLocaleString() : formatUptime(status.uptime)}
+              />
+              <InfoField label="端口" value={location.port || "80"} mono />
+            </dl>
+          </Card>
+        )}
+
+        <DaemonLogCard />
+
+        {/* 编辑配置文件提示 */}
+        <Card className="mb-4 p-4">
+          <div className="mb-2">
+            <h3 className="text-sm font-semibold">编辑配置文件</h3>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              日常配置请用左侧设置菜单与「工作流 / 定时任务」导航；
+              原始 YAML 请用 IDE 直接编辑文件，daemon 即时读到改动（providers / agents 无需重启）。
+            </p>
+          </div>
+          <dl className="grid grid-cols-1 gap-y-2 font-mono text-xs sm:grid-cols-[auto_1fr] sm:gap-x-4">
+            <dt className="text-muted-foreground">全局配置</dt>
+            <dd>{configPath ?? "~/.autopilot/config.yaml"}</dd>
+            <dt className="text-muted-foreground">工作流目录</dt>
+            <dd>~/.autopilot/workflows/&lt;name&gt;/workflow.yaml</dd>
+            <dt className="text-muted-foreground">CLI 查看</dt>
+            <dd>
+              <code className="bg-muted/40 px-1.5 py-0.5">autopilot config path</code>
+              <span className="mx-1 text-muted-foreground">·</span>
+              <code className="bg-muted/40 px-1.5 py-0.5">autopilot config show</code>
+            </dd>
+            <dt className="text-muted-foreground">检查配置</dt>
+            <dd>
+              <code className="bg-muted/40 px-1.5 py-0.5">autopilot config doctor</code>
+            </dd>
+          </dl>
+        </Card>
+      </div>
+    );
+  }
+
+  // general：常规偏好 + 桌面通知
   return (
-    <div className="mx-auto w-full max-w-4xl px-5 py-6">
+    <div className="w-full">
       {/* 常规偏好 */}
       <Card className="mb-4 p-4">
         <div className="mb-3">
@@ -106,62 +176,8 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         </div>
       </Card>
 
-      {/* 任务调度 */}
-      <SchedulerCard />
-
       {/* 桌面通知 */}
       <DesktopNotifyCard />
-
-      {/* 网络访问（含 API token + 本浏览器 token 副本） */}
-      <NetworkAccessCard />
-
-      {status && (
-        <Card className="mb-4 p-4">
-          <h3 className="mb-3 text-sm font-semibold">Daemon 信息</h3>
-          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
-            <InfoField
-              label="版本"
-              value={status.git_sha ? `${status.version} · ${status.git_sha}` : status.version}
-              mono
-            />
-            <InfoField label="PID" value={String(status.pid)} mono />
-            <InfoField
-              label="启动于"
-              value={status.started_at_iso ? new Date(status.started_at_iso).toLocaleString() : formatUptime(status.uptime)}
-            />
-            <InfoField label="端口" value={location.port || "80"} mono />
-          </dl>
-        </Card>
-      )}
-
-      <DaemonLogCard />
-
-      {/* 编辑配置文件提示 */}
-      <Card className="mb-4 p-4">
-        <div className="mb-2">
-          <h3 className="text-sm font-semibold">编辑配置文件</h3>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            日常配置请用上方的提供商 / 智能体 / 工作流 / 定时任务 Tab；
-            原始 YAML 请用 IDE 直接编辑文件，daemon 即时读到改动（providers / agents 无需重启）。
-          </p>
-        </div>
-        <dl className="grid grid-cols-1 gap-y-2 font-mono text-xs sm:grid-cols-[auto_1fr] sm:gap-x-4">
-          <dt className="text-muted-foreground">全局配置</dt>
-          <dd>{configPath ?? "~/.autopilot/config.yaml"}</dd>
-          <dt className="text-muted-foreground">工作流目录</dt>
-          <dd>~/.autopilot/workflows/&lt;name&gt;/workflow.yaml</dd>
-          <dt className="text-muted-foreground">CLI 查看</dt>
-          <dd>
-            <code className="bg-muted/40 px-1.5 py-0.5">autopilot config path</code>
-            <span className="mx-1 text-muted-foreground">·</span>
-            <code className="bg-muted/40 px-1.5 py-0.5">autopilot config show</code>
-          </dd>
-          <dt className="text-muted-foreground">检查配置</dt>
-          <dd>
-            <code className="bg-muted/40 px-1.5 py-0.5">autopilot config doctor</code>
-          </dd>
-        </dl>
-      </Card>
     </div>
   );
 }
@@ -218,7 +234,7 @@ function SchedulerCard(): React.ReactElement {
       <div className="mb-3">
         <h3 className="text-sm font-semibold">任务调度</h3>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          全局同时运行的任务总数上限（所有工作区合计）。写入 config.yaml 后即时生效，无需重启。
+          全局同时运行的任务总数上限（所有代码库合计）。写入 config.yaml 后即时生效，无需重启。
         </p>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr] sm:items-end">
@@ -717,7 +733,7 @@ function NetworkAccessCard(): React.ReactElement {
               对外暴露前必须先设置 API 安全令牌。生成后会立即切到"局域网开放"。
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-md border-l-4 border-warning bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
+          <div className="rounded-md bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
             <AlertTriangle className="mb-1 inline h-3.5 w-3.5 text-warning" />{" "}
             同网段的所有人将能尝试访问你的 daemon。本机浏览器和 CLI 不需要令牌；
             其他机器访问时必须在 <code className="font-mono">Authorization: Bearer</code> 头里带令牌。

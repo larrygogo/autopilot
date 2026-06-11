@@ -290,7 +290,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
 
       {/* 来源需求卡片（task.requirement_id 存在时显示）— embedded 时已在需求页内，冗余故隐藏 */}
       {!embedded && task.requirement_id && (
-        <Card className="mb-3 border-l-4 border-l-accent/60 px-4 py-2.5">
+        <Card className="mb-3 px-4 py-2.5">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <span className="font-mono text-[10px] text-muted-foreground">

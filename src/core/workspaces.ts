@@ -57,18 +57,10 @@ function nowMs(): number {
 // ──────────────────────────────────────────────
 
 /**
- * 项目是否已有顶层工作区（submodule 不计入）。
- * 1:1 约束是产品/UX 规则，放在用户面 RPC 入口校验，不污染 core 原语
- * （测试夹具/内部仍可用 createWorkspace 自由建多顶层）。DB 部分唯一索引（迁移 025）兜底。
- */
-export function projectHasTopWorkspace(projectId: string): boolean {
-  return getTopWorkspaceForProject(projectId) != null;
-}
-
-/**
- * 取项目的顶层工作区（submodule 不计入）。项目:工作区 1:1 约束下最多一个；
- * 若历史脏数据存在多个，取最早建的。无则返回 null。
- * 供「新建需求自动派生 workspace_id」等场景免去用户手动选工作区。
+ * 取项目的**默认**顶层代码库（submodule 不计入）= created_at 最早的一个。
+ * 项目:代码库已放开为 1:N（迁移 037 删 025 的唯一索引），本函数语义从「唯一」
+ * 变「默认」：供「新建需求自动派生主库 workspace_id」等场景免去用户手动选；
+ * 审批阶段用户可经 requirements.setWorkspaces 改选/多选。无则返回 null。
  */
 export function getTopWorkspaceForProject(projectId: string): Workspace | null {
   const db = getDb();

@@ -231,7 +231,7 @@ export function Tasks() {
       )}
 
       {error && (
-        <Card className="mb-4 border-l-4 border-l-destructive px-4 py-3">
+        <Card className="mb-4 px-4 py-3">
           <p className="font-mono text-[10px] text-destructive mb-1">ERROR</p>
           <p className="text-sm">{error}</p>
         </Card>

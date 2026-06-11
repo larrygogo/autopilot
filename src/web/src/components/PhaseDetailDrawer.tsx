@@ -232,7 +232,7 @@ function FieldGrid({ phase }: { phase: DrawerPhaseInfo }) {
         ))}
       </dl>
       {phase.gate && phase.gate_message && (
-        <p className="mt-2 border-l-4 border-warning bg-warning/5 px-2 py-1 text-xs text-muted-foreground">
+        <p className="mt-2 rounded-md bg-warning/5 px-2 py-1 text-xs text-muted-foreground">
           {phase.gate_message}
         </p>
       )}

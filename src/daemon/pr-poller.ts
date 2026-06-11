@@ -5,6 +5,7 @@ import {
   updateRequirement,
 } from "../core/requirements";
 import { createComment, nextCommentId } from "../core/requirement-comments";
+import { listSubPrs, updateSubPrWatermark } from "../core/requirement-sub-prs";
 import { getWorkspaceById } from "../core/workspaces";
 import { loadGithubConfig } from "../core/config";
 import { createLogger } from "../core/logger";
@@ -71,37 +72,75 @@ export async function pollAllPRs(): Promise<void> {
   }
 }
 
+/** 轮询跟踪项：一个交付 PR（多库 = sub_prs 全集；单库 = 需求主 PR） */
+interface TrackedPr {
+  prNumber: number;
+  wsId: string;
+  watermark: string | null;
+  /** 水位写回目标：sub → requirement_sub_prs 行；main → requirements.last_reviewed_event_id */
+  scope: "sub" | "main";
+  label: string;
+}
+
 /**
- * 单需求轮询：拉 PR → 处理 merge / new reviews。
+ * 单需求轮询（多 PR 聚合）：跟踪集 = sub_prs ∪ 主 PR（按 pr_number 去重——兼容旧
+ * submodule 数据：主 PR 不在 sub_prs 时必须并入，否则被排除在判定外）。
+ *
+ * 聚合判定：
+ * - 全部 PR MERGED → done
+ * - 任一 PR 新 CHANGES_REQUESTED → 合并反馈一条 comment、转一次 fix_revision（per-PR 水位去重）
+ * - 混有 CLOSED（未 merge）→ 维持 awaiting_review 等人处置（close 未 merge 是人的拒收信号）
  *
  * 为什么 export：测试需要直接调用。
  */
 export async function pollOne(reqId: string, cli: string): Promise<void> {
   const req = getRequirementById(reqId);
   if (!req || req.status !== "awaiting_review") return;
-  if (!req.pr_number) {
-    log.warn("requirement %s 无 pr_number，跳过", reqId);
-    return;
+
+  const subs = listSubPrs(reqId);
+  const tracked: TrackedPr[] = subs
+    .filter((sp) => sp.pr_number > 0)
+    .map((sp) => ({
+      prNumber: sp.pr_number,
+      wsId: sp.child_workspace_id,
+      watermark: sp.last_reviewed_event_id ?? null,
+      scope: "sub" as const,
+      label: getWorkspaceById(sp.child_workspace_id)?.alias ?? sp.child_workspace_id,
+    }));
+  if (req.pr_number && req.workspace_id && !tracked.some((t) => t.prNumber === req.pr_number)) {
+    tracked.push({
+      prNumber: req.pr_number,
+      wsId: req.workspace_id,
+      watermark: req.last_reviewed_event_id,
+      scope: "main",
+      label: "",
+    });
   }
-  if (!req.workspace_id) {
-    log.warn("requirement %s 未绑定 workspace，跳过", reqId);
-    return;
-  }
-  const repo = getWorkspaceById(req.workspace_id);
-  if (!repo || !repo.github_owner || !repo.github_repo) {
-    log.warn(
-      "requirement %s 关联 workspace 缺 github_owner/repo，跳过（请先在 /workspaces 健康检查回填）",
-      reqId,
-    );
+  if (tracked.length === 0) {
+    log.warn("requirement %s 无可跟踪 PR（pr_number/sub_prs 均空），跳过", reqId);
     return;
   }
 
-  const data = await ghPrView(cli, repo.github_owner, repo.github_repo, req.pr_number);
-  if (!data) return; // gh 调用失败，下周期重试
+  // 逐 PR 拉状态：任一缺 owner/repo 或 gh 失败 → 本周期放弃该需求的聚合判定（看不全不判，下周期重试）
+  const states: Array<{ t: TrackedPr; data: GhPrView }> = [];
+  for (const t of tracked) {
+    const ws = getWorkspaceById(t.wsId);
+    if (!ws || !ws.github_owner || !ws.github_repo) {
+      log.warn(
+        "requirement %s 的交付 PR #%s 关联 workspace %s 缺 github_owner/repo，本周期跳过聚合判定",
+        reqId, t.prNumber, t.wsId,
+      );
+      return;
+    }
+    const data = await ghPrView(cli, ws.github_owner, ws.github_repo, t.prNumber);
+    if (!data) return; // gh 调用失败，下周期重试
+    states.push({ t, data });
+  }
 
-  // 1. 检查 merged
-  if (data.state === "MERGED" || data.mergeCommit) {
-    log.info("requirement %s PR #%s merged，转 done", reqId, req.pr_number);
+  // 1. 全部 merged → done
+  const allMerged = states.every((s) => s.data.state === "MERGED" || s.data.mergeCommit);
+  if (allMerged) {
+    log.info("requirement %s 全部 %s 个交付 PR 已 merge，转 done", reqId, states.length);
     try {
       setRequirementStatus(reqId, "done");
     } catch (e: unknown) {
@@ -110,23 +149,29 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
     return;
   }
 
-  // 2. 检查新 CHANGES_REQUESTED review
-  const changes = data.reviews
-    .filter((r) => r.state === "CHANGES_REQUESTED")
-    .filter((r) => !req.last_reviewed_event_id || r.id > req.last_reviewed_event_id);
-
-  if (changes.length === 0) return;
-
-  // 拼合反馈正文（多条 review 合并到一次 fix_revision 处理）
-  const body = changes
-    .map((r) => `## ${r.author?.login ?? "unknown"}\n\n${r.body || "(无评论正文)"}`)
-    .join("\n\n---\n\n");
-  const latestId = changes[changes.length - 1].id;
+  // 2. 新 CHANGES_REQUESTED：逐 PR 按各自水位过滤；同周期多 PR 反馈合并成一条、只转一次 fix_revision
+  const sections: string[] = [];
+  const watermarkUpdates: Array<{ t: TrackedPr; latest: string }> = [];
+  let totalChanges = 0;
+  for (const s of states) {
+    const changes = s.data.reviews
+      .filter((r) => r.state === "CHANGES_REQUESTED")
+      .filter((r) => !s.t.watermark || r.id > s.t.watermark);
+    if (changes.length === 0) continue;
+    totalChanges += changes.length;
+    const tag = s.t.label ? `[${s.t.label}] ` : "";
+    sections.push(
+      changes
+        .map((r) => `## ${tag}${r.author?.login ?? "unknown"}\n\n${r.body || "(无评论正文)"}`)
+        .join("\n\n---\n\n"),
+    );
+    watermarkUpdates.push({ t: s.t, latest: changes[changes.length - 1].id });
+  }
+  if (sections.length === 0) return;
 
   log.info(
-    "requirement %s 收到 %s 条新 CHANGES_REQUESTED review，注入反馈触发 fix_revision",
-    reqId,
-    changes.length,
+    "requirement %s 收到 %s 条新 CHANGES_REQUESTED review（涉及 %s 个 PR），注入反馈触发 fix_revision",
+    reqId, totalChanges, watermarkUpdates.length,
   );
 
   createComment({
@@ -134,12 +179,15 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
     requirement_id: reqId,
     kind: "feedback",
     from_role: "github",
-    body,
-    github_review_id: latestId,
+    body: sections.join("\n\n---\n\n"),
+    github_review_id: watermarkUpdates[watermarkUpdates.length - 1].latest,
   });
 
-  // 更新 last_reviewed_event_id 去重
-  updateRequirement(reqId, { last_reviewed_event_id: latestId });
+  // per-PR 水位去重
+  for (const u of watermarkUpdates) {
+    if (u.t.scope === "sub") updateSubPrWatermark(reqId, u.t.wsId, u.latest);
+    else updateRequirement(reqId, { last_reviewed_event_id: u.latest });
+  }
 
   // 触发 fix_revision（跟 P3 手动注入路径一致）
   try {

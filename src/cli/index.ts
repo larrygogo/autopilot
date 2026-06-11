@@ -4,7 +4,7 @@ import { join } from "path";
 import { buildConfigTemplate } from "./config-template";
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
-import { intentToLabel } from "../client/now-intent";
+import { notificationIntentToLabel } from "../client/notification-intent";
 import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { rebuildIndexFromManifests, rebuildManifestsFromIndex } from "../core/rebuild-index";
@@ -1035,74 +1035,139 @@ program
   });
 
 // ──────────────────────────────────────────────
-// now — 文本卡片流（替代浏览器查看 /now）
+// notifications — 事件型通知流（list / read / dismiss）
 // ──────────────────────────────────────────────
 
-program
-  .command("now")
-  .description("查看当前需要关注的事（卡片流文本视图）")
+async function runNotificationsList(opts: {
+  port: string;
+  unread?: boolean;
+  json?: boolean;
+  limit?: string;
+}): Promise<void> {
+  const client = getClient(opts);
+  await ensureDaemon(client);
+  try {
+    const limit = opts.limit ? Math.max(1, parseInt(opts.limit, 10) || 50) : 50;
+    const { items } = await client.listNotifications({
+      limit,
+      unread_only: opts.unread === true,
+    });
+    if (opts.json) {
+      console.log(JSON.stringify(items, null, 2));
+      return;
+    }
+    if (items.length === 0) {
+      console.log(opts.unread ? "🎉 没有未读通知。" : "🎉 没有通知。");
+      return;
+    }
+    const ago = (ms: number) => {
+      const s = Math.max(0, Math.floor(ms / 1000));
+      if (s < 60) return `${s}s`;
+      if (s < 3600) return `${Math.floor(s / 60)}min`;
+      if (s < 86400) return `${Math.floor(s / 3600)}h`;
+      return `${Math.floor(s / 86400)}d`;
+    };
+    const nowMs = Date.now();
+    const rows = items.map((n) => ({
+      id: String(n.id),
+      sev: n.severity.toUpperCase(),
+      read: n.read_at === null ? "●" : " ",
+      title: n.context?.requirement_title ? `${n.title} · ${n.context.requirement_title}` : `${n.title}${n.body ? ` · ${n.body}` : ""}`,
+      when: ago(nowMs - n.created_at),
+      actions: n.actions.map((a) => notificationIntentToLabel(a.intent)).join(" / "),
+    }));
+    const wId = Math.max(2, ...rows.map((r) => r.id.length));
+    const wSev = Math.max(6, ...rows.map((r) => r.sev.length));
+    const maxTitle = Math.min(Math.max(8, ...rows.map((r) => r.title.length)), 60);
+    const wWhen = Math.max(4, ...rows.map((r) => r.when.length));
+    console.log(
+      ` ${"ID".padEnd(wId)}  ${"SEV".padEnd(wSev)}  ${"TITLE".padEnd(maxTitle)}  ${"AGE".padEnd(wWhen)}  ACTIONS`,
+    );
+    console.log(
+      `--${"-".repeat(wId)}  ${"-".repeat(wSev)}  ${"-".repeat(maxTitle)}  ${"-".repeat(wWhen)}  -------`,
+    );
+    for (const r of rows) {
+      const title = r.title.length > maxTitle ? r.title.slice(0, maxTitle - 1) + "…" : r.title;
+      console.log(
+        `${r.read}${r.id.padEnd(wId)}  ${r.sev.padEnd(wSev)}  ${title.padEnd(maxTitle)}  ${r.when.padEnd(wWhen)}  ${r.actions}`,
+      );
+    }
+    console.log(`\n共 ${items.length} 条（● = 未读）。`);
+  } catch (e: unknown) {
+    console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  }
+}
+
+const notificationsCmd = program
+  .command("notifications")
+  .description("通知（事件型通知流：任务终态 / 等待决策 / 异常）");
+
+notificationsCmd
+  .command("list", { isDefault: true })
+  .description("列出通知（默认最近 50 条，不含已删除）")
+  .option("--unread", "只看未读")
+  .option("--json", "JSON 输出")
+  .option("--limit <n>", "最多返回条数", "50")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (opts: { port: string }) => {
+  .action(runNotificationsList);
+
+notificationsCmd
+  .command("read [ids...]")
+  .description("标记已读（传通知 id 列表，或 --all 全部已读）")
+  .option("--all", "全部标为已读")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (ids: string[], opts: { port: string; all?: boolean }) => {
     const client = getClient(opts);
     await ensureDaemon(client);
-
     try {
-      const cards = await client.listNowCards();
-      if (cards.length === 0) {
-        console.log("🎉 没有需要关注的事。");
+      if (opts.all) {
+        const { updated } = await client.markAllNotificationsRead();
+        console.log(`已读 ${updated} 条。`);
         return;
       }
-
-      // 按优先级 + created_at 排序（与后端一致）
-      const PRIORITY_ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
-      cards.sort((a, b) => {
-        const dp = (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9);
-        if (dp !== 0) return dp;
-        return a.created_at - b.created_at;
-      });
-
-      // 计算列宽
-      const nowSec = Math.floor(Date.now() / 1000);
-      const rows = cards.map((c) => {
-        const waitedSec = Math.max(0, nowSec - c.created_at);
-        const wait = waitedSec < 60 ? `${waitedSec}s`
-          : waitedSec < 3600 ? `${Math.floor(waitedSec / 60)}min`
-          : `${Math.floor(waitedSec / 3600)}h`;
-        const actionsLine = c.actions.map((a) => intentToLabel(a.intent)).join(" / ");
-        return {
-          prio: c.priority,
-          title: c.title,
-          subtitle: c.subtitle,
-          wait,
-          actions: actionsLine,
-        };
-      });
-
-      const widths = {
-        prio: 4,
-        title: Math.max(8, ...rows.map((r) => r.title.length)),
-        wait: Math.max(6, ...rows.map((r) => r.wait.length)),
-      };
-      // 截断 title 防过宽
-      const maxTitle = Math.min(widths.title, 60);
-
-      console.log(
-        `${"PRIO".padEnd(widths.prio)}  ${"TITLE".padEnd(maxTitle)}  ${"WAIT".padEnd(widths.wait)}  ACTIONS`,
-      );
-      console.log(
-        `${"-".repeat(widths.prio)}  ${"-".repeat(maxTitle)}  ${"-".repeat(widths.wait)}  -------`,
-      );
-      for (const r of rows) {
-        const title = r.title.length > maxTitle ? r.title.slice(0, maxTitle - 1) + "…" : r.title;
-        console.log(
-          `${r.prio.padEnd(widths.prio)}  ${title.padEnd(maxTitle)}  ${r.wait.padEnd(widths.wait)}  ${r.actions}`,
-        );
+      const numeric = ids.map((x) => parseInt(x, 10)).filter((x) => Number.isFinite(x));
+      if (numeric.length === 0) {
+        console.error("用法：autopilot notifications read <id...> 或 --all");
+        process.exit(1);
       }
-      console.log(`\n共 ${cards.length} 项。`);
+      const { updated } = await client.markNotificationsRead(numeric);
+      console.log(`已读 ${updated} 条。`);
     } catch (e: unknown) {
       console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
       process.exit(1);
     }
+  });
+
+notificationsCmd
+  .command("dismiss <id>")
+  .description("删除（隐藏）一条通知")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (id: string, opts: { port: string }) => {
+    const client = getClient(opts);
+    await ensureDaemon(client);
+    try {
+      const numeric = parseInt(id, 10);
+      if (!Number.isFinite(numeric)) {
+        console.error("id 必须是数字");
+        process.exit(1);
+      }
+      await client.dismissNotification(numeric);
+      console.log(`已删除通知 ${numeric}。`);
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+// 旧 `autopilot now` —— 隐藏 deprecated 别名，指向 notifications list --unread（下版删除）
+program
+  .command("now", { hidden: true })
+  .description("[deprecated] 改用 autopilot notifications")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (opts: { port: string }) => {
+    console.error("提示：`autopilot now` 已废弃，请改用 `autopilot notifications`（本别名下版移除）。\n");
+    await runNotificationsList({ port: opts.port, unread: true });
   });
 
 // ──────────────────────────────────────────────

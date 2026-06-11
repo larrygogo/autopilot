@@ -1,9 +1,10 @@
 import { getDb } from "./db";
 
 /**
- * 子模块 PR 记录。表列在迁移 024 后统一为 child_workspace_id（早期经历
+ * 交付 PR 记录（原「子模块 PR」；多代码库需求时 = 各库交付 PR 的全集，含主库）。
+ * 表列在迁移 024 后统一为 child_workspace_id（早期经历
  * child_repo_id → child_codebase_id → child_workspace_id 两轮改名），TS 接口
- * 字段与列名一致。
+ * 字段与列名一致。last_reviewed_event_id（迁移 038）= 该 PR 的评审去重水位。
  */
 export interface RequirementSubPr {
   id: number;
@@ -12,6 +13,7 @@ export interface RequirementSubPr {
   pr_url: string;
   pr_number: number;
   created_at: number;
+  last_reviewed_event_id?: string | null;
 }
 
 export interface AppendSubPrOpts {
@@ -44,16 +46,27 @@ export function appendSubPr(opts: AppendSubPrOpts): RequirementSubPr {
 }
 
 /**
- * 列出某需求的所有子模块 PR（按 created_at 升序）。
+ * 列出某需求的所有交付 PR（按 created_at 升序）。
  */
 export function listSubPrs(requirementId: string): RequirementSubPr[] {
   const db = getDb();
   return db
     .query<RequirementSubPr, [string]>(
-      "SELECT id, requirement_id, child_workspace_id, pr_url, pr_number, created_at " +
-      "FROM requirement_sub_prs WHERE requirement_id = ? ORDER BY created_at ASC, id ASC"
+      "SELECT * FROM requirement_sub_prs WHERE requirement_id = ? ORDER BY created_at ASC, id ASC"
     )
     .all(requirementId);
+}
+
+/** 更新某交付 PR 的评审去重水位（pr-poller 多 PR 轮询用） */
+export function updateSubPrWatermark(
+  requirementId: string,
+  childWorkspaceId: string,
+  eventId: string,
+): void {
+  getDb().run(
+    "UPDATE requirement_sub_prs SET last_reviewed_event_id = ? WHERE requirement_id = ? AND child_workspace_id = ?",
+    [eventId, requirementId, childWorkspaceId],
+  );
 }
 
 /**

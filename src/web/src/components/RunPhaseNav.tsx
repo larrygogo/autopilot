@@ -58,7 +58,7 @@ export function RunPhaseNavSidebar({ entries, activePhase, onSelect, onSelectTra
                 onClick={() => onSelect(e.item.name)}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent/8",
-                  activePhase === e.item.name && "border-l-2 border-l-accent bg-accent/8",
+                  activePhase === e.item.name && "bg-accent/8",
                 )}
               >
                 <PhaseStatusIcon state={e.item.state} />

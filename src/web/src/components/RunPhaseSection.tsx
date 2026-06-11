@@ -215,10 +215,7 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
   const filterActive = !!filterQuery.trim() || filterLevels.size < ALL_LEVELS.length;
 
   return (
-    <div className={cn(
-      "rounded-xl border border-border bg-card",
-      runState === "failed" && "border-l-2 border-l-destructive",
-    )}>
+    <div className="rounded-xl border border-border bg-card">
       {/* header：整行可点折叠 */}
       <button
         type="button"

@@ -1,6 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Layers, Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { Layers, Plus, RefreshCw, Pencil, Trash2, LayoutGrid, List, MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,12 +32,9 @@ import { cn } from "@/lib/utils";
 interface FormState {
   name: string;
   description: string;
-  // 仅新建场景使用（edit 模式不显示这两字段）
-  remote_url: string;
-  alias: string;
 }
 
-const EMPTY_FORM: FormState = { name: "", description: "", remote_url: "", alias: "" };
+const EMPTY_FORM: FormState = { name: "", description: "" };
 
 function ProjectsTab() {
   const navigate = useNavigate();
@@ -50,6 +54,18 @@ function ProjectsTab() {
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleteInput, setDeleteInput] = useState("");
   const [deleting, setDeleting] = useState(false);
+
+  // grid / list 视图（localStorage 记住偏好）
+  const [view, setView] = useState<"grid" | "list">(() => {
+    try {
+      return localStorage.getItem("library.projects.view") === "list" ? "list" : "grid";
+    } catch {
+      return "grid";
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("library.projects.view", view); } catch { /* ignore */ }
+  }, [view]);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -80,7 +96,7 @@ function ProjectsTab() {
   const openEditDialog = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingProject(p);
-    setForm({ name: p.name, description: p.description ?? "", remote_url: "", alias: "" });
+    setForm({ name: p.name, description: p.description ?? "" });
     setDialogOpen(true);
   };
 
@@ -99,27 +115,19 @@ function ProjectsTab() {
     setSaving(true);
     try {
       if (editingProject) {
-        // 编辑：只改 name / description，不动工作区
+        // 编辑：只改 name / description，不动代码库
         await api.updateProject(editingProject.id, {
           name,
           description: form.description.trim() || null,
         });
         toast.success(`已更新项目「${name}」`);
       } else {
-        // 新建：必须提供远程地址
-        const remoteUrl = form.remote_url.trim();
-        if (!remoteUrl) {
-          toast.error("验证失败", "远程仓库地址不能为空");
-          setSaving(false);
-          return;
-        }
-        await api.createProjectWithWorkspace({
+        // 新建：只要名称/描述；代码库稍后在项目的「代码库」分区关联
+        await api.createProject({
           name,
-          remote_url: remoteUrl,
-          alias: form.alias.trim() || undefined,
           description: form.description.trim() || undefined,
         });
-        toast.success(`已创建项目「${name}」并关联工作区`);
+        toast.success(`已创建项目「${name}」，可在项目的「代码库」里关联 Git 仓库`);
       }
       setDialogOpen(false);
       setEditingProject(null);
@@ -159,6 +167,33 @@ function ProjectsTab() {
     }
   };
 
+  // Supabase 式操作菜单（grid 卡片右上角 / list 行尾共用）
+  const projectMenu = (project: Project) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        onClick={(e) => e.stopPropagation()}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        aria-label={`项目 ${project.name} 操作`}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-36" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuItem className="gap-2" onSelect={() => openEditDialog(project, { stopPropagation: () => {} } as React.MouseEvent)}>
+          <Pencil className="h-3.5 w-3.5" />
+          编辑
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="gap-2 text-destructive focus:text-destructive"
+          onSelect={() => openDeleteDialog(project, { stopPropagation: () => {} } as React.MouseEvent)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          删除
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <div className="space-y-4 pt-4">
       <div className="flex items-center justify-between gap-3">
@@ -166,6 +201,31 @@ function ProjectsTab() {
           共 {projects.length} 个项目
         </p>
         <div className="flex items-center gap-2">
+          {/* grid / list 视图切换（记住偏好） */}
+          <div className="flex items-center rounded-md border border-border p-0.5">
+            <button
+              type="button"
+              aria-label="网格视图"
+              onClick={() => setView("grid")}
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded transition-colors",
+                view === "grid" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="列表视图"
+              onClick={() => setView("list")}
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded transition-colors",
+                view === "list" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <List className="h-4 w-4" />
+            </button>
+          </div>
           <Button size="sm" onClick={openCreateDialog}>
             <Plus className="h-4 w-4" />
             新建项目
@@ -198,60 +258,64 @@ function ProjectsTab() {
         </Card>
       )}
 
-      {!loading && projects.length > 0 && (
+      {/* grid：固定高度卡片（Supabase 式，右上角 ⋯ 操作菜单） */}
+      {!loading && projects.length > 0 && view === "grid" && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => (
             <Card
               key={project.id}
-              className="flex cursor-pointer flex-col p-4 transition-colors hover:border-accent"
+              className="flex h-[150px] cursor-pointer flex-col p-4 transition-colors hover:border-accent"
               onClick={() => navigate("/projects/" + project.id)}
             >
-              {/* eyebrow + 项目 id（蓝图风） */}
-              <div className="mb-2 flex items-center gap-2 bp-label text-muted-foreground">
-                <Layers className="h-3 w-3" />
-                <span className="font-mono">{project.id}</span>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h3 className="truncate text-base font-bold leading-tight">{project.name}</h3>
+                  <div className="mt-1 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+                    <Layers className="h-3 w-3 shrink-0" />
+                    {project.id}
+                  </div>
+                </div>
+                {projectMenu(project)}
               </div>
-              <h3 className="text-base font-bold leading-tight line-clamp-2">
-                {project.name}
-              </h3>
               {project.description && (
                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground line-clamp-2">
                   {project.description}
                 </p>
               )}
-              {/* 底部 footer：创建时间 + 永远可见的 edit / delete（不依赖 hover，键盘 / 触屏均可达） */}
-              <div className="mt-auto flex items-center justify-between border-t border-border pt-2">
-                <span className="text-[11px] text-muted-foreground">
-                  创建于 {new Date(project.created_at).toLocaleDateString("zh-CN")}
-                </span>
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={(e) => openEditDialog(project, e)}
-                    disabled={deleteTarget?.id === project.id}
-                    title="编辑"
-                    aria-label={`编辑项目 ${project.name}`}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={(e) => openDeleteDialog(project, e)}
-                    disabled={deleteTarget?.id === project.id}
-                    title="删除"
-                    aria-label={`删除项目 ${project.name}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+              <div className="mt-auto text-[11px] text-muted-foreground">
+                创建于 {new Date(project.created_at).toLocaleDateString("zh-CN")}
               </div>
             </Card>
           ))}
         </div>
+      )}
+
+      {/* list：行式视图 */}
+      {!loading && projects.length > 0 && view === "list" && (
+        <Card className="overflow-hidden p-0">
+          <ul className="divide-y divide-border">
+            {projects.map((project) => (
+              <li
+                key={project.id}
+                className="flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
+                onClick={() => navigate("/projects/" + project.id)}
+              >
+                <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="shrink-0 text-sm font-bold">{project.name}</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                  {project.description ?? ""}
+                </span>
+                <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground sm:inline">
+                  {project.id}
+                </span>
+                <span className="hidden shrink-0 text-[11px] text-muted-foreground md:inline">
+                  {new Date(project.created_at).toLocaleDateString("zh-CN")}
+                </span>
+                {projectMenu(project)}
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
 
       {/* 新建 / 编辑 dialog */}
@@ -262,7 +326,7 @@ function ProjectsTab() {
             <DialogDescription>
               {editingProject
                 ? "修改项目名称或描述。"
-                : "填写项目名称和工作区路径，一步完成绑定。"}
+                : "填写名称即可创建；Git 仓库稍后在项目的「代码库」里关联。"}
             </DialogDescription>
           </DialogHeader>
 
@@ -291,37 +355,6 @@ function ProjectsTab() {
               />
             </div>
 
-            {/* 远程地址 + alias 字段：仅新建时显示 */}
-            {!editingProject && (
-              <>
-                <div className="space-y-1.5">
-                  <Label htmlFor="project-remote">
-                    远程仓库地址 <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="project-remote"
-                    placeholder="https://github.com/owner/repo.git"
-                    value={form.remote_url}
-                    onChange={(e) => setForm((f) => ({ ...f, remote_url: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    写入前会执行 git ls-remote 验证远程可达性
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label htmlFor="project-alias">工作区别名（可选）</Label>
-                  <Input
-                    id="project-alias"
-                    placeholder="自动从仓库名推导"
-                    value={form.alias}
-                    onChange={(e) => setForm((f) => ({ ...f, alias: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
-                  />
-                </div>
-              </>
-            )}
           </div>
 
           <DialogFooter>
@@ -341,7 +374,7 @@ function ProjectsTab() {
           <DialogHeader>
             <DialogTitle>删除项目</DialogTitle>
             <DialogDescription>
-              此操作将永久删除项目及其下所有工作区和需求，且不可恢复。
+              此操作将永久删除项目及其下所有代码库和需求，且不可恢复。
             </DialogDescription>
           </DialogHeader>
 

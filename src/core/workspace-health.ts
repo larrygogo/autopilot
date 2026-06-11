@@ -1,4 +1,45 @@
 import { existsSync, statSync } from "fs";
+import { loadGitConfig } from "./config";
+
+/**
+ * git 子进程的非交互环境：凭证缺失时**快速失败**而不是等待终端输入 / 弹凭证窗——
+ * daemon 子进程 stdio 全 ignore，交互等待 = 挂死到超时被杀（stderr 为空，错误不可读）。
+ */
+export const GIT_NONINTERACTIVE_ENV = {
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "Never",
+  GIT_ASKPASS: "",
+} as const;
+
+// gh auth token 兜底缓存（5 分钟）：避免每次探测/clone 都 spawn 一次 gh
+let _ghTokenCache: { at: number; token: string | null } | null = null;
+const GH_TOKEN_TTL_MS = 5 * 60_000;
+
+/**
+ * 解析 git 操作可用的 token：config.yaml `git.token` 优先；缺省时回退 `gh auth token`
+ * （用户通常用 gh 管 GitHub 凭证而不单独配 token —— 私有仓库的探测/clone 因此可用）。
+ * 两者都没有返回 null（公开仓库无需凭证）。
+ */
+export function resolveGitToken(): string | null {
+  try {
+    const cfg = loadGitConfig();
+    if (cfg.token) return cfg.token;
+  } catch { /* config 读取失败 → 继续尝试 gh */ }
+
+  if (_ghTokenCache && Date.now() - _ghTokenCache.at < GH_TOKEN_TTL_MS) {
+    return _ghTokenCache.token;
+  }
+  let token: string | null = null;
+  try {
+    const proc = Bun.spawnSync(["gh", "auth", "token"], { stdout: "pipe", stderr: "pipe", timeout: 10_000 });
+    if (proc.exitCode === 0) {
+      const out = new TextDecoder().decode(proc.stdout ?? new Uint8Array()).trim();
+      if (out) token = out;
+    }
+  } catch { /* gh 未安装/未登录 → null */ }
+  _ghTokenCache = { at: Date.now(), token };
+  return token;
+}
 
 export interface WorkspaceHealth {
   healthy: boolean;
@@ -244,19 +285,29 @@ export function probeRemote(remoteUrl: string, token?: string | null): ProbeResu
     return { ok: false, defaultBranch: null, error: "远程地址为空" };
   }
 
-  const url = buildAuthUrl(remoteUrl.trim(), token ?? null);
+  // token：调用方显式传入 > config git.token > gh auth token（私有仓库兜底）
+  const effectiveToken = token ?? resolveGitToken();
+  const url = buildAuthUrl(remoteUrl.trim(), effectiveToken);
 
   const proc = Bun.spawnSync(
     ["git", "ls-remote", "--symref", url, "HEAD"],
-    { stdout: "pipe", stderr: "pipe", timeout: 15_000 },
+    {
+      stdout: "pipe", stderr: "pipe", timeout: 15_000,
+      // 非交互：凭证缺失快速失败，不挂死等终端/弹窗（daemon stdio 全 ignore）
+      env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
+    },
   );
 
   if (proc.exitCode !== 0) {
     const stderr = new TextDecoder().decode(proc.stderr ?? new Uint8Array()).trim();
     // 脱敏：把 token-injected URL 从错误信息中去除
-    const safeErr = token ? stderr.replace(token, "***") : stderr;
+    const safeErr = effectiveToken ? stderr.replace(effectiveToken, "***") : stderr;
     const firstLine = safeErr.split("\n")[0] ?? "";
-    return { ok: false, defaultBranch: null, error: firstLine || "git ls-remote 失败" };
+    return {
+      ok: false,
+      defaultBranch: null,
+      error: firstLine || "git ls-remote 无输出退出（疑似等待凭证超时被杀；私有仓库请配置 config.yaml git.token 或 gh auth login）",
+    };
   }
 
   const output = new TextDecoder().decode(proc.stdout ?? new Uint8Array()).trim();

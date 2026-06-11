@@ -1,6 +1,6 @@
-import { onEvent, offEvent } from "../core/event-bus";
+import { onEvent, offEvent, emit } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
-import { listRequirements, setRequirementStatus, updateRequirement, getRequirementById } from "../core/requirements";
+import { listRequirements, setRequirementStatus, updateRequirement, getRequirementById, listRequirementWorkspaces } from "../core/requirements";
 import { getWorkspaceById } from "../core/workspaces";
 import { listSubmodules } from "../core/submodules";
 import { listComments } from "../core/requirement-comments";
@@ -157,6 +157,16 @@ async function tickGroup(groupId: string): Promise<void> {
     requirement += `\n\n## 历史执行评审遗留（前序执行被评审驳回的根因，本轮方案必须规避）\n\n${txt}`;
   }
 
+  // 多代码库需求（审批阶段反写的集合）：所有库均可写、各自交付 PR。
+  // 集合 >1 时任务沙盒会把每个库 clone 到子目录（具体布局由执行阶段的 listTaskRepos 提供）。
+  const reqWorkspaces = listRequirementWorkspaces(candidate.id);
+  if (reqWorkspaces.length > 1) {
+    const lines = reqWorkspaces
+      .map((w) => `- ${w.alias}: ${w.remote_url ?? "(无远程地址)"}（默认分支 ${w.default_branch}${w.id === candidate.workspace_id ? "，主仓库" : ""}）`)
+      .join("\n");
+    requirement += `\n\n## 本需求涉及的代码库（均可改动，将分别交付 PR）\n\n${lines}\n\n具体仓库在任务沙盒中的目录布局由执行阶段提供。`;
+  }
+
   // req:task 1:1：需求已有存活 task → 复用它重置重跑，不新建第二个（避免一 req 堆多 task）。
   // 首次执行 task_id 为 null 走下面新建；failed/重新入队时 task_id 已写 → 复用重跑。
   // 需求选定的工作流（NULL = 未显式选择，回退默认 dev）
@@ -182,6 +192,7 @@ async function tickGroup(groupId: string): Promise<void> {
       try {
         updateRequirement(candidate.id, { schedule_error: `重跑失败：${msg}` });
         setRequirementStatus(candidate.id, "ready");
+        emit({ type: "requirement:schedule-error", payload: { id: candidate.id, reason: `重跑失败：${msg}` } });
       } catch (rollbackErr: unknown) {
         log.error("tickRepo: 重跑回滚失败 %s: %s", candidate.id, (rollbackErr as Error).message);
       }
@@ -206,6 +217,7 @@ async function tickGroup(groupId: string): Promise<void> {
       // 不必翻 daemon.log（静默回滚是这类问题极难排查的根源）。
       updateRequirement(candidate.id, { schedule_error: `起任务失败：${msg}` });
       setRequirementStatus(candidate.id, "ready");
+      emit({ type: "requirement:schedule-error", payload: { id: candidate.id, reason: `起任务失败：${msg}` } });
     } catch (rollbackErr: unknown) {
       log.error("tickRepo: 回滚 status 失败 %s: %s", candidate.id, (rollbackErr as Error).message);
     }

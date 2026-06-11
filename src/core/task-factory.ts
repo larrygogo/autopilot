@@ -5,13 +5,60 @@ import { snapshotWorkflow } from "./manifest";
 import { ensureTaskSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskArtifactsDir, getTaskSandbox, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
 import { rmSync } from "fs";
 import { getWorkspaceById } from "./workspaces";
-import { getRequirementById, updateRequirement } from "./requirements";
+import { getRequirementById, updateRequirement, listRequirementWorkspaces } from "./requirements";
 import { clearSubPrs } from "./requirement-sub-prs";
 import { forceTransition } from "./state-machine";
 import { isLocked } from "./infra";
 import { forgetTaskRecoveryState } from "./watcher";
 import { executePhase } from "./runner";
 import { closeAgents } from "../agents/registry";
+
+/** WorkspaceRef + alias（多库沙盒子目录名用） */
+type WorkspaceRefWithAlias = WorkspaceRef & { alias?: string };
+
+/**
+ * 解析任务要 clone 的代码库集合（主库排第一）。
+ * - 需求集合（requirement_workspaces）≥1 时以集合为准（多库需求 = 多 clone 各自交付）
+ * - 集合为空时回退单库 fallbackWsId（adhoc / 测试夹具路径）
+ * 软失效（缺 remote_url）任一即抛：多库任务要求全集可 clone。
+ */
+function resolveWorkspaceRefs(
+  reqId: string | undefined,
+  fallbackWsId: string | undefined,
+  errPrefix: string,
+): WorkspaceRefWithAlias[] {
+  const req = reqId ? getRequirementById(reqId) : null;
+  const all = req ? listRequirementWorkspaces(req.id) : [];
+  const ordered = req
+    ? [...all].sort((a, b) =>
+        a.id === req.workspace_id ? -1 : b.id === req.workspace_id ? 1 : 0)
+    : [];
+  const pool = ordered.length > 0
+    ? ordered
+    : fallbackWsId
+      ? [getWorkspaceById(fallbackWsId)].filter((w): w is NonNullable<typeof w> => w != null)
+      : [];
+  const refs: WorkspaceRefWithAlias[] = [];
+  for (const ws of pool) {
+    if (!ws.remote_url) {
+      throw new StartTaskError(
+        `${errPrefix}：Workspace ${ws.id}（${ws.alias}）缺少远程地址（软失效）。` +
+        `多代码库任务要求集合内全部仓库可 clone。请先执行：\n` +
+        `  autopilot workspace update ${ws.id} --remote <git-url>`,
+        400,
+      );
+    }
+    refs.push({
+      id: ws.id,
+      alias: ws.alias,
+      remote_url: ws.remote_url,
+      default_branch: ws.default_branch,
+      github_owner: ws.github_owner,
+      github_repo: ws.github_repo,
+    });
+  }
+  return refs;
+}
 
 // ──────────────────────────────────────────────
 // Task ID 生成（避开易混字符与数字 4）
@@ -144,46 +191,37 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     extra["requirement"] = requirement ?? "";
   }
 
-  // sandbox.git=true 时反查 workspace 起 git worktree。必须在 createTask 之前，
-  // 这样能把 worktree 的真实路径/分支注入 extra（写进 manifest），供 run 阶段使用。
-  let workspace: WorkspaceRef | undefined;
+  // sandbox.git=true 时反查需求的代码库集合起多库 clone。必须在 createTask 之前，
+  // 这样能把 clone 的真实路径/分支注入 extra（写进 manifest），供 run 阶段使用。
+  let workspaceRefs: WorkspaceRefWithAlias[] = [];
   if (wf.sandbox?.git) {
-    // 直接从原始入参 opts 读（scheduler / routes 传的真值）。setup_func 返回的 extra
+    // 单库 fallback id：原始入参 opts（scheduler / routes 传的真值）优先；setup_func 返回的 extra
     // 不一定回传 workspace_id，不能依赖它（这是 worktree 之前从未建成的根因）。
-    // 仍兜底看 extra，兼容显式回传 workspace_id/codebase_id 的工作流。
-    const workspaceId =
+    // 集合（requirement_workspaces）≥1 时以集合为准，fallback 只在集合为空时生效。
+    const fallbackWsId =
       (typeof opts.workspace_id === "string" ? opts.workspace_id : undefined) ??
       (typeof opts.codebase_id === "string" ? opts.codebase_id : undefined) ??
       (typeof extra["workspace_id"] === "string" ? extra["workspace_id"] : undefined) ??
       (typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined) ??
-      // 回退需求绑定的 workspace（需求是 task 前置、必带 workspace 才能入队）：让 MCP start_task /
-      // 任意只给 reqId 的入口也能解析到 workspace，否则 git 工作流退化空目录、跑空任务。
       (getRequirementById(reqLink)?.workspace_id ?? undefined);
-    if (workspaceId) {
-      const ws = getWorkspaceById(workspaceId);
-      if (ws) {
-        if (!ws.remote_url) {
-          // 软失效工作区：remote_url 为 NULL，拒绝起任务（防止 sandbox 退化空目录悄悄运行）
-          throw new StartTaskError(
-            `Workspace ${workspaceId}（${ws.alias}）缺少远程地址（软失效）。请先执行：\n` +
-            `  autopilot workspace update ${workspaceId} --remote <git-url>\n` +
-            `补填远程地址后重试。`,
-            400,
-          );
-        }
-        workspace = {
-          id: ws.id,
-          remote_url: ws.remote_url,
-          default_branch: ws.default_branch,
-          github_owner: ws.github_owner,
-          github_repo: ws.github_repo,
-        };
-      }
+    workspaceRefs = resolveWorkspaceRefs(reqLink, fallbackWsId, "起任务失败");
+    if (workspaceRefs.length > 1) {
+      // 老 dev workflow 副本（不支持多库布局）跑多库任务会在 code_review 阶段裸 git fatal；
+      // 这里预先写一条指引日志，失败时用户能在任务日志看到根因。
+      console.warn(
+        `[task=${taskId}] 多代码库任务（${workspaceRefs.length} 库）：dev 工作流副本需为多库版本，` +
+        `老用户请先执行 autopilot workflow sync dev --apply`,
+      );
     }
   }
   try {
-    // 共用沙盒模型：task 启动时建一个独立 clone（源仓库零痕迹），所有 phase 共用它直接改文件。
-    ensureTaskSandbox(taskId, workflowName, wf.sandbox, workspace, deliverBranchName(title, taskId));
+    // 共用沙盒模型：task 启动时建独立 clone（源仓库零痕迹），所有 phase 共用直接改文件。
+    // 多库（集合 >1）clone 到 workspace/<alias>/ 子目录，各库共用同名交付分支。
+    ensureTaskSandbox(
+      taskId, workflowName, wf.sandbox,
+      workspaceRefs.length > 0 ? workspaceRefs : undefined,
+      deliverBranchName(title, taskId),
+    );
   } catch (e: unknown) {
     console.warn("ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
   }
@@ -310,30 +348,16 @@ export function resetTaskForRerun(taskId: string, opts: { requirement?: string; 
     // 共用沙盒重跑：清 artifacts（上轮产物）+ 删旧 clone 工作树 + 重新 clone 干净。
     try { rmSync(getTaskArtifactsDir(taskId), { recursive: true, force: true }); } catch { /* ignore */ }
     try { rmSync(getTaskSandbox(taskId), { recursive: true, force: true }); } catch { /* ignore */ }
-    let workspace: WorkspaceRef | undefined;
-    const req = task.requirement_id ? getRequirementById(task.requirement_id) : null;
-    const wsId = req?.workspace_id
-      ?? (typeof task["workspace_id"] === "string" ? (task["workspace_id"] as string) : undefined);
-    if (wsId) {
-      const ws = getWorkspaceById(wsId);
-      if (ws) {
-        if (!ws.remote_url) {
-          throw new StartTaskError(
-            `重跑失败：Workspace ${wsId}（${ws.alias}）缺少远程地址。请先 autopilot workspace update ${wsId} --remote <url>`,
-            400,
-          );
-        }
-        workspace = {
-          id: ws.id,
-          remote_url: ws.remote_url,
-          default_branch: ws.default_branch,
-          github_owner: ws.github_owner,
-          github_repo: ws.github_repo,
-        };
-      }
-    }
+    // 反查需求**当前**集合重 clone：failed 后用户改集合（加/换库）再重试自然生效
+    const fallbackWsId =
+      task.requirement_id ? getRequirementById(task.requirement_id)?.workspace_id ?? undefined : undefined;
+    const refs = resolveWorkspaceRefs(
+      task.requirement_id ?? undefined,
+      fallbackWsId ?? (typeof task["workspace_id"] === "string" ? (task["workspace_id"] as string) : undefined),
+      "重跑失败",
+    );
     // 重新 clone 干净工作树（替即焚的"重置 patch 元数据"）。
-    ensureTaskSandbox(taskId, targetWorkflow, wf.sandbox, workspace, deliverBranchName(String(opts.title ?? task.title ?? ""), taskId));
+    ensureTaskSandbox(taskId, targetWorkflow, wf.sandbox, refs.length > 0 ? refs : undefined, deliverBranchName(String(opts.title ?? task.title ?? ""), taskId));
     const meta = getTaskWorktreeMeta(taskId);
     if (meta) {
       updateTask(taskId, {

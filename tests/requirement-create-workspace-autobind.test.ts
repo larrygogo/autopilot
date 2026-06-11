@@ -52,7 +52,8 @@ describe("新建需求自动绑定工作区（项目:工作区 1:1）", () => {
     if (r.ok) {
       const { requirement } = r.payload as { requirement: { id: string; workspace_id: string | null; status: string } };
       expect(requirement.workspace_id).toBe("ws-2");
-      expect(requirement.status).toBe("clarifying");
+      // 创建后停 drafting：澄清依赖代码库 clone，须用户确认代码库后显式转 clarifying
+      expect(requirement.status).toBe("drafting");
     }
   });
 

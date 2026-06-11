@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Layers, FolderGit2, Inbox, Plus, RefreshCw,
+  ArrowLeft, FolderGit2, Inbox, Plus, RefreshCw,
   Trash2, Pencil, List, Archive, Loader2, Hand,
 } from "lucide-react";
 import { api, type Project, type Workspace, type Requirement } from "@/hooks/useApi";
@@ -27,8 +27,12 @@ import {
 import { ConfirmDialog } from "@/components/Modal";
 import { cn } from "@/lib/utils";
 
+/** 项目工作台子页（Supabase 式：侧栏项目导航切换，路由 /projects/:id/:section；无概览页，默认落需求） */
+export type ProjectSection = "requirements" | "workspaces" | "settings";
+
 interface ProjectDetailProps {
   projectId: string;
+  section?: ProjectSection;
 }
 
 interface CbForm {
@@ -42,7 +46,7 @@ interface CbForm {
 const EMPTY_CB: CbForm = { alias: "", remote_url: "", default_branch: "main", github_owner: "", github_repo: "" };
 
 
-export function ProjectDetail({ projectId }: ProjectDetailProps) {
+export function ProjectDetail({ projectId, section = "requirements" }: ProjectDetailProps) {
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -53,8 +57,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reqTab, setReqTab] = useState<string>("all");
 
-  // 编辑项目 dialog
-  const [projDialogOpen, setProjDialogOpen] = useState(false);
+  // 项目设置（settings section 内联表单，原编辑 dialog 已收编于此）
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [projForm, setProjForm] = useState<{ name: string; description: string }>({ name: "", description: "" });
   const [savingProj, setSavingProj] = useState(false);
@@ -65,7 +68,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const [savingReq, setSavingReq] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
-  // 新建 / 编辑工作区 dialog
+  // 新建 / 编辑代码库 dialog
   const [cbDialogOpen, setCbDialogOpen] = useState(false);
   const [editingCb, setEditingCb] = useState<Workspace | null>(null);
   const [cbForm, setCbForm] = useState<CbForm>(EMPTY_CB);
@@ -136,6 +139,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
       return;
     }
     // 从描述截取临时 title（取首行；若过长则截 30 字 + "…"）；clarifier 后续会基于内容优化 title。
+    // 代码库不在此选：创建时自动派生默认主库，集合在审批阶段反写确认
     const firstLine = desc.split("\n")[0].trim();
     const title = firstLine.length > 30 ? firstLine.slice(0, 30) + "…" : firstLine;
     setSavingReq(true);
@@ -162,10 +166,12 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
   // ── 项目 ────────────────────────────────────
 
-  const openProjDialog = () => {
-    setProjForm({ name: project?.name ?? "", description: project?.description ?? "" });
-    setProjDialogOpen(true);
-  };
+  // 项目加载后同步设置表单初值
+  useEffect(() => {
+    if (project) {
+      setProjForm({ name: project.name, description: project.description ?? "" });
+    }
+  }, [project]);
 
   const saveProject = async () => {
     const name = projForm.name.trim();
@@ -174,7 +180,6 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     try {
       await api.updateProject(projectId, { name, description: projForm.description.trim() || null });
       toast.success("已更新项目");
-      setProjDialogOpen(false);
       refresh();
     } catch (e: unknown) {
       toast.error("更新失败", (e as Error)?.message ?? String(e));
@@ -195,7 +200,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
     }
   };
 
-  // ── 工作区 ────────────────────────────────────
+  // ── 代码库 ────────────────────────────────────
 
   const openCbDialog = (cb?: Workspace) => {
     if (cb) {
@@ -236,16 +241,18 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           github_owner: cbForm.github_owner.trim() || null,
           github_repo: cbForm.github_repo.trim() || null,
         });
-        toast.success(`已更新工作区「${alias}」`);
+        toast.success(`已更新代码库「${alias}」`);
       } else {
-        await api.createProjectWorkspace(projectId, {
+        // 走 workspaces.create（仅凭远程 URL 注册 + probeRemote 验证 + 默认分支自动探测）。
+        // 不走 projects.addWorkspace —— 那是远程化前的本地 path 模式老接口（要求 path 必填）。
+        await api.createWorkspace({
           alias,
           remote_url: remoteUrl,
-          default_branch: cbForm.default_branch.trim() || "main",
+          project_id: projectId,
           github_owner: cbForm.github_owner.trim() || null,
           github_repo: cbForm.github_repo.trim() || null,
         });
-        toast.success(`已添加工作区「${alias}」`);
+        toast.success(`已添加代码库「${alias}」`);
       }
       setCbDialogOpen(false);
       setEditingCb(null);
@@ -258,11 +265,11 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
   };
 
   const removeCb = async (cb: Workspace) => {
-    if (!confirm(`确定移除工作区「${cb.alias}」？`)) return;
+    if (!confirm(`确定移除代码库「${cb.alias}」？`)) return;
     setDeletingCbId(cb.id);
     try {
       await api.deleteWorkspace(cb.id);
-      toast.success(`已移除工作区「${cb.alias}」`);
+      toast.success(`已移除代码库「${cb.alias}」`);
       refresh();
     } catch (e: unknown) {
       const msg = (e as Error)?.message ?? String(e);
@@ -271,11 +278,11 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         const m = msg.match(/(\d+)/);
         const n = m ? m[1] : "若干";
         if (confirm(
-          `⚠ ${n} 条需求关联此工作区。继续删除会把这些需求的 workspace_id 置 NULL（需求保留，但变成"未关联工作区"）。\n\n确定要级联删除吗？`,
+          `⚠ ${n} 条需求关联此代码库。继续删除会把这些需求的 workspace_id 置 NULL（需求保留，但变成"未关联代码库"）。\n\n确定要级联删除吗？`,
         )) {
           try {
             await api.deleteWorkspace(cb.id, true);
-            toast.success(`已移除工作区「${cb.alias}」（${n} 条需求已解关联）`);
+            toast.success(`已移除代码库「${cb.alias}」（${n} 条需求已解关联）`);
             refresh();
           } catch (e2: unknown) {
             toast.error("删除失败", (e2 as Error)?.message ?? String(e2));
@@ -313,100 +320,29 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-      {/* 顶部导航 */}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="-ml-2"
-        onClick={() => navigate("/projects")}
-      >
-        <ArrowLeft className="h-4 w-4" />
-        项目列表
-      </Button>
-
-      {/* Hero 区 */}
-      <header className="grid gap-x-8 gap-y-4 border-b border-border pb-5 lg:grid-cols-[1.7fr_1fr]">
-        <div className="min-w-0">
-          <div className="mb-3 flex items-center gap-3 font-mono text-[10px] text-muted-foreground">
-            <span className="h-px w-6 bg-foreground/40" aria-hidden="true" />
-            <span>PROJECT · {project?.id ?? "—"}</span>
-            <span className="h-px flex-1 bg-foreground/20" aria-hidden="true" />
-          </div>
-          <div className="flex items-center gap-3">
-            <Layers className="h-7 w-7 text-accent" />
-            <h1 className="font-display text-3xl font-bold leading-[1.05] sm:text-4xl">
-              {project?.name}
-            </h1>
-            {project && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                title="编辑项目"
-                onClick={openProjDialog}
-              >
-                <Pencil className="h-4 w-4" />
-              </Button>
-            )}
-            {project && project.id !== "proj-default" && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                title="删除项目"
-                onClick={() => setDeleteOpen(true)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-          {project?.description && (
-            <p className="mt-3 max-w-xl text-sm text-muted-foreground">{project.description}</p>
-          )}
-        </div>
-        <div className="flex flex-col gap-3 lg:items-end">
-          <div className="w-full border border-border bg-card/40 font-mono text-[11px]">
-            <div className="grid grid-cols-[100px_1fr] border-b border-border">
-              <div className="border-r border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
-                工作区
-              </div>
-              <div className="px-3 py-1.5 text-foreground">{codebases.length}</div>
-            </div>
-            <div className="grid grid-cols-[100px_1fr]">
-              <div className="border-r border-border bg-muted/50 px-3 py-1.5 text-muted-foreground">
-                需求
-              </div>
-              <div className="px-3 py-1.5 text-foreground">{requirements.length}</div>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* 工作区 */}
+      {/* 代码库 */}
+      {section === "workspaces" && (
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FolderGit2 className="h-4 w-4 text-muted-foreground" />
-            <span className="bp-label">工作区 · WORKSPACES（{codebases.length}）</span>
+            <span className="bp-label">代码库 · WORKSPACES（{codebases.length}）</span>
           </div>
-          {/* 每个项目仅一个工作区：已有则不再显示添加 */}
-          {codebases.length === 0 && (
-            <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
-              <Plus className="h-4 w-4" />
-              添加工作区
-            </Button>
-          )}
+          <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
+            <Plus className="h-4 w-4" />
+            添加代码库
+          </Button>
         </div>
 
         {codebases.length === 0 ? (
           <Card className="border border-border p-6 text-center">
             <FolderGit2 className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
             <p className="mb-3 font-mono text-xs text-muted-foreground">
-              暂无工作区，点「添加工作区」关联 Git 仓库。
+              暂无代码库，点「添加代码库」关联 Git 仓库。
             </p>
             <Button size="sm" variant="outline" onClick={() => openCbDialog()}>
               <Plus className="h-4 w-4" />
-              添加工作区
+              添加代码库
             </Button>
           </Card>
         ) : (
@@ -467,7 +403,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
                             className="text-destructive hover:text-destructive"
                             onClick={() => void removeCb(cb)}
                             disabled={deletingCbId === cb.id}
-                            title="移除工作区"
+                            title="移除代码库"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -481,8 +417,10 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           </Card>
         )}
       </section>
+      )}
 
       {/* 需求 */}
+      {section === "requirements" && (
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -493,7 +431,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             size="sm"
             onClick={openReqDialog}
             disabled={codebases.length === 0}
-            title={codebases.length === 0 ? "请先为项目添加工作区" : undefined}
+            title={codebases.length === 0 ? "请先在「代码库」关联 Git 仓库" : undefined}
           >
             <Plus className="h-4 w-4" />
             新建需求
@@ -505,7 +443,10 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
             <Inbox className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
             {codebases.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                需先关联工作区才能创建/运行需求 —— 请先在上方「添加工作区」。
+                需先关联代码库才能创建/运行需求 ——{" "}
+                <Link to={`/projects/${projectId}/workspaces`} className="underline hover:text-foreground">
+                  去「代码库」添加 ▸
+                </Link>
               </p>
             ) : (
               <>
@@ -563,46 +504,62 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           </Tabs>
         )}
       </section>
+      )}
 
-      {/* 编辑项目 Dialog */}
-      <Dialog open={projDialogOpen} onOpenChange={(open) => { if (!open && !savingProj) setProjDialogOpen(false); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>编辑项目</DialogTitle>
-            <DialogDescription>修改项目名称与描述。</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="proj-name">
-                名称 <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="proj-name"
-                placeholder="项目名称"
-                value={projForm.name}
-                autoFocus
-                onChange={(e) => setProjForm((f) => ({ ...f, name: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === "Enter") void saveProject(); }}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="proj-desc">描述（可选）</Label>
-              <Textarea
-                id="proj-desc"
-                placeholder="一句话描述这个项目"
-                value={projForm.description}
-                onChange={(e) => setProjForm((f) => ({ ...f, description: e.target.value }))}
-              />
-            </div>
+      {/* 设置：项目信息内联表单 + 危险区 */}
+      {section === "settings" && (
+        <section className="max-w-xl space-y-6">
+          <div>
+            <h2 className="mb-3 text-base font-semibold">项目信息</h2>
+            <Card className="space-y-4 p-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="proj-name">
+                  名称 <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="proj-name"
+                  placeholder="项目名称"
+                  value={projForm.name}
+                  onChange={(e) => setProjForm((f) => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="proj-desc">描述（可选）</Label>
+                <Textarea
+                  id="proj-desc"
+                  placeholder="一句话描述这个项目"
+                  value={projForm.description}
+                  onChange={(e) => setProjForm((f) => ({ ...f, description: e.target.value }))}
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={() => void saveProject()} disabled={savingProj}>
+                  {savingProj ? "保存中…" : "保存"}
+                </Button>
+              </div>
+            </Card>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setProjDialogOpen(false)} disabled={savingProj}>取消</Button>
-            <Button onClick={() => void saveProject()} disabled={savingProj}>
-              {savingProj ? "保存中…" : "保存"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
+          {project && project.id !== "proj-default" && (
+            <div>
+              <h2 className="mb-3 text-base font-semibold text-destructive">危险区</h2>
+              <Card className="flex flex-col gap-3 border-destructive/40 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  删除项目将级联清除其下全部需求、任务与代码库配置，不可恢复。
+                </p>
+                <Button
+                  variant="destructive"
+                  className="shrink-0"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  删除项目
+                </Button>
+              </Card>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* 删除项目确认 —— 用共享 ConfirmDialog（confirmWord=项目名，高危输入名确认）*/}
       <ConfirmDialog
@@ -615,7 +572,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
           <p>
             将<strong className="text-destructive">永久删除</strong>该项目，并级联清除其下
             {" "}{requirements.length}{" "}条需求、关联的全部任务（含运行中，会先尝试停止）、
-            {" "}{codebases.length}{" "}个工作区配置及评论/反馈等数据。此操作<strong>不可恢复</strong>。
+            {" "}{codebases.length}{" "}个代码库配置及评论/反馈等数据。此操作<strong>不可恢复</strong>。
           </p>
         }
         onConfirm={removeProject}
@@ -699,14 +656,14 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
         </DialogContent>
       </Dialog>
 
-      {/* 添加 / 编辑工作区 Dialog */}
+      {/* 添加 / 编辑代码库 Dialog */}
       <Dialog open={cbDialogOpen} onOpenChange={(open) => { if (!open) closeCbDialog(); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingCb ? "编辑工作区" : "添加工作区"}</DialogTitle>
+            <DialogTitle>{editingCb ? "编辑代码库" : "添加代码库"}</DialogTitle>
             <DialogDescription>
               {editingCb
-                ? `修改工作区「${editingCb.alias}」的配置。`
+                ? `修改代码库「${editingCb.alias}」的配置。`
                 : `将一个远程 Git 仓库关联到项目「${project?.name}」。`}
             </DialogDescription>
           </DialogHeader>

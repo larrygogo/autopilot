@@ -65,7 +65,7 @@ export function MarkdownView({
           ),
           blockquote: ({ node, ...props }) => (
             <blockquote
-              className="my-3 border-l-2 border-accent bg-accent/5 px-3 py-2 text-sm text-muted-foreground italic"
+              className="my-3 border-l-2 border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground italic"
               {...props}
             />
           ),

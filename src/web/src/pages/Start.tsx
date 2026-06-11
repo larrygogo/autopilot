@@ -26,7 +26,7 @@ export function Start() {
   const [newProjectName, setNewProjectName] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
 
-  // 进入页面：拉 projects（工作区不再让用户选 —— 项目:工作区 1:1，后端按 project 自动派生）
+  // 进入页面：拉 projects
   useEffect(() => {
     setLoadingProjects(true);
     api.listProjects()
@@ -64,7 +64,8 @@ export function Start() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      // 不传 workspace_id：后端按 project 唯一工作区自动派生（项目:工作区 1:1）
+      // 不强制选代码库：创建时后端按项目默认库（created_at 最早）自动派生主库，
+      // 代码库集合（含多仓库需求）在审批阶段反写确认
       const { title, spec_md } = await api.extractRequirement({
         raw_text: rawText.trim(),
         project_id: projectId,

@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSyn
 import { join, resolve, sep } from "path";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
-import { loadGitConfig, loadConfig } from "./config";
-import { buildAuthUrl } from "./workspace-health";
+import { loadConfig } from "./config";
+import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspace-health";
 
 // ──────────────────────────────────────────────
 // 任务 sandbox —— 每次任务独立的沙盒目录
@@ -48,12 +48,28 @@ export interface WorkspaceRef {
   github_repo?: string | null;
 }
 
+/** 多库沙盒（mode=multi-clone）中单个仓库的元数据 */
+export interface WorktreeRepoMeta {
+  workspace_id: string;
+  alias: string;
+  /** 相对 workspace/ 根的子目录名（由 alias 白名单化而来） */
+  dir: string;
+  branch: string;
+  base: string;
+  remote_url: string | null;
+  primary?: boolean;
+}
+
 /**
  * task sandbox 走 git worktree 时记录在 .worktree.json 的元数据。
  *
  * 这些字段是纯操作性元数据，仅用于删除时定位 git 目录（不参与任何 DB 查询/FK join），
  * codebase→workspace 改名后字段名改为 workspace_*。读取时兼容 Phase 2 之前写下的旧文件
  * （旧字段名 codebase_id/codebase_path、旧 id 前缀 cb-）见 readWorktreeMeta()。
+ *
+ * 多库（mode=multi-clone）：repos 数组是真相，顶层 workspace_id/branch/base/remote_url
+ * 镜像主库（旧 reader 不读 repos 也不炸）。单库任务不写 repos 字段、mode 仍是 clone
+ * —— 与存量文件 byte 级兼容。
  */
 export interface WorktreeMeta {
   workspace_id: string;
@@ -61,10 +77,12 @@ export interface WorktreeMeta {
   branch: string;
   base: string;
   created_at: number;
-  /** 沙盒模式：clone=独立克隆（删除纯 rmSync，不碰源仓库）；缺省/worktree=老 git worktree 数据 */
-  mode?: "clone" | "worktree";
+  /** 沙盒模式：clone=独立克隆（删除纯 rmSync，不碰源仓库）；multi-clone=多库各自独立克隆；缺省/worktree=老 git worktree 数据 */
+  mode?: "clone" | "multi-clone" | "worktree";
   /** clone 模式 push 的目标远程 url（GitHub）；null 表示无远程，submit_pr 会失败 */
   remote_url?: string | null;
+  /** 多库布局（mode=multi-clone 时存在） */
+  repos?: WorktreeRepoMeta[];
 }
 
 /** .worktree.json 磁盘原文形态：可能是新字段（workspace_*）或 Phase 2 前的旧字段（codebase_*）。 */
@@ -76,8 +94,9 @@ interface WorktreeMetaRaw {
   branch: string;
   base: string;
   created_at: number;
-  mode?: "clone" | "worktree";
+  mode?: "clone" | "multi-clone" | "worktree";
   remote_url?: string | null;
+  repos?: WorktreeRepoMeta[];
 }
 
 
@@ -147,7 +166,7 @@ export function ensureTaskSandbox(
   taskId: string,
   workflowName: string,
   sandboxConfig?: SandboxConfig,
-  workspace?: WorkspaceRef,
+  workspace?: WorkspaceRef | WorkspaceRef[],
   deliverBranch?: string,
 ): string {
   const wsPath = getTaskSandbox(taskId);
@@ -162,7 +181,11 @@ export function ensureTaskSandbox(
       log.warn("sandbox.git=true 与 template=%s 互斥，忽略 template [task=%s]",
         sandboxConfig.template, taskId);
     }
-    const wt = tryCreateClone(taskId, sandboxConfig, workspace, wsPath, deliverBranch);
+    // 多库（数组长度 >1）→ 子目录布局；单库（含单元素数组）→ 原路径零改动
+    const wsArr = Array.isArray(workspace) ? workspace : workspace ? [workspace] : [];
+    const wt = wsArr.length > 1
+      ? tryCreateMultiClone(taskId, sandboxConfig, wsArr, wsPath, deliverBranch)
+      : tryCreateClone(taskId, sandboxConfig, wsArr[0], wsPath, deliverBranch);
     if (wt) return wsPath;
     // 退化：clone 创建失败 → 空目录
     if (!existsSync(wsPath)) mkdirSync(wsPath, { recursive: true });
@@ -231,58 +254,7 @@ function tryCreateClone(
   if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
   if (existsSync(wsPath)) rmSync(wsPath, { recursive: true, force: true });
 
-  // 读取 git.token 配置，构建含凭证的 clone URL（HTTPS 注入；SSH 原样）
-  let cloneUrl = workspace.remote_url;
-  let cleanUrl = workspace.remote_url; // 不含 token 的干净 URL，clone 后覆盖 origin
-  try {
-    const gitCfg = loadGitConfig();
-    if (gitCfg.token) {
-      cloneUrl = buildAuthUrl(workspace.remote_url, gitCfg.token);
-    }
-  } catch (e: unknown) {
-    // token 读取失败仅 warn，不阻断 clone（无凭证的公开仓库可正常 clone）
-    log.warn("读取 git.token 失败，将尝试无凭证 clone [task=%s]: %s",
-      taskId, e instanceof Error ? e.message : String(e));
-  }
-
-  // 完整 clone（无 --local / --depth）
-  const cl = Bun.spawnSync(["git", "clone", cloneUrl, wsPath], { stdout: "pipe", stderr: "pipe" });
-  if (cl.exitCode !== 0) {
-    const stderr = cl.stderr ? new TextDecoder().decode(cl.stderr) : "";
-    // 脱敏：若 cloneUrl 含 token，从 stderr 中去除
-    const safeStderr = cloneUrl !== workspace.remote_url
-      ? stderr.replace(cloneUrl, workspace.remote_url)
-      : stderr;
-    log.warn("git clone 失败 [task=%s workspace=%s exit=%d]: %s",
-      taskId, workspace.id, cl.exitCode, safeStderr.slice(0, 300));
-    return null;
-  }
-
-  // clone 后立即覆盖 origin URL：去掉 token，防止凭证明文持久化在 .git/config
-  if (cloneUrl !== cleanUrl) {
-    Bun.spawnSync(["git", "-C", wsPath, "remote", "set-url", "origin", cleanUrl], { stderr: "pipe" });
-  }
-
-  // 基于 origin/<base> 建交付分支（完整 clone 后所有分支均作为 origin/<x> 可用）
-  const baseRef = Bun.spawnSync(
-    ["git", "-C", wsPath, "rev-parse", "--verify", "--quiet", `origin/${base}`],
-    { stderr: "pipe" },
-  ).exitCode === 0 ? `origin/${base}` : base;
-
-  const co = Bun.spawnSync(["git", "-C", wsPath, "checkout", "-B", branch, baseRef], { stderr: "pipe" });
-  if (co.exitCode !== 0) {
-    const stderr = co.stderr ? new TextDecoder().decode(co.stderr) : "";
-    log.warn("clone 后建交付分支失败 [task=%s branch=%s base=%s]: %s", taskId, branch, base, stderr.slice(0, 200));
-    // 不致命：仍在克隆的默认分支，尽量跑
-  }
-
-  // .git/info/exclude：让阶段产物目录不进 PR
-  try {
-    const excludeFile = join(wsPath, ".git", "info", "exclude");
-    if (existsSync(join(wsPath, ".git", "info"))) {
-      appendFileSync(excludeFile, "\n# autopilot 阶段产物（不进交付 PR）\n/[0-9][0-9]-*/\n");
-    }
-  } catch { /* exclude 写失败不阻塞任务 */ }
+  if (!cloneOneRepo(taskId, workspace, wsPath, base, branch)) return null;
 
   const meta: WorktreeMeta = {
     workspace_id: workspace.id,
@@ -297,6 +269,193 @@ function tryCreateClone(
   log.info("远程 clone 创建 [task=%s workspace=%s branch=%s base=%s remote=%s]",
     taskId, workspace.id, branch, base, workspace.remote_url);
   return meta;
+}
+
+/**
+ * clone 单个仓库到 dest：token 注入 → 完整 clone → 去 token 覆盖 origin →
+ * 基于 origin/<base> 建交付分支 → 写 .git/info/exclude。单库/多库共用。
+ */
+function cloneOneRepo(
+  taskId: string,
+  workspace: WorkspaceRef,
+  dest: string,
+  base: string,
+  branch: string,
+): boolean {
+  if (!workspace.remote_url) return false;
+
+  // token：config git.token > gh auth token 兜底（私有仓库），构建含凭证的 clone URL（HTTPS 注入；SSH 原样）
+  let cloneUrl = workspace.remote_url;
+  const cleanUrl = workspace.remote_url; // 不含 token 的干净 URL，clone 后覆盖 origin
+  try {
+    const gitToken = resolveGitToken();
+    if (gitToken) {
+      cloneUrl = buildAuthUrl(workspace.remote_url, gitToken);
+    }
+  } catch (e: unknown) {
+    // token 解析失败仅 warn，不阻断 clone（无凭证的公开仓库可正常 clone）
+    log.warn("解析 git token 失败，将尝试无凭证 clone [task=%s]: %s",
+      taskId, e instanceof Error ? e.message : String(e));
+  }
+
+  // 完整 clone（无 --local / --depth）；非交互 env：凭证缺失快速失败不挂死
+  const cl = Bun.spawnSync(["git", "clone", cloneUrl, dest], {
+    stdout: "pipe", stderr: "pipe",
+    env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
+  });
+  if (cl.exitCode !== 0) {
+    const stderr = cl.stderr ? new TextDecoder().decode(cl.stderr) : "";
+    // 脱敏：若 cloneUrl 含 token，从 stderr 中去除
+    const safeStderr = cloneUrl !== workspace.remote_url
+      ? stderr.replace(cloneUrl, workspace.remote_url)
+      : stderr;
+    log.warn("git clone 失败 [task=%s workspace=%s exit=%d]: %s",
+      taskId, workspace.id, cl.exitCode, safeStderr.slice(0, 300));
+    return false;
+  }
+
+  // clone 后立即覆盖 origin URL：去掉 token，防止凭证明文持久化在 .git/config
+  if (cloneUrl !== cleanUrl) {
+    Bun.spawnSync(["git", "-C", dest, "remote", "set-url", "origin", cleanUrl], { stderr: "pipe" });
+  }
+
+  // 基于 origin/<base> 建交付分支（完整 clone 后所有分支均作为 origin/<x> 可用）
+  const baseRef = Bun.spawnSync(
+    ["git", "-C", dest, "rev-parse", "--verify", "--quiet", `origin/${base}`],
+    { stderr: "pipe" },
+  ).exitCode === 0 ? `origin/${base}` : base;
+
+  const co = Bun.spawnSync(["git", "-C", dest, "checkout", "-B", branch, baseRef], { stderr: "pipe" });
+  if (co.exitCode !== 0) {
+    const stderr = co.stderr ? new TextDecoder().decode(co.stderr) : "";
+    log.warn("clone 后建交付分支失败 [task=%s branch=%s base=%s]: %s", taskId, branch, base, stderr.slice(0, 200));
+    // 不致命：仍在克隆的默认分支，尽量跑
+  }
+
+  // .git/info/exclude：让阶段产物目录不进 PR
+  try {
+    const excludeFile = join(dest, ".git", "info", "exclude");
+    if (existsSync(join(dest, ".git", "info"))) {
+      appendFileSync(excludeFile, "\n# autopilot 阶段产物（不进交付 PR）\n/[0-9][0-9]-*/\n");
+    }
+  } catch { /* exclude 写失败不阻塞任务 */ }
+
+  return true;
+}
+
+/** alias → 安全子目录名：白名单字符，非法/为空时回退 workspace id */
+function safeAliasDir(alias: string, workspaceId: string): string {
+  const cleaned = alias.replace(/[^\w.-]/g, "");
+  if (cleaned && TASK_ID_RE.test(cleaned) && cleaned !== "." && cleaned !== "..") return cleaned;
+  return workspaceId;
+}
+
+/**
+ * 多代码库沙盒：各库 clone 到 workspace/<alias>/ 子目录，全库共用同名交付分支。
+ * 任一 clone 失败 → 整体清掉退化空目录（半套布局比空目录更危险——agent 会只改一半还以为齐了）。
+ * 主库 = workspaces[0]（caller 保证排序）。
+ */
+function tryCreateMultiClone(
+  taskId: string,
+  cfg: SandboxConfig,
+  workspaces: Array<WorkspaceRef & { alias?: string }>,
+  wsRoot: string,
+  deliverBranch?: string,
+): WorktreeMeta | null {
+  const branch = deliverBranch ?? `${cfg.branch_prefix ?? "autopilot/"}${taskId}`;
+  if (existsSync(wsRoot)) rmSync(wsRoot, { recursive: true, force: true });
+  mkdirSync(wsRoot, { recursive: true });
+
+  const repos: WorktreeRepoMeta[] = [];
+  const usedDirs = new Set<string>();
+  for (const ws of workspaces) {
+    if (!ws.remote_url) {
+      log.warn("多库沙盒：workspace %s 无 remote_url（软失效），整体退化空目录 [task=%s]", ws.id, taskId);
+      rmSync(wsRoot, { recursive: true, force: true });
+      return null;
+    }
+    let dir = safeAliasDir(ws.alias ?? ws.id, ws.id);
+    if (usedDirs.has(dir)) dir = ws.id; // 目录名撞车回退 workspace id（项目内 alias 唯一，理论不撞）
+    usedDirs.add(dir);
+    const base = cfg.base ?? ws.default_branch;
+    const dest = join(wsRoot, dir);
+    if (!cloneOneRepo(taskId, ws, dest, base, branch)) {
+      log.warn("多库沙盒：仓库 %s clone 失败，整体退化空目录 [task=%s]", ws.id, taskId);
+      rmSync(wsRoot, { recursive: true, force: true });
+      return null;
+    }
+    repos.push({
+      workspace_id: ws.id,
+      alias: ws.alias ?? ws.id,
+      dir,
+      branch,
+      base,
+      remote_url: ws.remote_url,
+      primary: ws === workspaces[0],
+    });
+  }
+
+  const p = repos[0];
+  const meta: WorktreeMeta = {
+    mode: "multi-clone",
+    workspace_id: p.workspace_id,  // 顶层镜像主库：旧 reader 不读 repos 也不炸
+    workspace_path: "",
+    branch: p.branch,
+    base: p.base,
+    remote_url: p.remote_url,
+    created_at: Date.now(),
+    repos,
+  };
+  writeWorktreeMeta(taskId, meta);
+  log.info("多库远程 clone 创建 [task=%s repos=%s branch=%s]",
+    taskId, repos.map((r) => r.alias).join(","), branch);
+  return meta;
+}
+
+/** 任务的代码仓库布局上下文（workflow 阶段函数消费的唯一布局接口） */
+export interface TaskRepoCtx {
+  workspace_id: string;
+  alias: string;
+  /** 该库 clone 的绝对路径（git 命令 cwd） */
+  path: string;
+  /** 相对 workspace/ 根的子目录；单库 = ""（即根本身） */
+  dir: string;
+  branch: string;
+  base: string;
+  remote_url: string | null;
+  primary: boolean;
+}
+
+/**
+ * 列出任务的代码仓库布局。多库（multi-clone meta）展开 repos；单库/旧任务返回
+ * 单项指向 workspace/ 根；无 .worktree.json（非 git 工作流）返回 []。
+ */
+export function listTaskRepos(taskId: string): TaskRepoCtx[] {
+  const meta = readWorktreeMeta(taskId);
+  if (!meta) return [];
+  const root = getTaskSandbox(taskId);
+  if (meta.mode === "multi-clone" && meta.repos && meta.repos.length > 0) {
+    return meta.repos.map((r) => ({
+      workspace_id: r.workspace_id,
+      alias: r.alias,
+      path: join(root, r.dir),
+      dir: r.dir,
+      branch: r.branch,
+      base: r.base,
+      remote_url: r.remote_url,
+      primary: r.primary === true,
+    }));
+  }
+  return [{
+    workspace_id: meta.workspace_id,
+    alias: "",
+    path: root,
+    dir: "",
+    branch: meta.branch,
+    base: meta.base,
+    remote_url: meta.remote_url ?? null,
+    primary: true,
+  }];
 }
 
 
@@ -318,7 +477,7 @@ function readWorktreeMeta(taskId: string): WorktreeMeta | null {
     if (!workspace_id || workspace_path == null) return null;
     return {
       workspace_id, workspace_path, branch: raw.branch, base: raw.base, created_at: raw.created_at,
-      mode: raw.mode, remote_url: raw.remote_url,
+      mode: raw.mode, remote_url: raw.remote_url, repos: raw.repos,
     };
   } catch { return null; }
 }
@@ -390,37 +549,57 @@ export function isBenignBranchDeleteError(stderr: string): boolean {
 
 export function deleteRemoteDeliverBranch(taskId: string): { deleted: boolean; branch?: string; failed?: boolean; error?: string } {
   const meta = readWorktreeMeta(taskId);
-  if (!meta || meta.mode !== "clone" || !meta.branch) return { deleted: false };
-  if (!meta.branch.startsWith("feat/")) {
-    log.warn("跳过删远程分支：非 autopilot 交付分支命名空间 [task=%s branch=%s]", taskId, meta.branch);
-    return { deleted: false, branch: meta.branch };
+  if (!meta || (meta.mode !== "clone" && meta.mode !== "multi-clone") || !meta.branch) {
+    return { deleted: false };
   }
-  // 从 remote_url 解析 owner/repo，用 gh api 删远程分支（重跑时本地共用 clone 可能已删，故走 gh api）。
-  const m = (meta.remote_url ?? "").match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
-  if (!m) {
-    log.warn("删远程分支跳过：无法从 remote 解析 owner/repo [task=%s remote=%s]", taskId, meta.remote_url ?? "");
-    return { deleted: false, branch: meta.branch };
+
+  // 多库：逐库删（每库独立 feat/ 校验、独立良性 404 判定）；单库 = 长度 1 列表，行为不变
+  const targets: Array<{ branch: string; remote_url: string | null; label: string }> =
+    meta.mode === "multi-clone" && meta.repos && meta.repos.length > 0
+      ? meta.repos.map((r) => ({ branch: r.branch, remote_url: r.remote_url, label: r.alias }))
+      : [{ branch: meta.branch, remote_url: meta.remote_url ?? null, label: "" }];
+
+  let anyDeleted = false;
+  const errors: string[] = [];
+  for (const t of targets) {
+    const tag = t.label ? `[${t.label}] ` : "";
+    if (!t.branch.startsWith("feat/")) {
+      log.warn("跳过删远程分支：非 autopilot 交付分支命名空间 [task=%s %sbranch=%s]", taskId, tag, t.branch);
+      continue;
+    }
+    // 从 remote_url 解析 owner/repo，用 gh api 删远程分支（重跑时本地 clone 可能已删，故走 gh api）。
+    const m = (t.remote_url ?? "").match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
+    if (!m) {
+      log.warn("删远程分支跳过：无法从 remote 解析 owner/repo [task=%s %sremote=%s]", taskId, tag, t.remote_url ?? "");
+      continue;
+    }
+    const proc = Bun.spawnSync(
+      ["gh", "api", "-X", "DELETE", `repos/${m[1]}/${m[2]}/git/refs/heads/${t.branch}`],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    if (proc.exitCode === 0) {
+      log.info("删远程交付分支（重跑清旧轮，GitHub 自动 close 旧 PR）[task=%s %sbranch=%s]", taskId, tag, t.branch);
+      anyDeleted = true;
+      continue;
+    }
+    const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+    // 区分良性 404（远程已无此分支 = 幂等成功，无需 push 冲突顾虑）与真失败（受保护/无凭证/
+    // 网络）。真失败下重跑的普通 push 会撞已存在分支 → non-fast-forward，被判可恢复反复重试整
+    // 条流水线 5 轮才 failed，根因对用户完全不可见（RERUN-07）。真失败 ERROR 级日志 + 回传
+    // failed 让调用方 surface 到需求页。
+    if (isBenignBranchDeleteError(stderr)) {
+      log.info("删远程交付分支：远程已无此分支（幂等，重跑可继续）[task=%s %sbranch=%s]", taskId, tag, t.branch);
+      continue;
+    }
+    log.error("删远程交付分支真失败（非 404；重跑后 push 可能因分支已存在冲突）[task=%s %sbranch=%s]: %s",
+      taskId, tag, t.branch, stderr.slice(0, 200));
+    errors.push(`${tag}${stderr.slice(0, 150)}`);
   }
-  const proc = Bun.spawnSync(
-    ["gh", "api", "-X", "DELETE", `repos/${m[1]}/${m[2]}/git/refs/heads/${meta.branch}`],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  if (proc.exitCode === 0) {
-    log.info("删远程交付分支（重跑清旧轮，GitHub 自动 close 旧 PR）[task=%s branch=%s]", taskId, meta.branch);
-    return { deleted: true, branch: meta.branch };
+
+  if (errors.length > 0) {
+    return { deleted: anyDeleted, branch: meta.branch, failed: true, error: errors.join("; ").slice(0, 300) };
   }
-  const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
-  // 区分良性 404（远程已无此分支 = 幂等成功，无需 push 冲突顾虑）与真失败（受保护/无凭证/
-  // 网络）。真失败下重跑的普通 push 会撞已存在分支 → non-fast-forward，被判可恢复反复重试整
-  // 条流水线 5 轮才 failed，根因对用户完全不可见（RERUN-07）。真失败 ERROR 级日志 + 回传
-  // failed 让调用方 surface 到需求页。
-  if (isBenignBranchDeleteError(stderr)) {
-    log.info("删远程交付分支：远程已无此分支（幂等，重跑可继续）[task=%s branch=%s]", taskId, meta.branch);
-    return { deleted: false, branch: meta.branch };
-  }
-  log.error("删远程交付分支真失败（非 404；重跑后 push 可能因分支已存在冲突）[task=%s branch=%s]: %s",
-    taskId, meta.branch, stderr.slice(0, 200));
-  return { deleted: false, branch: meta.branch, failed: true, error: stderr.slice(0, 200) };
+  return { deleted: anyDeleted, branch: meta.branch };
 }
 
 
@@ -486,8 +665,8 @@ export function listSandboxDir(taskId: string, relPath: string, rootKind: Sandbo
 
   const entries: SandboxEntry[] = [];
   for (const name of readdirSync(abs)) {
-    // 代码根的顶层隐藏 .git（巨大且无浏览价值；改动统计走验收 diff 视图）
-    if (rootKind === "workspace" && name === ".git" && !relPath.replace(/^[/\\]+/, "")) continue;
+    // 代码树里隐藏 .git（巨大且无浏览价值；多库布局下各子目录层也适用；改动统计走验收 diff 视图）
+    if (rootKind === "workspace" && name === ".git") continue;
     const full = join(abs, name);
     try {
       const s = statSync(full);

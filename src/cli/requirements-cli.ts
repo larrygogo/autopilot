@@ -162,7 +162,7 @@ export function registerRequirementCommands(program: Command): void {
         }
       }
 
-      // 5) 建 requirement
+      // 5) 建 requirement（停在 drafting；澄清依赖代码库 clone，须先确认代码库）
       try {
         const result = await client.createRequirement({
           project_id: projectId,
@@ -171,9 +171,33 @@ export function registerRequirementCommands(program: Command): void {
           spec_md: specMd,
         });
         const id = result.requirement.id;
-        console.log(`✓ 已创建需求 ${id} (clarifier 调查中)`);
+        if (workspaceId) {
+          // CLI 解析出了代码库（显式 -c / cwd 推断）= 已选择 → 自动开始澄清
+          await client.transitionRequirement(id, "clarifying");
+          console.log(`✓ 已创建需求 ${id}（代码库 ${workspaceId}，clarifier 调查中）`);
+        } else {
+          console.log(`✓ 已创建需求 ${id}（草稿，已预选项目默认代码库）`);
+          console.log(`  确认代码库后开始澄清：autopilot req clarify ${id}`);
+          console.log(`  换代码库：autopilot req set-workspaces ${id} <ws-id...>`);
+        }
       } catch (e: unknown) {
         console.error(`创建需求失败：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("clarify <id>")
+    .description("开始/恢复需求澄清（前置：需求已选代码库）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement } = await client.transitionRequirement(id, "clarifying");
+        console.log(`✓ 需求 ${requirement.id} 已进入澄清（代码库 ${requirement.workspace_id}，AI 正在调查）`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
         process.exit(3);
       }
     });
@@ -198,7 +222,15 @@ export function registerRequirementCommands(program: Command): void {
           ["标题", r.title],
           ["状态", r.status],
           ["项目", r.project_id],
-          ["工作区", r.workspace_id ?? "(未关联)"],
+          [
+            "代码库",
+            (() => {
+              const ids = (r as { workspace_ids?: string[] }).workspace_ids ?? [];
+              if (!r.workspace_id && ids.length === 0) return "(未关联)";
+              const rest = ids.filter((w) => w !== r.workspace_id);
+              return [`${r.workspace_id ?? "(无主库)"}（主）`, ...rest].join(" · ");
+            })(),
+          ],
           ["工作流", r.workflow ?? "dev（默认）"],
           ["关联任务", r.task_id ?? "(无)"],
           ["PR", r.pr_url ?? "(无)"],
@@ -233,6 +265,25 @@ export function registerRequirementCommands(program: Command): void {
       try {
         const { requirement } = await client.updateRequirement(id, { workflow });
         console.log(`✓ 需求 ${requirement.id} 工作流已设为 ${workflow}`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("set-workspaces <id> <workspace-ids...>")
+    .description("设置需求的代码库集合（整体替换；--primary 指定主库，缺省为第一个；审批后冻结，failed 例外）")
+    .option("--primary <ws-id>", "主代码库（任务在此执行；必须在集合内）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, wsIds: string[], opts: { port: string; primary?: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement, workspace_ids } = await client.setRequirementWorkspaces(id, wsIds, opts.primary);
+        console.log(
+          `✓ 需求 ${requirement.id} 代码库已设为 [${workspace_ids.join(", ")}]，主库 ${requirement.workspace_id}`,
+        );
       } catch (e: unknown) {
         console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
         process.exit(3);

@@ -1,58 +1,39 @@
 import { lazy, Suspense } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/PageLoader";
 
 const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
+const Providers = lazy(() => import("./Providers").then((m) => ({ default: m.Providers })));
 
-// 工作流 / 定时任务已提到顶层导航（"编排"分组），不在设置内
-// 需求澄清模型已移除全局命名 clarifier agent，改由 requirement 维度配置（clarifier_provider/model）
-const TABS = [
-  { key: "general", label: "通用" },
-] as const;
+/** 设置分区（Supabase 式：侧栏设置菜单切换，路由 /settings[/:section]） */
+export type SettingsSection = "general" | "providers" | "scheduler" | "network" | "daemon";
 
-type TabKey = (typeof TABS)[number]["key"];
+const SECTION_HEADER: Record<Exclude<SettingsSection, "providers">, { title: string; desc: string }> = {
+  general: { title: "通用", desc: "默认偏好与桌面通知" },
+  scheduler: { title: "任务调度", desc: "全局最大并发任务数等调度行为" },
+  network: { title: "网络访问", desc: "daemon 监听地址与 API token" },
+  daemon: { title: "Daemon", desc: "运行状态、日志与配置文件" },
+};
 
-function isValidTab(s: string | null): s is TabKey {
-  return s !== null && TABS.some((t) => t.key === s);
-}
+export function SettingsHub({ section = "general" }: { section?: SettingsSection }) {
+  // 提供商分区自带页头（含「重新检查」操作），不套通用 header
+  if (section === "providers") {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <Providers />
+      </Suspense>
+    );
+  }
 
-export function SettingsHub() {
-  const [params, setParams] = useSearchParams();
-
-  const raw = params.get("tab");
-  const active: TabKey = isValidTab(raw) ? raw : "general";
-
-  const handleChange = (next: string) => {
-    const np = new URLSearchParams(params);
-    np.set("tab", next);
-    setParams(np, { replace: true });
-  };
-
+  const header = SECTION_HEADER[section];
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
-      <header className="mb-4 border-b border-border pb-3">
-        <h1 className="font-display text-2xl font-bold">设置 · SETTINGS</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          通用
-        </p>
+    <div className="mx-auto w-full max-w-4xl px-5 py-6">
+      <header className="mb-6">
+        <h1 className="text-2xl font-semibold leading-tight tracking-tight">{header.title}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{header.desc}</p>
       </header>
-
-      <Tabs value={active} onValueChange={handleChange}>
-        <TabsList>
-          {TABS.map((t) => (
-            <TabsTrigger key={t.key} value={t.key}>
-              {t.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        <Suspense fallback={<PageLoader />}>
-          <TabsContent value="general">
-            <Settings embedded />
-          </TabsContent>
-        </Suspense>
-      </Tabs>
+      <Suspense fallback={<PageLoader />}>
+        <Settings section={section} />
+      </Suspense>
     </div>
   );
 }
