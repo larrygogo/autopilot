@@ -844,6 +844,7 @@ export function RequirementDetail() {
     setSubmittingFeedback(true);
     try {
       await api.injectFeedback(id, prevBody.trim());
+      await refresh({ silent: true }); // 反馈历史 + 状态（awaiting_review→fix_revision）立即可见
       toast.success("反馈已提交");
     } catch (e: unknown) {
       setFeedbackBody(prevBody); // 失败把内容恢复让用户改后再试
@@ -1109,6 +1110,37 @@ export function RequirementDetail() {
             ))}
           </ol>
         )}
+      </div>
+    </Card>
+  ) : null;
+
+  // 反馈输入卡：验收（awaiting_review，注入后自动转 fix_revision）与修复（fix_revision）共用
+  const feedbackComposer = (req.status === "awaiting_review" || req.status === "fix_revision") ? (
+    <Card className="p-5">
+      <p className="mb-2 text-xs text-muted-foreground">
+        {req.status === "awaiting_review"
+          ? "审查意见（注入后需求转入修复，Agent 据此修改并更新 PR）："
+          : "修复阶段反馈（注入后 Agent 会据此修改）："}
+      </p>
+      <Textarea
+        value={feedbackBody}
+        onChange={(e) => setFeedbackBody(e.target.value)}
+        placeholder="填写修改建议…"
+        className="min-h-[80px] text-xs"
+        disabled={submittingFeedback}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
+        }}
+      />
+      <div className="mt-2 flex justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void inject()}
+          disabled={submittingFeedback || !feedbackBody.trim()}
+        >
+          {submittingFeedback ? "提交中…" : "注入反馈"}
+        </Button>
       </div>
     </Card>
   ) : null;
@@ -1755,31 +1787,7 @@ export function RequirementDetail() {
                 <>
                   {subPrCard}
                   {taskRecord}
-                  {!readonly && req.status === "fix_revision" && (
-                    <Card className="p-5">
-                      <p className="mb-2 text-xs text-muted-foreground">修复阶段反馈（注入后 Agent 会据此修改）：</p>
-                      <Textarea
-                        value={feedbackBody}
-                        onChange={(e) => setFeedbackBody(e.target.value)}
-                        placeholder="填写修改建议…"
-                        className="min-h-[80px] text-xs"
-                        disabled={submittingFeedback}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
-                        }}
-                      />
-                      <div className="mt-2 flex justify-end">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void inject()}
-                          disabled={submittingFeedback || !feedbackBody.trim()}
-                        >
-                          {submittingFeedback ? "提交中…" : "注入反馈"}
-                        </Button>
-                      </div>
-                    </Card>
-                  )}
+                  {!readonly && req.status === "fix_revision" && feedbackComposer}
                   {feedbackCard}
                 </>
               );
@@ -1815,6 +1823,10 @@ export function RequirementDetail() {
                   ) : (
                     <Card className="p-6 text-center text-sm text-muted-foreground">无关联执行，没有可验收的改动。</Card>
                   )}
+                  {/* NextStepCTA「去填写审查意见」滚动到 feedback-section —— 此前只在执行步渲染，
+                      验收步（当前步）滚动目标不存在；输入区 + 反馈历史在验收步常驻 */}
+                  {!readonly && feedbackComposer}
+                  {feedbackCard}
                 </>
               );
             }
