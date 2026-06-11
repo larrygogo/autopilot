@@ -25,11 +25,11 @@ test("当前步骤之前的步骤是 done 态（success 配色）", () => {
   expect(html).toContain("bg-success/15");
 });
 
-test("选中步骤有下划线高亮", () => {
+test("选中步骤有 accent 描边 pill 高亮（深色下下划线不可见，已改 ring）", () => {
   const html = renderToStaticMarkup(
     <StepBar status="running" selected="clarify" onSelect={() => {}} />,
   );
-  expect(html).toContain("underline");
+  expect(html).toContain("ring-accent/40");
 });
 
 test("failed 时完成步：圈与标签都标红（含选中态）", () => {
