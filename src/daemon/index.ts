@@ -1,5 +1,5 @@
 import { mkdirSync } from "fs";
-import { join } from "path";
+import { join, dirname, basename } from "path";
 import { AUTOPILOT_HOME, VERSION } from "../index";
 import { installAutopilotResolver } from "../core/autopilot-resolver";
 import { initDb, closeDb, listTasks, updateTask, closeOpenPhaseEvents } from "../core/db";
@@ -10,8 +10,8 @@ import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
 import { runInBackground } from "../core/runner";
 import { runScheduledTasks } from "../core/scheduler";
 import { initDaemonFileLog, log } from "../core/logger";
-import { loadDaemonConfig, loadGithubConfig } from "../core/config";
-import { enableBus, disableBus, bus } from "../core/event-bus";
+import { loadDaemonConfig, loadGithubConfig, getConfigPath } from "../core/config";
+import { enableBus, disableBus, bus, emit as emitEvent } from "../core/event-bus";
 import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
 import { startServerWithRetry } from "./server";
@@ -28,7 +28,7 @@ import { createDefaultAggregator, type Aggregator } from "../core/now-aggregator
 import { setNowAggregator } from "./routes-now";
 import type { AutopilotEvent } from "./protocol";
 import { RESTART_SENTINEL_CODE, FATAL_CONFIG_CODE } from "./supervisor";
-import { writeFileSync, existsSync, unlinkSync } from "fs";
+import { writeFileSync, existsSync, unlinkSync, watch as fsWatch } from "fs";
 
 // ──────────────────────────────────────────────
 // Module 级 shutdown 注册表
@@ -186,6 +186,35 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 激活事件总线
   enableBus();
 
+  // ── 外部编辑 config.yaml 热生效 ──────────────────────────────────────────
+  // 监听目录（而非文件）有两个好处：
+  //   1. daemon 启动时 config.yaml 不存在也能正常监听，文件创建后即可热生效
+  //   2. 部分编辑器（如 vim、Emacs）先写临时文件再重命名，监听文件会失去跟踪
+  // 防抖 300ms：编辑器保存时 fs.watch 可能连续触发（Windows 尤甚）。
+  // 已通过 RPC/Web UI 写的路径（rpc-methods.ts / routes.ts）不受此影响，各自 emit。
+  const configFilePath = getConfigPath();
+  const configDir = dirname(configFilePath);
+  const configFilename = basename(configFilePath);
+  let configWatchDebounce: ReturnType<typeof setTimeout> | null = null;
+  let configDirWatcher: ReturnType<typeof fsWatch> | null = null;
+  try {
+    configDirWatcher = fsWatch(configDir, { persistent: false }, (_event, filename) => {
+      // filename 为 null 时（某些平台不提供）也触发，统一处理
+      if (filename !== null && filename !== configFilename) return;
+      if (configWatchDebounce) clearTimeout(configWatchDebounce);
+      configWatchDebounce = setTimeout(() => {
+        configWatchDebounce = null;
+        log.info("config.yaml 检测到外部变化（目录监听），发射 config:updated 热生效");
+        emitEvent({ type: "config:updated", payload: {} });
+      }, 300);
+    });
+    log.info("config 目录监听已启动：%s（目标文件：%s）", configDir, configFilename);
+  } catch (e: unknown) {
+    // 目录不存在或权限不足时跳过（daemon 仍正常运行，热生效不可用）
+    log.warn("config 目录监听启动失败，外部编辑热生效不可用：%s", (e as Error).message);
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   // dogfood-bug27/28：config 或 workflow 改了之后 agent cache 必须丢弃，
   // 否则下个 task 还用老配置（cache key 是 workflowName:agentName，旧 Provider
   // 实例还持着旧 model / system_prompt / MCP 连接）。
@@ -309,6 +338,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     clearInterval(retentionTimer);
     clearInterval(schedulerTimer);
     clearInterval(prPollerTimer);
+    configDirWatcher?.close();
+    if (configWatchDebounce) {
+      clearTimeout(configWatchDebounce);
+      configWatchDebounce = null;
+    }
     disposeRequirementScheduler();
     disposeRequirementClarifier();
     disposeProviderCliMonitor();
