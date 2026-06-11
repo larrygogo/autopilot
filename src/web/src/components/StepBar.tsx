@@ -4,7 +4,8 @@ import { STEPS, STEP_ORDER, resolveCurrentStep, type ReqStep } from "@/lib/requi
 
 // 可点击的步骤进度条：6 步圆圈数字 + 连接线，当前步高亮、已走过打勾、未到达浅灰。
 // 终态（cancelled/failed）时 ✗ 画在死亡步（statusBeforeTerminal 定位），其后步骤保持未到达灰。
-// 选中步加下划线。所有步骤（含未到达）均可点击，点击回调 onSelect。
+// 选中步 = accent 描边 pill。所有步骤（含未到达）均可点击，点击回调 onSelect。
+// 移动端（<sm）：标签只在选中步显示，其余只留数字圈，避免 6 步 × 中文标签横向溢出。
 export function StepBar({
   status,
   statusBeforeTerminal,
@@ -28,13 +29,13 @@ export function StepBar({
         const isSelected = s.key === selected;
         const isAbortedTail = active && aborted;
         return (
-          <li key={s.key} className="flex flex-1 items-center gap-1.5 last:flex-none">
+          <li key={s.key} className="flex flex-1 items-center gap-1 sm:gap-1.5 last:flex-none">
             <button
               type="button"
               onClick={() => onSelect(s.key)}
               aria-current={isSelected ? "step" : undefined}
               className={cn(
-                "flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:bg-muted/50",
+                "flex items-center gap-2 rounded-md px-1 py-1 transition-colors hover:bg-muted/50 sm:px-2",
                 // 选中 = accent 描边 pill（muted 底在深色主题下几乎不可见）
                 isSelected && "bg-accent/10 ring-1 ring-accent/40 hover:bg-accent/15",
               )}
@@ -62,6 +63,8 @@ export function StepBar({
               <span
                 className={cn(
                   "whitespace-nowrap text-xs transition-colors",
+                  // 窄屏只给选中步留文字，其余步骤只显示数字圈
+                  !isSelected && "hidden sm:inline",
                   isAbortedTail
                     ? "font-medium text-destructive"
                     : isSelected

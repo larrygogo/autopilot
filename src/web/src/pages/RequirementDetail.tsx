@@ -1453,8 +1453,8 @@ export function RequirementDetail() {
         </div>
       </header>
 
-      {/* 步骤进度条：6 步可点击，默认当前步 */}
-      <div className="mb-5 rounded-lg border border-border bg-card/40 px-4 py-3">
+      {/* 步骤进度条：6 步可点击，默认当前步；窄屏非选中步只显示数字圈 + overflow 兜底 */}
+      <div className="mb-5 overflow-x-auto rounded-lg border border-border bg-card/40 px-3 py-3 sm:px-4">
         <StepBar status={req.status} statusBeforeTerminal={req.status_before_terminal} selected={activeStep} onSelect={setSelectedStep} />
       </div>
 
