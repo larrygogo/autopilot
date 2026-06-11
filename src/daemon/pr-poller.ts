@@ -5,12 +5,16 @@ import {
   updateRequirement,
 } from "../core/requirements";
 import { createComment, nextCommentId } from "../core/requirement-comments";
-import { listSubPrs, updateSubPrWatermark } from "../core/requirement-sub-prs";
+import { listSubPrs, updateSubPrWatermark, updateSubPrCiState } from "../core/requirement-sub-prs";
 import { getWorkspaceById } from "../core/workspaces";
 import { loadGithubConfig } from "../core/config";
+import { emit } from "../core/event-bus";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("pr-poller");
+
+/** 同一交付 PR 的 CI 失败自动修复触发上限；触顶后停下报人（通知），防环境性故障空转 */
+export const CI_FIX_LIMIT = 2;
 
 interface GhReview {
   id: string;
@@ -20,10 +24,50 @@ interface GhReview {
   submittedAt?: string;
 }
 
+/** gh pr view --json statusCheckRollup 数组元素：CheckRun（Actions）或 StatusContext（旧式 status） */
+interface GhCheckItem {
+  __typename?: "CheckRun" | "StatusContext";
+  // CheckRun
+  name?: string;
+  status?: "COMPLETED" | "IN_PROGRESS" | "QUEUED" | "PENDING" | "WAITING" | "REQUESTED";
+  conclusion?: string;
+  detailsUrl?: string;
+  // StatusContext
+  context?: string;
+  state?: "SUCCESS" | "FAILURE" | "ERROR" | "PENDING" | "EXPECTED";
+  targetUrl?: string;
+}
+
 interface GhPrView {
   state: "OPEN" | "CLOSED" | "MERGED";
   reviews: GhReview[];
   mergeCommit?: { oid: string } | null;
+  /** PR head commit SHA —— CI 失败水位的去重键（修复 push 新 commit 才可再触发） */
+  headRefOid?: string;
+  statusCheckRollup?: GhCheckItem[] | null;
+}
+
+/** 失败结论集合（CheckRun.conclusion）。CANCELLED/SKIPPED/NEUTRAL/ACTION_REQUIRED 不算 —— 非代码可修信号 */
+const FAILED_CONCLUSIONS = new Set(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"]);
+
+function checkIsPending(c: GhCheckItem): boolean {
+  if (c.__typename === "StatusContext" || c.context !== undefined) {
+    return c.state === "PENDING" || c.state === "EXPECTED";
+  }
+  return c.status !== undefined && c.status !== "COMPLETED";
+}
+
+function checkIsFailed(c: GhCheckItem): boolean {
+  if (c.__typename === "StatusContext" || c.context !== undefined) {
+    return c.state === "FAILURE" || c.state === "ERROR";
+  }
+  return c.conclusion !== undefined && FAILED_CONCLUSIONS.has(c.conclusion);
+}
+
+function checkLabel(c: GhCheckItem): string {
+  const name = c.name ?? c.context ?? "unknown-check";
+  const url = c.detailsUrl ?? c.targetUrl;
+  return url ? `${name}（${url}）` : name;
 }
 
 /**
@@ -80,6 +124,9 @@ interface TrackedPr {
   /** 水位写回目标：sub → requirement_sub_prs 行；main → requirements.last_reviewed_event_id */
   scope: "sub" | "main";
   label: string;
+  /** CI 失败水位（迁移 039，仅 sub 有；main 兼容路径不做 CI 检测） */
+  ciFailedSha: string | null;
+  ciFixCount: number;
 }
 
 /**
@@ -106,6 +153,8 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
       watermark: sp.last_reviewed_event_id ?? null,
       scope: "sub" as const,
       label: getWorkspaceById(sp.child_workspace_id)?.alias ?? sp.child_workspace_id,
+      ciFailedSha: sp.ci_failed_head_sha ?? null,
+      ciFixCount: sp.ci_fix_count ?? 0,
     }));
   if (req.pr_number && req.workspace_id && !tracked.some((t) => t.prNumber === req.pr_number)) {
     tracked.push({
@@ -114,6 +163,8 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
       watermark: req.last_reviewed_event_id,
       scope: "main",
       label: "",
+      ciFailedSha: null,
+      ciFixCount: 0,
     });
   }
   if (tracked.length === 0) {
@@ -167,11 +218,49 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
     );
     watermarkUpdates.push({ t: s.t, latest: changes[changes.length - 1].id });
   }
-  if (sections.length === 0) return;
+
+  // 3. CI / PR check 失败 → 自动修复回路（仅 scope=sub：迁移 039 水位列在 sub_prs 上；
+  //    旧 main-scope 兼容路径无水位落点，跳过——新需求主 PR 已全集落 sub_prs）。
+  //    触发条件：PR OPEN + checks 全部完成 + 有失败 + head SHA ≠ 已处理水位。
+  //    护栏：同 PR 自动修复 CI_FIX_LIMIT 次后停下报人（通知），不再自动转 fix_revision。
+  const ciSections: string[] = [];
+  const ciStateUpdates: Array<{ t: TrackedPr; sha: string }> = [];
+  for (const s of states) {
+    if (s.t.scope !== "sub") continue;
+    if (s.data.state !== "OPEN") continue;
+    const checks = s.data.statusCheckRollup ?? [];
+    if (checks.length === 0) continue;
+    if (checks.some(checkIsPending)) continue; // 跑完再判，一次拿到全部失败清单
+    const failed = checks.filter(checkIsFailed);
+    if (failed.length === 0) continue;
+    const sha = s.data.headRefOid;
+    if (!sha || s.t.ciFailedSha === sha) continue; // 该 head SHA 已处理过
+
+    const failedList = failed.map((c) => `- ${checkLabel(c)}`).join("\n");
+    if (s.t.ciFixCount >= CI_FIX_LIMIT) {
+      // 触顶：写 SHA 水位（同 SHA 不重复通知）+ 停下报人
+      updateSubPrCiState(reqId, s.t.wsId, sha, false);
+      const reason =
+        `自动修复已触发 ${s.t.ciFixCount} 次仍未转绿，可能是环境性问题，请人工处置。\n失败项：\n${failedList}`;
+      log.warn("requirement %s PR #%s CI 自动修复触顶（%s 次），停下报人", reqId, s.t.prNumber, s.t.ciFixCount);
+      emit({ type: "requirement:ci-fix-limit", payload: { id: reqId, pr_number: s.t.prNumber, reason } });
+      continue;
+    }
+    const tag = s.t.label ? `[${s.t.label}] ` : "";
+    ciSections.push(
+      `## ${tag}PR #${s.t.prNumber} 的 CI 检查失败（${failed.length} 项）\n\n` +
+      `${failedList}\n\n` +
+      `请在交付分支上修复并 push（PR 会自动更新）。可用 \`gh pr checks ${s.t.prNumber}\` / ` +
+      `\`gh run view --log-failed\` 查看失败日志。commit ${sha.slice(0, 8)}。`,
+    );
+    ciStateUpdates.push({ t: s.t, sha });
+  }
+
+  if (sections.length === 0 && ciSections.length === 0) return;
 
   log.info(
-    "requirement %s 收到 %s 条新 CHANGES_REQUESTED review（涉及 %s 个 PR），注入反馈触发 fix_revision",
-    reqId, totalChanges, watermarkUpdates.length,
+    "requirement %s：%s 条新 CHANGES_REQUESTED + %s 个 PR 的 CI 失败，注入反馈触发 fix_revision",
+    reqId, totalChanges, ciStateUpdates.length,
   );
 
   createComment({
@@ -179,14 +268,19 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
     requirement_id: reqId,
     kind: "feedback",
     from_role: "github",
-    body: sections.join("\n\n---\n\n"),
-    github_review_id: watermarkUpdates[watermarkUpdates.length - 1].latest,
+    body: [...sections, ...ciSections].join("\n\n---\n\n"),
+    github_review_id: watermarkUpdates.length > 0
+      ? watermarkUpdates[watermarkUpdates.length - 1].latest
+      : undefined,
   });
 
-  // per-PR 水位去重
+  // per-PR 水位去重（review 水位 + CI 水位/计数）
   for (const u of watermarkUpdates) {
     if (u.t.scope === "sub") updateSubPrWatermark(reqId, u.t.wsId, u.latest);
     else updateRequirement(reqId, { last_reviewed_event_id: u.latest });
+  }
+  for (const u of ciStateUpdates) {
+    updateSubPrCiState(reqId, u.t.wsId, u.sha, true);
   }
 
   // 触发 fix_revision（跟 P3 手动注入路径一致）
@@ -213,7 +307,7 @@ async function ghPrView(
     "view",
     String(prNumber),
     "--json",
-    "reviews,state,mergeCommit",
+    "reviews,state,mergeCommit,headRefOid,statusCheckRollup",
     "-R",
     `${owner}/${repo}`,
   ];

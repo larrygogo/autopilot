@@ -144,6 +144,19 @@ function onScheduleError(event: AutopilotEvent): void {
   });
 }
 
+function onCiFixLimit(event: AutopilotEvent): void {
+  if (event.type !== "requirement:ci-fix-limit") return;
+  const { id, pr_number, reason } = event.payload;
+  record({
+    type: "ci_fix_limit",
+    title: `PR #${pr_number} 的 CI 自动修复已达上限`,
+    body: preview(reason, 200),
+    related: { type: "requirement", id },
+    context: notificationContextForRequirement(id),
+    actions: [{ intent: { kind: "view_requirement", requirementId: id }, kind: "primary" }],
+  });
+}
+
 function onWatcherRecovery(event: AutopilotEvent): void {
   if (event.type !== "watcher:recovery") return;
   const { taskId, phase, fromStatus, toStatus } = event.payload;
@@ -165,6 +178,7 @@ const SUBSCRIPTIONS: Array<[string, (e: AutopilotEvent) => void]> = [
   ["requirement:active-question-changed", onActiveQuestionChanged],
   ["requirement:clarifier-error", onClarifierError],
   ["requirement:schedule-error", onScheduleError],
+  ["requirement:ci-fix-limit", onCiFixLimit],
   ["watcher:recovery", onWatcherRecovery],
 ];
 

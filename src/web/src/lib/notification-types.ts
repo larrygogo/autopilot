@@ -9,6 +9,7 @@ export type NotificationType =
   | "agent_question"
   | "clarifier_error"
   | "schedule_error"
+  | "ci_fix_limit"
   | "watcher_recovery";
 
 export type NotificationSeverity = "error" | "action" | "info";

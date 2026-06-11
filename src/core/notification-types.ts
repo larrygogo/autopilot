@@ -15,6 +15,7 @@ export type NotificationType =
   | "agent_question"
   | "clarifier_error"
   | "schedule_error"
+  | "ci_fix_limit"
   | "watcher_recovery";
 
 export type NotificationSeverity = "error" | "action" | "info";
@@ -24,6 +25,7 @@ export const SEVERITY_OF: Record<NotificationType, NotificationSeverity> = {
   task_failed: "error",
   clarifier_error: "error",
   schedule_error: "error",
+  ci_fix_limit: "error",
   task_await_review: "action",
   requirement_awaiting_approval: "action",
   agent_question: "action",

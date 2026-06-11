@@ -14,6 +14,10 @@ export interface RequirementSubPr {
   pr_number: number;
   created_at: number;
   last_reviewed_event_id?: string | null;
+  /** 已处理过的 CI 失败 head SHA（迁移 039）—— 同 SHA 不重复触发自动修复 */
+  ci_failed_head_sha?: string | null;
+  /** CI 自动修复已触发次数（迁移 039）—— 达上限后停下报人 */
+  ci_fix_count?: number;
 }
 
 export interface AppendSubPrOpts {
@@ -66,6 +70,25 @@ export function updateSubPrWatermark(
   getDb().run(
     "UPDATE requirement_sub_prs SET last_reviewed_event_id = ? WHERE requirement_id = ? AND child_workspace_id = ?",
     [eventId, requirementId, childWorkspaceId],
+  );
+}
+
+/**
+ * 记录某交付 PR 的 CI 失败处理水位（pr-poller CI 自动修复回路用）：
+ * 写入已处理的失败 head SHA，并把触发计数 +1（bumpCount=false 时只写 SHA，
+ * 用于触顶后「记住这个 SHA 已通知过」不再累加）。
+ */
+export function updateSubPrCiState(
+  requirementId: string,
+  childWorkspaceId: string,
+  failedHeadSha: string,
+  bumpCount: boolean,
+): void {
+  getDb().run(
+    `UPDATE requirement_sub_prs
+     SET ci_failed_head_sha = ?, ci_fix_count = ci_fix_count + ${bumpCount ? 1 : 0}
+     WHERE requirement_id = ? AND child_workspace_id = ?`,
+    [failedHeadSha, requirementId, childWorkspaceId],
   );
 }
 

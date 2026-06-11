@@ -49,6 +49,8 @@ export type AutopilotEvent =
   | { type: "requirement:spec-revised"; payload: { id: string; revision_id: number } }
   | { type: "requirement:clarifier-error"; payload: { id: string; reason: string } }
   | { type: "requirement:schedule-error"; payload: { id: string; reason: string } }
+  // CI 自动修复触顶（pr-poller）：同一交付 PR 的 CI 失败自动修复达上限，停下报人
+  | { type: "requirement:ci-fix-limit"; payload: { id: string; pr_number: number; reason: string } }
   // Provider 健康度（反应式 + 主动 CLI 探测）
   | { type: "provider:health-changed"; payload: { provider: string; healthy: boolean; reason?: string; ts: number } }
   | { type: "provider:health-snapshot"; payload: { states: import("./provider-health").ProviderHealthState[]; ts: number } }

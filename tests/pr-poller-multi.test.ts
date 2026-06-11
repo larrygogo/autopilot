@@ -17,6 +17,7 @@ import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { up as migrate038 } from "../src/migrations/038-sub-pr-review-watermark";
+import { up as migrate039 } from "../src/migrations/039-sub-pr-ci-watermark";
 import { _setDbForTest } from "../src/core/db";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
@@ -36,7 +37,7 @@ describe("pr-poller 多 PR 聚合", () => {
 
   beforeAll(() => {
     db = new Database(":memory:");
-    [migrate001, migrate004, migrate005, migrate006, migrate007, migrate008, migrate021, migrate024, migrate033, migrate038]
+    [migrate001, migrate004, migrate005, migrate006, migrate007, migrate008, migrate021, migrate024, migrate033, migrate038, migrate039]
       .forEach((fn) => fn(db));
     _setDbForTest(db);
     createProject({ id: "proj-001", name: "test-proj" });
@@ -135,6 +136,78 @@ describe("pr-poller 多 PR 聚合", () => {
     await pollOne(id, "gh");
     expect(listFeedbacks(id).length).toBe(1);
     expect(getRequirementById(id)?.status).toBe("awaiting_review");
+  });
+
+  it("CI 失败 → 注入反馈 + fix_revision + per-PR SHA 水位与计数；同 SHA 不重复触发", async () => {
+    const id = setupMultiReq();
+    _setGhRunnerForTest(mockGhByRepo({
+      backend: { state: "OPEN", reviews: [], mergeCommit: null, headRefOid: "aaa111", statusCheckRollup: [] },
+      frontend: {
+        state: "OPEN", reviews: [], mergeCommit: null, headRefOid: "bbb222",
+        statusCheckRollup: [
+          { __typename: "CheckRun", name: "test", status: "COMPLETED", conclusion: "FAILURE", detailsUrl: "https://ci/run/1" },
+          { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
+        ],
+      },
+    }));
+    await pollOne(id, "gh");
+    expect(getRequirementById(id)?.status).toBe("fix_revision");
+    const fbs = listFeedbacks(id);
+    expect(fbs.length).toBe(1);
+    expect(fbs[0].body).toContain("[frontend]");
+    expect(fbs[0].body).toContain("CI 检查失败");
+    expect(fbs[0].body).toContain("test（https://ci/run/1）");
+    const sub = listSubPrs(id).find((s) => s.child_workspace_id === "ws-fe");
+    expect(sub?.ci_failed_head_sha).toBe("bbb222");
+    expect(sub?.ci_fix_count).toBe(1);
+    // 同一 head SHA 再轮询不重复触发
+    setRequirementStatus(id, "awaiting_review");
+    await pollOne(id, "gh");
+    expect(listFeedbacks(id).length).toBe(1);
+    expect(getRequirementById(id)?.status).toBe("awaiting_review");
+  });
+
+  it("checks 未跑完（pending）不触发 CI 回路", async () => {
+    const id = setupMultiReq();
+    _setGhRunnerForTest(mockGhByRepo({
+      backend: { state: "OPEN", reviews: [], mergeCommit: null, headRefOid: "aaa", statusCheckRollup: [] },
+      frontend: {
+        state: "OPEN", reviews: [], mergeCommit: null, headRefOid: "bbb",
+        statusCheckRollup: [
+          { __typename: "CheckRun", name: "test", status: "COMPLETED", conclusion: "FAILURE" },
+          { __typename: "CheckRun", name: "build", status: "IN_PROGRESS" },
+        ],
+      },
+    }));
+    await pollOne(id, "gh");
+    expect(getRequirementById(id)?.status).toBe("awaiting_review");
+    expect(listFeedbacks(id).length).toBe(0);
+  });
+
+  it("CI 自动修复触顶（ci_fix_count >= 上限）→ 停下报人，不再转 fix_revision，但记 SHA 防重复", async () => {
+    const id = setupMultiReq();
+    // 预置：frontend PR 已自动修过 2 次
+    db.run(
+      "UPDATE requirement_sub_prs SET ci_fix_count = 2, ci_failed_head_sha = 'old-sha' WHERE requirement_id = ? AND child_workspace_id = 'ws-fe'",
+      [id],
+    );
+    _setGhRunnerForTest(mockGhByRepo({
+      backend: { state: "OPEN", reviews: [], mergeCommit: null, headRefOid: "aaa", statusCheckRollup: [] },
+      frontend: {
+        state: "OPEN", reviews: [], mergeCommit: null, headRefOid: "new-sha",
+        statusCheckRollup: [
+          { __typename: "CheckRun", name: "test", status: "COMPLETED", conclusion: "FAILURE" },
+        ],
+      },
+    }));
+    await pollOne(id, "gh");
+    // 不自动修：维持 awaiting_review、不注入反馈
+    expect(getRequirementById(id)?.status).toBe("awaiting_review");
+    expect(listFeedbacks(id).length).toBe(0);
+    // 但 SHA 写入（同一失败不重复报人）、计数不再涨
+    const sub = listSubPrs(id).find((s) => s.child_workspace_id === "ws-fe");
+    expect(sub?.ci_failed_head_sha).toBe("new-sha");
+    expect(sub?.ci_fix_count).toBe(2);
   });
 
   it("兼容旧 submodule 数据：主 PR 不在 sub_prs 时并入跟踪集（按 pr_number 去重）", async () => {
