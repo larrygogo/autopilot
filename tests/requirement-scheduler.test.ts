@@ -103,29 +103,9 @@ describe("tickRepo", () => {
     expect(active.length).toBe(1); // fix_revision 计入 active
   });
 
-  it("不同 repo 互不阻塞（active filter 独立）", () => {
-    const idA = nextRequirementId();
-    createRequirement({ id: idA, project_id: "proj-001", workspace_id: "cb-001", title: "A" });
-    setRequirementStatus(idA, "clarifying");
-    setRequirementStatus(idA, "ready");
-    setRequirementStatus(idA, "queued");
-    setRequirementStatus(idA, "running");
-
-    const idB = nextRequirementId();
-    createRequirement({ id: idB, project_id: "proj-001", workspace_id: "cb-002", title: "B" });
-    setRequirementStatus(idB, "clarifying");
-    setRequirementStatus(idB, "ready");
-    setRequirementStatus(idB, "queued");
-
-    // repo-001 有 active；repo-002 没有
-    const r1All = listRequirements({ workspace_id: "cb-001" });
-    const r1Active = r1All.filter((r) => r.status === "running" || r.status === "fix_revision");
-    expect(r1Active.length).toBe(1);
-
-    const r2All = listRequirements({ workspace_id: "cb-002" });
-    const r2Active = r2All.filter((r) => r.status === "running" || r.status === "fix_revision");
-    expect(r2Active.length).toBe(0); // repo-002 无活跃任务，可拉新
-  });
+  // 注：原「不同 repo 互不阻塞」测试已删除——调度已改为全局总上限
+  // （scheduler.max_concurrent_tasks，默认 1），跨 repo 行为见
+  // tests/requirement-scheduler-global.test.ts。
 });
 
 describe("tickRepo 组级锁（父 + 子模块同组 1 active）", () => {
@@ -211,20 +191,6 @@ describe("tickRepo 组级锁（父 + 子模块同组 1 active）", () => {
     expect(getRequirementById(idChildQueued)?.status).toBe("queued");
   });
 
-  it("不同组之间不互相阻塞", async () => {
-    const idA = nextRequirementId();
-    createRequirement({ id: idA, project_id: "proj-grp", workspace_id: "cb-c1", title: "group1-running" });
-    setRequirementStatus(idA, "clarifying");
-    setRequirementStatus(idA, "ready");
-    setRequirementStatus(idA, "queued");
-    setRequirementStatus(idA, "running");
-
-    const all2 = listRequirements({ workspace_id: "cb-p2" });
-    const active2 = all2.filter((r) => r.status === "running" || r.status === "fix_revision");
-    expect(active2.length).toBe(0);
-
-    const all1 = listRequirements({ workspace_id: "cb-c1" });
-    const active1 = all1.filter((r) => r.status === "running" || r.status === "fix_revision");
-    expect(active1.length).toBe(1);
-  });
+  // 注：原「不同组之间不互相阻塞」测试已删除——调度已改为全局总上限，
+  // 一组的 running 在 N=1 时会阻塞其他组拉新，见 tests/requirement-scheduler-global.test.ts。
 });

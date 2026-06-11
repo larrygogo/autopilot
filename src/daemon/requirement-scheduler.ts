@@ -24,7 +24,7 @@ const _inflightGroups = new Set<string>();
  *   两个并发 tick 中，第一个同步置 true，第二个看到 true 后进入 _pendingTicks。
  *   待第一个 tick 完成，finally 中释放锁并触发 drain，串行处理等待队列。
  *
- * 与 _inflightGroups（skip-and-forget）不同：_pendingTicks 确保不丢失。
+ * 无论被全局锁还是同组锁挡住，tick 都进 _pendingTicks 等 drain 重试，确保不丢失。
  */
 let _globalSchedulerLock = false;
 /** 等待全局锁释放后重试的 workspace id（Set 自动去重，同一 workspace 不重复入队）。 */
@@ -69,10 +69,13 @@ export async function tickRepo(workspaceId: string): Promise<void> {
   }
   const groupId = workspace.parent_workspace_id ?? workspace.id;
 
-  // 同组串行守卫（SC-3 TOCTOU）：同组两个事件并发时，跳过是安全的——
-  // in-progress tick 完成后释放 _inflightGroups，下次事件再触发。
+  // 同组串行守卫（SC-3 TOCTOU）：同组两个事件并发时，本次 tick 也入 _pendingTicks
+  // 等当前 tick 结束后 drain 重试。不能 skip-and-forget——若 in-progress tick 的
+  // listRequirements 快照早于新需求入队、且其候选启动失败回滚 ready（组里无 running），
+  // 之后不会再有事件触发，新 queued 会永久卡死（Copilot review #92）。
   if (_inflightGroups.has(groupId)) {
-    log.info("tickRepo: group %s 已有调度在执行，本次跳过（同仓库串行）", groupId);
+    log.info("tickRepo: group %s 已有调度在执行，入队等待重试（同仓库串行）", groupId);
+    _pendingTicks.add(workspaceId);
     return;
   }
 

@@ -199,8 +199,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   let configDirWatcher: ReturnType<typeof fsWatch> | null = null;
   try {
     configDirWatcher = fsWatch(configDir, { persistent: false }, (_event, filename) => {
-      // filename 为 null 时（某些平台不提供）也触发，统一处理
-      if (filename !== null && filename !== configFilename) return;
+      // filename 为 null/undefined 时（某些平台不提供）也触发；
+      // 归一化为 string 再比较（部分环境可能传 Buffer）
+      if (filename != null && String(filename) !== configFilename) return;
       if (configWatchDebounce) clearTimeout(configWatchDebounce);
       configWatchDebounce = setTimeout(() => {
         configWatchDebounce = null;

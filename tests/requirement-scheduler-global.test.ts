@@ -194,6 +194,36 @@ describe("tickRepo 全局并发上限", () => {
     expect(getRequirementById(idC)?.status).not.toBe("queued");
   });
 
+  it("同组锁：同组并发 tickRepo 时，被挡的 tick 也进 pending 重试（Copilot review：不 skip-and-forget）", async () => {
+    // 同一 workspace 两条 queued 需求 + 并发两个 tick。
+    // 单次 tick 只处理最老一条 candidate；若第二个 tick 被同组锁 skip-and-forget，
+    // 第二条需求将永久停在 queued（测试中无事件循环兜底）。
+    // 修复后：被挡 tick 入 _pendingTicks，drain 重试处理第二条 → 两条都脱离 queued。
+    const idB = nextRequirementId();
+    createRequirement({ id: idB, project_id: "proj-global", workspace_id: "ws-g1", title: "B" });
+    pushTo(idB, "queued");
+
+    const idC = nextRequirementId();
+    createRequirement({ id: idC, project_id: "proj-global", workspace_id: "ws-g1", title: "C" });
+    pushTo(idC, "queued");
+
+    await Promise.all([tickRepo("ws-g1"), tickRepo("ws-g1")]);
+
+    const deadline = Date.now() + 500;
+    while (Date.now() < deadline) {
+      if (
+        getRequirementById(idB)?.status !== "queued" &&
+        getRequirementById(idC)?.status !== "queued"
+      ) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+
+    expect(getRequirementById(idB)?.status).not.toBe("queued");
+    expect(getRequirementById(idC)?.status).not.toBe("queued");
+  });
+
   it("全局计数在 N 上限满时不超量（running 数 ≤ N）", async () => {
     writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
 
