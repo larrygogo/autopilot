@@ -41,21 +41,15 @@ export interface NextStepCTAProps {
 }
 
 function resolve(status: string, openQuestionCount: number): NextStepConfig | null {
-  if (status === "drafting" || status === "clarifying") {
+  // drafting 不出 banner：代码库确认卡自带「确认代码库，开始 AI 澄清」主按钮（带上下文的入口），
+  // 这里再出一个「开始 AI 澄清」就是同一动作的重复入口。
+  if (status === "clarifying") {
     if (openQuestionCount > 0) {
       return {
         cta: `去回答 ${openQuestionCount} 个问题`,
         hint: "AI 还有问题待你回答，回答完才能进入下一步。",
         Icon: ArrowDown,
         action: "scrollToQuestions",
-      };
-    }
-    if (status === "drafting") {
-      return {
-        cta: "标为已澄清",
-        hint: "AI 已经把需求整理好，确认无误后进入审批。",
-        Icon: ArrowRight,
-        action: "markReady",
       };
     }
     // clarifying + 没未答问题 = 跑批中（ClarifierProgressCard / Idle 兜底自己显示），不重复

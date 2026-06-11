@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
 import { AttachmentUploader } from "@/components/AttachmentUploader";
+import { RequirementWorkspacePicker } from "@/components/RequirementWorkspacePicker";
 import { AttachmentList } from "@/components/AttachmentList";
 import { TaskFileDiffsCard } from "@/components/TaskFileDiffsCard";
 import { SandboxBrowser } from "@/components/SandboxBrowser";
@@ -137,7 +138,7 @@ function ClarifierOverrideDialog({
         <DialogHeader>
           <DialogTitle>此需求的澄清模型</DialogTitle>
           <DialogDescription>
-            仅作用于本需求。继承全局表示用 /settings?tab=clarifier 的默认。
+            仅作用于本需求。继承全局表示用提供商默认模型。
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -352,7 +353,7 @@ function ClarifierProgressCard({
       {traceOpen && (
         <div className="mt-3 space-y-3">
           {round.last_parse_error && (
-            <div className="border border-l-4 border-border border-l-destructive bg-card px-3 py-2 rounded-md">
+            <div className="border border-border bg-card px-3 py-2 rounded-md">
               <p className="font-mono text-[10px] text-destructive mb-1">
                 上次解析失败
               </p>
@@ -451,7 +452,11 @@ export function RequirementDetail() {
       setStatusLogs(slogs);
       setAttachments(atts);
     } catch (e: unknown) {
-      if (!opts.silent) toast.error("加载失败", (e as Error)?.message ?? String(e));
+      const msg = (e as Error)?.message ?? String(e);
+      // 需求不存在（已删除 / 链接失效）：不弹 toast，由页面空态承接；其他错误（网络等）仍 toast
+      if (!opts.silent && !/not.?found/i.test(msg)) {
+        toast.error("加载失败", msg);
+      }
     } finally {
       if (!opts.silent) setLoading(false);
     }
@@ -535,6 +540,14 @@ export function RequirementDetail() {
     api.getProject(req.project_id).then(setProject).catch(() => setProject(null));
     api.listProjectWorkspaces(req.project_id).then(setProjectCodebases).catch(() => setProjectCodebases([]));
   }, [req?.project_id]);
+
+  // 代码库反写后：静默重拉需求（workspace_ids）+ 项目代码库列表（自定义新建后出现新条目）
+  const reloadWorkspaces = useCallback(() => {
+    void refresh({ silent: true });
+    if (req?.project_id) {
+      api.listProjectWorkspaces(req.project_id).then(setProjectCodebases).catch(() => {});
+    }
+  }, [refresh, req?.project_id]);
 
   // 工作流选项（编辑期下拉用），一次性拉取
   useEffect(() => {
@@ -647,7 +660,7 @@ export function RequirementDetail() {
   async function enqueue() {
     if (!id || !req) return;
     if (!req.workspace_id) {
-      toast.error("请先关联工作区", "需要绑定工作区才能入队执行，请在下方选择工作区。");
+      toast.error("请先选择主代码库", "需要至少一个代码库才能入队执行，请在审批面板的「代码库」卡片中选择。");
       return;
     }
     // optimistic：UI 立刻反映 queued 状态，不等服务端响应
@@ -700,6 +713,24 @@ export function RequirementDetail() {
     } catch (e: unknown) {
       setReq(prev);
       toast.error("驳回失败", (e as Error)?.message ?? String(e));
+    } finally {
+      busyRef.current = false;
+      setActionBusy(false);
+    }
+  }
+
+  /** drafting → clarifying：用户确认代码库后显式开始澄清（守卫在 RPC：无主库会被拒） */
+  async function startClarify() {
+    if (!id || !req) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setActionBusy(true);
+    try {
+      await api.transitionRequirement(id, "clarifying");
+      await refresh({ silent: true });
+      toast.success("已开始澄清，AI 正在克隆代码库并调查");
+    } catch (e: unknown) {
+      toast.error("开始澄清失败", (e as Error)?.message ?? String(e));
     } finally {
       busyRef.current = false;
       setActionBusy(false);
@@ -883,8 +914,38 @@ export function RequirementDetail() {
     }
   }
 
-  if (loading) return <div className="p-6 text-sm text-muted-foreground">加载中…</div>;
-  if (!req) return <div className="p-6 text-sm text-muted-foreground">需求不存在</div>;
+  if (loading) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin" />
+        <p className="mt-3 text-xs">加载需求…</p>
+      </div>
+    );
+  }
+  if (!req) {
+    // 不存在（已删除 / 链接失效）：页面空态承接，不弹 toast
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center px-4">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-card">
+          <FileQuestion className="h-7 w-7 text-muted-foreground/60" />
+        </div>
+        <h2 className="mt-5 text-lg font-semibold">需求不存在</h2>
+        <p className="mt-1.5 max-w-sm text-center text-sm text-muted-foreground">
+          这条需求可能已被删除，或者链接已失效。
+          {id && <span className="mt-1 block font-mono text-[11px] text-muted-foreground/70">{id}</span>}
+        </p>
+        <div className="mt-6 flex items-center gap-2">
+          <Button size="sm" onClick={() => navigate("/tasks")}>
+            <ArrowLeft className="h-3.5 w-3.5" />
+            返回流水线
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => navigate("/library")}>
+            查看项目
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const currentStep = resolveCurrentStep(req.status, req.status_before_terminal);
   const activeStep: ReqStep = selectedStep ?? currentStep;
@@ -988,13 +1049,16 @@ export function RequirementDetail() {
   const subPrCard = subPrs.length > 0 ? (
     <Card>
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-        <span className="text-sm font-medium">关联子 PR</span>
+        <span className="text-sm font-medium">交付 PR</span>
         <Badge variant="secondary">{subPrs.length}</Badge>
       </div>
       <ul className="divide-y divide-border">
         {subPrs.map((p) => (
           <li key={p.id} className="flex items-center gap-3 px-4 py-2 font-mono text-xs">
-            <span className="text-muted-foreground">{p.child_workspace_id}</span>
+            <span className="text-muted-foreground">
+              {projectCodebases.find((cb) => cb.id === p.child_workspace_id)?.alias ?? p.child_workspace_id}
+              {p.child_workspace_id === req.workspace_id && <span className="ml-1 text-warning">（主）</span>}
+            </span>
             <a
               href={p.pr_url}
               target="_blank"
@@ -1025,7 +1089,7 @@ export function RequirementDetail() {
         ) : (
           <ol className="space-y-3">
             {feedbacks.map((fb) => (
-              <li key={fb.id} className="border-l-2 border-accent/60 pl-3">
+              <li key={fb.id} className="border-l-2 border-border pl-3">
                 <div className="mb-1 flex flex-wrap items-center gap-1.5">
                   <Badge variant="outline">{SOURCE_LABEL[fb.source] ?? fb.source}</Badge>
                   <span className="font-mono text-[10px] text-muted-foreground">
@@ -1060,7 +1124,7 @@ export function RequirementDetail() {
   const clarifierStatus = (
     <>
       {req.clarifier_error && req.status === "clarifying" && (
-        <Card className="p-5 border-l-4 border-l-destructive">
+        <Card className="p-5">
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-1 min-w-0">
               <div className="font-mono text-xs text-destructive font-medium">⚠ 澄清出错</div>
@@ -1348,11 +1412,20 @@ export function RequirementDetail() {
             不再露 TASK id —— 用户视角「需求」就是这件工作本身，task 是内核执行概念 */}
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground">
           <span>ID <code className="text-accent">{req.id}</code></span>
-          <span>
-            工作区{" "}
+          <span
+            title={
+              (req.workspace_ids ?? [])
+                .map((wid) => projectCodebases.find((cb) => cb.id === wid)?.alias ?? wid)
+                .join(" · ") || undefined
+            }
+          >
+            代码库{" "}
             {req.workspace_id
               ? (projectCodebases.find((cb) => cb.id === req.workspace_id)?.alias ?? req.workspace_id)
               : "未关联"}
+            {(req.workspace_ids?.length ?? 0) > 1 && (
+              <span className="text-accent"> +{(req.workspace_ids!.length - 1)}</span>
+            )}
           </span>
           <span className="inline-flex items-center gap-1">
             工作流{" "}
@@ -1474,6 +1547,29 @@ export function RequirementDetail() {
             const readonly = pos === "past";
 
             if (activeStep === "clarify") {
+              // drafting = 澄清未开始：先确认代码库（澄清 agent 在其浅 clone 中调查），再显式开始
+              if (req.status === "drafting" && !readonly) {
+                return (
+                  <>
+                    <RequirementWorkspacePicker
+                      requirement={req}
+                      workspaces={projectCodebases}
+                      disabled={actionBusy}
+                      onChanged={reloadWorkspaces}
+                    />
+                    <Button
+                      className="w-full"
+                      onClick={startClarify}
+                      disabled={actionBusy || !req.workspace_id}
+                      title={!req.workspace_id ? "请先选择代码库（澄清基于代码库的克隆进行）" : undefined}
+                    >
+                      {actionBusy ? "处理中…" : "确认代码库，开始 AI 澄清 →"}
+                    </Button>
+                    {specCard}
+                    {attachmentSection}
+                  </>
+                );
+              }
               return (
                 <>
                   {clarifierStatus}
@@ -1500,7 +1596,7 @@ export function RequirementDetail() {
               return (
                 <>
                   {req.schedule_error && (
-                    <Card className="border-l-4 border-l-destructive p-4">
+                    <Card className="p-4">
                       <div className="flex items-start gap-2">
                         <span className="shrink-0 text-destructive">⚠</span>
                         <div className="min-w-0 text-sm">
@@ -1535,6 +1631,13 @@ export function RequirementDetail() {
                     </Card>
                   ) : (
                     <>
+                      {/* 审批阶段反写：本需求涉及哪些代码库（多选 + 主库 + 自定义新建） */}
+                      <RequirementWorkspacePicker
+                        requirement={req}
+                        workspaces={projectCodebases}
+                        disabled={actionBusy}
+                        onChanged={reloadWorkspaces}
+                      />
                       {specCard}
                       {attachmentSection}
                       {req.status === "awaiting_approval" && (
