@@ -15,6 +15,7 @@
  * 右侧 ACTIONS 卡仍保留作为"完整操作"列表（含次要/危险动作）。
  */
 
+import type { ReactNode } from "react";
 import { ArrowRight, ArrowDown, RotateCcw, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -32,6 +33,8 @@ export interface NextStepCTAProps {
   /** drafting/clarifying 时的未答问题数（影响 CTA 文案） */
   openQuestionCount?: number;
   busy?: boolean;
+  /** 渲染在主按钮左侧的附加决策控件（如审批/入队/重试时的工作流选择） */
+  extra?: ReactNode;
   onMarkReady?: () => void;
   onEnqueue?: () => void;
   onApprove?: () => void;
@@ -137,16 +140,19 @@ export function NextStepCTA(props: NextStepCTAProps) {
         </span>
         <p className="text-sm leading-relaxed text-foreground">{cfg.hint}</p>
       </div>
-      <Button
-        size="lg"
-        variant={isDanger ? "destructive" : "default"}
-        disabled={props.busy}
-        onClick={handler}
-        className="shrink-0 rounded-md text-xs"
-      >
-        {props.busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Icon className="mr-1.5 h-4 w-4" />}
-        {props.busy ? "处理中…" : cfg.cta}
-      </Button>
+      <div className="flex shrink-0 flex-wrap items-center gap-3">
+        {props.extra}
+        <Button
+          size="lg"
+          variant={isDanger ? "destructive" : "default"}
+          disabled={props.busy}
+          onClick={handler}
+          className="shrink-0 rounded-md text-xs"
+        >
+          {props.busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Icon className="mr-1.5 h-4 w-4" />}
+          {props.busy ? "处理中…" : cfg.cta}
+        </Button>
+      </div>
     </div>
   );
 }

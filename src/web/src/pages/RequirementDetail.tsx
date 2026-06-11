@@ -1433,27 +1433,12 @@ export function RequirementDetail() {
               <span className="text-accent"> +{(req.workspace_ids!.length - 1)}</span>
             )}
           </span>
+          {/* 工作流：此处只展示；选择/切换在下方「下一步」banner（审批/入队/重试的决策时刻） */}
           <span className="inline-flex items-center gap-1">
             工作流{" "}
-            {canEditRequirementContent(req.status) ? (
-              <select
-                value={req.workflow ?? "dev"}
-                onChange={(e) => void changeWorkflow(e.target.value)}
-                disabled={savingWorkflow || workflowOptions.length === 0}
-                className="rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[11px] focus:border-accent focus:outline-none"
-                title="该需求入队后用哪个工作流执行；审批后冻结"
-              >
-                {workflowOptions.length === 0 && <option value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</option>}
-                {workflowOptions.map((w) => (
-                  // 业务标签（中文 label）为主，内核名括注（无 label 的工作流只显示 name）
-                  <option key={w.name} value={w.name}>{w.label ? `${w.label}（${w.name}）` : w.name}</option>
-                ))}
-              </select>
-            ) : (
-              <code title={`审批后工作流随内容冻结（内核名：${req.workflow ?? "dev"}）`}>
-                {workflowOptions.find((w) => w.name === (req.workflow ?? "dev"))?.label ?? req.workflow ?? "dev"}
-              </code>
-            )}
+            <code title={`内核名：${req.workflow ?? "dev"}（审批后随内容冻结）`}>
+              {workflowOptions.find((w) => w.name === (req.workflow ?? "dev"))?.label ?? req.workflow ?? "dev"}
+            </code>
           </span>
           <span>创建 {new Date(req.created_at).toLocaleString()}</span>
           <span>更新 {new Date(req.updated_at).toLocaleString()}</span>
@@ -1465,11 +1450,32 @@ export function RequirementDetail() {
         <StepBar status={req.status} statusBeforeTerminal={req.status_before_terminal} selected={activeStep} onSelect={setSelectedStep} />
       </div>
 
-      {/* 下一步主 CTA banner */}
+      {/* 下一步主 CTA banner；审批/入队/重试 = 决定执行方式的时刻，工作流选择内联在按钮旁 */}
       <NextStepCTA
         status={req.status}
         openQuestionCount={openQuestions.length}
         busy={actionBusy}
+        extra={
+          canEditRequirementContent(req.status) &&
+          ["ready", "awaiting_approval", "failed"].includes(req.status) ? (
+            <label className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+              工作流
+              <select
+                value={req.workflow ?? "dev"}
+                onChange={(e) => void changeWorkflow(e.target.value)}
+                disabled={savingWorkflow || workflowOptions.length === 0}
+                className="rounded-md border border-border bg-card px-2 py-1.5 font-mono text-xs focus:border-accent focus:outline-none"
+                title="该需求入队后用哪个工作流执行；审批后冻结"
+              >
+                {workflowOptions.length === 0 && <option value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</option>}
+                {workflowOptions.map((w) => (
+                  // 业务标签（中文 label）为主，内核名括注（无 label 的工作流只显示 name）
+                  <option key={w.name} value={w.name}>{w.label ? `${w.label}（${w.name}）` : w.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : undefined
+        }
         onMarkReady={markReady}
         onEnqueue={enqueue}
         onApprove={approve}
@@ -1578,6 +1584,13 @@ export function RequirementDetail() {
               }
               return (
                 <>
+                  {/* 澄清进行中/回看：常驻展示已确认的代码库（冻结，只读） */}
+                  <RequirementWorkspacePicker
+                    requirement={req}
+                    workspaces={projectCodebases}
+                    readOnly
+                    onChanged={reloadWorkspaces}
+                  />
                   {clarifierStatus}
                   {chatCard}
                   {!readonly && (
@@ -1637,12 +1650,11 @@ export function RequirementDetail() {
                     </Card>
                   ) : (
                     <>
-                      {/* 审批阶段：代码库已在澄清前确认过，默认只读摘要，「调整」才展开反写 */}
+                      {/* 审批阶段：代码库在澄清前确认、开始澄清即冻结（中途换库会让澄清失效），只读展示 */}
                       <RequirementWorkspacePicker
                         requirement={req}
                         workspaces={projectCodebases}
-                        disabled={actionBusy}
-                        collapsed
+                        readOnly
                         onChanged={reloadWorkspaces}
                       />
                       {specCard}

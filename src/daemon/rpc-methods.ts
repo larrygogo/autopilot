@@ -953,7 +953,7 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.setWorkspaces",
-    description: "审批阶段反写需求的代码库集合（整体替换 + 设主库；审批后冻结，failed 例外）",
+    description: "澄清前确认需求的代码库集合（整体替换 + 设主库；开始澄清后冻结——澄清基于已选库做，临时换库会让澄清失效。failed 例外 = 重试设计用途）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
@@ -974,12 +974,13 @@ export function registerCoreRpcMethods(): void {
       }
       const cur = getRequirementById(p.id);
       if (!cur) throw new RpcError("NOT_FOUND", "requirement not found");
-      // 审批后冻结（与 requirements.update 同口径；failed 例外 = 重试设计用途）
-      const EDITABLE_STATUSES = new Set(["drafting", "clarifying", "ready", "awaiting_approval", "failed"]);
+      // 开始澄清即冻结：澄清 agent 基于已选代码库的浅 clone 调查提问，
+      // 中途换库会让已完成的澄清失效（failed 例外 = 重试设计用途，用户自担）
+      const EDITABLE_STATUSES = new Set(["drafting", "failed"]);
       if (!EDITABLE_STATUSES.has(cur.status)) {
         throw new RpcError(
           "INVALID_STATE",
-          `需求已通过审批（当前状态 ${cur.status}），代码库集合不可再编辑。执行内容以入队时的快照为准。`,
+          `代码库集合在开始澄清后冻结（当前状态 ${cur.status}）——澄清基于已选代码库进行，中途更换会使澄清结论失效。`,
         );
       }
       for (const wid of wsIds) {

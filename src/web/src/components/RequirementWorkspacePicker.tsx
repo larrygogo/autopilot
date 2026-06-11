@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FolderGit2, Plus, Star, Loader2, Trash2, Settings2 } from "lucide-react";
+import { FolderGit2, Plus, Star, Loader2, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,22 +16,22 @@ import { cn } from "@/lib/utils";
  * - 未勾选的库可就地删除（勾选中 = 本需求在用，先取消勾选；其他需求引用时后端 IN_USE 拦截）
  * - 每次变更即时调 requirements.setWorkspaces 反写（PUT 语义幂等），无独立保存按钮
  * - 约束：至少保留一个；取消主库时自动提升剩余第一个为主库
- * - collapsed：初始渲染为只读摘要（已选库 + 主库星标 + 「调整」展开）。审批阶段用 ——
- *   代码库在澄清前已确认过，审批时默认不再重复完整选择器
+ * - readOnly：只渲染只读摘要（已选库 + 主库星标），无任何编辑入口。审批及之后用 ——
+ *   代码库在澄清前确认、开始澄清即冻结（中途换库会让澄清失效），后端 setWorkspaces 同口径拦截
  */
 export function RequirementWorkspacePicker({
   requirement: req,
   workspaces,
   disabled,
-  collapsed,
+  readOnly,
   onChanged,
 }: {
   requirement: Requirement;
   /** 该需求所属项目下的全部代码库 */
   workspaces: Workspace[];
   disabled?: boolean;
-  /** 初始收起为只读摘要，点「调整」才展开完整选择器 */
-  collapsed?: boolean;
+  /** 只读摘要模式（澄清开始后代码库冻结） */
+  readOnly?: boolean;
   /** 反写成功 / 新建代码库后通知父组件刷新 */
   onChanged: () => void;
 }) {
@@ -43,7 +43,6 @@ export function RequirementWorkspacePicker({
   const [newUrl, setNewUrl] = useState("");
   const [newAlias, setNewAlias] = useState("");
   const [creating, setCreating] = useState(false);
-  const [expanded, setExpanded] = useState(!collapsed);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // 服务端状态 → 本地选择态（req 或集合变化时重置）
@@ -145,8 +144,8 @@ export function RequirementWorkspacePicker({
     }
   }
 
-  // 收起态：只读摘要（澄清前已确认过，审批时无需重复完整选择器）
-  if (!expanded) {
+  // 只读态：澄清开始后代码库冻结（中途换库会让澄清失效），仅展示无编辑入口
+  if (readOnly) {
     const chosen = workspaces.filter((w) => selected.has(w.id));
     return (
       <Card className="p-4">
@@ -154,34 +153,20 @@ export function RequirementWorkspacePicker({
           <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="shrink-0 text-sm font-semibold">代码库</span>
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-            {chosen.length === 0 ? (
-              <span className="text-xs text-destructive">未选择（请展开调整）</span>
-            ) : (
-              chosen.map((w) => (
-                <span
-                  key={w.id}
-                  className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs"
-                  title={w.remote_url ?? undefined}
-                >
-                  {w.alias}
-                  {primary === w.id && <Star className="h-3 w-3 fill-current text-warning" />}
-                </span>
-              ))
-            )}
+            {chosen.map((w) => (
+              <span
+                key={w.id}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs"
+                title={w.remote_url ?? undefined}
+              >
+                {w.alias}
+                {primary === w.id && <Star className="h-3 w-3 fill-current text-warning" />}
+              </span>
+            ))}
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0"
-            onClick={() => setExpanded(true)}
-            disabled={disabled}
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            调整
-          </Button>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          已在澄清前确认。任务只在主库（星标）改动并提交，其余作为只读上下文提供给 Agent。
+          已在澄清前确认，开始澄清后冻结。任务只在主库（星标）改动并提交，其余作为只读上下文提供给 Agent。
         </p>
       </Card>
     );
@@ -195,14 +180,7 @@ export function RequirementWorkspacePicker({
         <span className="font-mono text-[10px] text-muted-foreground">
           已选 {selected.size} · 星标 = 主库（任务在此执行）
         </span>
-        <span className="ml-auto flex items-center gap-2">
-          {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-          {collapsed && (
-            <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>
-              收起
-            </Button>
-          )}
-        </span>
+        {saving && <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground" />}
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
         本需求涉及哪些代码库由你在此确认；任务只在主库改动并提交，其余作为只读上下文提供给 Agent。

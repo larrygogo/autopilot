@@ -568,7 +568,7 @@ export const api = {
     project_id?: string;
   }) =>
     requestRpc<Workspace>("workspaces.create", body),
-  // [WS-RPC] requirements.setWorkspaces —— 审批阶段反写代码库集合（整体替换 + 主库）
+  // [WS-RPC] requirements.setWorkspaces —— 澄清前确认代码库集合（开始澄清后冻结；failed 例外）
   setRequirementWorkspaces: (id: string, workspaceIds: string[], primaryWorkspaceId?: string) =>
     requestRpc<{ requirement: Requirement; workspace_ids: string[] }>("requirements.setWorkspaces", {
       id,
