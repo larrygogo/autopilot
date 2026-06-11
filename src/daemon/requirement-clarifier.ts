@@ -1,10 +1,10 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { onEvent, offEvent, emit } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { getRequirementById, updateRequirement, setActiveQuestionId, setRequirementStatus } from "../core/requirements";
 import { getProjectById } from "../core/projects";
-import { getWorkspaceById } from "../core/workspaces";
+import { getWorkspaceById, type Workspace } from "../core/workspaces";
 import {
   createComment,
   nextCommentId,
@@ -20,6 +20,7 @@ import {
 import { buildClarifierAgent } from "./clarifier-agent";
 import { parseLlmYamlWrapper } from "../core/llm-yaml";
 import { listAttachments, buildAttachmentContext } from "../core/requirement-attachments";
+import { ensureRequirementClone, deleteRequirementClone } from "../core/requirement-clone";
 import {
   getSession,
   upsertSession,
@@ -49,6 +50,7 @@ type ClarifyFn = (
   prompt: string,
   reqId: string,
   sessionRef?: string,
+  cwd?: string,
 ) => Promise<{ rawText: string; newSessionRef?: string }>;
 
 let _clarifyFn: ClarifyFn = callClaude;
@@ -61,6 +63,7 @@ async function callClaude(
   prompt: string,
   reqId: string,
   sessionRef?: string,
+  cwd?: string,
 ): Promise<{ rawText: string; newSessionRef?: string }> {
   // 通过 agent 系统调用。merge 顺序：req-level override > 默认 (anthropic + provider 默认 model)
   let agent;
@@ -78,15 +81,16 @@ async function callClaude(
   }
 
   if (resolvedProvider === "anthropic") {
-    // Anthropic：chat() 已实现，支持 providerSessionId 续 session
-    const result = await agent.chat(prompt, { providerSessionId: sessionRef });
+    // Anthropic：chat() 已实现，支持 providerSessionId 续 session。
+    // cwd = 需求级浅 clone（如有）：agent 在仓库目录中，可用读类工具自查代码后再提问
+    const result = await agent.chat(prompt, { providerSessionId: sessionRef, cwd });
     const rawText = result.text.trim();
     if (!rawText) throw new Error("clarifier agent 返回空");
     return { rawText, newSessionRef: result.providerSessionId };
   } else {
     // OpenAI/Google：chat() 未实现（base.ts 抛错），沿用 run()，不做 session 跟踪
     // 传入的 sessionRef 被忽略；返回 newSessionRef = undefined
-    const result = await agent.run(prompt);
+    const result = await agent.run(prompt, cwd ? { cwd } : undefined);
     const rawText = result.text.trim();
     if (!rawText) throw new Error("clarifier agent 返回空");
     return { rawText, newSessionRef: undefined };
@@ -97,24 +101,149 @@ async function callClaude(
 // Prompt 构造
 // ──────────────────────────────────────────────
 
-function readWorkspaceContext(workspacePath: string): string {
-  const candidates = ["CLAUDE.md", "README.md", "README"];
+const REPO_DOC_CANDIDATES = ["CLAUDE.md", "README.md", "README"];
+
+/** 远程文档缓存：澄清是多轮的，避免每轮重复打 gh api（key: ws.id:branch，TTL 10 分钟） */
+const remoteDocCache = new Map<string, { at: number; content: string }>();
+const REMOTE_DOC_TTL_MS = 10 * 60_000;
+const REMOTE_DOC_FETCH_TIMEOUT_MS = 10_000;
+
+function readLocalWorkspaceDocs(workspacePath: string): string {
   const snippets: string[] = [];
-  for (const name of candidates) {
+  for (const name of REPO_DOC_CANDIDATES) {
     const file = join(workspacePath, name);
     if (existsSync(file)) {
       const content = readFileSync(file, "utf-8").slice(0, 4000);
-      snippets.push(`### ${name}\n${content}`);
+      snippets.push(`### 自述文档 ${name}\n${content}`);
     }
   }
   return snippets.join("\n\n");
+}
+
+/** 本地仓库结构事实：顶层条目清单（目录带 / 后缀；.git 排除，上限 40 项） */
+function readLocalStructure(workspacePath: string): string {
+  try {
+    const entries = readdirSync(workspacePath, { withFileTypes: true })
+      .filter((e) => e.name !== ".git")
+      .slice(0, 40)
+      .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
+    return entries.length > 0
+      ? `### 结构事实（机器采集）\n顶层条目：${entries.join(" ")}`
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+/** 跑一次 gh，带超时强杀；失败返回 null */
+async function runGh(args: string[]): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
+    const killTimer = setTimeout(() => { try { proc.kill(); } catch { /* ignore */ } }, REMOTE_DOC_FETCH_TIMEOUT_MS);
+    const exit = await proc.exited;
+    clearTimeout(killTimer);
+    if (exit !== 0) return null;
+    return await new Response(proc.stdout).text();
+  } catch {
+    return null; // gh 缺失 / 被 kill
+  }
+}
+
+/** 语言字节数 → "TypeScript 82.3%、CSS 9.1%"（取前 6） */
+function formatLanguages(json: Record<string, number>): string {
+  const total = Object.values(json).reduce((a, b) => a + b, 0);
+  if (!total) return "";
+  return Object.entries(json)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([k, v]) => `${k} ${((v / total) * 100).toFixed(1)}%`)
+    .join("、");
+}
+
+/**
+ * 按 remote_url 经 gh api 拉仓库上下文（私有库走 gh 凭证；非 GitHub 远程返回空）。
+ * 两部分：①结构事实（语言构成 + 顶层目录树——机器采集的客观信号，文档缺失/有错时的兜底）
+ * ②自述文档（CLAUDE.md/README 摘录，prompt 里已声明仅作线索）。
+ * 失败全静默容错（gh 缺失 / 未登录 / 404 / 网络）——上下文是增益项，不阻塞澄清。
+ */
+async function fetchRemoteWorkspaceContext(ws: Workspace): Promise<string> {
+  let owner = ws.github_owner;
+  let repo = ws.github_repo;
+  if (!owner || !repo) {
+    const m = (ws.remote_url ?? "").match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
+    if (m) { owner = m[1]; repo = m[2]; }
+  }
+  if (!owner || !repo) return "";
+
+  const key = `${ws.id}:${ws.default_branch}`;
+  const hit = remoteDocCache.get(key);
+  if (hit && Date.now() - hit.at < REMOTE_DOC_TTL_MS) return hit.content;
+
+  const sections: string[] = [];
+
+  // ① 结构事实：语言构成 + 顶层目录（并发拉）
+  const [langRaw, treeRaw] = await Promise.all([
+    runGh(["api", `repos/${owner}/${repo}/languages`]),
+    runGh(["api", `repos/${owner}/${repo}/git/trees/${encodeURIComponent(ws.default_branch)}`]),
+  ]);
+  const factLines: string[] = [];
+  if (langRaw) {
+    try {
+      const langs = formatLanguages(JSON.parse(langRaw) as Record<string, number>);
+      if (langs) factLines.push(`语言构成：${langs}`);
+    } catch { /* ignore */ }
+  }
+  if (treeRaw) {
+    try {
+      const tree = (JSON.parse(treeRaw) as { tree?: Array<{ path: string; type: string }> }).tree ?? [];
+      const entries = tree.slice(0, 40).map((e) => (e.type === "tree" ? `${e.path}/` : e.path));
+      if (entries.length > 0) factLines.push(`顶层条目：${entries.join(" ")}`);
+    } catch { /* ignore */ }
+  }
+  if (factLines.length > 0) {
+    sections.push(`### 结构事实（机器采集）\n${factLines.join("\n")}`);
+  }
+
+  // ② 自述文档
+  for (const name of REPO_DOC_CANDIDATES) {
+    const raw = await runGh([
+      "api",
+      `repos/${owner}/${repo}/contents/${encodeURIComponent(name)}?ref=${encodeURIComponent(ws.default_branch)}`,
+      "-H", "Accept: application/vnd.github.raw",
+    ]);
+    if (raw && raw.trim()) sections.push(`### 自述文档 ${name}\n${raw.slice(0, 4000)}`);
+  }
+
+  const content = sections.join("\n\n");
+  // 空结果也缓存：避免对没有这些文档的仓库每轮反复打 404
+  remoteDocCache.set(key, { at: Date.now(), content });
+  if (content) {
+    log.info("clarifier: 已从远程拉取 %s/%s 仓库上下文（%d 字）", owner, repo, content.length);
+  }
+  return content;
+}
+
+/**
+ * 仓库快照上下文 —— **仅 clone 失败的降级模式**（clone 就绪时探索交给 agent，不预拼接）。
+ * ① 老工作区本地 path → ② 按 remote_url 经 gh api 远程拉（结构事实 + 自述文档）。
+ * 结构事实是文档缺失/过期时的客观兜底信号。
+ */
+async function readWorkspaceContext(ws: Workspace): Promise<string> {
+  if (ws.path && existsSync(ws.path)) {
+    const parts = [readLocalStructure(ws.path), readLocalWorkspaceDocs(ws.path)].filter(Boolean);
+    if (parts.length > 0) return parts.join("\n\n");
+  }
+  return fetchRemoteWorkspaceContext(ws);
 }
 
 function buildPrompt(opts: {
   projectName: string;
   projectDescription: string | null;
   workspaceAlias: string | null;
+  /** 仓库快照上下文 —— 仅 clone 失败的降级模式使用（clone 就绪时不预拼接，探索交给 agent） */
   workspaceContext: string | null;
+  /** 需求级浅 clone 就绪：agent cwd 已指向仓库，自主探索（读文件 / 搜索 / git 命令 / 加深历史） */
+  repoCheckout?: { branch: string } | null;
   title: string;
   specMd: string;
   qaHistory: string;
@@ -125,9 +254,29 @@ function buildPrompt(opts: {
   ctxLines.push(`项目名称：${opts.projectName}`);
   if (opts.projectDescription) ctxLines.push(`项目描述：${opts.projectDescription}`);
   if (opts.workspaceAlias) ctxLines.push(`关联工作区：${opts.workspaceAlias}`);
+  if (opts.repoCheckout) {
+    ctxLines.push("");
+    ctxLines.push(
+      "## 仓库代码（浅克隆，自主探索）\n" +
+      `你的当前工作目录是本需求关联仓库的**浅克隆**（\`git clone --depth 1 --single-branch\`，` +
+      `仅 \`${opts.repoCheckout.branch}\` 分支的最新提交，没有历史记录）。\n\n` +
+      "**怎么了解这个项目由你决定**：读任何你认为有价值的文件（README / CLAUDE.md / 源码 / 配置 / 测试）、" +
+      "全文搜索、跑 git 命令；需要提交历史时可以 `git fetch --deepen <N>`（或 `--unshallow`）自行加深克隆。\n\n" +
+      "目标只有一个：把项目了解到足以提出**精准的问题**——能从代码确认的事实" +
+      "（某功能是否存在、入口在哪、技术栈是什么）不要拿去问用户；把提问机会留给代码答不了的部分" +
+      "（产品意图、优先级取舍、验收标准）。\n\n" +
+      "边界：这是一次性的需求级副本，仅供你了解项目——**禁止 push、禁止任何改动远程的操作**；" +
+      "修改本地文件没有意义（不会被任何流程使用）。",
+    );
+  }
   if (opts.workspaceContext) {
     ctxLines.push("");
-    ctxLines.push("## 工作区文档");
+    ctxLines.push("## 仓库背景（自动采集）");
+    ctxLines.push(
+      "> ⚠ 其中「自述文档」是仓库里的 CLAUDE.md/README 摘录，**可能过期、不完整甚至有错**——" +
+      "只作背景线索，不要当作事实引用；与用户描述冲突时以用户为准，拿不准的关键前提应当向用户提问验证。" +
+      "「结构事实」（语言构成/顶层目录）是机器采集的客观信号，可信度更高。",
+    );
     ctxLines.push(opts.workspaceContext);
   }
 
@@ -339,6 +488,21 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   }
   const workspace = req.workspace_id ? getWorkspaceById(req.workspace_id) : null;
 
+  // 需求级浅 clone（首轮建、后续轮幂等复用）：澄清 agent 的 cwd 指向它，
+  // 可用读类工具直接查代码验证事实再提问。clone 失败退化为无代码模式（不阻塞）。
+  let cloneDir: string | null = null;
+  if (workspace?.remote_url) {
+    // clone 可能耗时几十秒（首轮），给前端专属阶段而不是让用户以为卡在 LLM 调用
+    setPhase(reqId, "cloning-repo");
+    try {
+      cloneDir = await ensureRequirementClone(reqId, workspace);
+    } catch (e: unknown) {
+      log.warn("clarifier: 需求级 clone 失败，退化无代码模式 req=%s: %s",
+        reqId, e instanceof Error ? e.message : String(e));
+    }
+    setPhase(reqId, "preparing");
+  }
+
   // 开始新一轮：清除上次的错误（如果有）
   if (req.clarifier_error) {
     updateRequirement(reqId, { clarifier_error: null });
@@ -397,7 +561,10 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     projectName: project.name,
     projectDescription: project.description,
     workspaceAlias: workspace?.alias ?? null,
-    workspaceContext: workspace?.path ? readWorkspaceContext(workspace.path) : null,
+    // clone 就绪时不预拼接快照（探索交给 agent 自主）；clone 失败才降级到快照模式
+    workspaceContext:
+      cloneDir != null ? null : workspace ? (await readWorkspaceContext(workspace)) || null : null,
+    repoCheckout: cloneDir != null && workspace ? { branch: workspace.default_branch } : null,
     title: req.title,
     specMd: req.spec_md ?? "",
     // useReplay 时 qaHistory 传空：历史信息由 messagesReplay 段落承载，两者互斥
@@ -432,7 +599,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     try {
       setPhase(reqId, "calling-llm", { attempt: i as 0 | 1, prompt: attemptPrompt });
 
-      const { rawText, newSessionRef } = await _clarifyFn(attemptPrompt, reqId, attemptRef);
+      const { rawText, newSessionRef } = await _clarifyFn(attemptPrompt, reqId, attemptRef, cloneDir ?? undefined);
       attemptRaw = rawText;
       result = parseClarifyResult(rawText);
       resolvedRawText     = rawText;
@@ -579,6 +746,10 @@ export function initRequirementClarifier(): void {
     // 终态 → 清理 session（done/cancelled/failed）
     if (to === "done" || to === "cancelled" || to === "failed") {
       deleteSession(id, "clarifying");
+    }
+    // done/cancelled → 清理需求级浅 clone；failed 保留（补约束重试还要继续澄清）
+    if (to === "done" || to === "cancelled") {
+      try { deleteRequirementClone(id); } catch { /* 清理失败不阻塞 */ }
     }
 
     if (to !== "clarifying") return;

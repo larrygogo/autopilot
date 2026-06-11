@@ -297,6 +297,7 @@ function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode 
 
 const PHASE_LABEL: Record<ClarifierRoundState["phase"], string> = {
   preparing: "准备 prompt",
+  "cloning-repo": "克隆代码库",
   "calling-llm": "调用 LLM 中",
   parsing: "解析返回（重试中）",
   writing: "写入 spec / 问题",
@@ -307,6 +308,7 @@ const PHASE_LABEL: Record<ClarifierRoundState["phase"], string> = {
 
 const ACTIVE_PHASES = new Set<ClarifierRoundState["phase"]>([
   "preparing",
+  "cloning-repo",
   "calling-llm",
   "parsing",
   "writing",
@@ -324,16 +326,20 @@ function ClarifierProgressCard({
   onToggleTrace: () => void;
 }): React.ReactNode {
   const attemptLabel = round.attempt === 0 ? "第 1 次" : "第 2 次（重试）";
+  // clone 阶段还没碰 LLM —— 显示「初始化代码库」而不是误导性的「LLM 调用」
+  const isCloning = round.phase === "cloning-repo";
   return (
     <Card className="p-5">
       <div className="flex items-center gap-3">
         <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="font-mono text-xs text-muted-foreground">
-            AI 正在思考…
+            {isCloning ? "正在初始化代码库…" : "AI 正在思考…"}
           </div>
           <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/80">
-            {attemptLabel} LLM 调用 · 阶段：{PHASE_LABEL[round.phase]}
+            {isCloning
+              ? "克隆需求代码库供 AI 调查（首次较慢，完成后开始提问）"
+              : `${attemptLabel} LLM 调用 · 阶段：${PHASE_LABEL[round.phase]}`}
           </div>
         </div>
         <div className="font-mono text-xs tabular-nums text-muted-foreground shrink-0">

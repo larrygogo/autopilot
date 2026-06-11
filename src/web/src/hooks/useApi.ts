@@ -1,4 +1,4 @@
-import type { NowCard } from "../lib/now-types";
+import type { Notification } from "../lib/notification-types";
 import { rpcCall } from "../lib/ws-singleton";
 import { RpcCallError, type CallOptions } from "../lib/ws-rpc-client";
 import { getApiToken, shouldUseToken } from "../lib/api-token";
@@ -417,19 +417,7 @@ export const api = {
   // Agents — 命名复用 agent 机制已删除（Phase 3）。
   // agent 配置现在内联挂在 phase 上；试跑见下方 dryRunAgent（收内联配置对象）。
 
-  // Chat
-  chat: (body: { message: string; session_id?: string; agent?: string; workflow?: string; title?: string }) =>
-    request<{ session_id: string; message: ChatMessage }>("/api/chat", {
-      method: "POST", body: JSON.stringify(body),
-    }),
-  // [WS-RPC] sessions.list
-  listSessions: () => requestRpc<ChatSessionManifest[]>("sessions.list"),
-  // [WS-RPC] sessions.get
-  getSession: (id: string) =>
-    requestRpc<ChatSessionManifest & { messages: ChatMessage[] }>("sessions.get", { id }),
-  // [WS-RPC] sessions.delete
-  deleteSession: (id: string) =>
-    requestRpc<{ ok: true }>("sessions.delete", { id }),
+  // Chat（独立对话页已于 2026-06-11 删除；后端 chat/sessions 设施保留给需求澄清使用）
 
   // Defaults（用户偏好）
   // [WS-RPC] defaults.get
@@ -542,16 +530,8 @@ export const api = {
   // [WS-RPC] projects.create
   createProject: (body: { name: string; description?: string }) =>
     requestRpc<{ project: Project }>("projects.create", body).then((r) => r.project),
-  // [WS-RPC] projects.createWithWorkspace — 原子创建项目 + 工作区
-  createProjectWithWorkspace: (body: {
-    name: string;
-    remote_url: string;
-    /** 历史兼容；新流程不再传 */
-    path?: string;
-    alias?: string;
-    description?: string;
-  }) =>
-    requestRpc<{ project: Project; workspace: Workspace }>("projects.createWithWorkspace", body),
+  // projects.createWithWorkspace（原子创建项目+代码库）现仅 CLI 在用；
+  // Web 新建项目已简化为只填名称/描述，代码库在项目「代码库」分区单独关联
   // [WS-RPC] projects.update
   updateProject: (id: string, body: { name?: string; description?: string | null }) =>
     requestRpc<{ project: Project }>("projects.update", { id, ...body }).then((r) => r.project),
@@ -561,12 +541,8 @@ export const api = {
   // [WS-RPC] projects.workspaces
   listProjectWorkspaces: (projectId: string) =>
     requestRpc<{ workspaces: Workspace[] }>("projects.workspaces", { id: projectId }).then((r) => r.workspaces),
-  // [WS-RPC] projects.addWorkspace
-  createProjectWorkspace: (
-    projectId: string,
-    body: { alias: string; remote_url: string; default_branch?: string; github_owner?: string | null; github_repo?: string | null },
-  ) =>
-    requestRpc<{ workspace: Workspace }>("projects.addWorkspace", { id: projectId, ...body }).then((r) => r.workspace),
+  // projects.addWorkspace 是远程化前的本地 path 模式老接口（alias+path 必填），Web 不再调用；
+  // 新建代码库统一走 workspaces.create（见 createWorkspace，仅凭远程 URL 注册）
   // [WS-RPC] workspaces.delete —— 默认拒删 in-use workspace；force=true 才允许级联清空
   deleteWorkspace: (workspaceId: string, force = false) =>
     requestRpc<{ ok: true }>("workspaces.delete", { id: workspaceId, force }),
@@ -584,13 +560,21 @@ export const api = {
   // [WS-RPC] workspaces.create
   createWorkspace: (body: {
     alias: string;
-    path: string;
+    path?: string;
+    remote_url?: string;
     default_branch?: string;
     github_owner?: string | null;
     github_repo?: string | null;
     project_id?: string;
   }) =>
     requestRpc<Workspace>("workspaces.create", body),
+  // [WS-RPC] requirements.setWorkspaces —— 审批阶段反写代码库集合（整体替换 + 主库）
+  setRequirementWorkspaces: (id: string, workspaceIds: string[], primaryWorkspaceId?: string) =>
+    requestRpc<{ requirement: Requirement; workspace_ids: string[] }>("requirements.setWorkspaces", {
+      id,
+      workspace_ids: workspaceIds,
+      primary_workspace_id: primaryWorkspaceId,
+    }),
   // [WS-RPC] workspaces.detect —— 从本地路径探测 git 信息，用于创建表单自动填充
   detectWorkspace: (path: string) =>
     requestRpc<{
@@ -793,12 +777,35 @@ export const api = {
       method: "DELETE",
     }),
 
-  // /now state-derivation engine (PR 1 backend)
-  // [WS-RPC] now.cards（RPC handler 直接返回数组，不再 wrap cards 字段）
-  listNowCards: () => requestRpc<NowCard[]>("now.cards"),
-  // [WS-RPC] now.dismissCard
-  dismissNowCard: (cardId: string) =>
-    requestRpc<{ ok: true }>("now.dismissCard", { id: cardId }),
+  // Notifications（事件型通知流）
+  // [WS-RPC] notifications.list
+  listNotifications: (opts: {
+    limit?: number;
+    before_id?: number;
+    unread_only?: boolean;
+    include_dismissed?: boolean;
+  } = {}) =>
+    requestRpc<{ items: Notification[]; next_before_id: number | null }>(
+      "notifications.list",
+      opts,
+    ),
+  // [WS-RPC] notifications.unreadCount
+  notificationUnreadCount: () =>
+    requestRpc<{ count: number }>("notifications.unreadCount"),
+  // [WS-RPC] notifications.markRead
+  markNotificationsRead: (ids: number[]) =>
+    requestRpc<{ updated: number }>("notifications.markRead", { ids }),
+  // [WS-RPC] notifications.markAllRead
+  markAllNotificationsRead: () =>
+    requestRpc<{ updated: number }>("notifications.markAllRead"),
+  // [WS-RPC] notifications.dismiss
+  dismissNotification: (id: number) =>
+    requestRpc<{ ok: true }>("notifications.dismiss", { id }),
+  // [WS-RPC] providers.health（轻量内存态，通知面板 banner 用）
+  providersHealth: () =>
+    requestRpc<Array<{ provider: string; healthy: boolean; last_reason?: string }>>(
+      "providers.health",
+    ),
 };
 
 export interface Attachment {
@@ -957,13 +964,6 @@ export interface SandboxEntry {
   mtime?: number;
 }
 
-export interface ChatMessage {
-  role: "user" | "assistant" | "system";
-  content: string;
-  ts: string;
-  usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
-}
-
 export interface Schedule {
   id: string;
   name: string;
@@ -981,18 +981,6 @@ export interface Schedule {
   run_count: number;
   created_at: string;
   updated_at: string;
-}
-
-export interface ChatSessionManifest {
-  version: 1;
-  id: string;
-  title?: string;
-  agent: string;
-  workflow?: string;
-  provider_session_id?: string;
-  created_at: string;
-  updated_at: string;
-  message_count: number;
 }
 
 export interface WorkspaceHealthResult {
@@ -1067,6 +1055,8 @@ export interface Question {
 export interface Requirement {
   id: string;
   workspace_id: string | null;
+  /** 需求关联的代码库集合（requirement_workspaces，含主库；RPC 层附带） */
+  workspace_ids?: string[];
   project_id: string;
   title: string;
   status: string;
@@ -1128,7 +1118,7 @@ export interface SpecRevision {
 export interface ClarifierRoundState {
   req_id: string;
   started_at: number;
-  phase: "preparing" | "calling-llm" | "parsing" | "writing" | "done" | "aborted" | "errored";
+  phase: "preparing" | "cloning-repo" | "calling-llm" | "parsing" | "writing" | "done" | "aborted" | "errored";
   attempt: 0 | 1;
   prompt: string | null;
   last_parse_error: string | null;
