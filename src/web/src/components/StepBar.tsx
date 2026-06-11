@@ -34,8 +34,9 @@ export function StepBar({
               onClick={() => onSelect(s.key)}
               aria-current={isSelected ? "step" : undefined}
               className={cn(
-                "flex items-center gap-2 rounded-md px-1 py-0.5 transition-colors hover:bg-muted/50",
-                isSelected && "bg-muted/60",
+                "flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:bg-muted/50",
+                // 选中 = accent 描边 pill（muted 底在深色主题下几乎不可见）
+                isSelected && "bg-accent/10 ring-1 ring-accent/40 hover:bg-accent/15",
               )}
             >
               <span
@@ -70,7 +71,6 @@ export function StepBar({
                         : done
                           ? "text-muted-foreground"
                           : "text-muted-foreground/60",
-                  isSelected && "underline underline-offset-4",
                 )}
               >
                 {s.label}

@@ -1637,11 +1637,12 @@ export function RequirementDetail() {
                     </Card>
                   ) : (
                     <>
-                      {/* 审批阶段反写：本需求涉及哪些代码库（多选 + 主库 + 自定义新建） */}
+                      {/* 审批阶段：代码库已在澄清前确认过，默认只读摘要，「调整」才展开反写 */}
                       <RequirementWorkspacePicker
                         requirement={req}
                         workspaces={projectCodebases}
                         disabled={actionBusy}
+                        collapsed
                         onChanged={reloadWorkspaces}
                       />
                       {specCard}

@@ -2198,9 +2198,15 @@ export function registerCoreRpcMethods(): void {
       // 调用方必须显式 force: true 才能继续（前端弹 confirm dialog）
       if (!p.force) {
         const { getDb } = await import("../core/db");
+        // 主库列 + 多库集合表（requirement_workspaces）都算引用，UNION 按需求去重
         const row = getDb()
-          .query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM requirements WHERE workspace_id = ?")
-          .get(p.id);
+          .query<{ n: number }, [string, string]>(
+            "SELECT COUNT(*) AS n FROM (" +
+              "SELECT id FROM requirements WHERE workspace_id = ? " +
+              "UNION SELECT requirement_id FROM requirement_workspaces WHERE workspace_id = ?" +
+            ")",
+          )
+          .get(p.id, p.id);
         const affected = row?.n ?? 0;
         if (affected > 0) {
           throw new RpcError(
