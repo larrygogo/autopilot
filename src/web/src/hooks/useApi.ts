@@ -443,6 +443,21 @@ export const api = {
   saveDefaults: (body: { timezone?: string | null }) =>
     requestRpc<{ ok: true; timezone: string | null }>("defaults.save", body),
 
+  // 调度器配置
+  // [WS-RPC] scheduler.get
+  getSchedulerConfig: () =>
+    requestRpc<{
+      max_concurrent_tasks: number | null;
+      effective_max_concurrent_tasks: number;
+    }>("scheduler.get"),
+  // [WS-RPC] scheduler.save
+  saveSchedulerConfig: (body: { max_concurrent_tasks?: number | null }) =>
+    requestRpc<{
+      ok: true;
+      max_concurrent_tasks: number | null;
+      effective_max_concurrent_tasks: number;
+    }>("scheduler.save", body),
+
   // 网络访问设置
   getDaemonListen: () => request<DaemonListenInfo>("/api/daemon/listen"),
   saveDaemonListen: (body: { host?: string; port?: number }) =>

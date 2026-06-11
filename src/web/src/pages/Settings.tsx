@@ -114,6 +114,9 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         </div>
       </Card>
 
+      {/* 任务调度 */}
+      <SchedulerCard />
+
       {/* 桌面通知 */}
       <DesktopNotifyCard />
 
@@ -168,6 +171,86 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         </dl>
       </Card>
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// 任务调度设置
+//   - 全局最大并发任务数（scheduler.max_concurrent_tasks，默认 1）
+//   - 写入 config.yaml 后即热生效（调度器每次 tick 现读，无需重启）
+// ──────────────────────────────────────────────
+function SchedulerCard(): React.ReactElement {
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [effective, setEffective] = useState<number>(1);
+  const [configured, setConfigured] = useState<number | null>(null);
+  const [draft, setDraft] = useState<string>("");
+
+  useEffect(() => {
+    api.getSchedulerConfig()
+      .then((res) => {
+        setConfigured(res.max_concurrent_tasks);
+        setEffective(res.effective_max_concurrent_tasks);
+        setDraft(String(res.effective_max_concurrent_tasks));
+      })
+      .catch((e) => toast.error("加载调度配置失败", (e as Error)?.message ?? String(e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleBlur = async () => {
+    const n = parseInt(draft, 10);
+    if (!Number.isInteger(n) || n < 1 || String(n) !== draft.trim()) {
+      toast.error("并发数无效", "请填 ≥1 的整数");
+      setDraft(String(effective));
+      return;
+    }
+    if (n === effective) return;
+    setSaving(true);
+    try {
+      const res = await api.saveSchedulerConfig({ max_concurrent_tasks: n });
+      setConfigured(res.max_concurrent_tasks);
+      setEffective(res.effective_max_concurrent_tasks);
+      setDraft(String(res.effective_max_concurrent_tasks));
+      toast.success(`最大并发任务数已设为 ${res.effective_max_concurrent_tasks}，即时生效`);
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
+      setDraft(String(effective));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="mb-4 p-4">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold">任务调度</h3>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          全局同时运行的任务总数上限（所有工作区合计）。写入 config.yaml 后即时生效，无需重启。
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr] sm:items-end">
+        <div className="space-y-1.5">
+          <Label>最大并发任务数</Label>
+          {loading ? (
+            <p className="text-sm text-muted-foreground">加载中…</p>
+          ) : (
+            <Input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={handleBlur}
+              inputMode="numeric"
+              className="font-mono"
+              disabled={saving}
+            />
+          )}
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          内核配置：<code className="font-mono bg-muted/40 px-1.5 py-0.5">scheduler.max_concurrent_tasks</code>
+          {configured === null && !loading && <span className="ml-1">（当前未配置，生效默认 1）</span>}
+        </p>
+      </div>
+    </Card>
   );
 }
 

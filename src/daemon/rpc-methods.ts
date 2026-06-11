@@ -42,7 +42,7 @@ import {
   isValidTimezone,
   type ScheduleType,
 } from "../core/schedules";
-import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig } from "../core/config";
+import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig, loadSchedulerConfig, saveSchedulerConfig } from "../core/config";
 import { requestRestart, requestShutdown } from "./index";
 import { loadApiToken } from "../core/api-token";
 import {
@@ -1510,6 +1510,44 @@ export function registerCoreRpcMethods(): void {
         saveDefaultsConfig({ timezone: tz || undefined });
         emitBus({ type: "config:updated", payload: {} });
         return { ok: true, timezone: tz || null };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "scheduler.get",
+    description: "调度器配置（max_concurrent_tasks，未配置时为 null → 生效默认 1）",
+    handler: () => {
+      const cfg = loadSchedulerConfig();
+      return {
+        max_concurrent_tasks: cfg.max_concurrent_tasks ?? null,
+        effective_max_concurrent_tasks: cfg.max_concurrent_tasks ?? 1,
+      };
+    },
+  });
+
+  registerRpcMethod({
+    method: "scheduler.save",
+    description: "保存调度器配置（max_concurrent_tasks ≥1 整数；传 null 删除该段回落默认 1）。写后即热生效（调度器每次 tick 现读）",
+    handler: (params) => {
+      const p = asObj(params);
+      const v = p.max_concurrent_tasks;
+      if (v !== null && v !== undefined) {
+        if (typeof v !== "number" || !Number.isInteger(v) || v < 1) {
+          throw new RpcError("INVALID_PARAM", `max_concurrent_tasks 必须是 ≥1 的整数，收到：${JSON.stringify(v)}`);
+        }
+      }
+      try {
+        saveSchedulerConfig({ max_concurrent_tasks: v ?? undefined });
+        emitBus({ type: "config:updated", payload: {} });
+        const cfg = loadSchedulerConfig();
+        return {
+          ok: true,
+          max_concurrent_tasks: cfg.max_concurrent_tasks ?? null,
+          effective_max_concurrent_tasks: cfg.max_concurrent_tasks ?? 1,
+        };
       } catch (e: unknown) {
         throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
       }
