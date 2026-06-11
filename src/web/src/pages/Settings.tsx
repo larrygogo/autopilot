@@ -17,7 +17,6 @@ import {
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/Modal";
 import { cn } from "@/lib/utils";
-import { PageHero } from "@/components/PageHero";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
 import { getApiToken, setApiToken, clearApiToken, shouldUseToken } from "@/lib/api-token";
 import { setRestarting } from "@/lib/ws-singleton";
@@ -74,13 +73,6 @@ export function Settings(_props: { embedded?: boolean } = {}) {
 
   return (
     <div className="mx-auto w-full max-w-4xl px-5 py-6">
-      <PageHero
-        eyebrow="设置 · 全局"
-        title="通用设置"
-        subtitle="常规偏好 · 高级 YAML"
-        description="改后立即写入 AUTOPILOT_HOME/config.yaml；涉及 daemon 重启的项需自行重启。"
-      />
-
       {/* 常规偏好 */}
       <Card className="mb-4 p-4">
         <div className="mb-3">
