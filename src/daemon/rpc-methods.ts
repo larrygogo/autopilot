@@ -31,18 +31,7 @@ import {
 import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb } from "../core/workflows";
 import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow-templates";
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
-import {
-  listSchedules as coreListSchedules,
-  getSchedule as coreGetSchedule,
-  createSchedule as coreCreateSchedule,
-  updateSchedule as coreUpdateSchedule,
-  deleteSchedule as coreDeleteSchedule,
-  markScheduleFired,
-  systemTimezone,
-  isValidTimezone,
-  type ScheduleType,
-} from "../core/schedules";
-import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig, loadSchedulerConfig, saveSchedulerConfig } from "../core/config";
+import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig, loadSchedulerConfig, saveSchedulerConfig, systemTimezone, isValidTimezone } from "../core/config";
 import { requestRestart, requestShutdown } from "./index";
 import { loadApiToken } from "../core/api-token";
 import {
@@ -1298,129 +1287,7 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
-  // ── 第八批：schedules.* 域（6 个） ──
-
-  registerRpcMethod({
-    method: "schedules.list",
-    description: "列出所有定时计划",
-    handler: () => coreListSchedules(),
-  });
-
-  registerRpcMethod({
-    method: "schedules.get",
-    description: "按 id 取定时计划详情",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const sch = coreGetSchedule(p.id);
-      if (!sch) throw new RpcError("NOT_FOUND", "Schedule not found");
-      return sch;
-    },
-  });
-
-  registerRpcMethod({
-    method: "schedules.create",
-    description: "新建定时计划（once / cron）",
-    handler: async (params) => {
-      const p = asObj(params);
-      const name = typeof p.name === "string" ? p.name.trim() : "";
-      if (!name) throw new RpcError("INVALID_PARAM", "name 不能为空");
-      if (p.type !== "once" && p.type !== "cron") {
-        throw new RpcError("INVALID_PARAM", "type 必须是 once 或 cron");
-      }
-      if (typeof p.workflow !== "string" || !p.workflow.trim()) {
-        throw new RpcError("INVALID_PARAM", "workflow 不能为空");
-      }
-      const title = typeof p.title === "string" ? p.title.trim() : "";
-      if (!title) throw new RpcError("INVALID_PARAM", "title 不能为空");
-
-      await registryDiscover();
-      if (!registryGetWorkflow(p.workflow)) {
-        throw new RpcError("NOT_FOUND", `workflow "${p.workflow}" 不存在`);
-      }
-      const timezone = (typeof p.timezone === "string" && p.timezone.trim())
-        || loadDefaultsConfig().timezone
-        || systemTimezone();
-      if (!isValidTimezone(timezone)) {
-        throw new RpcError("INVALID_PARAM", `时区无效：${timezone}`);
-      }
-      try {
-        return coreCreateSchedule({
-          name,
-          type: p.type as ScheduleType,
-          run_at: (p.run_at as string | null | undefined) ?? null,
-          cron_expr: (p.cron_expr as string | null | undefined) ?? null,
-          timezone,
-          workflow: p.workflow,
-          title,
-          requirement: (typeof p.requirement === "string" && p.requirement.trim()) ? p.requirement.trim() : null,
-          enabled: typeof p.enabled === "boolean" ? p.enabled : undefined,
-        });
-      } catch (e: unknown) {
-        throw new RpcError("CREATE_FAILED", e instanceof Error ? e.message : String(e));
-      }
-    },
-  });
-
-  registerRpcMethod({
-    method: "schedules.update",
-    description: "PATCH 风格更新（仅传要改的字段）",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const { id: _id, ...patch } = p;
-      try {
-        const sch = coreUpdateSchedule(p.id, patch);
-        if (!sch) throw new RpcError("NOT_FOUND", "Schedule not found");
-        return sch;
-      } catch (e: unknown) {
-        if (e instanceof RpcError) throw e;
-        throw new RpcError("UPDATE_FAILED", e instanceof Error ? e.message : String(e));
-      }
-    },
-  });
-
-  registerRpcMethod({
-    method: "schedules.delete",
-    description: "删除定时计划",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const ok = coreDeleteSchedule(p.id);
-      if (!ok) throw new RpcError("NOT_FOUND", "Schedule not found");
-      return { ok: true };
-    },
-  });
-
-  registerRpcMethod({
-    method: "schedules.runNow",
-    description: "立即触发一次（不影响 next_run_at）",
-    handler: async (params) => {
-      const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      const sch = coreGetSchedule(p.id);
-      if (!sch) throw new RpcError("NOT_FOUND", "Schedule not found");
-      try {
-        const { createRequirementForSchedule, linkRequirementToFiredTask } = await import("../core/scheduler");
-        const reqText = sch.requirement ?? "";
-        const reqId = createRequirementForSchedule({ title: sch.title, spec_md: reqText || sch.title });
-        const task = await startTaskFromTemplate({
-          workflow: sch.workflow,
-          title: sch.title,
-          requirement: reqText || undefined,
-          requirement_id: reqId,
-        });
-        linkRequirementToFiredTask(reqId, task.id);
-        markScheduleFired(sch.id, task.id, sch.next_run_at, sch.enabled === 0);
-        return { ok: true, taskId: task.id };
-      } catch (e: unknown) {
-        if (e instanceof StartTaskError) throw new RpcError("START_FAILED", e.message);
-        throw new RpcError("INTERNAL", e instanceof Error ? e.message : String(e));
-      }
-    },
-  });
-
-  // ── 第九批：sandbox + defaults + setup mutation（8 个） ──
+  // ── 第八批：sandbox + defaults + setup mutation（8 个） ──
 
   registerRpcMethod({
     method: "sandboxes.tree",

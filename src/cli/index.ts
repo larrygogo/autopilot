@@ -1179,7 +1179,7 @@ program
     initDb();
     // dogfood-bug19 修复：init 必须跑全部 migrations，否则只创出 SCHEMA 里的
     // 基础表（tasks/task_logs），后续 18 条迁移加的 projects/codebases/
-    // requirements/workflows/schedules 全缺。客户 init 完跑 dashboard 创
+    // requirements/workflows 全缺。客户 init 完跑 dashboard 创
     // project 立即报 "no such table: projects"。
     const migrated = await runPendingMigrations();
     if (migrated > 0) {

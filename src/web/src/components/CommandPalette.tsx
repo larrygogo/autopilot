@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { MessageSquare, Workflow, Plug, Sliders, Moon, Sun, Plus, FileText, Clock, Folder, MessageCircle, XCircle, RotateCw } from "lucide-react";
+import { MessageSquare, Workflow, Plug, Sliders, Moon, Sun, Plus, FileText, Folder, MessageCircle, XCircle, RotateCw } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -111,7 +111,6 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
   const pages = useMemo(
     () => [
       { path: "/chat", label: "对话", icon: MessageSquare },
-      { path: "/schedules", label: "定时任务", icon: Clock },
       { path: "/workflows", label: "工作流", icon: Workflow },
       { path: "/providers", label: "提供商", icon: Plug },
       { path: "/settings", label: "通用设置", icon: Sliders },
