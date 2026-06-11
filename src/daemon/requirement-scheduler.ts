@@ -7,6 +7,7 @@ import { listComments } from "../core/requirement-comments";
 import { getTask } from "../core/db";
 import { startTaskFromTemplate, resetTaskForRerun } from "../core/task-factory";
 import { createLogger } from "../core/logger";
+import { loadSchedulerConfig } from "../core/config";
 
 const log = createLogger("requirement-scheduler");
 
@@ -16,17 +17,49 @@ let _handler: ((event: AutopilotEvent) => void) | null = null;
 const _inflightGroups = new Set<string>();
 
 /**
- * 单组 tick：父 workspace + 所有关联子模块视为一个调度组。
+ * 全局调度互斥锁：防止跨组并发 tick 出现 TOCTOU。
  *
- * 算法（spec §4.3 组级扩展）：
- *   - groupId = workspace.parent_workspace_id ?? workspace.id（即便传子模块 id 也归一化到父）
- *   - groupWorkspaceIds = [groupId, ...listSubmodules(groupId).map(r => r.id)]
- *   - active = listRequirements({}) 中 workspace_id ∈ groupWorkspaceIds 且 status ∈ {running, fix_revision}
- *   - 若 active 非空：do nothing
+ * 原理（JS 单线程保证）：
+ *   此变量在首个 await 前同步赋值，不会被其他协程打断。
+ *   两个并发 tick 中，第一个同步置 true，第二个看到 true 后进入 _pendingTicks。
+ *   待第一个 tick 完成，finally 中释放锁并触发 drain，串行处理等待队列。
+ *
+ * 无论被全局锁还是同组锁挡住，tick 都进 _pendingTicks 等 drain 重试，确保不丢失。
+ */
+let _globalSchedulerLock = false;
+/** 等待全局锁释放后重试的 workspace id（Set 自动去重，同一 workspace 不重复入队）。 */
+const _pendingTicks = new Set<string>();
+
+/**
+ * 从 _pendingTicks 取一个 workspace 重试调度。
+ * 每次只取一个（串行），通过微任务（Promise.resolve().then）触发，
+ * 在下一个 I/O 事件（宏任务）前执行，防止宏任务抢先重获锁。
+ */
+function _drainPendingTicks(): void {
+  if (_pendingTicks.size === 0) return;
+  const [next] = _pendingTicks;
+  _pendingTicks.delete(next);
+  Promise.resolve().then(() =>
+    tickRepo(next).catch((e: unknown) =>
+      log.error("_drainPendingTicks: 重试失败 workspace=%s: %s", next, (e as Error).message),
+    ),
+  );
+}
+
+/**
+ * 单组 tick 入口：父 workspace + 所有关联子模块视为一个调度组。
+ *
+ * 算法（spec §4.3 组级扩展，Rev2 全局限速）：
+ *   - groupId = workspace.parent_workspace_id ?? workspace.id
+ *   - 全局 active = listRequirements({}) 中 workspace_id IS NOT NULL 且 status ∈ {running, fix_revision}
+ *   - 若 global_active ≥ max_concurrent_tasks（默认 1）：do nothing
  *   - 否则取主仓库（父 groupId）上最老 queued requirement → startTaskFromTemplate
- *   - 子模块上的 queued（极端情况，正常 chat 流程不会发生）忽略
  *
  * 失败时回滚 status: queued → ready
+ *
+ * ⚠️ 行为变更（Rev2）：从「组内串行」改为「全局总上限」。
+ *   N=1 时，多 workspace 用户从「每组最多 1 个」变为「全局最多 1 个」（更严格）。
+ *   这是需求澄清 Q1 答案（全局总上限）的有意调整，非 bug。
  */
 export async function tickRepo(workspaceId: string): Promise<void> {
   const workspace = getWorkspaceById(workspaceId);
@@ -35,36 +68,52 @@ export async function tickRepo(workspaceId: string): Promise<void> {
     return;
   }
   const groupId = workspace.parent_workspace_id ?? workspace.id;
-  // 同组串行守卫（SC-3 TOCTOU）：tickRepo 是 async 事件处理器，从 active 检测到
-  // startTaskFromTemplate 之间有 await 让出点；并发两个 tick 会双双越过 active 检测、
-  // 在 candidate.task_id 写回前各起一个 task。跳过是安全的——task 终态会释放 slot 再触发
-  // tick，新 queued 不会永久丢失。仿 requirement-clarifier 的 _inflightRounds。
+
+  // 同组串行守卫（SC-3 TOCTOU）：同组两个事件并发时，本次 tick 也入 _pendingTicks
+  // 等当前 tick 结束后 drain 重试。不能 skip-and-forget——若 in-progress tick 的
+  // listRequirements 快照早于新需求入队、且其候选启动失败回滚 ready（组里无 running），
+  // 之后不会再有事件触发，新 queued 会永久卡死（Copilot review #92）。
   if (_inflightGroups.has(groupId)) {
-    log.info("tickRepo: group %s 已有调度在执行，本次跳过（同仓库串行）", groupId);
+    log.info("tickRepo: group %s 已有调度在执行，入队等待重试（同仓库串行）", groupId);
+    _pendingTicks.add(workspaceId);
     return;
   }
+
+  // 全局调度互斥锁（Rev2 TOCTOU 修复）：
+  //   此赋值在首个 await 前同步完成（JS 单线程），其他协程无法在此窗口内插入。
+  //   被阻塞的 tick 进入 _pendingTicks，锁释放后由 _drainPendingTicks 串行触发。
+  if (_globalSchedulerLock) {
+    log.info("tickRepo: 全局调度锁占用，入队等待 workspace=%s group=%s", workspaceId, groupId);
+    _pendingTicks.add(workspaceId);
+    return;
+  }
+
+  _globalSchedulerLock = true;
   _inflightGroups.add(groupId);
   try {
     await tickGroup(groupId);
   } finally {
     _inflightGroups.delete(groupId);
+    _globalSchedulerLock = false;
+    // 锁释放后串行处理等待队列
+    _drainPendingTicks();
   }
 }
 
-/** tickRepo 的实际调度体（调用时已持同组串行锁，见 _inflightGroups）。 */
+/** tickRepo 的实际调度体（调用时已持全局锁 _globalSchedulerLock 和同组锁 _inflightGroups）。 */
 async function tickGroup(groupId: string): Promise<void> {
+  // 保留 submodules 供日志输出（不再用于 active 过滤，active 已改为全局）
   const submodules = listSubmodules(groupId);
-  const groupWorkspaceIds = new Set<string>([groupId, ...submodules.map((r) => r.id)]);
 
-  // active 检测扩到整组
+  // 全局 active 检测（不区分 workspace 组）：
+  //   - workspace_id IS NOT NULL：排除高层需求（无工作区绑定），防止其错误占用槽位
+  //   - status ∈ {running, fix_revision}：占用槽位的两种状态
   const all = listRequirements({});
-  const active = all.filter(
-    (r) =>
-      r.workspace_id !== null &&
-      groupWorkspaceIds.has(r.workspace_id) &&
-      (r.status === "running" || r.status === "fix_revision"),
+  const maxConcurrent = loadSchedulerConfig().max_concurrent_tasks ?? 1;
+  const globalActive = all.filter(
+    (r) => r.workspace_id !== null && (r.status === "running" || r.status === "fix_revision"),
   );
-  if (active.length > 0) return;
+  if (globalActive.length >= maxConcurrent) return;
 
   // candidate 仅从主仓库拉（用户在 chat 提需求只会选父）
   const queued = all
@@ -218,4 +267,7 @@ export function disposeRequirementScheduler(): void {
   if (!_handler) return;
   offEvent("requirement:status-changed", _handler);
   _handler = null;
+  // 清除全局状态，防止 daemon 重启后残留脏状态
+  _globalSchedulerLock = false;
+  _pendingTicks.clear();
 }

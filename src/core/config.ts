@@ -341,6 +341,60 @@ export function saveGitConfig(cfg: GitConfig): void {
   writeDocument(doc);
 }
 
+// ──────────────────────────────────────────────
+// 调度器配置
+// ──────────────────────────────────────────────
+
+export interface SchedulerConfig {
+  /**
+   * 全局最大并发任务数（所有工作区合计运行中任务总数 ≤ N）。
+   * 默认 1（向后兼容：不配置时行为与之前相同）。
+   *
+   * ⚠️ 行为说明（N=1 时）：原实现是「组内串行，不同组可并行」；
+   * 改为全局计数后，N=1 对多 workspace 用户是更严格的全局串行。
+   * 这是有意为之的行为统一（需求澄清 Q1 答案：全局总上限）。
+   */
+  max_concurrent_tasks?: number;
+}
+
+/**
+ * 读取 config.yaml 的 scheduler 段。
+ * 字段缺失或类型非法时返回空对象；调用方使用 `?? 1` 取默认值 1。
+ */
+export function loadSchedulerConfig(): SchedulerConfig {
+  try {
+    const raw = loadConfig();
+    const section = raw["scheduler"];
+    if (!section || typeof section !== "object" || Array.isArray(section)) return {};
+    const s = section as Record<string, unknown>;
+    const out: SchedulerConfig = {};
+    if (
+      typeof s.max_concurrent_tasks === "number" &&
+      Number.isInteger(s.max_concurrent_tasks) &&
+      s.max_concurrent_tasks >= 1
+    ) {
+      out.max_concurrent_tasks = s.max_concurrent_tasks;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 写入/更新 scheduler 段。max_concurrent_tasks 为 undefined 时删除整段。
+ */
+export function saveSchedulerConfig(cfg: SchedulerConfig): void {
+  const doc = loadDocument();
+  const clean = stripUndefined(cfg as Record<string, unknown>);
+  if (Object.keys(clean).length === 0) {
+    if (doc.hasIn(["scheduler"])) doc.deleteIn(["scheduler"]);
+  } else {
+    doc.setIn(["scheduler"], clean);
+  }
+  writeDocument(doc);
+}
+
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {
