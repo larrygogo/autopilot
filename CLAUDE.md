@@ -41,7 +41,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **HTTP REST API**：`/api/tasks`、`/api/workflows`、`/api/status` 等 CRUD 端点
 - **WebSocket 实时推送**：频道订阅模式（`task:*`、`log:{taskId}` 等）推送状态变化和日志
 - **TUI**：ink (React for CLI) 终端 UI，WebSocket 连接 daemon
-- **Web UI**：React + Vite SPA，daemon 自身 serve 静态资源。**视觉风格 = claude.ai 质感**（暖象牙奶油底 / 深色暖炭灰、珊瑚橘 `#D97757` 强调、圆角、柔阴影、去大写去虚线）——token 在 `src/web/src/index.css`。早期的「蓝图工程图纸」风（直角/硬阴影/网格/大写压缩体）**已废弃，勿重新引入**
+- **Web UI**：React + Vite SPA，daemon 自身 serve 静态资源。**视觉风格 = claude.ai 质感**（暖象牙奶油底 / 深色暖炭灰、珊瑚橘 `#D97757` 强调、圆角、柔阴影、去大写去虚线）——token 在 `src/web/src/index.css`。早期的「蓝图工程图纸」风（直角/硬阴影/网格/大写压缩体）**已废弃，勿重新引入**。**布局骨架 = Supabase 控制台式**（2026-06-11）：全宽顶栏（logo + 面包屑页标题在左，搜索 / 快速创建 / 主题 / Now 铃铛在右）、侧栏下沉到顶栏之下、页头是单行中号标题（`PageHero` 已收敛，衬线 4xl hero 已废弃）。**侧栏是上下文导航**：进入项目（`/projects/:id`）或设置（`/settings`）后左侧菜单整体切换为该上下文的分区菜单（顶部「← 返回」回全局），设置分区 = 通用 / 提供商 / 任务调度 / 网络访问 / Daemon（子路由 `/settings/:section`，孤儿 Providers 页已接回「提供商」；旧 `?tab=` 链接有重定向兼容）。**移动端（<lg）= 底部 dock 原地展开抽屉（Supabase 式）**：页面常驻底部居中浮动 dock（搜索 / 现在(红点) / 菜单 三圆形图标，收起时离底边 1rem）；点击图标后展开：**pill 随面板一起从底部连续滑升、抽屉总高约 90vh**（容器锚底 + pill 在面板上方，面板 height 动画时容器顶边上移带着 pill 走；pill 行自身无背景、悬浮在**全屏玻璃遮罩**（bg-background/40 + blur，点击可关）上，激活图标反色高亮 + 旁出 ✕；**圆角卡片轮廓属于下方面板**（rounded-t-2xl + border-t）），不是独立弹层（无 Sheet/portal）。再点激活图标或 ✕ 收起；顶栏右侧菜单按钮（带未读 badge）是第二入口。搜索复用 `CommandPaletteContent`，与桌面 ⌘K dialog 同一内容体。**独立对话页 /chat 与 FloatingChat 已于 2026-06-11 整体删除**（后端 chat/sessions RPC 保留，需求澄清在用）。**左侧彩色亮条已全局移除**（2026-06-11 两轮清扫：选中/悬停态的 accent 条、NowCard 优先级条、错误/警告卡的 destructive/warning 条全部去掉，状态靠文字+底色表达；仅保留中性灰 `border-border` 的结构线——Markdown 引用、树形缩进、时间线轴。`toneToBorderLeftClass` 已删，勿再新增彩色左条）
 - **执行视图 = 线性时间线**（`TaskRunView`，2026-06-10 重构）：每轮 phase 执行（含驳回重做）按实际发生顺序独立成块往下追加（不在原 section 上 ×N 折叠），日志按本轮时间窗切片（logger 落盘 UTC 字符串，`parseLineTs` 必须按 UTC 解析），agent 调用按时间窗内联到对应轮；未执行 phase 灰色占位垫底；daemon 重启被打断的轮次标 `aborted`（灰圈）。纯逻辑在 `src/web/src/lib/run-view-logic.ts`（buildTimeline / filterLinesToWindow / assignAgentCalls）
 - **插件化工作流**：`AUTOPILOT_HOME/workflows/`（用户）工作流自动发现
 - **YAML 工作流定义**：`workflow.yaml` 定义结构，`workflow.ts` 只写阶段函数
@@ -55,9 +55,9 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **Agent 系统**：内置 Anthropic / OpenAI / Google 三大 Agent 提供商（凭证由对应 CLI 自身管理）
 - **Phase 内联 Agent**：每个 phase 在 `workflow.yaml` 里内联配置自己的 agent（`agent: {provider, model, system_prompt, max_turns, permission_mode}`）；省略则用 `DEFAULT_AGENT` 兜底。无"全局命名可复用 agent"概念（已于 2026-06 移除）。model 缺省时回退到 `providers.<provider>.default_model`
 - **Web UI 工作流编辑器**：阶段 CRUD / 并行块 / 驳回 / **phase 内联 agent 编辑**全图形化，`workflow.ts` 自动同步（改名重命名函数、追加缺失、孤儿清理）
-- **项目工作台**：两层数据模型 `Project ⊃ Workspace`，需求挂项目维度，支持 AI 调查 + 评论线程 + 用户审批流
-- **流水线（原"看板"）**：Web 的 `/tasks` 页（导航名「流水线」）把**需求 + 任务**合到一处看全生命周期，4 段 tab（全部 / 等待人工 / 运行中 / 归档），列表内按时间分组（今天/昨天/…），行是 Claude Code 风卡片。**「现在(Now)」独立保留**为决策收件箱，不并入
-- **评论线程**：`requirement_questions` + `requirement_question_replies`，Agent 调查期主动提问，用户回复后继续
+- **项目工作台**：两层数据模型 `Project ⊃ Workspace`，需求挂项目维度，支持 AI 调查 + 评论线程 + 用户审批流。**项目上下文壳层 = Supabase 式**（2026-06-11）：进入 `/projects/:id` 后顶栏面包屑换成项目切换器（`ProjectSwitcher` 下拉换项目/新建），左侧导航换成项目级菜单（需求 / 代码库 / 设置，子路由 `/projects/:id/:section`；**无概览页**，裸 `/projects/:id` 重定向到需求子页），顶部「← 项目列表」返回全局导航
+- **流水线（原"看板"）**：Web 的 `/tasks` 页（导航名「流水线」）把**需求 + 任务**合到一处看全生命周期，4 段 tab（全部 / 等待人工 / 运行中 / 归档），列表内按时间分组（今天/昨天/…），行是 Claude Code 风卡片。流水线是默认首页。**「Now 决策收件箱」已整体替换为「通知系统」**（2026-06-11，机制级重构非改名）：旧模型 = 11 个 card-source 从当前状态**派生**内存快照（状态变了卡片消失，aggregator + `now.*` RPC + `now:*` 频道，已全部删除，`/api/now/*` 410）；新模型 = **append-only 事件流**落 `notifications` 表（迁移 035/036，写入收口 `src/core/notifications.ts` 进 single-writer 白名单）。daemon 驻留 `notification-recorder` 订阅 event-bus 把领域事件翻译成通知行（task 终态/await_review、需求 awaiting_approval、agent 提问、clarifier/schedule 错误、watcher 恢复；新增 `requirement:schedule-error` 事件）；**read/dismiss 双状态独立**，RPC = `notifications.list/unreadCount/markRead/markAllRead/dismiss`，WS 频道 `notification:*`；保留策略 30 天/500 行。**持续状态不进通知流**：provider 不健康走面板顶部 `ProviderHealthBanner`（`providers.health` RPC + provider:* 订阅，恢复自动消失），空态走 NowEmptyGuide。badge=未读数（不再是"当前 error+decision 卡数"，状态看板职责归流水线「等待人工」tab）。三端：Web `NotificationsPanel`（右侧面板，optimistic 已读/删除）、CLI `autopilot notifications list/read/dismiss`（`now` 留隐藏 deprecated 别名一版）、TUI `NotificationList`（observer-only 不可操作）。`/now` 路由仍重定向到 `/tasks` 并自动展开面板
+- **评论线程**：`requirement_questions` + `requirement_question_replies`，Agent 调查期主动提问，用户回复后继续。**澄清的代码上下文**（2026-06-11，自主探索模型）：①**需求级浅 clone**（`runtime/requirements/<reqId>/workspace`，`src/core/requirement-clone.ts`，clarifier 首轮 ensure 幂等复用、`--depth 1 --single-branch`）——**clone 就绪时不预拼接任何文档/结构快照**，prompt 如实告知克隆形态（深度 1/单分支/无历史），探索方式交给 agent 自主（读任意文件、搜索、git 命令、`git fetch --deepen` 加深历史），目标导向 = 了解项目以提出精准问题、代码能答的不问用户；clarifier `permission_mode: bypassPermissions`（default 下 Bash 被拒跑不了 git，信任级同 dev develop 阶段）+ max_turns 15，prompt 明确禁 push/改远程。生命周期 = done/cancelled 或删除需求时清理，failed 保留供重试。② clone 失败降级：本地 path（老工作区）或 `gh api` 远程拉**结构事实 + 自述文档快照**（prompt 声明可能过期、仅作线索）。③ 全失败 = 纯文本模式
 - **框架零业务知识**：核心模块不含任何工作流专属常量或逻辑
 - **用户空间分离**：`AUTOPILOT_HOME`（默认 `~/.autopilot/`）存放用户配置、工作流和运行时数据
 
@@ -150,7 +150,7 @@ autopilot/
 
 ## 数据模型（P1+）
 
-两层结构：`Project ⊃ Workspace(1:1) ⊃ Submodule`（**每个 Project 最多一个顶层 Workspace**；submodule 不计入。靠迁移 025 的部分唯一索引 `UNIQUE(project_id) WHERE parent_workspace_id IS NULL` + RPC 入口守卫 `projectHasTopWorkspace` 落，core `createWorkspace` 原语不强制以便测试夹具/内部自由建）
+两层结构：`Project ⊃ Workspace(1:N) ⊃ Submodule`（**2026-06-11 起项目:代码库放开为 1:N**：迁移 037 删 025 的唯一索引 + 三处 RPC 守卫移除，`projectHasTopWorkspace` 已删；`getTopWorkspaceForProject` 语义从「唯一」变「默认 = created_at 最早」——但 **Web 新建需求已改为显式必选代码库**（Start 页 + 项目页弹窗，唯一时自动选中），自动派生只剩 CLI 快捷路径的兜底）。**Web UI 标签「代码库」= 内核 `workspace`**（纯展示层翻译，内核/CLI/RPC/DB 命名不动——勿借机翻回 codebase，迁移 024 不可逆）
 
 > **命名说明（2026-06 Phase 2 改名）**：内核「用户代码库」概念全量改名 **Workspace**（表 `workspaces`、id `ws-NNN`、列 `workspace_id`/`parent_workspace_id`、RPC `workspaces.*`、CLI `autopilot workspace`）。注意与**任务运行沙盒** `sandbox`（每 task 的独立运行目录，Phase 1 由旧 `workspace` 改名而来）区分：**workspace = 用户的源码仓库，sandbox = 任务的临时执行目录**，互不相干。`.worktree.json` 里历史字段名保持兼容旧 `codebase_*` 读取。
 >
@@ -162,13 +162,14 @@ autopilot/
 |------|-----|---------|------|
 | Project | `projects` | `proj-NNN` | 顶层工作空间。`proj-default` 是兜底项目（无归属的快捷任务挂这里） |
 | Workspace | `workspaces` | `ws-NNN` | 用户源码仓库（凭 `remote_url` 注册，任务执行时远程 clone），归属某 Project |
-| Requirement | `requirements` | `req-NNN` | 挂 project_id + workspace_id（多对多 via requirement_workspaces）。**是每个 Task 的前置** |
+| Requirement | `requirements` | `req-NNN` | 挂 project_id + workspace_id（**主库**）；**代码库集合存 `requirement_workspaces`**（不变式：主库 ∈ 集合），**审批阶段用户经 `requirements.setWorkspaces` 反写**（多选项目代码库 + 审批面板内自定义新建，审批后冻结、failed 例外）。**多库需求 = 全库可写、各自交付 PR**（2026-06-11 Phase 2）：沙盒把每库 clone 到 `workspace/<alias>/` 子目录（`.worktree.json` mode=multi-clone，顶层镜像主库兼容旧 reader；单库格式不变零回归）、`listTaskRepos(taskId)` 是 workflow 消费布局的唯一接口、submit_pr 遍历有 diff 的库各开 PR（全集落 `requirement_sub_prs` 含主库，部分失败=已开 PR 保留+phase 失败停下报人）、pr-poller 聚合判定（**全部 PR merged 才 done**、任一新 CHANGES_REQUESTED 转 fix_revision、per-PR 水位在 sub_prs.last_reviewed_event_id 迁移 038）、重跑逐库删远程 feat/ 分支。⚠ 老用户 dev workflow 副本需 `autopilot workflow sync dev --apply` 才支持多库。**是每个 Task 的前置** |
 | Task | `tasks` | 8 位短 id | 执行单元。**必有 `requirement_id`（非空）**，由某需求衍生 |
 | Question | `requirement_questions` | `qst-NNN` | Agent 调查期提问，含多轮回复 |
 
 **核心不变式：每个 Task 必有一个 Requirement 作为前置**（不存在游离任务）。需求+任务是「一件工作」的前后两段。
 - Requirement 真实状态机（见 `src/core/requirements.ts` ALLOWED_TRANSITIONS）：
   `drafting → clarifying → ready → (awaiting_approval) → queued → running → awaiting_review ⇄ fix_revision → done`，另有 `cancelled` / `failed`（failed 可回 queued/awaiting_approval 重试）。
+  **创建后停 drafting，确认代码库是进入澄清的前置**（2026-06-11）：澄清依赖代码库浅 clone，`requirements.create` 不再自动转 clarifying；Web 需求页 drafting 态显示代码库确认卡（自动派生主库为预选）+「开始 AI 澄清」按钮，CLI `req new -c`/cwd 推断成功时自动开始、否则提示 `req clarify <id>`；`requirements.transition → clarifying` 在 RPC 层守卫主库非空（core 原语不限以便测试夹具）。
   ⚠️ 不是早期文档写的 `draft/investigating` —— 那是过期简化，别照它写过滤逻辑。
 - Task 状态机：`pending_* → running_* → running_await_review → done/failed/cancelled`（phase 名内联在 status 里）。
 - **失败可见性与防「撞墙-失忆-重撞」（2026-06-10 dogfood 落地）**：
