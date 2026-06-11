@@ -164,6 +164,37 @@ describe("requirement-task-bridge 终态同步带原因（req-008 链路复现�
   });
 });
 
+describe("bridge：task done 的需求去向取决于交付 PR（req-018 验收死路回归）", () => {
+  it("task done + 需求有交付 PR → awaiting_review（验收，交 pr-poller 判 merge）", () => {
+    enableBus();
+    initRequirementTaskBridge();
+    const { reqId, taskId } = makeRunningRequirement();
+    updateRequirement(reqId, { pr_number: 93, pr_url: "https://github.com/o/r/pull/93" });
+
+    const { transition } = require("../src/core/state-machine");
+    transition(taskId!, "submit_pr_complete", {
+      transitions: { running_design: [["submit_pr_complete", "done"]] },
+      note: "PR 已提交",
+    });
+
+    // PR 还没 merge，需求必须停在验收而不是直通 done（req-018 事故：CI 红着就「完成」）
+    expect(getRequirementById(reqId)!.status).toBe("awaiting_review");
+  });
+
+  it("task done + 无任何交付 PR → done（纯 adhoc 无交付物）", () => {
+    enableBus();
+    initRequirementTaskBridge();
+    const { reqId, taskId } = makeRunningRequirement();
+
+    const { transition } = require("../src/core/state-machine");
+    transition(taskId!, "submit_pr_complete", {
+      transitions: { running_design: [["submit_pr_complete", "done"]] },
+    });
+
+    expect(getRequirementById(reqId)!.status).toBe("done");
+  });
+});
+
 describe("cancelRequirementWithTasks 手动取消 user 来源", () => {
   it("无 task：reason 默认「用户手动取消」+ source=user", () => {
     createProject({ id: "proj-sr2", name: "p2" });

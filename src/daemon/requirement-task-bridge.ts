@@ -4,9 +4,11 @@
  * 监听 task:transition 事件：
  *   - task → failed_*    → requirement → failed
  *   - task → cancelled   → requirement → cancelled
- *   - task → pending_await_review（submit_pr 完成）→ requirement → awaiting_review
+ *   - task → pending_await_review（带 await_review phase 的 workflow）→ requirement → awaiting_review
  *   - task → running_fix_revision → requirement → fix_revision
- *   - task → done        → requirement → done（兜底，正常由 pr-poller 处理 PR merge）
+ *   - task → done + 需求有交付 PR → requirement → awaiting_review（验收；pr-poller 在
+ *     全部 PR merge 后才转 done —— 直通 done 会让验收/CI 回路死路）
+ *   - task → done + 无交付 PR    → requirement → done（纯 adhoc 无交付物）
  *
  * 不在此处自动恢复需求队列；scheduler 已经监听了 requirement:status-changed 事件，
  * 会在 from=running/fix_revision 的状态释放时自动 tickRepo 启动下一个 queued 需求。
@@ -16,6 +18,7 @@ import { onEvent, offEvent } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { getRequirementById, setRequirementStatus, canTransitionStatus, listRequirements } from "../core/requirements";
 import { createComment, nextCommentId } from "../core/requirement-comments";
+import { listSubPrs } from "../core/requirement-sub-prs";
 import { getTask } from "../core/db";
 import { createLogger } from "../core/logger";
 
@@ -23,12 +26,20 @@ const log = createLogger("requirement-task-bridge");
 
 let _handler: ((event: AutopilotEvent) => void) | null = null;
 
-function targetReqStatus(taskTo: string): string | null {
+function targetReqStatus(taskTo: string, req: { id: string; pr_number: number | null }): string | null {
   if (taskTo === "cancelled") return "cancelled";
   if (taskTo.startsWith("failed_") || taskTo === "failed") return "failed";
   if (taskTo === "pending_await_review") return "awaiting_review";
   if (taskTo === "running_fix_revision") return "fix_revision";
-  if (taskTo === "done") return "done";
+  if (taskTo === "done") {
+    // task done = 执行单元干完了；需求是否「完成」取决于交付物：
+    // 有交付 PR（主 PR 或 sub_prs）→ 进验收 awaiting_review，由 pr-poller 在
+    // 全部 PR merge 后才转 done（poller 只扫 awaiting_review，这里直通 done 会
+    // 让验收/CI/review 回路整体死路 —— req-018 事故，PR 还 OPEN 需求就「完成」了）。
+    // 无 PR（纯 adhoc 无交付）→ done。
+    const hasPr = (req.pr_number ?? 0) > 0 || listSubPrs(req.id).some((sp) => sp.pr_number > 0);
+    return hasPr ? "awaiting_review" : "done";
+  }
   return null;
 }
 
@@ -44,11 +55,10 @@ export function initRequirementTaskBridge(): void {
     if (event.type !== "task:transition") return;
     const { taskId, to, trigger, note } = event.payload;
 
-    const reqStatus = targetReqStatus(to);
-    if (!reqStatus) return;
-
     const req = findRequirementByTaskId(taskId);
     if (!req) return;
+    const reqStatus = targetReqStatus(to, req);
+    if (!reqStatus) return;
     if (req.status === reqStatus) return;
     if (!canTransitionStatus(req.status, reqStatus)) {
       log.warn("bridge: 跳过非法转换 req=%s %s → %s（task=%s 到 %s）",
