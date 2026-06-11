@@ -148,10 +148,21 @@ describe("RPC requirements.setWorkspaces", () => {
     expect(missing.ok).toBe(false);
   });
 
-  it("审批后冻结：queued 拒改，failed 放行", async () => {
+  it("开始澄清即冻结：clarifying/awaiting_approval/queued 拒改，failed 放行", async () => {
+    // 澄清基于已选代码库的浅 clone 做，中途换库会让澄清失效 —— drafting 之后全程冻结
     setRequirementStatus("req-001", "clarifying");
+    const inClarify = await invokeRpcMethod("requirements.setWorkspaces", {
+      id: "req-001", workspace_ids: ["ws-002"],
+    });
+    expect(inClarify.ok).toBe(false);
+
     setRequirementStatus("req-001", "ready");
     setRequirementStatus("req-001", "awaiting_approval");
+    const inApproval = await invokeRpcMethod("requirements.setWorkspaces", {
+      id: "req-001", workspace_ids: ["ws-002"],
+    });
+    expect(inApproval.ok).toBe(false);
+
     setRequirementStatus("req-001", "queued");
     const frozen = await invokeRpcMethod("requirements.setWorkspaces", {
       id: "req-001", workspace_ids: ["ws-002"],
