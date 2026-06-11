@@ -1433,13 +1433,21 @@ export function RequirementDetail() {
               <span className="text-accent"> +{(req.workspace_ids!.length - 1)}</span>
             )}
           </span>
-          {/* 工作流：此处只展示；选择/切换在下方「下一步」banner（审批/入队/重试的决策时刻） */}
-          <span className="inline-flex items-center gap-1">
-            工作流{" "}
-            <code title={`内核名：${req.workflow ?? "dev"}（审批后随内容冻结）`}>
-              {workflowOptions.find((w) => w.name === (req.workflow ?? "dev"))?.label ?? req.workflow ?? "dev"}
-            </code>
-          </span>
+          {/* 工作流：审批通过后才在元信息展示（审批前尚未定案，选择器在「下一步」banner）。
+              终态（failed/cancelled）按死亡前状态判断是否已过审批 */}
+          {(() => {
+            const PRE_APPROVAL = new Set(["drafting", "clarifying", "ready", "awaiting_approval"]);
+            const effective = isAborted ? (req.status_before_terminal ?? req.status) : req.status;
+            if (PRE_APPROVAL.has(effective)) return null;
+            return (
+              <span className="inline-flex items-center gap-1">
+                工作流{" "}
+                <code title={`内核名：${req.workflow ?? "dev"}（审批后随内容冻结）`}>
+                  {workflowOptions.find((w) => w.name === (req.workflow ?? "dev"))?.label ?? req.workflow ?? "dev"}
+                </code>
+              </span>
+            );
+          })()}
           <span>创建 {new Date(req.created_at).toLocaleString()}</span>
           <span>更新 {new Date(req.updated_at).toLocaleString()}</span>
         </div>
@@ -1458,22 +1466,32 @@ export function RequirementDetail() {
         extra={
           canEditRequirementContent(req.status) &&
           ["ready", "awaiting_approval", "failed"].includes(req.status) ? (
-            <label className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-              工作流
-              <select
+            <div
+              className="flex items-center gap-2"
+              title="该需求入队后用哪个工作流执行；审批后冻结"
+            >
+              <span className="shrink-0 text-xs text-muted-foreground">工作流</span>
+              <Select
                 value={req.workflow ?? "dev"}
-                onChange={(e) => void changeWorkflow(e.target.value)}
+                onValueChange={(v) => void changeWorkflow(v)}
                 disabled={savingWorkflow || workflowOptions.length === 0}
-                className="rounded-md border border-border bg-card px-2 py-1.5 font-mono text-xs focus:border-accent focus:outline-none"
-                title="该需求入队后用哪个工作流执行；审批后冻结"
               >
-                {workflowOptions.length === 0 && <option value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</option>}
-                {workflowOptions.map((w) => (
-                  // 业务标签（中文 label）为主，内核名括注（无 label 的工作流只显示 name）
-                  <option key={w.name} value={w.name}>{w.label ? `${w.label}（${w.name}）` : w.name}</option>
-                ))}
-              </select>
-            </label>
+                <SelectTrigger className="h-10 w-auto min-w-[170px] gap-2 bg-background text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {workflowOptions.length === 0 && (
+                    <SelectItem value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</SelectItem>
+                  )}
+                  {workflowOptions.map((w) => (
+                    // 业务标签（中文 label）为主，内核名括注（无 label 的工作流只显示 name）
+                    <SelectItem key={w.name} value={w.name}>
+                      {w.label ? `${w.label}（${w.name}）` : w.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           ) : undefined
         }
         onMarkReady={markReady}
