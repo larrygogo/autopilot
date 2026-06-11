@@ -10,6 +10,26 @@ import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
 let tmpHome: string;
 
+/** 创建一个临时的 bare git 仓库，可被 git ls-remote 探测（与 routes-codebase-api 同款） */
+function createBareRepo(): string {
+  const dir = join(tmpdir(), `autopilot-setup-bare-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  Bun.spawnSync(["git", "init", "--bare", "-q", dir], { stdout: "pipe", stderr: "pipe" });
+  const work = dir + "-work";
+  mkdirSync(work, { recursive: true });
+  const cmds: string[][] = [
+    ["git", "-C", work, "init", "-q", "-b", "main"],
+    ["git", "-C", work, "config", "user.email", "test@autopilot.local"],
+    ["git", "-C", work, "config", "user.name", "Test"],
+    ["git", "-C", work, "commit", "--allow-empty", "-q", "-m", "init"],
+    ["git", "-C", work, "remote", "add", "origin", dir],
+    ["git", "-C", work, "push", "-q", "origin", "main"],
+  ];
+  for (const cmd of cmds) Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe" });
+  rmSync(work, { recursive: true, force: true });
+  return dir;
+}
+
 beforeEach(async () => {
   tmpHome = join(tmpdir(), `autopilot-setup-api-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(join(tmpHome, "runtime"), { recursive: true });
@@ -75,15 +95,36 @@ describe("setup.save* RPC", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("setup.saveWorkspaces 自动建 default project + 写 workspace", async () => {
-    const r = await invokeRpcMethod("setup.saveWorkspaces", { name: "my-project", path: tmpHome });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      const body = r.payload as { workspace: { alias: string; path: string; project_id: string } };
-      expect(body.workspace.alias).toBe("my-project");
-      expect(body.workspace.path).toBe(tmpHome);
-      expect(body.workspace.project_id).toBeTruthy();
+  it("setup.saveWorkspaces 自动建 default project + 写 workspace（remote_url 模式）", async () => {
+    const bareRepo = createBareRepo();
+    try {
+      const r = await invokeRpcMethod("setup.saveWorkspaces", { name: "my-project", remote_url: bareRepo });
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        const body = r.payload as { workspace: { alias: string; remote_url: string | null; default_branch: string; project_id: string } };
+        expect(body.workspace.alias).toBe("my-project");
+        expect(body.workspace.remote_url).toBe(bareRepo);
+        expect(body.workspace.default_branch).toBe("main");
+        expect(body.workspace.project_id).toBeTruthy();
+      }
+    } finally {
+      rmSync(bareRepo, { recursive: true, force: true });
     }
+  });
+
+  it("setup.saveWorkspaces 缺 remote_url → INVALID_PARAM（旧 path 签名已废弃）", async () => {
+    const r = await invokeRpcMethod("setup.saveWorkspaces", { name: "my-project", path: tmpHome });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe("INVALID_PARAM");
+  });
+
+  it("setup.saveWorkspaces 远程不可达 → REMOTE_UNREACHABLE", async () => {
+    const r = await invokeRpcMethod("setup.saveWorkspaces", {
+      name: "my-project",
+      remote_url: join(tmpdir(), `nonexistent-repo-${Date.now()}`),
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe("REMOTE_UNREACHABLE");
   });
 
   it("setup.dismiss 标记 dismiss", async () => {

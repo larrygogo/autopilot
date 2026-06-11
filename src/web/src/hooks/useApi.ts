@@ -626,8 +626,8 @@ export const api = {
   // setup.saveAgents 已移除（Phase 3：命名复用 agent 机制删除；首跑向导不再单独配 agent）。
 
   // [WS-RPC] setup.saveWorkspaces
-  setupWorkspace: (payload: { name: string; path: string; project_id?: string }) =>
-    requestRpc<{ workspace: { id: string; alias: string; path: string; project_id: string } }>(
+  setupWorkspace: (payload: { name: string; remote_url: string; project_id?: string }) =>
+    requestRpc<{ workspace: { id: string; alias: string; remote_url: string | null; project_id: string } }>(
       "setup.saveWorkspaces",
       payload,
     ),

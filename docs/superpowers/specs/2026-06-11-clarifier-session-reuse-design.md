@@ -470,7 +470,7 @@ _statusHandler = (event: AutopilotEvent) => {
 
 | 步骤 | 文件 | 内容 |
 |------|------|------|
-| **1** | `src/migrations/033-requirement-sessions.ts` | 建 `requirement_sessions` 表 |
+| **1** | `src/migrations/034-requirement-sessions.ts` | 建 `requirement_sessions` 表 |
 | **2** | `src/core/requirement-sessions.ts` | `getSession` / `upsertSession`（含 snapshot 截断）/ `deleteSession` |
 | **3a** | `tests/requirement-clarifier.test.ts`（现有） | **迁移所有现有 mock**：`_setClarifyFnForTest` 回调返回值从 `string` 改为 `{ rawText: string; newSessionRef?: string }` |
 | **3b** | `src/daemon/requirement-clarifier.ts` | 核心改造：`ClarifyFn` 类型、`callClaude`（provider 分支）、`buildIncrementalPrompt`（新增）、`buildPrompt`（+replay 参数）、`_runClarifierRoundInner`（session 逻辑）、`initRequirementClarifier`（终态清理） |
@@ -482,7 +482,7 @@ _statusHandler = (event: AutopilotEvent) => {
 ### 步骤 1：Migration 033
 
 ```typescript
-// src/migrations/033-requirement-sessions.ts
+// src/migrations/034-requirement-sessions.ts
 import type { Database } from "bun:sqlite";
 
 export function up(db: Database): void {
@@ -535,7 +535,7 @@ _setClarifyFnForTest(async (prompt, reqId, _sessionRef) => {
 
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
-| `src/migrations/033-requirement-sessions.ts` | **新增** | DB schema |
+| `src/migrations/034-requirement-sessions.ts` | **新增** | DB schema |
 | `src/core/requirement-sessions.ts` | **新增** | Session CRUD + snapshot 截断 |
 | `src/daemon/requirement-clarifier.ts` | **修改** | 核心逻辑，改动较大 |
 | `tests/requirement-sessions.test.ts` | **新增** | Session CRUD 单测 |

@@ -428,10 +428,12 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
 
   for (let i = 0; i < attempts.length; i++) {
     const { prompt: attemptPrompt, sessionRef: attemptRef, label } = attempts[i];
+    let attemptRaw = "";
     try {
       setPhase(reqId, "calling-llm", { attempt: i as 0 | 1, prompt: attemptPrompt });
 
       const { rawText, newSessionRef } = await _clarifyFn(attemptPrompt, reqId, attemptRef);
+      attemptRaw = rawText;
       result = parseClarifyResult(rawText);
       resolvedRawText     = rawText;
       resolvedSessionRef  = newSessionRef ?? (attemptRef ?? undefined);
@@ -439,7 +441,14 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
       break;
     } catch (e: unknown) {
       lastError = e instanceof Error ? e : new Error(String(e));
-      log.warn("clarifier: req=%s 第 %d 次（%s）失败: %s", reqId, i + 1, label, lastError.message);
+      log.warn(
+        "clarifier: req=%s 第 %d 次（%s）失败: %s%s",
+        reqId,
+        i + 1,
+        label,
+        lastError.message,
+        attemptRaw ? `；原始输出（前 500 字）: ${attemptRaw.slice(0, 500)}` : "",
+      );
       if (i === 0) {
         setPhase(reqId, "parsing", { attempt: 1, last_parse_error: lastError.message });
       }

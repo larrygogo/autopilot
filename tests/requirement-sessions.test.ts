@@ -9,7 +9,7 @@ import { up as m007 } from "../src/migrations/007-workflows";
 import { up as m008 } from "../src/migrations/008-projects";
 import { up as m009 } from "../src/migrations/009-nullable-codebase";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
-import { up as m033 } from "../src/migrations/033-requirement-sessions";
+import { up as m034 } from "../src/migrations/034-requirement-sessions";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createRequirement } from "../src/core/requirements";
@@ -23,7 +23,7 @@ import {
 
 function initSchema(): void {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m024, m033].forEach(fn => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m024, m034].forEach(fn => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "测试项目" });
   createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "" });

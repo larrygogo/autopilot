@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SetupProgress } from "@/components/SetupProgress";
-import { FolderPicker } from "@/components/FolderPicker";
 import { ModelCombobox } from "@/components/ModelCombobox";
 
 type ProviderName = "anthropic" | "openai" | "google";
@@ -38,8 +37,8 @@ export function Setup() {
   });
 
   const [cbName, setCbName] = useState("");
-  const [cbPath, setCbPath] = useState("");
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [cbRemoteUrl, setCbRemoteUrl] = useState("");
+  const [cbSubmitting, setCbSubmitting] = useState(false);
 
   useEffect(() => {
     api.setupStatus().then(setReport).catch(() => {});
@@ -73,12 +72,16 @@ export function Setup() {
 
   async function submitStep2OrSkip(skip: boolean) {
     if (!skip) {
-      if (!cbName.trim() || !cbPath.trim()) { toast.error("name / path 不能为空", ""); return; }
+      if (!cbName.trim() || !cbRemoteUrl.trim()) { toast.error("名称 / 远程仓库地址不能为空", ""); return; }
+      setCbSubmitting(true);
       try {
-        await api.setupWorkspace({ name: cbName.trim(), path: cbPath.trim() });
+        // 后端写库前会 git ls-remote 验证可达性（可能耗时数秒）
+        await api.setupWorkspace({ name: cbName.trim(), remote_url: cbRemoteUrl.trim() });
       } catch (e: unknown) {
         toast.error("创建工作区失败", (e as Error)?.message ?? String(e));
         return;
+      } finally {
+        setCbSubmitting(false);
       }
     }
     await api.setupDismiss().catch(() => {});
@@ -146,24 +149,24 @@ export function Setup() {
             <Input id="cb-name" value={cbName} onChange={(e) => setCbName(e.target.value)} placeholder="my-project" />
           </div>
           <div>
-            <Label htmlFor="cb-path">本地路径</Label>
-            <div className="flex gap-2">
-              <Input id="cb-path" value={cbPath} onChange={(e) => setCbPath(e.target.value)} />
-              <Button variant="outline" onClick={() => setPickerOpen(true)}>浏览…</Button>
-            </div>
+            <Label htmlFor="cb-remote">远程仓库地址</Label>
+            <Input
+              id="cb-remote"
+              value={cbRemoteUrl}
+              onChange={(e) => setCbRemoteUrl(e.target.value)}
+              placeholder="https://github.com/owner/repo 或 git@host:owner/repo.git"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              无需本地 clone，任务执行时自动从远程拉取；提交时会验证仓库可达性
+            </p>
           </div>
           <div className="flex justify-end gap-2 pt-4">
-            <Button variant="ghost" onClick={() => setStep(1)}>← 上一步</Button>
-            <Button variant="outline" onClick={() => submitStep2OrSkip(true)}>跳过</Button>
-            <Button onClick={() => submitStep2OrSkip(false)}>完成</Button>
+            <Button variant="ghost" onClick={() => setStep(1)} disabled={cbSubmitting}>← 上一步</Button>
+            <Button variant="outline" onClick={() => submitStep2OrSkip(true)} disabled={cbSubmitting}>跳过</Button>
+            <Button onClick={() => submitStep2OrSkip(false)} disabled={cbSubmitting}>
+              {cbSubmitting ? "验证远程仓库…" : "完成"}
+            </Button>
           </div>
-
-          <FolderPicker
-            open={pickerOpen}
-            initialPath={cbPath || undefined}
-            onSelect={(p) => { setCbPath(p); setPickerOpen(false); }}
-            onCancel={() => setPickerOpen(false)}
-          />
         </section>
       )}
     </div>
