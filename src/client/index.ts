@@ -55,6 +55,9 @@ export class AutopilotClient {
   get listRequirementSubPrs() { return this.http.listRequirementSubPrs.bind(this.http); }
   get listRequirementDeliveries() { return this.http.listRequirementDeliveries.bind(this.http); }
   get addRequirementFeedback() { return this.http.addRequirementFeedback.bind(this.http); }
+  get listRequirementComments() { return this.http.listRequirementComments.bind(this.http); }
+  get answerRequirementQuestion() { return this.http.answerRequirementQuestion.bind(this.http); }
+  get enqueueRequirement() { return this.http.enqueueRequirement.bind(this.http); }
   get listNotifications() { return this.http.listNotifications.bind(this.http); }
   get notificationUnreadCount() { return this.http.notificationUnreadCount.bind(this.http); }
   get markNotificationsRead() { return this.http.markNotificationsRead.bind(this.http); }

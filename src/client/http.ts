@@ -316,6 +316,11 @@ export class HttpClient {
     return this.call("requirements.transition", { id, to });
   }
 
+  /** 审批通过入队（对 spec 签字，入队后内容冻结；闸门校验集合×delivers） */
+  async enqueueRequirement(id: string): Promise<{ requirement: Requirement }> {
+    return this.call("requirements.enqueue", { id });
+  }
+
   async listRequirementSubPrs(id: string): Promise<{ sub_prs: Array<{ pr_url: string; pr_number: number }> }> {
     return this.call("requirements.subPrs", { id });
   }
@@ -329,6 +334,21 @@ export class HttpClient {
   /** 注入反馈评论（kind=feedback）；需求处于 awaiting_review 时 daemon 自动转 fix_revision */
   async addRequirementFeedback(id: string, body: string): Promise<{ comment: { id: string } }> {
     return this.call("comments.add", { requirementId: id, kind: "feedback", from_role: "user", body });
+  }
+
+  /** 列需求评论（澄清问答/反馈线程） */
+  async listRequirementComments(id: string): Promise<{ comments: Array<{ id: string; kind: string; from_role: string; parent_id: string | null; body: string; suggestions: string[] | null; status: string; created_at: number }> }> {
+    return this.call("comments.list", { requirementId: id });
+  }
+
+  /**
+   * 回答澄清问题 = 追加回复 + resolve 问题（两步合一，对齐 Web 行为）。
+   * clarifier 监听 requirement:question-resolved 才进下一轮——只回复不 resolve 会卡住。
+   */
+  async answerRequirementQuestion(id: string, questionId: string, body: string): Promise<{ ok: true }> {
+    await this.call("comments.add", { requirementId: id, kind: "question", from_role: "user", parent_id: questionId, body });
+    await this.call("comments.resolve", { id: questionId });
+    return { ok: true };
   }
 
   async setRequirementWorkspaces(

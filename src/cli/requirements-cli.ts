@@ -306,6 +306,60 @@ export function registerRequirementCommands(program: Command): void {
     });
 
   req
+    .command("questions <id>")
+    .description("列出需求的未决澄清问题（含建议选项）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { comments } = await client.listRequirementComments(id);
+        const open = comments.filter((c: { kind: string; parent_id: string | null; status: string }) => c.kind === "question" && c.parent_id === null && c.status !== "resolved");
+        if (open.length === 0) { console.log("（无未决问题）"); return; }
+        for (const q of open) {
+          console.log(`\n[${q.id}]\n${q.body}`);
+          if (q.suggestions?.length) console.log(`建议选项：${q.suggestions.join(" / ")}`);
+        }
+        console.log(`\n回答：autopilot req answer ${id} <question-id> "<回答>"`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("answer <id> <question-id> <text>")
+    .description("回答澄清问题（追加回复并标记已解决，AI 继续下一轮）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, questionId: string, text: string, opts: { port: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        await client.answerRequirementQuestion(id, questionId, text);
+        console.log(`✓ 已回答 ${questionId}，AI 继续澄清`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("approve <id>")
+    .description("审批通过：需求入队执行（对 spec 签字，入队后内容冻结）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement } = await client.enqueueRequirement(id);
+        console.log(`✓ 需求 ${requirement.id} 已审批入队（${requirement.status}），调度器将启动执行`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
     .command("accept <id>")
     .description("验收通过（artifacts 交付的需求 → done；PR 交付以 GitHub merge 为准，此处拒绝）")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
