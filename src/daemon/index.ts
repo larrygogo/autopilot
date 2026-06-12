@@ -24,6 +24,7 @@ import { initRequirementClarifier, disposeRequirementClarifier } from "./require
 import { initProviderCliMonitor, disposeProviderCliMonitor } from "./provider-cli-monitor";
 import { runClarifierWatchdog } from "./clarifier-watchdog";
 import { initRequirementTaskBridge, disposeRequirementTaskBridge } from "./requirement-task-bridge";
+import { initFixRevisionRunner, disposeFixRevisionRunner } from "./fix-revision-runner";
 import { initMcpRuntime, disposeMcpRuntime } from "./mcp-runtime";
 import type { AutopilotEvent } from "./protocol";
 import { RESTART_SENTINEL_CODE, FATAL_CONFIG_CODE } from "./supervisor";
@@ -259,6 +260,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   initProviderCliMonitor();
   // 桥接 task 状态变化 → 同步 requirement 状态
   initRequirementTaskBridge();
+  // fix_revision 修复执行器（注入反馈 / PR review / CI 失败 → 在任务沙盒起修复 agent）
+  initFixRevisionRunner();
 
   // 桥接：事件总线 → WebSocket 广播
   bus.on("*", (event: AutopilotEvent) => {
@@ -360,6 +363,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     disposeRequirementClarifier();
     disposeProviderCliMonitor();
     disposeRequirementTaskBridge();
+    disposeFixRevisionRunner();
     disposeNotificationRecorder();
     disableBus();
     // server.stop 必须 await 完成后才能 exit：它是异步的（等 socket 真正关闭），

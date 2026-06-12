@@ -1218,6 +1218,18 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
+    method: "requirements.fixRound",
+    description: "需求当前 fix_revision 修复轮的进度状态（无活动轮 → null）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      const { getFixRound } = await import("./fix-progress");
+      return { round: getFixRound(p.id) ?? null };
+    },
+  });
+
+  registerRpcMethod({
     method: "requirements.retryClarify",
     description: "重跑 clarifier 一轮（生成新问题）",
     handler: async (params) => {

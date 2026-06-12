@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type FixRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
 import { AttachmentUploader } from "@/components/AttachmentUploader";
 import { RequirementWorkspacePicker } from "@/components/RequirementWorkspacePicker";
 import { AttachmentList } from "@/components/AttachmentList";
@@ -424,6 +424,8 @@ export function RequirementDetail() {
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [retryingClarify, setRetryingClarify] = useState(false);
   const [round, setRound] = useState<ClarifierRoundState | null>(null);
+  const [fixRound, setFixRound] = useState<FixRoundState | null>(null);
+  const [fixElapsedSec, setFixElapsedSec] = useState(0);
   const [traceOpen, setTraceOpen] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [selectedStep, setSelectedStep] = useState<ReqStep | null>(null);
@@ -438,12 +440,13 @@ export function RequirementDetail() {
     if (!id) return;
     if (!opts.silent) setLoading(true);
     try {
-      const [data, repoList, sub, qs, rd, slogs, atts] = await Promise.all([
+      const [data, repoList, sub, qs, rd, frd, slogs, atts] = await Promise.all([
         api.getRequirement(id),
         api.listWorkspaces(),
         api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
         api.listQuestions(id).catch(() => [] as Question[]),
         api.getClarifierRound(id).catch(() => null),
+        api.getFixRound(id).catch(() => null),
         api.listRequirementStatusLogs(id).catch(() => [] as RequirementStatusLog[]),
         api.listAttachments(id).catch(() => [] as Attachment[]),
       ]);
@@ -455,6 +458,7 @@ export function RequirementDetail() {
       setSubPrs(sub);
       setQuestions(qs);
       setRound(rd);
+      setFixRound(frd);
       setStatusLogs(slogs);
       setAttachments(atts);
     } catch (e: unknown) {
@@ -503,6 +507,18 @@ export function RequirementDetail() {
         }
         return;
       }
+      if (event.type === "requirement:fix-round-update") {
+        const payload = event.payload as { req_id?: string; started_at?: number; phase?: FixRoundState["phase"] } | undefined;
+        if (!payload || payload.req_id !== id) return;
+        if (!payload.phase || typeof payload.started_at !== "number") return;
+        if (payload.phase === "done" || payload.phase === "errored") {
+          setFixRound(null);
+          void refresh({ silent: true }); // 终态随之刷新需求状态（awaiting_review / failed）
+        } else {
+          setFixRound({ req_id: payload.req_id!, started_at: payload.started_at, phase: payload.phase });
+        }
+        return;
+      }
       const isForThis = event.payload?.id === id;
       if (!isForThis) return;
       if (
@@ -517,6 +533,19 @@ export function RequirementDetail() {
       }
     });
   }, [id, subscribe, refresh]);
+
+  // fix_revision 修复轮计时（与 clarifier 计时同模式）
+  useEffect(() => {
+    if (!fixRound) {
+      setFixElapsedSec(0);
+      return;
+    }
+    setFixElapsedSec(Math.floor((Date.now() - fixRound.started_at) / 1000));
+    const t = setInterval(() => {
+      setFixElapsedSec(Math.floor((Date.now() - fixRound.started_at) / 1000));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [fixRound]);
 
   // 本地 1s tick 计时器：基于 round.started_at 推导已用秒数，
   // 避免依赖 WS 高频推送 elapsed 字段。
@@ -1110,6 +1139,35 @@ export function RequirementDetail() {
             ))}
           </ol>
         )}
+      </div>
+    </Card>
+  ) : null;
+
+  // 修复执行进度卡：fix_revision 时常驻（agent 在任务沙盒上按反馈修复中）
+  const fixProgressCard = (req.status === "fix_revision" && fixRound) ? (
+    <Card className="p-5">
+      <div className="flex items-center gap-3">
+        <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-xs text-muted-foreground">修复执行中…</div>
+          <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/80">
+            {fixRound.phase === "preparing"
+              ? "阶段：准备（读取反馈与沙盒布局）"
+              : "阶段：Agent 按反馈修改代码，完成后 push 更新 PR 并转回验收"}
+          </div>
+        </div>
+        <div className="font-mono text-xs tabular-nums text-muted-foreground shrink-0">
+          已用 {fixElapsedSec}s
+        </div>
+      </div>
+    </Card>
+  ) : (req.status === "fix_revision" && !fixRound) ? (
+    <Card className="p-5">
+      <div className="flex items-center gap-3">
+        <Clock className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <p className="font-mono text-xs text-muted-foreground">
+          等待修复执行器接管…（daemon 重启后会自动补跑；若长时间无进展，检查 daemon 是否运行）
+        </p>
       </div>
     </Card>
   ) : null;
@@ -1785,6 +1843,7 @@ export function RequirementDetail() {
             if (activeStep === "execute") {
               return (
                 <>
+                  {fixProgressCard}
                   {subPrCard}
                   {taskRecord}
                   {!readonly && req.status === "fix_revision" && feedbackComposer}
