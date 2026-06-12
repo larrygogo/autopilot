@@ -1,0 +1,25 @@
+name: artifact
+label: "产物交付（探针）"
+description: "非 PR 交付探针：agent 产出文件到 deliverables/，人工 gate 验收后归档到 AUTOPILOT_HOME/deliverables/<reqId>/<taskId>/。单库需求用。dogfood 数据回填 docs/superpowers/specs/2026-06-12-deliverable-abstraction-design.md"
+setup_func: setup_artifact_task
+
+sandbox:
+  git: true   # 需求挂了 workspace 就 clone 作只读参考；agent 不 push、不开 PR
+
+phases:
+  # produce：agent 产出交付物到沙盒 deliverables/，跑完 gate 挂起等人工验收。
+  # 驳回理由经 task.last_user_decision 喂给下一轮重做（见 workflow.ts）。
+  - name: produce
+    label: "制作"
+    timeout: 1800
+    gate: true
+    gate_message: "产物在任务沙盒 workspace/deliverables/ 目录（先看 SUMMARY.md）。通过 = 归档交付；驳回请写明修改意见，会喂给下一轮重做。"
+    agent:
+      label: "制作者"
+      provider: anthropic
+      permission_mode: bypassPermissions
+
+  # deliver：无 agent 的机械归档。把 deliverables/ 抄出沙盒（沙盒在需求 done 后会被清）。
+  - name: deliver
+    label: "归档"
+    timeout: 300
