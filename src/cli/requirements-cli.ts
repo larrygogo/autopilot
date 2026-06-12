@@ -195,7 +195,11 @@ export function registerRequirementCommands(program: Command): void {
       await ensureDaemon(client);
       try {
         const { requirement } = await client.transitionRequirement(id, "clarifying");
-        console.log(`✓ 需求 ${requirement.id} 已进入澄清（代码库 ${requirement.workspace_id}，AI 正在调查）`);
+        console.log(
+          requirement.workspace_id
+            ? `✓ 需求 ${requirement.id} 已进入澄清（基于代码库 ${requirement.workspace_id}，AI 正在调查）`
+            : `✓ 需求 ${requirement.id} 已进入澄清（无代码库，纯文本模式）`,
+        );
       } catch (e: unknown) {
         console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
         process.exit(3);
@@ -272,16 +276,28 @@ export function registerRequirementCommands(program: Command): void {
     });
 
   req
-    .command("set-workspaces <id> <workspace-ids...>")
+    .command("set-workspaces <id> [workspace-ids...]")
     .description("设置需求的代码库集合（整体替换；所有库平级、各自交付 PR；审批后冻结，failed 例外）")
+    .option("--none", "清空集合（无库需求：requires.git 为 optional/false 的工作流可走纯文本闭环）")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
-    .action(async (id: string, wsIds: string[], opts: { port: string }) => {
+    .action(async (id: string, wsIds: string[], opts: { none?: boolean; port: string }) => {
+      // variadic 可选 + --none 显式空集：「忘了传」与「确认无库」必须是两个动作，防误清
+      if (wsIds.length === 0 && !opts.none) {
+        console.error("错误：未提供代码库 id。确认走无库请加 --none");
+        process.exit(2);
+      }
+      if (wsIds.length > 0 && opts.none) {
+        console.error("错误：--none 与代码库 id 互斥");
+        process.exit(2);
+      }
       const client = getClient(opts.port);
       await ensureDaemon(client);
       try {
-        const { requirement, workspace_ids } = await client.setRequirementWorkspaces(id, wsIds);
+        const { requirement, workspace_ids } = await client.setRequirementWorkspaces(id, opts.none ? [] : wsIds);
         console.log(
-          `✓ 需求 ${requirement.id} 代码库已设为 [${workspace_ids.join(", ")}]`,
+          workspace_ids.length === 0
+            ? `✓ 需求 ${requirement.id} 已确认无代码库（纯文本闭环）`
+            : `✓ 需求 ${requirement.id} 代码库已设为 [${workspace_ids.join(", ")}]`,
         );
       } catch (e: unknown) {
         console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
