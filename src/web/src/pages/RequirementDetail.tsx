@@ -1098,11 +1098,34 @@ export function RequirementDetail() {
   // 结果」都回到同一个时间线里，不再分散在执行页的多个卡片。
   const reviewThreadCard = (
     <Card id="feedback-section">
-      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+      {/* 头部 = 验收决策条：标题 + PR 链接在左，「验收通过」主按钮在右（原独立决策条已并入） */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="text-sm font-medium">审查与修复</span>
         {feedbacks.length > 0 && (
-          <Badge variant="muted" className="ml-auto">{feedbacks.length}</Badge>
+          <Badge variant="muted">{feedbacks.length}</Badge>
+        )}
+        {req.pr_url && (
+          <a
+            href={req.pr_url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline"
+          >
+            PR #{req.pr_number}
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+        {req.status === "awaiting_review" && (
+          <Button
+            variant="default"
+            size="sm"
+            className="ml-auto text-xs"
+            onClick={() => void markDone()}
+            disabled={actionBusy}
+          >
+            <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> 验收通过 · 完成
+          </Button>
         )}
       </div>
       <div className="p-5">
@@ -1831,31 +1854,14 @@ export function RequirementDetail() {
             if (activeStep === "review") {
               return (
                 <>
-                  {/* 验收步 = 改动 diff + 决策条 + 审查与修复对话（执行细节在执行步） */}
-                  {!readonly && req.status === "awaiting_review" && (
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card/40 px-4 py-2.5">
-                      <span className="text-sm font-medium">
-                        验收
-                        {req.pr_url && (
-                          <a href={req.pr_url} target="_blank" rel="noreferrer" className="ml-3 inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline">
-                            PR #{req.pr_number}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        )}
-                      </span>
-                      <Button variant="default" size="sm" className="text-xs" onClick={() => void markDone()} disabled={actionBusy}>
-                        <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> 验收通过 · 完成
-                      </Button>
-                    </div>
-                  )}
+                  {/* 验收步：审查与修复对话置顶（头部即决策条：PR 链接 + 验收通过按钮），
+                      改动 diff 在下方供对照。id=feedback-section 是 NextStepCTA 的滚动锚 */}
+                  {reviewThreadCard}
                   {req.task_id ? (
                     <TaskFileDiffsCard taskId={req.task_id} reloadKey={req.status} />
                   ) : (
                     <Card className="p-6 text-center text-sm text-muted-foreground">无关联执行，没有可验收的改动。</Card>
                   )}
-                  {/* 审查与修复对话：时间线（意见 → 修复进度 → Agent 回应）+ 发布输入框。
-                      id=feedback-section（NextStepCTA「去填写审查意见」的滚动锚） */}
-                  {reviewThreadCard}
                 </>
               );
             }
