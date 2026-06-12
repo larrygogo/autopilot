@@ -13,8 +13,25 @@ export type ProviderName = typeof PROVIDER_NAMES[number];
 // ──────────────────────────────────────────────
 
 export interface DefaultsConfig {
-  /** 创建定时任务时的默认时区；未设置时 scheduler 用机器时区 */
+  /** 用户偏好时区；未设置时回退机器时区 */
   timezone?: string;
+}
+
+// ── 时区工具 ──
+
+/** 返回当前机器的 IANA 时区标识（如 "Asia/Shanghai"），无法检测时回退 "UTC" */
+export function systemTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+/** 检测给定时区字符串是否为有效的 IANA 时区 */
+export function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function loadDefaultsConfig(): DefaultsConfig {

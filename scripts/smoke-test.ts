@@ -97,14 +97,21 @@ async function main(): Promise<void> {
       .query("SELECT name FROM sqlite_master WHERE type='table'")
       .all() as { name: string }[];
     const names = new Set(tables.map((t) => t.name));
-    for (const required of ["projects", "workspaces", "requirements", "workflows", "schedules"]) {
+    for (const required of ["projects", "workspaces", "requirements", "workflows"]) {
       if (!names.has(required)) {
         console.error(`  ✗ 表 ${required} 不存在`);
         cleanup();
         process.exit(1);
       }
     }
-    console.log(`  ✓ projects / workspaces / requirements / workflows / schedules 全存在`);
+    console.log(`  ✓ projects / workspaces / requirements / workflows 全存在`);
+    // schedules 功能已移除，migration 035 会 DROP TABLE schedules
+    if (names.has("schedules")) {
+      console.error(`  ✗ 表 schedules 应已被删除但仍存在`);
+      cleanup();
+      process.exit(1);
+    }
+    console.log(`  ✓ schedules 表已移除（migration 035）`);
   } finally {
     db.close();
   }

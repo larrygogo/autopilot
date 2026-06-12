@@ -75,7 +75,7 @@ describe("init 必跑全部 migrations（dogfood-bug19）", () => {
     }
   });
 
-  it("init 后业务表全部存在（projects/workspaces/requirements/workflows/schedules）", () => {
+  it("init 后业务表全部存在（projects/workspaces/requirements/workflows）", () => {
     runInit();
     const db = new Database(join(tmpHome, "runtime", "workflow.db"), { readonly: true });
     try {
@@ -84,9 +84,11 @@ describe("init 必跑全部 migrations（dogfood-bug19）", () => {
         .all() as { name: string }[];
       const names = new Set(tables.map((t) => t.name));
       // 这些表分散在不同迁移里，没全部跑就会缺
-      for (const required of ["projects", "workspaces", "requirements", "workflows", "schedules"]) {
+      for (const required of ["projects", "workspaces", "requirements", "workflows"]) {
         expect(names.has(required)).toBe(true);
       }
+      // schedules 功能已移除，migration 035 会 DROP TABLE schedules
+      expect(names.has("schedules")).toBe(false);
     } finally {
       db.close();
     }

@@ -8,7 +8,6 @@ import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/registry";
 import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
 import { runInBackground } from "../core/runner";
-import { runScheduledTasks } from "../core/scheduler";
 import { initDaemonFileLog, log } from "../core/logger";
 import { loadDaemonConfig, loadGithubConfig, getConfigPath } from "../core/config";
 import { enableBus, disableBus, bus, emit as emitEvent } from "../core/event-bus";
@@ -101,7 +100,6 @@ const DEFAULT_HOST = "127.0.0.1";
 const WATCHER_INTERVAL_MS = 60_000;
 const CLARIFIER_WATCHDOG_INTERVAL_MS = 60_000;
 const RETENTION_INTERVAL_MS = 3600_000;  // 每小时扫一次 workspace 保留策略
-const SCHEDULER_INTERVAL_MS = 30_000;    // 每 30 秒扫一次定时任务（精度到分钟）
 // PR_POLL_INTERVAL_MS 由 config.yaml.github.poll_interval_seconds 决定
 
 export interface DaemonOptions {
@@ -323,20 +321,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   runRetention();
   const retentionTimer = setInterval(runRetention, RETENTION_INTERVAL_MS);
 
-  // scheduler 定时器：扫描到期的 schedule，创建对应任务。
-  // 重入守卫（CONC-04）：单 tick 可能涉及 agent 抽取耗时数秒，无守卫时重叠的两个 tick 会在
-  // 任一 markScheduleFired 之前各自命中同一 due schedule 双触发。
-  let schedulerRunning = false;
-  const schedulerTimer = setInterval(() => {
-    if (schedulerRunning) return;
-    schedulerRunning = true;
-    runScheduledTasks()
-      .catch((e: unknown) => {
-        console.error("scheduler 异常：", e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => { schedulerRunning = false; });
-  }, SCHEDULER_INTERVAL_MS);
-
   // pr-poller 定时器：扫 awaiting_review 需求的 PR，自动注入 review 反馈 / 标 done
   const ghCfg = loadGithubConfig();
   const prPollerInterval = ghCfg.poll_interval_seconds * 1000;
@@ -355,7 +339,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     clearInterval(watcherTimer);
     clearInterval(clarifierWatchdogTimer);
     clearInterval(retentionTimer);
-    clearInterval(schedulerTimer);
     clearInterval(prPollerTimer);
     configDirWatcher?.close();
     if (configWatchDebounce) {

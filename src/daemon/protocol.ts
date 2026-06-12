@@ -126,10 +126,6 @@ export function getChannelsForEvent(event: AutopilotEvent): string[] {
       channels.push("daemon");
       break;
     }
-    case "schedule": {
-      channels.push("schedule:*");
-      break;
-    }
     case "projects": {
       channels.push("projects:*");
       break;

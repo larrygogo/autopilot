@@ -9,7 +9,6 @@
 import type { Task, TaskLog } from "../core/db";
 import type { DaemonStatus, GraphData } from "../daemon/protocol";
 import type { SessionManifest, ChatMessage } from "../core/sessions";
-import type { Schedule, ScheduleType } from "../core/schedules";
 import type { Requirement } from "../core/requirements";
 import type { Notification } from "../core/notification-types";
 import { WsRpcCaller, toWsUrl, WsRpcError } from "./ws-rpc";
@@ -183,51 +182,6 @@ export class HttpClient {
   async exportWorkflow(name: string): Promise<string> {
     const bundle = await this.call<{ yaml: string }>("workflows.exportBundle", { name });
     return bundle.yaml;
-  }
-
-  // ── Schedules ──
-
-  async listSchedules(): Promise<Schedule[]> {
-    return this.call("schedules.list");
-  }
-
-  async getSchedule(id: string): Promise<Schedule> {
-    return this.call("schedules.get", { id });
-  }
-
-  async createSchedule(body: {
-    name: string;
-    type: ScheduleType;
-    run_at?: string | null;
-    cron_expr?: string | null;
-    timezone: string;
-    workflow: string;
-    title: string;
-    requirement?: string | null;
-    enabled?: boolean;
-  }): Promise<Schedule> {
-    return this.call("schedules.create", body);
-  }
-
-  async updateSchedule(id: string, body: Partial<{
-    name: string;
-    enabled: boolean;
-    run_at: string | null;
-    cron_expr: string | null;
-    timezone: string;
-    workflow: string;
-    title: string;
-    requirement: string | null;
-  }>): Promise<Schedule> {
-    return this.call("schedules.update", { id, ...body });
-  }
-
-  async deleteSchedule(id: string): Promise<{ ok: true }> {
-    return this.call("schedules.delete", { id });
-  }
-
-  async runScheduleNow(id: string): Promise<{ ok: true; taskId: string }> {
-    return this.call("schedules.runNow", { id });
   }
 
   // ── Projects ── (CLI 历史 wrap 风格 { projects } 保留)
