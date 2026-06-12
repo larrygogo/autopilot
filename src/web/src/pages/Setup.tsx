@@ -96,7 +96,6 @@ export function Setup() {
   return (
     <div className={PAGE_W_FOCUS}>
       <PageHero
-        eyebrow="SETUP"
         title="首跑向导"
         subtitle="完成 2 步即可开始使用 autopilot"
       />

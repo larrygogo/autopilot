@@ -90,15 +90,11 @@ export function ApiKeysPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="font-display text-lg font-semibold">API 密钥管理</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            管理各 LLM 供应商的 API 密钥。密钥使用 AES-256-GCM 加密存储。
-          </p>
-        </div>
+      {/* 页面标题由 SettingsHub 的 PageHero 提供（「API 密钥」分区头），这里只留刷新动作行 */}
+      <div className="flex items-center justify-end">
         <Button variant="ghost" size="sm" onClick={refresh} disabled={loading}>
           <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+          刷新
         </Button>
       </div>
 

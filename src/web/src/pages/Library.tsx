@@ -3,6 +3,7 @@ import { PAGE_W } from "@/lib/layout";
 import { useNavigate } from "react-router-dom";
 import { Layers, Plus, RefreshCw, Pencil, Trash2, MoreHorizontal } from "lucide-react";
 import { EntityGrid, EntityList, ViewToggle, useViewMode, type EntityCardItem } from "@/components/EntityCards";
+import { PageHero } from "@/components/PageHero";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -199,19 +200,23 @@ function ProjectsTab() {
   }));
 
   return (
-    <div className="space-y-4 pt-4">
+    <div className="space-y-4">
+      {/* 列表页统一骨架：PageHero（标题+副标+主创建按钮）+ 工具行（计数+视图切换） */}
+      <PageHero
+        title="项目"
+        subtitle="按项目维度查看 / 新建 / 进入工作台"
+        actions={
+          <Button onClick={openCreateDialog}>
+            <Plus className="h-4 w-4" />
+            新建项目
+          </Button>
+        }
+      />
       <div className="flex items-center justify-between gap-3">
         <p className="bp-label text-muted-foreground">
           共 {projects.length} 个项目
         </p>
-        <div className="flex items-center gap-2">
-          {/* grid / list 视图切换（记住偏好） */}
-          <ViewToggle view={view} onChange={setView} />
-          <Button size="sm" onClick={openCreateDialog}>
-            <Plus className="h-4 w-4" />
-            新建项目
-          </Button>
-        </div>
+        <ViewToggle view={view} onChange={setView} />
       </div>
 
       {loadError && (
@@ -345,16 +350,10 @@ function ProjectsTab() {
 // ---------------------------------------------------------------------------
 
 export function Library() {
-  // 历史 tab 已并入「现在」页，本页只剩项目列表
+  // 历史 tab 已并入「现在」页，本页只剩项目列表（页头在 ProjectsTab 内，
+  // 新建按钮要挂 PageHero actions 而 dialog state 在 tab 组件里）
   return (
     <div className={PAGE_W}>
-      <header className="mb-4 border-b border-border pb-3">
-        <h1 className="font-display text-2xl font-bold">项目</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          按项目维度查看 / 新建 / 进入工作台
-        </p>
-      </header>
-
       <ProjectsTab />
     </div>
   );

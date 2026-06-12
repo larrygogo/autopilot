@@ -1433,7 +1433,7 @@ export function RequirementDetail() {
                 if (e.key === "Enter") { e.preventDefault(); saveTitle(); }
                 if (e.key === "Escape") { setEditingTitle(false); setTitleDraft(req.title); }
               }}
-              className="h-auto break-words py-1.5 font-display text-2xl font-bold leading-tight sm:text-3xl"
+              className="h-auto break-words py-1.5 text-2xl font-semibold leading-tight tracking-tight"
               placeholder="需求标题"
             />
             <div className="flex items-center gap-2">
@@ -1453,7 +1453,8 @@ export function RequirementDetail() {
         ) : (
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-start gap-2">
-              <h1 className="break-words font-display text-3xl font-bold leading-[1.1] sm:text-4xl">
+              {/* 与 PageHero 标题排版对齐（衬线 4xl hero 已废弃） */}
+              <h1 className="break-words text-2xl font-semibold leading-tight tracking-tight">
                 {req.title}
               </h1>
               {canEditRequirementContent(req.status) && (

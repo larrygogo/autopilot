@@ -87,7 +87,6 @@ export function Start() {
   return (
     <div className={PAGE_W_FOCUS}>
       <PageHero
-        eyebrow="START"
         title="开始"
         subtitle="说说你想做什么，AI 帮你整理成需求"
       />

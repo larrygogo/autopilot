@@ -186,7 +186,6 @@ export function Tasks() {
   return (
     <div className={PAGE_W}>
       <PageHero
-        eyebrow="SHEET · PIPELINE"
         title="流水线"
         subtitle="需求 → 任务 全生命周期 · 一条工作从提出到跑完"
         meta={[

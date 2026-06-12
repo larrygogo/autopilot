@@ -75,10 +75,8 @@ export function Workflows() {
   return (
     <div className={PAGE_W}>
       <PageHero
-        eyebrow="SHEET · WORKFLOWS · DEF"
         title="工作流"
         subtitle="编排定义 · 阶段图谱"
-        meta={[{ k: "总数", v: workflows.length }]}
         actions={
           <Button onClick={() => setTemplatePickerOpen(true)}>
             <Plus className="h-4 w-4" />

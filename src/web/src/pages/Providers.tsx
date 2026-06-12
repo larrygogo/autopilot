@@ -89,7 +89,6 @@ export function Providers(_props: { embedded?: boolean } = {}) {
   return (
     <div className={PAGE_W_FORM}>
       <PageHero
-        eyebrow="提供商 · LLM"
         title="模型提供商"
         subtitle="全局默认 · CLI 凭证"
         description="通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。"

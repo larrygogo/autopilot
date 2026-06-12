@@ -116,7 +116,6 @@ export function NewWorkflowWithAI() {
   return (
     <div className={PAGE_W_FORM}>
       <PageHero
-        eyebrow="WORKFLOWS · AI"
         title="AI 生成工作流"
         subtitle="描述你想要的流程，AI 生成 yaml + ts；可继续追问调整"
       />
