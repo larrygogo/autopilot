@@ -1,6 +1,8 @@
 name: artifact
 label: "产物交付（探针）"
-description: "非 PR 交付探针：agent 产出文件到 deliverables/，人工 gate 验收后归档到 AUTOPILOT_HOME/deliverables/<reqId>/<taskId>/。单库需求用。dogfood 数据回填 docs/superpowers/specs/2026-06-12-deliverable-abstraction-design.md"
+description: "产出文件类交付物（设计图 / 网页 demo / 文档）：制作 → 人工验收 → 归档到本机交付目录。单库需求用"
+# 探针备注：非 PR 交付形态的零内核改动探针。归档目录 = AUTOPILOT_HOME/deliverables/<reqId>/<taskId>/；
+# dogfood 观察回填 docs/superpowers/specs/2026-06-12-deliverable-abstraction-design.md（「探针反馈」节）。
 setup_func: setup_artifact_task
 
 sandbox:
