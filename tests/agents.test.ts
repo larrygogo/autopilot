@@ -42,9 +42,17 @@ describe("agent system", () => {
     expect(agent.config.provider).toBe("anthropic");
   });
 
-  test("createAgent throws for unknown provider", () => {
+  test("createAgent throws for compat provider with cli mode", () => {
     const { createAgent } = require("../src/agents/registry");
-    expect(() => createAgent({ name: "a", provider: "unknown" as any, model: "m" })).toThrow("未知 provider");
+    // 非三大官方 provider 强制 cli 模式 → 报错（compat provider 仅支持 API）
+    expect(() => createAgent({ name: "a", provider: "unknown" as any, mode: "cli", model: "m" })).toThrow("仅支持 API 模式");
+  });
+
+  test("createAgent accepts compat provider in API mode", () => {
+    const { createAgent } = require("../src/agents/registry");
+    // compat provider 自动切 api 模式，不抛错
+    const agent = createAgent({ name: "a", provider: "deepseek", model: "deepseek-chat" });
+    expect(agent.mode).toBe("api");
   });
 });
 

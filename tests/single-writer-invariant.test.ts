@@ -40,6 +40,7 @@ const ALLOWLIST = new Set([
   "src/migrations/037-multi-workspace-per-project.ts", // 1:N：删 1:1 索引 + 回填 requirement_workspaces（一次性数据迁移）
   "src/core/notifications.ts",     // notifications 表：SQLite 即权威源，事件型通知流（替代 Now 派生快照）
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
+  "src/core/api-keys.ts",          // api_keys 表：SQLite 即权威源，API 密钥加密存储无 manifest 同步需求
 ]);
 
 const WRITE_SQL_RE = /\b(INSERT\s+(OR\s+\w+\s+)?INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|REPLACE\s+INTO)\b/i;

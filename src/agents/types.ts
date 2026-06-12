@@ -1,4 +1,11 @@
-export type ProviderName = "anthropic" | "openai" | "google";
+/** 预置 OpenAI 兼容供应商（命名已预置 base_url，用户只需提供 key） */
+export type BuiltinCompatProvider = "deepseek" | "kimi" | "minimax";
+
+/** 三大官方 + 预置兼容 + 自定义 compat provider */
+export type ProviderName = "anthropic" | "openai" | "google" | BuiltinCompatProvider | (string & {});
+
+/** Agent 接入方式：CLI 子进程 或 HTTP API 直连 */
+export type AgentMode = "cli" | "api";
 
 /**
  * Agent 定义。可出现在：
@@ -15,6 +22,8 @@ export interface AgentConfig {
   extends?: string | null | false;
   provider?: ProviderName;
   model?: string;
+  /** 接入方式：cli（子进程）或 api（HTTP 直连）。不填则继承 provider 级或按默认规则 */
+  mode?: AgentMode;
   permission_mode?: string;
   max_turns?: number;
   max_budget_usd?: number;

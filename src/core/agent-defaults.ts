@@ -11,8 +11,10 @@
  */
 export interface InlineAgentConfig {
   label?: string;
-  provider?: "anthropic" | "openai" | "google";
+  provider?: string;
   model?: string;
+  /** 接入方式：cli 或 api。不填则继承 provider 级或按默认规则 */
+  mode?: "cli" | "api";
   max_turns?: number;
   permission_mode?: string;
   system_prompt?: string;

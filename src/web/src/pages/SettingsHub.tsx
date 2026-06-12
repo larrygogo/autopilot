@@ -3,12 +3,14 @@ import { PageLoader } from "@/components/PageLoader";
 
 const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
 const Providers = lazy(() => import("./Providers").then((m) => ({ default: m.Providers })));
+const ApiKeysPage = lazy(() => import("./settings/ApiKeysPage").then((m) => ({ default: m.ApiKeysPage })));
 
 /** 设置分区（Supabase 式：侧栏设置菜单切换，路由 /settings[/:section]） */
-export type SettingsSection = "general" | "providers" | "scheduler" | "network" | "daemon";
+export type SettingsSection = "general" | "providers" | "api-keys" | "scheduler" | "network" | "daemon";
 
 const SECTION_HEADER: Record<Exclude<SettingsSection, "providers">, { title: string; desc: string }> = {
   general: { title: "通用", desc: "默认偏好与桌面通知" },
+  "api-keys": { title: "API 密钥", desc: "API 直连模式的供应商密钥（本机加密存储，CLI 模式无需配置）" },
   scheduler: { title: "任务调度", desc: "全局最大并发任务数等调度行为" },
   network: { title: "网络访问", desc: "daemon 监听地址与 API token" },
   daemon: { title: "Daemon", desc: "运行状态、日志与配置文件" },
@@ -32,7 +34,7 @@ export function SettingsHub({ section = "general" }: { section?: SettingsSection
         <p className="mt-1 text-sm text-muted-foreground">{header.desc}</p>
       </header>
       <Suspense fallback={<PageLoader />}>
-        <Settings section={section} />
+        {section === "api-keys" ? <ApiKeysPage /> : <Settings section={section} />}
       </Suspense>
     </div>
   );
