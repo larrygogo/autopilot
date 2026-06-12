@@ -9,7 +9,8 @@
 | 批次 | 内容 | 状态 |
 |---|---|---|
 | 第一批（2026-06-12） | barrel 入口 `components/pro/`、EmptyState、DescList、FormField + 代表点迁移 | ✅ 已落地 |
-| 第二批 | PageShell、DetailHeader、FormDialog、ErrorState、SectionCard、SkeletonRows（涉及全部页面/详情页迁移，单独立项） | 📋 已登记待落地 |
+| 第二批（2026-06-12） | PageShell、DetailHeader、FormDialog、ErrorState、SkeletonRows + 8 页迁移 | ✅ 已落地 |
+| 暂缓 | SectionCard（同构证据仅 3 处且结构分散，未达自家 3+ 重复门槛——按 §3 流程等证据） | ⏸ |
 
 ## 1. 分层模型
 
@@ -77,12 +78,12 @@ P0 = 现在就有 3+ 处手写重复；P1 = 重复达标但收益次之；P2 = *
 | **P0** | `EmptyState` | 空态卡 = 图标 + 一句话 + 引导动作（空态必须告诉用户"下一步做什么"） | `icon?`；`title`；`hint?`；`action?`；`size: "page"\|"section"\|"inline"` | ✅ 第一批 |
 | **P0** | `DescList` | 键值描述列表（详情页 meta 的唯一形态） | `items: Array<{label, value, mono?}>`；`columns?: 1\|2\|3\|4`；`dense?` | ✅ 第一批 |
 | **P0** | `FormField` | 表单行排版件 = Label + 控件 + hint + 错误（纯排版，不做受控/校验框架） | `label`；`required?`；`hint?`；`error?`；`htmlFor?`；`children` | ✅ 第一批 |
-| **P0** | `PageShell` | 页面容器 = 宽度档位 + 可选 PageHero + 页级状态闸门（error > loading > children） | `width: "content"\|"form"\|"focus"`；`hero?`；`loading?`；`error?: {message, onRetry?}` | 📋 第二批 |
-| **P0** | `DetailHeader` | 实体详情页头 = 返回链接 + 标题 + mono 标识符 + 状态徽章 + 操作区（`identifier` 槽是「业务标签叠加内核名」的结构化落点） | `back: {to, label}`；`title`；`identifier?`；`status?`；`actions?` | 📋 第二批 |
-| **P1** | `FormDialog` | 表单对话框骨架 = 标题 + 字段区 + 内联错误条 + busy footer（⚠ 只抽骨架，不做 schema 驱动 ProForm——本项目表单少而浅，schema 层是负资产） | `open/onOpenChange`；`title`；`busy?`；`error?`；`onSubmit`；`danger?` | 📋 第二批 |
-| **P1** | `ErrorState` | 错误态卡 = 为什么（业务话）+ 内核错误原文（mono 折叠）+ 重试出口 | `title`；`detail?`；`onRetry?`；`size` | 📋 第二批 |
-| **P1** | `SectionCard` | 详情页节卡片 = Card + 节标题行 + 右侧操作 + 可选折叠 | `title`；`actions?`；`collapsible?` | 📋 第二批 |
-| **P1** | `SkeletonRows` | 区块级加载骨架，替代区块内裸 spinner | `count?`；`variant: "row"\|"card"` | 📋 第二批 |
+| **P0** | `PageShell` | 页面容器 = 宽度档位 + 可选 PageHero + 页级状态闸门（error > loading > children） | `width: "content"\|"form"\|"focus"`；`hero?`；`loading?`；`error?: {message, onRetry?}` | ✅ 第二批 |
+| **P0** | `DetailHeader` | 实体详情页头 = 返回链接 + 标题 + mono 标识符 + 状态徽章 + 操作区（`identifier` 槽是「业务标签叠加内核名」的结构化落点） | `back: {to, label}`；`title`；`identifier?`；`status?`；`actions?` | ✅ 第二批 |
+| **P1** | `FormDialog` | 表单对话框骨架 = 标题 + 字段区 + 内联错误条 + busy footer（⚠ 只抽骨架，不做 schema 驱动 ProForm——本项目表单少而浅，schema 层是负资产） | `open/onOpenChange`；`title`；`busy?`；`error?`；`onSubmit`；`danger?` | ✅ 第二批 |
+| **P1** | `ErrorState` | 错误态卡 = 为什么（业务话）+ 内核错误原文（mono 折叠）+ 重试出口 | `title`；`detail?`；`onRetry?`；`size` | ✅ 第二批 |
+| **P1** | `SectionCard` | 详情页节卡片 = Card + 节标题行 + 右侧操作 + 可选折叠 | `title`；`actions?`；`collapsible?` | ⏸ 证据不足暂缓 |
+| **P1** | `SkeletonRows` | 区块级加载骨架，替代区块内裸 spinner | `count?`；`variant: "row"\|"card"` | ✅ 第二批 |
 | **P2 暂不抽** | ProTable 等价物 | 项目几乎无真表格场景 | — | — |
 | **P2 暂不抽** | schema 驱动表单 / StatGroup / 通用 Drawer 模板 | 重复 < 3 处；谁想抽，先按 §3 流程交三处重复证据 | — | — |
 
