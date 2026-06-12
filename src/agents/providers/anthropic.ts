@@ -403,8 +403,8 @@ export class AnthropicProvider extends BaseProvider {
   async run(prompt: string, options?: RunOptions): Promise<AgentResult> {
     // cwd 变 → 弃旧 session 开新会话，避免 claude --resume 续到已不存在的旧目录报
     // "No conversation found"。共用沙盒模型下同一任务各 phase 的 cwd 是同一个共用 clone、cwd
-    // 稳定，故 session 跨 phase 复用（想要的会话连续性）；重跑虽 cwd 路径不变但底层是新 clone，
-    // 由 resetTaskForRerun 显式 closeAgents 清 session（见 task-factory）。
+    // 稳定，故 session 跨 phase 复用（想要的会话连续性）；需求级重跑 = 新 run（新 taskId 新 cwd），
+    // 且 startNewRunForRequirement 还显式 closeAgents 清旧 session（见 task-factory）。
     if (options?.cwd !== this.lastCwd) {
       this.sessionId = undefined;
       this.lastCwd = options?.cwd;

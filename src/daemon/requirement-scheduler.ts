@@ -10,7 +10,7 @@ import {
 import type { Requirement } from "../core/requirements";
 import { listComments } from "../core/requirement-comments";
 import { getTask } from "../core/db";
-import { startTaskFromTemplate, resetTaskForRerun } from "../core/task-factory";
+import { startTaskFromTemplate, startNewRunForRequirement } from "../core/task-factory";
 import { createLogger } from "../core/logger";
 import { loadSchedulerConfig } from "../core/config";
 
@@ -24,15 +24,15 @@ let _handler: ((event: AutopilotEvent) => void) | null = null;
 // ──────────────────────────────────────────────
 type TaskStarters = {
   startTaskFromTemplate: typeof startTaskFromTemplate;
-  resetTaskForRerun: typeof resetTaskForRerun;
+  startNewRunForRequirement: typeof startNewRunForRequirement;
 };
-let _starters: TaskStarters = { startTaskFromTemplate, resetTaskForRerun };
+let _starters: TaskStarters = { startTaskFromTemplate, startNewRunForRequirement };
 
 /** 仅测试用：替换起任务 / 重跑实现。传 null 恢复真实实现。 */
 export function _setTaskStartersForTest(s: Partial<TaskStarters> | null): void {
   _starters = {
     startTaskFromTemplate: s?.startTaskFromTemplate ?? startTaskFromTemplate,
-    resetTaskForRerun: s?.resetTaskForRerun ?? resetTaskForRerun,
+    startNewRunForRequirement: s?.startNewRunForRequirement ?? startNewRunForRequirement,
   };
 }
 
@@ -155,22 +155,23 @@ async function scheduleOne(candidate: Requirement): Promise<boolean> {
   // 需求选定的工作流（NULL = 未显式选择，回退默认 dev）
   const reqWorkflow = candidate.workflow ?? "dev";
 
-  // req:task 1:1：需求已有存活 task → 复用它重置重跑，不新建第二个（避免一 req 堆多 task）。
-  // 首次执行 task_id 为 null 走下面新建；failed/重新入队时 task_id 已写 → 复用重跑。
+  // 需求级重跑 = 新 run（v2 R2）：需求已有 task（failed/重新入队时 task_id 已写）→
+  // startNewRunForRequirement 追加新 run（旧 run 历史保留，远程旧分支/旧 clone 由其善后）。
+  // 首次执行 task_id 为 null 走下面新建。
   const existing = candidate.task_id ? getTask(candidate.task_id) : null;
   if (existing) {
     try {
-      _starters.resetTaskForRerun(existing.id, {
+      const task = await _starters.startNewRunForRequirement(candidate.id, {
         requirement,
         title: candidate.title,
-        // failed 后用户可换工作流再重试：重跑时把 task 迁到新工作流（reset 本来就重置到
-        // initial_state + 清历史 + 重 clone，换流程是干净的）
-        workflow: reqWorkflow !== existing.workflow ? reqWorkflow : undefined,
+        // failed 后用户可换工作流再重试：新 run 全新 clone + 全新状态机，换流程是干净的
+        workflow: reqWorkflow,
       });
-      updateRequirement(candidate.id, { schedule_error: null });
+      // schedule_error 不在此处盲清：startNewRunForRequirement 内部负责（删远程分支真失败
+      // 时它写入的 RERUN-07 根因要保留，盲清会把刚 surface 的失败原因抹掉）
       setRequirementStatus(candidate.id, "running");
-      log.info("tick: 重跑 requirement %s → 复用 task %s on workspace %s",
-        candidate.id, existing.id, wsAlias);
+      log.info("tick: 重跑 requirement %s → 新 run %s（旧 run %s 历史保留）on workspace %s",
+        candidate.id, task.id, existing.id, wsAlias);
       return true;
     } catch (e: unknown) {
       const msg = (e as Error).message;

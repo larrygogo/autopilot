@@ -2,7 +2,7 @@ import { getDb } from "./db";
 import { emit } from "./event-bus";
 import { resolveComment } from "./requirement-comments";
 import { listWorkspaces, type Workspace } from "./workspaces";
-import { deleteRequirementClone } from "./requirement-clone";
+import { deleteRequirementRuntimeDir } from "./requirement-clone";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -315,8 +315,9 @@ export function deleteRequirement(id: string): void {
     db.run("DELETE FROM requirement_workspaces WHERE requirement_id = ?", [id]);
     db.run("DELETE FROM requirements WHERE id = ?", [id]);
   })();
-  // 需求级浅 clone（澄清用）随需求删除清理；失败不阻塞（内部已容错）
-  deleteRequirementClone(id);
+  // 需求运行时目录（workspace/ 浅 clone + runs/ 执行历史）随需求删除整树清理；
+  // 失败不阻塞（内部已容错）。v2 R2：runs/ 从属需求目录，删需求 = 级联删执行历史。
+  deleteRequirementRuntimeDir(id);
 }
 
 /**

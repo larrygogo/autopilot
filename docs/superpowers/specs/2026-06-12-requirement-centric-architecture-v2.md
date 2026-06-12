@@ -93,10 +93,15 @@ cancel 级联变平凡：取消需求 = abort 活跃 run（已有 task-lifecycle
 
 ## 4. 数据与文件层（承接 runtime spec，对齐 run 实体）
 
-- `tasks` 表 → 语义演进为 runs：**不改表名**（成本不对称），加列 `kind`（execution/fix，迁移 046）+ `seq`（需求内序号）；
+> R2 实施修正（2026-06-12 落地）：迁移号实际取 **044**（写 spec 时预估 046；迁移按号递增执行，
+> 预留跳号会让后落低号被静默跳过——撞号教训变体，后续 spec 一律写「实施时取当时最大+1」）。
+> 目录实际为 **`runs/<taskId>/`（不带 seq 前缀）**——getTaskRoot(taskId) 无法廉价查 seq，
+> seq 是 DB 列只供排序展示。
+
+- `tasks` 表 → 语义演进为 runs：**不改表名**（成本不对称），加列 `kind`（execution/fix）+ `seq`（需求内序号）（迁移 044 ✅）；
   `requirement_id` 已非空；title/requirement 字段副本停止使用（数据从需求读）
-- req:run 从 1:1 改 **1:N**：重跑=新 run 替代 resetTaskForRerun 的清史复用；task-factory 的 409 守卫改为「无活跃 run」
-- 文件：`runtime/requirements/<id>/runs/<seq>-<runId>/`（双根解析器照旧服务存量 runtime/tasks/）
+- req:run 从 1:1 改 **1:N**：重跑=新 run 替代 resetTaskForRerun 的清史复用（✅ 已删除，`startNewRunForRequirement` 接替）；task-factory 的 409 守卫改为「无活跃 run」（✅）
+- 文件：`runtime/requirements/<id>/runs/<taskId>/`（✅ 双根解析器照旧服务存量 runtime/tasks/）
 - 执行视图：TaskRunView 改挂需求页内（按 run 切换的执行历史），独立任务页降级为 run 详情路由
 - 流水线页去重拼接逻辑消亡：一行=一个需求（其活跃 run 的 phase 进度内联展示）
 
@@ -118,7 +123,7 @@ cancel 级联变平凡：取消需求 = abort 活跃 run（已有 task-lifecycle
 |---|---|---|
 | **R0** ✅ | 路径收口 getTaskRoot（已完成 a06d383） | — |
 | **R1 汇报接口** | `reportRunOutcome` 落地，bridge 改为其唯一调用方（外壳保留行为不变）——先把单口立起来，缝合代码逐步迁入 | dogfood 主库废除通过 |
-| **R2 run 多历史** | tasks 加 kind/seq（迁移 046）、重跑=新 run、文件落 runs/、执行视图按 run 切换 | R1 |
+| **R2 run 多历史** ✅（2026-06-12，迁移实为 044） | tasks 加 kind/seq、重跑=新 run、文件落 runs/（执行视图按 run 切换属 R6 UI 收束，本期流水线先只显示最新 run） | R1 |
 | **R3 fix=run** | fix-revision-runner 重构为创建 fix run（走标准 runner+汇报） | R1、R2 |
 | **R4 codebase 统一** | = runtime spec Stage 3（clone 归需求） | R2 |
 | **R5 声明层** | requires/delivers + 三闸门 + acceptance 执行器按 delivers 分发（与交付物 P0 合流） | R1 |

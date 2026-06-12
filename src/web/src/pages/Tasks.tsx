@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { tsToMs } from "@/lib/pipeline-time";
+import { filterLatestRunTasks } from "@/lib/pipeline-logic";
 import {
   TimeGroupedList, RequirementRow, TaskRow,
   type PipelineTask, type TimedRow, type PipelineNameMaps,
@@ -82,16 +83,32 @@ export function Tasks() {
     return () => { unsubT(); unsubR(); };
   }, [subscribe]);
 
+  // requirement_id → 需求对象：任务行代表整件工作时，分桶/状态视觉/卡片特化
+  //（preview、打开 PR 等动作）都以需求为准（task done 只是执行单元跑完，
+  // 需求可能还在验收/修复 —— 按 task 状态显示「已完成」会误导）
+  const reqById = useMemo(() => {
+    const m: Record<string, Requirement> = {};
+    for (const r of requirements) m[r.id] = r;
+    return m;
+  }, [requirements]);
+
+  // run 多历史（v2 R2）：每需求只显示 requirement.task_id 指向的最新 run，
+  // 历史 run 不铺行（run 历史列表 UI 留 R6）；无关联需求的任务照旧显示
+  const visibleTasks = useMemo(
+    () => filterLatestRunTasks(tasks, reqById),
+    [tasks, reqById],
+  );
+
   const allWorkflows = useMemo(() => {
     const set = new Set<string>();
-    for (const t of tasks) if (t.workflow) set.add(t.workflow);
+    for (const t of visibleTasks) if (t.workflow) set.add(t.workflow);
     return [...set].sort();
-  }, [tasks]);
+  }, [visibleTasks]);
 
   const filteredTasks = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q && !workflowFilter) return tasks;
-    return tasks.filter((t) => {
+    if (!q && !workflowFilter) return visibleTasks;
+    return visibleTasks.filter((t) => {
       if (workflowFilter && t.workflow !== workflowFilter) return false;
       if (!q) return true;
       return (
@@ -101,7 +118,7 @@ export function Tasks() {
         (t.requirement_id ?? "").toLowerCase().includes(q)
       );
     });
-  }, [tasks, searchQuery, workflowFilter]);
+  }, [visibleTasks, searchQuery, workflowFilter]);
 
   // 需求只按搜索过滤；workflow chip 激活时聚焦任务视角，隐藏需求段
   const filteredRequirements = useMemo(() => {
@@ -112,15 +129,6 @@ export function Tasks() {
       (r.id ?? "").toLowerCase().includes(q) || (r.title ?? "").toLowerCase().includes(q),
     );
   }, [requirements, searchQuery, workflowFilter]);
-
-  // requirement_id → 需求对象：任务行代表整件工作时，分桶/状态视觉/卡片特化
-  //（preview、打开 PR 等动作）都以需求为准（task done 只是执行单元跑完，
-  // 需求可能还在验收/修复 —— 按 task 状态显示「已完成」会误导）
-  const reqById = useMemo(() => {
-    const m: Record<string, Requirement> = {};
-    for (const r of requirements) m[r.id] = r;
-    return m;
-  }, [requirements]);
 
   // 4 段分类：等待人工 / 运行中 / 归档（需求只显示 draft/investigating/awaiting_approval 前置阶段）
   const tabs = useMemo<PipelineTab[]>(() => {
@@ -190,7 +198,7 @@ export function Tasks() {
         subtitle: "需求 → 任务 全生命周期 · 一条工作从提出到跑完",
         meta: [
           { k: "需求", v: requirements.length },
-          { k: "任务", v: tasks.length },
+          { k: "任务", v: visibleTasks.length },
           ...(filterActive ? [{ k: "匹配", v: filteredTasks.length + filteredRequirements.length }] : []),
         ],
       }}

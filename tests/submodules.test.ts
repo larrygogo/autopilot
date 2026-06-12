@@ -11,6 +11,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
+import { up as migrate044 } from "../src/migrations/044-task-run-columns";
 import { _setDbForTest } from "../src/core/db";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
@@ -82,6 +83,7 @@ describe("discoverSubmodules", () => {
     migrate008(testDb);
     migrate024(testDb);
     migrate033(testDb);
+    migrate044(testDb);
     _setDbForTest(testDb);
   });
 

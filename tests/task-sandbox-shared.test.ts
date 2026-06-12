@@ -116,12 +116,14 @@ describe("共用沙盒 · diff 看得到 committed + 新建改动（审计 P1 �
   });
 });
 
-describe("共用沙盒 · 重跑重新 clone（Task 5）", () => {
-  it("重跑删旧 workspace 并重新 clone（上一轮残留不带过来）", async () => {
-    const { createTask, updateTask } = await import("../src/core/db");
+describe("共用沙盒 · 需求级重跑 = 新 run（v2 R2，替代 resetTaskForRerun 清史复用）", () => {
+  it("startNewRunForRequirement：旧 run 历史保留（workspace 清掉）、新 run 全新 clone 落 runs/、task_id/seq 更新", async () => {
+    const { createTask, getTask, startTaskPhase, listTaskPhaseEvents } = await import("../src/core/db");
     const { createProject } = await import("../src/core/projects");
     const { createWorkspace } = await import("../src/core/workspaces");
-    const { resetTaskForRerun } = await import("../src/core/task-factory");
+    const { createRequirement, getRequirementById, updateRequirement, nextRequirementId } = await import("../src/core/requirements");
+    const { startNewRunForRequirement } = await import("../src/core/task-factory");
+    const { getTaskRoot } = await import("../src/core/sandbox");
     const registry = await import("../src/core/registry");
     registry._clearRegistry();
     registry.register({
@@ -135,20 +137,85 @@ describe("共用沙盒 · 重跑重新 clone（Task 5）", () => {
 
     createProject({ id: "proj-1", name: "p" });
     createWorkspace({ id: "ws-1", project_id: "proj-1", alias: "r", path: srcRepo, remote_url: srcRepo, default_branch: "main" });
+    const reqId = nextRequirementId();
+    createRequirement({ id: reqId, project_id: "proj-1", workspace_id: "ws-1", title: "rerun as new run" });
 
-    const id = taskId("shr5");
-    ensureTaskSandbox(id, "shr_wf", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, `feat/${id}`);
-    const ws = getTaskSandbox(id);
-    createTask({ id, title: "t", workflow: "shr_wf", initialStatus: "running_develop", requirementId: undefined });
-    updateTask(id, { workspace_id: "ws-1", branch: `feat/${id}`, default_branch: "main", workspace_path: ws });
-    writeFileSync(join(ws, "stale.txt"), "old\n", "utf-8"); // 上一轮残留
+    // 旧 run：模拟存量任务（legacy 根 runtime/tasks/<id>/，混根场景），已 failed 终态
+    const oldId = taskId("shr5old");
+    ensureTaskSandbox(oldId, "shr_wf", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, `feat/${oldId}`);
+    const oldWs = getTaskSandbox(oldId);
+    createTask({ id: oldId, title: "t", workflow: "shr_wf", initialStatus: "running_develop", requirementId: reqId });
+    startTaskPhase(oldId, "develop"); // 残留 open phase event（重跑前应被幂等关闭）
+    db.run("UPDATE tasks SET status='failed' WHERE id=?", [oldId]);
+    updateRequirement(reqId, { task_id: oldId });
+    // 旧 run 的执行历史物料（artifacts/logs）——新 run 后必须保留
+    const oldRoot = getTaskRoot(oldId);
+    mkdirSync(join(oldRoot, "artifacts"), { recursive: true });
+    writeFileSync(join(oldRoot, "artifacts", "design.md"), "old run artifact\n", "utf-8");
+    mkdirSync(join(oldRoot, "logs"), { recursive: true });
+    writeFileSync(join(oldRoot, "logs", "phase-develop.log"), "old log\n", "utf-8");
+    writeFileSync(join(oldWs, "stale.txt"), "old\n", "utf-8"); // 旧 clone 残留
 
-    resetTaskForRerun(id);
+    const newTask = await startNewRunForRequirement(reqId, { workflow: "shr_wf", title: "rerun as new run" });
 
-    // 重跑 = 重新 clone 干净：旧残留没了，源仓库 README 在（统一布局：重 clone 按
-    // workspace alias「r」落子目录）
-    expect(existsSync(join(ws, "stale.txt"))).toBe(false);
-    expect(existsSync(join(ws, "r", "README.md"))).toBe(true);
+    // 新 run：新 task 行、seq 递增、requirement.task_id 指向新 run
+    expect(newTask.id).not.toBe(oldId);
+    expect(newTask.seq).toBe(2);
+    expect(newTask.kind).toBe("execution");
+    expect(getRequirementById(reqId)?.task_id).toBe(newTask.id);
+
+    // 新 run 文件落新根 runtime/requirements/<reqId>/runs/<taskId>/，clone 全新建出
+    const newRoot = getTaskRoot(newTask.id);
+    expect(newRoot).toBe(join(tmpHome, "runtime", "requirements", reqId, "runs", newTask.id));
+    expect(existsSync(join(newRoot, "workspace", "r", "README.md"))).toBe(true);
+    expect(existsSync(join(newRoot, "workspace", "r", "stale.txt"))).toBe(false);
+
+    // 旧 run 历史保留：artifacts/logs/task 行都在；只有 workspace/ 代码 clone 被清
+    expect(getTask(oldId)?.status).toBe("failed");
+    expect(existsSync(join(oldRoot, "artifacts", "design.md"))).toBe(true);
+    expect(existsSync(join(oldRoot, "logs", "phase-develop.log"))).toBe(true);
+    expect(existsSync(oldWs)).toBe(false);
+
+    // 旧 run 残留 open phase event 被关闭（aborted），不留僵尸 running 轮
+    const oldEvents = listTaskPhaseEvents(oldId);
+    expect(oldEvents.length).toBe(1);
+    expect(oldEvents[0]!.status).toBe("aborted");
+  });
+
+  it("活跃 run 守卫：当前 run 非终态时 startNewRunForRequirement / startTaskFromTemplate 均 409", async () => {
+    const { createTask } = await import("../src/core/db");
+    const { createProject } = await import("../src/core/projects");
+    const { createWorkspace } = await import("../src/core/workspaces");
+    const { createRequirement, updateRequirement, nextRequirementId } = await import("../src/core/requirements");
+    const { startNewRunForRequirement, startTaskFromTemplate } = await import("../src/core/task-factory");
+    const registry = await import("../src/core/registry");
+    registry._clearRegistry();
+    registry.register({
+      name: "shr_wf",
+      description: "共用沙盒测试工作流",
+      phases: [{ name: "develop", pending_state: "pending_develop", running_state: "running_develop", trigger: "start_develop", complete_trigger: "develop_complete", fail_trigger: "develop_fail", label: "DEV", func: async () => {} }],
+      initial_state: "pending_develop",
+      terminal_states: ["done", "cancelled", "failed"],
+      sandbox: { git: true },
+    } as never);
+
+    createProject({ id: "proj-1", name: "p" });
+    createWorkspace({ id: "ws-1", project_id: "proj-1", alias: "r", path: srcRepo, remote_url: srcRepo, default_branch: "main" });
+    const reqId = nextRequirementId();
+    createRequirement({ id: reqId, project_id: "proj-1", workspace_id: "ws-1", title: "active run guard" });
+
+    const activeId = taskId("shr5act");
+    createTask({ id: activeId, title: "t", workflow: "shr_wf", initialStatus: "running_develop", requirementId: reqId });
+    updateRequirement(reqId, { task_id: activeId });
+
+    await expect(startNewRunForRequirement(reqId, { workflow: "shr_wf" }))
+      .rejects.toThrow(/活跃/);
+    await expect(startTaskFromTemplate({ workflow: "shr_wf", title: "x", requirement_id: reqId }))
+      .rejects.toThrow(/活跃 run/);
+    // 终态后允许追加新 run（409 解除）
+    db.run("UPDATE tasks SET status='cancelled' WHERE id=?", [activeId]);
+    const t = await startTaskFromTemplate({ workflow: "shr_wf", title: "x", requirement_id: reqId });
+    expect(t.seq).toBe(2);
   });
 });
 

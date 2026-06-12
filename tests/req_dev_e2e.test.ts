@@ -13,6 +13,7 @@ import { up as migrate019 } from "../src/migrations/019-task-requirement-id";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
+import { up as migrate044 } from "../src/migrations/044-task-run-columns";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 import { createRequirement } from "../src/core/requirements";
@@ -39,6 +40,7 @@ describe("req_dev e2e smoke", () => {
     migrate021(sqlite);
     migrate024(sqlite);
     migrate033(sqlite);
+    migrate044(sqlite);
 
     // 创建测试 project + codebase
     createProject({ id: "proj-001", name: "test-proj" });

@@ -463,7 +463,7 @@ export async function run_submit_pr(taskId: string): Promise<void> {
       const ahead = runGit(["rev-list", "--count", `origin/${r.base}..HEAD`], r.path, false).stdout.trim() !== "0";
       if (!staged && !ahead) continue; // 该库无改动 → 不开空 PR
       runGit(["commit", "-m", `feat: ${task.title}`], r.path, false);
-      // 普通 push（不 --force）：重跑时 resetTaskForRerun 已删远程上一轮交付分支（幂等清旧轮，
+      // 普通 push（不 --force）：重跑时 startNewRunForRequirement 已删远程上一轮交付分支（幂等清旧轮，
       // GitHub 自动 close 旧 PR），新一轮 push 到全新分支不会有 non-fast-forward 冲突。
       runGit(["push", "-u", "origin", r.branch], r.path);
 

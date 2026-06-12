@@ -1183,8 +1183,8 @@ function renderWorkflowYamlTemplate(name: string, description: string | undefine
   return `name: ${name}
 description: ${desc}
 
-# 可选：每个任务自动创建一个独立的 sandbox 沙盒
-# （runtime/tasks/<task-id>/workspace/），阶段函数在这里工作
+# 可选：每个任务自动创建一个独立的 sandbox 沙盒（路径经 getTaskSandbox 解析，
+# 新任务落 runtime/requirements/<req-id>/runs/<task-id>/workspace/），阶段函数在这里工作
 # sandbox:
 #   template: workspace_template   # 工作流目录下的模板文件夹，任务启动时 cp -r 到 sandbox
 
@@ -1202,35 +1202,27 @@ phases:
 `;
 }
 
-// 注意：下方模板字符串里的 join(home, "runtime", "tasks", taskId, "workspace") 是
-// 【生成到用户 workflow.ts 的脚手架代码】（特意自包含、不依赖 import），不是引擎进程内的
-// 路径解析——Stage 0 路径收口（getTaskRoot）有意不动它；需求中心化运行时 Stage 2 落地后
-// 此模板需改为走 @autopilot/core 的 getTaskSandbox（双根解析），见 spec 2026-06-12 E1。
+// 脚手架模板：sandbox 路径必须走 @autopilot/core/sandbox 的 getTaskSandbox（双根解析）——
+// v2 R2 起新任务文件落 runtime/requirements/<reqId>/runs/<taskId>/，手写拼接
+// runtime/tasks/<taskId> 的旧写法对新任务定位不到目录。
 function renderWorkflowTsTemplate(firstPhase: string): string {
   const fn = `run_${firstPhase}`;
   return `// 每个 phase 函数接收 taskId: string 参数；抛错则该阶段失败，
 // 可被状态机重试或驳回。详见 docs/workflow-development.md
 //
-// 每次任务自动获得一个独立的 sandbox 目录：
-//   \${AUTOPILOT_HOME}/runtime/tasks/\${taskId}/workspace
+// 每次任务自动获得一个独立的 sandbox 目录（路径经 getTaskSandbox 解析，勿手写拼接）。
 // 阶段函数应把所有产出 / 读写都放在这里，保持任务之间隔离。
 // 如需把 sandbox 传给 agent，调用 agent.run(prompt, { cwd: wsPath })。
 //
 // 常见 import（按需启用）：
-//   import { getTask } from "@autopilot/db";                  // 取任务对象
-//   import { agentForPhase } from "@autopilot/agents";        // 按 phase 取内联配置 agent
-//   import { getTaskSandbox } from "@autopilot/core";         // 取 sandbox 路径
+//   import { getTask } from "@autopilot/core/db";             // 取任务对象
+//   import { agentForPhase } from "@autopilot/agents/registry"; // 按 phase 取内联配置 agent
+//   import { listTaskRepos } from "@autopilot/core/sandbox";  // git 工作流取各仓库 clone 布局
 
-import { homedir } from "os";
-import { join } from "path";
-
-function taskSandbox(taskId: string): string {
-  const home = process.env.AUTOPILOT_HOME ?? join(homedir(), ".autopilot");
-  return join(home, "runtime", "tasks", taskId, "workspace");
-}
+import { getTaskSandbox } from "@autopilot/core/sandbox";
 
 export async function ${fn}(taskId: string): Promise<void> {
-  const ws = taskSandbox(taskId);
+  const ws = getTaskSandbox(taskId);
   console.log(\`[\${taskId}] 执行阶段 ${firstPhase}，sandbox=\${ws}\`);
   // TODO: 在这里实现阶段业务逻辑。例如：
   //   const agent = agentForPhase("<工作流名>", "${firstPhase}");

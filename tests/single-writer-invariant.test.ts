@@ -40,6 +40,7 @@ const ALLOWLIST = new Set([
   "src/migrations/037-multi-workspace-per-project.ts", // 1:N：删 1:1 索引 + 回填 requirement_workspaces（一次性数据迁移）
   "src/migrations/042-close-orphan-phase-events.ts", // 关闭终态任务遗留 open phase event（一次性数据修复，req-012 僵尸轮）
   "src/migrations/043-workspace-id-demote-backfill.ts", // 主库语义降级：集合↔缓存列双向回填校验（一次性数据迁移，幂等）
+  "src/migrations/044-task-run-columns.ts", // run 多历史：tasks 加 kind/seq + 按需求分组回填 seq（一次性数据迁移，幂等）
   "src/core/notifications.ts",     // notifications 表：SQLite 即权威源，事件型通知流（替代 Now 派生快照）
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
   "src/core/api-keys.ts",          // api_keys 表：SQLite 即权威源，API 密钥加密存储无 manifest 同步需求

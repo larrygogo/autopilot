@@ -1,13 +1,12 @@
-import { getTask, createTask, updateTask, clearTaskRunHistory } from "./db";
+import { getTask, createTask, closeOpenPhaseEvents, nextRunSeqForRequirement } from "./db";
 import type { Task } from "./db";
-import { discover, getWorkflow, listWorkflows, isParallelPhase } from "./registry";
+import { discover, getWorkflow, listWorkflows, isParallelPhase, getTerminalStates } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { ensureTaskSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskArtifactsDir, getTaskSandbox, clearTaskRunArtifacts, type WorkspaceRef } from "./sandbox";
+import { ensureTaskSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskSandbox, bindTaskRunRoot, removeTaskWorktree, type WorkspaceRef } from "./sandbox";
 import { rmSync } from "fs";
 import { getWorkspaceById } from "./workspaces";
 import { getRequirementById, updateRequirement, listRequirementWorkspaces } from "./requirements";
 import { clearSubPrs } from "./requirement-sub-prs";
-import { forceTransition } from "./state-machine";
 import { isLocked } from "./infra";
 import { forgetTaskRecoveryState } from "./watcher";
 import { executePhase } from "./runner";
@@ -97,6 +96,8 @@ export interface StartTaskOpts {
   requirement_id?: string;
   /** 兼容老接口：可选传入 reqId（既当 task id 种子，也兜底当 FK link） */
   reqId?: string;
+  /** run 种类（v2 R2）：缺省 execution；fix 修复轮由 R3 接入 */
+  kind?: string;
   /** 额外工作流参数（如 workspace_id），转发给 setup_func */
   [key: string]: unknown;
 }
@@ -138,14 +139,18 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     throw new StartTaskError("任务必须挂在一个需求下（缺 requirement_id）", 400);
   }
 
-  // req:task 严格 1:1：需求已有存活 task 时禁止再新建（重跑应走 resetTaskForRerun
-  // 复用同一 task）。挡住任何绕过 scheduler 的非法新建路径，避免一 req 堆多个游离 task。
+  // 活跃 run 互斥（v2 R2：req:run 1:N，但活跃 run 同时最多一个）：需求当前指向的 run
+  // 仍非终态时禁止新建。终态后允许追加新 run（重跑走 startNewRunForRequirement，历史保留）。
   const linkedReq = getRequirementById(reqLink);
-  if (linkedReq?.task_id && getTask(linkedReq.task_id)) {
-    throw new StartTaskError(
-      `需求 ${reqLink} 已有 task ${linkedReq.task_id}，重跑请走 resetTaskForRerun（不新建 task）`,
-      409,
-    );
+  if (linkedReq?.task_id) {
+    const activeRun = getTask(linkedReq.task_id);
+    if (activeRun && !isTaskTerminal(activeRun)) {
+      throw new StartTaskError(
+        `需求 ${reqLink} 已有活跃 run ${activeRun.id}（${activeRun.status}），同一需求活跃 run 最多一个；` +
+        `重跑请等其终态后走 startNewRunForRequirement`,
+        409,
+      );
+    }
   }
 
   let taskId: string;
@@ -154,6 +159,15 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     if (getTask(taskId)) throw new StartTaskError(`Task ID 已存在：${taskId}`, 409);
   } else {
     taskId = generateUniqueTaskId();
+  }
+
+  // v2 R2：新任务文件落新根 runtime/requirements/<reqId>/runs/<taskId>/。
+  // 必须在任何文件落盘（ensureTaskSandbox / createTask 写 manifest）之前登记目录归属——
+  // 此刻 task 行还不在 DB，getTaskRoot 无法反查 requirement_id。
+  try {
+    bindTaskRunRoot(taskId, reqLink);
+  } catch (e: unknown) {
+    console.warn("bindTaskRunRoot 失败（退回 legacy 根）：", e instanceof Error ? e.message : e);
   }
 
   const title = opts.title?.trim() || taskId;
@@ -171,7 +185,7 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
       };
       // 添加所有额外参数（如 workspace_id）
       for (const [key, value] of Object.entries(opts)) {
-        if (!["workflow", "title", "requirement", "reqId"].includes(key)) {
+        if (!["workflow", "title", "requirement", "reqId", "kind"].includes(key)) {
           setupArgs[key] = value;
         }
       }
@@ -249,6 +263,9 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     // 双向关联：requirement.task_id 由 requirement-scheduler 写；task.requirement_id 在此写。
     // reqLink 上面已强制非空（任务必有需求）。
     requirementId: reqLink,
+    // v2 R2：run 种类 + 需求内序号（重跑追加新 run 时递增，历史 run 保留）
+    kind: opts.kind ?? "execution",
+    seq: nextRunSeqForRequirement(reqLink),
     workflowSnapshot: snapshotWorkflow(wf),
   });
 
@@ -259,129 +276,98 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
   return task;
 }
 
+/** task 是否处于终态（workflow 自定义 terminal_states ∪ 基础集 done/cancelled/failed）。 */
+function isTaskTerminal(task: Task): boolean {
+  const terminals = new Set(["done", "cancelled", "failed", ...getTerminalStates(task.workflow)]);
+  return terminals.has(task.status);
+}
+
 /**
- * 重跑：复用同一 task id，从首阶段重置重新跑（req:task 严格 1:1，不新建第二个 task）。
+ * 需求级重跑 = 开新 run（v2 R2，替代已删除的 resetTaskForRerun 清史复用模型）。
  *
- * 清执行态（failure_count / 失败指纹 / dangling / pending 问答 / rejection / pr），重建干净
- * worktree（基于需求绑定 workspace 的最新 default_branch），清 watcher 内存恢复计数，
- * 再从首阶段启动。运行记录（task_phase_events / task_logs）随重跑清空，权威审计在 manifest / artifacts。
+ * 旧 run 的执行历史**全部保留**（DB 行 / phase events / task_logs / artifacts / logs /
+ * agent-calls / manifest 不清空——这是 run 多历史的核心价值）；只做新一轮必需的善后：
+ *   1. 删旧远程 feat/ 交付分支（分支名基于需求派生、新 run 复用同名分支，先删消除
+ *      non-fast-forward 冲突；GitHub 自动 close 旧 PR）。真失败 surface 到需求页（RERUN-07）。
+ *   2. 清旧 run 的 workspace/ 代码 clone（磁盘大头；legacy worktree 任务先清源仓库注册）。
+ *   3. 关旧 run 残留 open phase events（幂等，防时间线僵尸 running 轮）。
+ *   4. 创建新 task 行（kind=execution、seq 递增，文件落 runs/<newTaskId>/）并把
+ *      requirement.task_id 指向新 run，正常 clone 启动首阶段。
  *
- * @param opts.requirement 重跑时刷新的需求文本（spec 可能已更新）；省略则沿用 task 已存的。
- * @param opts.title 重跑时刷新的标题（需求改名后沿用旧 title 会污染交付 commit message / PR 标题）；省略则沿用。
- * @param opts.workflow 重跑时切换工作流（failed 后用户换流程重试）；省略则沿用。重置本就回
- *   initial_state + 清历史 + 重 clone，换流程是干净的。
+ * @param opts.requirement 重跑时刷新的需求文本（spec 可能已更新）；省略则用需求当前 spec 由调用方拼好传入。
+ * @param opts.title 重跑时刷新的标题；省略沿用需求标题。
+ * @param opts.workflow 重跑时切换工作流（failed 后用户换流程重试）；省略沿用需求所选（NULL 回退 dev）。
  */
-export function resetTaskForRerun(taskId: string, opts: { requirement?: string; title?: string; workflow?: string } = {}): void {
-  const task = getTask(taskId);
-  if (!task) throw new StartTaskError(`task 不存在：${taskId}`, 404);
+export async function startNewRunForRequirement(
+  reqId: string,
+  opts: { requirement?: string; title?: string; workflow?: string } = {},
+): Promise<Task> {
+  const req = getRequirementById(reqId);
+  if (!req) throw new StartTaskError(`需求不存在：${reqId}`, 404);
 
-  // 并发守卫：仍在运行（持文件锁）时不重置，避免删正被 git 写的 worktree
-  if (task.status.startsWith("running_") && isLocked(taskId)) {
-    throw new StartTaskError(`task ${taskId} 仍在运行中，无法重置重跑`, 409);
-  }
+  const oldTask = req.task_id ? getTask(req.task_id) : null;
 
-  const targetWorkflow = opts.workflow ?? task.workflow;
-  const wf = getWorkflow(targetWorkflow);
-  if (!wf) throw new StartTaskError(`Workflow "${targetWorkflow}" not found`, 500);
-
-  // 1. 清执行态：failure_count 是表列，其余在 extra（updateTask 把 null 合并进 extra = 清空）
-  const clear: Record<string, unknown> = {
-    failure_count: 0,
-    last_failure_fingerprint: null,
-    dangling: false,
-    pending_question: null,
-    pending_prompts: [],
-    rejection_counts: null,
-    rejection_reason: null,
-    pr_url: null,
-    pr_number: null,
-  };
-  if (opts.requirement !== undefined) clear["requirement"] = opts.requirement;
-  if (opts.title !== undefined) {
-    clear["title"] = opts.title;       // tasks 表列
-  }
-  if (targetWorkflow !== task.workflow) {
-    clear["workflow"] = targetWorkflow; // tasks 表列：failed 后换流程重试
-  }
-  updateTask(taskId, clear);
-
-  // 1b. 重跑=全新一轮：清 requirement 残留的 pr_url/pr_number（旧 PR 已被 deleteRemoteDeliverBranch
-  //     删分支 → GitHub 自动 close）。否则需求页在新 PR 出来前仍显示已关闭的旧 PR 链接。
-  if (task.requirement_id) {
-    try {
-      updateRequirement(task.requirement_id, { pr_url: null, pr_number: null });
-      // 一并清子模块 PR 记录（RERUN-08）：否则需求页残留上一轮未触及子模块的过期 sub PR 链接。
-      clearSubPrs(task.requirement_id);
-    } catch (e: unknown) {
-      console.warn("resetTaskForRerun: 清 requirement pr_url/sub_prs 失败：", e instanceof Error ? e.message : e);
-    }
-  }
-
-  // 2a. 重跑是全新一轮 → 清空全部历史运行记录（phase events + 状态日志 + 实时日志 +
-  //     agent 调用），否则流水线图/各日志 tab 仍显示上一轮的 ✓/耗时/记录。
-  clearTaskRunHistory(taskId);   // DB：phase_events + task_logs
-  clearTaskRunArtifacts(taskId); // 文件：logs/ + events.jsonl + agent-calls.jsonl
-
-  // 2b. 清 watcher 内存恢复计数，否则上次卡死累计的 recoveryCount 会让本次重跑过早被 cancel
-  try { forgetTaskRecoveryState(taskId); } catch { /* ignore */ }
-
-  // 3. 共用沙盒重跑：删远程旧交付分支 + 清 artifacts + 删旧 clone 重新 clone 干净
-  if (wf.sandbox?.git) {
-    // 重跑=干净重来：删远程上一轮交付分支（GitHub 自动 close 旧 PR）→ 消除 non-fast-forward 冲突。
-    // 删分支真失败（非 404）时 surface 到需求页：否则下一轮普通 push 撞已存在分支 → 反复重试
-    // 5 轮才 failed，根因完全不可见（RERUN-07）。
-    try {
-      const del = deleteRemoteDeliverBranch(taskId);
-      if (del.failed && task.requirement_id) {
-        try {
-          updateRequirement(task.requirement_id, {
-            schedule_error: `重跑前删远程交付分支失败：${del.error ?? "未知错误"}（下一轮 push 可能因分支已存在冲突，请检查分支保护/凭证）`,
-          });
-        } catch { /* ignore */ }
-      }
-    } catch (e: unknown) {
-      console.warn("resetTaskForRerun: deleteRemoteDeliverBranch 失败（容错继续）：", e instanceof Error ? e.message : e);
-    }
-    // 共用沙盒重跑：清 artifacts（上轮产物）+ 删旧 clone 工作树 + 重新 clone 干净。
-    try { rmSync(getTaskArtifactsDir(taskId), { recursive: true, force: true }); } catch { /* ignore */ }
-    try { rmSync(getTaskSandbox(taskId), { recursive: true, force: true }); } catch { /* ignore */ }
-    // 反查需求**当前**集合重 clone：failed 后用户改集合（加/换库）再重试自然生效
-    const fallbackWsId =
-      task.requirement_id ? getRequirementById(task.requirement_id)?.workspace_id ?? undefined : undefined;
-    const refs = resolveWorkspaceRefs(
-      task.requirement_id ?? undefined,
-      fallbackWsId ?? (typeof task["workspace_id"] === "string" ? (task["workspace_id"] as string) : undefined),
-      "重跑失败",
+  // 活跃 run 互斥：当前 run 非终态（或仍持文件锁）时不开新 run，避免删正被 git 写的 clone
+  if (oldTask && (!isTaskTerminal(oldTask) || isLocked(oldTask.id))) {
+    throw new StartTaskError(
+      `需求 ${reqId} 的当前 run ${oldTask.id} 仍活跃（${oldTask.status}），无法开新 run；请先取消或等其终态`,
+      409,
     );
-    // 重新 clone 干净工作树（替即焚的"重置 patch 元数据"）。
-    ensureTaskSandbox(taskId, targetWorkflow, wf.sandbox, refs.length > 0 ? refs : undefined, deliverBranchName(String(opts.title ?? task.title ?? ""), taskId));
-    const meta = getTaskWorktreeMeta(taskId);
-    if (meta) {
-      updateTask(taskId, {
-        default_branch: meta.base,
-        branch: meta.branch,
-        workspace_path: meta.workspace_path,
-        repo_path: getTaskSandbox(taskId),
-      });
+  }
+
+  // 旧 run 善后（历史保留，只清代码与远程分支）
+  if (oldTask) {
+    // 1. 删旧远程交付分支。真失败（非 404）写 schedule_error 让用户在需求页看到根因。
+    try {
+      const del = deleteRemoteDeliverBranch(oldTask.id);
+      try {
+        updateRequirement(reqId, {
+          schedule_error: del.failed
+            ? `开新 run 前删远程交付分支失败：${del.error ?? "未知错误"}（新一轮 push 可能因分支已存在冲突，请检查分支保护/凭证）`
+            : null,
+        });
+      } catch { /* ignore */ }
+    } catch (e: unknown) {
+      console.warn("startNewRunForRequirement: deleteRemoteDeliverBranch 失败（容错继续）：", e instanceof Error ? e.message : e);
     }
+
+    // 2. 清旧 run 的 workspace/（保留 artifacts / logs / manifest / .worktree.json 供历史回看）。
+    //    legacy worktree 任务例外：必须先 git worktree remove 清源仓库注册（零痕迹红线）。
+    const oldMeta = getTaskWorktreeMeta(oldTask.id);
+    if (oldMeta && oldMeta.mode !== "clone" && oldMeta.mode !== "multi-clone") {
+      try { removeTaskWorktree(oldTask.id); } catch { /* ignore */ }
+    }
+    try { rmSync(getTaskSandbox(oldTask.id), { recursive: true, force: true }); } catch { /* ignore */ }
+
+    // 3. 关旧 run 残留 open phase events（幂等）+ 清 watcher 内存恢复计数（防泄漏）
+    try { closeOpenPhaseEvents(oldTask.id); } catch { /* ignore */ }
+    try { forgetTaskRecoveryState(oldTask.id); } catch { /* ignore */ }
+
+    // 旧 agent session 指向被清的 clone，关掉防 claude --resume 续到陈旧会话
+    void closeAgents(oldTask.workflow).catch(() => { /* best-effort */ });
   }
 
-  // 3b. 共用沙盒下重跑会重新 clone（同一 cwd 路径，但底层是全新 clone）。anthropic 的「cwd 变→
-  //     弃 session」保护因 cwd 路径不变而失效，claude --resume 会续到指向已删旧 clone 的陈旧会话。
-  //     重跑 = 干净重来，显式关掉该工作流的 agent 连接（清缓存 session），下轮起全新会话。
-  if (wf.sandbox?.git) {
-    // 关旧 workflow 的 agent 连接（陈旧 session 指向已删 clone）；换流程时旧名才是有 session 的那个
-    void closeAgents(task.workflow).catch(() => { /* best-effort */ });
+  // 上轮 PR 记录清空（旧 PR 已随删分支 close；新 run 的 PR 出来前不该显示旧链接，RERUN-08）
+  try {
+    updateRequirement(reqId, { pr_url: null, pr_number: null });
+    clearSubPrs(reqId);
+  } catch (e: unknown) {
+    console.warn("startNewRunForRequirement: 清 requirement pr_url/sub_prs 失败：", e instanceof Error ? e.message : e);
   }
 
-  // 4. 状态强制回首阶段 pending（绕状态机，任意旧终态都能回 initial，留审计日志）
-  forceTransition(taskId, wf.initial_state, "rerun: 重置到首阶段重新执行");
+  // 4. 新 run：kind=execution、seq 递增，文件落 runtime/requirements/<reqId>/runs/<taskId>/
+  const task = await startTaskFromTemplate({
+    workflow: opts.workflow ?? req.workflow ?? undefined,
+    title: opts.title ?? req.title,
+    requirement: opts.requirement,
+    requirement_id: reqId,
+  });
 
-  // 5. 启动首阶段
-  const firstPhaseEntry = wf.phases[0];
-  if (!firstPhaseEntry) throw new StartTaskError("Workflow has no phases", 500);
-  const firstPhaseName = isParallelPhase(firstPhaseEntry)
-    ? firstPhaseEntry.parallel.name
-    : firstPhaseEntry.name;
-  executePhase(taskId, firstPhaseName).catch(() => {});
+  // requirement.task_id 指向新 run（旧 run 行保留 = 执行历史）
+  try {
+    updateRequirement(reqId, { task_id: task.id });
+  } catch (e: unknown) {
+    console.warn("startNewRunForRequirement: 写回 requirement.task_id 失败：", e instanceof Error ? e.message : e);
+  }
+  return task;
 }

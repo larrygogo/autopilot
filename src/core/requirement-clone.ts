@@ -21,6 +21,11 @@ import type { Workspace } from "./workspaces";
 const REQ_ID_RE = /^[\w.\-]+$/;
 const DEFAULT_CLONE_TIMEOUT_MS = 120_000;
 
+/** AUTOPILOT_HOME 动态读 env（兜底 import 时常量）：与 sandbox.ts 双根解析同口径，测试可注入。 */
+function autopilotHomeDir(): string {
+  return process.env.AUTOPILOT_HOME || AUTOPILOT_HOME;
+}
+
 /** ensureRequirementClones 接受的最小 workspace 形状（测试夹具友好） */
 export type RequirementCloneWorkspace = Pick<Workspace, "id" | "remote_url" | "default_branch"> & {
   alias?: string | null;
@@ -28,7 +33,7 @@ export type RequirementCloneWorkspace = Pick<Workspace, "id" | "remote_url" | "d
 
 export function getRequirementCloneDir(reqId: string): string {
   if (!REQ_ID_RE.test(reqId)) throw new Error(`非法 requirement ID：${reqId}`);
-  return join(AUTOPILOT_HOME, "runtime", "requirements", reqId, "workspace");
+  return join(autopilotHomeDir(), "runtime", "requirements", reqId, "workspace");
 }
 
 /**
@@ -132,16 +137,40 @@ async function cloneOne(
   return true;
 }
 
-/** 清理需求级 clone（整个 runtime/requirements/<reqId>/ 目录）。不存在时 no-op。 */
+/**
+ * 清理需求级浅 clone（**只清** runtime/requirements/<reqId>/workspace/）。不存在时 no-op。
+ *
+ * v2 R2 起需求目录还承载 runs/（执行历史，历史保留是 run 多历史的核心价值），
+ * done/cancelled 只清代码快照、不动 runs/——早期"整删需求目录"的语义已收窄，
+ * 整树删除走 deleteRequirementRuntimeDir（仅"删除需求"路径）。
+ */
 export function deleteRequirementClone(reqId: string): boolean {
   if (!REQ_ID_RE.test(reqId)) return false;
-  const root = join(AUTOPILOT_HOME, "runtime", "requirements", reqId);
+  const root = getRequirementCloneDir(reqId);
   if (!existsSync(root)) return false;
   try {
     rmSync(root, { recursive: true, force: true });
     return true;
   } catch (e: unknown) {
     log.warn("清理需求级 clone 失败 [req=%s]: %s", reqId, e instanceof Error ? e.message : String(e));
+    return false;
+  }
+}
+
+/**
+ * 删除需求的整个运行时目录 runtime/requirements/<reqId>/（含 workspace/ 浅 clone 与
+ * runs/ 执行历史）。仅供"删除需求"级联清理使用——其余生命周期点（done/cancelled）
+ * 用 deleteRequirementClone 只清代码快照。
+ */
+export function deleteRequirementRuntimeDir(reqId: string): boolean {
+  if (!REQ_ID_RE.test(reqId)) return false;
+  const root = join(autopilotHomeDir(), "runtime", "requirements", reqId);
+  if (!existsSync(root)) return false;
+  try {
+    rmSync(root, { recursive: true, force: true });
+    return true;
+  } catch (e: unknown) {
+    log.warn("删除需求运行时目录失败 [req=%s]: %s", reqId, e instanceof Error ? e.message : String(e));
     return false;
   }
 }

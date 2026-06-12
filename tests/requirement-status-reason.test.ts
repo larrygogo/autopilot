@@ -26,6 +26,7 @@ import { up as migrate028 } from "../src/migrations/028-requirement-status-reaso
 import { up as migrate029 } from "../src/migrations/029-requirement-status-before-terminal";
 import { up as migrate030 } from "../src/migrations/030-requirement-status-logs";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
+import { up as migrate044 } from "../src/migrations/044-task-run-columns";
 import { _setDbForTest, createTask, getTask, getDb } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createWorkspace } from "../src/core/workspaces";
@@ -49,7 +50,7 @@ let tmpHome: string;
 const ALL_MIGRATIONS = [
   migrate001, migrate002, migrate004, migrate005, migrate006, migrate007,
   migrate008, migrate009, migrate010, migrate018, migrate019, migrate021,
-  migrate024, migrate028, migrate029, migrate030, migrate033];
+  migrate024, migrate028, migrate029, migrate030, migrate033, migrate044];
 
 beforeEach(() => {
   tmpHome = join(tmpdir(), `autopilot-statusreason-${Date.now()}-${Math.random().toString(36).slice(2)}`);

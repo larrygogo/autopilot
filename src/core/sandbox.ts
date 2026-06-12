@@ -8,9 +8,10 @@ import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspa
 // ──────────────────────────────────────────────
 // 任务 sandbox —— 每次任务独立的沙盒目录
 //
-// 布局：
+// 布局（v2 R2 双根，getTaskRoot 解析）：
 //   AUTOPILOT_HOME/
-//     runtime/tasks/<task-id>/
+//     runtime/tasks/<task-id>/                          ← legacy 根（存量任务只读，零迁移）
+//     runtime/requirements/<req-id>/runs/<task-id>/     ← 新根（2026-06-12 起新任务落此）
 //       ├── workspace/         ← 阶段函数的沙盒目录（本模块管理；物理目录名保持 workspace 不变）
 //       │   └── <alias>/       ← git 模式统一布局：每个代码库 clone 到 alias 子目录（单库也是，2026-06-12）
 //       └── .worktree.json     ← git clone 元数据（仅 sandbox.git=true 时）
@@ -28,22 +29,106 @@ import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspa
 const TASK_ID_RE = /^[\w.\-]+$/;
 const WORKTREE_MANIFEST = ".worktree.json";
 
-/**
- * tasks 旧根目录（目录遍历 / retention 扫描的默认 root）。
- * AUTOPILOT_HOME 动态读 env（兜底 import 时常量）：保持 manifest / task-logs 等调用方的测试可注入性。
- * 需求中心化运行时 Stage 2 起目录遍历需双根（此旧根 + requirements/<reqId>/runs/ 新根）——
- * 见 docs/superpowers/specs/2026-06-12-requirement-centric-runtime.md E1。
- */
-function tasksRootDir(): string {
-  return join(process.env.AUTOPILOT_HOME || AUTOPILOT_HOME, "runtime", "tasks");
+/** AUTOPILOT_HOME 动态读 env（兜底 import 时常量）：保持 manifest / task-logs 等调用方的测试可注入性。 */
+function autopilotHomeDir(): string {
+  return process.env.AUTOPILOT_HOME || AUTOPILOT_HOME;
 }
 
 /**
- * 任务运行时根目录（Stage 0：恒返回旧路径 runtime/tasks/<id>/；
- * 需求中心化运行时 Stage 2 将在此开 runs/ 新根——见 specs/2026-06-12-requirement-centric-runtime.md E1）
+ * tasks 旧根目录（目录遍历 / retention 扫描的 legacy root）。
+ * v2 R2 起为双根之一：存量任务原地只读；新任务落 requirements/<reqId>/runs/ 新根。
+ */
+function tasksRootDir(): string {
+  return join(autopilotHomeDir(), "runtime", "tasks");
+}
+
+/** requirements 根目录（新根遍历入口：runtime/requirements/<reqId>/runs/<taskId>/）。 */
+function requirementsRootDir(): string {
+  return join(autopilotHomeDir(), "runtime", "requirements");
+}
+
+/** 某需求的 runs 目录（执行历史落点，v2 R2）。 */
+function requirementRunsDir(reqId: string): string {
+  return join(requirementsRootDir(), reqId, "runs");
+}
+
+/**
+ * taskId → 运行时根目录缓存。任务目录归属不变（旧根存量只读、新根创建后不迁移），
+ * 缓存安全；key 带 home 前缀防测试切换 AUTOPILOT_HOME 后串根。
+ */
+const taskRootCache = new Map<string, string>();
+
+function rootCacheKey(taskId: string): string {
+  return autopilotHomeDir() + "|" + taskId;
+}
+
+/** 仅测试用：清空 taskId→root 缓存。 */
+export function _clearTaskRootCacheForTest(): void {
+  taskRootCache.clear();
+}
+
+/**
+ * 反查 task 的 requirement_id（getTaskRoot 新根定位用）。
+ * 用惰性 require 而非顶层 import：静态 sandbox→db 会闭合 db→manifest→core/registry→
+ * prompt-runner→agents/registry 的大环，模块初始化期触发 TDZ（实测全量测试炸 464 例）。
+ * 首次调用时（模块图早已加载完）再解析，绕开初始化环；DB 不可用时返回 null 兜底 legacy。
+ */
+function lookupRequirementId(taskId: string): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const db = require("./db") as typeof import("./db");
+    return db.getTask(taskId)?.requirement_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 新 run 的目录归属种子（v2 R2）：把 taskId 的运行时根登记为
+ * runtime/requirements/<reqId>/runs/<taskId>/。
+ *
+ * 必须在任务文件首次落盘**之前**调用（startTaskFromTemplate 里 ensureTaskSandbox 先于
+ * createTask 执行，此刻 task 行还不在 DB，getTaskRoot 反查不到 requirement_id）。
+ * legacy 根已存在时（存量任务）优先 legacy——两根互斥、存量只读零迁移。
+ */
+export function bindTaskRunRoot(taskId: string, reqId: string): string {
+  if (!TASK_ID_RE.test(taskId)) throw new Error(`非法 task ID：${taskId}`);
+  if (!TASK_ID_RE.test(reqId)) throw new Error(`非法 requirement ID：${reqId}`);
+  const legacy = join(tasksRootDir(), taskId);
+  if (existsSync(legacy)) {
+    taskRootCache.set(rootCacheKey(taskId), legacy);
+    return legacy;
+  }
+  const root = join(requirementRunsDir(reqId), taskId);
+  taskRootCache.set(rootCacheKey(taskId), root);
+  return root;
+}
+
+/**
+ * 任务运行时根目录（v2 R2 双根解析，spec 2026-06-12-requirement-centric-runtime E1）：
+ *   1. legacy 根 runtime/tasks/<id>/ 存在 → 用旧根（存量只读，零文件迁移）
+ *   2. 否则按 task.requirement_id 落新根 runtime/requirements/<reqId>/runs/<id>/
+ *   3. 反查不到（task 行未入库 / 无需求关联的历史游离任务）→ 兜底 legacy（不缓存，
+ *      状态可能马上变化——新任务创建路径由 bindTaskRunRoot 显式种子，不依赖此兜底）
  */
 export function getTaskRoot(taskId: string): string {
-  return join(tasksRootDir(), taskId);
+  const key = rootCacheKey(taskId);
+  const cached = taskRootCache.get(key);
+  if (cached) return cached;
+
+  const legacy = join(tasksRootDir(), taskId);
+  if (existsSync(legacy)) {
+    taskRootCache.set(key, legacy);
+    return legacy;
+  }
+
+  const reqId = lookupRequirementId(taskId);
+  if (reqId && TASK_ID_RE.test(reqId)) {
+    const root = join(requirementRunsDir(reqId), taskId);
+    taskRootCache.set(key, root);
+    return root;
+  }
+  return legacy;
 }
 
 export interface SandboxConfig {
@@ -762,8 +847,9 @@ export function deleteTaskSandbox(taskId: string): boolean {
 }
 
 /**
- * 彻底删除任务运行时目录（`runtime/tasks/<task-id>/` 全部内容，包括 sandbox、
- * logs、events、agent-calls、task-manifest.json）。用于"删除任务"路径。
+ * 彻底删除任务运行时目录（经 getTaskRoot 双根解析：legacy `runtime/tasks/<id>/` 或
+ * 新根 `runtime/requirements/<reqId>/runs/<id>/`，全部内容包括 sandbox、logs、events、
+ * agent-calls、task-manifest.json）。用于"删除任务"路径。
  * 若 task 走 worktree，先清 worktree 让 workspace 干净。
  */
 export function deleteTaskRuntimeDir(taskId: string): boolean {
@@ -778,26 +864,13 @@ export function deleteTaskRuntimeDir(taskId: string): boolean {
 }
 
 /**
- * 清理任务的运行产物文件（logs 目录 / events / agent-calls），用于重跑重置。
- * 不动 sandbox（重跑单独 delete+rebuild）与 task-manifest.json。
- */
-export function clearTaskRunArtifacts(taskId: string): void {
-  if (!TASK_ID_RE.test(taskId)) {
-    throw new Error(`非法 task ID：${taskId}`);
-  }
-  const taskDir = getTaskRoot(taskId);
-  for (const name of ["logs", "agent-calls.jsonl", "events.jsonl"]) {
-    const p = join(taskDir, name);
-    try { if (existsSync(p)) rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
-  }
-}
-
-/**
  * 扫描所有任务的 sandbox 目录，返回每个任务的占用信息。
  * 用于 Dashboard 汇总 + 清理规则判断。
  */
 export interface TaskSandboxUsage {
   taskId: string;
+  /** 任务运行时根目录绝对路径（双根：legacy runtime/tasks/<id> 或 requirements/<reqId>/runs/<id>） */
+  root: string;
   size: number;
   mtime: number;
   exists: boolean;
@@ -843,24 +916,27 @@ export function applyRetentionPolicy(
   opts?: {
     isTerminal?: (taskId: string) => boolean;
     now?: number;
-    /** 显式指定 tasks 根目录（测试用 tmpdir），默认 AUTOPILOT_HOME/runtime/tasks */
+    /** 显式指定 legacy tasks 根目录（测试用 tmpdir），默认 AUTOPILOT_HOME/runtime/tasks */
     tasksRoot?: string;
+    /** 显式指定 requirements 根目录（测试用 tmpdir）；只传 tasksRoot 时不扫默认新根 */
+    requirementsRoot?: string;
   },
 ): { removed: string[]; reclaimedBytes: number } {
   const now = opts?.now ?? Date.now();
-  const tasksRoot = opts?.tasksRoot ?? tasksRootDir();
-  const all = scanTaskSandboxes(tasksRoot).filter((u) => u.exists && u.size > 0);
+  const injectedRoots = !!opts?.tasksRoot || !!opts?.requirementsRoot;
+  const all = scanTaskSandboxes(opts?.tasksRoot, opts?.requirementsRoot)
+    .filter((u) => u.exists && u.size > 0);
 
   const removed: string[] = [];
   let reclaimed = 0;
 
   const doRemove = (u: TaskSandboxUsage) => {
-    const ws = join(tasksRoot, u.taskId, "workspace");
+    const ws = join(u.root, "workspace");
     if (!existsSync(ws)) return;
     // 若是 worktree task，先 git worktree remove --force 让 workspace 干净（spec §3.4：
-    // 超过保留期还没提交就是垃圾，直接 force 干掉）。测试场景 tasksRoot 是 tmpdir 时
+    // 超过保留期还没提交就是垃圾，直接 force 干掉）。测试场景注入 tmpdir 根时
     // .worktree.json 不存在，removeTaskWorktree 是 no-op，不影响。
-    if (tasksRoot === tasksRootDir()) {
+    if (!injectedRoots) {
       try { removeTaskWorktree(u.taskId); } catch { /* ignore */ }
     }
     try {
@@ -903,26 +979,48 @@ export function applyRetentionPolicy(
 }
 
 /**
- * 扫所有任务 sandbox 大小 + mtime。
- * 可注入 root 让测试用 tmpdir；默认 AUTOPILOT_HOME/runtime/tasks。
+ * 扫所有任务 sandbox 大小 + mtime（双根：legacy runtime/tasks/ + runtime/requirements/<reqId>/runs/）。
+ * 可注入根目录让测试用 tmpdir；只传 rootOverride 时不扫默认新根（保持旧测试语义）。
  */
-export function scanTaskSandboxes(rootOverride?: string): TaskSandboxUsage[] {
-  const root = rootOverride ?? tasksRootDir();
-  if (!existsSync(root)) return [];
+export function scanTaskSandboxes(rootOverride?: string, requirementsRootOverride?: string): TaskSandboxUsage[] {
   const out: TaskSandboxUsage[] = [];
-  for (const taskId of readdirSync(root)) {
-    const ws = join(root, taskId, "workspace");
+
+  const scanOne = (taskRoot: string, taskId: string) => {
+    const ws = join(taskRoot, "workspace");
     if (!existsSync(ws)) {
-      out.push({ taskId, size: 0, mtime: 0, exists: false });
-      continue;
+      out.push({ taskId, root: taskRoot, size: 0, mtime: 0, exists: false });
+      return;
     }
     try {
       const s = statSync(ws);
-      out.push({ taskId, size: dirSizeBytes(ws), mtime: s.mtimeMs, exists: true });
+      out.push({ taskId, root: taskRoot, size: dirSizeBytes(ws), mtime: s.mtimeMs, exists: true });
     } catch {
-      out.push({ taskId, size: 0, mtime: 0, exists: false });
+      out.push({ taskId, root: taskRoot, size: 0, mtime: 0, exists: false });
+    }
+  };
+
+  // legacy 根：runtime/tasks/<taskId>/
+  const legacyRoot = rootOverride ?? tasksRootDir();
+  if (existsSync(legacyRoot)) {
+    for (const taskId of readdirSync(legacyRoot)) {
+      scanOne(join(legacyRoot, taskId), taskId);
     }
   }
+
+  // 新根：runtime/requirements/<reqId>/runs/<taskId>/（v2 R2）
+  const reqRoot = requirementsRootOverride ?? (rootOverride ? null : requirementsRootDir());
+  if (reqRoot && existsSync(reqRoot)) {
+    for (const reqId of readdirSync(reqRoot)) {
+      const runsDir = join(reqRoot, reqId, "runs");
+      if (!existsSync(runsDir)) continue;
+      try {
+        for (const taskId of readdirSync(runsDir)) {
+          scanOne(join(runsDir, taskId), taskId);
+        }
+      } catch { /* skip */ }
+    }
+  }
+
   return out;
 }
 

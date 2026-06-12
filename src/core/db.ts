@@ -31,6 +31,10 @@ export interface Task {
   parallel_group: string | null;
   /** 关联需求 id（reqId），可空兼容历史无关联任务。migration 019 加入。 */
   requirement_id: string | null;
+  /** run 种类（v2 R2，migration 044）：execution=主执行；fix=修复轮（R3 接入） */
+  kind: string;
+  /** 需求内 run 序号（v2 R2，migration 044）：同一需求第几次执行，供排序/展示 */
+  seq: number;
   [key: string]: unknown;
 }
 
@@ -102,6 +106,8 @@ export const TABLE_COLUMNS = new Set([
   "parallel_index",
   "parallel_group",
   "requirement_id",
+  "kind",
+  "seq",
 ]);
 
 // 受保护的列字段，不允许通过 extraUpdates/updateTask 修改
@@ -200,6 +206,10 @@ export interface CreateTaskOpts {
   extra?: Record<string, unknown>;
   /** 关联需求 id；可空（命令行手动创建 task 时无 requirement） */
   requirementId?: string | null;
+  /** run 种类（缺省 execution）。v2 R2：task = 需求的执行历史项 */
+  kind?: string;
+  /** 需求内 run 序号（缺省 1）。重跑=新 run 时由 task-factory 计算递增 */
+  seq?: number;
   /**
    * 工作流定义快照。若提供则同步写入 task-manifest.json 作为权威源（gsd-style）。
    * 省略时只写 DB（测试 / 老路径兼容）。
@@ -212,8 +222,8 @@ export function createTask(opts: CreateTaskOpts): void {
   const ts = now();
   db.run(
     "INSERT INTO tasks" +
-    " (id, title, workflow, status, channel, notify_target, extra, created_at, updated_at, requirement_id)" +
-    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    " (id, title, workflow, status, channel, notify_target, extra, created_at, updated_at, requirement_id, kind, seq)" +
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       opts.id,
       opts.title,
@@ -225,6 +235,8 @@ export function createTask(opts: CreateTaskOpts): void {
       ts,
       ts,
       opts.requirementId ?? null,
+      opts.kind ?? "execution",
+      opts.seq ?? 1,
     ]
   );
   if (opts.workflowSnapshot) {
@@ -528,6 +540,20 @@ export function listRootTasksByRequirementIds(requirementIds: string[]): Task[] 
 }
 
 /**
+ * 计算某需求下一个 run 的序号（v2 R2）：现有根任务（run）的最大 seq + 1。
+ * 用 MAX 而非 COUNT：历史 run 被删除后 COUNT 会回退撞号，MAX 保证单调递增。
+ * 并行块子任务（parent_task_id 非空）不是独立 run，不参与编号。
+ */
+export function nextRunSeqForRequirement(requirementId: string): number {
+  const row = getDb()
+    .query<{ s: number | null }, [string]>(
+      "SELECT MAX(seq) AS s FROM tasks WHERE requirement_id = ? AND parent_task_id IS NULL"
+    )
+    .get(requirementId);
+  return (row?.s ?? 0) + 1;
+}
+
+/**
  * 原子级联删除一组 task：先删 task_logs / task_phase_events，再删 tasks 本身。
  * 仅做 DB 层删除，不动文件/锁/manifest；不 emit 事件。
  * 由 task-delete.ts 统一协调，高层负责预校验与外部副作用清理。
@@ -607,19 +633,6 @@ export function closeOpenPhaseEvents(taskId: string): void {
     "UPDATE task_phase_events SET status = 'aborted', ended_at = ? WHERE task_id = ? AND ended_at IS NULL",
     [Date.now(), taskId],
   );
-}
-
-/**
- * 清空某 task 的全部运行历史记录（phase events + 状态转换日志）。
- * 用于重跑重置：重跑是全新一轮，旧轮的阶段进度/状态记录不该残留（否则流水线图仍显示
- * 上一轮的 ✓ 和耗时）。只清 DB 记录，文件类（实时日志/agent 调用）由调用方另清。
- */
-export function clearTaskRunHistory(taskId: string): void {
-  const db = getDb();
-  db.transaction(() => {
-    db.run("DELETE FROM task_phase_events WHERE task_id = ?", [taskId]);
-    db.run("DELETE FROM task_logs WHERE task_id = ?", [taskId]);
-  })();
 }
 
 /** 列出某 task 全部 phase event，按 started_at 升序。 */

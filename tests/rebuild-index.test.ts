@@ -26,7 +26,9 @@ async function withTempEnv<T>(
       channel TEXT DEFAULT 'log', notify_target TEXT, extra TEXT DEFAULT '{}',
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       started_at TEXT, parent_task_id TEXT, parallel_index INTEGER, parallel_group TEXT,
-      requirement_id TEXT
+      requirement_id TEXT,
+      kind TEXT NOT NULL DEFAULT 'execution',
+      seq INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE IF NOT EXISTS task_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
