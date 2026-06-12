@@ -397,6 +397,9 @@ export const api = {
   // [WS-RPC] workflows.saveYaml
   saveWorkflowYaml: (name: string, yaml: string) =>
     requestRpc<{ ok: boolean }>("workflows.saveYaml", { name, yaml }),
+  // [WS-RPC] workflows.setMeta —— 改显示名/描述（name 是标识符不可改）
+  setWorkflowMeta: (name: string, meta: { label?: string | null; description?: string | null }) =>
+    requestRpc<{ ok: boolean }>("workflows.setMeta", { name, ...meta }),
   reloadWorkflows: () =>
     request<{ ok: boolean; workflows: any[] }>("/api/reload", { method: "POST" }),
 

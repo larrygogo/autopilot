@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -8,9 +8,20 @@ import { useToast } from "@/components/Toast";
 import { PhasePipelineEditor } from "@/components/PhasePipelineEditor";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input, Textarea } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface WorkflowDetailData {
   name: string;
+  label?: string;
   description?: string;
   phases?: unknown[];
   initial_state?: string;
@@ -40,6 +51,10 @@ export function WorkflowDetail() {
   const [state, setState] = useState<"loading" | "ready" | "notfound">("loading");
   const [pendingDelete, setPendingDelete] = useState(false);
   const [retryingFromTask, setRetryingFromTask] = useState(false);
+  const [metaEditOpen, setMetaEditOpen] = useState(false);
+  const [metaLabel, setMetaLabel] = useState("");
+  const [metaDesc, setMetaDesc] = useState("");
+  const [savingMeta, setSavingMeta] = useState(false);
 
   const load = async () => {
     try {
@@ -93,6 +108,29 @@ export function WorkflowDetail() {
       toast.info(`请点击「${fromTaskPhase}」节点编辑 prompt 或 ts`);
     }
   }, [state, fromTaskPhase, toast]);
+
+  const openMetaEdit = () => {
+    setMetaLabel(detail?.label ?? "");
+    setMetaDesc(detail?.description ?? "");
+    setMetaEditOpen(true);
+  };
+
+  const handleSaveMeta = async () => {
+    setSavingMeta(true);
+    try {
+      await api.setWorkflowMeta(name, {
+        label: metaLabel.trim() || null,
+        description: metaDesc.trim() || null,
+      });
+      toast.success("已保存");
+      setMetaEditOpen(false);
+      await load();
+    } catch (e: unknown) {
+      toast.error("保存失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setSavingMeta(false);
+    }
+  };
 
   const handleReturnAndRetry = async () => {
     if (!fromTaskId) return;
@@ -164,20 +202,40 @@ export function WorkflowDetail() {
           {/* Summary card */}
           <Card className="p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="truncate font-mono text-base font-semibold text-accent">
-                {detail.name}
-              </h3>
-              {/* file 工作流同样可删（workflows.delete 对 file source 走 deleteWorkflowDir 删目录，
-                  CLI 一直支持）—— 此前误把 file 一刀切禁用，用户工作流全是 file 等于删除不可用 */}
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setPendingDelete(true)}
-                title="删除"
-              >
-                <Trash2 className="h-4 w-4" />
-                删除
-              </Button>
+              {/* 业务标签（label）作主标题，内核名（name）以 mono chip 叠加显示——
+                  与全局「业务标签叠加内核名」原则一致；无 label 时回退 mono name */}
+              <div className="flex min-w-0 flex-wrap items-baseline gap-2">
+                <h3
+                  className={`truncate text-base font-semibold text-accent ${detail.label ? "" : "font-mono"}`}
+                >
+                  {detail.label || detail.name}
+                </h3>
+                {detail.label && (
+                  <code
+                    className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+                    title="工作流标识符（目录名与任务/需求的引用键，不可修改）"
+                  >
+                    {detail.name}
+                  </code>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="sm" onClick={openMetaEdit} title="编辑显示名与描述">
+                  <Pencil className="h-4 w-4" />
+                  编辑
+                </Button>
+                {/* file 工作流同样可删（workflows.delete 对 file source 走 deleteWorkflowDir 删目录，
+                    CLI 一直支持）—— 此前误把 file 一刀切禁用，用户工作流全是 file 等于删除不可用 */}
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setPendingDelete(true)}
+                  title="删除"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  删除
+                </Button>
+              </div>
             </div>
 
             {detail.description && (
@@ -209,6 +267,49 @@ export function WorkflowDetail() {
           </Card>
         </div>
       )}
+
+      <Dialog open={metaEditOpen} onOpenChange={(o) => !savingMeta && setMetaEditOpen(o)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>编辑工作流信息</DialogTitle>
+            <DialogDescription>
+              标识符 <code className="font-mono">{name}</code> 不可修改——它是目录名与历史任务、
+              需求的引用键，改名等于新建工作流（可用导出 → 以新名导入实现）。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="wf-meta-label">显示名</Label>
+              <Input
+                id="wf-meta-label"
+                value={metaLabel}
+                onChange={(e) => setMetaLabel(e.target.value)}
+                placeholder={name}
+                maxLength={60}
+              />
+              <p className="text-xs text-muted-foreground">留空则界面回退显示标识符</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="wf-meta-desc">描述</Label>
+              <Textarea
+                id="wf-meta-desc"
+                value={metaDesc}
+                onChange={(e) => setMetaDesc(e.target.value)}
+                placeholder="一句话说明这个工作流做什么、适用什么需求"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" size="sm" disabled={savingMeta} onClick={() => setMetaEditOpen(false)}>
+              取消
+            </Button>
+            <Button size="sm" disabled={savingMeta} onClick={handleSaveMeta}>
+              {savingMeta ? "保存中…" : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={pendingDelete}

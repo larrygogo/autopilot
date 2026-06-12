@@ -1351,6 +1351,44 @@ export function setWorkflowPhases(workflowName: string, phases: PhaseEntryInput[
   writeFileSync(yamlPath, doc.toString(), "utf-8");
 }
 
+/**
+ * 工作流元信息（label / description）。name 是标识符（目录名 + tasks.workflow /
+ * requirements.workflow 引用键），不在可改范围内——改名等于新建工作流。
+ */
+export interface WorkflowMetaInput {
+  /** 显示名；null / 空串 = 删除该字段（UI 回退显示 name） */
+  label?: string | null;
+  /** 描述；null / 空串 = 删除该字段 */
+  description?: string | null;
+}
+
+/**
+ * 在 yaml 原文上手术式修改 label / description（Document API，保留注释与其他段）。
+ * 纯函数：file 来源与 db 来源（yaml_content 列）共用。
+ */
+export function patchWorkflowMetaYaml(raw: string, meta: WorkflowMetaInput): string {
+  const doc = parseDocument(raw);
+  for (const key of ["label", "description"] as const) {
+    const v = meta[key];
+    if (v === undefined) continue;
+    const trimmed = typeof v === "string" ? v.trim() : v;
+    if (trimmed === null || trimmed === "") doc.deleteIn([key]);
+    else doc.setIn([key], trimmed);
+  }
+  return doc.toString();
+}
+
+/**
+ * 修改 file 来源工作流的元信息。不自动 reload —— 调用方负责。
+ */
+export function setWorkflowMeta(workflowName: string, meta: WorkflowMetaInput): void {
+  const yamlPath = getWorkflowYamlPath(workflowName);
+  if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
+  const raw = readFileSync(yamlPath, "utf-8");
+  copyFileSync(yamlPath, yamlPath + ".bak");
+  writeFileSync(yamlPath, patchWorkflowMetaYaml(raw, meta), "utf-8");
+}
+
 function cleanPhaseEntry(p: PhaseEntryInput): Record<string, unknown> {
   if (isParallelInput(p)) {
     const parallel: Record<string, unknown> = { name: p.parallel.name };

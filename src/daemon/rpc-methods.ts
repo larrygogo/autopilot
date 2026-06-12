@@ -26,6 +26,9 @@ import {
   getWorkflowTs as registryGetWorkflowTs,
   saveWorkflowYaml,
   deleteWorkflowDir,
+  setWorkflowMeta,
+  patchWorkflowMetaYaml,
+  type WorkflowMetaInput,
   reload as reloadRegistry,
 } from "../core/registry";
 import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb } from "../core/workflows";
@@ -873,6 +876,45 @@ export function registerCoreRpcMethods(): void {
           updateDbWorkflow(p.name, { yaml_content: p.yaml });
         } else {
           saveWorkflowYaml(p.name, p.yaml);
+        }
+        await reloadRegistry();
+        emitBus({ type: "workflow:reloaded", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "workflows.setMeta",
+    description: "修改工作流显示名 / 描述（name 是标识符与引用键，不可改）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const meta: WorkflowMetaInput = {};
+      if ("label" in p) {
+        if (p.label !== null && typeof p.label !== "string") {
+          throw new RpcError("INVALID_PARAM", "label 需为字符串或 null");
+        }
+        meta.label = p.label as string | null;
+      }
+      if ("description" in p) {
+        if (p.description !== null && typeof p.description !== "string") {
+          throw new RpcError("INVALID_PARAM", "description 需为字符串或 null");
+        }
+        meta.description = p.description as string | null;
+      }
+      if (meta.label === undefined && meta.description === undefined) {
+        throw new RpcError("INVALID_PARAM", "至少提供 label / description 之一");
+      }
+      if (!registryGetWorkflow(p.name)) throw new RpcError("NOT_FOUND", "Workflow not found");
+      const row = getWorkflowFromDb(p.name);
+      try {
+        if (row && row.source === "db") {
+          updateDbWorkflow(p.name, { yaml_content: patchWorkflowMetaYaml(row.yaml_content, meta) });
+        } else {
+          setWorkflowMeta(p.name, meta);
         }
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
