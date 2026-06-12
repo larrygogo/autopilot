@@ -194,6 +194,12 @@ export interface ProviderConfig {
   default_model?: string;
   /** 是否启用。禁用时仍可保留配置，但注册该 provider 的 agent 不会被实例化 */
   enabled?: boolean;
+  /** provider 级默认接入方式：cli 或 api。不填则按供应商类型判断 */
+  mode?: "cli" | "api";
+  /** 自定义 base_url（API 模式下覆盖官方默认端点） */
+  base_url?: string;
+  /** 自定义 compat provider 的环境变量回落名 */
+  env_key_name?: string;
   [key: string]: unknown;
 }
 
@@ -260,16 +266,25 @@ export function saveConfigRaw(yamlContent: string): void {
 }
 
 /**
- * 读取 `providers.<name>` 段。仅返回已知的三个 provider；未配置时该 provider 对应值为 {}。
+ * 读取 `providers.<name>` 段。返回已知的三个内置 provider + 所有用户配置的自定义 provider；
+ * 未配置时内置 provider 对应值为 {}。
  */
-export function loadProviders(): Record<ProviderName, ProviderConfig> {
+export function loadProviders(): Record<string, ProviderConfig> {
   const raw = loadSection("providers");
   const out: Record<string, ProviderConfig> = {};
+  // 三大内置 provider 始终存在
   for (const name of PROVIDER_NAMES) {
     const value = raw[name];
     out[name] = value && typeof value === "object" ? (value as ProviderConfig) : {};
   }
-  return out as Record<ProviderName, ProviderConfig>;
+  // 自定义 provider（如 deepseek / kimi / minimax / 用户自定义 compat）
+  for (const [name, value] of Object.entries(raw)) {
+    if (name in out) continue; // 跳过已处理的内置 provider
+    if (value && typeof value === "object") {
+      out[name] = value as ProviderConfig;
+    }
+  }
+  return out;
 }
 
 function loadSection(key: string): Record<string, Record<string, unknown>> {

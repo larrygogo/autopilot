@@ -94,6 +94,17 @@ import {
   saveProvider,
   type ProviderName,
 } from "../core/config";
+import {
+  listApiKeys,
+  setApiKey,
+  deleteApiKey,
+  type ApiKeyInfo,
+} from "../core/api-keys";
+import {
+  isCompatOnlyProvider,
+  getCompatPreset,
+  BUILTIN_COMPAT_PROVIDERS,
+} from "../agents/providers/api/compat";
 import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
 import { listProviderModels } from "../agents/model-list";
 import { createAgent } from "../agents/registry";
@@ -2116,6 +2127,117 @@ export function registerCoreRpcMethods(): void {
       }
       wsManager.unsubscribeForClient(ctx.ws, channels);
       return { ok: true, channels };
+    },
+  });
+
+  // ── API Keys CRUD ──
+
+  registerRpcMethod({
+    method: "apiKeys.list",
+    description: "列出所有已配置的 API key（脱敏）",
+    handler: () => listApiKeys(),
+  });
+
+  registerRpcMethod({
+    method: "apiKeys.set",
+    description: "写入/更新某个 provider 的 API key",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.provider !== "string" || !p.provider) {
+        throw new RpcError("INVALID_PARAM", "需要 provider");
+      }
+      if (typeof p.key !== "string" || !p.key) {
+        throw new RpcError("INVALID_PARAM", "需要 key");
+      }
+      await setApiKey(p.provider, p.key);
+      return { ok: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "apiKeys.delete",
+    description: "删除某个 provider 的 API key",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.provider !== "string" || !p.provider) {
+        throw new RpcError("INVALID_PARAM", "需要 provider");
+      }
+      deleteApiKey(p.provider);
+      return { ok: true };
+    },
+  });
+
+  // ── 扩展 providers.list，补充 API 模式信息 ──
+
+  registerRpcMethod({
+    method: "providers.listExtended",
+    description: "返回所有 provider 的完整信息（含 API key 状态、compat 供应商）",
+    handler: () => {
+      const providers = loadProviders();
+      const apiKeys = listApiKeys();
+      const keyMap = new Map(apiKeys.map((k) => [k.provider, k]));
+
+      const result: Array<Record<string, unknown>> = [];
+
+      // 三大内置 provider
+      for (const name of PROVIDER_NAMES) {
+        const cfg = providers[name] || {};
+        const keyInfo = keyMap.get(name);
+        result.push({
+          name,
+          display_name: name.charAt(0).toUpperCase() + name.slice(1),
+          supports_cli: true,
+          supports_api: true,
+          api_only: false,
+          default_mode: cfg.mode || "cli",
+          default_model: cfg.default_model,
+          has_api_key: !!keyInfo,
+          key_hint: keyInfo?.key_hint,
+          key_source: keyInfo?.source,
+          base_url: cfg.base_url,
+        });
+      }
+
+      // 预置 compat 供应商
+      for (const [name, preset] of Object.entries(BUILTIN_COMPAT_PROVIDERS)) {
+        const cfg = providers[name] || {};
+        const keyInfo = keyMap.get(name);
+        result.push({
+          name,
+          display_name: preset.display_name,
+          supports_cli: false,
+          supports_api: true,
+          api_only: true,
+          default_mode: "api",
+          default_model: cfg.default_model || preset.default_model,
+          has_api_key: !!keyInfo,
+          key_hint: keyInfo?.key_hint,
+          key_source: keyInfo?.source,
+          base_url: cfg.base_url || preset.base_url,
+        });
+      }
+
+      // 用户自定义 compat provider（不在内置列表中的）
+      for (const [name, cfg] of Object.entries(providers)) {
+        if (PROVIDER_NAMES.includes(name as ProviderName)) continue;
+        if (name in BUILTIN_COMPAT_PROVIDERS) continue;
+        const keyInfo = keyMap.get(name);
+        result.push({
+          name,
+          display_name: name,
+          supports_cli: false,
+          supports_api: true,
+          api_only: true,
+          default_mode: "api",
+          default_model: cfg.default_model,
+          has_api_key: !!keyInfo,
+          key_hint: keyInfo?.key_hint,
+          key_source: keyInfo?.source,
+          base_url: cfg.base_url,
+        });
+      }
+
+      return result;
     },
   });
 }
