@@ -1,14 +1,18 @@
 /**
- * requirement-task-bridge：把 task 状态变化同步到对应 requirement。
+ * requirement-task-bridge：task 终结事件 → RunOutcome 翻译外壳（需求中心架构 v2 R1 形态）。
  *
- * 监听 task:transition 事件：
- *   - task → failed_*    → requirement → failed
- *   - task → cancelled   → requirement → cancelled
- *   - task → pending_await_review（带 await_review phase 的 workflow）→ requirement → awaiting_review
- *   - task → running_fix_revision → requirement → fix_revision
- *   - task → done + 需求有交付 PR → requirement → awaiting_review（验收；pr-poller 在
- *     全部 PR merge 后才转 done —— 直通 done 会让验收/CI 回路死路）
- *   - task → done + 无交付 PR    → requirement → done（纯 adhoc 无交付物）
+ * 职责已收窄为「事件订阅 + 找需求 + task 状态→outcome 翻译」三件事，
+ * 需求状态写入 / 终态原因 / 评审沉淀全部收进单口 `reportRunOutcome`（run-outcome.ts）。
+ * R2/R3 后执行器（fix-runner 等）直接调用单口，本事件缝合外壳退役。
+ *
+ * 翻译表（task:transition 的 to → outcome）：
+ *   - cancelled                → cancelled（note="API cancel" 是 cancelTaskAction 写死的
+ *     手动取消契约，映射成 user 来源——这是 task 侧契约知识，留在翻译层）
+ *   - failed_* / failed        → failed
+ *   - pending_await_review     → awaiting_human（带 await_review phase 的旧 workflow）
+ *   - running_fix_revision     → fixing（旧 workflow 兼容路径）
+ *   - done                     → delivered（有无交付 PR 由 run-outcome 判定去向）
+ *   - 其余                     → 忽略
  *
  * 不在此处自动恢复需求队列；scheduler 已经监听了 requirement:status-changed 事件，
  * 会在 from=running/fix_revision 的状态释放时自动 tick 启动下一个 queued 需求。
@@ -16,30 +20,35 @@
 
 import { onEvent, offEvent } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
-import { getRequirementById, setRequirementStatus, canTransitionStatus, listRequirements } from "../core/requirements";
-import { createComment, nextCommentId } from "../core/requirement-comments";
-import { listSubPrs } from "../core/requirement-sub-prs";
-import { getTask } from "../core/db";
+import { listRequirements } from "../core/requirements";
 import { createLogger } from "../core/logger";
+import { reportRunOutcome, type RunOutcome } from "./run-outcome";
 
 const log = createLogger("requirement-task-bridge");
 
 let _handler: ((event: AutopilotEvent) => void) | null = null;
 
-function targetReqStatus(taskTo: string, req: { id: string; pr_number: number | null }): string | null {
-  if (taskTo === "cancelled") return "cancelled";
-  if (taskTo.startsWith("failed_") || taskTo === "failed") return "failed";
-  if (taskTo === "pending_await_review") return "awaiting_review";
-  if (taskTo === "running_fix_revision") return "fix_revision";
-  if (taskTo === "done") {
-    // task done = 执行单元干完了；需求是否「完成」取决于交付物：
-    // 有交付 PR（主 PR 或 sub_prs）→ 进验收 awaiting_review，由 pr-poller 在
-    // 全部 PR merge 后才转 done（poller 只扫 awaiting_review，这里直通 done 会
-    // 让验收/CI/review 回路整体死路 —— req-018 事故，PR 还 OPEN 需求就「完成」了）。
-    // 无 PR（纯 adhoc 无交付）→ done。
-    const hasPr = (req.pr_number ?? 0) > 0 || listSubPrs(req.id).some((sp) => sp.pr_number > 0);
-    return hasPr ? "awaiting_review" : "done";
+/** task 状态 → RunOutcome 翻译表。不认识的状态返回 null（忽略）。 */
+function toRunOutcome(
+  taskId: string,
+  taskTo: string,
+  trigger: string,
+  note: string | null,
+): RunOutcome | null {
+  if (taskTo === "cancelled" || taskTo.startsWith("failed_") || taskTo === "failed") {
+    // 终态：把 task 侧的「为什么」（transition note）翻译成需求侧展示文案。
+    // "API cancel" 是 cancelTaskAction 写死的手动取消契约（task-actions.ts）——根因是
+    // 用户操作，映射成 user 来源，避免需求侧显示成「系统自动取消」吓到用户。
+    const isManualTaskCancel = note === "API cancel";
+    const reason = isManualTaskCancel ? "任务被手动取消" : note ?? `任务 ${taskId} ${taskTo}（trigger: ${trigger}）`;
+    const reasonSource = isManualTaskCancel ? ("user" as const) : ("task" as const);
+    return taskTo === "cancelled"
+      ? { kind: "cancelled", reason, reasonSource, note: note ?? undefined }
+      : { kind: "failed", reason, reasonSource, note: note ?? undefined };
   }
+  if (taskTo === "pending_await_review") return { kind: "awaiting_human" };
+  if (taskTo === "running_fix_revision") return { kind: "fixing" };
+  if (taskTo === "done") return { kind: "delivered" };
   return null;
 }
 
@@ -57,57 +66,14 @@ export function initRequirementTaskBridge(): void {
 
     const req = findRequirementByTaskId(taskId);
     if (!req) return;
-    const reqStatus = targetReqStatus(to, req);
-    if (!reqStatus) return;
-    if (req.status === reqStatus) return;
-    if (!canTransitionStatus(req.status, reqStatus)) {
-      log.warn("bridge: 跳过非法转换 req=%s %s → %s（task=%s 到 %s）",
-        req.id, req.status, reqStatus, taskId, to);
-      return;
-    }
-
-    try {
-      // 终态同步时把 task 侧的「为什么」（transition note）带给需求，让需求页直接可见。
-      // "API cancel" 是 cancelTaskAction 写死的手动取消契约（task-actions.ts）——根因是
-      // 用户操作，映射成 user 来源，避免需求侧显示成「系统自动取消」吓到用户。
-      const isTerminal = reqStatus === "cancelled" || reqStatus === "failed";
-      const isManualTaskCancel = note === "API cancel";
-      setRequirementStatus(req.id, reqStatus, isTerminal ? {
-        reason: isManualTaskCancel ? "任务被手动取消" : note ?? `任务 ${taskId} ${to}（trigger: ${trigger}）`,
-        reason_source: isManualTaskCancel ? "user" : "task",
-      } : undefined);
-      log.info("bridge: req=%s %s → %s（task=%s 到 %s）",
-        req.id, req.status, reqStatus, taskId, to);
-
-      // 评审知识沉淀（防撞墙-失忆-重撞）：终态时把 task 侧最后一轮评审驳回原话写成需求
-      // 评论（kind=feedback, from_role=agent），scheduler 重跑拼 requirement 文本时会带上，
-      // 让新一轮 design v1 即带着上轮发现的架构约束。沉淀失败不阻塞状态同步。
-      if (isTerminal) {
-        try {
-          const task = getTask(taskId);
-          const rejection = task?.["rejection_reason"];
-          if (typeof rejection === "string" && rejection.trim()) {
-            createComment({
-              id: nextCommentId(),
-              requirement_id: req.id,
-              kind: "feedback",
-              from_role: "agent",
-              body: `【执行评审遗留 · task ${taskId}】${note ?? to}\n\n最后一轮评审驳回理由（重跑时方案必须规避）：\n\n${rejection.slice(0, 4000)}`,
-            });
-            log.info("bridge: 已沉淀评审遗留为需求评论 req=%s task=%s", req.id, taskId);
-          }
-        } catch (e: unknown) {
-          log.warn("bridge: 沉淀评审遗留失败 req=%s: %s", req.id, (e as Error).message);
-        }
-      }
-    } catch (e: unknown) {
-      log.error("bridge: 同步 requirement 状态失败 req=%s: %s", req.id, (e as Error).message);
-    }
+    const outcome = toRunOutcome(taskId, to, trigger, note);
+    if (!outcome) return;
+    reportRunOutcome(req.id, taskId, outcome);
   };
 
   onEvent("task:transition", handler);
   _handler = handler;
-  log.info("requirement-task-bridge 已启动（订阅 task:transition）");
+  log.info("requirement-task-bridge 已启动（订阅 task:transition → reportRunOutcome）");
 }
 
 export function disposeRequirementTaskBridge(): void {
