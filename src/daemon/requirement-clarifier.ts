@@ -2,9 +2,9 @@ import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { onEvent, offEvent, emit } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
-import { getRequirementById, updateRequirement, setActiveQuestionId, setRequirementStatus } from "../core/requirements";
+import { getRequirementById, updateRequirement, setActiveQuestionId, setRequirementStatus, listRequirementWorkspaces } from "../core/requirements";
 import { getProjectById } from "../core/projects";
-import { getWorkspaceById, type Workspace } from "../core/workspaces";
+import type { Workspace } from "../core/workspaces";
 import {
   createComment,
   nextCommentId,
@@ -20,7 +20,7 @@ import {
 import { buildClarifierAgent } from "./clarifier-agent";
 import { parseLlmYamlWrapper } from "../core/llm-yaml";
 import { listAttachments, buildAttachmentContext } from "../core/requirement-attachments";
-import { ensureRequirementClone, deleteRequirementClone } from "../core/requirement-clone";
+import { ensureRequirementClones, deleteRequirementClone } from "../core/requirement-clone";
 import {
   getSession,
   upsertSession,
@@ -82,7 +82,7 @@ async function callClaude(
 
   if (resolvedProvider === "anthropic") {
     // Anthropic：chat() 已实现，支持 providerSessionId 续 session。
-    // cwd = 需求级浅 clone（如有）：agent 在仓库目录中，可用读类工具自查代码后再提问
+    // cwd = 需求级浅 clone 根（如有，各库在子目录）：agent 可用读类工具自查代码后再提问
     const result = await agent.chat(prompt, { providerSessionId: sessionRef, cwd });
     const rawText = result.text.trim();
     if (!rawText) throw new Error("clarifier agent 返回空");
@@ -239,11 +239,13 @@ async function readWorkspaceContext(ws: Workspace): Promise<string> {
 function buildPrompt(opts: {
   projectName: string;
   projectDescription: string | null;
-  workspaceAlias: string | null;
-  /** 仓库快照上下文 —— 仅 clone 失败的降级模式使用（clone 就绪时不预拼接，探索交给 agent） */
+  workspaceAliases: string[];
+  /** 仓库快照上下文 —— 仅 clone 失败库的降级模式使用（clone 就绪的库不预拼接，探索交给 agent） */
   workspaceContext: string | null;
-  /** 需求级浅 clone 就绪：agent cwd 已指向仓库，自主探索（读文件 / 搜索 / git 命令 / 加深历史） */
-  repoCheckout?: { branch: string } | null;
+  /** 需求级浅 clone 就绪的库（agent cwd = workspace/ 根，各库在子目录）：自主探索（读文件 / 搜索 / git 命令 / 加深历史） */
+  repoCheckouts: Array<{ dir: string; alias: string; branch: string }>;
+  /** clone 失败、仅有远程快照线索的库 alias（在浅克隆段聚合告知） */
+  failedAliases: string[];
   title: string;
   specMd: string;
   qaHistory: string;
@@ -253,15 +255,23 @@ function buildPrompt(opts: {
   const ctxLines: string[] = [];
   ctxLines.push(`项目名称：${opts.projectName}`);
   if (opts.projectDescription) ctxLines.push(`项目描述：${opts.projectDescription}`);
-  if (opts.workspaceAlias) ctxLines.push(`关联工作区：${opts.workspaceAlias}`);
-  if (opts.repoCheckout) {
+  if (opts.workspaceAliases.length > 0) ctxLines.push(`关联代码库：${opts.workspaceAliases.join("、")}`);
+  if (opts.repoCheckouts.length > 0) {
+    const repoLines = opts.repoCheckouts
+      .map((r) => `- \`./${r.dir}/\` — ${r.alias}（${r.branch} 分支，depth 1）`)
+      .join("\n");
     ctxLines.push("");
     ctxLines.push(
       "## 仓库代码（浅克隆，自主探索）\n" +
-      `你的当前工作目录是本需求关联仓库的**浅克隆**（\`git clone --depth 1 --single-branch\`，` +
-      `仅 \`${opts.repoCheckout.branch}\` 分支的最新提交，没有历史记录）。\n\n` +
-      "**怎么了解这个项目由你决定**：读任何你认为有价值的文件（README / CLAUDE.md / 源码 / 配置 / 测试）、" +
-      "全文搜索、跑 git 命令；需要提交历史时可以 `git fetch --deepen <N>`（或 `--unshallow`）自行加深克隆。\n\n" +
+      `你的当前工作目录下有本需求关联的 ${opts.repoCheckouts.length} 个仓库的**浅克隆**` +
+      "（`git clone --depth 1 --single-branch`，各仓库仅含对应分支的最新提交，没有历史记录）：\n" +
+      repoLines + "\n" +
+      (opts.failedAliases.length > 0
+        ? `\n（以下代码库克隆失败，仅提供「仓库背景」段的远程快照线索：${opts.failedAliases.join("、")}）\n`
+        : "") +
+      "\n**怎么了解这些项目由你决定**：读任何你认为有价值的文件（README / CLAUDE.md / 源码 / 配置 / 测试）、" +
+      "全文搜索、跑 git 命令（注意进入对应仓库子目录再执行）；需要提交历史时可以 `git fetch --deepen <N>`" +
+      "（或 `--unshallow`）自行加深克隆。\n\n" +
       "目标只有一个：把项目了解到足以提出**精准的问题**——能从代码确认的事实" +
       "（某功能是否存在、入口在哪、技术栈是什么）不要拿去问用户；把提问机会留给代码答不了的部分" +
       "（产品意图、优先级取舍、验收标准）。\n\n" +
@@ -486,19 +496,26 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     endRound(reqId, "aborted");
     return;
   }
-  const workspace = req.workspace_id ? getWorkspaceById(req.workspace_id) : null;
+  const workspaces = listRequirementWorkspaces(reqId);
 
-  // 需求级浅 clone（首轮建、后续轮幂等复用）：澄清 agent 的 cwd 指向它，
-  // 可用读类工具直接查代码验证事实再提问。clone 失败退化为无代码模式（不阻塞）。
-  let cloneDir: string | null = null;
-  if (workspace?.remote_url) {
+  // 需求级浅 clone（首轮建、后续轮幂等复用）：拉需求关联的**全集**代码库，
+  // agent cwd 指向 workspace/ 根、各库在子目录，可用读类工具直接查代码验证事实再提问。
+  // 按库降级：clone 成功的库进子目录探索；失败的库走远程快照拼 prompt；全失败退化纯文本（不阻塞）。
+  let cloneRoot: string | null = null;
+  let clonedRepos: Array<{ ws: Workspace; dir: string; path: string }> = [];
+  let failedRepos: Workspace[] = [];
+  if (workspaces.length > 0) {
     // clone 可能耗时几十秒（首轮），给前端专属阶段而不是让用户以为卡在 LLM 调用
     setPhase(reqId, "cloning-repo");
     try {
-      cloneDir = await ensureRequirementClone(reqId, workspace);
+      const cloneResult = await ensureRequirementClones(reqId, workspaces);
+      clonedRepos = cloneResult.cloned;
+      failedRepos = cloneResult.failed;
+      if (clonedRepos.length > 0) cloneRoot = cloneResult.root;
     } catch (e: unknown) {
-      log.warn("clarifier: 需求级 clone 失败，退化无代码模式 req=%s: %s",
+      log.warn("clarifier: 需求级 clone 失败，退化远程快照模式 req=%s: %s",
         reqId, e instanceof Error ? e.message : String(e));
+      failedRepos = workspaces;
     }
     setPhase(reqId, "preparing");
   }
@@ -557,14 +574,28 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   //   非 Anthropic（无论是否有 snapshot）→ 始终走 qaHistory 原路径，行为完全不变
   const hasSnapshot = (session?.messages_snapshot?.length ?? 0) > 0;
   const useReplay = isAnthropicProvider && !activeSessionRef && hasSnapshot;
+
+  // clone 失败库的降级快照（远程拉结构事实 + 自述文档，prompt 里已声明可能过期）；
+  // clone 就绪的库不预拼接（探索交给 agent 自主）
+  let degradedContext: string | null = null;
+  if (failedRepos.length > 0) {
+    const parts: string[] = [];
+    for (const ws of failedRepos) {
+      const ctx = await readWorkspaceContext(ws);
+      if (ctx) {
+        parts.push(workspaces.length > 1 ? `### 代码库 ${ws.alias}\n\n${ctx}` : ctx);
+      }
+    }
+    degradedContext = parts.length > 0 ? parts.join("\n\n") : null;
+  }
+
   const fullPrompt = buildPrompt({
     projectName: project.name,
     projectDescription: project.description,
-    workspaceAlias: workspace?.alias ?? null,
-    // clone 就绪时不预拼接快照（探索交给 agent 自主）；clone 失败才降级到快照模式
-    workspaceContext:
-      cloneDir != null ? null : workspace ? (await readWorkspaceContext(workspace)) || null : null,
-    repoCheckout: cloneDir != null && workspace ? { branch: workspace.default_branch } : null,
+    workspaceAliases: workspaces.map((w) => w.alias),
+    workspaceContext: degradedContext,
+    repoCheckouts: clonedRepos.map((c) => ({ dir: c.dir, alias: c.ws.alias, branch: c.ws.default_branch })),
+    failedAliases: failedRepos.map((w) => w.alias),
     title: req.title,
     specMd: req.spec_md ?? "",
     // useReplay 时 qaHistory 传空：历史信息由 messagesReplay 段落承载，两者互斥
@@ -599,7 +630,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     try {
       setPhase(reqId, "calling-llm", { attempt: i as 0 | 1, prompt: attemptPrompt });
 
-      const { rawText, newSessionRef } = await _clarifyFn(attemptPrompt, reqId, attemptRef, cloneDir ?? undefined);
+      const { rawText, newSessionRef } = await _clarifyFn(attemptPrompt, reqId, attemptRef, cloneRoot ?? undefined);
       attemptRaw = rawText;
       result = parseClarifyResult(rawText);
       resolvedRawText     = rawText;

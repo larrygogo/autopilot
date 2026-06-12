@@ -343,8 +343,8 @@ function cloneOneRepo(
   return true;
 }
 
-/** alias → 安全子目录名：白名单字符，非法/为空时回退 workspace id */
-function safeAliasDir(alias: string, workspaceId: string): string {
+/** alias → 安全子目录名：白名单字符，非法/为空时回退 workspace id（requirement-clone 共用） */
+export function safeAliasDir(alias: string, workspaceId: string): string {
   const cleaned = alias.replace(/[^\w.-]/g, "");
   if (cleaned && TASK_ID_RE.test(cleaned) && cleaned !== "." && cleaned !== "..") return cleaned;
   return workspaceId;
