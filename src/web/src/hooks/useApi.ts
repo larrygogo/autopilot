@@ -129,7 +129,6 @@ const NEW_API_PATTERNS: RegExp[] = [
   /^\/api\/requirements\/[\w.\-]+\/attachments(\/[\w.\-]+)?$/,
   // 顶层 collection endpoint（list/create，不匹配 /:id 详情）
   /^\/api\/providers(\?.*)?$/,
-  /^\/api\/schedules(\?.*)?$/,
   /^\/api\/defaults(\?.*)?$/,
   /^\/api\/fs\//,
   /^\/api\/requirements(\?.*)?$/,
@@ -484,33 +483,6 @@ export const api = {
       "/api/daemon/token",
       { method: "DELETE" },
     ),
-
-  // Schedules
-  // [WS-RPC] schedules.list
-  listSchedules: () => requestRpc<Schedule[]>("schedules.list"),
-  // [WS-RPC] schedules.get
-  getSchedule: (id: string) => requestRpc<Schedule>("schedules.get", { id }),
-  // [WS-RPC] schedules.create
-  createSchedule: (body: {
-    name: string;
-    type: "once" | "cron";
-    run_at?: string | null;
-    cron_expr?: string | null;
-    timezone?: string;
-    workflow: string;
-    title: string;
-    requirement?: string | null;
-    enabled?: boolean;
-  }) => requestRpc<Schedule>("schedules.create", body),
-  // [WS-RPC] schedules.update
-  updateSchedule: (id: string, body: Record<string, unknown>) =>
-    requestRpc<Schedule>("schedules.update", { id, ...body }),
-  // [WS-RPC] schedules.delete
-  deleteSchedule: (id: string) =>
-    requestRpc<{ ok: true }>("schedules.delete", { id }),
-  // [WS-RPC] schedules.runNow
-  runScheduleNow: (id: string) =>
-    requestRpc<{ ok: true; taskId: string }>("schedules.runNow", { id }),
 
   // [WS-RPC] agents.dryRun（LLM 调用，5min 超时）
   // 命名复用 agent 删除后：传一个内联 agent 配置对象（provider/model/system_prompt/...），
@@ -962,25 +934,6 @@ export interface ChatMessage {
   content: string;
   ts: string;
   usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
-}
-
-export interface Schedule {
-  id: string;
-  name: string;
-  type: "once" | "cron";
-  run_at: string | null;
-  cron_expr: string | null;
-  timezone: string;
-  workflow: string;
-  title: string;
-  requirement: string | null;
-  enabled: 0 | 1;
-  next_run_at: string | null;
-  last_run_at: string | null;
-  last_task_id: string | null;
-  run_count: number;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface ChatSessionManifest {

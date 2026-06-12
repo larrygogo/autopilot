@@ -12,7 +12,6 @@
 
 import type { Task } from "./db";
 import type { ChatMessage } from "./sessions";
-import type { Schedule } from "./schedules";
 import type { NowCard } from "./now-types";
 
 export type AutopilotEvent =
@@ -34,10 +33,6 @@ export type AutopilotEvent =
   | { type: "chat:delta"; payload: { sessionId: string; delta: string } }
   | { type: "chat:complete"; payload: { sessionId: string; message: ChatMessage } }
   | { type: "chat:error"; payload: { sessionId: string; error: string } }
-  | { type: "schedule:created"; payload: { schedule: Schedule } }
-  | { type: "schedule:updated"; payload: { schedule: Schedule } }
-  | { type: "schedule:deleted"; payload: { scheduleId: string } }
-  | { type: "schedule:fired"; payload: { schedule: Schedule; taskId: string } }
   | { type: "projects:changed"; payload: { id: string; action: "create" | "update" | "delete" } }
   | { type: "workspaces:changed"; payload: { id: string; action: "create" | "update" | "delete" } }
   | { type: "requirement:status-changed"; payload: { id: string; from: string; to: string; reason?: string | null } }

@@ -39,7 +39,6 @@ import {
   Menu,
   Circle,
   GitBranch,
-  CalendarClock,
   ChevronDown,
   ChevronRight,
   Folder,
@@ -55,7 +54,6 @@ const Setup = lazy(() => import("./pages/Setup").then((m) => ({ default: m.Setup
 const NewWorkflowWithAI = lazy(() => import("./pages/NewWorkflowWithAI").then((m) => ({ default: m.NewWorkflowWithAI })));
 const Workflows = lazy(() => import("./pages/Workflows").then((m) => ({ default: m.Workflows })));
 const WorkflowDetail = lazy(() => import("./pages/WorkflowDetail").then((m) => ({ default: m.WorkflowDetail })));
-const Schedules = lazy(() => import("./pages/Schedules").then((m) => ({ default: m.Schedules })));
 const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
 const TaskDetail = lazy(() =>
   import("./pages/TaskDetail").then((m) => ({ default: m.TaskDetail })),
@@ -98,7 +96,6 @@ const NAV_GROUPS: NavGroupDef[] = [
     title: "编排",
     items: [
       { path: "/workflows", label: "工作流", icon: GitBranch },
-      { path: "/schedules", label: "定时任务", icon: CalendarClock },
     ],
   },
   {
@@ -119,7 +116,6 @@ function titleForPath(pathname: string): string {
   }
   if (pathname.startsWith("/library")) return "项目";
   if (pathname.startsWith("/chat")) return "对话";
-  if (pathname.startsWith("/schedules")) return "定时任务";
   if (pathname.startsWith("/workflows")) return "工作流";
   if (pathname.startsWith("/projects/")) {
     const id = pathname.slice("/projects/".length);
@@ -266,7 +262,6 @@ function AppInner() {
                 <Route path="/workflows/new-with-ai" element={<NewWorkflowWithAI />} />
                 <Route path="/workflows/:name" element={<WorkflowDetail />} />
                 <Route path="/workflows" element={<Workflows />} />
-                <Route path="/schedules" element={<SchedulesRoute subscribe={subscribe} />} />
                 {/* /agents 旧入口：命名复用 agent 已删除，agent 配置下放到 phase 内联编辑（工作流编辑器） */}
                 <Route path="/agents" element={<Navigate to="/workflows" replace />} />
                 <Route path="/providers" element={<Navigate to="/settings?tab=providers" replace />} />
@@ -338,15 +333,6 @@ function ProjectDetailRoute() {
   const { id } = useParams<{ id: string }>();
   if (!id) return <Navigate to="/projects" replace />;
   return <ProjectDetail projectId={id} />;
-}
-
-function SchedulesRoute({
-  subscribe,
-}: {
-  subscribe: (channel: string, handler: (event: any) => void) => () => void;
-}) {
-  const navigate = useNavigate();
-  return <Schedules subscribe={subscribe} onSelectTask={(id) => navigate(`/tasks/${id}`)} />;
 }
 
 function SidebarContent({

@@ -78,7 +78,7 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         <div className="mb-3">
           <h3 className="text-sm font-semibold">常规偏好</h3>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            影响新建定时任务时的默认值；已创建的任务不受影响。
+            设置默认时区（目前仅用于保存偏好与界面展示）；已创建的任务不受影响。
           </p>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
@@ -141,7 +141,7 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         <div className="mb-2">
           <h3 className="text-sm font-semibold">编辑配置文件</h3>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            日常配置请用上方的提供商 / 智能体 / 工作流 / 定时任务 Tab；
+            日常配置请用上方的提供商 / 智能体 / 工作流 Tab；
             原始 YAML 请用 IDE 直接编辑文件，daemon 即时读到改动（providers / agents 无需重启）。
           </p>
         </div>

@@ -4,7 +4,6 @@ import { getWorkflow } from "./registry";
 import { deleteTaskRuntimeDir } from "./sandbox";
 import { releaseLock } from "./infra";
 import { forgetTaskRecoveryState } from "./watcher";
-import { clearScheduleTaskRefs } from "./schedules";
 import { emit } from "./event-bus";
 import { log } from "./logger";
 
@@ -66,7 +65,6 @@ function purgeTaskTree(tree: Task[], emitRootId: string | null): string[] {
     }
   }
 
-  clearScheduleTaskRefs(ids);
   deleteTaskRecords(ids);
 
   for (const id of ids) {
@@ -78,7 +76,7 @@ function purgeTaskTree(tree: Task[], emitRootId: string | null): string[] {
 
 /**
  * 彻底删除一个任务（及其所有子任务）：DB 记录、运行时目录（含 workspace/logs/manifest）、
- * 文件锁、watcher 内存态一并清理；schedules.last_task_id 置 NULL。
+ * 文件锁、watcher 内存态一并清理。
  *
  * 前置约束：
  *   - 只能从"根任务"调用（有父任务的子任务必须随父任务一起删）
