@@ -33,6 +33,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **内核不为某个 UI 妥协命名** —— 客户端层负责翻译。Web 上业务标签与内核名**叠加显示**（hover / 详情侧栏 / 操作历史同时露出 trigger 名），不是替换；让懂行用户能反向映射，不懂的人可忽略
 - 添加新功能时先问三连：「决策时刻要不要点这个按钮？自动化要不要调这个？观察时要不要看这条信息？」前两个决定它在 Web / CLI 怎么长，第三个决定 TUI 是否补
 - 警惕 Web 的业务语言反渗内核：trigger 改名压力必须挡在客户端层，不能让 state-machine 退让
+- **工作流自定义的产品支持范围 = PR 交付形态的定制轴**（2026-06-12 定位声明）：澄清 / 按仓库调度 / PR 验收 / fix_revision 修复回路 / CI 自动修复这些增值服务全部长在「需求 → PR」闭环上（bridge 按「有无交付 PR」泛化判断、不认 phase 名——自定义工作流只要最终交付 PR，全套照拿）；「自定义」指定制这条管线（加阶段、换 phase agent、调驳回、并行块），**不是任意流程编排平台**。非 PR 形态示例（doc_gen / data_pipeline / prompt_quick 等）是引擎能力演示（docs/state-machine.md 等的教学 fixture），拿不到增值服务、在 Web 决策台上无对应 affordance——这是有意取舍而非缺口。泛化闸门：dogfood 中出现**反复发生的真实非 PR 场景**再启动，且 P0 先做「交付物抽象」（交付物是什么 / 怎么验收 / 谁签字），之前不动核心不变式
 
 ## 架构概要
 
@@ -79,7 +80,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
     └── locks/                   # 文件锁目录
 ```
 
-初始化：`autopilot init`（会自动从 repo 内 `examples/workflows/dev` 装一份默认 dev 工作流到 `~/.autopilot/workflows/dev/`）
+初始化：`autopilot init`（会自动从 repo 内 examples 装 `dev` + `ad-hoc` 两个产品工作流到 `~/.autopilot/workflows/`；其余示例是模板，按需 `workflow create` 克隆）
 升级：`autopilot upgrade`
 启动 daemon：`autopilot daemon run`
 启动 TUI：`autopilot tui`
