@@ -78,7 +78,6 @@ export function Workflows() {
         eyebrow="SHEET · WORKFLOWS · DEF"
         title="工作流"
         subtitle="编排定义 · 阶段图谱"
-        description="管理所有可用的工作流；每个工作流都是 AUTOPILOT_HOME/workflows/ 下的独立目录。"
         meta={[{ k: "总数", v: workflows.length }]}
         actions={
           <Button onClick={() => setTemplatePickerOpen(true)}>

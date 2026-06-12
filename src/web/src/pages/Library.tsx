@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { PAGE_W } from "@/lib/layout";
 import { useNavigate } from "react-router-dom";
-import { Layers, Plus, RefreshCw, Pencil, Trash2, LayoutGrid, List, MoreHorizontal } from "lucide-react";
+import { Layers, Plus, RefreshCw, Pencil, Trash2, MoreHorizontal } from "lucide-react";
+import { EntityGrid, EntityList, ViewToggle, useViewMode, type EntityCardItem } from "@/components/EntityCards";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -57,16 +58,7 @@ function ProjectsTab() {
   const [deleting, setDeleting] = useState(false);
 
   // grid / list 视图（localStorage 记住偏好）
-  const [view, setView] = useState<"grid" | "list">(() => {
-    try {
-      return localStorage.getItem("library.projects.view") === "list" ? "list" : "grid";
-    } catch {
-      return "grid";
-    }
-  });
-  useEffect(() => {
-    try { localStorage.setItem("library.projects.view", view); } catch { /* ignore */ }
-  }, [view]);
+  const [view, setView] = useViewMode("library.projects.view");
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -195,6 +187,17 @@ function ProjectsTab() {
     </DropdownMenu>
   );
 
+  const projectItems: EntityCardItem[] = projects.map((project) => ({
+    key: project.id,
+    title: project.name,
+    subtitle: project.id,
+    description: project.description || undefined,
+    meta: `创建于 ${new Date(project.created_at).toLocaleDateString("zh-CN")}`,
+    menu: projectMenu(project),
+    icon: Layers,
+    onOpen: () => navigate("/projects/" + project.id),
+  }));
+
   return (
     <div className="space-y-4 pt-4">
       <div className="flex items-center justify-between gap-3">
@@ -203,30 +206,7 @@ function ProjectsTab() {
         </p>
         <div className="flex items-center gap-2">
           {/* grid / list 视图切换（记住偏好） */}
-          <div className="flex items-center rounded-md border border-border p-0.5">
-            <button
-              type="button"
-              aria-label="网格视图"
-              onClick={() => setView("grid")}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded transition-colors",
-                view === "grid" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              aria-label="列表视图"
-              onClick={() => setView("list")}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded transition-colors",
-                view === "list" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <List className="h-4 w-4" />
-            </button>
-          </div>
+          <ViewToggle view={view} onChange={setView} />
           <Button size="sm" onClick={openCreateDialog}>
             <Plus className="h-4 w-4" />
             新建项目
@@ -259,65 +239,9 @@ function ProjectsTab() {
         </Card>
       )}
 
-      {/* grid：固定高度卡片（Supabase 式，右上角 ⋯ 操作菜单） */}
-      {!loading && projects.length > 0 && view === "grid" && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => (
-            <Card
-              key={project.id}
-              className="flex h-[150px] cursor-pointer flex-col p-4 transition-colors hover:border-accent"
-              onClick={() => navigate("/projects/" + project.id)}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h3 className="truncate text-base font-bold leading-tight">{project.name}</h3>
-                  <div className="mt-1 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
-                    <Layers className="h-3 w-3 shrink-0" />
-                    {project.id}
-                  </div>
-                </div>
-                {projectMenu(project)}
-              </div>
-              {project.description && (
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground line-clamp-2">
-                  {project.description}
-                </p>
-              )}
-              <div className="mt-auto text-[11px] text-muted-foreground">
-                创建于 {new Date(project.created_at).toLocaleDateString("zh-CN")}
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* list：行式视图 */}
-      {!loading && projects.length > 0 && view === "list" && (
-        <Card className="overflow-hidden p-0">
-          <ul className="divide-y divide-border">
-            {projects.map((project) => (
-              <li
-                key={project.id}
-                className="flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40"
-                onClick={() => navigate("/projects/" + project.id)}
-              >
-                <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="shrink-0 text-sm font-bold">{project.name}</span>
-                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                  {project.description ?? ""}
-                </span>
-                <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground sm:inline">
-                  {project.id}
-                </span>
-                <span className="hidden shrink-0 text-[11px] text-muted-foreground md:inline">
-                  {new Date(project.created_at).toLocaleDateString("zh-CN")}
-                </span>
-                {projectMenu(project)}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+      {/* grid / list：共享实体目录模板（EntityCards，与工作流目录同款） */}
+      {!loading && projects.length > 0 && view === "grid" && <EntityGrid items={projectItems} />}
+      {!loading && projects.length > 0 && view === "list" && <EntityList items={projectItems} />}
 
       {/* 新建 / 编辑 dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); }}>
