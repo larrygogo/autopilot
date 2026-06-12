@@ -2,6 +2,7 @@
 
 > 状态：**探针阶段**（Step 1 进行中）。本文沉淀 2026-06-12 architect + pm 两份评估的共识，
 > 作为 P0 落地时的设计基准。P0 开工前须先用探针数据校订本文。
+> **2026-06-12 晚更新**：本 spec 与 `2026-06-12-requirement-centric-runtime.md`（需求中心化运行时）合流——input_mode/delivers 即其 Stage 4 声明层；迁移号修正 044/045；调度死锁项已由主库废除 Stage 2 解决。
 
 ## 背景与决策
 
@@ -33,7 +34,7 @@ git 仓库只是输入的一种，PR 只是产出的一种。
 
 ## P0 技术骨架（architect 评估，待探针校订）
 
-### 输入侧：`requirements.input_mode` 列（迁移 041）
+### 输入侧：`requirements.input_mode` 列（迁移 **044**——原写 041 已被 api-keys 占用）
 
 `TEXT NULL`：`NULL`=未确认（drafting 默认）/ `'git'`=基于代码库 / `'none'`=确认无库。
 回填 `input_mode='git' WHERE workspace_id IS NOT NULL`。不能只靠 `workspace_id IS NULL`
@@ -46,10 +47,10 @@ git 仓库只是输入的一种，PR 只是产出的一种。
 | `requirements.create`（rpc-methods.ts ~:1038） | 项目无 workspace 拒建需求 | 删守卫；无库则 workspace_id=NULL |
 | `transition → clarifying`（~:1130） | 卡 workspace_id 非空 | 卡 `input_mode IS NOT NULL`（none 走 clarifier 纯文本模式——现有第 3 级降级变声明态） |
 | `requirements.enqueue`（~:1145） | 卡 workspace_id 非空 | 卡 input_mode + 交叉校验（none × delivers:pr → 拒） |
-| `requirement-scheduler`（~:260 + tickRepo + :114 globalActive） | 无库需求不调度（queued 永久死锁） | 无库调度道（groupId 保留值 `"::none"`）；**globalActive 过滤同步改**，否则并发上限被穿透 |
+| ~~requirement-scheduler~~ | ~~无库需求不调度~~ | **已由 2026-06-12 主库废除 Stage 2 解决**（纯全局 FIFO，无库可调度失败可见），本行无需再做 |
 | `requirements.setWorkspaces` | 不接受空集 | 显式空集 → 清集合 + `input_mode='none'`；非空 → `'git'`。冻结闸门原样适用 |
 
-### 产出侧：`delivers:` 声明 + `requirement_deliveries` 表（迁移 042）
+### 产出侧：`delivers:` 声明 + `requirement_deliveries` 表（迁移 **045**——原写 042 已被 close-orphan-phase-events 占用）
 
 - `workflow.yaml` 顶层 `delivers: pr | artifacts`（缺省 `auto` = 事实推断，老用户副本零影响）。
   声明只用于 enqueue 预检和 UI 预告；**运行时判定以事实为准**（hasPr / hasDeliveries）。
@@ -61,7 +62,7 @@ git 仓库只是输入的一种，PR 只是产出的一种。
   artifact 对称放需求目录。⚠ 注意 `deleteRequirementClone` 在需求 done/cancelled 时
   **整目录删除 `runtime/requirements/<reqId>/`**（requirement-clarifier.ts ~:752）——
   P0 落地时要么把清理收窄到 `workspace/` 子目录，要么交付目录放
-  `AUTOPILOT_HOME/deliverables/<reqId>/`（探针采用后者）。promote 后 done 清沙盒、
+  `runtime/requirements/<reqId>/deliveries（原 AUTOPILOT_HOME/deliverables 方案已被需求中心化运行时 spec 取代）/<reqId>/`（探针采用后者）。promote 后 done 清沙盒、
   retention、重跑都不再威胁交付物。
 
 ### 改造面（PR 路径零回归是底线）
@@ -109,6 +110,6 @@ enqueue 交叉校验）——沿用 requirement-sub-prs 的既有分界。`'emai
 - [ ] 场景为真？（实际跑了几个需求、是真实需要还是演练）
 - [ ] 澄清期痛点（PR 语义提问框架对 artifact 需求的违和度）
 - [ ] 验收时刻痛点（gate 在任务页 vs 期望在需求页；沙盒文件浏览够不够看产物）
-- [ ] 归档痛点（手动去 `AUTOPILOT_HOME/deliverables/` 拿文件的体验）
+- [ ] 归档痛点（手动去 `runtime/requirements/<reqId>/deliveries（原 AUTOPILOT_HOME/deliverables 方案已被需求中心化运行时 spec 取代）/` 拿文件的体验）
 - [ ] 重流程痛点（哪一步最想跳过：澄清？审批？）
 - [ ] 对 P0 骨架的修正
