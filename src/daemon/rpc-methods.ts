@@ -85,6 +85,7 @@ import {
   finishClarification,
   listRequirementStatusLogs,
   listRequirementWorkspaceIds,
+  listRequirementWorkspaces,
   setRequirementWorkspaces as coreSetRequirementWorkspaces,
   type Requirement,
 } from "../core/requirements";
@@ -1010,7 +1011,7 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.setWorkspaces",
-    description: "澄清前确认需求的代码库集合（整体替换 + 设主库；开始澄清后冻结——澄清基于已选库做，临时换库会让澄清失效。failed 例外 = 重试设计用途）",
+    description: "澄清前确认需求的代码库集合（整体替换；开始澄清后冻结——澄清基于已选库做，临时换库会让澄清失效。failed 例外 = 重试设计用途）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
@@ -1022,13 +1023,7 @@ export function registerCoreRpcMethods(): void {
         throw new RpcError("INVALID_PARAM", "需要非空 string[] workspace_ids");
       }
       const wsIds = [...new Set(p.workspace_ids as string[])];
-      const primary =
-        typeof p.primary_workspace_id === "string" && p.primary_workspace_id
-          ? p.primary_workspace_id
-          : wsIds[0];
-      if (!wsIds.includes(primary)) {
-        throw new RpcError("INVALID_PARAM", "primary_workspace_id 必须在 workspace_ids 集合内");
-      }
+      // primary_workspace_id 入参接受但忽略（主库概念已废除，2026-06-12；兼容老 web-dist 一版）
       const cur = getRequirementById(p.id);
       if (!cur) throw new RpcError("NOT_FOUND", "requirement not found");
       // 开始澄清即冻结：澄清 agent 基于已选代码库的浅 clone 调查提问，
@@ -1047,7 +1042,7 @@ export function registerCoreRpcMethods(): void {
           throw new RpcError("PRECONDITION_FAILED", `代码库 ${ws.alias}（${wid}）不属于该需求的项目`);
         }
       }
-      coreSetRequirementWorkspaces(p.id, wsIds, primary);
+      coreSetRequirementWorkspaces(p.id, wsIds);
       const updated = getRequirementById(p.id)!;
       return { requirement: attachWorkspaceIds([updated])[0], workspace_ids: wsIds };
     },
@@ -1119,7 +1114,7 @@ export function registerCoreRpcMethods(): void {
         chat_session_id: (p.chat_session_id as string | null | undefined) ?? null,
       });
       // 停在 drafting：澄清依赖代码库 clone，须由用户确认代码库后显式进入澄清
-      // （自动派生的主库只是预选；Web 在需求页确认、CLI 用 req clarify / -c 显式指定时自动开始）
+      // （自动派生的默认库只是预选；Web 在需求页确认、CLI 用 req clarify / -c 显式指定时自动开始）
       return { requirement: created };
     },
   });
@@ -1194,9 +1189,9 @@ export function registerCoreRpcMethods(): void {
       if (typeof p.to !== "string" || !p.to.trim()) throw new RpcError("INVALID_PARAM", "to 必填");
       const cur = getRequirementById(p.id);
       if (!cur) throw new RpcError("NOT_FOUND", "requirement not found");
-      // 澄清前置：必须已选代码库（澄清 agent 在代码库浅 clone 中工作）
-      if (p.to.trim() === "clarifying" && !cur.workspace_id) {
-        throw new RpcError("PRECONDITION_FAILED", "请先为需求选择代码库再开始澄清（澄清基于代码库的克隆进行）");
+      // 澄清前置：代码库集合非空（澄清 agent 在已选代码库的浅 clone 中工作；真相在集合表）
+      if (p.to.trim() === "clarifying" && listRequirementWorkspaces(p.id).length === 0) {
+        throw new RpcError("PRECONDITION_FAILED", "代码库集合为空，请先确认代码库再开始澄清（澄清基于代码库的克隆进行）");
       }
       return { requirement: setRequirementStatus(p.id, p.to.trim()) };
     },
@@ -2146,7 +2141,7 @@ export function registerCoreRpcMethods(): void {
       // 调用方必须显式 force: true 才能继续（前端弹 confirm dialog）
       if (!p.force) {
         const { getDb } = await import("../core/db");
-        // 主库列 + 多库集合表（requirement_workspaces）都算引用，UNION 按需求去重
+        // workspace_id 缓存列 + 集合表（requirement_workspaces）都算引用，UNION 按需求去重
         const row = getDb()
           .query<{ n: number }, [string, string]>(
             "SELECT COUNT(*) AS n FROM (" +

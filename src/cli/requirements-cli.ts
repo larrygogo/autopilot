@@ -225,10 +225,10 @@ export function registerRequirementCommands(program: Command): void {
           [
             "代码库",
             (() => {
+              // 集合平铺（主库概念已废除；workspace_id 只是缓存列，集合为空时兜底展示）
               const ids = (r as { workspace_ids?: string[] }).workspace_ids ?? [];
-              if (!r.workspace_id && ids.length === 0) return "(未关联)";
-              const rest = ids.filter((w) => w !== r.workspace_id);
-              return [`${r.workspace_id ?? "(无主库)"}（主）`, ...rest].join(" · ");
+              const all = ids.length > 0 ? ids : r.workspace_id ? [r.workspace_id] : [];
+              return all.length > 0 ? all.join(" · ") : "(未关联)";
             })(),
           ],
           ["工作流", r.workflow ?? "dev（默认）"],
@@ -273,16 +273,15 @@ export function registerRequirementCommands(program: Command): void {
 
   req
     .command("set-workspaces <id> <workspace-ids...>")
-    .description("设置需求的代码库集合（整体替换；--primary 指定主库，缺省为第一个；审批后冻结，failed 例外）")
-    .option("--primary <ws-id>", "主代码库（任务在此执行；必须在集合内）")
+    .description("设置需求的代码库集合（整体替换；所有库平级、各自交付 PR；审批后冻结，failed 例外）")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
-    .action(async (id: string, wsIds: string[], opts: { port: string; primary?: string }) => {
+    .action(async (id: string, wsIds: string[], opts: { port: string }) => {
       const client = getClient(opts.port);
       await ensureDaemon(client);
       try {
-        const { requirement, workspace_ids } = await client.setRequirementWorkspaces(id, wsIds, opts.primary);
+        const { requirement, workspace_ids } = await client.setRequirementWorkspaces(id, wsIds);
         console.log(
-          `✓ 需求 ${requirement.id} 代码库已设为 [${workspace_ids.join(", ")}]，主库 ${requirement.workspace_id}`,
+          `✓ 需求 ${requirement.id} 代码库已设为 [${workspace_ids.join(", ")}]`,
         );
       } catch (e: unknown) {
         console.error(`错误：${e instanceof Error ? e.message : String(e)}`);

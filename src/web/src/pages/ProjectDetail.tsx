@@ -145,7 +145,7 @@ export function ProjectDetail({ projectId, section = "requirements" }: ProjectDe
       return;
     }
     // 从描述截取临时 title（取首行；若过长则截 30 字 + "…"）；clarifier 后续会基于内容优化 title。
-    // 代码库不在此选：创建时自动派生默认主库，集合在审批阶段反写确认
+    // 代码库不在此选：创建时自动派生默认预选库，集合在澄清前确认（无主/副之分）
     const firstLine = desc.split("\n")[0].trim();
     const title = firstLine.length > 30 ? firstLine.slice(0, 30) + "…" : firstLine;
     setSavingReq(true);

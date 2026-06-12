@@ -319,12 +319,10 @@ export class HttpClient {
   async setRequirementWorkspaces(
     id: string,
     workspaceIds: string[],
-    primaryWorkspaceId?: string,
   ): Promise<{ requirement: Requirement & { workspace_ids: string[] }; workspace_ids: string[] }> {
     return this.call("requirements.setWorkspaces", {
       id,
       workspace_ids: workspaceIds,
-      primary_workspace_id: primaryWorkspaceId,
     });
   }
 

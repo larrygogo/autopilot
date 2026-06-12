@@ -18,6 +18,10 @@ import { deleteRequirementClone } from "./requirement-clone";
 export interface Requirement {
   id: string;
   project_id: string;
+  /**
+   * 冗余缓存 = 代码库集合第一个（2026-06-12 主库语义降级，迁移 043）。
+   * 勿做「主库」语义消费；真相在 requirement_workspaces 集合表。
+   */
   workspace_id: string | null;
   title: string;
   status: string;
@@ -123,7 +127,7 @@ function nowMs(): number {
 // ──────────────────────────────────────────────
 
 export function createRequirement(opts: CreateRequirementOpts): Requirement {
-  // 自动关联：若未指定 workspace_id 且 project 下只有 1 个 workspace，自动选它
+  // 自动派生默认预选库：若未指定 workspace_id 且 project 下只有 1 个 workspace，自动选它
   let resolvedWorkspaceId: string | null = opts.workspace_id ?? null;
   if (resolvedWorkspaceId === null && opts.project_id) {
     const wss = listWorkspaces({ projectId: opts.project_id, includeSubmodules: false });
@@ -172,7 +176,10 @@ export function listRequirements(
   const where: string[] = [];
   const vals: (string | number)[] = [];
   if (filters.workspace_id) {
-    where.push("workspace_id = ?");
+    // 按代码库过滤走集合表（任一关联库命中）——workspace_id 列只是缓存，多库需求按缓存列过滤会漏
+    where.push(
+      "EXISTS (SELECT 1 FROM requirement_workspaces rw WHERE rw.requirement_id = requirements.id AND rw.workspace_id = ?)",
+    );
     vals.push(filters.workspace_id);
   }
   if (filters.project_id) {
@@ -232,7 +239,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
   vals.push(nowMs());
   vals.push(id);
   db.run(`UPDATE requirements SET ${fields.join(", ")} WHERE id = ?`, vals);
-  // 改主库时同步关联表（INSERT OR IGNORE，不清旧行——已选的上下文库不能丢）。
+  // 改 workspace_id 缓存列时同步关联表（INSERT OR IGNORE，不清旧行——已选的库不能丢）。
   // 历史一致性洞：create 写关联表而 update 不写，1:N 后该表是集合真相，必须双向同步。
   if (typeof opts.workspace_id === "string" && opts.workspace_id) {
     db.run(
@@ -243,7 +250,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
   return getRequirementById(id);
 }
 
-/** 需求关联的代码库集合（含主库），按创建时间升序 */
+/** 需求关联的代码库集合，按创建时间升序（集合自然序） */
 export function listRequirementWorkspaces(reqId: string): Workspace[] {
   return getDb()
     .query<Workspace, [string]>(
@@ -272,10 +279,11 @@ export function listRequirementWorkspaceIds(reqIds: string[]): Map<string, strin
 }
 
 /**
- * 整体替换需求的代码库集合（PUT 语义）并设置主库（审批阶段反写）。
- * 入参校验（非空 / primary ∈ 集合 / 同项目 / 状态闸门）由 RPC 层负责。
+ * 整体替换需求的代码库集合（PUT 语义）。
+ * 入参校验（非空 / 同项目 / 状态闸门）由 RPC 层负责。
+ * workspace_id 列只是冗余缓存 = 集合第一个（主库语义已废除，2026-06-12）。
  */
-export function setRequirementWorkspaces(reqId: string, wsIds: string[], primaryId: string): void {
+export function setRequirementWorkspaces(reqId: string, wsIds: string[]): void {
   const db = getDb();
   db.transaction(() => {
     db.run("DELETE FROM requirement_workspaces WHERE requirement_id = ?", [reqId]);
@@ -286,7 +294,7 @@ export function setRequirementWorkspaces(reqId: string, wsIds: string[], primary
       );
     }
     db.run("UPDATE requirements SET workspace_id = ?, updated_at = ? WHERE id = ?", [
-      primaryId,
+      wsIds[0] ?? null,
       nowMs(),
       reqId,
     ]);

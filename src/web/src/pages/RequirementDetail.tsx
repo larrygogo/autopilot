@@ -696,7 +696,7 @@ export function RequirementDetail() {
   async function enqueue() {
     if (!id || !req) return;
     if (!req.workspace_id) {
-      toast.error("请先选择主代码库", "需要至少一个代码库才能入队执行，请在审批面板的「代码库」卡片中选择。");
+      toast.error("请先选择代码库", "需要至少一个代码库才能入队执行，请在审批面板的「代码库」卡片中选择。");
       return;
     }
     // optimistic：UI 立刻反映 queued 状态，不等服务端响应
@@ -755,7 +755,7 @@ export function RequirementDetail() {
     }
   }
 
-  /** drafting → clarifying：用户确认代码库后显式开始澄清（守卫在 RPC：无主库会被拒） */
+  /** drafting → clarifying：用户确认代码库后显式开始澄清（守卫在 RPC：代码库集合为空会被拒） */
   async function startClarify() {
     if (!id || !req) return;
     if (busyRef.current) return;
@@ -1077,7 +1077,6 @@ export function RequirementDetail() {
           <li key={p.id} className="flex items-center gap-3 px-4 py-2 font-mono text-xs">
             <span className="text-muted-foreground">
               {projectCodebases.find((cb) => cb.id === p.child_workspace_id)?.alias ?? p.child_workspace_id}
-              {p.child_workspace_id === req.workspace_id && <span className="ml-1 text-warning">（主）</span>}
             </span>
             <a
               href={p.pr_url}
@@ -1525,20 +1524,18 @@ export function RequirementDetail() {
             不再露 TASK id —— 用户视角「需求」就是这件工作本身，task 是内核执行概念 */}
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground">
           <span>ID <code className="text-accent">{req.id}</code></span>
-          <span
-            title={
-              (req.workspace_ids ?? [])
-                .map((wid) => projectCodebases.find((cb) => cb.id === wid)?.alias ?? wid)
-                .join(" · ") || undefined
-            }
-          >
+          {/* 代码库平铺：集合内全部库平级展示（主库概念已废除，workspace_id 只是缓存列） */}
+          <span>
             代码库{" "}
-            {req.workspace_id
-              ? (projectCodebases.find((cb) => cb.id === req.workspace_id)?.alias ?? req.workspace_id)
-              : "未关联"}
-            {(req.workspace_ids?.length ?? 0) > 1 && (
-              <span className="text-accent"> +{(req.workspace_ids!.length - 1)}</span>
-            )}
+            {(() => {
+              const ids = (req.workspace_ids?.length ?? 0) > 0
+                ? req.workspace_ids!
+                : req.workspace_id ? [req.workspace_id] : [];
+              if (ids.length === 0) return "未关联";
+              return ids
+                .map((wid) => projectCodebases.find((cb) => cb.id === wid)?.alias ?? wid)
+                .join(" · ");
+            })()}
           </span>
           {/* 工作流：审批通过后才在元信息展示（审批前尚未定案，选择器在「下一步」banner）。
               终态（failed/cancelled）按死亡前状态判断是否已过审批 */}
@@ -1685,6 +1682,8 @@ export function RequirementDetail() {
             if (activeStep === "clarify") {
               // drafting = 澄清未开始：先确认代码库（澄清 agent 在其浅 clone 中调查），再显式开始
               if (req.status === "drafting" && !readonly) {
+                // 守卫与 RPC 同口径：代码库集合非空（workspace_id 只是缓存列）
+                const hasWorkspaces = (req.workspace_ids?.length ?? 0) > 0 || !!req.workspace_id;
                 return (
                   <>
                     <RequirementWorkspacePicker
@@ -1696,8 +1695,8 @@ export function RequirementDetail() {
                     <Button
                       className="w-full"
                       onClick={startClarify}
-                      disabled={actionBusy || !req.workspace_id}
-                      title={!req.workspace_id ? "请先选择代码库（澄清基于代码库的克隆进行）" : undefined}
+                      disabled={actionBusy || !hasWorkspaces}
+                      title={!hasWorkspaces ? "请先选择代码库（澄清基于代码库的克隆进行）" : undefined}
                     >
                       {actionBusy ? "处理中…" : "确认代码库，开始 AI 澄清 →"}
                     </Button>

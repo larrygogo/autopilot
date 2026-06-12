@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FolderGit2, Plus, Star, Loader2, Trash2 } from "lucide-react";
+import { FolderGit2, Plus, Loader2, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,12 +11,12 @@ import { cn } from "@/lib/utils";
 /**
  * 需求的代码库确认/反写卡片（UI「代码库」= 内核 workspace）。
  *
- * - 多选项目下的代码库（checkbox），主库（任务执行库）用星标单选
+ * - 纯多选项目下的代码库（checkbox），无主/副之分——所有已选库均可改动、各自交付 PR
  * - 「自定义」内联新建：remote_url（+ 可选别名）→ workspaces.create（probeRemote 验证）→ 自动选中
  * - 未勾选的库可就地删除（勾选中 = 本需求在用，先取消勾选；其他需求引用时后端 IN_USE 拦截）
  * - 每次变更即时调 requirements.setWorkspaces 反写（PUT 语义幂等），无独立保存按钮
- * - 约束：至少保留一个；取消主库时自动提升剩余第一个为主库
- * - readOnly：只渲染只读摘要（已选库 + 主库星标），无任何编辑入口。审批及之后用 ——
+ * - 约束：至少保留一个
+ * - readOnly：只渲染只读摘要（已选库），无任何编辑入口。审批及之后用 ——
  *   代码库在澄清前确认、开始澄清即冻结（中途换库会让澄清失效），后端 setWorkspaces 同口径拦截
  */
 export function RequirementWorkspacePicker({
@@ -38,7 +38,6 @@ export function RequirementWorkspacePicker({
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [primary, setPrimary] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [newUrl, setNewUrl] = useState("");
   const [newAlias, setNewAlias] = useState("");
@@ -51,13 +50,12 @@ export function RequirementWorkspacePicker({
       ? req.workspace_ids
       : req.workspace_id ? [req.workspace_id] : [];
     setSelected(new Set(ids));
-    setPrimary(req.workspace_id ?? ids[0] ?? null);
   }, [req.id, req.workspace_id, JSON.stringify(req.workspace_ids ?? [])]);
 
-  async function persist(nextIds: string[], nextPrimary: string) {
+  async function persist(nextIds: string[]) {
     setSaving(true);
     try {
-      await api.setRequirementWorkspaces(req.id, nextIds, nextPrimary);
+      await api.setRequirementWorkspaces(req.id, nextIds);
       onChanged();
     } catch (e: unknown) {
       toast.error("代码库设置失败", (e as Error)?.message ?? String(e));
@@ -78,17 +76,8 @@ export function RequirementWorkspacePicker({
     } else {
       next.add(wsId);
     }
-    // 主库被取消 → 自动提升剩余第一个
-    let nextPrimary = primary && next.has(primary) ? primary : [...next][0]!;
     setSelected(next);
-    setPrimary(nextPrimary);
-    void persist([...next], nextPrimary);
-  }
-
-  function makePrimary(wsId: string) {
-    if (!selected.has(wsId) || wsId === primary) return;
-    setPrimary(wsId);
-    void persist([...selected], wsId);
+    void persist([...next]);
   }
 
   /** 从 remote_url 推导别名（owner/repo.git → repo） */
@@ -128,10 +117,8 @@ export function RequirementWorkspacePicker({
       // 新库自动加入选中集合并反写
       const next = new Set(selected);
       next.add(ws.id);
-      const nextPrimary = primary ?? ws.id;
       setSelected(next);
-      setPrimary(nextPrimary);
-      await api.setRequirementWorkspaces(req.id, [...next], nextPrimary);
+      await api.setRequirementWorkspaces(req.id, [...next]);
       toast.success(`已添加代码库「${alias}」并选中`);
       setNewUrl("");
       setNewAlias("");
@@ -160,13 +147,12 @@ export function RequirementWorkspacePicker({
                 title={w.remote_url ?? undefined}
               >
                 {w.alias}
-                {primary === w.id && <Star className="h-3 w-3 fill-current text-warning" />}
               </span>
             ))}
           </div>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          已在澄清前确认，开始澄清后冻结。任务只在主库（星标）改动并提交，其余作为只读上下文提供给 Agent。
+          已在澄清前确认，开始澄清后冻结。所有已选库均可改动、各自交付 PR。
         </p>
       </Card>
     );
@@ -178,12 +164,12 @@ export function RequirementWorkspacePicker({
         <FolderGit2 className="h-4 w-4 text-muted-foreground" />
         <span className="text-sm font-semibold">代码库</span>
         <span className="font-mono text-[10px] text-muted-foreground">
-          已选 {selected.size} · 星标 = 主库（任务在此执行）
+          已选 {selected.size}
         </span>
         {saving && <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground" />}
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        本需求涉及哪些代码库由你在此确认；任务只在主库改动并提交，其余作为只读上下文提供给 Agent。
+        本需求涉及哪些代码库由你在此确认；所有已选库均可改动、各自交付 PR。
       </p>
 
       {workspaces.length === 0 && (
@@ -193,7 +179,6 @@ export function RequirementWorkspacePicker({
       <ul className="space-y-1">
         {workspaces.map((w) => {
           const checked = selected.has(w.id);
-          const isPrimary = primary === w.id;
           return (
             <li
               key={w.id}
@@ -214,19 +199,6 @@ export function RequirementWorkspacePicker({
                   {w.remote_url ?? "(无远程地址)"}
                 </span>
               </label>
-              <button
-                type="button"
-                title={isPrimary ? "主库（任务在此执行）" : "设为主库"}
-                aria-label={isPrimary ? `主库 ${w.alias}` : `设 ${w.alias} 为主库`}
-                disabled={disabled || saving || !checked}
-                onClick={() => makePrimary(w.id)}
-                className={cn(
-                  "shrink-0 rounded p-1 transition-colors disabled:opacity-30",
-                  isPrimary ? "text-warning" : "text-muted-foreground/50 hover:text-foreground",
-                )}
-              >
-                <Star className={cn("h-4 w-4", isPrimary && "fill-current")} />
-              </button>
               <button
                 type="button"
                 title={checked ? "本需求正在使用，先取消勾选才能删除" : "删除此代码库（仅注册记录）"}

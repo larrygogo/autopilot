@@ -27,6 +27,7 @@ import { up as m030 } from "../src/migrations/030-requirement-status-logs";
 import { up as m031 } from "../src/migrations/031-requirement-workflow";
 import { up as m033 } from "../src/migrations/033-workspace-remote-url";
 import { up as m037 } from "../src/migrations/037-multi-workspace-per-project";
+import { up as m043 } from "../src/migrations/043-workspace-id-demote-backfill";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createWorkspace } from "../src/core/workspaces";
@@ -34,6 +35,7 @@ import {
   createRequirement,
   getRequirementById,
   updateRequirement,
+  listRequirements,
   listRequirementWorkspaces,
   listRequirementWorkspaceIds,
   setRequirementWorkspaces,
@@ -90,16 +92,56 @@ describe("core：关联集合维护", () => {
     expect(ids).toEqual(["ws-001", "ws-002"]);
   });
 
-  it("setRequirementWorkspaces 整体替换 + 设主库", () => {
+  it("setRequirementWorkspaces 整体替换：workspace_id 缓存 = 集合第一个", () => {
     setup();
     mkWs("ws-001", "a");
     mkWs("ws-002", "b");
     mkWs("ws-003", "c");
     createRequirement({ id: "req-001", project_id: "p1", workspace_id: "ws-001", title: "t", spec_md: "" });
-    setRequirementWorkspaces("req-001", ["ws-002", "ws-003"], "ws-003");
+    setRequirementWorkspaces("req-001", ["ws-003", "ws-002"]);
     expect(getRequirementById("req-001")?.workspace_id).toBe("ws-003");
     const ws = listRequirementWorkspaces("req-001").map((w) => w.id).sort();
     expect(ws).toEqual(["ws-002", "ws-003"]);
+  });
+
+  it("listRequirements({workspace_id}) 走集合 EXISTS：多库需求按任一关联库命中", () => {
+    setup();
+    mkWs("ws-001", "a");
+    mkWs("ws-002", "b");
+    createRequirement({ id: "req-001", project_id: "p1", workspace_id: "ws-001", title: "t", spec_md: "" });
+    setRequirementWorkspaces("req-001", ["ws-001", "ws-002"]);
+    // 缓存列 = ws-001，但按 ws-002（非缓存列）过滤也应命中
+    expect(getRequirementById("req-001")?.workspace_id).toBe("ws-001");
+    expect(listRequirements({ workspace_id: "ws-002" }).map((r) => r.id)).toEqual(["req-001"]);
+    expect(listRequirements({ workspace_id: "ws-001" }).map((r) => r.id)).toEqual(["req-001"]);
+  });
+});
+
+describe("迁移 043：主库语义降级回填（幂等）", () => {
+  it("集合空但列非空 → 补集合行；列 NULL 但集合非空 → 回填 created_at 最早；重跑幂等", () => {
+    const db = setup();
+    mkWs("ws-001", "a");
+    mkWs("ws-002", "b");
+    // 场景 1：集合空但列非空（直接 SQL 制造历史脏数据）
+    createRequirement({ id: "req-001", project_id: "p1", workspace_id: "ws-001", title: "t1", spec_md: "" });
+    db.run("DELETE FROM requirement_workspaces WHERE requirement_id = 'req-001'");
+    // 场景 2：列 NULL 但集合非空（含两个库，created_at 区分先后）
+    createRequirement({ id: "req-002", project_id: "p1", title: "t2", spec_md: "" });
+    db.run("UPDATE requirements SET workspace_id = NULL WHERE id = 'req-002'");
+    db.run("INSERT OR IGNORE INTO requirement_workspaces (requirement_id, workspace_id) VALUES ('req-002', 'ws-001'), ('req-002', 'ws-002')");
+    db.run("UPDATE workspaces SET created_at = 1000 WHERE id = 'ws-002'");
+    db.run("UPDATE workspaces SET created_at = 2000 WHERE id = 'ws-001'");
+
+    m043(db);
+    // 场景 1：集合补回
+    expect(listRequirementWorkspaceIds(["req-001"]).get("req-001")).toEqual(["ws-001"]);
+    // 场景 2：列回填 = 集合内 workspace.created_at 最早（ws-002）
+    expect(getRequirementById("req-002")?.workspace_id).toBe("ws-002");
+
+    // 幂等：重跑无副作用
+    m043(db);
+    expect(listRequirementWorkspaceIds(["req-001"]).get("req-001")).toEqual(["ws-001"]);
+    expect(getRequirementById("req-002")?.workspace_id).toBe("ws-002");
   });
 });
 
@@ -112,7 +154,7 @@ describe("RPC requirements.setWorkspaces", () => {
     createRequirement({ id: "req-001", project_id: "p1", workspace_id: "ws-001", title: "t", spec_md: "" });
   });
 
-  it("反写集合 + 默认主库 = 第一个；响应附 workspace_ids", async () => {
+  it("反写集合：workspace_id 缓存 = 第一个；响应附 workspace_ids", async () => {
     const r = await invokeRpcMethod("requirements.setWorkspaces", {
       id: "req-001",
       workspace_ids: ["ws-002", "ws-001"],
@@ -126,14 +168,20 @@ describe("RPC requirements.setWorkspaces", () => {
     }
   });
 
-  it("校验：空集合 / primary 不在集合 / 跨项目 / 不存在", async () => {
-    const empty = await invokeRpcMethod("requirements.setWorkspaces", { id: "req-001", workspace_ids: [] });
-    expect(empty.ok).toBe(false);
-
-    const badPrimary = await invokeRpcMethod("requirements.setWorkspaces", {
+  it("primary_workspace_id 入参接受但忽略（主库概念已废除，兼容老 web-dist）", async () => {
+    const r = await invokeRpcMethod("requirements.setWorkspaces", {
       id: "req-001", workspace_ids: ["ws-001"], primary_workspace_id: "ws-002",
     });
-    expect(badPrimary.ok).toBe(false);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const d = r.payload as { requirement: { workspace_id: string } };
+      expect(d.requirement.workspace_id).toBe("ws-001"); // = 集合第一个，与 primary 入参无关
+    }
+  });
+
+  it("校验：空集合 / 跨项目 / 不存在", async () => {
+    const empty = await invokeRpcMethod("requirements.setWorkspaces", { id: "req-001", workspace_ids: [] });
+    expect(empty.ok).toBe(false);
 
     createProject({ id: "p2", name: "项目二" });
     mkWs("ws-100", "other", "p2");
@@ -184,5 +232,23 @@ describe("RPC requirements.setWorkspaces", () => {
       const d = r.payload as { requirement: { workspace_ids: string[] } };
       expect(d.requirement.workspace_ids).toEqual(["ws-001"]);
     }
+  });
+
+  it("transition → clarifying 守卫按集合判定：集合空被拒，确认集合后放行", async () => {
+    // p1 下已有 2 个库 → create 不自动派生（仅唯一时自动选），集合为空
+    createRequirement({ id: "req-002", project_id: "p1", title: "t2", spec_md: "" });
+    expect(listRequirementWorkspaces("req-002").length).toBe(0);
+
+    const denied = await invokeRpcMethod("requirements.transition", { id: "req-002", to: "clarifying" });
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.error.message).toContain("代码库集合为空");
+
+    const set = await invokeRpcMethod("requirements.setWorkspaces", {
+      id: "req-002", workspace_ids: ["ws-002"],
+    });
+    expect(set.ok).toBe(true);
+    const allowed = await invokeRpcMethod("requirements.transition", { id: "req-002", to: "clarifying" });
+    expect(allowed.ok).toBe(true);
+    expect(getRequirementById("req-002")?.status).toBe("clarifying");
   });
 });

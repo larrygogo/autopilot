@@ -553,12 +553,11 @@ export const api = {
     project_id?: string;
   }) =>
     requestRpc<Workspace>("workspaces.create", body),
-  // [WS-RPC] requirements.setWorkspaces —— 澄清前确认代码库集合（开始澄清后冻结；failed 例外）
-  setRequirementWorkspaces: (id: string, workspaceIds: string[], primaryWorkspaceId?: string) =>
+  // [WS-RPC] requirements.setWorkspaces —— 澄清前确认代码库集合（开始澄清后冻结；failed 例外；无主/副之分）
+  setRequirementWorkspaces: (id: string, workspaceIds: string[]) =>
     requestRpc<{ requirement: Requirement; workspace_ids: string[] }>("requirements.setWorkspaces", {
       id,
       workspace_ids: workspaceIds,
-      primary_workspace_id: primaryWorkspaceId,
     }),
   // [WS-RPC] workspaces.detect —— 从本地路径探测 git 信息，用于创建表单自动填充
   detectWorkspace: (path: string) =>
@@ -1031,8 +1030,9 @@ export interface Question {
 
 export interface Requirement {
   id: string;
+  /** 冗余缓存 = 集合第一个（主库语义已废除）；真相在 workspace_ids */
   workspace_id: string | null;
-  /** 需求关联的代码库集合（requirement_workspaces，含主库；RPC 层附带） */
+  /** 需求关联的代码库集合（requirement_workspaces；RPC 层附带） */
   workspace_ids?: string[];
   project_id: string;
   title: string;

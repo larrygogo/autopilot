@@ -65,8 +65,8 @@ export function Start() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      // 不强制选代码库：创建时后端按项目默认库（created_at 最早）自动派生主库，
-      // 代码库集合（含多仓库需求）在审批阶段反写确认
+      // 不强制选代码库：创建时后端按项目默认库（created_at 最早）自动派生预选库，
+      // 代码库集合（含多仓库需求）在澄清前确认（无主/副之分）
       const { title, spec_md } = await api.extractRequirement({
         raw_text: rawText.trim(),
         project_id: projectId,

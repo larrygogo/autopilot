@@ -17,7 +17,7 @@ import { closeAgents } from "../agents/registry";
 type WorkspaceRefWithAlias = WorkspaceRef & { alias?: string };
 
 /**
- * 解析任务要 clone 的代码库集合（主库排第一）。
+ * 解析任务要 clone 的代码库集合（集合自然序 = workspace created_at 升序，主库概念已废除）。
  * - 需求集合（requirement_workspaces）≥1 时以集合为准（多库需求 = 多 clone 各自交付）
  * - 集合为空时回退单库 fallbackWsId（adhoc / 测试夹具路径）
  * 软失效（缺 remote_url）任一即抛：多库任务要求全集可 clone。
@@ -29,12 +29,8 @@ function resolveWorkspaceRefs(
 ): WorkspaceRefWithAlias[] {
   const req = reqId ? getRequirementById(reqId) : null;
   const all = req ? listRequirementWorkspaces(req.id) : [];
-  const ordered = req
-    ? [...all].sort((a, b) =>
-        a.id === req.workspace_id ? -1 : b.id === req.workspace_id ? 1 : 0)
-    : [];
-  const pool = ordered.length > 0
-    ? ordered
+  const pool = all.length > 0
+    ? all
     : fallbackWsId
       ? [getWorkspaceById(fallbackWsId)].filter((w): w is NonNullable<typeof w> => w != null)
       : [];
