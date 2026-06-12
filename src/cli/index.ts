@@ -13,6 +13,7 @@ import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
 import { loadDaemonConfig } from "../core/config";
 import { registerWorkflowCommands } from "./workflow";
 import { registerConfigCommands, printReport as printDoctorReport } from "./config";
+import { ensureSecretKey, setApiKey as coreSetApiKey, deleteApiKey as coreDeleteApiKey, listApiKeys as coreListApiKeys } from "../core/api-keys";
 import { registerRequirementCommands } from "./requirements-cli";
 import { registerProjectCommands } from "./project";
 import { registerWorkspaceCommands } from "./workspace";
@@ -1160,6 +1161,129 @@ program
   });
 
 // ──────────────────────────────────────────────
+// key — API 密钥管理（本地，不需要 daemon）
+// ──────────────────────────────────────────────
+
+const key = program.command("key").alias("apikey").description("API 密钥管理");
+
+key
+  .command("set <provider>")
+  .description("设置 API 密钥（交互式输入，不落 shell history）")
+  .option("--from-env <varName>", "从环境变量读取密钥")
+  .action(async (provider: string, opts: { fromEnv?: string }) => {
+    initDb();
+    await runPendingMigrations();
+
+    let rawKey: string;
+
+    if (opts.fromEnv) {
+      // 从环境变量读取
+      const envValue = process.env[opts.fromEnv];
+      if (!envValue) {
+        console.error(`错误：环境变量 ${opts.fromEnv} 未设置或为空`);
+        process.exit(1);
+      }
+      rawKey = envValue;
+    } else {
+      // 交互式输入（无回显）
+      process.stdout.write(`请输入 ${provider} 的 API key: `);
+      rawKey = await readLineNoEcho();
+      console.log(); // 换行
+      if (!rawKey.trim()) {
+        console.error("错误：API key 不能为空");
+        process.exit(1);
+      }
+    }
+
+    try {
+      await coreSetApiKey(provider, rawKey);
+      console.log(`✓ ${provider} 的 API key 已保存`);
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+key
+  .command("list")
+  .description("列出已配置的 API 密钥（脱敏显示）")
+  .action(async () => {
+    initDb();
+    await runPendingMigrations();
+    const keys = coreListApiKeys();
+    if (keys.length === 0) {
+      console.log("暂无已配置的 API 密钥。");
+      console.log("使用 `autopilot key set <provider>` 添加密钥。");
+      return;
+    }
+    console.log("已配置的 API 密钥：\n");
+    const maxNameLen = Math.max(...keys.map((k) => k.provider.length));
+    for (const k of keys) {
+      const name = k.provider.padEnd(maxNameLen);
+      const source = k.source === "env" ? " (环境变量)" : "";
+      const updated = k.updated_at ? ` [${k.updated_at}]` : "";
+      console.log(`  ${name}  ${k.key_hint}${source}${updated}`);
+    }
+  });
+
+key
+  .command("delete <provider>")
+  .description("删除 API 密钥")
+  .action(async (provider: string) => {
+    initDb();
+    await runPendingMigrations();
+    try {
+      coreDeleteApiKey(provider);
+      console.log(`✓ ${provider} 的 API key 已删除`);
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+/**
+ * 无回显读取一行输入（用于密码/密钥输入）。
+ *
+ * 使用 readline 模块 + 静默 output stream 实现跨平台隐藏输入：
+ * - Windows 终端通常 stdin.setRawMode 为 undefined，旧实现无法隐藏输入
+ * - readline 配合 muted output 在所有平台都能正确隐藏回显
+ */
+async function readLineNoEcho(): Promise<string> {
+  const rl = await import("readline");
+  const { Writable } = await import("stream");
+
+  // 静默输出流：所有写入都丢弃（阻止 readline 回显用户输入）
+  const mutedOutput = new Writable({
+    write(_chunk: unknown, _encoding: string, callback: () => void) {
+      callback();
+    },
+  });
+
+  const iface = rl.createInterface({
+    input: process.stdin,
+    output: mutedOutput,
+    terminal: true,
+  });
+
+  return new Promise((resolve, reject) => {
+    iface.question("", (answer) => {
+      iface.close();
+      resolve(answer);
+    });
+
+    // 处理 Ctrl+C
+    iface.on("close", () => {
+      // 如果 question callback 未触发就 close 了（用户按 Ctrl+C），
+      // readline 会正常关闭，question callback 不会被调用
+    });
+    process.once("SIGINT", () => {
+      iface.close();
+      reject(new Error("用户中断"));
+    });
+  });
+}
+
+// ──────────────────────────────────────────────
 // init — 初始化（本地，不需要 daemon）
 // ──────────────────────────────────────────────
 
@@ -1176,6 +1300,13 @@ program
       mkdirSync(dir, { recursive: true });
       console.log(`已创建目录：${dir}`);
     }
+    // 生成 API 密钥加密文件（幂等，已存在则跳过）
+    try {
+      await ensureSecretKey();
+    } catch (e: unknown) {
+      console.warn(`生成 secret.key 失败（不阻塞 init）：${e instanceof Error ? e.message : String(e)}`);
+    }
+
     initDb();
     // dogfood-bug19 修复：init 必须跑全部 migrations，否则只创出 SCHEMA 里的
     // 基础表（tasks/task_logs），后续 18 条迁移加的 projects/codebases/

@@ -39,6 +39,7 @@ const ALLOWLIST = new Set([
   "src/migrations/033-workspace-remote-url.ts", // workspace 添加 remote_url 列 + 从本地 path 探测回填（一次性数据迁移）
   "src/core/now-dismiss.ts",       // now_dismissed_cards 表：SQLite 即权威源，dismiss 状态无 manifest 同步需求
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
+  "src/core/api-keys.ts",          // api_keys 表：SQLite 即权威源，API 密钥加密存储无 manifest 同步需求
 ]);
 
 const WRITE_SQL_RE = /\b(INSERT\s+(OR\s+\w+\s+)?INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|REPLACE\s+INTO)\b/i;

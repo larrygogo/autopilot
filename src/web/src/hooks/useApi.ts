@@ -412,6 +412,15 @@ export const api = {
   // [WS-RPC] providers.models
   getProviderModels: (name: string) =>
     requestRpc<ProviderModelsResult>("providers.models", { name }),
+  // [WS-RPC] providers.listExtended — 含 API key 状态
+  listProvidersExtended: () => requestRpc<ProviderExtendedInfo[]>("providers.listExtended"),
+
+  // API Keys
+  listApiKeys: () => requestRpc<ApiKeyInfo[]>("apiKeys.list"),
+  setApiKey: (provider: string, key: string) =>
+    requestRpc<{ ok: boolean }>("apiKeys.set", { provider, key }),
+  deleteApiKey: (provider: string) =>
+    requestRpc<{ ok: boolean }>("apiKeys.delete", { provider }),
 
   // Agents — 命名复用 agent 机制已删除（Phase 3）。
   // agent 配置现在内联挂在 phase 上；试跑见下方 dryRunAgent（收内联配置对象）。
@@ -1099,4 +1108,27 @@ export interface FsListResult {
   entries: { name: string; is_dir: boolean }[];
   /** 后端截断到 2000 entries 时为 true（系统大目录保护）；老 daemon 不返回此字段 */
   truncated?: boolean;
+}
+
+// ── API Key 管理类型 ──
+
+export interface ApiKeyInfo {
+  provider: string;
+  key_hint: string;
+  updated_at: string;
+  source: "db" | "env";
+}
+
+export interface ProviderExtendedInfo {
+  name: string;
+  display_name: string;
+  supports_cli: boolean;
+  supports_api: boolean;
+  api_only: boolean;
+  default_mode: "cli" | "api";
+  default_model?: string;
+  has_api_key: boolean;
+  key_hint?: string;
+  key_source?: "db" | "env";
+  base_url?: string;
 }

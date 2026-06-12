@@ -4,11 +4,13 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/PageLoader";
 
 const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
+const ApiKeysPage = lazy(() => import("./settings/ApiKeysPage").then((m) => ({ default: m.ApiKeysPage })));
 
 // 工作流 / 定时任务已提到顶层导航（"编排"分组），不在设置内
 // 需求澄清模型已移除全局命名 clarifier agent，改由 requirement 维度配置（clarifier_provider/model）
 const TABS = [
   { key: "general", label: "通用" },
+  { key: "api-keys", label: "API 密钥" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -34,7 +36,7 @@ export function SettingsHub() {
       <header className="mb-4 border-b border-border pb-3">
         <h1 className="font-display text-2xl font-bold">设置 · SETTINGS</h1>
         <p className="text-xs text-muted-foreground mt-1">
-          通用
+          通用 · API 密钥
         </p>
       </header>
 
@@ -50,6 +52,9 @@ export function SettingsHub() {
         <Suspense fallback={<PageLoader />}>
           <TabsContent value="general">
             <Settings embedded />
+          </TabsContent>
+          <TabsContent value="api-keys">
+            <ApiKeysPage />
           </TabsContent>
         </Suspense>
       </Tabs>
