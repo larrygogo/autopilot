@@ -12,7 +12,7 @@
  *          + 2026-06-12-requirement-centric-architecture-v2.md（§3 acceptance 执行器）
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getTask } from "@autopilot/core/db";
 import { transition } from "@autopilot/core/state-machine";
@@ -62,16 +62,23 @@ export async function run_produce(taskId: string): Promise<void> {
   const requirement = ((task["requirement"] as string | undefined) ?? "").trim();
   if (!requirement) throw new Error("任务 requirement 字段为空，请在创建任务时提供需求描述");
 
+  // 交付目录用**绝对路径**写进 prompt（dogfood req-020 实锤：相对指引下 agent 用
+  // Write 工具时幻觉出 ~/deliverables 绝对路径，产物逃逸沙盒写进用户主目录）
+  const deliverablesAbs = join(root, DELIVERABLES_DIR);
   const prompt =
     `你是一位多面手创作者（设计 / 前端 / 文档均可）。请根据需求产出交付物。\n\n` +
     `## 需求\n${requirement}\n\n` +
     `## 工作目录\n当前目录下若有代码仓库克隆，仅供阅读参考。**不要修改仓库已有文件，不要 git commit / push。**\n\n` +
     `## 交付规则\n` +
-    `1. 所有交付物写入 \`${DELIVERABLES_DIR}/\` 目录（不存在则创建）\n` +
+    `1. 所有交付物写入此绝对路径目录（已存在）：\`${deliverablesAbs}\`\n` +
+    `   ⚠ 写文件必须用上面的绝对路径前缀，不要写到任何其他位置（尤其不要写到用户主目录）\n` +
     `2. 网页 demo = 自包含静态文件（单 html 或 html+css+js），双击可开，不依赖构建工具或服务器\n` +
     `3. 设计图 = svg，或可在浏览器直接打开的 html 画布\n` +
-    `4. 最后写 \`${DELIVERABLES_DIR}/SUMMARY.md\`：交付了什么、每个文件是什么、怎么打开查看\n` +
+    `4. 最后写 \`${join(deliverablesAbs, "SUMMARY.md")}\`：交付了什么、每个文件是什么、怎么打开查看\n` +
     `5. 完成前自查：SUMMARY.md 列出的每个文件都真实存在且可打开`;
+
+  // 预创建交付目录（prompt 声明「已存在」，免去 agent mkdir 一步出错面）
+  mkdirSync(deliverablesAbs, { recursive: true });
 
   const agent = agentForPhase(task.workflow, "produce");
   const result = await agent.run(prompt, { cwd: root, timeout: 1_800_000 });
@@ -83,8 +90,11 @@ export async function run_produce(taskId: string): Promise<void> {
     "utf-8",
   );
 
-  if (!existsSync(join(root, DELIVERABLES_DIR))) {
-    throw new Error(`produce 完成但沙盒里没有 ${DELIVERABLES_DIR}/ 目录——agent 未按约定产出`);
+  // 非空校验（仅查目录存在不够：req-020 中 agent mkdir 了空目录、产物写去了别处，
+  // phase 误通过把锅甩给 deliver——早失败才能在 produce 轮内重做）
+  const produced = existsSync(deliverablesAbs) ? readdirSync(deliverablesAbs) : [];
+  if (produced.length === 0) {
+    throw new Error(`produce 完成但 ${deliverablesAbs} 为空——agent 未按约定产出交付物`);
   }
 }
 
