@@ -2,8 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { PAGE_W } from "@/lib/layout";
 import { useNavigate } from "react-router-dom";
 import { Layers, Plus, RefreshCw, Pencil, Trash2, MoreHorizontal } from "lucide-react";
-import { EntityGrid, EntityList, ViewToggle, useViewMode, type EntityCardItem } from "@/components/EntityCards";
-import { PageHero } from "@/components/PageHero";
+import { EmptyState, EntityGrid, EntityList, PageHero, ViewToggle, useViewMode, type EntityCardItem } from "@/components/pro";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -232,16 +231,18 @@ function ProjectsTab() {
       )}
 
       {!loading && !loadError && projects.length === 0 && (
-        <Card className="p-10 text-center">
-          <Layers className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
-          <p className="mb-4 text-sm text-muted-foreground">
-            暂无项目，点「新建项目」开始创建第一个项目。
-          </p>
-          <Button size="sm" onClick={openCreateDialog}>
-            <Plus className="h-4 w-4" />
-            新建项目
-          </Button>
-        </Card>
+        <EmptyState
+          size="page"
+          icon={Layers}
+          title="暂无项目"
+          hint="项目是需求与代码库的工作台，先建一个开始"
+          action={
+            <Button size="sm" onClick={openCreateDialog}>
+              <Plus className="h-4 w-4" />
+              新建项目
+            </Button>
+          }
+        />
       )}
 
       {/* grid / list：共享实体目录模板（EntityCards，与工作流目录同款） */}

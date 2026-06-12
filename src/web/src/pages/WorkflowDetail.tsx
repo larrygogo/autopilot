@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { PAGE_W } from "@/lib/layout";
+import { DescList, FormField, PAGE_W } from "@/components/pro";
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/hooks/useApi";
@@ -243,15 +243,14 @@ export function WorkflowDetail() {
               <p className="mb-3 text-sm text-muted-foreground">{detail.description}</p>
             )}
 
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
-              <SummaryField label="初始状态">
-                <code className="font-mono">{detail.initial_state}</code>
-              </SummaryField>
-              <SummaryField label="终态数">
-                {detail.terminal_states?.length ?? 0}
-              </SummaryField>
-              <SummaryField label="阶段数">{detail.phases?.length ?? 0}</SummaryField>
-            </dl>
+            <DescList
+              columns={4}
+              items={[
+                { label: "初始状态", value: detail.initial_state, mono: true },
+                { label: "终态数", value: detail.terminal_states?.length ?? 0 },
+                { label: "阶段数", value: detail.phases?.length ?? 0 },
+              ]}
+            />
           </Card>
 
           {/* 流水线 + 阶段编辑器：节点点击弹编辑 drawer */}
@@ -279,8 +278,7 @@ export function WorkflowDetail() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="wf-meta-label">显示名</Label>
+            <FormField label="显示名" htmlFor="wf-meta-label" hint="留空则界面回退显示标识符">
               <Input
                 id="wf-meta-label"
                 value={metaLabel}
@@ -288,10 +286,8 @@ export function WorkflowDetail() {
                 placeholder={name}
                 maxLength={60}
               />
-              <p className="text-xs text-muted-foreground">留空则界面回退显示标识符</p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="wf-meta-desc">描述</Label>
+            </FormField>
+            <FormField label="描述" htmlFor="wf-meta-desc">
               <Textarea
                 id="wf-meta-desc"
                 value={metaDesc}
@@ -299,7 +295,7 @@ export function WorkflowDetail() {
                 placeholder="一句话说明这个工作流做什么、适用什么需求"
                 rows={3}
               />
-            </div>
+            </FormField>
           </div>
           <DialogFooter>
             <Button variant="secondary" size="sm" disabled={savingMeta} onClick={() => setMetaEditOpen(false)}>
@@ -349,15 +345,6 @@ export function WorkflowDetail() {
         }}
         onCancel={() => setPendingDelete(false)}
       />
-    </div>
-  );
-}
-
-function SummaryField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="truncate text-sm">{children}</dd>
     </div>
   );
 }

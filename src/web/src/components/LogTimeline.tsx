@@ -1,4 +1,5 @@
 import React from "react";
+import { EmptyState } from "@/components/pro";
 import { taskStatusZh, taskTriggerZh } from "@/lib/run-view-logic";
 
 interface LogEntry {
@@ -19,11 +20,7 @@ interface LogEntry {
 export function LogTimeline({ logs, phaseLabelOf }: { logs: LogEntry[]; phaseLabelOf?: (phase: string) => string }) {
   const labelOf = phaseLabelOf ?? ((p: string) => p);
   if (logs.length === 0) {
-    return (
-      <div className="px-3 py-4 text-xs text-muted-foreground">
-        暂无日志 · NO ENTRIES
-      </div>
-    );
+    return <EmptyState size="inline" title="暂无状态转移记录" />;
   }
 
   return (

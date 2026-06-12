@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { statusVisual, toneToTextClass } from "@/lib/status-style";
-import { EntityGrid, EntityList, ViewToggle, useViewMode, type EntityCardItem } from "@/components/EntityCards";
+import { EmptyState, EntityGrid, EntityList, ViewToggle, useViewMode, type EntityCardItem } from "@/components/pro";
 
 interface WorkflowInfo {
   name: string;
@@ -153,12 +153,17 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
 
   if (workflows.length === 0) {
     return (
-      <Card className="p-6 text-center">
-        <p className="text-sm text-muted-foreground">还没有工作流</p>
-        <Button onClick={onNew} className="mt-3 rounded-md text-[11px]">
-          <Plus className="mr-1 h-3.5 w-3.5" /> 从模板创建第一个
-        </Button>
-      </Card>
+      <EmptyState
+        size="page"
+        icon={GitBranch}
+        title="还没有工作流"
+        hint="从内置模板克隆一个，或用 AI 按描述生成"
+        action={
+          <Button onClick={onNew} className="rounded-md text-[11px]">
+            <Plus className="mr-1 h-3.5 w-3.5" /> 从模板创建第一个
+          </Button>
+        }
+      />
     );
   }
 
