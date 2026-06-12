@@ -11,7 +11,7 @@
  *   - task → done + 无交付 PR    → requirement → done（纯 adhoc 无交付物）
  *
  * 不在此处自动恢复需求队列；scheduler 已经监听了 requirement:status-changed 事件，
- * 会在 from=running/fix_revision 的状态释放时自动 tickRepo 启动下一个 queued 需求。
+ * 会在 from=running/fix_revision 的状态释放时自动 tick 启动下一个 queued 需求。
  */
 
 import { onEvent, offEvent } from "../core/event-bus";

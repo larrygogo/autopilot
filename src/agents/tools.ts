@@ -499,7 +499,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
     // ── 需求队列：入队执行 ──
     tool(
       "enqueue_requirement",
-      "把已 ready 的需求推入执行队列（status=queued）。requirement-scheduler 会监听到状态变化并自动创建 req_dev task 开始执行（同仓库严格串行）。",
+      "把已 ready 的需求推入执行队列（status=queued）。requirement-scheduler 会监听到状态变化并自动创建 req_dev task 开始执行（全局并发上限内按入队先后 FIFO 调度）。",
       {
         req_id: z.string(),
       },
