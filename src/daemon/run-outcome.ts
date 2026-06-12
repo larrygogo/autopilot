@@ -19,6 +19,7 @@
 import { getRequirementById, setRequirementStatus, canTransitionStatus } from "../core/requirements";
 import { createComment, nextCommentId } from "../core/requirement-comments";
 import { listSubPrs } from "../core/requirement-sub-prs";
+import { hasDeliveries } from "../core/requirement-deliveries";
 import { getTask } from "../core/db";
 import { createLogger } from "../core/logger";
 
@@ -54,13 +55,17 @@ function targetReqStatus(outcome: RunOutcome, req: { id: string; pr_number: numb
     case "fixing":
       return "fix_revision";
     case "delivered": {
-      // run 干完了；需求是否「完成」取决于交付物：
-      // 有交付 PR（主 PR 或 sub_prs）→ 进验收 awaiting_review，由 pr-poller 在
-      // 全部 PR merge 后才转 done（poller 只扫 awaiting_review，这里直通 done 会
-      // 让验收/CI/review 回路整体死路 —— req-018 事故，PR 还 OPEN 需求就「完成」了）。
-      // 无 PR（纯 adhoc 无交付）→ done。
+      // run 干完了；需求是否「完成」取决于交付物（事实推断，声明 delivers 只管预检/UI 预告）：
+      // 1. 有交付 PR（主 PR 或 sub_prs）→ 进验收 awaiting_review，由 pr-poller 在
+      //    全部 PR merge 后才转 done（poller 只扫 awaiting_review，这里直通 done 会
+      //    让验收/CI/review 回路整体死路 —— req-018 事故，PR 还 OPEN 需求就「完成」了）。
+      //    **hasPr 优先**——混合交付不支持，PR 赢（v2 R5 红线）。
+      // 2. 无 PR 但有 deliveries（artifacts 交付，v2 R5）→ awaiting_review，
+      //    验收信号 = Web/CLI 人工通过/驳回（poller 对此静默 skip）。
+      // 3. 都无（纯 adhoc 无交付）→ done。
       const hasPr = (req.pr_number ?? 0) > 0 || listSubPrs(req.id).some((sp) => sp.pr_number > 0);
-      return hasPr ? "awaiting_review" : "done";
+      if (hasPr) return "awaiting_review";
+      return hasDeliveries(req.id) ? "awaiting_review" : "done";
     }
   }
 }

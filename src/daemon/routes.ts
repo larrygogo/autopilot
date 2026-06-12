@@ -46,7 +46,10 @@ import {
   setRequirementStatus,
   nextRequirementId,
   finishClarification,
+  listRequirementWorkspaces,
 } from "../core/requirements";
+import { validateWorkflowInput } from "./workflow-declarations";
+import { resolveDeliveryFilePath, maxDeliveryRound } from "../core/requirement-deliveries";
 import {
   saveAttachment,
   listAttachments as listReqAttachments,
@@ -820,12 +823,9 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       if (!projectId) {
         return error("project_id 必填（或提供 workspace_id 由 daemon 反查）");
       }
-      // 强制项目须关联工作区；项目:工作区 1:1 → 未显式指定时自动派生，免手动绑定
-      const topWs = getTopWorkspaceForProject(projectId);
-      if (!topWs) {
-        return error("项目未关联工作区，请先添加工作区再创建需求");
-      }
-      if (!workspaceId) workspaceId = topWs.id;
+      // v2 R5：项目无工作区不再拒建需求（无库需求可走 requires.git 非 true 的工作流闭环）；
+      // 未显式指定时自动派生项目默认工作区作预选（无则 workspace_id=NULL，由确认卡 / 闸门把关）
+      if (!workspaceId) workspaceId = getTopWorkspaceForProject(projectId)?.id ?? null;
       const id = nextRequirementId();
       try {
         const created = createRequirement({
@@ -862,7 +862,12 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       const id = reqEnqueueMatch;
       const r = getRequirementById(id);
       if (!r) return error("requirement not found", 404);
-      if (!r.workspace_id) return error("请先关联工作区再入队");
+      // v2 R5：按所选工作流动态校验（与 RPC requirements.enqueue 同口径）
+      {
+        const hasWs = listRequirementWorkspaces(id).length > 0 || !!r.workspace_id;
+        const reason = validateWorkflowInput(r.workflow, hasWs, { crossCheckDelivers: true });
+        if (reason) return error(reason);
+      }
       if (!(r.spec_md ?? "").trim()) {
         return error("需求规约为空，请先完成澄清或手动填写规约");
       }
@@ -994,6 +999,36 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       if (!att || att.requirement_id !== reqId) return error("attachment not found", 404);
       deleteReqAttachment(attId);
       return json({ ok: true });
+    }
+
+    // ─────────── Requirement Deliveries（artifacts 交付物下载，v2 R5） ───────────
+
+    // GET /api/requirements/:id/deliveries/download?round=N&path=<relative> —— 二进制原样下载单文件
+    const reqDeliveryDownloadMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/deliveries\/download$/);
+    if (method === "GET" && reqDeliveryDownloadMatch) {
+      const reqId = reqDeliveryDownloadMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      const relPath = url.searchParams.get("path") ?? "";
+      if (!relPath) return error("path 参数必填", 400);
+      const roundParam = url.searchParams.get("round");
+      const round = roundParam ? parseInt(roundParam, 10) : maxDeliveryRound(reqId);
+      if (!Number.isInteger(round) || round < 1) return error("无可下载的交付轮", 404);
+      try {
+        const abs = resolveDeliveryFilePath(reqId, round, relPath);
+        if (!abs) return error("非法路径", 400);
+        const file = Bun.file(abs);
+        if (!(await file.exists())) return error("文件不存在", 404);
+        const fileName = relPath.split(/[/\\]/).pop() ?? "file";
+        return new Response(file, {
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+            ...cors,
+          },
+        });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 400);
+      }
     }
 
     // ─────────── Comments（评论线程：question / feedback / handoff） ───────────

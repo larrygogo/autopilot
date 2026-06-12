@@ -38,6 +38,9 @@ import { listFeedbacks } from "../core/requirement-feedbacks";
 import { createComment, nextCommentId } from "../core/requirement-comments";
 import { listTaskRepos, getTaskSandbox, getTaskWorktreeMeta, type TaskRepoCtx } from "../core/sandbox";
 import { listSubPrs, type RequirementSubPr } from "../core/requirement-sub-prs";
+import { hasDeliveries, deliverArtifacts, maxDeliveryRound, getDeliveryRoundDir } from "../core/requirement-deliveries";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "fs";
+import { join } from "path";
 import { getTask } from "../core/db";
 import {
   registerBuiltin,
@@ -180,6 +183,50 @@ function buildFixPrompt(
   ].join("\n");
 }
 
+/** 沙盒内产物目录名（与 artifact 工作流约定一致；修复轮重做产物写到这里再 promote） */
+const FIX_DELIVERABLES_DIR = "deliverables";
+
+/**
+ * artifacts 修复模式 prompt（v2 R5）：需求无交付 PR、有 deliveries —— 按反馈**重做产物**，
+ * 完成后由框架 promote 到需求 deliveries/round-<N+1>/（替代 PR 模式的 commit/push 指引）。
+ */
+function buildArtifactFixPrompt(
+  reqId: string,
+  title: string,
+  repos: TaskRepoCtx[],
+  lastRound: number,
+): string {
+  const feedbacks = listFeedbacks(reqId).slice(-MAX_FEEDBACKS_IN_PROMPT);
+  const fbSection = feedbacks.length > 0
+    ? feedbacks
+        .map((f) => `### ${f.source === "github_review" ? "评审" : "用户"} · ${new Date(f.created_at).toISOString()}\n${f.body}`)
+        .join("\n\n---\n\n")
+    : "（未找到反馈正文 —— 请根据需求规约自行判断需要改什么）";
+  const repoSection = repos.length > 0
+    ? [
+        "## 参考仓库布局（只读参考，**不要 git commit / push / 改动仓库已有文件**）",
+        repos.map((r) => `- ${r.alias || "（仓库）"}：${r.dir ? `子目录 ${r.dir}/` : "当前目录"}`).join("\n"),
+        "",
+      ]
+    : [];
+
+  return [
+    `# 产物修复任务：${title}`,
+    "",
+    `此前交付的产物（第 ${lastRound} 轮验收）被驳回，请按反馈重做产物。`,
+    "",
+    ...repoSection,
+    "## 反馈（按时间升序，最新在最后；与旧反馈冲突时以最新为准）",
+    fbSection,
+    "",
+    "## 要求",
+    `1. 当前目录的 \`${FIX_DELIVERABLES_DIR}/\` 里已放着上一轮产物，请针对反馈**增量修改**（除非反馈明确要求推倒重来）。该目录在你完成后会整体作为新一轮交付——上轮未变的文件保留原样即可`,
+    `2. 最后更新 \`${FIX_DELIVERABLES_DIR}/SUMMARY.md\`：本轮改了什么、每个文件是什么、怎么打开查看`,
+    "3. 禁止：git commit / push、修改参考仓库文件、把产物写到别处",
+    "4. 最后用一段话总结：按哪条反馈改了什么",
+  ].join("\n");
+}
+
 // ──────────────────────────────────────────────
 // fix phase（标准阶段函数：runner 负责锁/心跳/事件/重试/止损，这里只干修复本身）
 // ──────────────────────────────────────────────
@@ -192,12 +239,22 @@ export async function runFixPhase(taskId: string): Promise<void> {
   const req = getRequirementById(reqId);
   if (!req) throw new Error(`fix run ${taskId} 关联需求 ${reqId} 不存在`);
 
+  const subPrs = listSubPrs(reqId);
+  const hasPr = (req.pr_number ?? 0) > 0 || subPrs.some((sp) => sp.pr_number > 0);
+
+  // artifacts 修复模式（v2 R5）：无交付 PR、有 deliveries —— 重做产物 + promote round+1。
+  // 守卫 = deliveries 存在（hasPr 优先，混合交付不支持，PR 赢——与 run-outcome 同口径），
+  // PR 路径零回归：hasPr 时永远走下方原 PR 修复分支。
+  if (!hasPr && hasDeliveries(reqId)) {
+    await runArtifactFixPhase(taskId, reqId, req.title);
+    return;
+  }
+
   const repos = _listRepos(taskId);
   if (repos.length === 0) {
     throw new Error(`fix run ${taskId} 无沙盒布局（.worktree.json 缺失 / clone 失败），无法修复`);
   }
 
-  const subPrs = listSubPrs(reqId);
   const prompt = buildFixPrompt(reqId, req.title, repos, subPrs, req.pr_number ?? null);
 
   log.info("fix-runner: req=%s 开始修复（fix run=%s, repos=%s, PRs=%s）",
@@ -222,6 +279,57 @@ export async function runFixPhase(taskId: string): Promise<void> {
     log.warn("fix-runner: req=%s 修复总结写评论失败：%s", reqId, (e as Error).message);
   }
   log.info("fix-runner: req=%s 修复完成（fix run=%s）。agent 总结：%s", reqId, taskId, summary.slice(0, 300));
+}
+
+/**
+ * artifacts 修复（v2 R5）：cwd = 任务沙盒根（有库 = 需求级 codebase 容器目录，库只读参考；
+ * 无库 = runs/<id>/workspace 空目录）。流程：
+ *   1. 把上一轮交付物种入 cwd/deliverables/（agent 增量修改，与 artifact 探针的驳回语义一致）
+ *   2. 起修复 agent 按反馈重做产物
+ *   3. deliverArtifacts promote 到需求 deliveries/round-<N+1>/ 落表（替代 PR 模式的 commit/push）
+ *   4. 修复总结落需求评论（与 PR 模式同管道）
+ */
+async function runArtifactFixPhase(taskId: string, reqId: string, title: string): Promise<void> {
+  const cwd = getTaskSandbox(taskId);
+  if (!existsSync(cwd)) mkdirSync(cwd, { recursive: true });
+
+  // 种入上一轮产物（rm 后整拷，防上次中断残留半套）
+  const lastRound = maxDeliveryRound(reqId);
+  const workDir = join(cwd, FIX_DELIVERABLES_DIR);
+  const prevDir = getDeliveryRoundDir(reqId, lastRound);
+  rmSync(workDir, { recursive: true, force: true });
+  if (existsSync(prevDir)) {
+    cpSync(prevDir, workDir, { recursive: true });
+  } else {
+    mkdirSync(workDir, { recursive: true });
+  }
+
+  const repos = _listRepos(taskId);
+  const prompt = buildArtifactFixPrompt(reqId, title, repos, lastRound);
+
+  log.info("fix-runner: req=%s 开始产物修复（fix run=%s, 上一轮 round=%s, 参考仓库=%s）",
+    reqId, taskId, lastRound, repos.length);
+
+  const summary = (await _fixFn(prompt, cwd)).trim();
+
+  if (!existsSync(workDir) || readdirSync(workDir).length === 0) {
+    throw new Error(`产物修复完成但 ${FIX_DELIVERABLES_DIR}/ 为空——agent 未按约定产出`);
+  }
+  const delivery = deliverArtifacts(taskId, workDir, summary);
+
+  try {
+    createComment({
+      id: nextCommentId(),
+      requirement_id: reqId,
+      kind: "feedback",
+      from_role: "agent",
+      body: `【修复完成 · 第 ${delivery.round} 轮交付】\n\n${summary.slice(0, 8000)}`,
+    });
+  } catch (e: unknown) {
+    log.warn("fix-runner: req=%s 修复总结写评论失败：%s", reqId, (e as Error).message);
+  }
+  log.info("fix-runner: req=%s 产物修复完成（fix run=%s, round=%s）。agent 总结：%s",
+    reqId, taskId, delivery.round, summary.slice(0, 300));
 }
 
 // ──────────────────────────────────────────────
@@ -262,14 +370,21 @@ export async function startFixRun(reqId: string): Promise<void> {
   }
 
   if (!req.task_id) {
-    fail("需求无关联任务（task_id 为空），找不到上一轮交付分支");
+    fail("需求无关联任务（task_id 为空），找不到上一轮交付现场");
     return;
   }
+  // artifacts 修复模式（v2 R5）：无交付 PR、有 deliveries —— 交付现场在需求 deliveries/
+  // 目录（runFixPhase 会把上一轮产物种入沙盒），不依赖上一轮交付分支。
+  const subPrs = listSubPrs(reqId);
+  const artifactsMode =
+    !((req.pr_number ?? 0) > 0 || subPrs.some((sp) => sp.pr_number > 0)) && hasDeliveries(reqId);
+
   // 交付分支名从上一轮 run 的 .worktree.json 取（fix run 链上每轮都续写同名分支）。
-  // 运行目录被整体删除（meta 丢失）才无从续作 —— 此时只能整轮重跑。
+  // 运行目录被整体删除（meta 丢失）才无从续作 —— PR 模式此时只能整轮重跑；
+  // artifacts 模式无分支也可修（有库则停默认分支只读参考）。
   const prevMeta = getTaskWorktreeMeta(req.task_id);
   const branch = prevMeta?.branch;
-  if (!branch) {
+  if (!branch && !artifactsMode) {
     fail(`上一轮 run ${req.task_id} 无交付分支记录（.worktree.json 缺失，运行目录可能已被删除），请重新入队整轮重跑`);
     return;
   }
@@ -281,8 +396,7 @@ export async function startFixRun(reqId: string): Promise<void> {
       title: req.title,
       requirement_id: reqId,
       kind: "fix",
-      deliver_branch: branch,
-      checkout_existing_branch: true,
+      ...(branch ? { deliver_branch: branch, checkout_existing_branch: true } : {}),
     });
     taskId = task.id;
   } catch (e: unknown) {

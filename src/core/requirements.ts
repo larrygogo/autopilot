@@ -3,6 +3,7 @@ import { emit } from "./event-bus";
 import { resolveComment } from "./requirement-comments";
 import { listWorkspaces, type Workspace } from "./workspaces";
 import { deleteRequirementRuntimeDir } from "./requirement-clone";
+import { deleteDeliveriesForRequirement } from "./requirement-deliveries";
 
 // ──────────────────────────────────────────────
 // 类型定义
@@ -45,6 +46,12 @@ export interface Requirement {
   status_before_terminal: string | null;
   /** 执行用的工作流名；NULL = 未显式选择，调度时回退默认 "dev"。审批后随内容冻结。 */
   workflow: string | null;
+  /**
+   * 输入形态确认状态（迁移 045，交付物抽象 P0）：
+   * NULL=未确认（drafting 默认）/ 'git'=基于代码库 / 'none'=确认无库。
+   * setRequirementWorkspaces 按集合空/非空写 'none'/'git'；闸门按所选工作流的 requires.git 校验。
+   */
+  input_mode: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -74,6 +81,7 @@ export interface UpdateRequirementOpts {
   clarifier_model?: string | null;
   schedule_error?: string | null;
   workflow?: string | null;
+  input_mode?: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -227,6 +235,7 @@ export function updateRequirement(id: string, opts: UpdateRequirementOpts): Requ
     "clarifier_model",
     "schedule_error",
     "workflow",
+    "input_mode",
   ] as const;
   for (const k of updatable) {
     if (opts[k] !== undefined) {
@@ -280,8 +289,9 @@ export function listRequirementWorkspaceIds(reqIds: string[]): Map<string, strin
 
 /**
  * 整体替换需求的代码库集合（PUT 语义）。
- * 入参校验（非空 / 同项目 / 状态闸门）由 RPC 层负责。
+ * 入参校验（同项目 / 状态闸门）由 RPC 层负责。
  * workspace_id 列只是冗余缓存 = 集合第一个（主库语义已废除，2026-06-12）。
+ * input_mode（迁移 045）随集合同步：显式空集 = 确认无库 'none'；非空 = 'git'。
  */
 export function setRequirementWorkspaces(reqId: string, wsIds: string[]): void {
   const db = getDb();
@@ -298,6 +308,14 @@ export function setRequirementWorkspaces(reqId: string, wsIds: string[]): void {
       nowMs(),
       reqId,
     ]);
+    try {
+      db.run("UPDATE requirements SET input_mode = ? WHERE id = ?", [
+        wsIds.length > 0 ? "git" : "none",
+        reqId,
+      ]);
+    } catch {
+      // input_mode 列不存在（迁移 045 未跑的旧库/选择性迁移测试夹具）：声明态是增强，不阻塞集合写入
+    }
   })();
 }
 
@@ -313,6 +331,7 @@ export function deleteRequirement(id: string): void {
     db.run("DELETE FROM requirement_comments WHERE requirement_id = ?", [id]);
     db.run("DELETE FROM requirement_sub_prs WHERE requirement_id = ?", [id]);
     db.run("DELETE FROM requirement_workspaces WHERE requirement_id = ?", [id]);
+    deleteDeliveriesForRequirement(id);
     db.run("DELETE FROM requirements WHERE id = ?", [id]);
   })();
   // 需求运行时目录（workspace/ 浅 clone + runs/ 执行历史）随需求删除整树清理；

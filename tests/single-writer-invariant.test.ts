@@ -24,6 +24,7 @@ const ALLOWLIST = new Set([
   "src/core/requirement-comments.ts", // 统一评论表：question / feedback / handoff 合并后的 SQLite 权威源
   "src/core/requirement-attachments.ts", // requirement_attachments 表：SQLite 即权威源，附件 CRUD 无 manifest 同步需求
   "src/core/requirement-sub-prs.ts", // requirement_sub_prs 表：SQLite 即权威源，无 manifest 同步需求
+  "src/core/requirement-deliveries.ts", // requirement_deliveries 表：SQLite 即权威源，交付物轮次记录（v2 R5）
   "src/core/requirement-sessions.ts", // requirement_sessions 表：SQLite 即权威源，澄清会话状态无 manifest 同步需求
   "src/core/spec-revisions.ts",  // spec_revisions 表：SQLite 即权威源，spec 修订历史无 manifest 同步需求
   "src/core/submodules.ts",      // submodules：通过 createRepo 写 repos 表，SQLite 即权威源
@@ -41,6 +42,7 @@ const ALLOWLIST = new Set([
   "src/migrations/042-close-orphan-phase-events.ts", // 关闭终态任务遗留 open phase event（一次性数据修复，req-012 僵尸轮）
   "src/migrations/043-workspace-id-demote-backfill.ts", // 主库语义降级：集合↔缓存列双向回填校验（一次性数据迁移，幂等）
   "src/migrations/044-task-run-columns.ts", // run 多历史：tasks 加 kind/seq + 按需求分组回填 seq（一次性数据迁移，幂等）
+  "src/migrations/045-requirement-input-mode.ts", // 输入形态声明：加列 + 回填 'git'（一次性数据迁移，幂等）
   "src/core/notifications.ts",     // notifications 表：SQLite 即权威源，事件型通知流（替代 Now 派生快照）
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
   "src/core/api-keys.ts",          // api_keys 表：SQLite 即权威源，API 密钥加密存储无 manifest 同步需求

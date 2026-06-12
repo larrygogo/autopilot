@@ -97,6 +97,8 @@ function attachWorkspaceIds<T extends { id: string }>(reqs: T[]): Array<T & { wo
   return reqs.map((r) => ({ ...r, workspace_ids: map.get(r.id) ?? [] }));
 }
 import { listSubPrs } from "../core/requirement-sub-prs";
+import { listDeliveries, listDeliveryFiles, maxDeliveryRound } from "../core/requirement-deliveries";
+import { validateWorkflowInput } from "./workflow-declarations";
 import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
 import { getRound as getClarifierRound } from "./clarifier-progress";
 import { runClarifierRound } from "./requirement-clarifier";
@@ -1023,16 +1025,16 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.setWorkspaces",
-    description: "澄清前确认需求的代码库集合（整体替换；开始澄清后冻结——澄清基于已选库做，临时换库会让澄清失效。failed 例外 = 重试设计用途）",
+    description: "澄清前确认需求的代码库集合（整体替换；显式空集 = 确认无库 input_mode='none'；开始澄清后冻结——澄清基于已选库做，临时换库会让澄清失效。failed 例外 = 重试设计用途）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      // 空数组合法（v2 R5：显式空集 = 确认无库，配合 requires.git 非 true 的工作流走纯文本闭环）
       if (
         !Array.isArray(p.workspace_ids) ||
-        p.workspace_ids.length === 0 ||
         !p.workspace_ids.every((x) => typeof x === "string" && x)
       ) {
-        throw new RpcError("INVALID_PARAM", "需要非空 string[] workspace_ids");
+        throw new RpcError("INVALID_PARAM", "需要 string[] workspace_ids（空数组 = 确认无库）");
       }
       const wsIds = [...new Set(p.workspace_ids as string[])];
       // primary_workspace_id 入参接受但忽略（主库概念已废除，2026-06-12；兼容老 web-dist 一版）
@@ -1109,13 +1111,9 @@ export function registerCoreRpcMethods(): void {
       if (!projectId) {
         throw new RpcError("INVALID_PARAM", "project_id 必填（或提供 workspace_id 由 daemon 反查）");
       }
-      // 强制：项目必须关联工作区才能创建/运行需求
-      const topWs = getTopWorkspaceForProject(projectId);
-      if (!topWs) {
-        throw new RpcError("PRECONDITION_FAILED", "项目未关联工作区，请先添加工作区再创建需求");
-      }
-      // 项目:工作区 1:1 —— 未显式指定时自动派生项目唯一工作区，免去用户手动绑定。
-      if (!workspaceId) workspaceId = topWs.id;
+      // v2 R5：项目无工作区不再拒建需求（无库需求可走 requires.git 非 true 的工作流闭环）；
+      // 未显式指定时自动派生项目默认工作区作预选（无则 workspace_id=NULL，由确认卡 / 闸门把关）。
+      if (!workspaceId) workspaceId = getTopWorkspaceForProject(projectId)?.id ?? null;
       const id = nextRequirementId();
       const created = coreCreateRequirement({
         id,
@@ -1170,6 +1168,12 @@ export function registerCoreRpcMethods(): void {
         workflow: (typeof p.workflow === "string" || p.workflow === null) ? p.workflow : undefined,
       });
       if (!updated) throw new RpcError("NOT_FOUND", "requirement not found");
+      // setWorkflow 闸门（v2 R5）：换工作流时声明校验不通过 → 响应带 warning（不阻断，enqueue 兜底重验）
+      if (p.workflow !== undefined) {
+        const hasWs = listRequirementWorkspaces(p.id).length > 0 || !!updated.workspace_id;
+        const warning = validateWorkflowInput(updated.workflow, hasWs, { crossCheckDelivers: true });
+        if (warning) return { requirement: updated, warning: `${warning}（入队时将被拦截）` };
+      }
       return { requirement: updated };
     },
   });
@@ -1201,9 +1205,16 @@ export function registerCoreRpcMethods(): void {
       if (typeof p.to !== "string" || !p.to.trim()) throw new RpcError("INVALID_PARAM", "to 必填");
       const cur = getRequirementById(p.id);
       if (!cur) throw new RpcError("NOT_FOUND", "requirement not found");
-      // 澄清前置：代码库集合非空（澄清 agent 在已选代码库的浅 clone 中工作；真相在集合表）
-      if (p.to.trim() === "clarifying" && listRequirementWorkspaces(p.id).length === 0) {
-        throw new RpcError("PRECONDITION_FAILED", "代码库集合为空，请先确认代码库再开始澄清（澄清基于代码库的克隆进行）");
+      // 澄清前置（v2 R5 起按所选工作流的 requires.git 动态校验）：
+      //   requires.git=true → 卡集合非空（澄清 agent 在已选代码库的浅 clone 中工作；真相在集合表）
+      //   "optional"/false  → 集合空也放行（确认 input_mode='none'，clarifier 走纯文本模式）
+      if (p.to.trim() === "clarifying") {
+        const hasWs = listRequirementWorkspaces(p.id).length > 0;
+        const reason = validateWorkflowInput(cur.workflow, hasWs);
+        if (reason) throw new RpcError("PRECONDITION_FAILED", `${reason}（澄清基于代码库的克隆进行）`);
+        if (!hasWs && cur.input_mode !== "none") {
+          try { coreUpdateRequirement(p.id, { input_mode: "none" }); } catch { /* 列缺失旧库容错 */ }
+        }
       }
       return { requirement: setRequirementStatus(p.id, p.to.trim()) };
     },
@@ -1211,15 +1222,22 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "requirements.enqueue",
-    description: "入队执行（必须已关联 workspace 且 spec_md 非空）",
+    description: "入队执行（spec_md 非空；代码库要求按所选工作流的 requires.git 动态校验，集合空 × delivers:pr 交叉拒）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const r = getRequirementById(p.id);
       if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
-      if (!r.workspace_id) throw new RpcError("PRECONDITION_FAILED", "请先关联工作区再入队");
+      // v2 R5：按所选工作流动态校验（requires.git=true 卡集合非空；optional/false 放行；
+      // 交叉校验 = 集合空 × delivers:pr 拒——PR 无处可开）
+      const hasWs = listRequirementWorkspaces(p.id).length > 0 || !!r.workspace_id;
+      const reason = validateWorkflowInput(r.workflow, hasWs, { crossCheckDelivers: true });
+      if (reason) throw new RpcError("PRECONDITION_FAILED", reason);
       if (!(r.spec_md ?? "").trim()) {
         throw new RpcError("PRECONDITION_FAILED", "需求规约为空，请先完成澄清或手动填写规约");
+      }
+      if (!hasWs && r.input_mode !== "none") {
+        try { coreUpdateRequirement(p.id, { input_mode: "none" }); } catch { /* 列缺失旧库容错 */ }
       }
       return { requirement: setRequirementStatus(p.id, "queued") };
     },
@@ -1256,6 +1274,32 @@ export function registerCoreRpcMethods(): void {
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
       return { sub_prs: listSubPrs(p.id) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.deliveries",
+    description: "需求的交付物轮次记录（artifacts 验收用；每验收轮一行，round 升序）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      return { deliveries: listDeliveries(p.id) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.listDeliveryFiles",
+    description: "某验收轮的交付物文件列表（缺省最新轮；只列文件 + 下载，不做渲染预览）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      const round = typeof p.round === "number" && Number.isInteger(p.round) && p.round >= 1
+        ? p.round
+        : maxDeliveryRound(p.id);
+      if (round < 1) return { round: 0, files: [] };
+      return { round, files: listDeliveryFiles(p.id, round) };
     },
   });
 

@@ -44,11 +44,14 @@ export function taskMeta(status: string): { Icon: typeof Loader2; tone: Tone; la
 }
 
 /** 需求状态 → 卡片视觉。覆盖全生命周期（项目页的需求没有任务行代表后段）。 */
-export function reqMeta(status: string): { Icon: typeof Loader2; tone: Tone; label: string; spin?: boolean } {
+export function reqMeta(status: string, opts?: { hasPr?: boolean }): { Icon: typeof Loader2; tone: Tone; label: string; spin?: boolean } {
   if (status === "queued") return { Icon: Clock, tone: "accent", label: "待执行" };
   if (status === "running") return { Icon: Loader2, tone: "accent", label: "执行中", spin: true };
   if (status === "fix_revision") return { Icon: Loader2, tone: "accent", label: "修复中", spin: true };
-  if (status === "awaiting_review") return { Icon: Hand, tone: "warning", label: "待 PR review" };
+  // artifacts 交付（无 PR，v2 R5）的验收在需求页人工完成 —— 不写「PR review」误导去 GitHub
+  if (status === "awaiting_review") {
+    return { Icon: Hand, tone: "warning", label: opts?.hasPr === false ? "待验收" : "待 PR review" };
+  }
   if (status === "awaiting_approval") return { Icon: Hand, tone: "warning", label: "待审批" };
   if (status === "ready") return { Icon: Hand, tone: "warning", label: "待入队" };
   if (status === "clarifying") return { Icon: Search, tone: "info", label: "调查中" };
@@ -176,7 +179,9 @@ function ReqCardExtras({ req, card }: { req: Requirement; card: ReqCardSpec }) {
 }
 
 export function RequirementRow({ req, now, maps }: { req: Requirement; now: number; maps?: PipelineNameMaps }) {
-  const { Icon, tone, label, spin } = reqMeta(req.status);
+  // 列表行只有 requirement 自身字段：pr_url/pr_number 是主 PR 缓存（submit_pr 必回填），
+  // 据此区分 PR 验收与 artifacts 人工验收的标签
+  const { Icon, tone, label, spin } = reqMeta(req.status, { hasPr: !!req.pr_url || (req.pr_number ?? 0) > 0 });
   const wfName = req.workflow ?? "dev";
   const secondary = [
     req.id,
@@ -272,7 +277,7 @@ export function TaskRow({ task, now, maps, req }: {
   req?: Requirement;
 }) {
   const { Icon, tone, label, spin } = req
-    ? reqMeta(req.status)
+    ? reqMeta(req.status, { hasPr: !!req.pr_url || (req.pr_number ?? 0) > 0 })
     : { ...taskMeta(task.status), spin: task.status.startsWith("running_") };
   const phase = parsePhase(task.status);
   const secondary = [

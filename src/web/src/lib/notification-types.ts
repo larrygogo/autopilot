@@ -6,6 +6,7 @@ export type NotificationType =
   | "task_cancelled"
   | "task_await_review"
   | "requirement_awaiting_approval"
+  | "requirement_awaiting_review"
   | "agent_question"
   | "clarifier_error"
   | "schedule_error"

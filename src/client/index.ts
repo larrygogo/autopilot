@@ -52,6 +52,9 @@ export class AutopilotClient {
   get getSessionMessages() { return this.http.getSessionMessages.bind(this.http); }
   get setRequirementWorkspaces() { return this.http.setRequirementWorkspaces.bind(this.http); }
   get transitionRequirement() { return this.http.transitionRequirement.bind(this.http); }
+  get listRequirementSubPrs() { return this.http.listRequirementSubPrs.bind(this.http); }
+  get listRequirementDeliveries() { return this.http.listRequirementDeliveries.bind(this.http); }
+  get addRequirementFeedback() { return this.http.addRequirementFeedback.bind(this.http); }
   get listNotifications() { return this.http.listNotifications.bind(this.http); }
   get notificationUnreadCount() { return this.http.notificationUnreadCount.bind(this.http); }
   get markNotificationsRead() { return this.http.markNotificationsRead.bind(this.http); }

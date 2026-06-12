@@ -84,6 +84,17 @@ export interface PhaseSandboxSpec {
   deliver?: boolean;
 }
 
+/**
+ * 工作流声明层（需求中心架构 v2 R5，runtime spec D 节）：
+ * requires = 输入闸门声明（能不能往下走），sandbox = 执行机制（怎么建沙盒）——分层不合并。
+ * registry 只透传形状 + 缺省派生（requires.git 缺省 = sandbox.git ?? false，老副本零感知）；
+ * 枚举值的业务语义（'pr'/'artifacts'、闸门拦截）全在 daemon，core 零业务知识。
+ */
+export interface WorkflowRequiresSpec {
+  /** true=必须有代码库；false=不要求；"optional"=可有可无（有就 clone 作参考） */
+  git?: boolean | "optional";
+}
+
 export interface WorkflowDefinition {
   name: string;
   /** 显示名（UI 显示），未填则回退到 name */
@@ -91,6 +102,10 @@ export interface WorkflowDefinition {
   description?: string;
   config?: Record<string, unknown>;
   sandbox?: WorkflowSandboxSpec;
+  /** 输入闸门声明；缺省派生自 sandbox.git（见 getWorkflowGitRequirement） */
+  requires?: WorkflowRequiresSpec;
+  /** 产出形态声明（如 "pr" / "artifacts"）；registry 纯字符串透传，枚举语义在 daemon。缺省 = 事实推断 */
+  delivers?: string;
   phases: (PhaseDefinition | { parallel: ParallelDefinition })[];
   initial_state: string;
   terminal_states: string[];
@@ -281,6 +296,8 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
     normalizeWorkflowFields(wfDef, yamlPath);
     // `workspace:` 段已更名为 `sandbox:`；优先读 sandbox，回退老字段并 warn
     normalizeSandboxSection(wfDef, yamlPath);
+    // 声明层（requires/delivers）：只做形状归一 + lint，不校验枚举值（语义在 daemon）
+    normalizeDeclarations(wfDef, yamlPath);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
     log.error("解析 YAML 工作流 %s 失败：%s", yamlPath, message);
@@ -800,6 +817,9 @@ function composeDbWorkflow(
     terminal_states: base.terminal_states,
   };
   if (base.sandbox !== undefined) composed.sandbox = base.sandbox;
+  // 声明层随 base 继承（派生工作流的输入/产出形态默认同 base；DB 派生层暂不支持覆写）
+  if (base.requires !== undefined) composed.requires = base.requires;
+  if (base.delivers !== undefined) composed.delivers = base.delivers;
   if (base.setup_func !== undefined) composed.setup_func = base.setup_func;
   if (base.notify_func !== undefined) composed.notify_func = base.notify_func;
   if (base.config !== undefined) composed.config = base.config;
@@ -964,7 +984,15 @@ export function getWorkflow(name: string): WorkflowDefinition | null {
   return _registry.get(name) ?? null;
 }
 
-export function listWorkflows(): { name: string; label?: string; description: string }[] {
+export function listWorkflows(): {
+  name: string;
+  label?: string;
+  description: string;
+  /** 声明层（v2 R5）：git 输入要求（含缺省派生），客户端据此调整代码库确认 UI */
+  requires_git: boolean | "optional";
+  /** 声明层（v2 R5）：产出形态字符串透传（"pr"/"artifacts"…），缺省 undefined = 事实推断 */
+  delivers?: string;
+}[] {
   // `__` 前缀 = 内置平台工作流（registerBuiltin），不进列表：用户不可选它起任务 /
   // 设为需求工作流，UI / CLI 列表也不展示。getWorkflow / 状态机 / watcher 照常工作
   //（watcher 的终态集合对内置工作流由 done/cancelled/failed 固定兜底覆盖）。
@@ -974,6 +1002,8 @@ export function listWorkflows(): { name: string; label?: string; description: st
       name: wf.name,
       label: wf.label,
       description: wf.description ?? "",
+      requires_git: getWorkflowGitRequirement(wf),
+      delivers: wf.delivers,
     }));
 }
 
@@ -1199,6 +1229,49 @@ function normalizeSandboxSection(wfDef: Record<string, unknown>, yamlPath: strin
     wfDef.sandbox = wfDef.workspace;
     delete wfDef.workspace;
   }
+}
+
+/**
+ * 声明层（requires / delivers）形状归一 + lint（v2 R5）。
+ * 只管形状：requires 须是对象、requires.git 须是 boolean|"optional"、delivers 须是字符串，
+ * 非法形状删除 + warn（回退缺省派生）。**不校验枚举值**——'pr'/'artifacts' 的语义在 daemon。
+ * lint：requires.git===true 而 sandbox.git 缺失 → warn（声明要 git 却没有 git 沙盒供给，
+ * 任务会在空目录里跑——大概率是漏写 sandbox.git）。
+ */
+function normalizeDeclarations(wfDef: Record<string, unknown>, yamlPath: string): void {
+  if ("requires" in wfDef && wfDef.requires !== undefined) {
+    if (!wfDef.requires || typeof wfDef.requires !== "object" || Array.isArray(wfDef.requires)) {
+      log.warn("workflow.yaml %s：`requires:` 应为对象（如 {git: true}），已忽略", yamlPath);
+      delete wfDef.requires;
+    } else {
+      const r = wfDef.requires as Record<string, unknown>;
+      if ("git" in r && r.git !== undefined && r.git !== true && r.git !== false && r.git !== "optional") {
+        log.warn("workflow.yaml %s：`requires.git` 应为 true/false/\"optional\"，当前 %o 已忽略（回退派生自 sandbox.git）",
+          yamlPath, r.git);
+        delete r.git;
+      }
+    }
+  }
+  if ("delivers" in wfDef && wfDef.delivers !== undefined && typeof wfDef.delivers !== "string") {
+    log.warn("workflow.yaml %s：`delivers:` 应为字符串，当前 %o 已忽略（回退事实推断）", yamlPath, wfDef.delivers);
+    delete wfDef.delivers;
+  }
+  const requiresGit = (wfDef.requires as WorkflowRequiresSpec | undefined)?.git;
+  const sandboxGit = (wfDef.sandbox as WorkflowSandboxSpec | undefined)?.git;
+  if (requiresGit === true && sandboxGit !== true) {
+    log.warn("workflow.yaml %s：requires.git=true 但 sandbox.git 缺失——任务不会建代码沙盒，请补 `sandbox: {git: true}`",
+      yamlPath);
+  }
+}
+
+/**
+ * 工作流的 git 输入要求（声明层缺省派生，纯形状推导无业务语义）：
+ * requires.git 显式声明优先；缺省派生 = sandbox.git ?? false（老工作流零感知）。
+ */
+export function getWorkflowGitRequirement(wf: WorkflowDefinition): boolean | "optional" {
+  const g = wf.requires?.git;
+  if (g === true || g === false || g === "optional") return g;
+  return wf.sandbox?.git === true;
 }
 
 function renderWorkflowYamlTemplate(name: string, description: string | undefined, firstPhase: string): string {

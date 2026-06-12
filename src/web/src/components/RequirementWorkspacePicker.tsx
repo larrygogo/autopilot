@@ -24,6 +24,8 @@ export function RequirementWorkspacePicker({
   workspaces,
   disabled,
   readOnly,
+  allowEmpty,
+  emptyHint,
   onChanged,
 }: {
   requirement: Requirement;
@@ -32,6 +34,10 @@ export function RequirementWorkspacePicker({
   disabled?: boolean;
   /** 只读摘要模式（澄清开始后代码库冻结） */
   readOnly?: boolean;
+  /** 允许空集确认（v2 R5：所选工作流 requires.git 为 "optional"/false 时，无库需求可走完整闭环） */
+  allowEmpty?: boolean;
+  /** allowEmpty 时展示的说明文案（如「此工作流不要求代码库」） */
+  emptyHint?: string;
   /** 反写成功 / 新建代码库后通知父组件刷新 */
   onChanged: () => void;
 }) {
@@ -68,8 +74,9 @@ export function RequirementWorkspacePicker({
   function toggle(wsId: string) {
     const next = new Set(selected);
     if (next.has(wsId)) {
-      if (next.size === 1) {
-        toast.error("至少保留一个代码库");
+      // 所选工作流要求代码库时至少保留一个；不要求（allowEmpty）时可清空 = 确认无库
+      if (next.size === 1 && !allowEmpty) {
+        toast.error("至少保留一个代码库", "当前工作流需要代码库；如需无库需求请先换用不要求代码库的工作流。");
         return;
       }
       next.delete(wsId);
@@ -140,7 +147,9 @@ export function RequirementWorkspacePicker({
           <FolderGit2 className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="shrink-0 text-sm font-semibold">代码库</span>
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-            {chosen.map((w) => (
+            {chosen.length === 0 ? (
+              <span className="font-mono text-xs text-muted-foreground">无（已确认为无库需求）</span>
+            ) : chosen.map((w) => (
               <span
                 key={w.id}
                 className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs"
@@ -152,7 +161,9 @@ export function RequirementWorkspacePicker({
           </div>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          已在澄清前确认，开始澄清后冻结。所有已选库均可改动、各自交付 PR。
+          {chosen.length === 0
+            ? "已确认不关联代码库（纯文本澄清，按所选工作流交付）。"
+            : "已在澄清前确认，开始澄清后冻结。所有已选库均可改动、各自交付 PR。"}
         </p>
       </Card>
     );
@@ -171,6 +182,12 @@ export function RequirementWorkspacePicker({
       <p className="mb-3 text-xs text-muted-foreground">
         本需求涉及哪些代码库由你在此确认；所有已选库均可改动、各自交付 PR。
       </p>
+
+      {allowEmpty && (
+        <p className="mb-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          {emptyHint ?? "此工作流不要求代码库"}——可不选任何库直接开始（AI 走纯文本澄清，按工作流产出交付物）；选了库则作为参考克隆给 AI。
+        </p>
+      )}
 
       {workspaces.length === 0 && (
         <p className="mb-2 text-xs text-muted-foreground">项目下暂无代码库，用下方「自定义」添加。</p>

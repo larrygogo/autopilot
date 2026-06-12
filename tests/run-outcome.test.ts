@@ -27,6 +27,8 @@ import { up as migrate029 } from "../src/migrations/029-requirement-status-befor
 import { up as migrate030 } from "../src/migrations/030-requirement-status-logs";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { up as migrate044 } from "../src/migrations/044-task-run-columns";
+import { up as migrate045 } from "../src/migrations/045-requirement-input-mode";
+import { up as migrate046 } from "../src/migrations/046-requirement-deliveries";
 import { _setDbForTest, createTask } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createWorkspace } from "../src/core/workspaces";
@@ -48,7 +50,8 @@ let tmpHome: string;
 const ALL_MIGRATIONS = [
   migrate001, migrate002, migrate004, migrate005, migrate006, migrate007,
   migrate008, migrate009, migrate010, migrate018, migrate019, migrate021,
-  migrate024, migrate028, migrate029, migrate030, migrate033, migrate044];
+  migrate024, migrate028, migrate029, migrate030, migrate033, migrate044,
+  migrate045, migrate046];
 
 beforeEach(() => {
   tmpHome = join(tmpdir(), `autopilot-runoutcome-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -120,6 +123,27 @@ describe("reportRunOutcome：delivered 的去向取决于交付 PR（req-018 验
     const { reqId, runId } = makeRequirement("running");
     reportRunOutcome(reqId, runId, { kind: "delivered" });
     expect(getRequirementById(reqId)!.status).toBe("done");
+  });
+
+  it("无 PR 但有 deliveries（artifacts 交付，v2 R5）→ awaiting_review（人工验收）", () => {
+    const { reqId, runId } = makeRequirement("running");
+    db.run(
+      "INSERT INTO requirement_deliveries (id, requirement_id, task_id, round, path, summary, created_at) VALUES (?, ?, ?, 1, 'deliveries/round-1', NULL, ?)",
+      ["dlv-001", reqId, runId, Date.now()],
+    );
+    reportRunOutcome(reqId, runId, { kind: "delivered" });
+    expect(getRequirementById(reqId)!.status).toBe("awaiting_review");
+  });
+
+  it("hasPr 优先于 deliveries（混合交付不支持，PR 赢）：两者都有 → awaiting_review 由 PR 验收管", () => {
+    const { reqId, runId } = makeRequirement("running");
+    updateRequirement(reqId, { pr_number: 11, pr_url: "https://github.com/o/r/pull/11" });
+    db.run(
+      "INSERT INTO requirement_deliveries (id, requirement_id, task_id, round, path, summary, created_at) VALUES (?, ?, ?, 1, 'deliveries/round-1', NULL, ?)",
+      ["dlv-002", reqId, runId, Date.now()],
+    );
+    reportRunOutcome(reqId, runId, { kind: "delivered" });
+    expect(getRequirementById(reqId)!.status).toBe("awaiting_review");
   });
 });
 

@@ -316,6 +316,21 @@ export class HttpClient {
     return this.call("requirements.transition", { id, to });
   }
 
+  async listRequirementSubPrs(id: string): Promise<{ sub_prs: Array<{ pr_url: string; pr_number: number }> }> {
+    return this.call("requirements.subPrs", { id });
+  }
+
+  async listRequirementDeliveries(id: string): Promise<{
+    deliveries: Array<{ id: string; requirement_id: string; task_id: string | null; round: number; path: string; summary: string | null; created_at: number }>;
+  }> {
+    return this.call("requirements.deliveries", { id });
+  }
+
+  /** 注入反馈评论（kind=feedback）；需求处于 awaiting_review 时 daemon 自动转 fix_revision */
+  async addRequirementFeedback(id: string, body: string): Promise<{ comment: { id: string } }> {
+    return this.call("comments.add", { requirementId: id, kind: "feedback", from_role: "user", body });
+  }
+
   async setRequirementWorkspaces(
     id: string,
     workspaceIds: string[],

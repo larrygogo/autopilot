@@ -1,8 +1,10 @@
 # 交付物抽象（输入 / 产出双轴）设计备忘
 
-> 状态：**探针阶段**（Step 1 进行中）。本文沉淀 2026-06-12 architect + pm 两份评估的共识，
-> 作为 P0 落地时的设计基准。P0 开工前须先用探针数据校订本文。
-> **2026-06-12 晚更新**：本 spec 与 `2026-06-12-requirement-centric-runtime.md`（需求中心化运行时）合流——input_mode/delivers 即其 Stage 4 声明层；迁移号修正 044/045；调度死锁项已由主库废除 Stage 2 解决。
+> 状态：**P0 已落地（2026-06-12，v2 R5 合流实施）**。迁移实际取号 **045（input_mode）/ 046（requirement_deliveries）**；
+> deliveries 落点 = `runtime/requirements/<reqId>/deliveries/round-<N>/`（core/requirement-deliveries.ts 的 deliverArtifacts promote）；
+> 三闸门按所选工作流 requires/delivers 动态校验（daemon/workflow-declarations.ts）；artifact 工作流已去 gate hack 正式化。
+> 本文沉淀 2026-06-12 architect + pm 两份评估的共识，作为 P0 落地时的设计基准。
+> **2026-06-12 晚更新**：本 spec 与 `2026-06-12-requirement-centric-runtime.md`（需求中心化运行时）合流——input_mode/delivers 即其 Stage 4 声明层；调度死锁项已由主库废除 Stage 2 解决。
 
 ## 背景与决策
 

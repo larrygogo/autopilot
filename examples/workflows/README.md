@@ -42,9 +42,10 @@ cp -r examples/workflows/doc_gen/ ~/.autopilot/workflows/doc_gen/
 
 design → review → develop → code_review → submit_pr，每个 phase 就地内联 agent 配置。适合作为派生自定义 PR 交付管线的精简起点。
 
-### artifact — 产物交付（探针，dogfood 中）
+### artifact — 产物交付（v2 R5 正式形态）
 
-produce（`gate: true` 人工验收，驳回意见喂回重做）→ deliver（归档到 `AUTOPILOT_HOME/deliverables/<reqId>/<taskId>/`）。非 PR 交付形态的零内核改动探针，为「交付物抽象」P0 收集实测痛点（设计基准与反馈清单见 `docs/superpowers/specs/2026-06-12-deliverable-abstraction-design.md`）。单库需求用。
+produce（agent 产出到沙盒 `deliverables/`）→ deliver（`deliverArtifacts` promote 到需求 `runtime/requirements/<reqId>/deliveries/round-<N>/` 并落 `requirement_deliveries` 表）。验收在需求级：run 完成后需求转 awaiting_review，Web 验收卡 / CLI `req accept|reject` 人工通过或驳回（驳回 → fix_revision 修复轮重做产物 promote round+1）。声明层 `requires: {git: "optional"}` + `delivers: artifacts` —— 无代码库需求也能走完整闭环。
+（探针期的 produce gate hack 与 `AUTOPILOT_HOME/deliverables/` 归档已废弃；老用户同步：`autopilot workflow sync artifact --apply`。设计基准见 `docs/superpowers/specs/2026-06-12-deliverable-abstraction-design.md`。）
 
 ## 引擎能力演示（教学 fixture）
 

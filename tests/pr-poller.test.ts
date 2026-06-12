@@ -9,6 +9,7 @@ import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
+import { up as migrate046 } from "../src/migrations/046-requirement-deliveries";
 import { _setDbForTest } from "../src/core/db";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
@@ -36,6 +37,7 @@ describe("pr-poller pollOne", () => {
     migrate021(db);
     migrate024(db);
     migrate033(db);
+    migrate046(db);
     _setDbForTest(db);
     createProject({ id: "proj-001", name: "test-proj" });
     createWorkspace({
@@ -58,6 +60,7 @@ describe("pr-poller pollOne", () => {
   beforeEach(() => {
     db.run("DELETE FROM requirement_comments WHERE kind = 'feedback'");
     db.run("DELETE FROM requirements");
+    db.run("DELETE FROM requirement_deliveries");
   });
 
   afterEach(() => {
@@ -88,6 +91,26 @@ describe("pr-poller pollOne", () => {
       stderr: "",
     });
   }
+
+  it("artifacts 交付（有 deliveries 无 PR）→ 静默 skip：不调 gh、状态不变（v2 R5）", async () => {
+    const id = setupReqAwaitingReview();
+    updateRequirement(id, { pr_number: null, pr_url: null }); // 无可跟踪 PR
+    db.run(
+      "INSERT INTO requirement_deliveries (id, requirement_id, task_id, round, path, summary, created_at) VALUES (?, ?, NULL, 1, 'deliveries/round-1', NULL, ?)",
+      ["dlv-poller-1", id, Date.now()],
+    );
+    let ghCalled = 0;
+    _setGhRunnerForTest(async () => {
+      ghCalled++;
+      return { exitCode: 1, stdout: "", stderr: "不应被调用" };
+    });
+
+    await pollOne(id, "gh");
+
+    expect(ghCalled).toBe(0);
+    expect(getRequirementById(id)?.status).toBe("awaiting_review");
+    expect(listFeedbacks(id).length).toBe(0);
+  });
 
   it("PR merged → setStatus(done) + 不注入反馈", async () => {
     const id = setupReqAwaitingReview();

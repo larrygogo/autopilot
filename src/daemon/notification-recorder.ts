@@ -15,6 +15,8 @@ import type { AutopilotEvent } from "../core/events";
 import { getTask } from "../core/db";
 import { getDb } from "../core/db";
 import { getRequirementById } from "../core/requirements";
+import { listSubPrs } from "../core/requirement-sub-prs";
+import { hasDeliveries } from "../core/requirement-deliveries";
 import { createNotification, pruneNotifications } from "../core/notifications";
 import type { CreateNotificationInput } from "../core/notifications";
 import {
@@ -81,17 +83,36 @@ function onTaskTransition(event: AutopilotEvent): void {
 function onReqStatusChanged(event: AutopilotEvent): void {
   if (event.type !== "requirement:status-changed") return;
   const { id, to } = event.payload;
-  if (to !== "awaiting_approval") return;
-  const req = getRequirementById(id);
-  if (!req) return;
-  record({
-    type: "requirement_awaiting_approval",
-    title: "需求等待审批",
-    body: req.title,
-    related: { type: "requirement", id },
-    context: notificationContextForRequirement(id),
-    actions: [{ intent: { kind: "view_requirement", requirementId: id }, kind: "primary" }],
-  });
+  if (to === "awaiting_approval") {
+    const req = getRequirementById(id);
+    if (!req) return;
+    record({
+      type: "requirement_awaiting_approval",
+      title: "需求等待审批",
+      body: req.title,
+      related: { type: "requirement", id },
+      context: notificationContextForRequirement(id),
+      actions: [{ intent: { kind: "view_requirement", requirementId: id }, kind: "primary" }],
+    });
+    return;
+  }
+  // artifacts 交付的验收时刻（v2 R5）：无 PR 时 awaiting_review 没有 poller 自动收口，
+  // 人不来点「验收通过/驳回」流程就停摆 —— 必须通知。PR 交付不通知（merge 由 poller
+  // 自动判定，验收信号在 GitHub，通知反而是噪音；PR 路径零变化）。文案不提 PR。
+  if (to === "awaiting_review") {
+    const req = getRequirementById(id);
+    if (!req) return;
+    const hasPr = (req.pr_number ?? 0) > 0 || listSubPrs(id).some((sp) => sp.pr_number > 0);
+    if (hasPr || !hasDeliveries(id)) return;
+    record({
+      type: "requirement_awaiting_review",
+      title: "交付物等待验收",
+      body: req.title,
+      related: { type: "requirement", id },
+      context: notificationContextForRequirement(id),
+      actions: [{ intent: { kind: "view_requirement", requirementId: id }, kind: "primary" }],
+    });
+  }
 }
 
 function onActiveQuestionChanged(event: AutopilotEvent): void {

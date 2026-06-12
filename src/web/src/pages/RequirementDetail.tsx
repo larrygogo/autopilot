@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { PAGE_W } from "@/lib/layout";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion, Bot, UserRound } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion, Bot, UserRound, Download, Package } from "lucide-react";
+import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type RequirementDelivery, type DeliveryFileEntry, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
 import { AttachmentUploader } from "@/components/AttachmentUploader";
 import { RequirementWorkspacePicker } from "@/components/RequirementWorkspacePicker";
 import { AttachmentList } from "@/components/AttachmentList";
@@ -429,7 +429,9 @@ export function RequirementDetail() {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [selectedStep, setSelectedStep] = useState<ReqStep | null>(null);
   const [statusLogs, setStatusLogs] = useState<RequirementStatusLog[]>([]);
-  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string }[]>([]);
+  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string; requires_git?: boolean | "optional"; delivers?: string }[]>([]);
+  const [deliveries, setDeliveries] = useState<RequirementDelivery[]>([]);
+  const [deliveryFiles, setDeliveryFiles] = useState<{ round: number; files: DeliveryFileEntry[] } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -439,7 +441,7 @@ export function RequirementDetail() {
     if (!id) return;
     if (!opts.silent) setLoading(true);
     try {
-      const [data, repoList, sub, qs, rd, slogs, atts] = await Promise.all([
+      const [data, repoList, sub, qs, rd, slogs, atts, dels] = await Promise.all([
         api.getRequirement(id),
         api.listWorkspaces(),
         api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
@@ -447,6 +449,7 @@ export function RequirementDetail() {
         api.getClarifierRound(id).catch(() => null),
         api.listRequirementStatusLogs(id).catch(() => [] as RequirementStatusLog[]),
         api.listAttachments(id).catch(() => [] as Attachment[]),
+        api.listRequirementDeliveries(id).catch(() => [] as RequirementDelivery[]),
       ]);
       setReq(data.requirement);
       setFeedbacks(data.feedbacks);
@@ -458,6 +461,13 @@ export function RequirementDetail() {
       setRound(rd);
       setStatusLogs(slogs);
       setAttachments(atts);
+      setDeliveries(dels);
+      // artifacts 验收卡：最新轮文件列表（无交付记录则清空）
+      if (dels.length > 0) {
+        api.listDeliveryFiles(id).then(setDeliveryFiles).catch(() => setDeliveryFiles(null));
+      } else {
+        setDeliveryFiles(null);
+      }
     } catch (e: unknown) {
       const msg = (e as Error)?.message ?? String(e);
       // 需求不存在（已删除 / 链接失效）：不弹 toast，由页面空态承接；其他错误（网络等）仍 toast
@@ -559,7 +569,7 @@ export function RequirementDetail() {
   // 工作流选项（编辑期下拉用），一次性拉取
   useEffect(() => {
     api.listWorkflows()
-      .then((ws) => setWorkflowOptions(ws.map((w) => ({ name: w.name, label: w.label, description: w.description ?? "" }))))
+      .then((ws) => setWorkflowOptions(ws.map((w) => ({ name: w.name, label: w.label, description: w.description ?? "", requires_git: w.requires_git, delivers: w.delivers }))))
       .catch(() => { /* 拉不到时下拉退化为只显示当前值 */ });
   }, []);
 
@@ -1064,6 +1074,64 @@ export function RequirementDetail() {
     </Card>
   ) : null;
 
+  // artifacts 交付（v2 R5）：有交付物记录且无任何交付 PR（hasPr 优先——混合交付不支持，PR 赢）
+  const hasAnyPr = !!req.pr_url || (req.pr_number ?? 0) > 0 || subPrs.length > 0;
+  const isArtifactsDelivery = deliveries.length > 0 && !hasAnyPr;
+  const latestDelivery = deliveries.length > 0 ? deliveries[deliveries.length - 1] : null;
+
+  const fmtSize = (n: number) =>
+    n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`;
+
+  // 交付物验收卡：最新轮文件列表 + 下载（只列不渲染——范围控制）。通过/驳回动作在
+  // 「审查与修复」卡头部（验收通过按钮）与底部输入框（驳回 = 发布审查意见），与 PR 验收同管道。
+  const deliveriesCard = latestDelivery ? (
+    <Card>
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+        <Package className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-sm font-medium">交付物</span>
+        <Badge variant="secondary">第 {latestDelivery.round} 轮</Badge>
+        <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+          {new Date(latestDelivery.created_at).toLocaleString()}
+        </span>
+      </div>
+      <div className="space-y-3 p-5">
+        {latestDelivery.summary && (
+          <div className="scrollbar-thin max-h-[280px] overflow-auto rounded-md border border-border bg-muted/30 p-3">
+            <MarkdownView content={latestDelivery.summary} />
+          </div>
+        )}
+        {deliveryFiles && deliveryFiles.round === latestDelivery.round && deliveryFiles.files.length > 0 ? (
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {deliveryFiles.files.map((f) => (
+              <li key={f.path} className="flex items-center gap-3 px-3 py-2 font-mono text-xs">
+                <span className="min-w-0 flex-1 truncate" title={f.path}>{f.path}</span>
+                <span className="shrink-0 text-muted-foreground">{fmtSize(f.size)}</span>
+                <a
+                  href={api.deliveryDownloadUrl(req.id, latestDelivery.round, f.path)}
+                  className="inline-flex shrink-0 items-center gap-1 text-accent hover:underline"
+                  title="下载此文件"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  下载
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="font-mono text-xs text-muted-foreground">
+            交付目录暂无可列出的文件（可能已被清理或尚未同步）。
+          </p>
+        )}
+        {deliveries.length > 1 && (
+          <p className="font-mono text-[10px] text-muted-foreground">
+            共 {deliveries.length} 轮交付（驳回重交递增）；历史轮文件在
+            runtime/requirements/{req.id}/deliveries/ 下。
+          </p>
+        )}
+      </div>
+    </Card>
+  ) : null;
+
   // 审查与修复对话卡（验收步专属）：时间线（审查意见 / GitHub review / Agent 修复回应 +
   // 进行中的修复进度条目）+ 底部发布输入框 —— 每发一条意见，对应的「正在做什么 / 进度 /
   // 结果」都回到同一个时间线里，不再分散在执行页的多个卡片。
@@ -1102,8 +1170,9 @@ export function RequirementDetail() {
       <div className="p-5">
         {feedbacks.length === 0 && req.status !== "fix_revision" ? (
           <p className="font-mono text-xs text-muted-foreground">
-            还没有审查记录。发布审查意见后 Agent 会按意见修复并在此回应；GitHub 上的
-            Request Changes 与 CI 失败也会自动进入这里。
+            {isArtifactsDelivery
+              ? "还没有审查记录。查看上方交付物后：通过点「验收通过」；不满意发布审查意见，Agent 会按意见重做产物并在此回应。"
+              : "还没有审查记录。发布审查意见后 Agent 会按意见修复并在此回应；GitHub 上的 Request Changes 与 CI 失败也会自动进入这里。"}
           </p>
         ) : (
           <ol className="space-y-2.5">
@@ -1152,7 +1221,9 @@ export function RequirementDetail() {
                   )}
                 </div>
                 <p className="font-mono text-[11px] text-muted-foreground">
-                  按上方最新意见在交付分支上修复，完成后 push 更新 PR 并在此回应总结
+                  {isArtifactsDelivery
+                    ? "按上方最新意见重做产物，完成后交付新一轮（round+1）并在此回应总结"
+                    : "按上方最新意见在交付分支上修复，完成后 push 更新 PR 并在此回应总结"}
                   {req.task_id ? "；实时进度与日志见下方「执行记录」" : ""}
                 </p>
               </li>
@@ -1469,7 +1540,10 @@ export function RequirementDetail() {
         )}
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           <Badge variant={STATUS_VARIANT[req.status] ?? "outline"}>
-            {STATUS_LABEL[req.status] ?? req.status}
+            {/* artifacts 交付（无 PR）：验收信号 = 本页人工通过/驳回，不是 PR review */}
+            {req.status === "awaiting_review" && isArtifactsDelivery
+              ? "待验收"
+              : STATUS_LABEL[req.status] ?? req.status}
           </Badge>
           {project && (
             <Link
@@ -1652,25 +1726,65 @@ export function RequirementDetail() {
             const readonly = pos === "past";
 
             if (activeStep === "clarify") {
-              // drafting = 澄清未开始：先确认代码库（澄清 agent 在其浅 clone 中调查），再显式开始
+              // drafting = 澄清未开始：先确认工作流 + 代码库（澄清 agent 在其浅 clone 中调查），再显式开始
               if (req.status === "drafting" && !readonly) {
-                // 守卫与 RPC 同口径：代码库集合非空（workspace_id 只是缓存列）
+                // 守卫与 RPC 同口径：代码库集合非空（workspace_id 只是缓存列）；
+                // 所选工作流 requires.git 非 true（"optional"/false）时允许空集确认（v2 R5 无库闭环）
                 const hasWorkspaces = (req.workspace_ids?.length ?? 0) > 0 || !!req.workspace_id;
+                const wfDecl = workflowOptions.find((w) => w.name === (req.workflow ?? "dev"));
+                const gitOptional = !!wfDecl && wfDecl.requires_git !== undefined && wfDecl.requires_git !== true;
                 return (
                   <>
+                    {/* 工作流先于代码库确认：requires.git 由所选工作流决定（业务标签 + 内核名叠加） */}
+                    <Card className="p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="shrink-0 text-sm font-semibold">工作流</span>
+                        <Select
+                          value={req.workflow ?? "dev"}
+                          onValueChange={(v) => void changeWorkflow(v)}
+                          disabled={savingWorkflow || actionBusy || workflowOptions.length === 0}
+                        >
+                          <SelectTrigger className="h-9 w-auto min-w-[170px] gap-2 bg-background text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {workflowOptions.length === 0 && (
+                              <SelectItem value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</SelectItem>
+                            )}
+                            {workflowOptions.map((w) => (
+                              <SelectItem key={w.name} value={w.name}>
+                                {w.label ? `${w.label}（${w.name}）` : w.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {gitOptional ? "此工作流不要求代码库" : "此工作流需要代码库"}
+                          {wfDecl?.delivers ? ` · 交付 ${wfDecl.delivers === "pr" ? "PR" : wfDecl.delivers}` : ""}
+                        </span>
+                      </div>
+                    </Card>
                     <RequirementWorkspacePicker
                       requirement={req}
                       workspaces={projectCodebases}
                       disabled={actionBusy}
+                      allowEmpty={gitOptional}
+                      emptyHint={`工作流「${wfDecl?.label ?? wfDecl?.name ?? req.workflow ?? "dev"}」不要求代码库`}
                       onChanged={reloadWorkspaces}
                     />
                     <Button
                       className="w-full"
                       onClick={startClarify}
-                      disabled={actionBusy || !hasWorkspaces}
-                      title={!hasWorkspaces ? "请先选择代码库（澄清基于代码库的克隆进行）" : undefined}
+                      disabled={actionBusy || (!hasWorkspaces && !gitOptional)}
+                      title={!hasWorkspaces && !gitOptional ? "请先选择代码库（澄清基于代码库的克隆进行）" : undefined}
                     >
-                      {actionBusy ? "处理中…" : "确认代码库，开始 AI 澄清 →"}
+                      {actionBusy
+                        ? "处理中…"
+                        : hasWorkspaces
+                          ? "确认代码库，开始 AI 澄清 →"
+                          : gitOptional
+                            ? "确认无代码库，开始 AI 澄清 →"
+                            : "确认代码库，开始 AI 澄清 →"}
                     </Button>
                     {specCard}
                     {attachmentSection}
@@ -1839,10 +1953,13 @@ export function RequirementDetail() {
             if (activeStep === "review") {
               return (
                 <>
-                  {/* 验收步：审查与修复对话置顶（头部即决策条：PR 链接 + 验收通过按钮），
-                      改动 diff 在下方供对照。id=feedback-section 是 NextStepCTA 的滚动锚 */}
+                  {/* 验收步：artifacts 交付时交付物卡置顶（文件列表 + 下载），通过/驳回在下方
+                      「审查与修复」卡（与 PR 验收同管道）；PR 交付时审查与修复对话置顶
+                      （头部即决策条：PR 链接 + 验收通过按钮），改动 diff 在下方供对照。
+                      id=feedback-section 是 NextStepCTA 的滚动锚 */}
+                  {isArtifactsDelivery && deliveriesCard}
                   {reviewThreadCard}
-                  {req.task_id ? (
+                  {isArtifactsDelivery ? null : req.task_id ? (
                     <TaskFileDiffsCard taskId={req.task_id} reloadKey={req.status} />
                   ) : (
                     <Card className="p-6 text-center text-sm text-muted-foreground">无关联执行，没有可验收的改动。</Card>
@@ -1873,6 +1990,8 @@ export function RequirementDetail() {
                     </div>
                   </Card>
                 )}
+                {/* artifacts 交付：完成步常驻交付物卡（交付物随需求保留，沙盒清理不影响下载） */}
+                {isArtifactsDelivery && deliveriesCard}
                 {req.task_id && <SandboxBrowser taskId={req.task_id} taskStatus={undefined} />}
               </>
             );

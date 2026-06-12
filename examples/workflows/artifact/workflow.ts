@@ -1,23 +1,26 @@
 /**
- * artifact 探针工作流：非 PR 交付的最小闭环（零内核改动）。
+ * artifact 工作流：非 PR 交付的最小闭环（v2 R5 正式形态，原探针已升级）。
  *
- * produce（gate 人工验收，驳回重做）→ deliver（归档出沙盒）。
- * 归档目录 AUTOPILOT_HOME/deliverables/<reqId>/<taskId>/ ——
- * 不能放 runtime/requirements/<reqId>/（需求 done 时整目录被清），
- * 也不能留任务沙盒（done 即清 workspace）。
+ * produce（agent 产出到沙盒 deliverables/）→ deliver（deliverArtifacts promote 到需求
+ * runtime/requirements/<reqId>/deliveries/round-<N>/ 并落 requirement_deliveries 表）。
+ *
+ * 验收不在 workflow 内（探针期的 produce gate hack 已移除）：run done 后框架判定
+ * hasDeliveries → 需求转 awaiting_review，由 Web 验收卡 / CLI `req accept|reject` 人工
+ * 通过（done）或驳回（fix_revision → __fix run artifacts 模式重做产物 promote round+1）。
  *
  * 设计基准：docs/superpowers/specs/2026-06-12-deliverable-abstraction-design.md
+ *          + 2026-06-12-requirement-centric-architecture-v2.md（§3 acceptance 执行器）
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { AUTOPILOT_HOME } from "@autopilot/index";
 import { getTask } from "@autopilot/core/db";
 import { transition } from "@autopilot/core/state-machine";
 import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { getTaskArtifactsDir } from "@autopilot/core/sandbox";
+import { deliverArtifacts } from "@autopilot/core/requirement-deliveries";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 
 const DELIVERABLES_DIR = "deliverables";
@@ -35,21 +38,6 @@ function sandboxRoot(task: NonNullable<ReturnType<typeof getTask>>): string {
   return root;
 }
 
-function readLastUserDecision(task: ReturnType<typeof getTask>): {
-  phase: string;
-  decision: string;
-  note: string;
-  ts: string;
-} | null {
-  const raw = task?.["last_user_decision"] as string | undefined;
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
 function phaseDir(taskId: string, workflowName: string, phaseName: string): string {
   const wf = getWorkflow(workflowName);
   if (!wf) throw new Error(`workflow not found: ${workflowName}`);
@@ -61,10 +49,10 @@ function phaseDir(taskId: string, workflowName: string, phaseName: string): stri
 }
 
 // ──────────────────────────────────────────────
-// produce：agent 产出交付物，gate 挂起等人工验收
+// produce：agent 产出交付物到沙盒 deliverables/
 // ──────────────────────────────────────────────
 //
-// 末尾不主动 transition——runner 检测到 gate:true 自动挂到 awaiting_produce。
+// 末尾不手动 transition：runner 在阶段函数返回后自动 complete_trigger 推进 deliver。
 
 export async function run_produce(taskId: string): Promise<void> {
   const task = getTask(taskId);
@@ -74,26 +62,16 @@ export async function run_produce(taskId: string): Promise<void> {
   const requirement = ((task["requirement"] as string | undefined) ?? "").trim();
   if (!requirement) throw new Error("任务 requirement 字段为空，请在创建任务时提供需求描述");
 
-  // 人工 gate 驳回后重做：把驳回意见喂回 prompt
-  let rejectionHistory = "";
-  const decision = readLastUserDecision(task);
-  if (decision?.phase === "produce" && decision.decision === "reject" && decision.note) {
-    rejectionHistory =
-      `\n\n## 上一轮人工驳回意见（${decision.ts}）\n${decision.note}\n\n` +
-      `沙盒里 ${DELIVERABLES_DIR}/ 还保留着上一轮产物。请针对意见增量修改，不要推倒重来（除非意见明确要求）。`;
-  }
-
   const prompt =
     `你是一位多面手创作者（设计 / 前端 / 文档均可）。请根据需求产出交付物。\n\n` +
     `## 需求\n${requirement}\n\n` +
-    `## 工作目录\n当前目录是参考仓库的克隆，仅供阅读参考。**不要修改仓库已有文件，不要 git commit / push。**\n\n` +
+    `## 工作目录\n当前目录下若有代码仓库克隆，仅供阅读参考。**不要修改仓库已有文件，不要 git commit / push。**\n\n` +
     `## 交付规则\n` +
     `1. 所有交付物写入 \`${DELIVERABLES_DIR}/\` 目录（不存在则创建）\n` +
     `2. 网页 demo = 自包含静态文件（单 html 或 html+css+js），双击可开，不依赖构建工具或服务器\n` +
     `3. 设计图 = svg，或可在浏览器直接打开的 html 画布\n` +
     `4. 最后写 \`${DELIVERABLES_DIR}/SUMMARY.md\`：交付了什么、每个文件是什么、怎么打开查看\n` +
-    `5. 完成前自查：SUMMARY.md 列出的每个文件都真实存在且可打开` +
-    rejectionHistory;
+    `5. 完成前自查：SUMMARY.md 列出的每个文件都真实存在且可打开`;
 
   const agent = agentForPhase(task.workflow, "produce");
   const result = await agent.run(prompt, { cwd: root, timeout: 1_800_000 });
@@ -108,11 +86,10 @@ export async function run_produce(taskId: string): Promise<void> {
   if (!existsSync(join(root, DELIVERABLES_DIR))) {
     throw new Error(`produce 完成但沙盒里没有 ${DELIVERABLES_DIR}/ 目录——agent 未按约定产出`);
   }
-  // ↓ 不 transition：runner 自动 await_produce → awaiting_produce 等人工决断
 }
 
 // ──────────────────────────────────────────────
-// deliver：机械归档（无 agent），把产物抄出沙盒
+// deliver：机械交付（无 agent），promote 产物到需求 deliveries/ 并落表
 // ──────────────────────────────────────────────
 
 export async function run_deliver(taskId: string): Promise<void> {
@@ -122,17 +99,19 @@ export async function run_deliver(taskId: string): Promise<void> {
   const src = join(sandboxRoot(task), DELIVERABLES_DIR);
   if (!existsSync(src)) throw new Error(`找不到产物目录：${src}`);
 
-  const reqId = (task["requirement_id"] as string | undefined) ?? "no-req";
-  const dest = join(AUTOPILOT_HOME, "deliverables", reqId, taskId);
-  rmSync(dest, { recursive: true, force: true });
-  mkdirSync(dest, { recursive: true });
-  cpSync(src, dest, { recursive: true });
+  // SUMMARY.md 作本轮交付摘要（验收 UI 展示）；读不到不阻塞
+  let summary: string | undefined;
+  try {
+    summary = readFileSync(join(src, "SUMMARY.md"), "utf-8").slice(0, 2000);
+  } catch { /* ignore */ }
 
-  const fileCount = readdirSync(dest, { recursive: true }).length;
+  // promote 出沙盒：交付物生命周期属于需求；round = 现有 max+1（驳回重交递增）
+  const delivery = deliverArtifacts(taskId, src, summary);
+
   const wf = getWorkflow(task.workflow);
   if (!wf) throw new Error(`工作流不存在：${task.workflow}`);
   transition(taskId, "deliver_complete", {
     transitions: buildTransitions(wf),
-    note: `产物已归档：${dest}（${fileCount} 个条目，含目录）`,
+    note: `产物已交付：需求 ${delivery.requirement_id} 第 ${delivery.round} 轮（${delivery.path}/），等待需求级人工验收`,
   });
 }

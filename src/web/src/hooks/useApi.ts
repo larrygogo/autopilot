@@ -270,6 +270,10 @@ export const api = {
         description: string;
         source?: "db" | "file";
         derives_from?: string | null;
+        /** 声明层（v2 R5）：git 输入要求（含 sandbox.git 缺省派生） */
+        requires_git?: boolean | "optional";
+        /** 声明层（v2 R5）：产出形态（"pr"/"artifacts"…，缺省 = 事实推断） */
+        delivers?: string;
       }>
     >("workflows.list"),
   // [WS-RPC] workflows.get
@@ -699,6 +703,21 @@ export const api = {
   listRequirementSubPrs: (id: string) =>
     requestRpc<{ sub_prs: RequirementSubPr[] }>("requirements.subPrs", { id }).then((r) => r.sub_prs),
 
+  // [WS-RPC] requirements.deliveries —— artifacts 交付轮次记录（验收卡用）
+  listRequirementDeliveries: (id: string) =>
+    requestRpc<{ deliveries: RequirementDelivery[] }>("requirements.deliveries", { id }).then((r) => r.deliveries),
+
+  // [WS-RPC] requirements.listDeliveryFiles —— 某验收轮文件列表（缺省最新轮）
+  listDeliveryFiles: (id: string, round?: number) =>
+    requestRpc<{ round: number; files: DeliveryFileEntry[] }>(
+      "requirements.listDeliveryFiles",
+      round !== undefined ? { id, round } : { id },
+    ),
+
+  /** 交付物单文件下载 URL（HTTP 二进制通道） */
+  deliveryDownloadUrl: (id: string, round: number, path: string) =>
+    `/api/requirements/${encodeURIComponent(id)}/deliveries/download?round=${round}&path=${encodeURIComponent(path)}`,
+
   // [WS-RPC] requirements.specRevisions
   listSpecRevisions: (id: string) =>
     requestRpc<{ revisions: SpecRevision[] }>("requirements.specRevisions", { id }).then((r) => r.revisions),
@@ -1056,8 +1075,28 @@ export interface Requirement {
   status_before_terminal: string | null;
   /** 执行用的工作流名；null = 未显式选择（调度回退默认 dev）。审批后随内容冻结 */
   workflow: string | null;
+  /** 输入形态确认（迁移 045）：null=未确认 / 'git'=基于代码库 / 'none'=确认无库 */
+  input_mode?: string | null;
   created_at: number;
   updated_at: number;
+}
+
+/** 需求交付物轮次记录（requirement_deliveries，artifacts 验收用） */
+export interface RequirementDelivery {
+  id: string;
+  requirement_id: string;
+  task_id: string | null;
+  round: number;
+  /** 相对需求运行时目录的落点（deliveries/round-<N>） */
+  path: string;
+  summary: string | null;
+  created_at: number;
+}
+
+export interface DeliveryFileEntry {
+  path: string;
+  size: number;
+  mtime: number;
 }
 
 export interface RequirementFeedback {

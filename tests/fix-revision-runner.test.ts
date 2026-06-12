@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
@@ -23,6 +23,7 @@ import { up as migrate005 } from "../src/migrations/005-requirements";
 import { up as migrate006 } from "../src/migrations/006-submodules";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
+import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate018 } from "../src/migrations/018-task-phase-events";
 import { up as migrate019 } from "../src/migrations/019-task-requirement-id";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
@@ -34,6 +35,8 @@ import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { up as migrate038 } from "../src/migrations/038-sub-pr-review-watermark";
 import { up as migrate039 } from "../src/migrations/039-sub-pr-ci-watermark";
 import { up as migrate044 } from "../src/migrations/044-task-run-columns";
+import { up as migrate045 } from "../src/migrations/045-requirement-input-mode";
+import { up as migrate046 } from "../src/migrations/046-requirement-deliveries";
 import { _setDbForTest, createTask, getTask } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createWorkspace } from "../src/core/workspaces";
@@ -46,6 +49,7 @@ import {
 } from "../src/core/requirements";
 import { appendFeedback, listFeedbacks } from "../src/core/requirement-feedbacks";
 import { appendSubPr } from "../src/core/requirement-sub-prs";
+import { deliverArtifacts, listDeliveries, getDeliveryRoundDir } from "../src/core/requirement-deliveries";
 import { getWorkflow, listWorkflows, reload, _clearRegistry } from "../src/core/registry";
 import { getTaskRoot, getTaskSandbox, _clearTaskRootCacheForTest } from "../src/core/sandbox";
 import { executePhase } from "../src/core/runner";
@@ -65,9 +69,9 @@ let db: Database;
 let tmpHome: string;
 
 const MIGRATIONS = [
-  migrate001, migrate004, migrate005, migrate006, migrate007, migrate008,
+  migrate001, migrate004, migrate005, migrate006, migrate007, migrate008, migrate009,
   migrate018, migrate019, migrate021, migrate024, migrate028, migrate029,
-  migrate030, migrate033, migrate038, migrate039, migrate044,
+  migrate030, migrate033, migrate038, migrate039, migrate044, migrate045, migrate046,
 ];
 
 let n = 0;
@@ -293,6 +297,108 @@ describe("fix run（标准管线端到端）", () => {
     const r = getRequirementById(fx.reqId)!;
     expect(getTask(fixTaskId)!.status).toBe("failed");
     expect(r.status_reason).toContain("agent 崩了");
+  });
+});
+
+// ──────────────────────────────────────────────
+// artifacts 修复模式（v2 R5：无 PR、有 deliveries → 重做产物 promote round+1）
+// ──────────────────────────────────────────────
+
+/** artifacts 夹具：无库需求（项目无 workspace，不会自动派生）、prev run 已交付 round-1、无 PR */
+function makeArtifactFixture(): { reqId: string; prevTaskId: string } {
+  const reqId = nextRequirementId();
+  createRequirement({ id: reqId, project_id: `proj-fx${n}`, workspace_id: null, title: "做个 demo" });
+  for (const s of ["clarifying", "ready", "queued", "running", "awaiting_review"]) {
+    setRequirementStatus(reqId, s);
+  }
+  const prevTaskId = `tkart${String(n).padStart(2, "0")}`;
+  createTask({
+    id: prevTaskId, title: "做个 demo", workflow: "artifact", initialStatus: "done",
+    requirementId: reqId, kind: "execution", seq: 1,
+  });
+  updateRequirement(reqId, { task_id: prevTaskId });
+  // round-1 交付（经正式 promote 通道）
+  const src = join(tmpHome, `art-src-${n}`);
+  mkdirSync(src, { recursive: true });
+  writeFileSync(join(src, "index.html"), "<html>v1</html>", "utf-8");
+  writeFileSync(join(src, "SUMMARY.md"), "首轮交付", "utf-8");
+  deliverArtifacts(prevTaskId, src, "首轮交付");
+  return { reqId, prevTaskId };
+}
+
+describe("artifacts 修复模式（fix run 重做产物）", () => {
+  it("端到端：驳回 → fix run 种入上一轮产物 → 重做 → promote round-2 → 回 awaiting_review", async () => {
+    const fx = makeArtifactFixture();
+    appendFeedback({ requirement_id: fx.reqId, source: "manual", body: "标题颜色改成红色" });
+
+    let seenPrompt = "";
+    let seenCwd = "";
+    let preSeeded = false;
+    _setFixFnForTest(async (prompt, cwd) => {
+      seenPrompt = prompt;
+      seenCwd = cwd;
+      // 框架已把上一轮产物种入 cwd/deliverables/（增量修改语义）
+      preSeeded = readFileSync(join(cwd, "deliverables", "index.html"), "utf-8") === "<html>v1</html>";
+      writeFileSync(join(cwd, "deliverables", "index.html"), "<html>v2-red</html>", "utf-8");
+      writeFileSync(join(cwd, "deliverables", "SUMMARY.md"), "标题已改红", "utf-8");
+      return "已按反馈把标题改成红色";
+    });
+    enableBus();
+    initRequirementTaskBridge();
+
+    setRequirementStatus(fx.reqId, "fix_revision"); // 事件触发 fix run（无 .worktree.json 也不 failed）
+
+    await waitFor(() => getRequirementById(fx.reqId)?.status === "awaiting_review", "需求回 awaiting_review");
+
+    const req = getRequirementById(fx.reqId)!;
+    const fixTask = getTask(req.task_id!)!;
+    expect(fixTask.kind).toBe("fix");
+    expect(fixTask.status).toBe("done");
+
+    // artifacts 模式 prompt：反馈 + 重做产物指引，无 git push 要求
+    expect(preSeeded).toBe(true);
+    expect(seenPrompt).toContain("标题颜色改成红色");
+    expect(seenPrompt).toContain("deliverables/");
+    expect(seenPrompt).not.toContain("git push");
+    expect(seenCwd).toBe(getTaskSandbox(fixTask.id));
+
+    // promote round-2：新内容落需求 deliveries/；round-1 原样保留
+    const rounds = listDeliveries(fx.reqId).map((d) => d.round);
+    expect(rounds).toEqual([1, 2]);
+    expect(readFileSync(join(getDeliveryRoundDir(fx.reqId, 2), "index.html"), "utf-8")).toBe("<html>v2-red</html>");
+    expect(readFileSync(join(getDeliveryRoundDir(fx.reqId, 1), "index.html"), "utf-8")).toBe("<html>v1</html>");
+
+    // 修复总结落需求评论（带轮次）
+    const agentFb = listFeedbacks(fx.reqId).find((f) => f.from_role === "agent");
+    expect(agentFb?.body).toContain("修复完成 · 第 2 轮");
+    expect(agentFb?.body).toContain("已按反馈把标题改成红色");
+  });
+
+  it("agent 未产出 deliverables/ → fix run 失败（不静默空交付）", async () => {
+    const fx = makeArtifactFixture();
+    _setFixFnForTest(async (_prompt, cwd) => {
+      // 把种入的产物删光，模拟 agent 清空了产物目录
+      rmSync(join(cwd, "deliverables"), { recursive: true, force: true });
+      return "啥也没做";
+    });
+    enableBus();
+    initRequirementTaskBridge();
+
+    setRequirementStatus(fx.reqId, "fix_revision");
+
+    // 第一次失败留重试；直接对 fix run 再跑一次同指纹失败 → 确定性止损 → 需求 failed
+    await waitFor(() => {
+      const r = getRequirementById(fx.reqId);
+      if (!r?.task_id || r.task_id === fx.prevTaskId) return false;
+      const t = getTask(r.task_id);
+      return !!t && ((t.failure_count as number | undefined) ?? 0) >= 1;
+    }, "fix run 第一次失败落计数");
+    const fixTaskId = getRequirementById(fx.reqId)!.task_id!;
+    await executePhase(fixTaskId, "fix");
+    await waitFor(() => getRequirementById(fx.reqId)?.status === "failed", "需求 failed");
+    expect(getRequirementById(fx.reqId)!.status_reason).toContain("未按约定产出");
+    // 没有第二轮交付
+    expect(listDeliveries(fx.reqId).map((d) => d.round)).toEqual([1]);
   });
 });
 

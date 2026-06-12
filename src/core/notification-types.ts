@@ -12,6 +12,7 @@ export type NotificationType =
   | "task_cancelled"
   | "task_await_review"
   | "requirement_awaiting_approval"
+  | "requirement_awaiting_review"
   | "agent_question"
   | "clarifier_error"
   | "schedule_error"
@@ -28,6 +29,7 @@ export const SEVERITY_OF: Record<NotificationType, NotificationSeverity> = {
   ci_fix_limit: "error",
   task_await_review: "action",
   requirement_awaiting_approval: "action",
+  requirement_awaiting_review: "action",
   agent_question: "action",
   task_done: "info",
   task_cancelled: "info",

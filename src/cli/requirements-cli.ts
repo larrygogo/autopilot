@@ -290,6 +290,63 @@ export function registerRequirementCommands(program: Command): void {
     });
 
   req
+    .command("accept <id>")
+    .description("验收通过（artifacts 交付的需求 → done；PR 交付以 GitHub merge 为准，此处拒绝）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement: r } = await client.getRequirement(id);
+        if (r.status !== "awaiting_review") {
+          console.error(`错误：需求当前状态 ${r.status}，仅 awaiting_review（待验收）可执行验收`);
+          process.exit(2);
+        }
+        // 签字处唯一：有交付 PR 的需求以 GitHub merge 为验收信号（全部 PR merge 后 poller 自动 done）
+        const { sub_prs } = await client.listRequirementSubPrs(id).catch(() => ({ sub_prs: [] }));
+        const hasPr = (r.pr_number ?? 0) > 0 || !!r.pr_url || sub_prs.some((sp) => sp.pr_number > 0);
+        if (hasPr) {
+          console.error("错误：此需求交付 PR，验收以 GitHub merge 为准（签字处唯一）。");
+          console.error(`请去 merge 交付 PR，全部 merge 后需求自动转 done。${r.pr_url ? `\n  主 PR：${r.pr_url}` : ""}`);
+          process.exit(2);
+        }
+        const { requirement } = await client.transitionRequirement(id, "done");
+        console.log(`✓ 需求 ${requirement.id} 验收通过，已完成`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("reject <id>")
+    .description("验收驳回：注入反馈并转 fix_revision（修复轮按反馈重做后回到待验收）")
+    .requiredOption("-m, --message <reason>", "驳回理由（会喂给修复 agent）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string; message: string }) => {
+      const reason = opts.message.trim();
+      if (!reason) {
+        console.error("错误：驳回理由不能为空");
+        process.exit(1);
+      }
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement: r } = await client.getRequirement(id);
+        if (r.status !== "awaiting_review") {
+          console.error(`错误：需求当前状态 ${r.status}，仅 awaiting_review（待验收）可驳回`);
+          process.exit(2);
+        }
+        // comments.add(kind=feedback)：daemon 在 awaiting_review 自动转 fix_revision（与 Web/PR 驳回同管道）
+        await client.addRequirementFeedback(id, reason);
+        console.log(`✓ 需求 ${id} 已驳回，修复轮将按反馈重做（进度见 autopilot req show ${id}）`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
     .command("set-title <id> <title>")
     .description("修改需求标题")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))

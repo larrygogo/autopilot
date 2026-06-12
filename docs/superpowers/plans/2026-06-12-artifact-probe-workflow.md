@@ -1,5 +1,7 @@
 # artifact 探针工作流实施计划
 
+> **状态（2026-06-12 晚）：已升级为正式形态（v2 R5）**——produce gate hack 与 `AUTOPILOT_HOME/deliverables/` 归档已废弃，交付改 `deliverArtifacts` promote 到需求 `deliveries/round-<N>/` 落表、验收改需求级 awaiting_review（Web 验收卡 / CLI `req accept|reject`）。本文仅存档探针期实施过程。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 零内核改动的 artifact 交付探针工作流——agent 产出文件到沙盒 `deliverables/`，人工 gate 验收，deliver 阶段归档到 `AUTOPILOT_HOME/deliverables/<reqId>/<taskId>/`，用真实设计图 / 网页 demo 需求收集交付物抽象 P0 的实测痛点。

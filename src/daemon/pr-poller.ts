@@ -6,6 +6,7 @@ import {
 } from "../core/requirements";
 import { createComment, nextCommentId } from "../core/requirement-comments";
 import { listSubPrs, updateSubPrWatermark, updateSubPrCiState } from "../core/requirement-sub-prs";
+import { hasDeliveries } from "../core/requirement-deliveries";
 import { getWorkspaceById } from "../core/workspaces";
 import { loadGithubConfig } from "../core/config";
 import { emit } from "../core/event-bus";
@@ -168,6 +169,9 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
     });
   }
   if (tracked.length === 0) {
+    // artifacts 交付（v2 R5）：有 deliveries 无 PR = 人工验收（Web/CLI 通过/驳回），
+    // poller 无事可做 —— 静默 skip，消除 5 分钟一条的 warn 噪音
+    if (hasDeliveries(reqId)) return;
     log.warn("requirement %s 无可跟踪 PR（pr_number/sub_prs 均空），跳过", reqId);
     return;
   }

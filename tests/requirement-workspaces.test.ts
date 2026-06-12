@@ -28,6 +28,7 @@ import { up as m031 } from "../src/migrations/031-requirement-workflow";
 import { up as m033 } from "../src/migrations/033-workspace-remote-url";
 import { up as m037 } from "../src/migrations/037-multi-workspace-per-project";
 import { up as m043 } from "../src/migrations/043-workspace-id-demote-backfill";
+import { up as m045 } from "../src/migrations/045-requirement-input-mode";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createWorkspace } from "../src/core/workspaces";
@@ -46,7 +47,7 @@ import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
 function setup(): Database {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m012, m013, m014, m015, m019, m021, m024, m025, m028, m029, m030, m031, m033, m037].forEach((fn) => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m012, m013, m014, m015, m019, m021, m024, m025, m028, m029, m030, m031, m033, m037, m045].forEach((fn) => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "项目一" });
   return db;
@@ -179,10 +180,21 @@ describe("RPC requirements.setWorkspaces", () => {
     }
   });
 
-  it("校验：空集合 / 跨项目 / 不存在", async () => {
+  it("显式空集 = 确认无库（v2 R5）：清集合 + workspace_id 置 NULL + input_mode='none'", async () => {
     const empty = await invokeRpcMethod("requirements.setWorkspaces", { id: "req-001", workspace_ids: [] });
-    expect(empty.ok).toBe(false);
+    expect(empty.ok).toBe(true);
+    const r = getRequirementById("req-001")!;
+    expect(r.workspace_id).toBe(null);
+    expect(r.input_mode).toBe("none");
+    expect(listRequirementWorkspaces("req-001").length).toBe(0);
 
+    // 重新选库 → 回 'git'
+    const back = await invokeRpcMethod("requirements.setWorkspaces", { id: "req-001", workspace_ids: ["ws-001"] });
+    expect(back.ok).toBe(true);
+    expect(getRequirementById("req-001")!.input_mode).toBe("git");
+  });
+
+  it("校验：跨项目 / 不存在", async () => {
     createProject({ id: "p2", name: "项目二" });
     mkWs("ws-100", "other", "p2");
     const crossProject = await invokeRpcMethod("requirements.setWorkspaces", {
@@ -239,9 +251,10 @@ describe("RPC requirements.setWorkspaces", () => {
     createRequirement({ id: "req-002", project_id: "p1", title: "t2", spec_md: "" });
     expect(listRequirementWorkspaces("req-002").length).toBe(0);
 
+    // dev 未注册（registry 空）→ 保守按 requires.git=true：集合空被拒（v2 R5 动态闸门）
     const denied = await invokeRpcMethod("requirements.transition", { id: "req-002", to: "clarifying" });
     expect(denied.ok).toBe(false);
-    if (!denied.ok) expect(denied.error.message).toContain("代码库集合为空");
+    if (!denied.ok) expect(denied.error.message).toContain("需要代码库");
 
     const set = await invokeRpcMethod("requirements.setWorkspaces", {
       id: "req-002", workspace_ids: ["ws-002"],
