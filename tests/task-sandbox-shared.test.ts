@@ -60,13 +60,16 @@ afterEach(() => {
 });
 
 describe("共用沙盒 · ensureTaskSandbox 建 clone（Task 1）", () => {
-  it("ensureTaskSandbox 对 git 工作流建出含源仓库内容的工作树", () => {
+  it("ensureTaskSandbox 对 git 工作流建出含源仓库内容的工作树（统一布局：单库也在 ./alias/ 子目录）", () => {
     const id = taskId("shr1");
     ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, "feat/shr1");
     const ws = getTaskSandbox(id);
-    expect(existsSync(join(ws, ".git"))).toBe(true);
-    expect(existsSync(join(ws, "README.md"))).toBe(true);
-    expect(readFileSync(join(ws, "README.md"), "utf-8")).toContain("base");
+    // 无 alias → 子目录名回退 workspace id
+    const repo = join(ws, "ws-1");
+    expect(existsSync(join(ws, ".git"))).toBe(false); // 根不再是仓库根
+    expect(existsSync(join(repo, ".git"))).toBe(true);
+    expect(existsSync(join(repo, "README.md"))).toBe(true);
+    expect(readFileSync(join(repo, "README.md"), "utf-8")).toContain("base");
   });
 });
 
@@ -93,21 +96,21 @@ describe("共用沙盒 · diff 看得到 committed + 新建改动（审计 P1 �
     const { computeDiffStat } = await import("../src/daemon/task-outcome");
     const id = taskId("shrcr");
     ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, `feat/${id}`);
-    const ws = getTaskSandbox(id);
-    const gitc = (args: string[]) => Bun.spawnSync(["git", "-C", ws, ...args], { stdout: "pipe", stderr: "pipe" });
+    const repo = join(getTaskSandbox(id), "ws-1"); // 统一布局：仓库在 ./<alias|id>/ 子目录
+    const gitc = (args: string[]) => Bun.spawnSync(["git", "-C", repo, ...args], { stdout: "pipe", stderr: "pipe" });
     gitc(["config", "user.email", "t@t.io"]);
     gitc(["config", "user.name", "t"]);
     gitc(["config", "commit.gpgsign", "false"]);
     // 模拟 develop agent：改已跟踪文件 + 新建文件，并自己 commit（这正是审计 P1 里
     // `git diff`(工作树 vs HEAD) 看空 diff 的场景——commit 后工作树==HEAD）。
-    writeFileSync(join(ws, "README.md"), "base\nfeature\n", "utf-8");
-    writeFileSync(join(ws, "new.ts"), "export const y = 2;\n", "utf-8");
+    writeFileSync(join(repo, "README.md"), "base\nfeature\n", "utf-8");
+    writeFileSync(join(repo, "new.ts"), "export const y = 2;\n", "utf-8");
     gitc(["add", "-A"]);
     gitc(["commit", "-m", "dev commit"]);
 
     // computeDiffStat 用 origin/<base> + add -A + diff --cached：即便已 commit、含新文件，仍看得到。
     // 旧的 `git diff`(工作树 vs HEAD) 在此场景会返回空 → code_review 反复驳回杀任务。
-    const stat = computeDiffStat(ws, "main");
+    const stat = computeDiffStat(repo, "main");
     expect(stat).not.toBeNull();
     expect(stat!.files).toBe(2); // README 改 + new.ts 新增
   });
@@ -142,25 +145,28 @@ describe("共用沙盒 · 重跑重新 clone（Task 5）", () => {
 
     resetTaskForRerun(id);
 
-    // 重跑 = 重新 clone 干净：旧残留没了，源仓库 README 在
+    // 重跑 = 重新 clone 干净：旧残留没了，源仓库 README 在（统一布局：重 clone 按
+    // workspace alias「r」落子目录）
     expect(existsSync(join(ws, "stale.txt"))).toBe(false);
-    expect(existsSync(join(ws, "README.md"))).toBe(true);
+    expect(existsSync(join(ws, "r", "README.md"))).toBe(true);
   });
 });
 
 describe("共用沙盒 · 全流程集成（真 runner → 共用 clone → phase 写 → diff_stat → 自动推进）", () => {
-  it("executePhase 注入共用沙盒，phase 经 getCurrentSandboxDir 写文件落进 clone 且 diff_stat 端到端看到", async () => {
+  it("executePhase 注入共用沙盒，phase 经 listTaskRepos 定位仓库写文件且 diff_stat 端到端看到", async () => {
     const { executePhase } = await import("../src/core/runner");
     const { getCurrentSandboxDir } = await import("../src/core/task-context");
+    const { listTaskRepos } = await import("../src/core/sandbox");
     const { computeDiffStat } = await import("../src/daemon/task-outcome");
     const { createTask, updateTask, getTask } = await import("../src/core/db");
     const { createProject } = await import("../src/core/projects");
     const { createWorkspace } = await import("../src/core/workspaces");
     const registry = await import("../src/core/registry");
 
-    // phase 函数完全不知道路径，只从 ALS 上下文取 runner 注入的共用沙盒——
-    // 这正是要端到端验证的链路：runner 注入 getTaskSandbox(id) → 函数读 getCurrentSandboxDir()。
+    // phase 函数完全不知道路径：沙盒根从 ALS 上下文取（runner 注入 getTaskSandbox(id)），
+    // 仓库位置走 listTaskRepos（统一布局的唯一消费接口）——与 dev workflow 同款链路。
     let sawSandbox: string | undefined;
+    let sawRepoPath: string | undefined;
     registry._clearRegistry();
     registry.register({
       name: "shr_int",
@@ -169,9 +175,11 @@ describe("共用沙盒 · 全流程集成（真 runner → 共用 clone → phas
         name: "develop", pending_state: "pending_develop", running_state: "running_develop",
         trigger: "start_develop", complete_trigger: "develop_complete", fail_trigger: "develop_fail",
         label: "DEV",
-        func: async () => {
+        func: async (tid: string) => {
           sawSandbox = getCurrentSandboxDir();
-          writeFileSync(join(sawSandbox!, "delivered.ts"), "export const ok = true;\n", "utf-8");
+          const repos = listTaskRepos(tid);
+          sawRepoPath = repos[0]?.path;
+          writeFileSync(join(sawRepoPath!, "delivered.ts"), "export const ok = true;\n", "utf-8");
         },
       }],
       initial_state: "pending_develop",
@@ -183,7 +191,7 @@ describe("共用沙盒 · 全流程集成（真 runner → 共用 clone → phas
     createWorkspace({ id: "ws-1", project_id: "proj-1", alias: "r", path: srcRepo, remote_url: srcRepo, default_branch: "main" });
 
     const id = taskId("shrint");
-    ensureTaskSandbox(id, "shr_int", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, `feat/${id}`);
+    ensureTaskSandbox(id, "shr_int", { git: true }, [{ id: "ws-1", alias: "r", remote_url: srcRepo, default_branch: "main" }] as never, `feat/${id}`);
     const ws = getTaskSandbox(id);
     createTask({ id, title: "t", workflow: "shr_int", initialStatus: "running_develop", requirementId: undefined });
     updateTask(id, { workspace_id: "ws-1", branch: `feat/${id}`, default_branch: "main", workspace_path: ws });
@@ -191,12 +199,13 @@ describe("共用沙盒 · 全流程集成（真 runner → 共用 clone → phas
     // 真 runner 跑这一 phase：内部会注入 getTaskSandbox(id) 作 sandboxDir
     await executePhase(id, "develop");
 
-    // 1) phase 函数确实拿到了共用沙盒路径（= 该 task 的共用 clone）
+    // 1) phase 函数确实拿到了共用沙盒路径（= 该 task 的沙盒根）+ 仓库子目录
     expect(sawSandbox).toBe(ws);
-    // 2) 文件真落进了共用 clone
-    expect(existsSync(join(ws, "delivered.ts"))).toBe(true);
+    expect(sawRepoPath).toBe(join(ws, "r"));
+    // 2) 文件真落进了仓库 clone（统一布局：./r/ 子目录）
+    expect(existsSync(join(ws, "r", "delivered.ts"))).toBe(true);
     // 3) diff_stat 端到端看到这次改动（add -A + diff --cached origin/main）
-    const stat = computeDiffStat(ws, "main");
+    const stat = computeDiffStat(join(ws, "r"), "main");
     expect(stat).not.toBeNull();
     expect(stat!.files).toBe(1);
     // 4) phase 成功 → 单 phase 工作流自动推进到终态 done（无下一阶段 spawn）

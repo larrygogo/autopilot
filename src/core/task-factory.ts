@@ -201,18 +201,19 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
       (typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined) ??
       (getRequirementById(reqLink)?.workspace_id ?? undefined);
     workspaceRefs = resolveWorkspaceRefs(reqLink, fallbackWsId, "起任务失败");
-    if (workspaceRefs.length > 1) {
-      // 老 dev workflow 副本（不支持多库布局）跑多库任务会在 code_review 阶段裸 git fatal；
+    if (workspaceRefs.length >= 1) {
+      // 统一 multi-clone 布局（单库也 clone 到 ./alias/ 子目录）：老 dev workflow 副本
+      // 默认把 workspace 根当仓库根，所有 git 任务都会裸 git fatal；
       // 这里预先写一条指引日志，失败时用户能在任务日志看到根因。
       console.warn(
-        `[task=${taskId}] 多代码库任务（${workspaceRefs.length} 库）：dev 工作流副本需为多库版本，` +
-        `老用户请先执行 autopilot workflow sync dev --apply`,
+        `[task=${taskId}] 任务沙盒为统一子目录布局（${workspaceRefs.length} 库）：` +
+        `dev workflow 副本需同步到统一布局版本：autopilot workflow sync dev --apply`,
       );
     }
   }
   try {
     // 共用沙盒模型：task 启动时建独立 clone（源仓库零痕迹），所有 phase 共用直接改文件。
-    // 多库（集合 >1）clone 到 workspace/<alias>/ 子目录，各库共用同名交付分支。
+    // 统一布局：每库 clone 到 workspace/<alias>/ 子目录（单库也是），各库共用同名交付分支。
     ensureTaskSandbox(
       taskId, workflowName, wf.sandbox,
       workspaceRefs.length > 0 ? workspaceRefs : undefined,

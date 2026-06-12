@@ -104,7 +104,7 @@ async function runFixerAgent(prompt: string, cwd: string): Promise<string> {
 function repoLayoutSection(repos: TaskRepoCtx[]): string {
   const lines = repos.map((r) => {
     const where = r.dir ? `子目录 ${r.dir}/` : "当前目录（仓库根）";
-    return `- ${r.alias || "（主库）"}：${where}，交付分支 ${r.branch}（base ${r.base}）${r.primary ? " ★主库" : ""}`;
+    return `- ${r.alias || "（仓库）"}：${where}，交付分支 ${r.branch}（base ${r.base}）`;
   });
   return lines.join("\n");
 }

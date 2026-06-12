@@ -1,11 +1,11 @@
 /**
- * 多代码库沙盒（Phase 2：多库可写、各自交付）。
+ * 任务沙盒统一 multi-clone 布局（2026-06-12 主库概念废除：单库也 clone 到子目录）。
  *
  * 覆盖：
- *   - 集合 >1 → workspace/<alias>/ 子目录各自 clone + .worktree.json v2（mode=multi-clone）
- *   - 顶层字段镜像主库（旧 reader 兼容）
- *   - listTaskRepos：多库展开 / 单库单项指向根 / 无 meta 返回 []
- *   - 单库（单元素数组）走原路径：meta mode=clone、无 repos 字段（存量 byte 级兼容）
+ *   - 集合 >1 → workspace/<alias>/ 子目录各自 clone + .worktree.json（mode=multi-clone）
+ *   - 顶层字段镜像 repos[0]（旧 reader 兼容）
+ *   - 单库（单元素数组）同布局：mode=multi-clone、repos 长度 1、代码在 ./alias/ 子目录
+ *   - listTaskRepos：multi-clone 展开 / 旧 mode=clone 单项指向根（历史 reader）/ 无 meta 返回 []
  *   - 任一库 clone 失败 → 整体退化空目录（不留半套布局）
  *
  * 复用 sandbox-worktree.test.ts 的 spawn 子进程模式（AUTOPILOT_HOME env 注入 tmpdir）。
@@ -103,7 +103,7 @@ console.log(JSON.stringify({
     expect(r.repos[0].path.replace(/\\/g, "/").endsWith("workspace/backend")).toBe(true);
   });
 
-  it("单库（单元素数组）→ 原路径：mode=clone、无 repos 字段（存量兼容）；listTaskRepos 单项指向根", async () => {
+  it("单库（单元素数组）→ 统一布局：mode=multi-clone、repos 长度 1、代码在 ./alias/ 子目录 + 顶层镜像", async () => {
     initGitRepo(repoA, "main");
     const out = await runInHome(`
 import { ensureTaskSandbox, listTaskRepos } from "${SANDBOX_MODULE}";
@@ -114,16 +114,52 @@ const refs = [{ id: "ws-001", alias: "solo", remote_url: ${JSON.stringify(repoA)
 const ws = ensureTaskSandbox("t-mr-2", "wf", cfg, refs, "feat/demo-t-mr-2");
 const rawMeta = JSON.parse(readFileSync(join(ws, "..", ".worktree.json"), "utf8"));
 const repos = listTaskRepos("t-mr-2");
-console.log(JSON.stringify({ rootGit: existsSync(ws + "/.git"), rawMeta, repos }));
+console.log(JSON.stringify({
+  rootGit: existsSync(ws + "/.git"),
+  soloGit: existsSync(ws + "/solo/.git"),
+  rawMeta, repos,
+}));
 `);
     const r = JSON.parse(out);
-    expect(r.rootGit).toBe(true);
-    expect(r.rawMeta.mode).toBe("clone");
-    expect("repos" in r.rawMeta).toBe(false); // 单库不写 repos —— 与存量文件 byte 级兼容
+    expect(r.rootGit).toBe(false);  // 根不再是仓库根
+    expect(r.soloGit).toBe(true);   // 代码在 ./solo/ 子目录
+    expect(r.rawMeta.mode).toBe("multi-clone");
+    expect(r.rawMeta.repos.length).toBe(1);
+    // 顶层镜像字段保留写 = repos[0]（防御未排查的历史 reader）
+    expect(r.rawMeta.workspace_id).toBe("ws-001");
+    expect(r.rawMeta.branch).toBe("feat/demo-t-mr-2");
+    expect(r.rawMeta.remote_url).toBe(repoA);
     expect(r.repos.length).toBe(1);
-    expect(r.repos[0].dir).toBe("");
-    expect(r.repos[0].primary).toBe(true);
+    expect(r.repos[0].dir).toBe("solo");
+    expect(r.repos[0].primary).toBe(true); // = 集合第一个（纯位置语义）
+    expect(r.repos[0].path.replace(/\\/g, "/").endsWith("workspace/solo")).toBe(true);
+  });
+
+  it("旧 mode=clone 格式（历史任务）→ listTaskRepos 单项指向根、removeTaskWorktree 零碰源仓库", async () => {
+    const out = await runInHome(`
+import { listTaskRepos, getTaskWorktreeMeta, removeTaskWorktree } from "${SANDBOX_MODULE}";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+// 手写存量单库格式（Stage 4 之前 tryCreateClone 写下的）
+const taskDir = join(process.env.AUTOPILOT_HOME ?? "", "runtime", "tasks", "t-mr-old");
+mkdirSync(join(taskDir, "workspace"), { recursive: true });
+writeFileSync(join(taskDir, ".worktree.json"), JSON.stringify({
+  workspace_id: "ws-009", workspace_path: "", branch: "feat/old-task", base: "main",
+  created_at: 1, mode: "clone", remote_url: "https://github.com/o/r.git",
+}));
+const repos = listTaskRepos("t-mr-old");
+const removed = removeTaskWorktree("t-mr-old");
+const after = getTaskWorktreeMeta("t-mr-old");
+console.log(JSON.stringify({ repos, removed, after }));
+`);
+    const r = JSON.parse(out);
+    expect(r.repos.length).toBe(1);
+    expect(r.repos[0].dir).toBe("");       // 旧布局：根即仓库
+    expect(r.repos[0].workspace_id).toBe("ws-009");
+    expect(r.repos[0].branch).toBe("feat/old-task");
     expect(r.repos[0].path.replace(/\\/g, "/").endsWith("/workspace")).toBe(true);
+    expect(r.removed).toBe(true);          // clone 模式：清 meta、不跑任何 git
+    expect(r.after).toBeNull();
   });
 
   it("任一库 clone 失败 → 整体退化空目录，不留半套布局", async () => {

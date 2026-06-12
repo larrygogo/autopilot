@@ -1,5 +1,6 @@
 import { existsSync } from "fs";
 import { getTask, listTaskPhaseEvents, getDb } from "../core/db";
+import { listTaskRepos } from "../core/sandbox";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("task-outcome");
@@ -76,13 +77,28 @@ export async function computeTaskOutcome(taskId: string): Promise<TaskOutcome | 
   }
 
   // 3) sandbox + diff_stat
-  // 共用沙盒模型下代码改动在任务 clone 工作树里（repo_path）。对它跑 git diff（add -A +
-  // diff --cached <base>）统计 committed + 未提交 + 未跟踪新文件。
+  // 统一 multi-clone 布局：按 .worktree.json 的 repos 逐库统计（add -A + diff --cached
+  // origin/<base>，覆盖 committed + 未提交 + 未跟踪）后求和。单库 = 长度 1；旧 mode=clone
+  // 任务 listTaskRepos 返回根路径单项，行为与原 repo_path 直跑一致。
+  // 无布局元数据（极旧任务）回退 repo_path 直跑。
   const repo_path = ((task as Record<string, unknown>).repo_path as string | undefined) ?? null;
   const sandbox_path =
     repo_path ?? ((task as Record<string, unknown>).workspace_path as string | undefined) ?? null;
   let diff_stat: DiffStat | null = null;
-  if (sandbox_path && existsSync(sandbox_path)) {
+  let repos: ReturnType<typeof listTaskRepos> = [];
+  try {
+    repos = listTaskRepos(taskId).filter((r) => existsSync(r.path));
+  } catch { /* 布局元数据读取失败 → 走 repo_path 兜底 */ }
+  if (repos.length > 0) {
+    for (const r of repos) {
+      const s = computeDiffStat(r.path, r.base);
+      if (!s) continue;
+      if (!diff_stat) diff_stat = { files: 0, insertions: 0, deletions: 0 };
+      diff_stat.files += s.files;
+      diff_stat.insertions += s.insertions;
+      diff_stat.deletions += s.deletions;
+    }
+  } else if (sandbox_path && existsSync(sandbox_path)) {
     const baseBranch = resolveBaseBranch(reqId);
     diff_stat = computeDiffStat(sandbox_path, baseBranch);
   }

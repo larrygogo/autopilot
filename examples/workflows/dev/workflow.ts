@@ -57,7 +57,8 @@ function getRejectionCounts(task: ReturnType<typeof getTask>): Record<string, nu
 }
 
 /**
- * 任务的代码仓库布局（多代码库需求 = 多个子目录 clone；单库 = 单项指向 workspace/ 根）。
+ * 任务的代码仓库布局（统一 multi-clone：每库 clone 到 ./alias/ 子目录，单库也是；
+ * 旧 mode=clone 任务为单项指向 workspace/ 根）。
  * 单一真相在 .worktree.json（listTaskRepos 读），极旧任务无 meta 时用 extra 拼单库兜底。
  */
 function taskRepos(taskId: string, task: NonNullable<ReturnType<typeof getTask>>): TaskRepoCtx[] {
@@ -77,15 +78,17 @@ function taskRepos(taskId: string, task: NonNullable<ReturnType<typeof getTask>>
 }
 
 /**
- * 多仓库布局说明段（拼进 design/develop prompt）。单库返回空串——prompt 与单库时代完全一致。
+ * 仓库布局说明段（拼进 design/develop/code_review prompt）。统一 multi-clone 布局下
+ * 单库代码也在 ./alias/ 子目录，必须告知 agent（否则在 workspace 根上跑 git 直接 fatal）。
+ * 仅旧任务（根即仓库，dir 全空）返回空串——prompt 与旧时代完全一致。
  */
 function repoLayoutSection(repos: TaskRepoCtx[]): string {
-  if (repos.length <= 1) return "";
+  if (repos.length === 0 || repos.every((r) => r.dir === "")) return "";
   const lines = repos
-    .map((r) => `- \`./${r.dir}/\` — ${r.alias}${r.primary ? "（主仓库）" : ""}（base 分支 ${r.base}）`)
+    .map((r) => `- \`./${r.dir}/\` — ${r.alias}（base 分支 ${r.base}）`)
     .join("\n");
   return (
-    `\n\n## 仓库布局（多仓库任务）\n本任务涉及 ${repos.length} 个仓库，分别克隆在当前目录的子目录下：\n${lines}\n` +
+    `\n\n## 仓库布局\n本任务涉及 ${repos.length} 个仓库，分别克隆在当前目录的子目录下：\n${lines}\n` +
     `规则：直接在各子目录内修改文件；**不要自己 git commit/push**（每个仓库的改动会由 submit_pr 阶段分别提交并各开一个 PR）；` +
     `跨仓库接口（API 契约/类型定义）必须两侧同步修改。`
   );
@@ -321,7 +324,7 @@ export async function run_code_review(taskId: string): Promise<void> {
     // base 用 origin/<branch>：clone 后远程跟踪 ref 对默认+非默认分支都在（本地只建了默认分支）。
     const diffResult = runGit(["diff", "--cached", "--no-ext-diff", `origin/${r.base}`], r.path);
     const statResult = runGit(["diff", "--cached", "--stat", `origin/${r.base}`], r.path);
-    const head = repos.length > 1 ? `\n### 仓库 ${r.alias}${r.primary ? "（主）" : ""}（目录 ./${r.dir}/）\n` : "";
+    const head = repos.length > 1 ? `\n### 仓库 ${r.alias}（目录 ./${r.dir}/）\n` : "";
     // 全量 stat（很小）给 reviewer 文件级全景——大改动 diff 截断时，排在尾部的文件
     // （迁移/前端组件等）会整个消失，reviewer 盲判「未实现」三连驳（dogfood：req-011
     // 第三轮 108KB diff，被指「缺失」的 migration/上传组件全都存在，只是被切掉了）。
@@ -343,7 +346,9 @@ export async function run_code_review(taskId: string): Promise<void> {
   const prompt =
     `你是一位代码审查专家。请审查以下代码变更是否符合技术方案要求。\n\n` +
     `## 技术方案\n${planContent}\n\n` +
-    (repos.length > 1 ? `${repoLayoutSection(repos)}\n\n` : "") +
+    // repoLayoutSection 自空判断（旧根布局任务返回空串）；统一子目录布局下单库也要告知，
+    // 否则 diff 截断时 reviewer 按提示自查会在 workspace 根上跑 git 直接 fatal。
+    (repoLayoutSection(repos) ? `${repoLayoutSection(repos)}\n\n` : "") +
     `## 变更文件全景（git diff --stat 全量）\n${statSections}\n` +
     `## 代码变更\n${diffSections}${truncationNotice}\n\n` +
     `请从以下维度审查：正确性、代码质量、安全性、测试覆盖。\n\n` +
@@ -449,7 +454,7 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const results: Array<{ repo: TaskRepoCtx; prUrl: string }> = [];
   const failures: string[] = [];
   for (const r of repos) {
-    const label = r.alias || "主仓库";
+    const label = r.alias || "仓库";
     try {
       // 共用沙盒：各 phase 的改动已直接累积在工作树，submit_pr 落成交付 commit（空改动时容错不报错）。
       runGit(["add", "-A"], r.path);
@@ -480,8 +485,10 @@ export async function run_submit_pr(taskId: string): Promise<void> {
       const prUrl = ensurePr(r, task.title, prResult.text);
       results.push({ repo: r, prUrl });
 
-      // 多库：每个 PR（含主库）落 requirement_sub_prs 作为交付 PR 全集；单库零行为变化
-      if (repos.length > 1 && r.workspace_id && reqId) {
+      // 每个交付 PR 都落 requirement_sub_prs 作为交付 PR 全集（单库也落——新任务全部走
+      // pr-poller 聚合验收路径，CI 自动修复回路同样覆盖单库）。极旧任务兜底布局
+      // workspace_id 为空串 → 跳过，走 main-scope 兼容路径。
+      if (r.workspace_id && reqId) {
         const n = Number(prUrl.match(/\/pull\/(\d+)/)?.[1] ?? 0);
         try {
           appendSubPr({ requirement_id: reqId, child_workspace_id: r.workspace_id, pr_url: prUrl, pr_number: n });
@@ -502,10 +509,11 @@ export async function run_submit_pr(taskId: string): Promise<void> {
     throw new Error(`部分仓库交付失败（已成功 ${results.length} 个，其 PR 已保留）：\n${failures.join("\n")}`);
   }
 
+  // 展示镜像 = 第一个交付 PR（repo.primary 是位置语义 = 集合第一个；交付 PR 全集在 sub_prs）
   const primaryPr = results.find((x) => x.repo.primary) ?? results[0];
   updateTask(taskId, { pr_url: primaryPr.prUrl });
 
-  // 回填 PR 到需求：需求页/产出卡从 requirement.pr_url 读（主库 PR 作主显示），不回填则"需求做完了看不到 PR"。
+  // 回填 PR 到需求：需求页/产出卡从 requirement.pr_url 读（第一个交付 PR 作主显示），不回填则"需求做完了看不到 PR"。
   if (reqId) {
     const m = primaryPr.prUrl.match(/\/pull\/(\d+)/);
     const prNumber = m ? Number(m[1]) : null;

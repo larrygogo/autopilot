@@ -12,7 +12,8 @@ import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspa
 //   AUTOPILOT_HOME/
 //     runtime/tasks/<task-id>/
 //       ├── workspace/         ← 阶段函数的沙盒目录（本模块管理；物理目录名保持 workspace 不变）
-//       └── .worktree.json     ← git worktree 元数据（仅 sandbox.git=true 时）
+//       │   └── <alias>/       ← git 模式统一布局：每个代码库 clone 到 alias 子目录（单库也是，2026-06-12）
+//       └── .worktree.json     ← git clone 元数据（仅 sandbox.git=true 时）
 //
 // 工作流可在 workflow.yaml 声明：
 //   sandbox:
@@ -57,6 +58,7 @@ export interface WorktreeRepoMeta {
   branch: string;
   base: string;
   remote_url: string | null;
+  /** = 集合第一个（纯位置语义，主库概念已废除）；保留字段名防破坏存量 reader */
   primary?: boolean;
 }
 
@@ -67,9 +69,9 @@ export interface WorktreeRepoMeta {
  * codebase→workspace 改名后字段名改为 workspace_*。读取时兼容 Phase 2 之前写下的旧文件
  * （旧字段名 codebase_id/codebase_path、旧 id 前缀 cb-）见 readWorktreeMeta()。
  *
- * 多库（mode=multi-clone）：repos 数组是真相，顶层 workspace_id/branch/base/remote_url
- * 镜像主库（旧 reader 不读 repos 也不炸）。单库任务不写 repos 字段、mode 仍是 clone
- * —— 与存量文件 byte 级兼容。
+ * 统一布局（2026-06-12 主库概念废除）：新任务一律 mode=multi-clone，repos 数组是真相
+ * （单库 = 长度 1），顶层 workspace_id/branch/base/remote_url 镜像 repos[0]（防御未排查
+ * 的历史 reader，不读 repos 也不炸）。mode=clone 是历史单库格式，reader 全保留。
  */
 export interface WorktreeMeta {
   workspace_id: string;
@@ -181,11 +183,9 @@ export function ensureTaskSandbox(
       log.warn("sandbox.git=true 与 template=%s 互斥，忽略 template [task=%s]",
         sandboxConfig.template, taskId);
     }
-    // 多库（数组长度 >1）→ 子目录布局；单库（含单元素数组）→ 原路径零改动
+    // 统一布局（主库概念废除）：凡 git 模式一律 multi-clone 子目录布局（单库 = 长度 1 repos）
     const wsArr = Array.isArray(workspace) ? workspace : workspace ? [workspace] : [];
-    const wt = wsArr.length > 1
-      ? tryCreateMultiClone(taskId, sandboxConfig, wsArr, wsPath, deliverBranch)
-      : tryCreateClone(taskId, sandboxConfig, wsArr[0], wsPath, deliverBranch);
+    const wt = tryCreateMultiClone(taskId, sandboxConfig, wsArr, wsPath, deliverBranch);
     if (wt) return wsPath;
     // 退化：clone 创建失败 → 空目录
     if (!existsSync(wsPath)) mkdirSync(wsPath, { recursive: true });
@@ -214,61 +214,6 @@ export function ensureTaskSandbox(
 /** 读取 task 的 worktree 元数据（若 task 走 git worktree 模式且 .worktree.json 存在）。 */
 export function getTaskWorktreeMeta(taskId: string): WorktreeMeta | null {
   return readWorktreeMeta(taskId);
-}
-
-/**
- * 为 task 创建独立远程 clone 沙盒。成功返回 WorktreeMeta(mode=clone)，失败 warn + 返回 null。
- *
- * 核心：直接从远程 git clone（完整 clone，不加 --depth）。
- * token 注入：HTTPS URL + config.yaml git.token 存在时，临时注入凭证到 clone URL，
- * clone 后的 .git/config origin 会带 token（push 时也生效）；SSH 走系统 key。
- *
- * 步骤：
- *   1. 读 git.token 配置，构建含凭证的 clone URL
- *   2. git clone <authUrl> <wsPath>（完整历史，无 --local / --depth）
- *   3. 基于 origin/<base> 建交付分支
- *   4. 写 .worktree.json（mode=clone）
- */
-function tryCreateClone(
-  taskId: string,
-  cfg: SandboxConfig,
-  workspace: WorkspaceRef | undefined,
-  wsPath: string,
-  deliverBranch?: string,
-): WorktreeMeta | null {
-  if (!workspace) {
-    log.warn("sandbox.git=true 但未提供 workspace（task.extra 无 workspace_id？）；退化空目录 [task=%s]", taskId);
-    return null;
-  }
-  if (!workspace.remote_url) {
-    log.warn("sandbox.git=true 但 workspace %s 无 remote_url（软失效工作区）；退化空目录 [task=%s]",
-      workspace.id, taskId);
-    return null;
-  }
-
-  const base = cfg.base ?? workspace.default_branch;
-  const branch = deliverBranch ?? `${cfg.branch_prefix ?? "autopilot/"}${taskId}`;
-
-  // 目标目录必须不存在（git clone 要求）；父目录要在
-  const parent = join(wsPath, "..");
-  if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
-  if (existsSync(wsPath)) rmSync(wsPath, { recursive: true, force: true });
-
-  if (!cloneOneRepo(taskId, workspace, wsPath, base, branch)) return null;
-
-  const meta: WorktreeMeta = {
-    workspace_id: workspace.id,
-    workspace_path: "",   // 远程 clone 模式无本地路径
-    branch,
-    base,
-    created_at: Date.now(),
-    mode: "clone",
-    remote_url: workspace.remote_url,  // 存干净 URL（不含 token）
-  };
-  writeWorktreeMeta(taskId, meta);
-  log.info("远程 clone 创建 [task=%s workspace=%s branch=%s base=%s remote=%s]",
-    taskId, workspace.id, branch, base, workspace.remote_url);
-  return meta;
 }
 
 /**
@@ -351,9 +296,10 @@ export function safeAliasDir(alias: string, workspaceId: string): string {
 }
 
 /**
- * 多代码库沙盒：各库 clone 到 workspace/<alias>/ 子目录，全库共用同名交付分支。
+ * 任务沙盒统一布局（单库 = 长度 1 集合）：各库 clone 到 workspace/<alias>/ 子目录，
+ * 全库共用同名交付分支。
  * 任一 clone 失败 → 整体清掉退化空目录（半套布局比空目录更危险——agent 会只改一半还以为齐了）。
- * 主库 = workspaces[0]（caller 保证排序）。
+ * repos[0] = 集合第一个（位置语义，主库概念已废除）；顶层字段镜像 repos[0] 防御历史 reader。
  */
 function tryCreateMultiClone(
   taskId: string,
@@ -362,6 +308,10 @@ function tryCreateMultiClone(
   wsRoot: string,
   deliverBranch?: string,
 ): WorktreeMeta | null {
+  if (workspaces.length === 0) {
+    log.warn("sandbox.git=true 但未提供 workspace（task.extra 无 workspace_id？）；退化空目录 [task=%s]", taskId);
+    return null;
+  }
   const branch = deliverBranch ?? `${cfg.branch_prefix ?? "autopilot/"}${taskId}`;
   if (existsSync(wsRoot)) rmSync(wsRoot, { recursive: true, force: true });
   mkdirSync(wsRoot, { recursive: true });
@@ -398,7 +348,7 @@ function tryCreateMultiClone(
   const p = repos[0];
   const meta: WorktreeMeta = {
     mode: "multi-clone",
-    workspace_id: p.workspace_id,  // 顶层镜像主库：旧 reader 不读 repos 也不炸
+    workspace_id: p.workspace_id,  // 顶层镜像 repos[0]：旧 reader 不读 repos 也不炸
     workspace_path: "",
     branch: p.branch,
     base: p.base,
@@ -423,12 +373,13 @@ export interface TaskRepoCtx {
   branch: string;
   base: string;
   remote_url: string | null;
+  /** = 集合第一个（纯位置语义，主库概念已废除） */
   primary: boolean;
 }
 
 /**
- * 列出任务的代码仓库布局。多库（multi-clone meta）展开 repos；单库/旧任务返回
- * 单项指向 workspace/ 根；无 .worktree.json（非 git 工作流）返回 []。
+ * 列出任务的代码仓库布局。multi-clone meta（新任务统一格式，单库 = 长度 1）展开 repos；
+ * 旧 mode=clone 任务返回单项指向 workspace/ 根；无 .worktree.json（非 git 工作流）返回 []。
  */
 export function listTaskRepos(taskId: string): TaskRepoCtx[] {
   const meta = readWorktreeMeta(taskId);
@@ -491,7 +442,7 @@ function writeWorktreeMeta(taskId: string, meta: WorktreeMeta): void {
 /**
  * 移除任务沙盒的 git 元数据。
  *
- * - clone 模式（mode=clone）：**零碰源仓库** —— 只清 .worktree.json，沙盒目录交给上游 rmSync。
+ * - clone / multi-clone 模式：**零碰源仓库** —— 只清 .worktree.json，沙盒目录交给上游 rmSync。
  *   这是"用户仓库零痕迹"的代码级护栏：独立 clone 的删除绝不跑任何 `git -C <源仓库>`。
  * - 老 worktree 数据（无 mode）：向后兼容，仍 `git worktree remove --force` 清掉源仓库的 worktree 注册。
  * - .worktree.json 不存在 → no-op 返回 false。
@@ -500,8 +451,8 @@ export function removeTaskWorktree(taskId: string): boolean {
   const meta = readWorktreeMeta(taskId);
   if (!meta) return false;
 
-  // clone 模式：源仓库零接触，删除纯靠 rmSync（上游 deleteTaskSandbox 做）
-  if (meta.mode === "clone") {
+  // clone / multi-clone 模式：源仓库零接触，删除纯靠 rmSync（上游 deleteTaskSandbox 做）
+  if (meta.mode === "clone" || meta.mode === "multi-clone") {
     try { rmSync(worktreeMetaPath(taskId), { force: true }); } catch { /* ignore */ }
     return true;
   }

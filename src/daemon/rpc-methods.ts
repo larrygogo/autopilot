@@ -41,6 +41,7 @@ import {
   listSandboxDir,
   readSandboxFile,
   scanTaskSandboxes,
+  listTaskRepos,
 } from "../core/sandbox";
 import { setKv, getDb } from "../core/db";
 import { discover as registryDiscover, getWorkflow as registryGetWorkflow } from "../core/registry";
@@ -522,6 +523,18 @@ export function registerCoreRpcMethods(): void {
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const task = getTask(p.id);
       if (!task) throw new RpcError("NOT_FOUND", "task not found");
+      const { computeFileDiffs } = await import("./task-outcome");
+      // 统一 multi-clone 布局：按 .worktree.json 的 repos 逐库取 diff（单库 = 长度 1；
+      // 多库文件路径加 <dir>/ 前缀区分归属）。旧 mode=clone 任务 listTaskRepos 返回
+      // 根路径单项（dir=""），行为与原 repo_path 直跑一致。
+      const repos = listTaskRepos(p.id).filter((r) => existsSync(r.path));
+      if (repos.length > 0) {
+        const files = repos.flatMap((r) =>
+          computeFileDiffs(r.path, r.base).map((f) => (r.dir ? { ...f, file: `${r.dir}/${f.file}` } : f)),
+        );
+        return { files };
+      }
+      // 无布局元数据（极旧任务）：回退 repo_path 直跑
       const repoPath = (task as Record<string, unknown>).repo_path as string | undefined;
       if (!repoPath || !existsSync(repoPath)) return { files: [] };
       const reqId = (task as Record<string, unknown>).requirement_id as string | undefined;
@@ -533,7 +546,6 @@ export function registerCoreRpcMethods(): void {
           if (ws?.default_branch) base = ws.default_branch;
         }
       }
-      const { computeFileDiffs } = await import("./task-outcome");
       return { files: computeFileDiffs(repoPath, base) };
     },
   });
