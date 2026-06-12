@@ -6,8 +6,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { AUTOPILOT_HOME } from "../index";
-import { getTaskArtifactsDir } from "./sandbox";
+import { getTaskArtifactsDir, getTaskRoot } from "./sandbox";
 import { isParallelPhase, type WorkflowDefinition } from "./registry";
 import type { AgentCallRecord } from "./task-logs";
 
@@ -30,7 +29,7 @@ export function getPhaseIndex(workflow: WorkflowDefinition, phaseName: string): 
 }
 
 function readAllAgentCalls(taskId: string): AgentCallRecord[] {
-  const path = join(AUTOPILOT_HOME, "runtime", "tasks", taskId, "agent-calls.jsonl");
+  const path = join(getTaskRoot(taskId), "agent-calls.jsonl");
   if (!existsSync(path)) return [];
   const raw = readFileSync(path, "utf-8");
   const out: AgentCallRecord[] = [];
@@ -48,7 +47,7 @@ function readAllAgentCalls(taskId: string): AgentCallRecord[] {
 
 function readPhaseLogFull(taskId: string, phaseName: string): string {
   if (!PHASE_NAME_RE.test(phaseName)) return "";
-  const path = join(AUTOPILOT_HOME, "runtime", "tasks", taskId, "logs", `phase-${phaseName}.log`);
+  const path = join(getTaskRoot(taskId), "logs", `phase-${phaseName}.log`);
   if (!existsSync(path)) return "";
   try {
     return readFileSync(path, "utf-8");

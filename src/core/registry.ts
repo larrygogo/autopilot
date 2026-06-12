@@ -1202,6 +1202,10 @@ phases:
 `;
 }
 
+// 注意：下方模板字符串里的 join(home, "runtime", "tasks", taskId, "workspace") 是
+// 【生成到用户 workflow.ts 的脚手架代码】（特意自包含、不依赖 import），不是引擎进程内的
+// 路径解析——Stage 0 路径收口（getTaskRoot）有意不动它；需求中心化运行时 Stage 2 落地后
+// 此模板需改为走 @autopilot/core 的 getTaskSandbox（双根解析），见 spec 2026-06-12 E1。
 function renderWorkflowTsTemplate(firstPhase: string): string {
   const fn = `run_${firstPhase}`;
   return `// 每个 phase 函数接收 taskId: string 参数；抛错则该阶段失败，

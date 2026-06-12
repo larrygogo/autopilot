@@ -17,8 +17,7 @@ import { existsSync, rmSync } from "fs";
 import { onEvent, offEvent } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { getRequirementById } from "../core/requirements";
-import { removeTaskWorktree } from "../core/sandbox";
-import { AUTOPILOT_HOME } from "../index";
+import { getTaskRoot, removeTaskWorktree } from "../core/sandbox";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("done-workspace-cleanup");
@@ -28,8 +27,9 @@ const log = createLogger("done-workspace-cleanup");
  * tasksRoot 可注入（测试用 tmpdir；生产默认 AUTOPILOT_HOME/runtime/tasks）。
  */
 export function cleanupTaskWorkspace(taskId: string, tasksRoot?: string): boolean {
-  const root = tasksRoot ?? join(AUTOPILOT_HOME, "runtime", "tasks");
-  const ws = join(root, taskId, "workspace");
+  const ws = tasksRoot
+    ? join(tasksRoot, taskId, "workspace")
+    : join(getTaskRoot(taskId), "workspace");
   if (!existsSync(ws)) return false;
   // 旧 worktree 任务先 git worktree remove 让源仓库干净（clone 模式下 no-op）
   if (!tasksRoot) {

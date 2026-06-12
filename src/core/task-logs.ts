@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync, statSync } from "fs";
 import { join } from "path";
-import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
+import { getTaskRoot } from "./sandbox";
 
 // ──────────────────────────────────────────────
 // 任务日志落盘
@@ -34,7 +34,7 @@ export interface PhaseLogMeta {
 
 function taskLogsDir(taskId: string): string {
   if (!TASK_ID_RE.test(taskId)) throw new Error(`非法 taskId：${taskId}`);
-  return join(AUTOPILOT_HOME, "runtime", "tasks", taskId, "logs");
+  return join(getTaskRoot(taskId), "logs");
 }
 
 function ensureTaskLogsDir(taskId: string): string {
@@ -55,7 +55,7 @@ function eventsPath(taskId: string): string {
 function agentCallsPath(taskId: string): string {
   // 存在 <task>/agent-calls.jsonl（和 logs 同级，因为它是更顶层的调用记录）
   if (!TASK_ID_RE.test(taskId)) throw new Error(`非法 taskId：${taskId}`);
-  const taskDir = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
+  const taskDir = getTaskRoot(taskId);
   if (!existsSync(taskDir)) mkdirSync(taskDir, { recursive: true });
   return join(taskDir, "agent-calls.jsonl");
 }

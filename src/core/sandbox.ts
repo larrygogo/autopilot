@@ -28,6 +28,24 @@ import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspa
 const TASK_ID_RE = /^[\w.\-]+$/;
 const WORKTREE_MANIFEST = ".worktree.json";
 
+/**
+ * tasks 旧根目录（目录遍历 / retention 扫描的默认 root）。
+ * AUTOPILOT_HOME 动态读 env（兜底 import 时常量）：保持 manifest / task-logs 等调用方的测试可注入性。
+ * 需求中心化运行时 Stage 2 起目录遍历需双根（此旧根 + requirements/<reqId>/runs/ 新根）——
+ * 见 docs/superpowers/specs/2026-06-12-requirement-centric-runtime.md E1。
+ */
+function tasksRootDir(): string {
+  return join(process.env.AUTOPILOT_HOME || AUTOPILOT_HOME, "runtime", "tasks");
+}
+
+/**
+ * 任务运行时根目录（Stage 0：恒返回旧路径 runtime/tasks/<id>/；
+ * 需求中心化运行时 Stage 2 将在此开 runs/ 新根——见 specs/2026-06-12-requirement-centric-runtime.md E1）
+ */
+export function getTaskRoot(taskId: string): string {
+  return join(tasksRootDir(), taskId);
+}
+
 export interface SandboxConfig {
   /** 模板目录名（相对于 workflow 目录），默认 undefined = 空 sandbox */
   template?: string;
@@ -110,7 +128,7 @@ export function getTaskSandbox(taskId: string): string {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
   }
-  return join(AUTOPILOT_HOME, "runtime", "tasks", taskId, "workspace");
+  return join(getTaskRoot(taskId), "workspace");
 }
 
 /**
@@ -127,7 +145,7 @@ export function getTaskAgentHome(taskId: string): string {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
   }
-  const home = join(AUTOPILOT_HOME, "runtime", "tasks", taskId, "agent-home");
+  const home = join(getTaskRoot(taskId), "agent-home");
   mkdirSync(home, { recursive: true });
   return home;
 }
@@ -145,7 +163,7 @@ export function getTaskArtifactsDir(taskId: string): string {
     throw new Error(`非法 task ID：${taskId}`);
   }
   // 纯路径（不 mkdir）：浏览 / 算大小等只读用途不该产生副作用；写产物处各自 recursive mkdir。
-  return join(AUTOPILOT_HOME, "runtime", "tasks", taskId, "artifacts");
+  return join(getTaskRoot(taskId), "artifacts");
 }
 
 /**
@@ -412,7 +430,7 @@ export function listTaskRepos(taskId: string): TaskRepoCtx[] {
 
 function worktreeMetaPath(taskId: string): string {
   if (!TASK_ID_RE.test(taskId)) throw new Error(`非法 task ID：${taskId}`);
-  return join(AUTOPILOT_HOME, "runtime", "tasks", taskId, WORKTREE_MANIFEST);
+  return join(getTaskRoot(taskId), WORKTREE_MANIFEST);
 }
 
 function readWorktreeMeta(taskId: string): WorktreeMeta | null {
@@ -729,7 +747,7 @@ export function deleteTaskSandbox(taskId: string): boolean {
   }
   // 旧 worktree task：先 git worktree remove --force 让源仓库干净（独立 clone 模式下 no-op）。
   let removed = removeTaskWorktree(taskId);
-  const taskRoot = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
+  const taskRoot = getTaskRoot(taskId);
   for (const target of [
     getTaskSandbox(taskId),       // workspace/（共用代码 clone）
     getTaskArtifactsDir(taskId),  // artifacts/（沙盒 tab 展示的产物文档）
@@ -753,7 +771,7 @@ export function deleteTaskRuntimeDir(taskId: string): boolean {
     throw new Error(`非法 task ID：${taskId}`);
   }
   removeTaskWorktree(taskId);
-  const dir = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
+  const dir = getTaskRoot(taskId);
   if (!existsSync(dir)) return false;
   rmSync(dir, { recursive: true, force: true });
   return true;
@@ -767,7 +785,7 @@ export function clearTaskRunArtifacts(taskId: string): void {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
   }
-  const taskDir = join(AUTOPILOT_HOME, "runtime", "tasks", taskId);
+  const taskDir = getTaskRoot(taskId);
   for (const name of ["logs", "agent-calls.jsonl", "events.jsonl"]) {
     const p = join(taskDir, name);
     try { if (existsSync(p)) rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -830,7 +848,7 @@ export function applyRetentionPolicy(
   },
 ): { removed: string[]; reclaimedBytes: number } {
   const now = opts?.now ?? Date.now();
-  const tasksRoot = opts?.tasksRoot ?? join(AUTOPILOT_HOME, "runtime", "tasks");
+  const tasksRoot = opts?.tasksRoot ?? tasksRootDir();
   const all = scanTaskSandboxes(tasksRoot).filter((u) => u.exists && u.size > 0);
 
   const removed: string[] = [];
@@ -842,7 +860,7 @@ export function applyRetentionPolicy(
     // 若是 worktree task，先 git worktree remove --force 让 workspace 干净（spec §3.4：
     // 超过保留期还没提交就是垃圾，直接 force 干掉）。测试场景 tasksRoot 是 tmpdir 时
     // .worktree.json 不存在，removeTaskWorktree 是 no-op，不影响。
-    if (tasksRoot === join(AUTOPILOT_HOME, "runtime", "tasks")) {
+    if (tasksRoot === tasksRootDir()) {
       try { removeTaskWorktree(u.taskId); } catch { /* ignore */ }
     }
     try {
@@ -889,7 +907,7 @@ export function applyRetentionPolicy(
  * 可注入 root 让测试用 tmpdir；默认 AUTOPILOT_HOME/runtime/tasks。
  */
 export function scanTaskSandboxes(rootOverride?: string): TaskSandboxUsage[] {
-  const root = rootOverride ?? join(AUTOPILOT_HOME, "runtime", "tasks");
+  const root = rootOverride ?? tasksRootDir();
   if (!existsSync(root)) return [];
   const out: TaskSandboxUsage[] = [];
   for (const taskId of readdirSync(root)) {

@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
+import { join, sep } from "path";
 import { buildConfigTemplate } from "./config-template";
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
@@ -8,6 +8,7 @@ import { notificationIntentToLabel } from "../client/notification-intent";
 import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { rebuildIndexFromManifests, rebuildManifestsFromIndex } from "../core/rebuild-index";
+import { getTaskRoot } from "../core/sandbox";
 import { discover } from "../core/registry";
 import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
 import { loadDaemonConfig } from "../core/config";
@@ -599,7 +600,7 @@ task
           console.log(`  ${k.padEnd(labelWidth)}  ${v}`);
         }
         console.log("");
-        console.log(`Workspace: ${process.env.AUTOPILOT_HOME || "~/.autopilot"}/runtime/tasks/${tt.id}/workspace/`);
+        console.log(`Workspace: ${join(getTaskRoot(String(tt.id)), "workspace")}${sep}`);
         console.log(`日志：autopilot task logs ${tt.id}`);
       } catch (e: unknown) {
         console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
@@ -720,10 +721,9 @@ task
     // 末尾给客户指明 agent trace 位置 —— task logs 只显示状态机转换，客户
     // 跑完最想看的"agent 写了啥 / 评审什么意见"在 workspace 里。
     if (!opts.follow) {
-      const home = process.env.AUTOPILOT_HOME || `~/.autopilot`;
-      const wsRoot = `${home}/runtime/tasks/${taskId}/workspace/`;
+      const wsRoot = join(getTaskRoot(taskId), "workspace") + sep;
       console.log("");
-      console.log(`Agent trace + phase 产物：${wsRoot}<NN-phase>/agent-trace.md`);
+      console.log(`Agent trace + phase 产物：${wsRoot}<NN-phase>${sep}agent-trace.md`);
       console.log(`实时跟踪状态：autopilot task logs ${taskId} --follow`);
     }
 

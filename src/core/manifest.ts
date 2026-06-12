@@ -4,6 +4,7 @@ import { homedir } from "os";
 import { atomicWriteSync } from "./atomic-write";
 import { log } from "./logger";
 import { isParallelPhase, type WorkflowDefinition, type PhaseDefinition, type ParallelDefinition, type WorkflowSandboxSpec } from "./registry";
+import { getTaskRoot } from "./sandbox";
 import type { TransitionTable } from "./state-machine";
 
 /** 动态读取 AUTOPILOT_HOME，支持测试中修改 env */
@@ -75,7 +76,7 @@ export function getManifestPath(taskId: string): string {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
   }
-  return join(getAutopilotHome(), "runtime", "tasks", taskId, "task-manifest.json");
+  return join(getTaskRoot(taskId), "task-manifest.json");
 }
 
 /**
@@ -186,6 +187,8 @@ export function appendTransition(
  * 扫描 runtime/tasks/ 下所有含 task-manifest.json 的任务 ID。
  */
 export function listManifestTaskIds(): string[] {
+  // 目录遍历（rebuild-index 全量扫描），非单 task 拼接——Stage 0 有意不收口 getTaskRoot；
+  // 需求中心化运行时 Stage 2 起此处需双根遍历（旧 runtime/tasks/ + requirements/<reqId>/runs/），见 spec E1。
   const root = join(getAutopilotHome(), "runtime", "tasks");
   if (!existsSync(root)) return [];
   const out: string[] = [];
