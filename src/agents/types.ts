@@ -94,9 +94,6 @@ export interface ChatResult {
   text: string;
   /** provider 本次返回的 session id（后续续对话用） */
   providerSessionId?: string;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    total_cost_usd?: number;
-  };
+  /** 形状与 AgentResult["usage"] 一致（含 prompt cache 读/写 token） */
+  usage?: AgentResult["usage"];
 }
