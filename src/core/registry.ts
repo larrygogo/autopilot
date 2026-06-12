@@ -2,7 +2,7 @@ import type { TransitionTable } from "./state-machine";
 import { log } from "./logger";
 import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { join, sep } from "path";
 import { parse as parseYaml, parseDocument, type Document } from "yaml";
 import { tryMakePromptRunnerForPhase } from "./prompt-runner";
 import type { InlineAgentConfig } from "./agent-defaults";
@@ -1127,8 +1127,10 @@ export function deleteWorkflowDir(workflowName: string): boolean {
   }
   const wfRoot = join(getAutopilotHomeDynamic(), "workflows");
   const dir = join(wfRoot, workflowName);
-  // 安全校验：最终路径必须仍在 wfRoot 下（防 path traversal）
-  if (!dir.startsWith(wfRoot + "/") && dir !== wfRoot) {
+  // 安全校验：最终路径必须仍在 wfRoot 下（防 path traversal）。
+  // 必须用平台 sep —— 硬编码 "/" 在 Windows 上（join 产出反斜杠）永不匹配，
+  // 会把所有合法删除误杀成「非法路径」（2026-06-12 事故：工作流全部无法删除）
+  if (!dir.startsWith(wfRoot + sep) && dir !== wfRoot) {
     throw new Error(`非法路径：${dir}（必须在 ${wfRoot} 下）`);
   }
   if (!existsSync(dir)) return false;
