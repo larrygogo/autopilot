@@ -107,8 +107,6 @@ export function WorkflowDetail() {
     }
   };
 
-  const isFileSource = (detail?.source ?? "file") === "file";
-
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-6">
       <button
@@ -169,12 +167,13 @@ export function WorkflowDetail() {
               <h3 className="truncate font-mono text-base font-semibold text-accent">
                 {detail.name}
               </h3>
+              {/* file 工作流同样可删（workflows.delete 对 file source 走 deleteWorkflowDir 删目录，
+                  CLI 一直支持）—— 此前误把 file 一刀切禁用，用户工作流全是 file 等于删除不可用 */}
               <Button
                 variant="destructive"
                 size="sm"
                 onClick={() => setPendingDelete(true)}
-                disabled={isFileSource}
-                title={isFileSource ? "文件工作流只读，请改源目录" : "删除"}
+                title="删除"
               >
                 <Trash2 className="h-4 w-4" />
                 删除
