@@ -4,13 +4,14 @@
  * 关系铁律：信息流单向——需求驱动 run 创建（向下委托），run 终结汇报 outcome（向上报告）。
  * run 永不直接改需求状态；所有「run 终结 → 需求状态转移」必须经过 reportRunOutcome：
  *   - delivered      → 有交付 PR 进 awaiting_review（验收交 pr-poller），无 PR 直通 done
+ *   - fixed          → awaiting_review（fix run 修复完成回验收，v2 R3）
  *   - awaiting_human → awaiting_review（带 await_review phase 的旧 workflow 兼容路径）
  *   - fixing         → fix_revision（旧 workflow 的 running_fix_revision 兼容路径）
  *   - failed / cancelled → 对应终态，落 status_reason / status_reason_source，
  *     并把 task 侧 rejection_reason 沉淀为需求评论（防撞墙-失忆-重撞）
  *
- * 当前调用方：requirement-task-bridge（从 task:transition 事件翻译而来）。
- * R3 后 fix 执行器等直接调用本单口，事件缝合外壳退役。
+ * 当前调用方：requirement-task-bridge（从 task:transition 事件翻译而来；
+ * v2 R3 起 fix run（task.kind=fix）的 done 也由 bridge 翻译为 fixed 经此单口汇报）。
  *
  * 放 daemon 层而非 core：它要读 sub_prs / 写需求状态，是服务编排逻辑。
  */
@@ -32,6 +33,7 @@ const log = createLogger("run-outcome");
  */
 export type RunOutcome =
   | { kind: "delivered" }                 // 执行完成；交付物有无由本模块查（hasPr）决定验收/直通
+  | { kind: "fixed" }                     // fix run（kind=fix）完成：修复已 push 回交付分支 → 回验收（v2 R3）
   | { kind: "awaiting_human" }            // 带 await_review phase 的旧 workflow 挂起（pending_await_review 兼容路径）
   | { kind: "fixing" }                    // 旧 workflow 的 running_fix_revision 兼容路径
   | { kind: "failed"; reason?: string; reasonSource?: "user" | "task"; note?: string }
@@ -45,6 +47,9 @@ function targetReqStatus(outcome: RunOutcome, req: { id: string; pr_number: numb
     case "failed":
       return "failed";
     case "awaiting_human":
+      return "awaiting_review";
+    case "fixed":
+      // fix run 修完 push 回同一交付分支 → 回验收，pr-poller 继续盯 merge / CI / 新一轮 review
       return "awaiting_review";
     case "fixing":
       return "fix_revision";

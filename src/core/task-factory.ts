@@ -96,8 +96,12 @@ export interface StartTaskOpts {
   requirement_id?: string;
   /** 兼容老接口：可选传入 reqId（既当 task id 种子，也兜底当 FK link） */
   reqId?: string;
-  /** run 种类（v2 R2）：缺省 execution；fix 修复轮由 R3 接入 */
+  /** run 种类（v2 R2）：缺省 execution；fix 修复轮（v2 R3）由 fix-revision-runner 传入 */
   kind?: string;
+  /** 指定交付分支名（fix run 续作上一轮交付分支用）；缺省按 title 派生新分支 */
+  deliver_branch?: string;
+  /** 沙盒 checkout 既有远程交付分支而非从 base 新建（fix run 续作模式，v2 R3） */
+  checkout_existing_branch?: boolean;
   /** 额外工作流参数（如 workspace_id），转发给 setup_func */
   [key: string]: unknown;
 }
@@ -111,20 +115,24 @@ export class StartTaskError extends Error {
 
 export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> {
   await discover();
-  const workflows = listWorkflows();
-  if (workflows.length === 0) {
-    throw new StartTaskError("No workflows found", 500);
-  }
 
   let workflowName: string;
   if (opts.workflow) {
+    // 显式指定（含 `__` 前缀的内置工作流，如 fix run 的 __fix——listWorkflows 隐藏它们，
+    // 但 getWorkflow 可取）：跳过默认选择，存在性由下方 getWorkflow 统一校验。
     workflowName = opts.workflow;
-  } else if (workflows.length === 1) {
-    workflowName = workflows[0].name;
   } else {
-    throw new StartTaskError(
-      `Multiple workflows found, specify one: ${workflows.map((w) => w.name).join(", ")}`
-    );
+    const workflows = listWorkflows();
+    if (workflows.length === 0) {
+      throw new StartTaskError("No workflows found", 500);
+    }
+    if (workflows.length === 1) {
+      workflowName = workflows[0].name;
+    } else {
+      throw new StartTaskError(
+        `Multiple workflows found, specify one: ${workflows.map((w) => w.name).join(", ")}`
+      );
+    }
   }
 
   const wf = getWorkflow(workflowName);
@@ -185,7 +193,7 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
       };
       // 添加所有额外参数（如 workspace_id）
       for (const [key, value] of Object.entries(opts)) {
-        if (!["workflow", "title", "requirement", "reqId", "kind"].includes(key)) {
+        if (!["workflow", "title", "requirement", "reqId", "kind", "deliver_branch", "checkout_existing_branch"].includes(key)) {
           setupArgs[key] = value;
         }
       }
@@ -228,10 +236,17 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
   try {
     // 共用沙盒模型：task 启动时建独立 clone（源仓库零痕迹），所有 phase 共用直接改文件。
     // 统一布局：每库 clone 到 workspace/<alias>/ 子目录（单库也是），各库共用同名交付分支。
+    // fix run（v2 R3）：deliver_branch 指定上一轮交付分支 + checkout_existing_branch 续作模式
+    //（clone 后 checkout origin/<branch> 而非从 base 新建——不依赖旧 run 的 workspace）。
+    const deliverBranch =
+      typeof opts.deliver_branch === "string" && opts.deliver_branch.trim()
+        ? opts.deliver_branch.trim()
+        : deliverBranchName(title, taskId);
     ensureTaskSandbox(
       taskId, workflowName, wf.sandbox,
       workspaceRefs.length > 0 ? workspaceRefs : undefined,
-      deliverBranchName(title, taskId),
+      deliverBranch,
+      { checkoutExisting: opts.checkout_existing_branch === true },
     );
   } catch (e: unknown) {
     console.warn("ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
@@ -276,8 +291,9 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
   return task;
 }
 
-/** task 是否处于终态（workflow 自定义 terminal_states ∪ 基础集 done/cancelled/failed）。 */
-function isTaskTerminal(task: Task): boolean {
+/** task 是否处于终态（workflow 自定义 terminal_states ∪ 基础集 done/cancelled/failed）。
+ *  导出供「需求已有活跃 run」判定共用口径（fix-revision-runner 防重入等）。 */
+export function isTaskTerminal(task: Task): boolean {
   const terminals = new Set(["done", "cancelled", "failed", ...getTerminalStates(task.workflow)]);
   return terminals.has(task.status);
 }

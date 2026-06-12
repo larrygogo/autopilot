@@ -1,21 +1,29 @@
 /**
- * fix-revision-runner：fix_revision 的修复执行器（方案 B，2026-06-12）。
+ * fix-revision-runner：fix_revision 的修复执行器（需求中心架构 v2 R3：fix = 标准 run）。
  *
- * 背景：旧设计里修复由 workflow 的 await_review / fix_revision 两个 phase 承担
- * （任务长驻 polling 等 trigger）。该机制随 workflow 精简被拆掉后，需求转入
- * fix_revision 就没有任何组件去执行修复 —— 反馈注入后永远停在原地（req-018 链路）。
+ * 演进：
+ *   - 旧设计 A：workflow 内 await_review / fix_revision 两个 phase 长驻 polling —— 已拆。
+ *   - 旧设计 B（方案 B，2026-06-12 上半）：需求级独立执行器，在「保留的任务沙盒」上
+ *     一次性起修复 agent —— 独立炉灶：没有文件锁 / heartbeat / watcher 保护 / phase events，
+ *     且依赖旧 run 的 workspace（被 retention 清走则只能 failed）。
+ *   - 当前（v2 R3）：fix = kind=fix 的**标准 task**，走完整 runner 管线。本模块只负责：
+ *       1. 程序化注册内置 `__fix` 工作流（单 phase `fix`；`__` 前缀 = 平台内置，
+ *          listWorkflows 隐藏。prompt 含 PR / 反馈语义，故注册代码在 daemon 不进 core）
+ *       2. 监听 requirement:status-changed → fix_revision：创建 fix run（kind=fix、seq 递增、
+ *          requirement.task_id 指向 fix run；**续作不重来**——不删远程分支、不清旧 run workspace）
+ *       3. daemon 启动补跑：fix_revision 且无活跃 run → 创建 fix run；有活跃 fix run 的
+ *          由标准 task 恢复机制（respawn / dangling / watcher）接管
  *
- * 本模块以「需求级执行器」补上闭环，与任务状态机解耦（task 保持 done 不复活）：
- *   requirement → fix_revision（注入反馈 / PR CHANGES_REQUESTED / CI 失败均会触发）
- *     → 在保留的任务沙盒（clone + 交付分支工作树）上一次性起修复 agent：
- *       读反馈 → 改代码 → commit & push 同分支（PR 自动更新）
- *     → 成功转回 awaiting_review（pr-poller 继续盯 merge / CI）
- *     → 失败转 failed 停下报人（status_reason 可见，可重试）
+ * fix run 沙盒 = **clone 远程交付分支**（checkout_existing_branch 模式）：feat/ 分支在远程
+ * 存在，重新 clone 即可——不再依赖旧 run 的 workspace，「沙盒被 retention 清走则 failed」
+ * 的尴尬从根上消灭。多库需求：全集 clone，有交付 PR 的库 checkout 各自交付分支，
+ * 无 PR 的库停在默认分支只读参考。
  *
- * 进度可见性：fix-progress 内存态 + requirement:fix-round-update 事件，
- * Web 在 fix_revision 状态显示实时进度卡。
+ * 终结汇报：fix run done → bridge 翻译 `{kind:"fixed"}` → reportRunOutcome → awaiting_review；
+ * 失败（runner 确定性止损 / 触顶）→ failed → 需求 failed 停下报人。run 永不直接改需求状态。
  *
- * daemon 重启恢复：init 时扫描存量 fix_revision 需求补跑（漏触发的回路不悬空）。
+ * 进度可见性 = 标准 task 进度（执行视图 / task logs / agent-calls 天然可看），
+ * 旧 fix-progress 内存态已退役。
  */
 
 import { onEvent, offEvent } from "../core/event-bus";
@@ -23,31 +31,40 @@ import type { AutopilotEvent } from "./protocol";
 import {
   getRequirementById,
   setRequirementStatus,
+  updateRequirement,
   listRequirements,
 } from "../core/requirements";
 import { listFeedbacks } from "../core/requirement-feedbacks";
 import { createComment, nextCommentId } from "../core/requirement-comments";
-import { listTaskRepos, type TaskRepoCtx } from "../core/sandbox";
-import { listSubPrs } from "../core/requirement-sub-prs";
-import { createAgent } from "../agents/registry";
-import { loadProviders } from "../core/config";
-import type { ProviderName } from "../core/config";
-import { runWithTaskContext } from "../core/task-context";
-import { startFixRound, setFixPhase, endFixRound } from "./fix-progress";
-import { createLogger, setTaskId, setPhase as setLogPhase, resetPhase } from "../core/logger";
-import { existsSync } from "fs";
+import { listTaskRepos, getTaskSandbox, getTaskWorktreeMeta, type TaskRepoCtx } from "../core/sandbox";
+import { listSubPrs, type RequirementSubPr } from "../core/requirement-sub-prs";
+import { getTask } from "../core/db";
+import {
+  registerBuiltin,
+  expandPhaseDefaults,
+  type WorkflowDefinition,
+  type PhaseDefinition,
+} from "../core/registry";
+import { startTaskFromTemplate, isTaskTerminal, StartTaskError } from "../core/task-factory";
+import { agentForPhase } from "../agents/registry";
+import type { InlineAgentConfig } from "../core/agent-defaults";
+import { createLogger } from "../core/logger";
 
 const log = createLogger("fix-revision-runner");
+
+/** 内置修复工作流名（`__` 前缀 = 平台内置，listWorkflows 隐藏） */
+export const FIX_WORKFLOW_NAME = "__fix";
 
 /** 拼进 prompt 的反馈条数上限（升序取最近 N 条，最新在后） */
 const MAX_FEEDBACKS_IN_PROMPT = 5;
 
 // ──────────────────────────────────────────────
-// 修复 agent（daemon 层基础设施，与 clarifier-agent 同构；信任级同 develop 阶段）
+// 内置 __fix 工作流（单 phase fix，走标准 runner 管线）
 // ──────────────────────────────────────────────
 
-const FIXER_DEFAULTS = {
-  provider: "anthropic" as ProviderName,
+/** 修复 agent 的 phase 内联配置（信任级同 dev develop 阶段；模型回退 provider 默认） */
+const FIXER_AGENT: InlineAgentConfig = {
+  provider: "anthropic",
   // 修复要读日志 / 改多文件 / 跑测试 / git 操作，回合数给足
   max_turns: 40,
   permission_mode: "bypassPermissions",
@@ -56,17 +73,27 @@ const FIXER_DEFAULTS = {
     "直接修改并 push 同一分支。修复前先理解反馈与现有实现，修小而准，不顺手重构。",
 };
 
-function buildFixerAgent() {
-  const providers = loadProviders();
-  const provider = FIXER_DEFAULTS.provider;
-  return createAgent({
-    name: "fix-reviser",
-    provider,
-    model: providers[provider]?.default_model,
-    max_turns: FIXER_DEFAULTS.max_turns,
-    permission_mode: FIXER_DEFAULTS.permission_mode,
-    system_prompt: FIXER_DEFAULTS.system_prompt,
-  });
+function buildFixWorkflow(): WorkflowDefinition {
+  const phase: PhaseDefinition = expandPhaseDefaults(
+    {
+      name: "fix",
+      timeout: 3600,
+      agent: FIXER_AGENT,
+      func: runFixPhase,
+    },
+    new Set(["fix"]),
+  );
+  return {
+    name: FIX_WORKFLOW_NAME,
+    label: "修复轮（内置）",
+    description: "平台内置：fix_revision 修复轮执行器（按评审/CI 反馈在交付分支上修复并 push）",
+    phases: [phase],
+    initial_state: phase.pending_state, // pending_fix
+    terminal_states: ["done", "cancelled", "failed"],
+    // sandbox.git=true：task-factory 反查需求代码库集合远程 clone（fix run 经
+    // checkout_existing_branch 续作交付分支，见 startFixRun）
+    sandbox: { git: true },
+  };
 }
 
 // ──────────────────────────────────────────────
@@ -81,8 +108,7 @@ export function _setFixFnForTest(fn: FixFn | null): void {
   _fixFn = fn ?? runFixerAgent;
 }
 
-// listTaskRepos 依赖模块加载时固定的 AUTOPILOT_HOME 常量，测试无法用 tmp home
-// 重定向（沙盒测试为此走子进程）。这里提供注入点让 runner 测试留在主进程。
+// listTaskRepos 读 .worktree.json（真实 clone 布局）；测试无真实 clone 时注入假布局。
 type ListReposFn = typeof listTaskRepos;
 
 let _listRepos: ListReposFn = listTaskRepos;
@@ -92,7 +118,7 @@ export function _setListReposForTest(fn: ListReposFn | null): void {
 }
 
 async function runFixerAgent(prompt: string, cwd: string): Promise<string> {
-  const agent = buildFixerAgent();
+  const agent = agentForPhase(FIX_WORKFLOW_NAME, "fix");
   const result = await agent.run(prompt, { cwd });
   return result.text.trim();
 }
@@ -101,21 +127,35 @@ async function runFixerAgent(prompt: string, cwd: string): Promise<string> {
 // Prompt 构造
 // ──────────────────────────────────────────────
 
-function repoLayoutSection(repos: TaskRepoCtx[]): string {
+function repoLayoutSection(repos: TaskRepoCtx[], subPrs: RequirementSubPr[]): string {
+  const prByWs = new Map(subPrs.map((sp) => [sp.child_workspace_id, sp.pr_number]));
   const lines = repos.map((r) => {
     const where = r.dir ? `子目录 ${r.dir}/` : "当前目录（仓库根）";
-    return `- ${r.alias || "（仓库）"}：${where}，交付分支 ${r.branch}（base ${r.base}）`;
+    const pr = prByWs.get(r.workspace_id);
+    const deliver = pr
+      ? `交付分支 ${r.branch}（base ${r.base}），交付 PR #${pr}`
+      : `无交付 PR（停在默认分支，只读参考，勿改动）`;
+    return `- ${r.alias || "（仓库）"}：${where}，${deliver}`;
   });
   return lines.join("\n");
 }
 
-function buildFixPrompt(reqId: string, title: string, repos: TaskRepoCtx[], prNumbers: number[]): string {
+function buildFixPrompt(
+  reqId: string,
+  title: string,
+  repos: TaskRepoCtx[],
+  subPrs: RequirementSubPr[],
+  mainPrNumber: number | null,
+): string {
   const feedbacks = listFeedbacks(reqId).slice(-MAX_FEEDBACKS_IN_PROMPT);
   const fbSection = feedbacks.length > 0
     ? feedbacks
         .map((f) => `### ${f.source === "github_review" ? "GitHub 评审/CI" : "用户"} · ${new Date(f.created_at).toISOString()}\n${f.body}`)
         .join("\n\n---\n\n")
     : "（未找到反馈正文 —— 请检查 PR 上的最新 review 与 CI 状态后自行判断需要修什么）";
+  const prNumbers = [
+    ...new Set([...subPrs.map((sp) => sp.pr_number), ...(mainPrNumber ? [mainPrNumber] : [])]),
+  ].filter((n) => n > 0);
   const prHint = prNumbers.length > 0
     ? `相关 PR：${prNumbers.map((n) => `#${n}`).join("、")}。CI 失败时可用 \`gh pr checks <PR号>\` 与 \`gh run view --log-failed\` 查看失败日志。`
     : "";
@@ -125,8 +165,8 @@ function buildFixPrompt(reqId: string, title: string, repos: TaskRepoCtx[], prNu
     "",
     "此前交付的 PR 收到了评审 / CI 反馈，请在现有交付分支上修复。",
     "",
-    "## 仓库布局（任务沙盒，已是交付分支的工作树）",
-    repoLayoutSection(repos),
+    "## 仓库布局（任务沙盒，有交付 PR 的库已 checkout 交付分支）",
+    repoLayoutSection(repos, subPrs),
     "",
     "## 反馈（按时间升序，最新在最后；与旧反馈冲突时以最新为准）",
     fbSection,
@@ -141,39 +181,70 @@ function buildFixPrompt(reqId: string, title: string, repos: TaskRepoCtx[], prNu
 }
 
 // ──────────────────────────────────────────────
-// 执行体
+// fix phase（标准阶段函数：runner 负责锁/心跳/事件/重试/止损，这里只干修复本身）
 // ──────────────────────────────────────────────
 
-const _inflight = new Set<string>();
+export async function runFixPhase(taskId: string): Promise<void> {
+  const task = getTask(taskId);
+  if (!task) throw new Error(`fix run ${taskId} 不存在`);
+  const reqId = task.requirement_id;
+  if (!reqId) throw new Error(`fix run ${taskId} 缺少 requirement_id`);
+  const req = getRequirementById(reqId);
+  if (!req) throw new Error(`fix run ${taskId} 关联需求 ${reqId} 不存在`);
 
-/** 测试用：清空进程内锁。 */
-export function _resetFixInflightForTest(): void {
-  _inflight.clear();
-}
-
-export async function runFixRevision(reqId: string): Promise<void> {
-  if (_inflight.has(reqId)) {
-    log.info("fix-runner: req=%s 已在跑，跳过重复触发", reqId);
-    return;
+  const repos = _listRepos(taskId);
+  if (repos.length === 0) {
+    throw new Error(`fix run ${taskId} 无沙盒布局（.worktree.json 缺失 / clone 失败），无法修复`);
   }
-  _inflight.add(reqId);
+
+  const subPrs = listSubPrs(reqId);
+  const prompt = buildFixPrompt(reqId, req.title, repos, subPrs, req.pr_number ?? null);
+
+  log.info("fix-runner: req=%s 开始修复（fix run=%s, repos=%s, PRs=%s）",
+    reqId, taskId, repos.length,
+    [...new Set([...subPrs.map((sp) => sp.pr_number), ...(req.pr_number ? [req.pr_number] : [])])].join(",") || "无");
+
+  // cwd = 沙盒根（统一子目录布局，各库在 ./alias/）。agent 实时输出 / agent-calls 记录
+  // 由 runner 的 runWithTaskContext 标准管线提供，无需在此手工接 logger / task-context。
+  const summary = (await _fixFn(prompt, getTaskSandbox(taskId))).trim();
+
+  // 产出可见性：修复总结落需求评论（反馈历史直接展示「改了什么、push 了哪些库」），
+  // 不让产出只活在任务日志里。写入失败不阻塞 run 终结（状态流转走 bridge → reportRunOutcome）。
   try {
-    await _runInner(reqId);
-  } finally {
-    _inflight.delete(reqId);
-    endFixRound(reqId, "errored"); // inner 正常结束已 endFixRound，这里是异常路径兜底（no-op 安全）
+    createComment({
+      id: nextCommentId(),
+      requirement_id: reqId,
+      kind: "feedback",
+      from_role: "agent",
+      body: `【修复完成】\n\n${summary.slice(0, 8000)}`,
+    });
+  } catch (e: unknown) {
+    log.warn("fix-runner: req=%s 修复总结写评论失败：%s", reqId, (e as Error).message);
   }
+  log.info("fix-runner: req=%s 修复完成（fix run=%s）。agent 总结：%s", reqId, taskId, summary.slice(0, 300));
 }
 
-async function _runInner(reqId: string): Promise<void> {
+// ──────────────────────────────────────────────
+// fix run 创建（事件触发 / 启动补跑共用）
+// ──────────────────────────────────────────────
+
+/**
+ * 为 fix_revision 需求创建 fix run（kind=fix 的标准 task）。
+ *
+ * 与 startNewRunForRequirement（重跑=重来）的关键区别 —— fix 是**续作**：
+ *   - 不删远程交付分支（修复要 push 回同一分支让 PR 自动更新）
+ *   - 不清旧 run workspace / 不清 sub_prs / pr_url（历史与交付记录原样保留）
+ *   - 沙盒 = 重新 clone + checkout 远程交付分支（不依赖旧 run 的本地 workspace）
+ *
+ * 防重入：需求已有活跃（非终态）run 时跳过（DB 真相，与 task-factory 409 守卫同口径）——
+ * 活跃 fix run 的中断恢复由标准 task 机制（respawn / dangling / watcher）负责。
+ */
+export async function startFixRun(reqId: string): Promise<void> {
   const req = getRequirementById(reqId);
   if (!req || req.status !== "fix_revision") return;
 
-  startFixRound(reqId);
-
   const fail = (reason: string): void => {
-    log.warn("fix-runner: req=%s 修复失败：%s", reqId, reason);
-    endFixRound(reqId, "errored");
+    log.warn("fix-runner: req=%s 无法启动修复：%s", reqId, reason);
     try {
       setRequirementStatus(reqId, "failed", { reason: `修复执行失败：${reason}`, reason_source: "system" });
     } catch (e: unknown) {
@@ -181,84 +252,56 @@ async function _runInner(reqId: string): Promise<void> {
     }
   };
 
+  // 防重入（DB 真相）：当前指向的 run 仍活跃 → 不重复创建
+  if (req.task_id) {
+    const cur = getTask(req.task_id);
+    if (cur && !isTaskTerminal(cur)) {
+      log.info("fix-runner: req=%s 已有活跃 run %s（%s），跳过创建 fix run", reqId, cur.id, cur.status);
+      return;
+    }
+  }
+
   if (!req.task_id) {
-    fail("需求无关联任务（task_id 为空），没有可修复的交付沙盒");
+    fail("需求无关联任务（task_id 为空），找不到上一轮交付分支");
     return;
   }
-  const repos = _listRepos(req.task_id);
-  if (repos.length === 0) {
-    fail(`任务 ${req.task_id} 无沙盒布局（.worktree.json 缺失）`);
+  // 交付分支名从上一轮 run 的 .worktree.json 取（fix run 链上每轮都续写同名分支）。
+  // 运行目录被整体删除（meta 丢失）才无从续作 —— 此时只能整轮重跑。
+  const prevMeta = getTaskWorktreeMeta(req.task_id);
+  const branch = prevMeta?.branch;
+  if (!branch) {
+    fail(`上一轮 run ${req.task_id} 无交付分支记录（.worktree.json 缺失，运行目录可能已被删除），请重新入队整轮重跑`);
     return;
   }
-  const primary = repos.find((r) => r.primary) ?? repos[0];
-  if (!existsSync(primary.path)) {
-    fail(`任务沙盒已不存在（${primary.path}）—— 可能被保留策略清理，请重新入队整轮重跑`);
-    return;
-  }
 
-  const prNumbers = [
-    ...new Set([
-      ...listSubPrs(reqId).map((sp) => sp.pr_number),
-      ...(req.pr_number ? [req.pr_number] : []),
-    ]),
-  ].filter((n) => n > 0);
-
-  const prompt = buildFixPrompt(reqId, req.title, repos, prNumbers);
-
-  log.info("fix-runner: req=%s 开始修复（task=%s, repos=%s, PRs=%s）",
-    reqId, req.task_id, repos.length, prNumbers.join(",") || "无");
-  setFixPhase(reqId, "fixing");
-
-  // 进入 task context + logger 任务标签 —— 让修复过程获得与正常 phase 同级的可见性：
-  // - agent 的实时输出（bridgeCliMessage：assistant 文本/工具调用/工具结果）走 log:entry
-  //   事件（带 taskId）+ 落 phase 磁盘日志 → Web 执行记录 / `task logs --follow` 实时可看
-  // - Agent.run 自动 appendAgentCall(phase="fix_revision") → 调用记录（prompt/产出/用时）持久化
-  let summary: string;
-  setTaskId(req.task_id);
-  setLogPhase("fix_revision", "FIX_REVISION");
+  let taskId: string;
   try {
-    summary = await runWithTaskContext(
-      { taskId: req.task_id, phase: "fix_revision", sandboxDir: primary.path },
-      () => _fixFn(prompt, primary.path),
-    );
-  } catch (e: unknown) {
-    fail(e instanceof Error ? e.message : String(e));
-    return;
-  } finally {
-    resetPhase();
-  }
-
-  // 修复期间用户可能取消/状态被改 —— re-fetch 校验后再转回验收
-  const after = getRequirementById(reqId);
-  if (!after || after.status !== "fix_revision") {
-    log.info("fix-runner: req=%s 修复完成但状态已变（%s），不写回", reqId, after?.status ?? "已删除");
-    endFixRound(reqId, "done");
-    return;
-  }
-
-  endFixRound(reqId, "done");
-
-  // 产出可见性：修复总结落需求评论（反馈历史直接展示「改了什么、push 了哪些库」），
-  // 不让产出只活在 daemon 日志里。写入失败不阻塞状态流转。
-  try {
-    createComment({
-      id: nextCommentId(),
+    const task = await startTaskFromTemplate({
+      workflow: FIX_WORKFLOW_NAME,
+      title: req.title,
       requirement_id: reqId,
-      kind: "feedback",
-      from_role: "agent",
-      body: `【修复完成 · 已转回验收】\n\n${summary.slice(0, 8000)}`,
+      kind: "fix",
+      deliver_branch: branch,
+      checkout_existing_branch: true,
     });
+    taskId = task.id;
   } catch (e: unknown) {
-    log.warn("fix-runner: req=%s 修复总结写评论失败：%s", reqId, (e as Error).message);
+    if (e instanceof StartTaskError && e.status === 409) {
+      // 并发窗口下已有活跃 run（守卫同口径）——让位，不算失败
+      log.info("fix-runner: req=%s 创建 fix run 撞活跃 run 守卫，跳过：%s", reqId, e.message);
+      return;
+    }
+    fail(`创建 fix run 失败：${e instanceof Error ? e.message : String(e)}`);
+    return;
   }
 
+  // requirement.task_id 指向 fix run（旧 run 行保留 = 执行历史；UI 执行视图随之切到修复轮）
   try {
-    setRequirementStatus(reqId, "awaiting_review");
-    log.info("fix-runner: req=%s 修复完成，转回 awaiting_review。agent 总结：%s",
-      reqId, summary.slice(0, 300));
+    updateRequirement(reqId, { task_id: taskId });
   } catch (e: unknown) {
-    log.error("fix-runner: req=%s 转回 awaiting_review 失败：%s", reqId, (e as Error).message);
+    log.error("fix-runner: req=%s 写回 task_id=%s 失败：%s", reqId, taskId, (e as Error).message);
   }
+  log.info("fix-runner: req=%s 已创建 fix run %s（branch=%s，续作不删远程分支）", reqId, taskId, branch);
 }
 
 // ──────────────────────────────────────────────
@@ -270,26 +313,33 @@ let _handler: ((event: AutopilotEvent) => void) | null = null;
 export function initFixRevisionRunner(): void {
   if (_handler) return;
 
+  // 注册内置 __fix 工作流（registerBuiltin：workflow reload 后仍存活）。
+  // 必须先于 daemon 的 recoverDanglingTasks / watcher——它们恢复 running_fix 任务时
+  // 要能 getWorkflow("__fix") 找到 phase 函数。
+  registerBuiltin(buildFixWorkflow());
+
   _handler = (event: AutopilotEvent) => {
     if (event.type !== "requirement:status-changed") return;
     const { id, to } = event.payload;
     if (to !== "fix_revision") return;
-    runFixRevision(id).catch((e: unknown) => {
+    startFixRun(id).catch((e: unknown) => {
       log.error("fix-runner: 触发失败 req=%s: %s", id, (e as Error).message);
     });
   };
   onEvent("requirement:status-changed", _handler);
 
-  // 重启恢复：daemon 挂掉时正在/等待修复的需求会停在 fix_revision，启动时补跑
+  // 启动补跑：停在 fix_revision 且无活跃 run 的需求补建 fix run（含 v2 R3 之前的存量
+  // 需求——旧模型无 fix run 概念，直接起新 fix run 即可）。有活跃 fix run 的在
+  // startFixRun 内被防重入跳过，交由标准 task 恢复机制接管。
   const stranded = listRequirements({ status: "fix_revision" });
   for (const r of stranded) {
-    log.info("fix-runner: 启动恢复 —— req=%s 停在 fix_revision，补跑修复", r.id);
-    runFixRevision(r.id).catch((e: unknown) => {
+    log.info("fix-runner: 启动恢复 —— req=%s 停在 fix_revision，检查/补建 fix run", r.id);
+    startFixRun(r.id).catch((e: unknown) => {
       log.error("fix-runner: 启动恢复失败 req=%s: %s", r.id, (e as Error).message);
     });
   }
 
-  log.info("fix-revision-runner 已启动（订阅 requirement:status-changed，恢复 %s 条）", stranded.length);
+  log.info("fix-revision-runner 已启动（__fix 工作流已注册；订阅 requirement:status-changed，启动检查 %s 条）", stranded.length);
 }
 
 export function disposeFixRevisionRunner(): void {

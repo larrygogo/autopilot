@@ -51,8 +51,7 @@ export type AutopilotEvent =
   | { type: "provider:health-snapshot"; payload: { states: import("./provider-health").ProviderHealthState[]; ts: number } }
   // Clarifier 进度反馈（内存态，daemon 重启即清）
   | { type: "requirement:clarifier-round-update"; payload: import("../daemon/clarifier-progress").ClarifierRoundState }
-  // fix_revision 修复执行进度（内存态，fix-revision-runner）
-  | { type: "requirement:fix-round-update"; payload: import("../daemon/fix-progress").FixRoundState }
+  // 注：requirement:fix-round-update 已随 fix-progress 退役（v2 R3：fix = 标准 run，进度走 task 事件流）
   // Phase 5 — 运行中 task 追加 prompt（spec §3.8）
   | { type: "task:prompt-queued"; payload: { taskId: string; source: string; queued_at: number } }
   | { type: "task:prompt-answered"; payload: { taskId: string; source: string } }

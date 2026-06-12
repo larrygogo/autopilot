@@ -708,10 +708,7 @@ export const api = {
     requestRpc<{ round: ClarifierRoundState | null }>("requirements.clarifierRound", { id })
       .then((r) => r.round),
 
-  // [WS-RPC] requirements.fixRound —— fix_revision 修复执行进度（fix-revision-runner）
-  getFixRound: (id: string) =>
-    requestRpc<{ round: FixRoundState | null }>("requirements.fixRound", { id })
-      .then((r) => r.round),
+  // requirements.fixRound 已移除（v2 R3：fix = 标准 run，进度看 requirement.task_id 指向的任务）
 
   // Comments（统一评论线程：question / feedback / handoff）
   // [WS-RPC] comments.list
@@ -1101,13 +1098,6 @@ export interface ClarifierRoundState {
   attempt: 0 | 1;
   prompt: string | null;
   last_parse_error: string | null;
-}
-
-/** fix_revision 修复执行进度（daemon fix-progress 内存态镜像） */
-export interface FixRoundState {
-  req_id: string;
-  started_at: number;
-  phase: "preparing" | "fixing" | "done" | "errored";
 }
 
 export interface RediscoverSubmodulesResult {

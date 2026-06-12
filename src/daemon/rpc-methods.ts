@@ -1281,17 +1281,8 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
-  registerRpcMethod({
-    method: "requirements.fixRound",
-    description: "需求当前 fix_revision 修复轮的进度状态（无活动轮 → null）",
-    handler: async (params) => {
-      const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
-      const { getFixRound } = await import("./fix-progress");
-      return { round: getFixRound(p.id) ?? null };
-    },
-  });
+  // requirements.fixRound 已移除（v2 R3）：fix = 标准 run，修复进度即 task 进度
+  //（requirement.task_id 指向 fix run，执行视图 / task logs / agent-calls 直接可看）。
 
   registerRpcMethod({
     method: "requirements.retryClarify",

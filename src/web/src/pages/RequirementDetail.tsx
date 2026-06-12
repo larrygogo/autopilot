@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { PAGE_W } from "@/lib/layout";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion, Bot, UserRound } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type FixRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
+import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
 import { AttachmentUploader } from "@/components/AttachmentUploader";
 import { RequirementWorkspacePicker } from "@/components/RequirementWorkspacePicker";
 import { AttachmentList } from "@/components/AttachmentList";
@@ -425,8 +425,6 @@ export function RequirementDetail() {
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [retryingClarify, setRetryingClarify] = useState(false);
   const [round, setRound] = useState<ClarifierRoundState | null>(null);
-  const [fixRound, setFixRound] = useState<FixRoundState | null>(null);
-  const [fixElapsedSec, setFixElapsedSec] = useState(0);
   const [traceOpen, setTraceOpen] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [selectedStep, setSelectedStep] = useState<ReqStep | null>(null);
@@ -441,13 +439,12 @@ export function RequirementDetail() {
     if (!id) return;
     if (!opts.silent) setLoading(true);
     try {
-      const [data, repoList, sub, qs, rd, frd, slogs, atts] = await Promise.all([
+      const [data, repoList, sub, qs, rd, slogs, atts] = await Promise.all([
         api.getRequirement(id),
         api.listWorkspaces(),
         api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
         api.listQuestions(id).catch(() => [] as Question[]),
         api.getClarifierRound(id).catch(() => null),
-        api.getFixRound(id).catch(() => null),
         api.listRequirementStatusLogs(id).catch(() => [] as RequirementStatusLog[]),
         api.listAttachments(id).catch(() => [] as Attachment[]),
       ]);
@@ -459,7 +456,6 @@ export function RequirementDetail() {
       setSubPrs(sub);
       setQuestions(qs);
       setRound(rd);
-      setFixRound(frd);
       setStatusLogs(slogs);
       setAttachments(atts);
     } catch (e: unknown) {
@@ -508,18 +504,6 @@ export function RequirementDetail() {
         }
         return;
       }
-      if (event.type === "requirement:fix-round-update") {
-        const payload = event.payload as { req_id?: string; started_at?: number; phase?: FixRoundState["phase"] } | undefined;
-        if (!payload || payload.req_id !== id) return;
-        if (!payload.phase || typeof payload.started_at !== "number") return;
-        if (payload.phase === "done" || payload.phase === "errored") {
-          setFixRound(null);
-          void refresh({ silent: true }); // 终态随之刷新需求状态（awaiting_review / failed）
-        } else {
-          setFixRound({ req_id: payload.req_id!, started_at: payload.started_at, phase: payload.phase });
-        }
-        return;
-      }
       const isForThis = event.payload?.id === id;
       if (!isForThis) return;
       if (
@@ -534,19 +518,6 @@ export function RequirementDetail() {
       }
     });
   }, [id, subscribe, refresh]);
-
-  // fix_revision 修复轮计时（与 clarifier 计时同模式）
-  useEffect(() => {
-    if (!fixRound) {
-      setFixElapsedSec(0);
-      return;
-    }
-    setFixElapsedSec(Math.floor((Date.now() - fixRound.started_at) / 1000));
-    const t = setInterval(() => {
-      setFixElapsedSec(Math.floor((Date.now() - fixRound.started_at) / 1000));
-    }, 1000);
-    return () => clearInterval(t);
-  }, [fixRound]);
 
   // 本地 1s tick 计时器：基于 round.started_at 推导已用秒数，
   // 避免依赖 WS 高频推送 elapsed 字段。
@@ -1164,24 +1135,25 @@ export function RequirementDetail() {
                 </li>
               );
             })}
-            {/* 进行中的修复 = 时间线的活跃条目（spinner + 阶段 + 用时），完成后被 Agent 修复总结替代 */}
+            {/* 进行中的修复 = 时间线的活跃条目。fix 是标准 run（v2 R3）：实时进度 / 日志 /
+                agent 调用全在下方「执行记录」（task_id 已指向修复轮），此处只给状态 + 跳转 */}
             {req.status === "fix_revision" && (
               <li className="rounded-md border border-accent/25 bg-accent/5 p-3">
                 <div className="mb-1 flex flex-wrap items-center gap-1.5">
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
                   <span className="text-xs font-medium text-accent">Agent 修复执行中</span>
-                  {fixRound && (
-                    <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
-                      已用 {fixElapsedSec}s
-                    </span>
+                  {req.task_id && (
+                    <a
+                      href="#task-record"
+                      className="ml-auto font-mono text-[11px] text-accent hover:underline"
+                    >
+                      查看执行 →
+                    </a>
                   )}
                 </div>
                 <p className="font-mono text-[11px] text-muted-foreground">
-                  {fixRound
-                    ? (fixRound.phase === "preparing"
-                        ? "准备中：读取反馈与交付沙盒布局…"
-                        : "按上方最新意见修改代码，完成后 push 更新 PR 并在此回应总结")
-                    : "等待修复执行器接管…（daemon 重启后会自动补跑；长时间无进展请检查 daemon）"}
+                  按上方最新意见在交付分支上修复，完成后 push 更新 PR 并在此回应总结
+                  {req.task_id ? "；实时进度与日志见下方「执行记录」" : ""}
                 </p>
               </li>
             )}
@@ -1220,7 +1192,7 @@ export function RequirementDetail() {
 
   // 执行视图：展开常驻（带标题头），所有阶段一致呈现，不折叠
   const taskRecord = req.task_id ? (
-    <Card>
+    <Card id="task-record">
       <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
         <span className="text-sm font-medium">执行记录</span>
         <span className="font-mono text-[10px] text-muted-foreground">TASK {req.task_id.slice(0, 8)}…</span>

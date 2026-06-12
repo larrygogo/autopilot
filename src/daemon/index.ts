@@ -241,7 +241,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   initProviderCliMonitor();
   // 桥接 task 状态变化 → 同步 requirement 状态
   initRequirementTaskBridge();
-  // fix_revision 修复执行器（注入反馈 / PR review / CI 失败 → 在任务沙盒起修复 agent）
+  // fix_revision 修复执行器（v2 R3：注册内置 __fix 工作流 + fix_revision → 创建 kind=fix
+  // 标准 run）。必须先于 recoverDanglingTasks——恢复 running_fix 任务要能找到 __fix 工作流。
   initFixRevisionRunner();
   // 需求完成即清任务 workspace（交付已在远程 PR，本地 clone 占空间无保留价值）
   initDoneWorkspaceCleanup();

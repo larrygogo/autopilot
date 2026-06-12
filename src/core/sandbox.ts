@@ -273,6 +273,14 @@ export function ensureTaskSandbox(
   sandboxConfig?: SandboxConfig,
   workspace?: WorkspaceRef | WorkspaceRef[],
   deliverBranch?: string,
+  opts?: {
+    /**
+     * checkout 既有远程交付分支（fix run 续作模式，v2 R3）：clone 后不从 base 新建分支，
+     * 而是 checkout origin/<deliverBranch>；远程无此分支（该库本轮无交付）→ 停在默认分支
+     * 只读参考。缺省 false = 正常模式（从 base 新建交付分支）。
+     */
+    checkoutExisting?: boolean;
+  },
 ): string {
   const wsPath = getTaskSandbox(taskId);
 
@@ -288,7 +296,7 @@ export function ensureTaskSandbox(
     }
     // 统一布局（主库概念废除）：凡 git 模式一律 multi-clone 子目录布局（单库 = 长度 1 repos）
     const wsArr = Array.isArray(workspace) ? workspace : workspace ? [workspace] : [];
-    const wt = tryCreateMultiClone(taskId, sandboxConfig, wsArr, wsPath, deliverBranch);
+    const wt = tryCreateMultiClone(taskId, sandboxConfig, wsArr, wsPath, deliverBranch, opts?.checkoutExisting === true);
     if (wt) return wsPath;
     // 退化：clone 创建失败 → 空目录
     if (!existsSync(wsPath)) mkdirSync(wsPath, { recursive: true });
@@ -329,6 +337,7 @@ function cloneOneRepo(
   dest: string,
   base: string,
   branch: string,
+  checkoutExisting = false,
 ): boolean {
   if (!workspace.remote_url) return false;
 
@@ -367,17 +376,36 @@ function cloneOneRepo(
     Bun.spawnSync(["git", "-C", dest, "remote", "set-url", "origin", cleanUrl], { stderr: "pipe" });
   }
 
-  // 基于 origin/<base> 建交付分支（完整 clone 后所有分支均作为 origin/<x> 可用）
-  const baseRef = Bun.spawnSync(
-    ["git", "-C", dest, "rev-parse", "--verify", "--quiet", `origin/${base}`],
-    { stderr: "pipe" },
-  ).exitCode === 0 ? `origin/${base}` : base;
+  if (checkoutExisting) {
+    // fix run 续作模式（v2 R3）：checkout 既有远程交付分支，不从 base 新建（不重置交付内容）。
+    // 远程无此分支 = 该库本轮无交付 PR → 停在克隆的默认分支只读参考，不视为失败。
+    const hasRemoteBranch = Bun.spawnSync(
+      ["git", "-C", dest, "rev-parse", "--verify", "--quiet", `origin/${branch}`],
+      { stderr: "pipe" },
+    ).exitCode === 0;
+    if (hasRemoteBranch) {
+      const co = Bun.spawnSync(["git", "-C", dest, "checkout", "-B", branch, `origin/${branch}`], { stderr: "pipe" });
+      if (co.exitCode !== 0) {
+        const stderr = co.stderr ? new TextDecoder().decode(co.stderr) : "";
+        log.warn("checkout 既有交付分支失败 [task=%s branch=%s]: %s", taskId, branch, stderr.slice(0, 200));
+      }
+    } else {
+      log.info("远程无交付分支 %s，保持默认分支（该库本轮无交付，只读参考）[task=%s workspace=%s]",
+        branch, taskId, workspace.id);
+    }
+  } else {
+    // 基于 origin/<base> 建交付分支（完整 clone 后所有分支均作为 origin/<x> 可用）
+    const baseRef = Bun.spawnSync(
+      ["git", "-C", dest, "rev-parse", "--verify", "--quiet", `origin/${base}`],
+      { stderr: "pipe" },
+    ).exitCode === 0 ? `origin/${base}` : base;
 
-  const co = Bun.spawnSync(["git", "-C", dest, "checkout", "-B", branch, baseRef], { stderr: "pipe" });
-  if (co.exitCode !== 0) {
-    const stderr = co.stderr ? new TextDecoder().decode(co.stderr) : "";
-    log.warn("clone 后建交付分支失败 [task=%s branch=%s base=%s]: %s", taskId, branch, base, stderr.slice(0, 200));
-    // 不致命：仍在克隆的默认分支，尽量跑
+    const co = Bun.spawnSync(["git", "-C", dest, "checkout", "-B", branch, baseRef], { stderr: "pipe" });
+    if (co.exitCode !== 0) {
+      const stderr = co.stderr ? new TextDecoder().decode(co.stderr) : "";
+      log.warn("clone 后建交付分支失败 [task=%s branch=%s base=%s]: %s", taskId, branch, base, stderr.slice(0, 200));
+      // 不致命：仍在克隆的默认分支，尽量跑
+    }
   }
 
   // .git/info/exclude：让阶段产物目录不进 PR
@@ -410,6 +438,7 @@ function tryCreateMultiClone(
   workspaces: Array<WorkspaceRef & { alias?: string }>,
   wsRoot: string,
   deliverBranch?: string,
+  checkoutExisting = false,
 ): WorktreeMeta | null {
   if (workspaces.length === 0) {
     log.warn("sandbox.git=true 但未提供 workspace（task.extra 无 workspace_id？）；退化空目录 [task=%s]", taskId);
@@ -432,7 +461,7 @@ function tryCreateMultiClone(
     usedDirs.add(dir);
     const base = cfg.base ?? ws.default_branch;
     const dest = join(wsRoot, dir);
-    if (!cloneOneRepo(taskId, ws, dest, base, branch)) {
+    if (!cloneOneRepo(taskId, ws, dest, base, branch, checkoutExisting)) {
       log.warn("多库沙盒：仓库 %s clone 失败，整体退化空目录 [task=%s]", ws.id, taskId);
       rmSync(wsRoot, { recursive: true, force: true });
       return null;

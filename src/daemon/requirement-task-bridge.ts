@@ -11,6 +11,7 @@
  *   - failed_* / failed        → failed
  *   - pending_await_review     → awaiting_human（带 await_review phase 的旧 workflow）
  *   - running_fix_revision     → fixing（旧 workflow 兼容路径）
+ *   - done + task.kind=fix     → fixed（fix run 修复完成回验收，v2 R3）
  *   - done                     → delivered（有无交付 PR 由 run-outcome 判定去向）
  *   - 其余                     → 忽略
  *
@@ -21,6 +22,7 @@
 import { onEvent, offEvent } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { listRequirements } from "../core/requirements";
+import { getTask } from "../core/db";
 import { createLogger } from "../core/logger";
 import { reportRunOutcome, type RunOutcome } from "./run-outcome";
 
@@ -48,7 +50,11 @@ function toRunOutcome(
   }
   if (taskTo === "pending_await_review") return { kind: "awaiting_human" };
   if (taskTo === "running_fix_revision") return { kind: "fixing" };
-  if (taskTo === "done") return { kind: "delivered" };
+  if (taskTo === "done") {
+    // fix run（kind=fix，v2 R3）：done = 修复已 push 回交付分支 → fixed（回验收）；
+    // 普通 execution run：delivered（有无交付 PR 由 run-outcome 判定去向）。
+    return getTask(taskId)?.kind === "fix" ? { kind: "fixed" } : { kind: "delivered" };
+  }
   return null;
 }
 

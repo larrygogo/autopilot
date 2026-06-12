@@ -124,7 +124,7 @@ cancel 级联变平凡：取消需求 = abort 活跃 run（已有 task-lifecycle
 | **R0** ✅ | 路径收口 getTaskRoot（已完成 a06d383） | — |
 | **R1 汇报接口** | `reportRunOutcome` 落地，bridge 改为其唯一调用方（外壳保留行为不变）——先把单口立起来，缝合代码逐步迁入 | dogfood 主库废除通过 |
 | **R2 run 多历史** ✅（2026-06-12，迁移实为 044） | tasks 加 kind/seq、重跑=新 run、文件落 runs/（执行视图按 run 切换属 R6 UI 收束，本期流水线先只显示最新 run） | R1 |
-| **R3 fix=run** | fix-revision-runner 重构为创建 fix run（走标准 runner+汇报） | R1、R2 |
+| **R3 fix=run** ✅（2026-06-12） | fix-revision-runner 重构为创建 fix run（内置 `__fix` 工作流走标准 runner 管线；沙盒=clone 远程交付分支续作；bridge 翻译 fixed outcome 经 reportRunOutcome；fix-progress 退役） | R1、R2 |
 | **R4 codebase 统一** | = runtime spec Stage 3（clone 归需求） | R2 |
 | **R5 声明层** | requires/delivers + 三闸门 + acceptance 执行器按 delivers 分发（与交付物 P0 合流） | R1 |
 | **R6 UI 收束** | 需求页为唯一主视图（run 历史内联）、流水线一需求一行、任务路由降级 run 详情 | R2 |

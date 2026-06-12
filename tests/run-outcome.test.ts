@@ -136,6 +136,19 @@ describe("reportRunOutcome：非终态委托路径", () => {
     expect(getRequirementById(reqId)!.status).toBe("fix_revision");
   });
 
+  it("fixed → awaiting_review（fix run 修复完成回验收，v2 R3）", () => {
+    const { reqId, runId } = makeRequirement("awaiting_review");
+    setRequirementStatus(reqId, "fix_revision");
+    reportRunOutcome(reqId, runId, { kind: "fixed" });
+    expect(getRequirementById(reqId)!.status).toBe("awaiting_review");
+  });
+
+  it("fixed 从非法出发态（drafting）→ 静默跳过", () => {
+    const { reqId, runId } = makeRequirement("drafting");
+    expect(() => reportRunOutcome(reqId, runId, { kind: "fixed" })).not.toThrow();
+    expect(getRequirementById(reqId)!.status).toBe("drafting");
+  });
+
   it("非终态汇报不写 reason 列", () => {
     const { reqId, runId } = makeRequirement("running");
     reportRunOutcome(reqId, runId, { kind: "awaiting_human" });

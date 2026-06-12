@@ -144,15 +144,33 @@ export function getPhaseSandboxSpec(
 
 const _registry: Map<string, WorkflowDefinition> = new Map();
 
+/**
+ * 程序化注册的内置工作流（如 daemon 注册的平台级执行器 `__fix`）。
+ * 与文件/DB 工作流的区别：不依赖磁盘发现，reload() 清空注册表后自动重新注册。
+ * 命名约定 `__` 前缀标内置 —— listWorkflows 默认隐藏（getWorkflow / runner 照常可用）。
+ */
+const _builtins: Map<string, WorkflowDefinition> = new Map();
+
 export function _clearRegistry(): void {
   _registry.clear();
+  _builtins.clear();
 }
 
 /**
- * 热重载：清空注册表 + 重新发现工作流。
+ * 注册内置工作流：进注册表 + 记入 builtins 集合（reload 后存活）。
+ * 框架只提供机制；具体内置工作流的定义（prompt / 业务语义）由 daemon 层提供。
+ */
+export function registerBuiltin(wf: WorkflowDefinition): void {
+  _builtins.set(wf.name, wf);
+  _registry.set(wf.name, wf);
+}
+
+/**
+ * 热重载：清空注册表 + 重新发现工作流。内置工作流（registerBuiltin）自动保留。
  */
 export async function reload(): Promise<void> {
   _registry.clear();
+  for (const wf of _builtins.values()) _registry.set(wf.name, wf);
   await discover();
 }
 
@@ -947,11 +965,16 @@ export function getWorkflow(name: string): WorkflowDefinition | null {
 }
 
 export function listWorkflows(): { name: string; label?: string; description: string }[] {
-  return [..._registry.values()].map((wf) => ({
-    name: wf.name,
-    label: wf.label,
-    description: wf.description ?? "",
-  }));
+  // `__` 前缀 = 内置平台工作流（registerBuiltin），不进列表：用户不可选它起任务 /
+  // 设为需求工作流，UI / CLI 列表也不展示。getWorkflow / 状态机 / watcher 照常工作
+  //（watcher 的终态集合对内置工作流由 done/cancelled/failed 固定兜底覆盖）。
+  return [..._registry.values()]
+    .filter((wf) => !wf.name.startsWith("__"))
+    .map((wf) => ({
+      name: wf.name,
+      label: wf.label,
+      description: wf.description ?? "",
+    }));
 }
 
 /**
