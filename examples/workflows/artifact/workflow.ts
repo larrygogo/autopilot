@@ -9,7 +9,7 @@
  * 设计基准：docs/superpowers/specs/2026-06-12-deliverable-abstraction-design.md
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "@autopilot/index";
 import { getTask } from "@autopilot/core/db";
@@ -124,6 +124,7 @@ export async function run_deliver(taskId: string): Promise<void> {
 
   const reqId = (task["requirement_id"] as string | undefined) ?? "no-req";
   const dest = join(AUTOPILOT_HOME, "deliverables", reqId, taskId);
+  rmSync(dest, { recursive: true, force: true });
   mkdirSync(dest, { recursive: true });
   cpSync(src, dest, { recursive: true });
 
@@ -132,6 +133,6 @@ export async function run_deliver(taskId: string): Promise<void> {
   if (!wf) throw new Error(`工作流不存在：${task.workflow}`);
   transition(taskId, "deliver_complete", {
     transitions: buildTransitions(wf),
-    note: `产物已归档：${dest}（${fileCount} 项）`,
+    note: `产物已归档：${dest}（${fileCount} 个条目，含目录）`,
   });
 }
