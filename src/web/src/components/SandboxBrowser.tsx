@@ -312,7 +312,7 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
                       二进制文件，无法文本预览。点击「下载」。
                     </p>
                   ) : (
-                    <CodeViewer code={file.content} />
+                    <CodeViewer code={file.content} filename={file.path} />
                   )}
                 </div>
               </div>
