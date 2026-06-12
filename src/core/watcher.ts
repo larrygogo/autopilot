@@ -297,6 +297,23 @@ function isTaskTerminal(taskId: string): boolean {
 }
 
 /**
+ * 需求是否终态（done/cancelled/failed）——需求级 codebase 的 retention 闸门（v2 R4）。
+ * 非终态永不清（fix run 的工作现场）；需求行已删的孤儿目录视作可清。
+ */
+function isRequirementTerminal(reqId: string): boolean {
+  try {
+    // 惰性 require：watcher 在 core，requirements 也在 core，但避免顶层 import 扩大模块环
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const reqs = require("./requirements") as typeof import("./requirements");
+    const r = reqs.getRequirementById(reqId);
+    if (!r) return true; // 孤儿目录（需求已删但整树删失败的残留）→ 可清
+    return r.status === "done" || r.status === "cancelled" || r.status === "failed";
+  } catch {
+    return false; // DB 不可用 → 保守不清
+  }
+}
+
+/**
  * 按全局 retention 配置清理老 sandbox。安全项：只清终态任务，永远不动
  * 运行中 / 待处理任务的 sandbox。
  * Daemon 每隔固定周期调一次，无配置 / 空配置直接跳过。
@@ -307,6 +324,7 @@ export function pruneSandboxesByPolicy(): void {
 
   const result = applyRetentionPolicy(policy, {
     isTerminal: isTaskTerminal,
+    isRequirementTerminal,
   });
   if (result.removed.length > 0) {
     const mb = (result.reclaimedBytes / 1024 / 1024).toFixed(1);

@@ -117,7 +117,7 @@ describe("共用沙盒 · diff 看得到 committed + 新建改动（审计 P1 �
 });
 
 describe("共用沙盒 · 需求级重跑 = 新 run（v2 R2，替代 resetTaskForRerun 清史复用）", () => {
-  it("startNewRunForRequirement：旧 run 历史保留（workspace 清掉）、新 run 全新 clone 落 runs/、task_id/seq 更新", async () => {
+  it("startNewRunForRequirement：旧 run 历史保留（workspace 清掉）、新 run clone 落需求级 codebase/、task_id/seq 更新", async () => {
     const { createTask, getTask, startTaskPhase, listTaskPhaseEvents } = await import("../src/core/db");
     const { createProject } = await import("../src/core/projects");
     const { createWorkspace } = await import("../src/core/workspaces");
@@ -164,11 +164,21 @@ describe("共用沙盒 · 需求级重跑 = 新 run（v2 R2，替代 resetTaskFo
     expect(newTask.kind).toBe("execution");
     expect(getRequirementById(reqId)?.task_id).toBe(newTask.id);
 
-    // 新 run 文件落新根 runtime/requirements/<reqId>/runs/<taskId>/，clone 全新建出
+    // 新 run 文件落新根 runtime/requirements/<reqId>/runs/<taskId>/；
+    // 代码 clone 归需求所有（v2 R4）：落 requirements/<reqId>/codebase/<alias>/，
+    // runs/<taskId>/ 下不再有 workspace/
     const newRoot = getTaskRoot(newTask.id);
     expect(newRoot).toBe(join(tmpHome, "runtime", "requirements", reqId, "runs", newTask.id));
-    expect(existsSync(join(newRoot, "workspace", "r", "README.md"))).toBe(true);
-    expect(existsSync(join(newRoot, "workspace", "r", "stale.txt"))).toBe(false);
+    const cbRoot = join(tmpHome, "runtime", "requirements", reqId, "codebase");
+    expect(existsSync(join(cbRoot, "r", "README.md"))).toBe(true);
+    expect(existsSync(join(cbRoot, "r", "stale.txt"))).toBe(false);
+    expect(existsSync(join(newRoot, "workspace"))).toBe(false);
+    // getTaskSandbox 对新任务重定向到需求级 codebase 根（.worktree.json repos_root=codebase）
+    const { getTaskSandbox: gts, listTaskRepos } = await import("../src/core/sandbox");
+    expect(gts(newTask.id)).toBe(cbRoot);
+    const repos = listTaskRepos(newTask.id);
+    expect(repos.length).toBe(1);
+    expect(repos[0]!.path).toBe(join(cbRoot, "r"));
 
     // 旧 run 历史保留：artifacts/logs/task 行都在；只有 workspace/ 代码 clone 被清
     expect(getTask(oldId)?.status).toBe("failed");

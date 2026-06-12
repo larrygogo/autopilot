@@ -2,7 +2,7 @@ import { getTask, createTask, closeOpenPhaseEvents, nextRunSeqForRequirement } f
 import type { Task } from "./db";
 import { discover, getWorkflow, listWorkflows, isParallelPhase, getTerminalStates } from "./registry";
 import { snapshotWorkflow } from "./manifest";
-import { ensureTaskSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskSandbox, bindTaskRunRoot, removeTaskWorktree, type WorkspaceRef } from "./sandbox";
+import { ensureTaskSandbox, ensureRunCodebaseSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskSandbox, bindTaskRunRoot, removeTaskWorktree, type WorkspaceRef } from "./sandbox";
 import { rmSync } from "fs";
 import { getWorkspaceById } from "./workspaces";
 import { getRequirementById, updateRequirement, listRequirementWorkspaces } from "./requirements";
@@ -234,22 +234,28 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     }
   }
   try {
-    // 共用沙盒模型：task 启动时建独立 clone（源仓库零痕迹），所有 phase 共用直接改文件。
-    // 统一布局：每库 clone 到 workspace/<alias>/ 子目录（单库也是），各库共用同名交付分支。
-    // fix run（v2 R3）：deliver_branch 指定上一轮交付分支 + checkout_existing_branch 续作模式
-    //（clone 后 checkout origin/<branch> 而非从 base 新建——不依赖旧 run 的 workspace）。
+    // 代码沙盒供给（源仓库零痕迹）。v2 R4：代码 clone 归需求所有——git 工作流经
+    // ensureRunCodebaseSandbox 落 runtime/requirements/<reqId>/codebase/<alias>/
+    // （澄清浅 clone 原地升级 = 删除重 clone；统一布局：单库也在 ./alias/ 子目录），
+    // 各库共用同名交付分支，所有 phase / 后续 fix run 共用这一份 clone。
+    // fix run（v2 R3/R4）：deliver_branch 指定上一轮交付分支 + checkout_existing_branch
+    // 续作模式——codebase 仍在（fidelity=full + 分支匹配）则幂等复用零重 clone，
+    // 被清走则重新 clone + checkout origin/<branch>（重建路径兜底）。
     const deliverBranch =
       typeof opts.deliver_branch === "string" && opts.deliver_branch.trim()
         ? opts.deliver_branch.trim()
         : deliverBranchName(title, taskId);
-    ensureTaskSandbox(
-      taskId, workflowName, wf.sandbox,
-      workspaceRefs.length > 0 ? workspaceRefs : undefined,
-      deliverBranch,
-      { checkoutExisting: opts.checkout_existing_branch === true },
-    );
+    if (wf.sandbox?.git && workspaceRefs.length > 0) {
+      await ensureRunCodebaseSandbox(
+        taskId, reqLink, wf.sandbox, workspaceRefs, deliverBranch,
+        { checkoutExisting: opts.checkout_existing_branch === true },
+      );
+    } else {
+      // 非 git 工作流（template / 空目录）或 git 但无 workspace（退化空目录）：legacy 路径
+      ensureTaskSandbox(taskId, workflowName, wf.sandbox, undefined, deliverBranch);
+    }
   } catch (e: unknown) {
-    console.warn("ensureTaskSandbox 失败：", e instanceof Error ? e.message : e);
+    console.warn("任务沙盒供给失败：", e instanceof Error ? e.message : e);
   }
 
   // 框架标准字段注入：clone 建成功时，把物理路径/分支/base 写进 extra（写进 manifest 供 run
@@ -347,7 +353,9 @@ export async function startNewRunForRequirement(
       console.warn("startNewRunForRequirement: deleteRemoteDeliverBranch 失败（容错继续）：", e instanceof Error ? e.message : e);
     }
 
-    // 2. 清旧 run 的 workspace/（保留 artifacts / logs / manifest / .worktree.json 供历史回看）。
+    // 2. 清旧 run 的代码 clone（保留 artifacts / logs / manifest / .worktree.json 供历史回看）。
+    //    v2 R4 任务 getTaskSandbox 指向需求级 codebase/ —— 重跑语义照搬「删 codebase 重 clone」，
+    //    新 run 的 ensureCodebase 因交付分支不同必然全新 clone。
     //    legacy worktree 任务例外：必须先 git worktree remove 清源仓库注册（零痕迹红线）。
     const oldMeta = getTaskWorktreeMeta(oldTask.id);
     if (oldMeta && oldMeta.mode !== "clone" && oldMeta.mode !== "multi-clone") {

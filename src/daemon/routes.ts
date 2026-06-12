@@ -104,7 +104,6 @@ import {
 import type { Agent } from "../agents/agent";
 import { loadApiToken, previewApiToken, saveApiToken, deleteApiToken, generateApiToken } from "../core/api-token";
 import {
-  ensureTaskSandbox,
   listSandboxDir,
   readSandboxFile,
   resolveSandboxPath,

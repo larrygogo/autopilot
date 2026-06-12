@@ -20,7 +20,8 @@ import {
 import { buildClarifierAgent } from "./clarifier-agent";
 import { parseLlmYamlWrapper } from "../core/llm-yaml";
 import { listAttachments, buildAttachmentContext } from "../core/requirement-attachments";
-import { ensureRequirementClones, deleteRequirementClone } from "../core/requirement-clone";
+import { ensureRequirementClones } from "../core/requirement-clone";
+import { deleteRequirementCodebase } from "../core/codebase";
 import {
   getSession,
   upsertSession,
@@ -242,8 +243,9 @@ function buildPrompt(opts: {
   workspaceAliases: string[];
   /** 仓库快照上下文 —— 仅 clone 失败库的降级模式使用（clone 就绪的库不预拼接，探索交给 agent） */
   workspaceContext: string | null;
-  /** 需求级浅 clone 就绪的库（agent cwd = workspace/ 根，各库在子目录）：自主探索（读文件 / 搜索 / git 命令 / 加深历史） */
-  repoCheckouts: Array<{ dir: string; alias: string; branch: string }>;
+  /** 需求级 clone 就绪的库（agent cwd = codebase/ 根，各库在子目录）：自主探索（读文件 / 搜索 / git 命令 / 加深历史）。
+   *  fidelity=full = 上一轮执行的完整 clone（failed 重澄清场景），停在交付分支、工作树可能有遗留——prompt 如实声明，不静默 reset */
+  repoCheckouts: Array<{ dir: string; alias: string; branch: string; fidelity: "shallow" | "full" }>;
   /** clone 失败、仅有远程快照线索的库 alias（在浅克隆段聚合告知） */
   failedAliases: string[];
   title: string;
@@ -257,26 +259,32 @@ function buildPrompt(opts: {
   if (opts.projectDescription) ctxLines.push(`项目描述：${opts.projectDescription}`);
   if (opts.workspaceAliases.length > 0) ctxLines.push(`关联代码库：${opts.workspaceAliases.join("、")}`);
   if (opts.repoCheckouts.length > 0) {
+    const anyFull = opts.repoCheckouts.some((r) => r.fidelity === "full");
     const repoLines = opts.repoCheckouts
-      .map((r) => `- \`./${r.dir}/\` — ${r.alias}（${r.branch} 分支，depth 1）`)
+      .map((r) => r.fidelity === "full"
+        ? `- \`./${r.dir}/\` — ${r.alias}（**完整克隆**，当前停在交付分支 ${r.branch}——本需求上一轮执行的工作分支，` +
+          "工作树可能残留上一轮未提交的改动；建议先 `git status` / `git log` 了解现场，不要把它当成 base 分支的最新状态）"
+        : `- \`./${r.dir}/\` — ${r.alias}（${r.branch} 分支，浅克隆 depth 1）`)
       .join("\n");
     ctxLines.push("");
     ctxLines.push(
-      "## 仓库代码（浅克隆，自主探索）\n" +
-      `你的当前工作目录下有本需求关联的 ${opts.repoCheckouts.length} 个仓库的**浅克隆**` +
-      "（`git clone --depth 1 --single-branch`，各仓库仅含对应分支的最新提交，没有历史记录）：\n" +
+      "## 仓库代码（本地克隆，自主探索）\n" +
+      `你的当前工作目录下有本需求关联的 ${opts.repoCheckouts.length} 个仓库的本地克隆` +
+      (anyFull
+        ? "（浅克隆仅含对应分支的最新提交、没有历史记录；标注「完整克隆」的仓库含完整历史与上一轮执行现场）：\n"
+        : "（`git clone --depth 1 --single-branch`，各仓库仅含对应分支的最新提交，没有历史记录）：\n") +
       repoLines + "\n" +
       (opts.failedAliases.length > 0
         ? `\n（以下代码库克隆失败，仅提供「仓库背景」段的远程快照线索：${opts.failedAliases.join("、")}）\n`
         : "") +
       "\n**怎么了解这些项目由你决定**：读任何你认为有价值的文件（README / CLAUDE.md / 源码 / 配置 / 测试）、" +
-      "全文搜索、跑 git 命令（注意进入对应仓库子目录再执行）；需要提交历史时可以 `git fetch --deepen <N>`" +
+      "全文搜索、跑 git 命令（注意进入对应仓库子目录再执行）；浅克隆需要提交历史时可以 `git fetch --deepen <N>`" +
       "（或 `--unshallow`）自行加深克隆。\n\n" +
       "目标只有一个：把项目了解到足以提出**精准的问题**——能从代码确认的事实" +
       "（某功能是否存在、入口在哪、技术栈是什么）不要拿去问用户；把提问机会留给代码答不了的部分" +
       "（产品意图、优先级取舍、验收标准）。\n\n" +
-      "边界：这是一次性的需求级副本，仅供你了解项目——**禁止 push、禁止任何改动远程的操作**；" +
-      "修改本地文件没有意义（不会被任何流程使用）。",
+      "边界：这是需求级副本，仅供你了解项目——**禁止 push、禁止任何改动远程的操作**；" +
+      "也不要修改/还原本地文件（完整克隆的工作树是后续修复轮的工作现场，保持原样）。",
     );
   }
   if (opts.workspaceContext) {
@@ -498,11 +506,13 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   }
   const workspaces = listRequirementWorkspaces(reqId);
 
-  // 需求级浅 clone（首轮建、后续轮幂等复用）：拉需求关联的**全集**代码库，
-  // agent cwd 指向 workspace/ 根、各库在子目录，可用读类工具直接查代码验证事实再提问。
+  // 需求级 clone（首轮建、后续轮幂等复用；v2 R4 = 需求 codebase/，与执行同一份）：
+  // 拉需求关联的**全集**代码库，agent cwd 指向 codebase/ 根、各库在子目录，
+  // 可用读类工具直接查代码验证事实再提问。failed 重澄清可能复用上一轮执行的完整 clone
+  //（fidelity=full、停在交付分支脏树）——prompt 如实声明，不静默 reset。
   // 按库降级：clone 成功的库进子目录探索；失败的库走远程快照拼 prompt；全失败退化纯文本（不阻塞）。
   let cloneRoot: string | null = null;
-  let clonedRepos: Array<{ ws: Workspace; dir: string; path: string }> = [];
+  let clonedRepos: Array<{ ws: Workspace; dir: string; path: string; fidelity: "shallow" | "full"; branch: string }> = [];
   let failedRepos: Workspace[] = [];
   if (workspaces.length > 0) {
     // clone 可能耗时几十秒（首轮），给前端专属阶段而不是让用户以为卡在 LLM 调用
@@ -594,7 +604,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     projectDescription: project.description,
     workspaceAliases: workspaces.map((w) => w.alias),
     workspaceContext: degradedContext,
-    repoCheckouts: clonedRepos.map((c) => ({ dir: c.dir, alias: c.ws.alias, branch: c.ws.default_branch })),
+    repoCheckouts: clonedRepos.map((c) => ({ dir: c.dir, alias: c.ws.alias, branch: c.branch, fidelity: c.fidelity })),
     failedAliases: failedRepos.map((w) => w.alias),
     title: req.title,
     specMd: req.spec_md ?? "",
@@ -778,9 +788,11 @@ export function initRequirementClarifier(): void {
     if (to === "done" || to === "cancelled" || to === "failed") {
       deleteSession(id, "clarifying");
     }
-    // done/cancelled → 清理需求级浅 clone；failed 保留（补约束重试还要继续澄清）
-    if (to === "done" || to === "cancelled") {
-      try { deleteRequirementClone(id); } catch { /* 清理失败不阻塞 */ }
+    // codebase 清理（v2 R4，spec B）：done 即清（done-workspace-cleanup 负责）；
+    // cancelled 仅清纯澄清浅 clone——含 full clone（可能有未交付改动想救回）时留给
+    // retention 按需求终态清；failed 整份保留（补约束重试 / fix 续作还要用）
+    if (to === "cancelled") {
+      try { deleteRequirementCodebase(id, { onlyIfNoFull: true }); } catch { /* 清理失败不阻塞 */ }
     }
 
     if (to !== "clarifying") return;

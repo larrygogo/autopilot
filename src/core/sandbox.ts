@@ -4,6 +4,10 @@ import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
 import { loadConfig } from "./config";
 import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspace-health";
+import { ensureCodebase, getRequirementCodebaseRoot, safeAliasDir } from "./codebase";
+
+// alias → 安全子目录名的实现已随 codebase 原语迁到 codebase.ts；保留 re-export 兼容既有 import
+export { safeAliasDir } from "./codebase";
 
 // ──────────────────────────────────────────────
 // 任务 sandbox —— 每次任务独立的沙盒目录
@@ -11,10 +15,13 @@ import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspa
 // 布局（v2 R2 双根，getTaskRoot 解析）：
 //   AUTOPILOT_HOME/
 //     runtime/tasks/<task-id>/                          ← legacy 根（存量任务只读，零迁移）
-//     runtime/requirements/<req-id>/runs/<task-id>/     ← 新根（2026-06-12 起新任务落此）
-//       ├── workspace/         ← 阶段函数的沙盒目录（本模块管理；物理目录名保持 workspace 不变）
-//       │   └── <alias>/       ← git 模式统一布局：每个代码库 clone 到 alias 子目录（单库也是，2026-06-12）
-//       └── .worktree.json     ← git clone 元数据（仅 sandbox.git=true 时）
+//     runtime/requirements/<req-id>/
+//       ├── codebase/<alias>/  ← v2 R4：代码 clone 归需求所有（ensureCodebase，codebase.ts）
+//       ├── .codebase.json     ← clone 清单（真相）
+//       └── runs/<task-id>/    ← 新根（2026-06-12 起新任务落此）
+//           ├── workspace/     ← 非 git 工作流的沙盒目录（git 任务的沙盒根 = 需求级 codebase/，
+//           │                     经 .worktree.json 的 repos_root="codebase" 重定向）
+//           └── .worktree.json ← git clone 元数据镜像（repos[].dir 相对沙盒根，旧 reader 兼容）
 //
 // 工作流可在 workflow.yaml 声明：
 //   sandbox:
@@ -188,6 +195,14 @@ export interface WorktreeMeta {
   remote_url?: string | null;
   /** 多库布局（mode=multi-clone 时存在） */
   repos?: WorktreeRepoMeta[];
+  /**
+   * v2 R4：repos 的物理根。"codebase" = 代码 clone 归需求所有
+   * （runtime/requirements/<reqId>/codebase/），本文件只是镜像投影（旧 reader 兼容），
+   * getTaskSandbox 据此把沙盒根重定向到需求级 codebase。缺省 = 任务自有 workspace/。
+   */
+  repos_root?: "codebase";
+  /** repos_root=codebase 时记录归属需求（避免回查 DB） */
+  requirement_id?: string;
 }
 
 /** .worktree.json 磁盘原文形态：可能是新字段（workspace_*）或 Phase 2 前的旧字段（codebase_*）。 */
@@ -202,16 +217,30 @@ interface WorktreeMetaRaw {
   mode?: "clone" | "multi-clone" | "worktree";
   remote_url?: string | null;
   repos?: WorktreeRepoMeta[];
+  repos_root?: "codebase";
+  requirement_id?: string;
 }
 
 
 /**
  * 获取任务 sandbox 的绝对路径（不保证存在）。
- * 物理目录名保持 `workspace`，与历史磁盘布局兼容。
+ *
+ * - v2 R4 新 git 任务（.worktree.json 的 repos_root="codebase"）：返回需求级 codebase 根
+ *   runtime/requirements/<reqId>/codebase/（多库容器目录，单库也在 ./alias/ 子目录）——
+ *   代码 clone 归需求所有，任务沙盒只是它的视图。
+ * - 其余（存量任务 / 非 git 工作流）：任务自有 `<taskRoot>/workspace`，
+ *   物理目录名保持 `workspace`，与历史磁盘布局兼容。
  */
 export function getTaskSandbox(taskId: string): string {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
+  }
+  const meta = readWorktreeMeta(taskId);
+  if (meta?.repos_root === "codebase") {
+    const reqId = meta.requirement_id ?? lookupRequirementId(taskId);
+    if (reqId && TASK_ID_RE.test(reqId)) {
+      return getRequirementCodebaseRoot(reqId);
+    }
   }
   return join(getTaskRoot(taskId), "workspace");
 }
@@ -328,6 +357,88 @@ export function getTaskWorktreeMeta(taskId: string): WorktreeMeta | null {
 }
 
 /**
+ * v2 R4：git 工作流任务的沙盒供给 —— 代码 clone 归需求所有。
+ *
+ * 经 ensureCodebase(fidelity="full") 把需求代码库集合落到
+ * runtime/requirements/<reqId>/codebase/<alias>/（澄清浅 clone 原地升级 = 删除重 clone；
+ * fix run 经 checkoutExisting 幂等命中交付分支工作树 = 零重 clone），然后在
+ * runs/<taskId>/.worktree.json 写镜像投影（mode=multi-clone + repos_root="codebase"，
+ * repos[].dir 相对 codebase 根——旧 reader / listTaskRepos 形状不变的关键）。
+ *
+ * 任一库失败 → 整体退化空目录（半套布局比空目录更危险）：清掉 codebase、不写 meta、
+ * mkdir 任务自有空 workspace/，与既有 ensureTaskSandbox 退化语义一致。
+ */
+export async function ensureRunCodebaseSandbox(
+  taskId: string,
+  reqId: string,
+  cfg: SandboxConfig,
+  workspaces: Array<WorkspaceRef & { alias?: string }>,
+  deliverBranch: string,
+  opts?: { checkoutExisting?: boolean },
+): Promise<string> {
+  if (!TASK_ID_RE.test(taskId)) throw new Error(`非法 task ID：${taskId}`);
+
+  // 幂等重入：本 run 的镜像已写 → 直接返回（codebase 由 ensureCodebase 自身幂等保障）
+  const existing = readWorktreeMeta(taskId);
+  if (existing?.repos_root === "codebase") return getTaskSandbox(taskId);
+
+  if (workspaces.length === 0) {
+    log.warn("sandbox.git=true 但未提供 workspace；退化空目录 [task=%s]", taskId);
+    const ws = join(getTaskRoot(taskId), "workspace");
+    mkdirSync(ws, { recursive: true });
+    return ws;
+  }
+
+  const res = await ensureCodebase(
+    reqId,
+    workspaces.map((w) => ({ id: w.id, alias: w.alias, remote_url: w.remote_url, default_branch: w.default_branch })),
+    {
+      fidelity: "full",
+      deliverBranch,
+      checkoutExisting: opts?.checkoutExisting === true,
+      base: cfg.base,
+    },
+  );
+
+  if (res.failed.length > 0 || res.repos.length === 0) {
+    log.warn("需求 codebase 供给失败（%s/%s 库失败），任务沙盒整体退化空目录 [task=%s req=%s]",
+      res.failed.length, workspaces.length, taskId, reqId);
+    try { rmSync(res.root, { recursive: true, force: true }); } catch { /* ignore */ }
+    const ws = join(getTaskRoot(taskId), "workspace");
+    mkdirSync(ws, { recursive: true });
+    return ws;
+  }
+
+  const wsById = new Map(workspaces.map((w) => [w.id, w]));
+  const repos: WorktreeRepoMeta[] = res.repos.map((r, i) => ({
+    workspace_id: r.ws.id,
+    alias: r.alias,
+    dir: r.dir,
+    branch: r.branch,
+    base: r.base,
+    remote_url: wsById.get(r.ws.id)?.remote_url ?? r.ws.remote_url,
+    primary: i === 0,
+  }));
+  const p = repos[0];
+  writeWorktreeMeta(taskId, {
+    mode: "multi-clone",
+    repos_root: "codebase",
+    requirement_id: reqId,
+    workspace_id: p.workspace_id,  // 顶层镜像 repos[0]：旧 reader 不读 repos 也不炸
+    workspace_path: "",
+    branch: p.branch,
+    base: p.base,
+    remote_url: p.remote_url,
+    created_at: Date.now(),
+    repos,
+  });
+  log.info("任务沙盒指向需求级 codebase [task=%s req=%s repos=%s branch=%s reused=%s]",
+    taskId, reqId, repos.map((r) => r.alias).join(","), deliverBranch,
+    res.repos.filter((r) => r.reused).map((r) => r.alias).join(",") || "无");
+  return getTaskSandbox(taskId);
+}
+
+/**
  * clone 单个仓库到 dest：token 注入 → 完整 clone → 去 token 覆盖 origin →
  * 基于 origin/<base> 建交付分支 → 写 .git/info/exclude。单库/多库共用。
  */
@@ -417,13 +528,6 @@ function cloneOneRepo(
   } catch { /* exclude 写失败不阻塞任务 */ }
 
   return true;
-}
-
-/** alias → 安全子目录名：白名单字符，非法/为空时回退 workspace id（requirement-clone 共用） */
-export function safeAliasDir(alias: string, workspaceId: string): string {
-  const cleaned = alias.replace(/[^\w.-]/g, "");
-  if (cleaned && TASK_ID_RE.test(cleaned) && cleaned !== "." && cleaned !== "..") return cleaned;
-  return workspaceId;
 }
 
 /**
@@ -561,6 +665,7 @@ function readWorktreeMeta(taskId: string): WorktreeMeta | null {
     return {
       workspace_id, workspace_path, branch: raw.branch, base: raw.base, created_at: raw.created_at,
       mode: raw.mode, remote_url: raw.remote_url, repos: raw.repos,
+      repos_root: raw.repos_root, requirement_id: raw.requirement_id,
     };
   } catch { return null; }
 }
@@ -859,20 +964,44 @@ export function deleteTaskSandbox(taskId: string): boolean {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
   }
+  // meta / 沙盒路径必须在 removeTaskWorktree 之前取——它会删 .worktree.json，
+  // 之后 getTaskSandbox 对 codebase 任务会丢失重定向信息。
+  const meta = readWorktreeMeta(taskId);
+  const sandboxPath = getTaskSandbox(taskId);
   // 旧 worktree task：先 git worktree remove --force 让源仓库干净（独立 clone 模式下 no-op）。
   let removed = removeTaskWorktree(taskId);
   const taskRoot = getTaskRoot(taskId);
-  for (const target of [
-    getTaskSandbox(taskId),       // workspace/（共用代码 clone）
-    getTaskArtifactsDir(taskId),  // artifacts/（沙盒 tab 展示的产物文档）
+  const targets = [
+    getTaskArtifactsDir(taskId),   // artifacts/（沙盒 tab 展示的产物文档）
     join(taskRoot, ".agent-runs"), // 旧即焚副本残留（兼容删除）
-  ]) {
+  ];
+  if (meta?.repos_root === "codebase") {
+    // v2 R4：代码 clone 归需求所有（跨 run 共享）。仅当本 run 仍是需求当前 run 时随释放
+    // 一并清 codebase——历史 run 的释放不能动正被新 run / fix run 使用的共享 clone。
+    if (isCurrentRunOfRequirement(taskId, meta.requirement_id)) targets.unshift(sandboxPath);
+  } else {
+    targets.unshift(sandboxPath);  // workspace/（任务自有代码 clone）
+  }
+  for (const target of targets) {
     if (existsSync(target)) {
       rmSync(target, { recursive: true, force: true });
       removed = true;
     }
   }
   return removed;
+}
+
+/** task 是否是其需求当前指向的 run（requirement.task_id === taskId）。DB 不可用时保守 false。 */
+function isCurrentRunOfRequirement(taskId: string, reqId?: string): boolean {
+  if (!reqId) return false;
+  try {
+    // 惰性 require：避免 sandbox→requirements 的静态环（同 lookupRequirementId 的理由）
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const reqs = require("./requirements") as typeof import("./requirements");
+    return reqs.getRequirementById(reqId)?.task_id === taskId;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -933,17 +1062,49 @@ export function loadRetentionPolicy(): RetentionPolicy {
   } catch { return {}; }
 }
 
+/** 需求级 codebase 的磁盘占用（retention 新轨，v2 R4） */
+export interface RequirementCodebaseUsage {
+  reqId: string;
+  /** codebase/ 目录绝对路径 */
+  path: string;
+  size: number;
+  mtime: number;
+}
+
+/** 扫所有需求级 codebase 大小 + mtime（runtime/requirements/<reqId>/codebase/）。 */
+export function scanRequirementCodebases(requirementsRootOverride?: string): RequirementCodebaseUsage[] {
+  const root = requirementsRootOverride ?? requirementsRootDir();
+  const out: RequirementCodebaseUsage[] = [];
+  if (!existsSync(root)) return out;
+  for (const reqId of readdirSync(root)) {
+    const cb = join(root, reqId, "codebase");
+    if (!existsSync(cb)) continue;
+    try {
+      const s = statSync(cb);
+      out.push({ reqId, path: cb, size: dirSizeBytes(cb), mtime: s.mtimeMs });
+    } catch { /* skip */ }
+  }
+  return out;
+}
+
 /**
- * 应用保留策略清理 sandbox：按 (a) 超过 days 的任务 (b) 总占用超 max_total_mb
- * 的老任务清 sandbox。返回被清理的 taskId 列表。
- * 仅清 sandbox 目录，不动 logs / agent-calls / DB 记录。
+ * 应用保留策略清理 sandbox：按 (a) 超过 days (b) 总占用超 max_total_mb 清理。
+ * 两条轨：
+ *   - 旧轨：任务自有 workspace/（legacy runtime/tasks/ + runs/<id>/workspace，存量任务）
+ *     —— 终态任务（isTerminal）才可清
+ *   - 新轨（v2 R4）：需求级 codebase/（runtime/requirements/<reqId>/codebase/）
+ *     —— **只清终态需求**（isRequirementTerminal；不传回调 = 永不清，fix run 的保障）
+ * 返回被清理的标识列表（任务=taskId；codebase 条目带 "codebase:" 前缀）。
+ * 仅清代码目录，不动 logs / agent-calls / DB 记录。
  *
- * 可注入 opts.tasksRoot 让测试用 tmpdir 模拟 AUTOPILOT_HOME；生产路径不传走默认。
+ * 可注入 opts.tasksRoot / requirementsRoot 让测试用 tmpdir；生产路径不传走默认。
  */
 export function applyRetentionPolicy(
   policy: RetentionPolicy,
   opts?: {
     isTerminal?: (taskId: string) => boolean;
+    /** 需求是否终态（done/cancelled/failed）；不传 = 需求级 codebase 一律不清（非终态保护） */
+    isRequirementTerminal?: (reqId: string) => boolean;
     now?: number;
     /** 显式指定 legacy tasks 根目录（测试用 tmpdir），默认 AUTOPILOT_HOME/runtime/tasks */
     tasksRoot?: string;
@@ -955,11 +1116,20 @@ export function applyRetentionPolicy(
   const injectedRoots = !!opts?.tasksRoot || !!opts?.requirementsRoot;
   const all = scanTaskSandboxes(opts?.tasksRoot, opts?.requirementsRoot)
     .filter((u) => u.exists && u.size > 0);
+  // 需求级 codebase 轨：requirementsRoot 注入优先；只注入 tasksRoot 时不扫默认根（同 runs 扫描语义）
+  const cbRoot = opts?.requirementsRoot ?? (opts?.tasksRoot ? null : undefined);
+  const cbAll = cbRoot === null ? [] : scanRequirementCodebases(cbRoot).filter((u) => u.size > 0);
 
   const removed: string[] = [];
   let reclaimed = 0;
 
-  const doRemove = (u: TaskSandboxUsage) => {
+  const taskRemovable = (u: TaskSandboxUsage) => !opts?.isTerminal || opts.isTerminal(u.taskId);
+  // codebase 非终态永不清：回调缺省按"非终态"处理（与任务轨"缺省可删"刻意不同——
+  // codebase 是 fix run 的工作现场，宁可漏清不可误删）
+  const cbRemovable = (u: RequirementCodebaseUsage) =>
+    !!opts?.isRequirementTerminal && opts.isRequirementTerminal(u.reqId);
+
+  const doRemoveTask = (u: TaskSandboxUsage) => {
     const ws = join(u.root, "workspace");
     if (!existsSync(ws)) return;
     // 若是 worktree task，先 git worktree remove --force 让 workspace 干净（spec §3.4：
@@ -975,30 +1145,53 @@ export function applyRetentionPolicy(
     } catch { /* ignore */ }
   };
 
-  // (a) 按天数清终态任务
+  const doRemoveCodebase = (u: RequirementCodebaseUsage) => {
+    if (!existsSync(u.path)) return;
+    try {
+      rmSync(u.path, { recursive: true, force: true });
+      // 清单一并清：目录没了清单就是过期账本
+      try { rmSync(join(u.path, "..", ".codebase.json"), { force: true }); } catch { /* ignore */ }
+      removed.push(`codebase:${u.reqId}`);
+      reclaimed += u.size;
+    } catch { /* ignore */ }
+  };
+
+  // (a) 按天数清终态
   if (typeof policy.days === "number" && policy.days > 0) {
     const threshold = now - policy.days * 86400 * 1000;
     for (const u of all) {
-      if (u.mtime && u.mtime < threshold) {
-        if (!opts?.isTerminal || opts.isTerminal(u.taskId)) {
-          doRemove(u);
-        }
-      }
+      if (u.mtime && u.mtime < threshold && taskRemovable(u)) doRemoveTask(u);
+    }
+    for (const u of cbAll) {
+      if (u.mtime && u.mtime < threshold && cbRemovable(u)) doRemoveCodebase(u);
     }
   }
 
-  // (b) 总占用超限时，按 mtime 旧→新再删
+  // (b) 总占用超限时，按 mtime 旧→新再删（两轨合并计算总量）
   if (typeof policy.max_total_mb === "number" && policy.max_total_mb > 0) {
     const maxBytes = policy.max_total_mb * 1024 * 1024;
-    let remaining = all.filter((u) => !removed.includes(u.taskId));
+    type Candidate =
+      | { kind: "task"; mtime: number; size: number; u: TaskSandboxUsage }
+      | { kind: "codebase"; mtime: number; size: number; u: RequirementCodebaseUsage };
+    const remaining: Candidate[] = [
+      ...all
+        .filter((u) => !removed.includes(u.taskId))
+        .map((u): Candidate => ({ kind: "task", mtime: u.mtime, size: u.size, u })),
+      ...cbAll
+        .filter((u) => !removed.includes(`codebase:${u.reqId}`))
+        .map((u): Candidate => ({ kind: "codebase", mtime: u.mtime, size: u.size, u })),
+    ];
     let total = remaining.reduce((a, it) => a + it.size, 0);
     if (total > maxBytes) {
       remaining.sort((a, b) => a.mtime - b.mtime);
-      for (const u of remaining) {
+      for (const c of remaining) {
         if (total <= maxBytes) break;
-        if (!opts?.isTerminal || opts.isTerminal(u.taskId)) {
-          doRemove(u);
-          total -= u.size;
+        if (c.kind === "task" && taskRemovable(c.u)) {
+          doRemoveTask(c.u);
+          total -= c.size;
+        } else if (c.kind === "codebase" && cbRemovable(c.u)) {
+          doRemoveCodebase(c.u);
+          total -= c.size;
         }
       }
     }
