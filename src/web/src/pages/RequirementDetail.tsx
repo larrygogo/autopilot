@@ -1591,7 +1591,6 @@ export function RequirementDetail() {
         onApprove={approve}
         onRetry={() => void retryFromFailed()}
         onScrollToQuestions={() => scrollToSection("clarification-section")}
-        onScrollToFeedback={() => scrollToSection("feedback-section")}
       />
 
       {/* 主体：单列（元信息已上移标题下、危险区沉底，不再有右侧栏） */}

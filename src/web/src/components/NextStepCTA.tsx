@@ -23,7 +23,7 @@ interface NextStepConfig {
   cta: string;
   hint: string;
   Icon: typeof ArrowRight;
-  action: "markReady" | "enqueue" | "approve" | "retry" | "scrollToQuestions" | "scrollToFeedback";
+  action: "markReady" | "enqueue" | "approve" | "retry" | "scrollToQuestions";
   /** failed 状态用 destructive 色调，其他用 accent */
   tone?: "accent" | "destructive";
 }
@@ -40,7 +40,6 @@ export interface NextStepCTAProps {
   onApprove?: () => void;
   onRetry?: () => void;
   onScrollToQuestions?: () => void;
-  onScrollToFeedback?: () => void;
 }
 
 function resolve(status: string, openQuestionCount: number): NextStepConfig | null {
@@ -74,22 +73,8 @@ function resolve(status: string, openQuestionCount: number): NextStepConfig | nu
       action: "approve",
     };
   }
-  if (status === "awaiting_review") {
-    return {
-      cta: "去填写审查意见",
-      hint: "PR 已生成，请在下方反馈区填写审查意见，或直接标记合并。",
-      Icon: ArrowDown,
-      action: "scrollToFeedback",
-    };
-  }
-  if (status === "fix_revision") {
-    return {
-      cta: "去提交修复反馈",
-      hint: "Agent 正在修复，可在下方反馈区注入新的修改建议。",
-      Icon: ArrowDown,
-      action: "scrollToFeedback",
-    };
-  }
+  // awaiting_review / fix_revision 不出 banner：「审查与修复」卡已置顶（头部即决策条
+  // —— PR 链接 + 验收通过按钮 + 发布输入框），再出滚动引导是重复入口。
   if (status === "failed") {
     return {
       cta: "重新入队执行",
@@ -113,7 +98,6 @@ export function NextStepCTA(props: NextStepCTAProps) {
       case "approve": return props.onApprove;
       case "retry": return props.onRetry;
       case "scrollToQuestions": return props.onScrollToQuestions;
-      case "scrollToFeedback": return props.onScrollToFeedback;
     }
   })();
 
