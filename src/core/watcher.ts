@@ -1,4 +1,4 @@
-import { getDb, getTask, type Task } from "./db";
+import { getDb, getTask, closeOpenPhaseEvents, type Task } from "./db";
 import { isLocked } from "./infra";
 import { log } from "./logger";
 import { runInBackground } from "./runner";
@@ -215,6 +215,7 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
         // 放弃=失败：forceTransition→failed 已 emit task:transition，被 card-sources/task-failed
         // 生成 P0「失败」卡。这里不再 emit watcher:recovery（否则 stuck.ts 会同时弹「已自动恢复」
         // 卡，两张矛盾卡并存，RERUN-03）。正常恢复路径（下方 toStatus=pending_）才 emit。
+        closeOpenPhaseEvents(task.id);
       } catch (e: unknown) {
         log.error("watcher: 强制转 failed 失败 task=%s: %s", task.id, (e as Error).message);
       }
@@ -237,6 +238,11 @@ export function checkStuckTasks(stuckTimeoutSeconds = 600): void {
       pendingState,
       `watcher: 检测到卡死任务，回退到 ${pendingState}（elapsed=${Math.round(elapsedMs / 1000)}s, attempt=${attempts + 1}）`
     );
+
+    // 被打断轮次的 open phase event 先关掉（标 aborted），否则重跑再开一条后，
+    // 执行时间线出现多轮同时转圈的僵尸（耗时累计到 now、日志窗口无限重叠）——
+    // daemon 重启恢复三分支都有此清理（daemon/index.ts），watcher 这条恢复路曾漏掉
+    closeOpenPhaseEvents(task.id);
 
     emit({ type: "watcher:recovery", payload: { taskId: task.id, phase: phaseName, fromStatus: task.status, toStatus: pendingState } });
     lastRecoveryAttempt.set(task.id, nowMs);

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, setSystemTime } from "bun:test";
 import { Database } from "bun:sqlite";
 
 // ──────────────────────────────────────────────
@@ -33,6 +33,15 @@ const SCHEMA = [
   "    note TEXT,",
   "    created_at TEXT NOT NULL,",
   "    FOREIGN KEY (task_id) REFERENCES tasks(id)",
+  ");",
+  "",
+  "CREATE TABLE IF NOT EXISTS task_phase_events (",
+  "    id INTEGER PRIMARY KEY AUTOINCREMENT,",
+  "    task_id TEXT NOT NULL,",
+  "    phase TEXT NOT NULL,",
+  "    status TEXT NOT NULL,",
+  "    started_at INTEGER NOT NULL,",
+  "    ended_at INTEGER",
   ");",
 ].join("\n");
 
@@ -258,6 +267,63 @@ describe("watcher - checkStuckTasks", () => {
       // runner 在 phase 成功完成时调此函数
       watcherModule.clearPhaseRecoveryCount("task-rerun-02", "step1");
     }
+  });
+
+  it("卡死恢复重跑前关闭遗留 open phase event（标 aborted）—— 否则执行时间线出现多轮并行转圈僵尸", () => {
+    // dogfood 实锤（yrw66qe6）：daemon 重启打断 running phase → watcher 恢复重跑，
+    // 但旧轮 phase event 永远 ended_at=NULL/status=running → UI 多个轮次同时转圈、
+    // 耗时累计到 now、日志窗口无限（与新轮日志切片完全重叠）。
+    registryModule.register(makeTestWorkflowWithAwaitReview() as any);
+    dbModule.createTask({
+      id: "task-zombie-event",
+      title: "被打断的任务",
+      workflow: "test_wf",
+      initialStatus: "running_step1",
+    });
+    const orphanEventId = dbModule.startTaskPhase("task-zombie-event", "step1");
+    sqlite.run(
+      "UPDATE tasks SET updated_at = ? WHERE id = ?",
+      [new Date(Date.now() - 30 * 60 * 1000).toISOString(), "task-zombie-event"],
+    );
+
+    watcherModule.checkStuckTasks(600);
+    expect(dbModule.getTask("task-zombie-event")?.status).toBe("pending_step1");
+
+    const orphan = dbModule
+      .listTaskPhaseEvents("task-zombie-event")
+      .find((e) => e.id === orphanEventId);
+    expect(orphan?.status).toBe("aborted");
+    expect(orphan?.ended_at).not.toBeNull();
+  });
+
+  it("恢复触顶转 failed 时同样关闭 open phase event（失败任务不留转圈僵尸轮）", () => {
+    registryModule.register(makeTestWorkflowWithAwaitReview() as any);
+    dbModule.createTask({
+      id: "task-zombie-cap",
+      title: "反复卡死触顶的任务",
+      workflow: "test_wf",
+      initialStatus: "running_step1",
+    });
+
+    // 推进 4 轮：前 3 轮正常恢复（MAX_RECOVERIES_PER_PHASE=3），第 4 轮触顶转 failed。
+    // setSystemTime 推进时钟绕过 60s 恢复节流。
+    const base = Date.now();
+    for (let round = 0; round < 4; round++) {
+      setSystemTime(new Date(base + round * 120_000));
+      sqlite.run(
+        "UPDATE tasks SET status='running_step1', updated_at=? WHERE id=?",
+        [new Date(Date.now() - 30 * 60 * 1000).toISOString(), "task-zombie-cap"],
+      );
+      dbModule.startTaskPhase("task-zombie-cap", "step1");
+      watcherModule.checkStuckTasks(600);
+    }
+    setSystemTime();
+
+    expect(dbModule.getTask("task-zombie-cap")?.status).toBe("failed");
+    const open = dbModule
+      .listTaskPhaseEvents("task-zombie-cap")
+      .filter((e) => e.ended_at === null);
+    expect(open).toHaveLength(0);
   });
 
   it("running_await_review 在 heartbeat 内（updated_at 新）不应被误恢复", () => {

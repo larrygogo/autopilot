@@ -7,7 +7,7 @@ import { api, type AgentCallSummary, type AgentCallRecord } from "@/hooks/useApi
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  shouldFollow, extractLevel, filterLinesToWindow, fmtDuration, isNeverRun, localizeLineTs,
+  shouldFollow, extractLevel, filterLinesToWindow, dropLiveOverlap, fmtDuration, isNeverRun, localizeLineTs,
   LEVEL_TEXT, ALL_LEVELS, type Level,
 } from "@/lib/run-view-logic";
 import { PhaseStatusIcon, type PhaseVisualState } from "@/components/RunPhaseNav";
@@ -164,7 +164,9 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
     if (windowStartMs !== undefined) {
       base = filterLinesToWindow(base, windowStartMs, windowEndMs ?? null);
     }
-    const all = (isRunning ? [...base, ...liveLines] : base).map(localizeLineTs);
+    // live 缓冲与 4s 全量轮询的内容重叠（缓冲不在轮询后清空，有竞态丢行风险），
+    // 渲染层去重：只保留落在 base 最后时间戳之后的 live 行
+    const all = (isRunning ? [...base, ...dropLiveOverlap(base, liveLines)] : base).map(localizeLineTs);
     const q = filterQuery.trim().toLowerCase();
     return all.filter((line) => {
       if (!line.trim()) return false;

@@ -17,7 +17,7 @@ import { startServerWithRetry } from "./server";
 import { setWebDistDir, reloadApiToken, getApiTokenState, extendAllowedOrigins, detectLanIPv4, isExposedHost, startupAuthBlocked } from "./routes";
 import { generateApiToken, saveApiToken } from "../core/api-token";
 import { hasAnyUser } from "../core/auth";
-import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo } from "./pid";
+import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo, writeRestartFlag, consumeRestartFlag } from "./pid";
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
 import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
 import { initProviderCliMonitor, disposeProviderCliMonitor } from "./provider-cli-monitor";
@@ -37,9 +37,6 @@ import { writeFileSync, existsSync, unlinkSync, watch as fsWatch } from "fs";
 // ──────────────────────────────────────────────
 let _activeShutdown: ((exitCode: number) => void) | null = null;
 
-/** 主动 respawn 标志文件路径：让新 daemon 启动时识别"上一次是主动重启不是崩溃" */
-const restartFlagPath = (): string => join(AUTOPILOT_HOME, "runtime", "restart.flag");
-
 /**
  * 由 RPC 等内部调用方触发 daemon 重启。
  *
@@ -54,11 +51,7 @@ const restartFlagPath = (): string => join(AUTOPILOT_HOME, "runtime", "restart.f
  */
 export function requestRestart(delayMs = 100): boolean {
   if (!_activeShutdown) return false;
-  try {
-    writeFileSync(restartFlagPath(), String(Date.now()), "utf-8");
-  } catch (e: unknown) {
-    console.warn("写 restart.flag 失败（继续重启，但运行中 task 会被标 dangling）：", e);
-  }
+  writeRestartFlag();
   const fn = _activeShutdown;
   setTimeout(() => fn(RESTART_SENTINEL_CODE), delayMs);
   return true;
@@ -78,18 +71,7 @@ export function requestShutdown(delayMs = 150): boolean {
   return true;
 }
 
-/**
- * 检查并消费 restart.flag。返回 true 表示这次启动是主动 respawn 的延续。
- * 调用方负责在消费后决定是否对 running_* task 做自动重启。
- */
-function consumeRestartFlag(): boolean {
-  const p = restartFlagPath();
-  if (!existsSync(p)) return false;
-  try {
-    unlinkSync(p);
-  } catch { /* 删失败也不影响逻辑，下次启动还会再读到（保守做法） */ }
-  return true;
-}
+// restart.flag 的写入/消费 helpers 收口在 pid.ts（CLI `daemon restart` 也要写 flag）
 
 // ──────────────────────────────────────────────
 // Daemon 入口

@@ -27,6 +27,7 @@ import {
   removeSupervisorPid,
   readListenInfo,
   removeListenInfo,
+  writeRestartFlag,
 } from "../daemon/pid";
 
 // ──────────────────────────────────────────────
@@ -421,6 +422,9 @@ daemon
         process.exit(1);
       }
       console.log("daemon 已停止。");
+      // 主动重启标志：新 daemon 据此对 running_* task 自动 respawn（关旧 phase
+      // event + 立即重跑），而不是标 dangling 等用户 / 等 watcher 卡死判定兜底
+      writeRestartFlag();
     } else {
       console.log("daemon 未在运行，将直接启动。");
     }

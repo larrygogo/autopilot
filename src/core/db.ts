@@ -569,7 +569,8 @@ export interface TaskPhaseEvent {
   id: number;
   task_id: string;
   phase: string;
-  status: "running" | "done" | "awaiting" | "failed";
+  /** aborted = daemon 重启 / watcher 恢复 / 取消时被打断的轮次（closeOpenPhaseEvents 写入） */
+  status: "running" | "done" | "awaiting" | "failed" | "aborted";
   started_at: number;
   ended_at: number | null;
 }
