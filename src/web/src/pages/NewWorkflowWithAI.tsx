@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { PageHero } from "@/components/PageHero";
-import { PAGE_W_FORM } from "@/lib/layout";
+import { PageShell } from "@/components/pro";
 import { useNavigate } from "react-router-dom";
 import { Loader2, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { parse as parseYaml, parseDocument } from "yaml";
@@ -114,11 +113,7 @@ export function NewWorkflowWithAI() {
   }
 
   return (
-    <div className={PAGE_W_FORM}>
-      <PageHero
-        title="AI 生成工作流"
-        subtitle="描述你想要的流程，AI 生成 yaml + ts；可继续追问调整"
-      />
+    <PageShell width="form" hero={{ title: "AI 生成工作流", subtitle: "描述你想要的流程，AI 生成 yaml + ts；可继续追问调整" }}>
 
       {/* 描述区 */}
       <Card className="mb-4 p-4">
@@ -300,6 +295,6 @@ export function NewWorkflowWithAI() {
           </Card>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

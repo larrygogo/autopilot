@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { PAGE_W_FORM } from "@/lib/layout";
 import { AlertTriangle, CheckCircle2, HelpCircle, RefreshCw, XCircle } from "lucide-react";
 import { api, type ProviderItem, type ProviderStatus, type ProviderModelsResult } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
-import { PageHero } from "@/components/PageHero";
+import { PageShell } from "@/components/pro";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -87,18 +86,20 @@ export function Providers(_props: { embedded?: boolean } = {}) {
   };
 
   return (
-    <div className={PAGE_W_FORM}>
-      <PageHero
-        title="模型提供商"
-        subtitle="全局默认 · CLI 凭证"
-        description="通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。"
-        actions={
+    <PageShell
+      width="form"
+      hero={{
+        title: "模型提供商",
+        subtitle: "全局默认 · CLI 凭证",
+        description: "通过 Claude / Codex / Gemini 各自的 CLI 调用模型，凭证由 CLI 管理。",
+        actions: (
           <Button variant="secondary" onClick={refreshStatus} disabled={checking} size="sm">
             <RefreshCw className={cn("h-3.5 w-3.5", checking && "animate-spin")} />
             {checking ? "检查中…" : "重新检查"}
           </Button>
-        }
-      />
+        ),
+      }}
+    >
 
       {/* 说明 */}
       <Card className="mb-4 p-4">
@@ -187,7 +188,7 @@ export function Providers(_props: { embedded?: boolean } = {}) {
           })}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
 

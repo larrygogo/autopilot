@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { PAGE_W } from "@/lib/layout";
 import { useNavigate } from "react-router-dom";
 import { Layers, Plus, RefreshCw, Pencil, Trash2, MoreHorizontal } from "lucide-react";
-import { EmptyState, EntityGrid, EntityList, PageHero, ViewToggle, useViewMode, type EntityCardItem } from "@/components/pro";
+import { ConfirmDialog, EmptyState, EntityGrid, EntityList, ErrorState, FormDialog, FormField, PageHero, PageShell, SkeletonRows, ViewToggle, useViewMode, type EntityCardItem } from "@/components/pro";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -14,15 +13,6 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { api, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { cn } from "@/lib/utils";
@@ -49,12 +39,10 @@ function ProjectsTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
 
 
 
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
-  const [deleteInput, setDeleteInput] = useState("");
   const [deleting, setDeleting] = useState(false);
 
   // grid / list 视图（localStorage 记住偏好）
@@ -94,54 +82,40 @@ function ProjectsTab() {
   };
 
   const closeDialog = () => {
-    if (saving) return;
     setDialogOpen(false);
     setEditingProject(null);
   };
 
+  // busy / 内联错误 / 成功关闭由 FormDialog 骨架接管：抛错 = 失败（内联展示），正常返回 = 成功
   const save = async () => {
     const name = form.name.trim();
-    if (!name) {
-      toast.error("验证失败", "项目名称不能为空");
-      return;
+    if (editingProject) {
+      // 编辑：只改 name / description，不动代码库
+      await api.updateProject(editingProject.id, {
+        name,
+        description: form.description.trim() || null,
+      });
+      toast.success(`已更新项目「${name}」`);
+    } else {
+      // 新建：只要名称/描述；代码库稍后在项目的「代码库」分区关联
+      await api.createProject({
+        name,
+        description: form.description.trim() || undefined,
+      });
+      toast.success(`已创建项目「${name}」，可在项目的「代码库」里关联 Git 仓库`);
     }
-    setSaving(true);
-    try {
-      if (editingProject) {
-        // 编辑：只改 name / description，不动代码库
-        await api.updateProject(editingProject.id, {
-          name,
-          description: form.description.trim() || null,
-        });
-        toast.success(`已更新项目「${name}」`);
-      } else {
-        // 新建：只要名称/描述；代码库稍后在项目的「代码库」分区关联
-        await api.createProject({
-          name,
-          description: form.description.trim() || undefined,
-        });
-        toast.success(`已创建项目「${name}」，可在项目的「代码库」里关联 Git 仓库`);
-      }
-      setDialogOpen(false);
-      setEditingProject(null);
-      refresh();
-    } catch (e: unknown) {
-      toast.error(editingProject ? "更新失败" : "创建失败", (e as Error)?.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
+    setEditingProject(null);
+    refresh();
   };
 
   const openDeleteDialog = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
     setDeleteTarget(p);
-    setDeleteInput("");
   };
 
   const closeDeleteDialog = () => {
     if (deleting) return;
     setDeleteTarget(null);
-    setDeleteInput("");
   };
 
   const confirmDelete = async () => {
@@ -151,7 +125,6 @@ function ProjectsTab() {
       await api.deleteProject(deleteTarget.id);
       toast.success(`已删除项目「${deleteTarget.name}」`);
       setDeleteTarget(null);
-      setDeleteInput("");
       refresh();
     } catch (e: unknown) {
       toast.error("删除失败", (e as Error)?.message ?? String(e));
@@ -218,17 +191,9 @@ function ProjectsTab() {
         <ViewToggle view={view} onChange={setView} />
       </div>
 
-      {loadError && (
-        <Card className="border-destructive/50 p-4">
-          <p className="text-sm text-destructive">加载失败：{loadError}</p>
-        </Card>
-      )}
+      {loadError && <ErrorState title="加载项目失败" detail={loadError} onRetry={refresh} />}
 
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      )}
+      {loading && <SkeletonRows variant="card" count={3} />}
 
       {!loading && !loadError && projects.length === 0 && (
         <EmptyState
@@ -249,99 +214,49 @@ function ProjectsTab() {
       {!loading && projects.length > 0 && view === "grid" && <EntityGrid items={projectItems} />}
       {!loading && projects.length > 0 && view === "list" && <EntityList items={projectItems} />}
 
-      {/* 新建 / 编辑 dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editingProject ? "编辑项目" : "新建项目"}</DialogTitle>
-            <DialogDescription>
-              {editingProject
-                ? "修改项目名称或描述。"
-                : "填写名称即可创建；Git 仓库稍后在项目的「代码库」里关联。"}
-            </DialogDescription>
-          </DialogHeader>
+      {/* 新建 / 编辑 dialog（FormDialog 骨架：busy/内联错误/Enter 提交由骨架接管） */}
+      <FormDialog
+        open={dialogOpen}
+        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        title={editingProject ? "编辑项目" : "新建项目"}
+        description={
+          editingProject
+            ? "修改项目名称或描述。"
+            : "填写名称即可创建；Git 仓库稍后在项目的「代码库」里关联。"
+        }
+        submitText={editingProject ? "保存" : "创建"}
+        submitDisabled={!form.name.trim()}
+        onSubmit={save}
+      >
+        <FormField label="名称" required htmlFor="project-name">
+          <Input
+            id="project-name"
+            placeholder="例如：My Awesome App"
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          />
+        </FormField>
+        <FormField label="描述（可选）" htmlFor="project-description">
+          <Input
+            id="project-description"
+            placeholder="简短描述项目用途"
+            value={form.description}
+            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+          />
+        </FormField>
+      </FormDialog>
 
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="project-name">
-                名称 <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="project-name"
-                placeholder="例如：My Awesome App"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="project-description">描述（可选）</Label>
-              <Input
-                id="project-description"
-                placeholder="简短描述项目用途"
-                value={form.description}
-                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
-              />
-            </div>
-
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDialog} disabled={saving}>
-              取消
-            </Button>
-            <Button onClick={() => void save()} disabled={saving}>
-              {saving ? (editingProject ? "保存中…" : "创建中…") : (editingProject ? "保存" : "创建")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 删除确认 dialog */}
-      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) closeDeleteDialog(); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>删除项目</DialogTitle>
-            <DialogDescription>
-              此操作将永久删除项目及其下所有代码库和需求，且不可恢复。
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3 py-2">
-            <p className="text-sm text-muted-foreground">
-              请输入项目名称{" "}
-              <span className="font-medium text-foreground">
-                {deleteTarget?.name}
-              </span>{" "}
-              以确认删除：
-            </p>
-            <Input
-              placeholder={deleteTarget?.name}
-              value={deleteInput}
-              onChange={(e) => setDeleteInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && deleteInput === deleteTarget?.name) void confirmDelete();
-              }}
-              autoFocus
-            />
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDeleteDialog} disabled={deleting}>
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => void confirmDelete()}
-              disabled={deleting || deleteInput !== deleteTarget?.name}
-            >
-              {deleting ? "删除中…" : "确认删除"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* 删除确认：不可逆且高代价 → ConfirmDialog confirmWord（规范 docs/web-components.md §3） */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="删除项目"
+        message="此操作将永久删除项目及其下所有代码库和需求，且不可恢复。"
+        danger
+        confirmWord={deleteTarget?.name}
+        confirmText="确认删除"
+        onConfirm={confirmDelete}
+        onCancel={closeDeleteDialog}
+      />
     </div>
   );
 }
@@ -354,8 +269,8 @@ export function Library() {
   // 历史 tab 已并入「现在」页，本页只剩项目列表（页头在 ProjectsTab 内，
   // 新建按钮要挂 PageHero actions 而 dialog state 在 tab 组件里）
   return (
-    <div className={PAGE_W}>
+    <PageShell width="content">
       <ProjectsTab />
-    </div>
+    </PageShell>
   );
 }

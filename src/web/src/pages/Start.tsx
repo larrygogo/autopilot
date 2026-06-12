@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { PageHero } from "@/components/PageHero";
-import { PAGE_W_FOCUS } from "@/lib/layout";
+import { PageShell } from "@/components/pro";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Plus } from "lucide-react";
 import { api, type Project } from "@/hooks/useApi";
@@ -85,11 +84,7 @@ export function Start() {
   }
 
   return (
-    <div className={PAGE_W_FOCUS}>
-      <PageHero
-        title="开始"
-        subtitle="说说你想做什么，AI 帮你整理成需求"
-      />
+    <PageShell width="focus" hero={{ title: "开始", subtitle: "说说你想做什么，AI 帮你整理成需求" }}>
 
       <div className="space-y-4">
         <div className="space-y-2">
@@ -166,6 +161,6 @@ export function Start() {
           </Button>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

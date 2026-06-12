@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { PageHero } from "@/components/PageHero";
-import { PAGE_W_FOCUS } from "@/lib/layout";
+import { PageShell } from "@/components/pro";
 import { useNavigate } from "react-router-dom";
 import { api, type DoctorReportWithDismiss } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
@@ -94,11 +93,7 @@ export function Setup() {
   const minimumReady = report && report.checks.find((c) => c.id === "providers.has-enabled")?.status === "ok";
 
   return (
-    <div className={PAGE_W_FOCUS}>
-      <PageHero
-        title="首跑向导"
-        subtitle="完成 2 步即可开始使用 autopilot"
-      />
+    <PageShell width="focus" hero={{ title: "首跑向导", subtitle: "完成 2 步即可开始使用 autopilot" }}>
 
       <SetupProgress current={step} labels={["Provider", "代码库"]} />
 
@@ -169,6 +164,6 @@ export function Setup() {
           </div>
         </section>
       )}
-    </div>
+    </PageShell>
   );
 }

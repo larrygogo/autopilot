@@ -6,6 +6,11 @@
 export { EmptyState } from "./empty-state";
 export { DescList, type DescItem } from "./desc-list";
 export { FormField } from "./form-field";
+export { ErrorState } from "./error-state";
+export { SkeletonRows } from "./skeleton-rows";
+export { PageShell } from "./page-shell";
+export { DetailHeader } from "./detail-header";
+export { FormDialog } from "./form-dialog";
 
 // ── 存量散件收编（不搬文件，逻辑归位）──
 export { PageHero } from "@/components/PageHero";

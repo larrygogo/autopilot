@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { PAGE_W } from "@/lib/layout";
+import { PageShell } from "@/components/pro";
 import { Link } from "react-router-dom";
 import { Loader2, Hand, Search, X, List, Archive } from "lucide-react";
 import { api, type Requirement } from "@/hooks/useApi";
@@ -7,7 +7,6 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { PageHero } from "@/components/PageHero";
 import { cn } from "@/lib/utils";
 import { tsToMs } from "@/lib/pipeline-time";
 import {
@@ -184,16 +183,18 @@ export function Tasks() {
   };
 
   return (
-    <div className={PAGE_W}>
-      <PageHero
-        title="流水线"
-        subtitle="需求 → 任务 全生命周期 · 一条工作从提出到跑完"
-        meta={[
+    <PageShell
+      width="content"
+      hero={{
+        title: "流水线",
+        subtitle: "需求 → 任务 全生命周期 · 一条工作从提出到跑完",
+        meta: [
           { k: "需求", v: requirements.length },
           { k: "任务", v: tasks.length },
           ...(filterActive ? [{ k: "匹配", v: filteredTasks.length + filteredRequirements.length }] : []),
-        ]}
-      />
+        ],
+      }}
+    >
 
       {/* 工具栏：搜索框 + workflow chip 过滤 */}
       {hasAny && (
@@ -327,7 +328,7 @@ export function Tasks() {
           })}
         </Tabs>
       )}
-    </div>
+    </PageShell>
   );
 }
 

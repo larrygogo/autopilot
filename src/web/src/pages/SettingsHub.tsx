@@ -1,6 +1,5 @@
 import { lazy, Suspense } from "react";
-import { PAGE_W_FORM } from "@/lib/layout";
-import { PageHero } from "@/components/PageHero";
+import { PageShell } from "@/components/pro";
 import { PageLoader } from "@/components/PageLoader";
 
 const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
@@ -30,11 +29,10 @@ export function SettingsHub({ section = "general" }: { section?: SettingsSection
 
   const header = SECTION_HEADER[section];
   return (
-    <div className={PAGE_W_FORM}>
-      <PageHero title={header.title} subtitle={header.desc} />
+    <PageShell width="form" hero={{ title: header.title, subtitle: header.desc }}>
       <Suspense fallback={<PageLoader />}>
         {section === "api-keys" ? <ApiKeysPage /> : <Settings section={section} />}
       </Suspense>
-    </div>
+    </PageShell>
   );
 }
