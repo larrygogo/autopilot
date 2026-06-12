@@ -34,7 +34,7 @@ import {
   updateRequirement,
   nextRequirementId,
 } from "../src/core/requirements";
-import { appendFeedback } from "../src/core/requirement-feedbacks";
+import { appendFeedback, listFeedbacks } from "../src/core/requirement-feedbacks";
 import type { TaskRepoCtx } from "../src/core/sandbox";
 import {
   runFixRevision,
@@ -111,6 +111,11 @@ describe("fix-revision-runner", () => {
     expect(seenPrompt).toContain("feat/x");
     expect(seenPrompt).toContain("#7");
     expect(seenCwd).toBe(tmpRepo);
+    // 产出可见性：agent 总结落需求反馈（from_role=agent，UI 显示「Agent 修复」）
+    const fbs = listFeedbacks(id);
+    const agentFb = fbs.find((f) => f.from_role === "agent");
+    expect(agentFb?.body).toContain("修复完成");
+    expect(agentFb?.body).toContain("已修复并 push");
   });
 
   it("agent 执行失败 → 需求 failed + status_reason 带原因（停下报人）", async () => {

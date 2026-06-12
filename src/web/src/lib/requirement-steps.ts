@@ -26,9 +26,11 @@ export function statusToStep(status: string): ReqStep {
     case "queued":
       return "queue";
     case "running":
-    case "fix_revision":
       return "execute";
+    // fix_revision 属于验收阶段的循环（验收 ⇄ 修复）：用户在验收页发审查意见，
+    // 修复进度与结果也回到验收页 —— 当前步留在「验收」，不跳回「执行」
     case "awaiting_review":
+    case "fix_revision":
       return "review";
     case "done":
     case "failed":

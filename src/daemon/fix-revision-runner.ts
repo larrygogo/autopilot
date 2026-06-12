@@ -26,13 +26,15 @@ import {
   listRequirements,
 } from "../core/requirements";
 import { listFeedbacks } from "../core/requirement-feedbacks";
+import { createComment, nextCommentId } from "../core/requirement-comments";
 import { listTaskRepos, type TaskRepoCtx } from "../core/sandbox";
 import { listSubPrs } from "../core/requirement-sub-prs";
 import { createAgent } from "../agents/registry";
 import { loadProviders } from "../core/config";
 import type { ProviderName } from "../core/config";
+import { runWithTaskContext } from "../core/task-context";
 import { startFixRound, setFixPhase, endFixRound } from "./fix-progress";
-import { createLogger } from "../core/logger";
+import { createLogger, setTaskId, setPhase as setLogPhase, resetPhase } from "../core/logger";
 import { existsSync } from "fs";
 
 const log = createLogger("fix-revision-runner");
@@ -207,12 +209,23 @@ async function _runInner(reqId: string): Promise<void> {
     reqId, req.task_id, repos.length, prNumbers.join(",") || "无");
   setFixPhase(reqId, "fixing");
 
+  // 进入 task context + logger 任务标签 —— 让修复过程获得与正常 phase 同级的可见性：
+  // - agent 的实时输出（bridgeCliMessage：assistant 文本/工具调用/工具结果）走 log:entry
+  //   事件（带 taskId）+ 落 phase 磁盘日志 → Web 执行记录 / `task logs --follow` 实时可看
+  // - Agent.run 自动 appendAgentCall(phase="fix_revision") → 调用记录（prompt/产出/用时）持久化
   let summary: string;
+  setTaskId(req.task_id);
+  setLogPhase("fix_revision", "FIX_REVISION");
   try {
-    summary = await _fixFn(prompt, primary.path);
+    summary = await runWithTaskContext(
+      { taskId: req.task_id, phase: "fix_revision", sandboxDir: primary.path },
+      () => _fixFn(prompt, primary.path),
+    );
   } catch (e: unknown) {
     fail(e instanceof Error ? e.message : String(e));
     return;
+  } finally {
+    resetPhase();
   }
 
   // 修复期间用户可能取消/状态被改 —— re-fetch 校验后再转回验收
@@ -224,6 +237,21 @@ async function _runInner(reqId: string): Promise<void> {
   }
 
   endFixRound(reqId, "done");
+
+  // 产出可见性：修复总结落需求评论（反馈历史直接展示「改了什么、push 了哪些库」），
+  // 不让产出只活在 daemon 日志里。写入失败不阻塞状态流转。
+  try {
+    createComment({
+      id: nextCommentId(),
+      requirement_id: reqId,
+      kind: "feedback",
+      from_role: "agent",
+      body: `【修复完成 · 已转回验收】\n\n${summary.slice(0, 8000)}`,
+    });
+  } catch (e: unknown) {
+    log.warn("fix-runner: req=%s 修复总结写评论失败：%s", reqId, (e as Error).message);
+  }
+
   try {
     setRequirementStatus(reqId, "awaiting_review");
     log.info("fix-runner: req=%s 修复完成，转回 awaiting_review。agent 总结：%s",

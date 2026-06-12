@@ -1095,6 +1095,8 @@ export interface RequirementFeedback {
   id: number;
   requirement_id: string;
   source: "github_review" | "manual";
+  /** 原始评论角色（user/github/agent）—— agent = 修复执行器的总结 */
+  from_role?: string;
   body: string;
   github_review_id: string | null;
   created_at: number;

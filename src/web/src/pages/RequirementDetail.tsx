@@ -810,24 +810,7 @@ export function RequirementDetail() {
     }
   }
 
-  async function requestFix() {
-    if (!id || !req) return;
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setActionBusy(true);
-    const prev = req;
-    setReq({ ...req, status: "fix_revision" });
-    try {
-      await api.transitionRequirement(id, "fix_revision");
-      toast.success("已标记需要修改，Agent 将继续修复");
-    } catch (e: unknown) {
-      setReq(prev);
-      toast.error("操作失败", (e as Error)?.message ?? String(e));
-    } finally {
-      busyRef.current = false;
-      setActionBusy(false);
-    }
-  }
+  // 「要求修改」已并入审查对话卡：发布带正文的审查意见即触发修复（空转 fix_revision 无意义，已删 requestFix）
 
   async function retryFromFailed() {
     if (!id || !req) return;
@@ -1110,24 +1093,32 @@ export function RequirementDetail() {
     </Card>
   ) : null;
 
-  const feedbackCard = (feedbacks.length > 0 || req.status === "awaiting_review" || req.status === "fix_revision") ? (
+  // 审查与修复对话卡（验收步专属）：时间线（审查意见 / GitHub review / Agent 修复回应 +
+  // 进行中的修复进度条目）+ 底部发布输入框 —— 每发一条意见，对应的「正在做什么 / 进度 /
+  // 结果」都回到同一个时间线里，不再分散在执行页的多个卡片。
+  const reviewThreadCard = (
     <Card id="feedback-section">
       <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
         <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-sm font-medium">反馈历史</span>
+        <span className="text-sm font-medium">审查与修复</span>
         {feedbacks.length > 0 && (
           <Badge variant="muted" className="ml-auto">{feedbacks.length}</Badge>
         )}
       </div>
       <div className="p-5">
-        {feedbacks.length === 0 ? (
-          <p className="font-mono text-xs text-muted-foreground">等待 PR review 反馈…</p>
+        {feedbacks.length === 0 && req.status !== "fix_revision" ? (
+          <p className="font-mono text-xs text-muted-foreground">
+            还没有审查记录。发布审查意见后 Agent 会按意见修复并在此回应；GitHub 上的
+            Request Changes 与 CI 失败也会自动进入这里。
+          </p>
         ) : (
           <ol className="space-y-3">
             {feedbacks.map((fb) => (
               <li key={fb.id} className="border-l-2 border-border pl-3">
                 <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline">{SOURCE_LABEL[fb.source] ?? fb.source}</Badge>
+                  <Badge variant="outline">
+                    {fb.from_role === "agent" ? "Agent 修复" : (SOURCE_LABEL[fb.source] ?? fb.source)}
+                  </Badge>
                   <span className="font-mono text-[10px] text-muted-foreground">
                     {new Date(fb.created_at).toLocaleString()}
                   </span>
@@ -1137,71 +1128,59 @@ export function RequirementDetail() {
                 </pre>
               </li>
             ))}
+            {/* 进行中的修复 = 时间线的活跃条目（spinner + 阶段 + 用时），完成后被 Agent 修复总结替代 */}
+            {req.status === "fix_revision" && (
+              <li className="border-l-2 border-accent/50 pl-3">
+                <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+                  <span className="text-xs font-medium text-foreground">Agent 修复执行中</span>
+                  {fixRound && (
+                    <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                      已用 {fixElapsedSec}s
+                    </span>
+                  )}
+                </div>
+                <p className="font-mono text-[11px] text-muted-foreground">
+                  {fixRound
+                    ? (fixRound.phase === "preparing"
+                        ? "准备中：读取反馈与交付沙盒布局…"
+                        : "按上方最新意见修改代码，完成后 push 更新 PR 并在此回应总结")
+                    : "等待修复执行器接管…（daemon 重启后会自动补跑；长时间无进展请检查 daemon）"}
+                </p>
+              </li>
+            )}
           </ol>
         )}
       </div>
-    </Card>
-  ) : null;
-
-  // 修复执行进度卡：fix_revision 时常驻（agent 在任务沙盒上按反馈修复中）
-  const fixProgressCard = (req.status === "fix_revision" && fixRound) ? (
-    <Card className="p-5">
-      <div className="flex items-center gap-3">
-        <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
-        <div className="flex-1 min-w-0">
-          <div className="font-mono text-xs text-muted-foreground">修复执行中…</div>
-          <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/80">
-            {fixRound.phase === "preparing"
-              ? "阶段：准备（读取反馈与沙盒布局）"
-              : "阶段：Agent 按反馈修改代码，完成后 push 更新 PR 并转回验收"}
+      {/* 发布入口：验收中 / 修复中都可追加意见（修复中追加 = 下一轮修复的输入）。
+          status 即活跃性判据 —— done/cancelled 回看时自动无输入框 */}
+      {(req.status === "awaiting_review" || req.status === "fix_revision") && (
+        <div className="border-t border-border p-4">
+          <Textarea
+            value={feedbackBody}
+            onChange={(e) => setFeedbackBody(e.target.value)}
+            placeholder={req.status === "awaiting_review"
+              ? "填写审查意见…（发布后 Agent 立即开始修复，进度和结果会回到这里）"
+              : "补充意见…（当前修复完成后，新意见会触发下一轮修复）"}
+            className="min-h-[72px] text-xs"
+            disabled={submittingFeedback}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
+            }}
+          />
+          <div className="mt-2 flex justify-end">
+            <Button
+              size="sm"
+              onClick={() => void inject()}
+              disabled={submittingFeedback || !feedbackBody.trim()}
+            >
+              {submittingFeedback ? "发布中…" : "发布审查意见"}
+            </Button>
           </div>
         </div>
-        <div className="font-mono text-xs tabular-nums text-muted-foreground shrink-0">
-          已用 {fixElapsedSec}s
-        </div>
-      </div>
+      )}
     </Card>
-  ) : (req.status === "fix_revision" && !fixRound) ? (
-    <Card className="p-5">
-      <div className="flex items-center gap-3">
-        <Clock className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <p className="font-mono text-xs text-muted-foreground">
-          等待修复执行器接管…（daemon 重启后会自动补跑；若长时间无进展，检查 daemon 是否运行）
-        </p>
-      </div>
-    </Card>
-  ) : null;
-
-  // 反馈输入卡：验收（awaiting_review，注入后自动转 fix_revision）与修复（fix_revision）共用
-  const feedbackComposer = (req.status === "awaiting_review" || req.status === "fix_revision") ? (
-    <Card className="p-5">
-      <p className="mb-2 text-xs text-muted-foreground">
-        {req.status === "awaiting_review"
-          ? "审查意见（注入后需求转入修复，Agent 据此修改并更新 PR）："
-          : "修复阶段反馈（注入后 Agent 会据此修改）："}
-      </p>
-      <Textarea
-        value={feedbackBody}
-        onChange={(e) => setFeedbackBody(e.target.value)}
-        placeholder="填写修改建议…"
-        className="min-h-[80px] text-xs"
-        disabled={submittingFeedback}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
-        }}
-      />
-      <div className="mt-2 flex justify-end">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void inject()}
-          disabled={submittingFeedback || !feedbackBody.trim()}
-        >
-          {submittingFeedback ? "提交中…" : "注入反馈"}
-        </Button>
-      </div>
-    </Card>
-  ) : null;
+  );
 
   // 执行视图：展开常驻（带标题头），所有阶段一致呈现，不折叠
   const taskRecord = req.task_id ? (
@@ -1843,11 +1822,8 @@ export function RequirementDetail() {
             if (activeStep === "execute") {
               return (
                 <>
-                  {fixProgressCard}
                   {subPrCard}
                   {taskRecord}
-                  {!readonly && req.status === "fix_revision" && feedbackComposer}
-                  {feedbackCard}
                 </>
               );
             }
@@ -1855,8 +1831,8 @@ export function RequirementDetail() {
             if (activeStep === "review") {
               return (
                 <>
-                  {/* 验收步 = 看改动本身：只显示按文件 diff + 一行决策条（其余执行细节在执行步） */}
-                  {!readonly && (
+                  {/* 验收步 = 改动 diff + 决策条 + 审查与修复对话（执行细节在执行步） */}
+                  {!readonly && req.status === "awaiting_review" && (
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card/40 px-4 py-2.5">
                       <span className="text-sm font-medium">
                         验收
@@ -1867,14 +1843,9 @@ export function RequirementDetail() {
                           </a>
                         )}
                       </span>
-                      <div className="flex gap-2">
-                        <Button variant="default" size="sm" className="text-xs" onClick={() => void markDone()} disabled={actionBusy}>
-                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> 验收通过 · 完成
-                        </Button>
-                        <Button variant="outline" size="sm" className="text-xs" onClick={() => void requestFix()} disabled={actionBusy}>
-                          ↩ 要求修改
-                        </Button>
-                      </div>
+                      <Button variant="default" size="sm" className="text-xs" onClick={() => void markDone()} disabled={actionBusy}>
+                        <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> 验收通过 · 完成
+                      </Button>
                     </div>
                   )}
                   {req.task_id ? (
@@ -1882,10 +1853,9 @@ export function RequirementDetail() {
                   ) : (
                     <Card className="p-6 text-center text-sm text-muted-foreground">无关联执行，没有可验收的改动。</Card>
                   )}
-                  {/* NextStepCTA「去填写审查意见」滚动到 feedback-section —— 此前只在执行步渲染，
-                      验收步（当前步）滚动目标不存在；输入区 + 反馈历史在验收步常驻 */}
-                  {!readonly && feedbackComposer}
-                  {feedbackCard}
+                  {/* 审查与修复对话：时间线（意见 → 修复进度 → Agent 回应）+ 发布输入框。
+                      id=feedback-section（NextStepCTA「去填写审查意见」的滚动锚） */}
+                  {reviewThreadCard}
                 </>
               );
             }

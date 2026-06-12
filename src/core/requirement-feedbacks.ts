@@ -17,6 +17,8 @@ export interface RequirementFeedback {
   id: number;
   requirement_id: string;
   source: "github_review" | "manual";
+  /** 原始评论角色（user/github/agent…）—— UI 区分「Agent 修复总结」与用户手动反馈 */
+  from_role?: string;
   body: string;
   github_review_id: string | null;
   created_at: number;
@@ -43,6 +45,7 @@ function commentRowToFeedback(row: CommentRow, fakeId: number): RequirementFeedb
     id: fakeId,
     requirement_id: row.requirement_id,
     source: row.from_role === "github" ? "github_review" : "manual",
+    from_role: row.from_role,
     body: row.body,
     github_review_id: row.github_review_id,
     created_at: row.created_at,
