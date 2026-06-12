@@ -42,6 +42,10 @@ Single-phase zero-code workflow; the default workflow behind `autopilot run "<pr
 
 design → review → develop → code_review → submit_pr, with agents configured inline per phase. A good minimal starting point for deriving custom PR delivery pipelines.
 
+### artifact — artifact delivery (probe, dogfooding)
+
+produce (`gate: true` manual acceptance; rejection notes fed back into the redo round) → deliver (archives to `AUTOPILOT_HOME/deliverables/<reqId>/<taskId>/`). A zero-kernel-change probe for the non-PR delivery shape, collecting real-world pain points for the "deliverable abstraction" P0 (design baseline and feedback checklist: `docs/superpowers/specs/2026-06-12-deliverable-abstraction-design.md`). For single-repo requirements.
+
 ## Engine Capability Demos (teaching fixtures)
 
 ### prompt_quick — quick prompt writing
