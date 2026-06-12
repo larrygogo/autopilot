@@ -9,6 +9,7 @@ import {
   unreadCount,
   markRead,
   markAllRead,
+  markReadByRelated,
   dismissNotification,
   pruneNotifications,
 } from "../src/core/notifications";
@@ -119,5 +120,24 @@ describe("notifications core", () => {
     const loaded = getNotification(n.id);
     expect(loaded?.context).toBeNull();
     expect(loaded?.title).toBe("a");
+  });
+
+  it("markReadByRelated：按关联实体批量已读，返回实际清掉的 id（点进任务页自动已读）", () => {
+    const a = createNotification({ type: "task_done", title: "A", related: { type: "task", id: "t-1" } });
+    const b = createNotification({ type: "task_failed", title: "B", related: { type: "task", id: "t-1" } });
+    const c = createNotification({ type: "task_done", title: "C", related: { type: "task", id: "t-2" } });
+    const d = createNotification({ type: "agent_question", title: "D", related: { type: "requirement", id: "req-9" } });
+    markRead([b.id]); // b 已读 → 不应重复出现在返回里
+
+    const ids = markReadByRelated("task", "t-1");
+    expect(ids).toEqual([a.id]);
+    expect(getNotification(a.id)?.read_at).not.toBeNull();
+    expect(getNotification(c.id)?.read_at).toBeNull();
+    expect(getNotification(d.id)?.read_at).toBeNull();
+
+    // 幂等：再调返回空
+    expect(markReadByRelated("task", "t-1")).toEqual([]);
+    // 无匹配实体
+    expect(markReadByRelated("task", "t-404")).toEqual([]);
   });
 });

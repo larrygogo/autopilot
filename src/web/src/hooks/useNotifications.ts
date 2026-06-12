@@ -16,6 +16,8 @@ export interface UseNotificationsResult {
   markAllRead: () => Promise<void>;
   /** optimistic 删除（隐藏） */
   dismiss: (id: number) => Promise<void>;
+  /** 按关联实体已读（点进任务/需求详情页自动消化）；状态同步靠 WS notification:read 回流 */
+  markReadByRelated: (relatedType: "task" | "requirement", relatedId: string) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -148,6 +150,15 @@ export function useNotifications(): UseNotificationsResult {
     }
   }, []);
 
+  const markReadByRelated = useCallback(
+    async (relatedType: "task" | "requirement", relatedId: string) => {
+      // 不做 optimistic：daemon 端按实体查未读集合后广播 notification:read，
+      // 本 hook 的 WS handler 统一消化（含未加载进列表的行的 unread 计数）
+      await api.markNotificationsReadByRelated(relatedType, relatedId);
+    },
+    [],
+  );
+
   return {
     items,
     unread,
@@ -158,6 +169,7 @@ export function useNotifications(): UseNotificationsResult {
     markRead,
     markAllRead,
     dismiss,
+    markReadByRelated,
     refresh,
   };
 }

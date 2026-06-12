@@ -158,6 +158,10 @@ function titleForPath(pathname: string): string {
 
 type MobileDrawerTab = "nav" | "now" | "search";
 
+// 通知面板宽度边界（px）：下限保证卡片可读，上限防止挤垮主内容区
+const PANEL_MIN_W = 320;
+const PANEL_MAX_W = 720;
+
 /** 移动端浮动 dock / 抽屉 pill 共用的三入口（Supabase 式） */
 const MOBILE_TABS: Array<{ key: MobileDrawerTab; icon: React.ComponentType<{ className?: string }>; label: string }> = [
   { key: "search", icon: Search, label: "搜索" },
@@ -189,6 +193,48 @@ function AppInner() {
   useEffect(() => {
     try { localStorage.setItem("now.panel.open", nowOpen ? "1" : "0"); } catch { /* ignore */ }
   }, [nowOpen]);
+
+  // 通知面板宽度：左缘拖拽调节，记住偏好
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    try {
+      const v = parseInt(localStorage.getItem("now.panel.width") ?? "", 10);
+      return Number.isFinite(v) ? Math.min(PANEL_MAX_W, Math.max(PANEL_MIN_W, v)) : 380;
+    } catch {
+      return 380;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("now.panel.width", String(panelWidth)); } catch { /* ignore */ }
+  }, [panelWidth]);
+  const startPanelResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = panelWidth;
+    const onMove = (ev: PointerEvent) =>
+      setPanelWidth(Math.min(PANEL_MAX_W, Math.max(PANEL_MIN_W, startW + (startX - ev.clientX))));
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  // 进入任务/需求详情页 = 已查看该实体，自动消化其未读通知（daemon 广播
+  // notification:read 回流刷新列表与 badge）。unread 进 deps：停留期间新到的
+  // 同实体通知也即时消化（已读后 RPC 幂等返回空，不会循环）。
+  useEffect(() => {
+    if (notifications.unread === 0) return;
+    const task = location.pathname.match(/^\/tasks\/([^/]+)/);
+    const req = location.pathname.match(/^\/requirements\/([^/]+)/);
+    if (task) void notifications.markReadByRelated("task", task[1]).catch(() => {});
+    else if (req) void notifications.markReadByRelated("requirement", req[1]).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, notifications.unread]);
 
   const isDesktop = () =>
     typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches;
@@ -393,7 +439,18 @@ function AppInner() {
 
           {/* 通知面板：桌面端内联右栏（Supabase Advisor 式） */}
           {nowOpen && (
-            <aside className="hidden w-[380px] shrink-0 border-l border-border bg-background lg:block xl:w-[420px]">
+            <aside
+              className="relative hidden shrink-0 border-l border-border bg-background lg:block"
+              style={{ width: panelWidth }}
+            >
+              {/* 左缘拖拽柄：调节面板宽度 */}
+              <div
+                className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors hover:bg-accent/40"
+                onPointerDown={startPanelResize}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="调节通知面板宽度"
+              />
               <NotificationsPanel notifications={notifications} onClose={() => setNowOpen(false)} />
             </aside>
           )}

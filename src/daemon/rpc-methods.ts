@@ -71,6 +71,7 @@ import {
   unreadCount as notificationUnreadCount,
   markRead as markNotificationsRead,
   markAllRead as markAllNotificationsRead,
+  markReadByRelated as markNotificationsReadByRelated,
   dismissNotification,
 } from "../core/notifications";
 import { listUnhealthy } from "../core/provider-health";
@@ -367,6 +368,23 @@ export function registerCoreRpcMethods(): void {
       const updated = markNotificationsRead(p.ids as number[]);
       emitBus({ type: "notification:read", payload: { ids: p.ids as number[] } });
       return { updated };
+    },
+  });
+
+  registerRpcMethod({
+    method: "notifications.markReadByRelated",
+    description: "按关联实体批量已读（用户点进任务/需求详情页即视为消化了相关通知）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (p.related_type !== "task" && p.related_type !== "requirement" && p.related_type !== "system") {
+        throw new RpcError("INVALID_PARAM", "related_type 需为 task / requirement / system");
+      }
+      if (typeof p.related_id !== "string" || !p.related_id) {
+        throw new RpcError("INVALID_PARAM", "需要 related_id");
+      }
+      const ids = markNotificationsReadByRelated(p.related_type, p.related_id);
+      if (ids.length > 0) emitBus({ type: "notification:read", payload: { ids } });
+      return { updated: ids.length, ids };
     },
   });
 

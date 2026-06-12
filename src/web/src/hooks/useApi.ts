@@ -779,6 +779,12 @@ export const api = {
   // [WS-RPC] notifications.markAllRead
   markAllNotificationsRead: () =>
     requestRpc<{ updated: number }>("notifications.markAllRead"),
+  // [WS-RPC] notifications.markReadByRelated —— 点进任务/需求详情页自动消化相关通知
+  markNotificationsReadByRelated: (relatedType: "task" | "requirement", relatedId: string) =>
+    requestRpc<{ updated: number; ids: number[] }>("notifications.markReadByRelated", {
+      related_type: relatedType,
+      related_id: relatedId,
+    }),
   // [WS-RPC] notifications.dismiss
   dismissNotification: (id: number) =>
     requestRpc<{ ok: true }>("notifications.dismiss", { id }),

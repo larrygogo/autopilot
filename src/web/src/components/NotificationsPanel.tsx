@@ -1,12 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { X, Loader2, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { NotificationItem } from "@/components/NotificationItem";
 import { NowEmptyGuide } from "@/components/NowEmptyGuide";
 import { ProviderHealthBanner } from "@/components/ProviderHealthBanner";
 import type { UseNotificationsResult } from "@/hooks/useNotifications";
 import { api, type DoctorReportWithDismiss } from "@/hooks/useApi";
+
+// 分类 = 内核 severity 的业务标签（叠加显示：chip hover 露出内核名）。
+// error=异常（失败/触顶类）、action=待处理（等审批/评审/提问）、info=动态（完成/取消/恢复）
+const FILTERS = [
+  { key: "all", label: "全部" },
+  { key: "action", label: "待处理" },
+  { key: "error", label: "异常" },
+  { key: "info", label: "动态" },
+] as const;
+type FilterKey = (typeof FILTERS)[number]["key"];
 
 /**
  * 「通知」面板 —— 事件型通知流（daemon notifications 表为权威源）。
@@ -25,6 +36,17 @@ export function NotificationsPanel({
     notifications;
   const [now, setNow] = useState(Date.now());
   const [setupReport, setSetupReport] = useState<DoctorReportWithDismiss | null>(null);
+  const [filter, setFilter] = useState<FilterKey>("all");
+
+  const countBySeverity = useMemo(() => {
+    const c: Record<string, number> = { action: 0, error: 0, info: 0 };
+    for (const n of items) c[n.severity] = (c[n.severity] ?? 0) + 1;
+    return c;
+  }, [items]);
+  const visible = useMemo(
+    () => (filter === "all" ? items : items.filter((n) => n.severity === filter)),
+    [items, filter],
+  );
 
   // 每 30s 刷新相对时间（通知不需要秒级滚动）
   useEffect(() => {
@@ -70,6 +92,30 @@ export function NotificationsPanel({
         </div>
       </div>
 
+      {/* 分类筛选：内核 severity 的业务标签（hover 露出内核名） */}
+      <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
+        {FILTERS.map((f) => {
+          const count = f.key === "all" ? items.length : countBySeverity[f.key] ?? 0;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFilter(f.key)}
+              title={f.key === "all" ? "全部通知" : `severity: ${f.key}`}
+              className={cn(
+                "rounded-full px-2.5 py-1 text-[11px] transition-colors",
+                filter === f.key
+                  ? "bg-accent/15 font-medium text-accent"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              {f.label}
+              {count > 0 && <span className="ml-1 font-mono text-[10px] opacity-70">{count}</span>}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex-1 overflow-y-auto scrollbar-thin p-3">
         {showSetupBanner && (
           <div className="mb-3 rounded-md border border-border p-3 text-sm">
@@ -97,8 +143,14 @@ export function NotificationsPanel({
 
         {!loading && !error && items.length === 0 && <NowEmptyGuide />}
 
+        {!loading && !error && items.length > 0 && visible.length === 0 && (
+          <p className="mt-8 text-center text-xs text-muted-foreground">
+            该分类下暂无通知（已加载范围内）
+          </p>
+        )}
+
         <div className="flex flex-col gap-2">
-          {items.map((n) => (
+          {visible.map((n) => (
             <NotificationItem
               key={n.id}
               notification={n}

@@ -145,6 +145,23 @@ export function markRead(ids: number[]): number {
   return Number(result.changes);
 }
 
+/**
+ * 按关联实体批量已读（幂等），返回实际被清掉的通知 id（供调用方广播
+ * notification:read 增量事件）。用途：用户点进任务/需求详情页 = 已经看到
+ * 该实体的最新状态，相关未读通知自动消化。
+ */
+export function markReadByRelated(relatedType: NotificationRelatedType, relatedId: string): number[] {
+  const rows = getDb()
+    .query<{ id: number }, [string, string]>(
+      "SELECT id FROM notifications WHERE read_at IS NULL AND related_type = ? AND related_id = ?",
+    )
+    .all(relatedType, relatedId);
+  if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.id);
+  markRead(ids);
+  return ids;
+}
+
 export function markAllRead(): number {
   const result = getDb().run(
     "UPDATE notifications SET read_at = ? WHERE read_at IS NULL AND dismissed_at IS NULL",
