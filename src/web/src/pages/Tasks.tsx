@@ -113,11 +113,12 @@ export function Tasks() {
     );
   }, [requirements, searchQuery, workflowFilter]);
 
-  // requirement_id → 需求状态：任务行代表整件工作时，分桶与状态视觉都以需求为准
-  //（task done 只是执行单元跑完，需求可能还在验收/修复 —— 按 task 状态显示「已完成」会误导）
-  const reqStatusById = useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const r of requirements) m[r.id] = r.status;
+  // requirement_id → 需求对象：任务行代表整件工作时，分桶/状态视觉/卡片特化
+  //（preview、打开 PR 等动作）都以需求为准（task done 只是执行单元跑完，
+  // 需求可能还在验收/修复 —— 按 task 状态显示「已完成」会误导）
+  const reqById = useMemo(() => {
+    const m: Record<string, Requirement> = {};
+    for (const r of requirements) m[r.id] = r;
     return m;
   }, [requirements]);
 
@@ -137,7 +138,7 @@ export function Tasks() {
     const taskRunning: PipelineTask[] = [];
     const archived: PipelineTask[] = [];
     for (const t of filteredTasks) {
-      const rs = t.requirement_id ? reqStatusById[t.requirement_id] : undefined;
+      const rs = t.requirement_id ? reqById[t.requirement_id]?.status : undefined;
       if (rs) {
         // 有关联需求 → 按需求状态分桶（验收/修复中的工作不能进「归档」）
         if (rs === "done" || rs === "cancelled") archived.push(t);
@@ -155,7 +156,7 @@ export function Tasks() {
       { key: "running", label: "运行中", icon: Loader2, iconClass: "text-accent", reqs: reqRunning, tasks: taskRunning },
       { key: "archived", label: "归档", icon: Archive, iconClass: "text-muted-foreground", reqs: [], tasks: archived },
     ];
-  }, [filteredRequirements, filteredTasks, reqStatusById]);
+  }, [filteredRequirements, filteredTasks, reqById]);
 
   const now = Date.now();
 
@@ -166,7 +167,7 @@ export function Tasks() {
       ...t.tasks.map((tk) => ({
         key: `t-${tk.id}`,
         ts: tsToMs(tk.updated_at),
-        node: <TaskRow task={tk} now={now} maps={nameMaps} reqStatus={tk.requirement_id ? reqStatusById[tk.requirement_id] : undefined} />,
+        node: <TaskRow task={tk} now={now} maps={nameMaps} req={tk.requirement_id ? reqById[tk.requirement_id] : undefined} />,
       })),
     ].sort((a, b) => b.ts - a.ts);
 

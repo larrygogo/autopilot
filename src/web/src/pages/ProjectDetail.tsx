@@ -53,6 +53,7 @@ export function ProjectDetail({ projectId, section = "requirements" }: ProjectDe
   const [project, setProject] = useState<Project | null>(null);
   const [codebases, setCodebases] = useState<Workspace[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
+  const [workflowLabels, setWorkflowLabels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reqTab, setReqTab] = useState<string>("all");
@@ -91,6 +92,10 @@ export function ProjectDetail({ projectId, section = "requirements" }: ProjectDe
       })
       .catch((e: unknown) => setLoadError((e as Error)?.message ?? String(e)))
       .finally(() => setLoading(false));
+    // 工作流 label 映射：需求卡 secondary 显示工作流中文名（与流水线页对齐）；拉不到不阻塞
+    api.listWorkflows()
+      .then((list) => setWorkflowLabels(Object.fromEntries(list.map((w) => [w.name, w.label ?? w.name]))))
+      .catch(() => {});
   }, [projectId]);
 
   useEffect(() => {
@@ -116,7 +121,7 @@ export function ProjectDetail({ projectId, section = "requirements" }: ProjectDe
   const now = Date.now();
   const rowsOf = (list: Requirement[]): TimedRow[] =>
     list
-      .map((r) => ({ key: r.id, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} now={now} /> }))
+      .map((r) => ({ key: r.id, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} now={now} maps={{ workflows: workflowLabels }} /> }))
       .sort((a, b) => b.ts - a.ts);
 
   // ── 需求 ──────────────────────────────────────

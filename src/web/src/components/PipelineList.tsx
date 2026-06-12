@@ -7,7 +7,7 @@ import { api, type Requirement } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { cn } from "@/lib/utils";
 import { relTime, tsToMs, bucketOf, BUCKET_ORDER, BUCKET_LABEL, type TimeBucket } from "@/lib/pipeline-time";
-import { reqCardSpec, type ReqCardAction } from "@/lib/requirement-card";
+import { reqCardSpec, specPreview, type ReqCardAction, type ReqCardSpec } from "@/lib/requirement-card";
 
 export interface PipelineTask {
   id: string;
@@ -149,6 +149,32 @@ export function RowCard({
   );
 }
 
+/** 状态特化区（提示条 + 行内动作）：RequirementRow 与「代表需求的 TaskRow」共用同一套规则。 */
+function ReqCardExtras({ req, card }: { req: Requirement; card: ReqCardSpec }) {
+  if (!card.notice && card.actions.length === 0) return null;
+  return (
+    <div className="mt-2.5 space-y-2">
+      {card.notice && (
+        <p className={cn(
+          "rounded-lg px-3 py-2 text-[12px] leading-relaxed",
+          card.notice.tone === "error"
+            ? "bg-destructive/8 text-destructive"
+            : "bg-muted/50 text-muted-foreground",
+        )}>
+          {card.notice.text}
+        </p>
+      )}
+      {card.actions.length > 0 && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {card.actions.map((a) => (
+            <ReqCardActionButton key={a.key} req={req} action={a} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RequirementRow({ req, now, maps }: { req: Requirement; now: number; maps?: PipelineNameMaps }) {
   const { Icon, tone, label, spin } = reqMeta(req.status);
   const wfName = req.workflow ?? "dev";
@@ -170,27 +196,7 @@ export function RequirementRow({ req, now, maps }: { req: Requirement; now: numb
       statusLabel={label}
       secondary={secondary}
       preview={card.preview}
-      extra={(card.notice || card.actions.length > 0) && (
-        <div className="mt-2.5 space-y-2">
-          {card.notice && (
-            <p className={cn(
-              "rounded-lg px-3 py-2 text-[12px] leading-relaxed",
-              card.notice.tone === "error"
-                ? "bg-destructive/8 text-destructive"
-                : "bg-muted/50 text-muted-foreground",
-            )}>
-              {card.notice.text}
-            </p>
-          )}
-          {card.actions.length > 0 && (
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {card.actions.map((a) => (
-                <ReqCardActionButton key={a.key} req={req} action={a} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      extra={<ReqCardExtras req={req} card={card} />}
     />
   );
 }
@@ -256,16 +262,17 @@ function ReqCardActionButton({ req, action }: { req: Requirement; action: ReqCar
   );
 }
 
-export function TaskRow({ task, now, maps, reqStatus }: {
+export function TaskRow({ task, now, maps, req }: {
   task: PipelineTask;
   now: number;
   maps?: PipelineNameMaps;
-  /** 关联需求的状态。任务行代表整件工作时传入 —— 状态视觉以需求为准
-   *（task done 只是执行单元跑完，需求可能还在验收/修复，显示「已完成」会误导用户） */
-  reqStatus?: string;
+  /** 关联需求（任务行代表整件工作时传入）—— 状态视觉以需求为准（task done 只是执行
+   * 单元跑完，需求可能还在验收/修复），preview/提示/动作与需求卡同走 reqCardSpec
+   * （此前裸糊原始 markdown spec 且无「打开 PR / 去回答」，与项目页需求卡割裂） */
+  req?: Requirement;
 }) {
-  const { Icon, tone, label, spin } = reqStatus
-    ? reqMeta(reqStatus)
+  const { Icon, tone, label, spin } = req
+    ? reqMeta(req.status)
     : { ...taskMeta(task.status), spin: task.status.startsWith("running_") };
   const phase = parsePhase(task.status);
   const secondary = [
@@ -273,6 +280,7 @@ export function TaskRow({ task, now, maps, reqStatus }: {
     phase || null,
     task.requirement_id ? `← ${task.requirement_id}` : null,
   ].filter(Boolean).join(" · ");
+  const card = req ? reqCardSpec(req) : null;
   return (
     <RowCard
       to={`/tasks/${task.id}`}
@@ -283,7 +291,8 @@ export function TaskRow({ task, now, maps, reqStatus }: {
       time={relTime(tsToMs(task.updated_at), now)}
       statusLabel={label}
       secondary={secondary}
-      preview={task.requirement ?? null}
+      preview={card ? card.preview : specPreview(task.requirement ?? "")}
+      extra={req && card ? <ReqCardExtras req={req} card={card} /> : undefined}
     />
   );
 }
