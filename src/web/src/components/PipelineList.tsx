@@ -256,8 +256,17 @@ function ReqCardActionButton({ req, action }: { req: Requirement; action: ReqCar
   );
 }
 
-export function TaskRow({ task, now, maps }: { task: PipelineTask; now: number; maps?: PipelineNameMaps }) {
-  const { Icon, tone, label } = taskMeta(task.status);
+export function TaskRow({ task, now, maps, reqStatus }: {
+  task: PipelineTask;
+  now: number;
+  maps?: PipelineNameMaps;
+  /** 关联需求的状态。任务行代表整件工作时传入 —— 状态视觉以需求为准
+   *（task done 只是执行单元跑完，需求可能还在验收/修复，显示「已完成」会误导用户） */
+  reqStatus?: string;
+}) {
+  const { Icon, tone, label, spin } = reqStatus
+    ? reqMeta(reqStatus)
+    : { ...taskMeta(task.status), spin: task.status.startsWith("running_") };
   const phase = parsePhase(task.status);
   const secondary = [
     maps?.workflows?.[task.workflow] ?? task.workflow, // 工作流中文 label（无映射退回内核名）
@@ -269,7 +278,7 @@ export function TaskRow({ task, now, maps }: { task: PipelineTask; now: number; 
       to={`/tasks/${task.id}`}
       Icon={Icon}
       tone={tone}
-      spin={task.status.startsWith("running_")}
+      spin={spin}
       title={task.title}
       time={relTime(tsToMs(task.updated_at), now)}
       statusLabel={label}

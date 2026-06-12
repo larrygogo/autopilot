@@ -113,6 +113,14 @@ export function Tasks() {
     );
   }, [requirements, searchQuery, workflowFilter]);
 
+  // requirement_id → 需求状态：任务行代表整件工作时，分桶与状态视觉都以需求为准
+  //（task done 只是执行单元跑完，需求可能还在验收/修复 —— 按 task 状态显示「已完成」会误导）
+  const reqStatusById = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const r of requirements) m[r.id] = r.status;
+    return m;
+  }, [requirements]);
+
   // 4 段分类：等待人工 / 运行中 / 归档（需求只显示 draft/investigating/awaiting_approval 前置阶段）
   const tabs = useMemo<PipelineTab[]>(() => {
     const reqHuman: Requirement[] = [];
@@ -129,6 +137,14 @@ export function Tasks() {
     const taskRunning: PipelineTask[] = [];
     const archived: PipelineTask[] = [];
     for (const t of filteredTasks) {
+      const rs = t.requirement_id ? reqStatusById[t.requirement_id] : undefined;
+      if (rs) {
+        // 有关联需求 → 按需求状态分桶（验收/修复中的工作不能进「归档」）
+        if (rs === "done" || rs === "cancelled") archived.push(t);
+        else if (rs === "running" || rs === "queued" || rs === "fix_revision") taskRunning.push(t);
+        else taskHuman.push(t); // awaiting_review / awaiting_approval / failed / 其他 → 球在你这
+        continue;
+      }
       const s = t.status;
       if (s.startsWith("awaiting_") || s === "failed" || s.startsWith("failed_")) taskHuman.push(t);
       else if (s.startsWith("running_") || s.startsWith("pending_")) taskRunning.push(t);
@@ -139,7 +155,7 @@ export function Tasks() {
       { key: "running", label: "运行中", icon: Loader2, iconClass: "text-accent", reqs: reqRunning, tasks: taskRunning },
       { key: "archived", label: "归档", icon: Archive, iconClass: "text-muted-foreground", reqs: [], tasks: archived },
     ];
-  }, [filteredRequirements, filteredTasks]);
+  }, [filteredRequirements, filteredTasks, reqStatusById]);
 
   const now = Date.now();
 
@@ -147,7 +163,11 @@ export function Tasks() {
   const rowsOf = (t: PipelineTab): TimedRow[] =>
     [
       ...t.reqs.map((r) => ({ key: `r-${r.id}`, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} now={now} maps={nameMaps} /> })),
-      ...t.tasks.map((tk) => ({ key: `t-${tk.id}`, ts: tsToMs(tk.updated_at), node: <TaskRow task={tk} now={now} maps={nameMaps} /> })),
+      ...t.tasks.map((tk) => ({
+        key: `t-${tk.id}`,
+        ts: tsToMs(tk.updated_at),
+        node: <TaskRow task={tk} now={now} maps={nameMaps} reqStatus={tk.requirement_id ? reqStatusById[tk.requirement_id] : undefined} />,
+      })),
     ].sort((a, b) => b.ts - a.ts);
 
   const allRows = useMemo(() => tabs.flatMap(rowsOf).sort((a, b) => b.ts - a.ts), [tabs, now]);
