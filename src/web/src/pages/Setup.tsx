@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PAGE_W_FOCUS } from "@/lib/layout";
 import { useNavigate } from "react-router-dom";
 import { api, type DoctorReportWithDismiss } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
@@ -92,7 +93,7 @@ export function Setup() {
   const minimumReady = report && report.checks.find((c) => c.id === "providers.has-enabled")?.status === "ok";
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
+    <div className={PAGE_W_FOCUS}>
       <header className="mb-4 border-b border-border pb-3">
         <h1 className="font-display text-2xl font-bold">首跑向导 · SETUP</h1>
         <p className="text-xs text-muted-foreground mt-1">

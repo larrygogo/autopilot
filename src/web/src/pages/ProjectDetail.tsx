@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { PAGE_W } from "@/lib/layout";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, FolderGit2, Inbox, Plus, RefreshCw,
@@ -311,7 +312,7 @@ export function ProjectDetail({ projectId, section = "requirements" }: ProjectDe
 
   if (loadError) {
     return (
-      <div className="mx-auto max-w-5xl p-4 md:p-6">
+      <div className={PAGE_W}>
         <Button variant="ghost" size="sm" className="mb-4" onClick={() => navigate("/projects")}>
           <ArrowLeft className="h-4 w-4" />
           返回项目列表
@@ -324,7 +325,7 @@ export function ProjectDetail({ projectId, section = "requirements" }: ProjectDe
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+    <div className={cn(PAGE_W, "space-y-6")}>
       {/* 代码库 */}
       {section === "workspaces" && (
       <section className="space-y-3">

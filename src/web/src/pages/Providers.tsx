@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { PAGE_W_FORM } from "@/lib/layout";
 import { AlertTriangle, CheckCircle2, HelpCircle, RefreshCw, XCircle } from "lucide-react";
 import { api, type ProviderItem, type ProviderStatus, type ProviderModelsResult } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
@@ -86,7 +87,7 @@ export function Providers(_props: { embedded?: boolean } = {}) {
   };
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-5 py-6">
+    <div className={PAGE_W_FORM}>
       <PageHero
         eyebrow="提供商 · LLM"
         title="模型提供商"

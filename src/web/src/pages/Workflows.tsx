@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import { PAGE_W } from "@/lib/layout";
+import { cn } from "@/lib/utils";
 import { Plus } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -64,14 +66,14 @@ export function Workflows() {
 
   if (loading) {
     return (
-      <div className="mx-auto w-full max-w-6xl px-5 py-8 text-sm text-muted-foreground">
+      <div className={cn(PAGE_W, "text-sm text-muted-foreground")}>
         加载中…
       </div>
     );
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-6">
+    <div className={PAGE_W}>
       <PageHero
         eyebrow="SHEET · WORKFLOWS · DEF"
         title="工作流"

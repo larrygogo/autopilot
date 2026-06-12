@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { PAGE_W_FOCUS } from "@/lib/layout";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Plus } from "lucide-react";
 import { api, type Project } from "@/hooks/useApi";
@@ -83,7 +84,7 @@ export function Start() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
+    <div className={PAGE_W_FOCUS}>
       <header className="mb-4 border-b border-border pb-3">
         <h1 className="font-display text-2xl font-bold">开始 · START</h1>
         <p className="text-xs text-muted-foreground mt-1">

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { PAGE_W } from "@/lib/layout";
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/hooks/useApi";
@@ -146,7 +147,7 @@ export function WorkflowDetail() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-6">
+    <div className={PAGE_W}>
       <button
         onClick={() => navigate("/workflows")}
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { PAGE_W } from "@/lib/layout";
 import { Link } from "react-router-dom";
 import { Loader2, Hand, Search, X, List, Archive } from "lucide-react";
 import { api, type Requirement } from "@/hooks/useApi";
@@ -183,7 +184,7 @@ export function Tasks() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6 md:px-6 md:py-8">
+    <div className={PAGE_W}>
       <PageHero
         eyebrow="SHEET · PIPELINE"
         title="流水线"

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { PAGE_W } from "@/lib/layout";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion, Bot, UserRound } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type FixRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
@@ -1398,7 +1399,7 @@ export function RequirementDetail() {
   ) : null;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-6">
+    <div className={PAGE_W}>
       {/* 顶部导航条 */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <Button

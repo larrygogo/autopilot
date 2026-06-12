@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { PAGE_W } from "@/lib/layout";
 import { useNavigate } from "react-router-dom";
 import { Layers, Plus, RefreshCw, Pencil, Trash2, LayoutGrid, List, MoreHorizontal } from "lucide-react";
 import {
@@ -422,7 +423,7 @@ function ProjectsTab() {
 export function Library() {
   // 历史 tab 已并入「现在」页，本页只剩项目列表
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
+    <div className={PAGE_W}>
       <header className="mb-4 border-b border-border pb-3">
         <h1 className="font-display text-2xl font-bold">项目</h1>
         <p className="text-xs text-muted-foreground mt-1">

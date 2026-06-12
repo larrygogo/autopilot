@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { PAGE_W_FORM } from "@/lib/layout";
 import { useNavigate } from "react-router-dom";
 import { Loader2, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { parse as parseYaml, parseDocument } from "yaml";
@@ -112,7 +113,7 @@ export function NewWorkflowWithAI() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 md:px-6 md:py-8">
+    <div className={PAGE_W_FORM}>
       <header className="mb-4 border-b border-border pb-3">
         <h1 className="font-display text-2xl font-bold">
           ✨ AI 生成工作流
