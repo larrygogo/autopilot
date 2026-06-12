@@ -68,14 +68,16 @@ function AgentCallInline({ taskId, call }: { taskId: string; call: AgentCallSumm
 
   return (
     <div className={cn("rounded-lg border border-border/60 bg-muted/30", call.error && "border-destructive/40")}>
+      {/* flex-wrap + truncate：窄屏（移动端）下左侧 agent/模型名不被右侧 meta 挤成竖排单字列，
+          meta 整组换行到第二行右对齐 */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[11px]"
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-2.5 py-1.5 text-left font-mono text-[11px]"
       >
         <Bot className="h-3.5 w-3.5 shrink-0 text-accent" />
-        <span className="text-foreground/85">{call.agent}</span>
-        {call.model && <span className="text-muted-foreground">{call.model}</span>}
+        <span className="min-w-0 max-w-full truncate text-foreground/85">{call.agent}</span>
+        {call.model && <span className="min-w-0 max-w-full truncate text-muted-foreground">{call.model}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground">
           {call.error && <span className="text-destructive">出错</span>}
           {tokens && <span>{tokens}</span>}

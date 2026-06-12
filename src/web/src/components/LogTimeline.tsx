@@ -59,7 +59,9 @@ export function LogTimeline({ logs, phaseLabelOf }: { logs: LogEntry[]; phaseLab
               [{taskTriggerZh(log.trigger_name, labelOf)}]
             </span>
           )}
-          {log.note && <span className="text-muted-foreground">{log.note}</span>}
+          {/* break-all：note 里的长 URL（如 PR 链接）无空格可断，flex 子项的 min-content
+              会撑出横向溢出（break-words 不缩 min-content，移动端实测溢出屏幕） */}
+          {log.note && <span className="min-w-0 break-all text-muted-foreground">{log.note}</span>}
         </div>
       ))}
     </div>
