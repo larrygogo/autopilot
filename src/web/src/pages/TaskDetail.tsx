@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { PAGE_W } from "@/lib/layout";
 import { Link } from "react-router-dom";
 import { ArrowLeft, FolderTree, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2 } from "lucide-react";
 import { api } from "@/hooks/useApi";
@@ -178,7 +179,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
 
   if (!task) {
     return (
-      <div className={cn("text-sm text-muted-foreground", embedded ? "py-6" : "mx-auto w-full max-w-6xl px-5 py-8")}>加载中…</div>
+      <div className={cn("text-sm text-muted-foreground", embedded ? "py-6" : PAGE_W)}>加载中…</div>
     );
   }
 
@@ -247,7 +248,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
   ) : null;
 
   return (
-    <div className={cn(embedded ? "w-full" : "mx-auto w-full max-w-6xl px-5 py-6")}>
+    <div className={cn(embedded ? "w-full" : PAGE_W)}>
       {/* Header — 整页模式：返回 + task.id + 状态 + 操作组。embedded 时由需求页承担页头，仅保留操作组 */}
       {embedded ? (
         actionGroup && (
