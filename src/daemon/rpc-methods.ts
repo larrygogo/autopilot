@@ -98,13 +98,10 @@ import {
   listApiKeys,
   setApiKey,
   deleteApiKey,
-  type ApiKeyInfo,
+  envKeyNameForProvider,
+  maskApiKey,
 } from "../core/api-keys";
-import {
-  isCompatOnlyProvider,
-  getCompatPreset,
-  BUILTIN_COMPAT_PROVIDERS,
-} from "../agents/providers/api/compat";
+import { BUILTIN_COMPAT_PROVIDERS } from "../agents/providers/api/compat";
 import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
 import { listProviderModels } from "../agents/model-list";
 import { createAgent } from "../agents/registry";
@@ -2177,6 +2174,16 @@ export function registerCoreRpcMethods(): void {
       const apiKeys = listApiKeys();
       const keyMap = new Map(apiKeys.map((k) => [k.provider, k]));
 
+      // listApiKeys() 的 env 补齐只覆盖内置 ENV_KEY_MAP；自定义 provider
+      // （或配置了 env_key_name 的）需要额外检查环境变量回落，避免 UI 误标"未配置"
+      const envFallback = (
+        provider: string,
+        customEnvKeyName?: string,
+      ): { key_hint: string; source: "env" } | undefined => {
+        const envValue = process.env[envKeyNameForProvider(provider, customEnvKeyName)];
+        return envValue ? { key_hint: maskApiKey(envValue), source: "env" } : undefined;
+      };
+
       const result: Array<Record<string, unknown>> = [];
 
       // 三大内置 provider
@@ -2201,7 +2208,7 @@ export function registerCoreRpcMethods(): void {
       // 预置 compat 供应商
       for (const [name, preset] of Object.entries(BUILTIN_COMPAT_PROVIDERS)) {
         const cfg = providers[name] || {};
-        const keyInfo = keyMap.get(name);
+        const keyInfo = keyMap.get(name) || envFallback(name, cfg.env_key_name);
         result.push({
           name,
           display_name: preset.display_name,
@@ -2221,7 +2228,7 @@ export function registerCoreRpcMethods(): void {
       for (const [name, cfg] of Object.entries(providers)) {
         if (PROVIDER_NAMES.includes(name as ProviderName)) continue;
         if (name in BUILTIN_COMPAT_PROVIDERS) continue;
-        const keyInfo = keyMap.get(name);
+        const keyInfo = keyMap.get(name) || envFallback(name, cfg.env_key_name);
         result.push({
           name,
           display_name: name,

@@ -1164,7 +1164,7 @@ program
 // key — API 密钥管理（本地，不需要 daemon）
 // ──────────────────────────────────────────────
 
-const key = program.command("key").description("API 密钥管理");
+const key = program.command("key").alias("apikey").description("API 密钥管理");
 
 key
   .command("set <provider>")

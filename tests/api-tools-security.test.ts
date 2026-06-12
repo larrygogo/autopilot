@@ -131,9 +131,17 @@ describe("assertSafeUrl", () => {
     await expect(assertSafeUrl("http://172.16.0.1/", "default")).rejects.toThrow("SSRF");
   });
 
-  it("放通合法公网域名", async () => {
-    // 真实 DNS 解析（需联网），放通公网地址
-    await expect(assertSafeUrl("https://api.deepseek.com", "default")).resolves.toBeUndefined();
+  it("放通公网 IP（不触发 DNS，离线可复现）", async () => {
+    await expect(assertSafeUrl("https://8.8.8.8/", "default")).resolves.toBeUndefined();
+  });
+
+  it("拒绝 IPv6 loopback 字面量（[::1] 与全展开形式）", async () => {
+    await expect(assertSafeUrl("http://[::1]:6180/", "default")).rejects.toThrow("SSRF");
+    await expect(assertSafeUrl("http://[0:0:0:0:0:0:0:1]/", "default")).rejects.toThrow("SSRF");
+  });
+
+  it("拒绝 IPv6 link-local 字面量", async () => {
+    await expect(assertSafeUrl("http://[fe80::1]/", "default")).rejects.toThrow("SSRF");
   });
 
   it("拒绝非 http/https 协议", async () => {

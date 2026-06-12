@@ -55,10 +55,17 @@ function normalizePermissionMode(mode?: string): PermissionMode {
  * （只要 newdir 的真实祖先在沙盒内）。
  */
 export function assertInSandbox(inputPath: string, sandboxRoot: string): void {
+  // sandboxRoot 自身也 realpath 展开，避免沙盒根是符号链接时
+  // 与 realpath 后的 resolved 比较失配（误判越界或规则失效）
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(sandboxRoot);
+  } catch {
+    realRoot = resolve(sandboxRoot);
+  }
+
   // trailing slash 规范化，防止 /sandbox-abc 误匹配 /sandbox-abcdef
-  const normalizedRoot = sandboxRoot.endsWith(sep)
-    ? sandboxRoot
-    : sandboxRoot + sep;
+  const normalizedRoot = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
 
   let resolved: string;
 
@@ -86,7 +93,7 @@ export function assertInSandbox(inputPath: string, sandboxRoot: string): void {
     resolved = join(realAncestor, ...pendingSegments);
   }
 
-  if (resolved !== sandboxRoot && !resolved.startsWith(normalizedRoot)) {
+  if (resolved !== realRoot && !resolved.startsWith(normalizedRoot)) {
     throw new ToolError(`路径越界拒绝：${inputPath} → ${resolved}`);
   }
 }
@@ -104,6 +111,9 @@ const PRIVATE_RANGES = [
   /^255\./,
   // IPv6
   /^::1$/,
+  /^(0{1,4}:){7}0{0,3}1$/, // loopback 全展开形式 0:0:0:0:0:0:0:1
+  /^::ffff:127\./i, // IPv4-mapped loopback（点分形式）
+  /^::ffff:7f[0-9a-f]{2}:/i, // IPv4-mapped loopback（十六进制形式）
   /^fe80:/i,
   /^fc00:/i,
   /^fd[0-9a-f]{2}:/i,
@@ -111,11 +121,23 @@ const PRIVATE_RANGES = [
 
 /** 判断字符串是否为 IPv4 地址 */
 const IPV4_REGEX = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
-/** 判断字符串是否为 IPv6 地址（简化版，含 ::1 等） */
-const IPV6_REGEX = /^[\da-fA-F:]+$/;
+/** 判断字符串是否为 IPv6 地址（简化版；必须含 ':'，避免把 "deadbeef" 这类纯十六进制主机名误判为 IP） */
+const IPV6_REGEX = /^[\da-fA-F:.]+$/;
+
+/** URL.hostname 对 IPv6 字面量会带方括号（如 "[::1]"），统一剥掉再判断 */
+function stripBrackets(hostname: string): string {
+  return hostname.startsWith("[") && hostname.endsWith("]")
+    ? hostname.slice(1, -1)
+    : hostname;
+}
 
 function isIpAddress(hostname: string): boolean {
-  return IPV4_REGEX.test(hostname) || IPV6_REGEX.test(hostname) || hostname === "localhost";
+  const h = stripBrackets(hostname);
+  return (
+    IPV4_REGEX.test(h) ||
+    (h.includes(":") && IPV6_REGEX.test(h)) ||
+    hostname === "localhost"
+  );
 }
 
 function checkPrivateIp(address: string, hostname: string): void {
@@ -148,7 +170,7 @@ export async function assertSafeUrl(rawUrl: string, mode: PermissionMode): Promi
 
   // 如果 hostname 本身就是 IP 地址（如 127.0.0.1, ::1），直接检查，无需 DNS 解析
   if (isIpAddress(parsed.hostname)) {
-    checkPrivateIp(parsed.hostname, parsed.hostname);
+    checkPrivateIp(stripBrackets(parsed.hostname), parsed.hostname);
     return;
   }
 
@@ -517,10 +539,10 @@ export class ToolExecutor {
       : this.sandboxRoot;
     const includeGlob = input["include"] as string | undefined;
 
-    // 使用 grep -rn 搜索
+    // 使用 grep -rn 搜索；"--" 终止选项解析，防止以 '-' 开头的 pattern 被当成 grep 选项
     const args = ["-rn", "--max-count=100"];
     if (includeGlob) args.push("--include", includeGlob);
-    args.push(pattern, searchPath);
+    args.push("--", pattern, searchPath);
 
     try {
       const result = Bun.spawnSync(["grep", ...args], {
@@ -544,23 +566,52 @@ export class ToolExecutor {
     const url = input["url"] as string;
     if (!url) throw new ToolError("url 参数缺失");
 
-    await assertSafeUrl(url, this.mode);
+    let method = (input["method"] as string || "GET").toUpperCase();
+    let currentUrl = url;
+    const MAX_REDIRECTS = 5;
 
-    const method = (input["method"] as string || "GET").toUpperCase();
-    try {
-      const response = await fetch(url, {
-        method,
-        headers: { "User-Agent": "autopilot/1.0" },
-        signal: AbortSignal.timeout(30_000),
-      });
+    // 禁用自动重定向：每一跳的 Location 都要重新过 assertSafeUrl，
+    // 防止公网 URL 302 跳到 127.0.0.1 / 169.254.169.254 等私网地址绕过 SSRF 检查
+    for (let redirects = 0; ; redirects++) {
+      await assertSafeUrl(currentUrl, this.mode);
+
+      let response: Response;
+      try {
+        response = await fetch(currentUrl, {
+          method,
+          headers: { "User-Agent": "autopilot/1.0" },
+          redirect: "manual",
+          signal: AbortSignal.timeout(30_000),
+        });
+      } catch (e: unknown) {
+        throw new ToolError(`fetch 失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (location) {
+          if (redirects >= MAX_REDIRECTS) {
+            throw new ToolError(`重定向次数超过上限（${MAX_REDIRECTS}）：${url}`);
+          }
+          try {
+            currentUrl = new URL(location, currentUrl).toString();
+          } catch {
+            throw new ToolError(`重定向目标无效：${location}`);
+          }
+          // 303（及历史上 301/302 对非 GET 的事实行为）降级为 GET
+          if (response.status === 303 || (method !== "GET" && method !== "HEAD")) {
+            method = "GET";
+          }
+          continue;
+        }
+      }
+
       const text = await response.text();
       // 截断过长的响应
       if (text.length > 50_000) {
         return text.slice(0, 50_000) + "\n... (响应被截断)";
       }
       return text;
-    } catch (e: unknown) {
-      throw new ToolError(`fetch 失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
