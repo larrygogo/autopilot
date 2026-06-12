@@ -210,7 +210,9 @@ function PhaseNode({
       tabIndex={clickable ? 0 : undefined}
       className={cn(
         "group relative flex min-w-[7rem] shrink-0 flex-col items-center justify-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-center transition-all",
-        clickable ? "cursor-pointer hover:border-foreground hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-accent" : "cursor-default hover:border-foreground hover:bg-secondary",
+        // focus-visible（非 focus）：鼠标点击后不留常驻橙圈（曾被容器 overflow 裁出上下缺口），
+        // 键盘 Tab 导航仍有焦点环；ring-inset 画在边界内不再被裁
+        clickable ? "cursor-pointer hover:border-foreground hover:bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" : "cursor-default hover:border-foreground hover:bg-secondary",
         highlight && "border-foreground bg-secondary",
         current && "border-accent bg-accent/12 bp-shadow",
         statusBorder,
@@ -317,7 +319,7 @@ function ParallelNode({
         tabIndex={clickable ? 0 : undefined}
         className={cn(
           "flex items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors",
-          clickable ? "cursor-pointer hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-accent" : "cursor-default",
+          clickable ? "cursor-pointer hover:bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" : "cursor-default",
           headHighlight && "bg-secondary",
         )}
         onMouseEnter={() => onHover?.(name)}
