@@ -22,7 +22,6 @@ import { CommandPalette, CommandPaletteContent } from "./components/CommandPalet
 import { Command } from "./components/ui/command";
 import { NotificationsPanel } from "./components/NotificationsPanel";
 import { ProjectSwitcher } from "./components/ProjectSwitcher";
-import { NewTaskDialog } from "./components/NewTaskDialog";
 import { QuickCreateMenu } from "./components/QuickCreateMenu";
 import { RunningTasksIndicator } from "./components/RunningTasksIndicator";
 import { DaemonOfflineBanner } from "./components/DaemonOfflineBanner";
@@ -172,7 +171,6 @@ function AppInner() {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileDrawerTab>("nav");
   const [cmdOpen, setCmdOpen] = useState(false);
-  const [newTaskOpen, setNewTaskOpen] = useState(false);
   const { state: wsState, subscribe } = useWebSocket();
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
   const notifications = useNotifications();
@@ -489,7 +487,6 @@ function AppInner() {
                     onClose={() => setMobileDrawerOpen(false)}
                     onNavigate={(path) => navigate(path)}
                     onSelectTask={(id) => navigate(`/tasks/${id}`)}
-                    onNewTask={() => setNewTaskOpen(true)}
                     pathname={location.pathname}
                     listClassName="max-h-none flex-1"
                   />
@@ -505,14 +502,7 @@ function AppInner() {
         onOpenChange={setCmdOpen}
         onNavigate={(path) => navigate(path)}
         onSelectTask={(id) => navigate(`/tasks/${id}`)}
-        onNewTask={() => setNewTaskOpen(true)}
         pathname={location.pathname}
-      />
-
-      <NewTaskDialog
-        open={newTaskOpen}
-        onClose={() => setNewTaskOpen(false)}
-        onCreated={(id) => navigate(`/tasks/${id}`)}
       />
 
       <Toaster position="top-center" closeButton />

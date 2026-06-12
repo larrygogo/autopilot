@@ -42,7 +42,6 @@ interface Props {
   /** 传入目标路径（如 "/library"、"/settings"） */
   onNavigate: (path: string) => void;
   onSelectTask: (id: string) => void;
-  onNewTask: () => void;
   /** 当前页面 pathname — 用来给出上下文敏感动作（如 TaskDetail 时显示"取消此任务"） */
   pathname?: string;
 }
@@ -54,7 +53,6 @@ interface ContentProps {
   onClose: () => void;
   onNavigate: (path: string) => void;
   onSelectTask: (id: string) => void;
-  onNewTask: () => void;
   pathname?: string;
   /** 覆盖 CommandList 高度（移动端抽屉内撑满） */
   listClassName?: string;
@@ -72,7 +70,7 @@ function parseContext(pathname?: string): { kind: "task" | "requirement" | "proj
   return null;
 }
 
-export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, onNewTask, pathname }: Props) {
+export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, pathname }: Props) {
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
       <CommandPaletteContent
@@ -80,7 +78,6 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
         onClose={() => onOpenChange(false)}
         onNavigate={onNavigate}
         onSelectTask={onSelectTask}
-        onNewTask={onNewTask}
         pathname={pathname}
       />
     </CommandDialog>
@@ -93,7 +90,6 @@ export function CommandPaletteContent({
   onClose,
   onNavigate,
   onSelectTask,
-  onNewTask,
   pathname,
   listClassName,
 }: ContentProps) {
@@ -185,10 +181,10 @@ export function CommandPaletteContent({
         )}
 
         <CommandGroup heading="操作">
-          <CommandItem onSelect={run(onNewTask)}>
+          {/* 「新建任务」入口已移除（Web=决策台，发起工作走需求闭环；快捷发包归 CLI） */}
+          <CommandItem onSelect={run(() => onNavigate("/start"))}>
             <Plus className="h-4 w-4" />
-            新建任务
-            <CommandShortcut>N</CommandShortcut>
+            新建需求
           </CommandItem>
           <CommandItem onSelect={run(toggle)}>
             {resolved === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
