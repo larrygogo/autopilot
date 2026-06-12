@@ -39,14 +39,27 @@ export interface RunPhaseSectionProps {
 }
 
 /** agent 调用内联：默认一行摘要，点击展开懒加载**完整** prompt / 结果（不截断） */
+/** token 数紧凑显示：≥1 万转 k（312456 → 312.5k） */
+function fmtTok(n: number): string {
+  return n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
 function AgentCallInline({ taskId, call }: { taskId: string; call: AgentCallSummary }) {
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState<AgentCallRecord | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const tokens = call.usage
-    ? `${call.usage.input_tokens ?? 0}→${call.usage.output_tokens ?? 0} tok`
-    : null;
-  const cost = call.usage?.total_cost_usd != null ? `$${call.usage.total_cost_usd.toFixed(4)}` : null;
+  // 输入 = 新输入 + prompt cache 读/写（Anthropic 开缓存时 input_tokens 只是未命中
+  // 缓存的零头，单独显示会严重低估——dogfood 实锤「3→6646」）。历史记录无 cache
+  // 字段时自然回退为旧口径。
+  const u = call.usage;
+  const totalIn = u
+    ? (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+    : 0;
+  const tokens = u ? `${fmtTok(totalIn)}→${fmtTok(u.output_tokens ?? 0)} tok` : null;
+  const tokensTitle = u
+    ? `输入：新 ${u.input_tokens ?? 0} + 缓存读 ${u.cache_read_input_tokens ?? 0} + 缓存写 ${u.cache_creation_input_tokens ?? 0}；输出 ${u.output_tokens ?? 0}`
+    : undefined;
+  const cost = u?.total_cost_usd != null ? `$${u.total_cost_usd.toFixed(4)}` : null;
 
   // 首次展开懒加载完整记录（summary 里的 preview 是 120 字符截断）
   useEffect(() => {
@@ -80,7 +93,7 @@ function AgentCallInline({ taskId, call }: { taskId: string; call: AgentCallSumm
         {call.model && <span className="min-w-0 max-w-full truncate text-muted-foreground">{call.model}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground">
           {call.error && <span className="text-destructive">出错</span>}
-          {tokens && <span>{tokens}</span>}
+          {tokens && <span title={tokensTitle}>{tokens}</span>}
           {cost && <span>{cost}</span>}
           {call.elapsed_ms != null && <span>{fmtDuration(call.elapsed_ms)}</span>}
         </span>

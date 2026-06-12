@@ -389,7 +389,7 @@ export const api = {
     request<{
       text: string;
       durationMs: number;
-      usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+      usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; total_cost_usd?: number };
     }>(
       `/api/workflows/${workflowName}/dry-run`,
       { method: "POST", body: JSON.stringify(body) },
@@ -488,7 +488,7 @@ export const api = {
       elapsed_ms: number;
       result: {
         text: string;
-        usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+        usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; total_cost_usd?: number };
       };
     }>(
       "agents.dryRun",
@@ -931,7 +931,7 @@ export interface AgentCallSummary {
   provider?: string;
   model?: string;
   elapsed_ms?: number;
-  usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+  usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; total_cost_usd?: number };
   error?: string;
   prompt_preview: string;
   result_preview: string;

@@ -368,12 +368,19 @@ export class AnthropicProvider extends BaseProvider {
           if (m.subtype === "success") {
             text = (m.result as string | undefined) ?? "";
             sessionIdOut = m.session_id as string | undefined;
-            const u = m.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+            const u = m.usage as {
+              input_tokens?: number;
+              output_tokens?: number;
+              cache_creation_input_tokens?: number;
+              cache_read_input_tokens?: number;
+            } | undefined;
             const cost = m.total_cost_usd as number | undefined;
             if (u || typeof cost === "number") {
               usage = {
                 input_tokens: u?.input_tokens,
                 output_tokens: u?.output_tokens,
+                cache_creation_input_tokens: u?.cache_creation_input_tokens,
+                cache_read_input_tokens: u?.cache_read_input_tokens,
                 total_cost_usd: cost,
               };
             }
@@ -447,12 +454,19 @@ export class AnthropicProvider extends BaseProvider {
           if (m.subtype === "success") {
             text = (m.result as string | undefined) ?? "";
             sessionIdOut = m.session_id as string | undefined;
-            const u = m.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+            const u = m.usage as {
+              input_tokens?: number;
+              output_tokens?: number;
+              cache_creation_input_tokens?: number;
+              cache_read_input_tokens?: number;
+            } | undefined;
             const cost = m.total_cost_usd as number | undefined;
             if (u || typeof cost === "number") {
               usage = {
                 input_tokens: u?.input_tokens,
                 output_tokens: u?.output_tokens,
+                cache_creation_input_tokens: u?.cache_creation_input_tokens,
+                cache_read_input_tokens: u?.cache_read_input_tokens,
                 total_cost_usd: cost,
               };
             }

@@ -24,7 +24,16 @@ export interface AgentConfig {
 
 export interface AgentResult {
   text: string;
-  usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+  usage?: {
+    /** 未走缓存的新输入 token（Anthropic 开 prompt cache 时只是零头，真实输入看 cache 两项） */
+    input_tokens?: number;
+    output_tokens?: number;
+    /** prompt cache 写入量（按 1.25x 计价的部分） */
+    cache_creation_input_tokens?: number;
+    /** prompt cache 命中读取量（agent loop 的输入大头） */
+    cache_read_input_tokens?: number;
+    total_cost_usd?: number;
+  };
 }
 
 export interface RunOptions {
