@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion } from "lucide-react";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion, Bot, UserRound } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type FixRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
 import { AttachmentUploader } from "@/components/AttachmentUploader";
 import { RequirementWorkspacePicker } from "@/components/RequirementWorkspacePicker";
@@ -61,7 +61,7 @@ const STATUS_VARIANT: Record<
 const TERMINAL_STATUSES = new Set(["done", "cancelled"]);
 
 const SOURCE_LABEL: Record<string, string> = {
-  manual: "手动",
+  manual: "审查意见",
   github_review: "GitHub Review",
 };
 
@@ -1135,28 +1135,41 @@ export function RequirementDetail() {
             Request Changes 与 CI 失败也会自动进入这里。
           </p>
         ) : (
-          <ol className="space-y-3">
-            {feedbacks.map((fb) => (
-              <li key={fb.id} className="border-l-2 border-border pl-3">
-                <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline">
-                    {fb.from_role === "agent" ? "Agent 修复" : (SOURCE_LABEL[fb.source] ?? fb.source)}
-                  </Badge>
-                  <span className="font-mono text-[10px] text-muted-foreground">
-                    {new Date(fb.created_at).toLocaleString()}
-                  </span>
-                </div>
-                <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
-                  {fb.body}
-                </pre>
-              </li>
-            ))}
+          <ol className="space-y-2.5">
+            {/* 对话双方用底色 + 图标区分：用户/GitHub = 中性卡，Agent 回应 = accent 淡底卡 */}
+            {feedbacks.map((fb) => {
+              const isAgent = fb.from_role === "agent";
+              return (
+                <li
+                  key={fb.id}
+                  className={cn(
+                    "rounded-md border p-3",
+                    isAgent ? "border-accent/25 bg-accent/5" : "border-border bg-muted/30",
+                  )}
+                >
+                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                    {isAgent
+                      ? <Bot className="h-3.5 w-3.5 text-accent" />
+                      : <UserRound className="h-3.5 w-3.5 text-muted-foreground" />}
+                    <span className={cn("text-xs font-medium", isAgent ? "text-accent" : "text-foreground")}>
+                      {isAgent ? "Agent 修复" : (SOURCE_LABEL[fb.source] ?? fb.source)}
+                    </span>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {new Date(fb.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
+                    {fb.body}
+                  </pre>
+                </li>
+              );
+            })}
             {/* 进行中的修复 = 时间线的活跃条目（spinner + 阶段 + 用时），完成后被 Agent 修复总结替代 */}
             {req.status === "fix_revision" && (
-              <li className="border-l-2 border-accent/50 pl-3">
+              <li className="rounded-md border border-accent/25 bg-accent/5 p-3">
                 <div className="mb-1 flex flex-wrap items-center gap-1.5">
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
-                  <span className="text-xs font-medium text-foreground">Agent 修复执行中</span>
+                  <span className="text-xs font-medium text-accent">Agent 修复执行中</span>
                   {fixRound && (
                     <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
                       已用 {fixElapsedSec}s

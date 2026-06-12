@@ -52,6 +52,7 @@ function commentsToFeedbacks(all: Comment[]): RequirementFeedback[] {
       id: ++fakeId,
       requirement_id: c.requirement_id,
       source: c.from_role === "github" ? "github_review" : "manual",
+      from_role: c.from_role,
       body: c.body,
       github_review_id: c.github_review_id,
       created_at: c.created_at,
