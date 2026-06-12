@@ -34,7 +34,7 @@ git 仓库只是输入的一种，PR 只是产出的一种。
 
 ## P0 技术骨架（architect 评估，待探针校订）
 
-### 输入侧：`requirements.input_mode` 列（迁移 **044**——原写 041 已被 api-keys 占用）
+### 输入侧：`requirements.input_mode` 列（迁移号**实施时取当时最大+1**（勿预留——044 已被 R2 task-run-columns 占用；migrate 按号递增执行，跳号先行会让后落低号被静默跳过））
 
 `TEXT NULL`：`NULL`=未确认（drafting 默认）/ `'git'`=基于代码库 / `'none'`=确认无库。
 回填 `input_mode='git' WHERE workspace_id IS NOT NULL`。不能只靠 `workspace_id IS NULL`
@@ -50,7 +50,7 @@ git 仓库只是输入的一种，PR 只是产出的一种。
 | ~~requirement-scheduler~~ | ~~无库需求不调度~~ | **已由 2026-06-12 主库废除 Stage 2 解决**（纯全局 FIFO，无库可调度失败可见），本行无需再做 |
 | `requirements.setWorkspaces` | 不接受空集 | 显式空集 → 清集合 + `input_mode='none'`；非空 → `'git'`。冻结闸门原样适用 |
 
-### 产出侧：`delivers:` 声明 + `requirement_deliveries` 表（迁移 **045**——原写 042 已被 close-orphan-phase-events 占用）
+### 产出侧：`delivers:` 声明 + `requirement_deliveries` 表（迁移号实施时取当时最大+1（同上））
 
 - `workflow.yaml` 顶层 `delivers: pr | artifacts`（缺省 `auto` = 事实推断，老用户副本零影响）。
   声明只用于 enqueue 预检和 UI 预告；**运行时判定以事实为准**（hasPr / hasDeliveries）。
