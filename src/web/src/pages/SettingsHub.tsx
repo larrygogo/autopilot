@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import { PAGE_W_FORM } from "@/lib/layout";
+import { PageHero } from "@/components/PageHero";
 import { PageLoader } from "@/components/PageLoader";
 
 const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
@@ -30,10 +31,7 @@ export function SettingsHub({ section = "general" }: { section?: SettingsSection
   const header = SECTION_HEADER[section];
   return (
     <div className={PAGE_W_FORM}>
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold leading-tight tracking-tight">{header.title}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{header.desc}</p>
-      </header>
+      <PageHero title={header.title} subtitle={header.desc} />
       <Suspense fallback={<PageLoader />}>
         {section === "api-keys" ? <ApiKeysPage /> : <Settings section={section} />}
       </Suspense>

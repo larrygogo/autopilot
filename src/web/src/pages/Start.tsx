@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { PageHero } from "@/components/PageHero";
 import { PAGE_W_FOCUS } from "@/lib/layout";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Plus } from "lucide-react";
@@ -85,12 +86,11 @@ export function Start() {
 
   return (
     <div className={PAGE_W_FOCUS}>
-      <header className="mb-4 border-b border-border pb-3">
-        <h1 className="font-display text-2xl font-bold">开始 · START</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          说说你想做什么，AI 帮你整理成需求
-        </p>
-      </header>
+      <PageHero
+        eyebrow="START"
+        title="开始"
+        subtitle="说说你想做什么，AI 帮你整理成需求"
+      />
 
       <div className="space-y-4">
         <div className="space-y-2">

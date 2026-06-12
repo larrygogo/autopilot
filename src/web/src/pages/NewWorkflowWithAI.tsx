@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { PageHero } from "@/components/PageHero";
 import { PAGE_W_FORM } from "@/lib/layout";
 import { useNavigate } from "react-router-dom";
 import { Loader2, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
@@ -114,14 +115,11 @@ export function NewWorkflowWithAI() {
 
   return (
     <div className={PAGE_W_FORM}>
-      <header className="mb-4 border-b border-border pb-3">
-        <h1 className="font-display text-2xl font-bold">
-          ✨ AI 生成工作流
-        </h1>
-        <p className="font-mono text-xs text-muted-foreground mt-1">
-          描述你想要的流程，AI 生成 yaml + ts；可继续追问调整
-        </p>
-      </header>
+      <PageHero
+        eyebrow="WORKFLOWS · AI"
+        title="AI 生成工作流"
+        subtitle="描述你想要的流程，AI 生成 yaml + ts；可继续追问调整"
+      />
 
       {/* 描述区 */}
       <Card className="mb-4 p-4">
