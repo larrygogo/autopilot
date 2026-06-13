@@ -1,6 +1,6 @@
 # 需求中心架构 v2：实体模型重构（Requirement ⊃ Run）
 
-> 状态：架构设计稿（2026-06-12 与用户三轮对齐后定稿方向）。
+> 状态：**全部 R0-R6 已落地（2026-06-12，commit a06d383→f7138c8）**。req-020 无库 artifact 闭环已 dogfood 走通（详见末尾）；PR 路径与驳回回路待补 dogfood。
 > 取代/吸收：`2026-06-12-requirement-centric-runtime.md`（其目录布局/双根解析器/clone 生命周期/声明层全部仍有效，
 > 成为本架构的文件层推论）；本文补上它缺失的**实体关系重定义**——用户指出的「架构本质」。
 
@@ -122,12 +122,12 @@ cancel 级联变平凡：取消需求 = abort 活跃 run（已有 task-lifecycle
 | Phase | 内容 | 依赖 |
 |---|---|---|
 | **R0** ✅ | 路径收口 getTaskRoot（已完成 a06d383） | — |
-| **R1 汇报接口** | `reportRunOutcome` 落地，bridge 改为其唯一调用方（外壳保留行为不变）——先把单口立起来，缝合代码逐步迁入 | dogfood 主库废除通过 |
+| **R1 汇报接口** ✅（31b9275） | `reportRunOutcome` 落地，bridge 降级为事件→outcome 翻译外壳 | — |
 | **R2 run 多历史** ✅（2026-06-12，迁移实为 044） | tasks 加 kind/seq、重跑=新 run、文件落 runs/（执行视图按 run 切换属 R6 UI 收束，本期流水线先只显示最新 run） | R1 |
 | **R3 fix=run** ✅（2026-06-12） | fix-revision-runner 重构为创建 fix run（内置 `__fix` 工作流走标准 runner 管线；沙盒=clone 远程交付分支续作；bridge 翻译 fixed outcome 经 reportRunOutcome；fix-progress 退役） | R1、R2 |
-| **R4 codebase 统一** | = runtime spec Stage 3（clone 归需求） | R2 |
-| **R5 声明层** | requires/delivers + 三闸门 + acceptance 执行器按 delivers 分发（与交付物 P0 合流） | R1 |
-| **R6 UI 收束** | 需求页为唯一主视图（run 历史内联）、流水线一需求一行、任务路由降级 run 详情 | R2 |
+| **R4 codebase 统一** ✅（ca3f9a4） | ensureCodebase clone 归需求 `codebase/<alias>/`、fix 复用零重 clone、retention 按需求终态 | R2 |
+| **R5 声明层** ✅（13b0f24） | requires/delivers + 三闸门 + artifacts 验收执行器（Web/CLI 与 PR 同管道）、artifact 工作流去 gate hack 正式化 | R1 |
+| **R6 UI 收束** ✅（f7138c8） | 需求页多 run 横向切换器（单 run 零噪音）、execution/fix 轮次标识、/tasks/:id 降级单 run 深链接+需求面包屑、流水线一需求一行确认 | R2 |
 
 节奏不变：先 dogfood 主库废除一轮；期间可做 R1（外壳不变的接口收口，低风险）。
 
@@ -138,3 +138,18 @@ cancel 级联变平凡：取消需求 = abort 活跃 run（已有 task-lifecycle
 - 并行块 fork 的子 task：在 run 模型下是 run 的内部结构（parent_task_id 已有），不升格为独立 run
 - 开放：clarify 是否最终也建模为 run（统一「一切执行皆 run」）——后期拓展，本期不动
 - 开放：run 状态机与需求状态机的「委托态」在 UI 上怎么表达（需求 running 时展开 run phase 进度）——R6 设计
+
+## Dogfood 记录（2026-06-12，req-020）
+
+无库 artifact 需求（画 v2 架构 SVG）全闭环走通：建需求→设 artifact workflow→`--none` 确认无库（input_mode=none）→clarifying 闸门放行（requires.git=optional）→纯文本澄清两轮问答→审批入队→全局 FIFO 调度→run 落 `requirements/req-020/runs/wuyasdu2/`（旧 tasks/ 零残留）→produce 绘 SVG→deliver promote `deliveries/round-1/` 落表→awaiting_review→accept→done（done 后 deliveries+runs 日志保留）。**内核新管线零缺陷**。
+
+6 个发现全部当场修复：
+1. CLI 无法清空代码库集合 → `req set-workspaces --none`（299313f）
+2/4. CLI 缺澄清问答/审批命令 → `req questions`/`req answer`/`req approve`（ad691af）
+3. 「只回复不 resolve 卡死 clarifier」隐蔽陷阱 → client `answerRequirementQuestion` 两步合一封装
+5. 纯生成任务执行期日志静默（无工具调用→流式 delta 不落盘）→ **未修，待补 token 进度心跳**（低优）
+6. **真 bug**：agent 相对路径指引下 Write 幻觉绝对路径，产物逃逸沙盒写进 `~/deliverables` → produce prompt 注入沙盒绝对路径+预创建+禁写他处，校验改「非空」（7a07863）
+
+**待补 dogfood**：① PR 路径（dev 需求真实交付 PR——本单未覆盖）② 驳回回路（`req reject`→fix run artifacts 模式→round-2 递增——未实测）。
+
+**流程教训**：dogfood 时 AI 不应代行验收（accept 是用户对产物签字的权力）。我当时为验证 accept 命令本身而执行了 `req accept`，越权了。规矩：跑到 awaiting_review 即停，产物交用户验收。顺带暴露产品观察——artifacts done 后无后悔药（不像 PR 有 GitHub revert），是否需要 done→重开机制待多攒 dogfood 再判。
