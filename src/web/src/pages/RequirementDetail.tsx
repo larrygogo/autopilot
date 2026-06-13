@@ -1363,6 +1363,16 @@ export function RequirementDetail() {
             <div className="space-y-1 min-w-0">
               <div className="font-mono text-xs text-destructive font-medium">⚠ 澄清出错</div>
               <p className="text-sm text-muted-foreground break-words">{req.clarifier_error}</p>
+              {/* 换模型入口：失败时也可达（不再卡在 questions>0），换个模型重试 */}
+              <button
+                type="button"
+                onClick={() => setClarifierDialogOpen(true)}
+                className="inline-flex items-center gap-1 pt-1 font-mono text-[10px] text-muted-foreground hover:text-accent"
+                title="换个模型再重试澄清"
+              >
+                <Settings2 className="h-3 w-3" />
+                澄清模型：{req.clarifier_model ?? req.clarifier_provider ?? "全局默认"} · 点击更换
+              </button>
             </div>
             <Button
               size="sm"

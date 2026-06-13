@@ -413,6 +413,8 @@ export class HttpClient {
     spec_md?: string;
     workspace_id?: string | null;
     workflow?: string | null;
+    clarifier_provider?: string | null;
+    clarifier_model?: string | null;
   }): Promise<{ requirement: { id: string; status: string; title: string } }> {
     return this.call("requirements.update", { id, ...body });
   }

@@ -188,12 +188,22 @@ export function registerRequirementCommands(program: Command): void {
 
   req
     .command("clarify <id>")
-    .description("开始/恢复需求澄清（前置：需求已选代码库）")
+    .description("开始/恢复需求澄清（前置：需求已选代码库）；可换澄清 agent 的 provider/model 后重试")
+    .option("--provider <name>", "覆盖本需求的澄清 provider（如 kimi-code）")
+    .option("--model <model>", "覆盖本需求的澄清模型（省略走 provider 默认）")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
-    .action(async (id: string, opts: { port: string }) => {
+    .action(async (id: string, opts: { port: string; provider?: string; model?: string }) => {
       const client = getClient(opts.port);
       await ensureDaemon(client);
       try {
+        // 先设需求级澄清覆盖（换模型重试用），再进澄清
+        if (opts.provider !== undefined || opts.model !== undefined) {
+          await client.updateRequirement(id, {
+            clarifier_provider: opts.provider ?? null,
+            clarifier_model: opts.model ?? null,
+          });
+          console.log(`✓ 已设澄清 agent：${opts.provider ?? "(继承)"}${opts.model ? " / " + opts.model : ""}`);
+        }
         const { requirement } = await client.transitionRequirement(id, "clarifying");
         console.log(
           requirement.workspace_id
