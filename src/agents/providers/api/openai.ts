@@ -76,6 +76,9 @@ export class OpenAIApiAdapter implements ProviderAdapter {
     let buf = "";
 
     let text = "";
+    // 推理模型（如 kimi-for-coding）先流 reasoning_content（思考）再给 content。
+    // 单独累计，content 为空时作回退 —— 否则推理模型整段输出被丢成「(无输出)」。
+    let reasoning = "";
     // 流式 tool_calls 拼接：Map<index, { id, name, arguments }>
     const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
     let usage = { input_tokens: 0, output_tokens: 0 };
@@ -92,8 +95,10 @@ export class OpenAIApiAdapter implements ProviderAdapter {
           const line = buf.slice(0, nlIdx).trim();
           buf = buf.slice(nlIdx + 1);
 
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6);
+          // SSE 规范里冒号后空格可选：OpenAI 发 "data: {…}"，Kimi Code 发 "data:{…}"。
+          // 只认带空格会把 Kimi 的每行都跳过 → 整段输出丢空。统一去前缀 + trim 兼容两者。
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
           if (data === "[DONE]") continue;
 
           let event: Record<string, unknown>;
@@ -125,6 +130,11 @@ export class OpenAIApiAdapter implements ProviderAdapter {
           if (typeof delta["content"] === "string") {
             text += delta["content"];
             if (onDelta) onDelta(delta["content"] as string);
+          }
+          // 推理增量（reasoning_content）：推送以便进度可见 + 累计作 content 空时的回退
+          if (typeof delta["reasoning_content"] === "string") {
+            reasoning += delta["reasoning_content"];
+            if (onDelta) onDelta(delta["reasoning_content"] as string);
           }
 
           // 工具调用增量
@@ -167,7 +177,8 @@ export class OpenAIApiAdapter implements ProviderAdapter {
     }
 
     return {
-      text,
+      // content 为空（推理模型整段都是 reasoning）时回退用 reasoning，避免输出丢成空
+      text: text || reasoning,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage,
       stopReason: stopReason ?? "stop",
