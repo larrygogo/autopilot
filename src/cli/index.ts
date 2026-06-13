@@ -15,6 +15,17 @@ import { loadDaemonConfig } from "../core/config";
 import { registerWorkflowCommands } from "./workflow";
 import { registerConfigCommands, printReport as printDoctorReport } from "./config";
 import { ensureSecretKey, setApiKey as coreSetApiKey, deleteApiKey as coreDeleteApiKey, listApiKeys as coreListApiKeys } from "../core/api-keys";
+import {
+  listProviders as coreListProviders,
+  createProvider as coreCreateProvider,
+  deleteProvider as coreDeleteProvider,
+  getProviderByName as coreGetProviderByName,
+  getProviderById as coreGetProviderById,
+  setProviderCliStatus as coreSetProviderCliStatus,
+  type ProviderType,
+} from "../core/providers";
+import { listWorkflowsUsingProvider } from "../core/registry";
+import { probeCli } from "../agents/cli-status";
 import { registerRequirementCommands } from "./requirements-cli";
 import { registerProjectCommands } from "./project";
 import { registerWorkspaceCommands } from "./workspace";
@@ -1308,6 +1319,100 @@ key
       console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
       process.exit(1);
     }
+  });
+
+// ── provider 条目管理（条目化重构 P1；CLI 一等公民，core 直连不经 daemon）──
+
+const provider = program.command("provider").description("模型供应商条目管理（CLI / API 单类型实例）");
+
+provider
+  .command("list")
+  .description("列出 provider 条目")
+  .action(async () => {
+    initDb();
+    await runPendingMigrations();
+    const list = coreListProviders();
+    if (list.length === 0) {
+      console.log("暂无 provider 条目。用 `autopilot provider add <name> --type cli|api` 添加。");
+      return;
+    }
+    const nameW = Math.max(...list.map((p) => p.name.length), 4);
+    console.log(`${"NAME".padEnd(nameW)}  TYPE  SUBTYPE         STATUS`);
+    for (const p of list) {
+      const status = p.type === "cli"
+        ? (p.cli_status === "ok" ? "就绪" : p.cli_status === "missing" ? "本地不支持" : "未检测")
+        : (p.default_model ? `model=${p.default_model}` : "—");
+      const en = p.enabled === 0 ? " (禁用)" : "";
+      console.log(`${p.name.padEnd(nameW)}  ${p.type.padEnd(4)}  ${p.subtype.padEnd(14)}  ${status}${en}`);
+    }
+  });
+
+provider
+  .command("add <name>")
+  .description("添加 provider 条目")
+  .requiredOption("--type <type>", "类型：cli | api")
+  .option("--subtype <subtype>", "cli: claude|codex|gemini|custom；api: openai-compat（默认）/anthropic/openai/google")
+  .option("--display <name>", "显示名")
+  .option("--base-url <url>", "API 端点（api 类型）")
+  .option("--model <model>", "默认模型")
+  .option("--cli-bin <bin>", "自定义 CLI 二进制（subtype=custom）")
+  .option("--env-key <NAME>", "API 密钥环境变量名")
+  .action(async (name: string, opts: {
+    type: string; subtype?: string; display?: string; baseUrl?: string; model?: string; cliBin?: string; envKey?: string;
+  }) => {
+    initDb();
+    await runPendingMigrations();
+    const type = opts.type as ProviderType;
+    if (type !== "cli" && type !== "api") {
+      console.error("错误：--type 需为 cli 或 api");
+      process.exit(1);
+    }
+    const subtype = opts.subtype ?? (type === "cli" ? "claude" : "openai-compat");
+    try {
+      const entry = coreCreateProvider({
+        name,
+        display_name: opts.display ?? name,
+        type,
+        subtype,
+        cli_bin: opts.cliBin ?? null,
+        base_url: opts.baseUrl ?? null,
+        env_key_name: opts.envKey ?? null,
+        default_model: opts.model ?? null,
+      });
+      if (type === "cli") {
+        const probe = await probeCli(subtype, entry.cli_bin ?? undefined);
+        coreSetProviderCliStatus(entry.id, probe.status, probe.version ?? null);
+        console.log(`✓ 已添加 ${name}（${entry.id}）；本地 CLI：${probe.status === "ok" ? `就绪 ${probe.version ?? ""}` : probe.status === "missing" ? "本地不支持（未安装）" : "未知"}`);
+      } else {
+        console.log(`✓ 已添加 ${name}（${entry.id}）；API 密钥用 \`autopilot key set ${name}\` 配置`);
+      }
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+provider
+  .command("remove <idOrName>")
+  .description("删除 provider 条目（被工作流引用则拒删，--force 强删）")
+  .option("--force", "忽略工作流引用强制删除")
+  .action(async (idOrName: string, opts: { force?: boolean }) => {
+    initDb();
+    await runPendingMigrations();
+    const entry = idOrName.startsWith("prov-") ? coreGetProviderById(idOrName) : coreGetProviderByName(idOrName);
+    if (!entry) {
+      console.error(`错误：找不到 provider 条目：${idOrName}`);
+      process.exit(1);
+    }
+    const refs = listWorkflowsUsingProvider(entry.name);
+    if (refs.length > 0 && !opts.force) {
+      console.error(`错误：provider「${entry.name}」被工作流引用，删除会让它们无法使用：`);
+      for (const r of refs) console.error(`  - ${r.workflow}（${r.phases.join(", ")}）`);
+      console.error("先改这些工作流的 provider，或加 --force 强删。");
+      process.exit(1);
+    }
+    coreDeleteProvider(entry.id);
+    console.log(`✓ 已删除 provider 条目：${entry.name}`);
   });
 
 /**

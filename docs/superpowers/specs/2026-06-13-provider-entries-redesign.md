@@ -123,6 +123,13 @@ P2 回归风险：误把「跑完最后一轮」拦成立即中断（闸门只�
 ### 不做（YAGNI）
 provider 健康实时轮询扩展；provider 分组/标签/排序（平铺即可，种子在前）。
 
+### P1 务实保留 → P2 跟进
+- **doctor / setup.saveProviders 暂仍读写 config.yaml**（has-enabled 诊断、onboarding）。
+  运行时解析、Web/CLI provider add/remove 已全表驱动，但 doctor 的 `providers.has-enabled`
+  检查仍读 config.yaml；setup.saveProviders 双写（config + 同步条目）。后果：经 Web/CLI
+  新增的 provider 条目不反映在 doctor 诊断里。改为 doctor 读条目表（+ 考虑 CLI cli_status
+  可用性判定 usable）留 P2，避免 P1 一连串 doctor/cli-config/task-start-gate 测试契约重写。
+
 ## 10. 待实现时复核
 - 迁移号取当时最大 +1（防撞号，本文档暂记 047）
 - single-writer-invariant 测试：providers 表写 SQL 只在 db.ts 白名单

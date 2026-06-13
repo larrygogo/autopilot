@@ -116,6 +116,7 @@ import {
   loadProviders,
   loadConfigRaw,
   PROVIDER_NAMES,
+  saveProvider,
   type ProviderName,
 } from "../core/config";
 import {
@@ -1750,17 +1751,20 @@ export function registerCoreRpcMethods(): void {
       if (!p.providers || typeof p.providers !== "object" || Array.isArray(p.providers)) {
         throw new RpcError("INVALID_PARAM", "providers must be an object");
       }
-      // 条目化后写 providers 条目（按 name 找种子条目 update）而非 config.yaml
+      // onboarding 写 config.yaml（doctor 诊断暂仍读 config，P1 务实保留）+ 同步条目表
       for (const [name, cfg] of Object.entries(p.providers as Record<string, unknown>)) {
         if (!(PROVIDER_NAMES as readonly string[]).includes(name)) continue;
         if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
         const c = cfg as Record<string, unknown>;
+        saveProvider(name as ProviderName, c);
+        // 同步到 providers 条目（运行时以条目为准）
         const entry = getProviderEntryByName(name);
-        if (!entry) continue;
-        updateProvider(entry.id, {
-          enabled: typeof c.enabled === "boolean" ? c.enabled : undefined,
-          default_model: typeof c.default_model === "string" ? c.default_model : undefined,
-        });
+        if (entry) {
+          updateProvider(entry.id, {
+            enabled: typeof c.enabled === "boolean" ? c.enabled : undefined,
+            default_model: typeof c.default_model === "string" ? c.default_model : undefined,
+          });
+        }
       }
       return { report: await runChecks({ level: 1 }) };
     },

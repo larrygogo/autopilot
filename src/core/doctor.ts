@@ -65,11 +65,9 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
 
   // C3：providers 结构 + 收集 enabled
   //
-  // 零配置模式（CLAUDE.md 说"provider 自动适配、agent 用内置默认"）：
-  // - raw["providers"] 字段完全不存在 → 零配置，所有内置 provider 默认走
-  //   CLI 自身管理凭证，doctor L1 不报 error（L2 探测才看 CLI 装没装）
-  // - raw["providers"] 存在但为空对象 / 都没 enabled → 用户明确没启用，
-  //   保留 error 提示去 /setup 配置（行为不变）
+  // 注：provider 条目化重构后运行时解析以 providers 表为准；但 doctor / setup 的
+  // has-enabled 诊断暂仍读 config.yaml（P1 务实保留，避免诊断契约大改）。doctor 与
+  // 条目表的一致性（含 Web/CLI provider add 反映到诊断）作为 P2 跟进。
   const hasProvidersSection = raw["providers"] !== undefined;
   const providersSection = (raw["providers"] ?? {}) as Record<string, unknown>;
   const enabledProviders: Array<{ name: string; cfg: Record<string, unknown> }> = [];
@@ -87,15 +85,12 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
     (p) => typeof p.cfg.default_model === "string" && (p.cfg.default_model as string).trim() !== "",
   );
   if (validEnabled.length === 0 && !hasProvidersSection) {
-    // 零配置模式：用户没显式配 providers 段，按 CLAUDE.md 设计走"CLI 凭证
-    // 自管理"路径。L1 不报错，提示 L2 才能验证 CLI 装没装。
     checks.push({
       id: "providers.has-enabled", category: "provider", status: "ok",
       title: "零配置模式（providers 段未写，依赖 CLI 凭证自管理）",
       detail: "如需切 model / 自建代理，参考 config.yaml 注释里的 providers 段示例；用 --probe 跑 L2 探测验证 CLI 装没装",
     });
   } else if (validEnabled.length === 0) {
-    // 用户主动写了 providers 段但都没 enabled — 真错误
     checks.push({
       id: "providers.has-enabled", category: "provider", status: "error",
       title: "至少需要启用一个 provider 并填写 default_model",
