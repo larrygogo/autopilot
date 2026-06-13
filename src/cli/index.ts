@@ -1404,6 +1404,8 @@ provider
       console.error(`错误：找不到 provider 条目：${idOrName}`);
       process.exit(1);
     }
+    // 加载工作流到 registry（core 直连上下文未自动 discover），否则引用守卫看到空 registry
+    await discover();
     const refs = listWorkflowsUsingProvider(entry.name);
     if (refs.length > 0 && !opts.force) {
       console.error(`错误：provider「${entry.name}」被工作流引用，删除会让它们无法使用：`);
