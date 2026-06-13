@@ -46,6 +46,8 @@ const ALLOWLIST = new Set([
   "src/core/notifications.ts",     // notifications 表：SQLite 即权威源，事件型通知流（替代 Now 派生快照）
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
   "src/core/api-keys.ts",          // api_keys 表：SQLite 即权威源，API 密钥加密存储无 manifest 同步需求
+  "src/core/providers.ts",         // providers 表：SQLite 即权威源，provider 条目 CRUD（条目化重构 P1）
+  "src/migrations/047-providers-table.ts", // provider 条目化：建表 + 种子官方三家 + 导入 config compat（一次性数据迁移，幂等）
 ]);
 
 const WRITE_SQL_RE = /\b(INSERT\s+(OR\s+\w+\s+)?INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|REPLACE\s+INTO)\b/i;
