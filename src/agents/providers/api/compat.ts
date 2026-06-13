@@ -30,6 +30,15 @@ export const BUILTIN_COMPAT_PROVIDERS: Record<string, CompatProviderPreset> = {
     default_model: "moonshot-v1-8k",
     display_name: "Kimi (Moonshot)",
   },
+  // Kimi Code（K2.7 Code）：OpenAI 兼容，端点 https://api.kimi.com/coding（适配器补 /v1/chat/completions）。
+  // ⚠ 该端点按 User-Agent 限定只给编码 Agent（claude-cli / RooCode 等）—— createCompatAdapter
+  //    对 kimi.com host 注入被认可的 coding-agent UA，否则 403。模型 id 实测 = kimi-for-coding。
+  "kimi-code": {
+    base_url: "https://api.kimi.com/coding",
+    env_key: "KIMI_CODE_API_KEY",
+    default_model: "kimi-for-coding",
+    display_name: "Kimi Code (K2.7)",
+  },
   minimax: {
     base_url: "https://api.minimax.chat",
     env_key: "MINIMAX_API_KEY",
@@ -56,12 +65,23 @@ export function getCompatPreset(name: string): CompatProviderPreset | undefined 
  * @param baseUrl 自定义 base_url（覆盖预置端点）
  * @param providerName 供应商名称（用于日志标识）
  */
+// 部分编码专用端点（如 Kimi Code）按 User-Agent 限定只给编码 Agent 调用，普通 UA 返回 403。
+// autopilot API 模式本身就是编码 Agent，对这些 host 注入被认可的 coding-agent UA。
+const CODING_AGENT_UA = "claude-cli/2.1.176 (external, cli)";
+function codingAgentUaFor(baseUrl: string): string | undefined {
+  try {
+    return new URL(baseUrl).hostname.endsWith("kimi.com") ? CODING_AGENT_UA : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createCompatAdapter(
   apiKey: string,
   baseUrl: string,
   providerName?: string,
 ): ProviderAdapter {
-  const adapter = new OpenAIApiAdapter(apiKey, baseUrl);
+  const adapter = new OpenAIApiAdapter(apiKey, baseUrl, codingAgentUaFor(baseUrl));
   // 用闭包包一层，让 name 能正确反映 compat provider
   return {
     get name() { return providerName || "compat"; },

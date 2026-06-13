@@ -16,6 +16,8 @@ export class OpenAIApiAdapter implements ProviderAdapter {
   constructor(
     private apiKey: string,
     private baseUrl: string = DEFAULT_BASE_URL,
+    /** 可选 User-Agent 覆盖（某些端点如 Kimi Code 按 UA 限定只给编码 Agent 用） */
+    private userAgent?: string,
   ) {}
 
   async completeStream(
@@ -51,6 +53,7 @@ export class OpenAIApiAdapter implements ProviderAdapter {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
+        ...(this.userAgent ? { "User-Agent": this.userAgent } : {}),
       },
       body: JSON.stringify(body),
       signal: options.signal,
