@@ -1,22 +1,17 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
   Eye,
   EyeOff,
-  Globe,
-  HelpCircle,
   Plus,
   RefreshCw,
   Trash2,
-  XCircle,
 } from "lucide-react";
 import {
   api,
-  type ProviderItem,
-  type ProviderStatus,
-  type ProviderModelsResult,
   type ProviderExtendedInfo,
+  type ProviderTemplate,
 } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { PageShell } from "@/components/pro";
@@ -26,7 +21,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -35,182 +29,165 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/Modal";
-import { ModelCombobox } from "@/components/ModelCombobox";
 import { cn } from "@/lib/utils";
 
-const PROVIDER_META: Record<string, { defaultModel: string; loginCmd: string }> = {
-  anthropic: { defaultModel: "claude-sonnet-4-6", loginCmd: "claude login" },
-  openai: { defaultModel: "o4-mini", loginCmd: "codex login" },
-  google: { defaultModel: "gemini-2.5-pro", loginCmd: "gemini auth login" },
-};
-
-const MODEL_LIST_PROVIDERS = ["anthropic", "openai", "google"] as const;
+// CLI 子类型 → 默认 login 提示（展示用）
+const CLI_SUBTYPES: { value: string; label: string; login: string }[] = [
+  { value: "claude", label: "Claude（Anthropic）", login: "claude login" },
+  { value: "codex", label: "Codex（OpenAI）", login: "codex login" },
+  { value: "gemini", label: "Gemini（Google）", login: "gemini auth login" },
+];
 
 /**
- * 统一「提供商」设置页（2026-06-13 合并原「提供商」+「API 密钥」两个分区）。
+ * 统一「提供商」设置页（provider 条目化重构 P1）。
  *
- * 一个 provider = 一张卡：CLI 模式块（仅 supports_cli）+ API 密钥块（supports_api）
- * 在同卡内并置。官方三家两块都有 + 启用/默认模型可改；兼容供应商仅 API 块 + 只读端点。
- * 顶部综合徽标按 OR 逻辑（CLI 就绪 或 有 API key 即「就绪」），避免只用一种模式时误报红。
+ * provider = 用户自管的单类型实例：CLI / API 各自成条、平级、可增删。
+ * CLI 条目检本地可用性（本地不支持也可留着）；API 条目管密钥 + 默认模型。
  */
 export function Providers(_props: { embedded?: boolean } = {}) {
   const toast = useToast();
-  const [ext, setExt] = useState<ProviderExtendedInfo[]>([]);
-  const [items, setItems] = useState<Record<string, ProviderItem>>({});
-  const [statuses, setStatuses] = useState<Record<string, ProviderStatus>>({});
-  const [models, setModels] = useState<Record<string, ProviderModelsResult>>({});
+  const [entries, setEntries] = useState<ProviderExtendedInfo[]>([]);
+  const [templates, setTemplates] = useState<ProviderTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
-  const [saving, setSaving] = useState<string | null>(null);
 
-  // API key 添加/更新对话框
-  const [keyDialogProvider, setKeyDialogProvider] = useState<string | null>(null);
+  // API key 对话框
+  const [keyDialogName, setKeyDialogName] = useState<string | null>(null);
   const [keyInput, setKeyInput] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
   const [deleteKeyTarget, setDeleteKeyTarget] = useState<string | null>(null);
 
-  // compat provider 的默认模型草稿（compat 走窄接口 setProviderDefaultModel，与官方的整段保存分开）
-  const [compatModelDraft, setCompatModelDraft] = useState<Record<string, string>>({});
-  const [savingCompat, setSavingCompat] = useState<string | null>(null);
+  // 删除条目
+  const [deleteTarget, setDeleteTarget] = useState<ProviderExtendedInfo | null>(null);
 
-  const loadAll = async () => {
+  // 添加条目对话框
+  const [addOpen, setAddOpen] = useState(false);
+
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [e, itemList] = await Promise.all([
+      const [list, tpls] = await Promise.all([
         api.listProvidersExtended(),
-        api.listProviders().catch(() => [] as ProviderItem[]),
+        api.listProviderTemplates().catch(() => [] as ProviderTemplate[]),
       ]);
-      setExt(e);
-      const im: Record<string, ProviderItem> = {};
-      for (const it of itemList) im[it.name] = it;
-      setItems(im);
-      // 播种 compat 默认模型草稿
-      const cm: Record<string, string> = {};
-      for (const pe of e) if (pe.api_only) cm[pe.name] = pe.default_model ?? "";
-      setCompatModelDraft(cm);
+      setEntries(list);
+      setTemplates(tpls);
     } catch (e: unknown) {
       setLoadError((e as Error)?.message ?? String(e));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const refreshStatus = async () => {
+  useEffect(() => { load(); }, [load]);
+
+  const recheckCli = async () => {
     setChecking(true);
     try {
-      const list = await api.getProvidersStatus();
-      const map: Record<string, ProviderStatus> = {};
-      for (const s of list) map[s.name] = s;
-      setStatuses(map);
-    } catch (e: unknown) {
-      console.warn("状态检测失败", e);
+      await Promise.all(
+        entries.filter((e) => e.type === "cli" && e.id).map((e) => api.detectProviderCli(e.id!).catch(() => null)),
+      );
+      await load();
     } finally {
       setChecking(false);
     }
   };
 
-  const refreshModels = async () => {
-    const results = await Promise.all(
-      MODEL_LIST_PROVIDERS.map((n) => api.getProviderModels(n).catch(() => null)),
-    );
-    const map: Record<string, ProviderModelsResult> = {};
-    for (const r of results) if (r) map[r.name] = r;
-    setModels(map);
-  };
-
-  useEffect(() => {
-    loadAll();
-    refreshStatus();
-    refreshModels();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const updateItem = (name: string, field: keyof ProviderItem, value: string | boolean | undefined) => {
-    setItems((prev) => ({ ...prev, [name]: { ...prev[name], name, [field]: value } as ProviderItem }));
-  };
-
-  const saveConfig = async (name: string) => {
-    const item = items[name];
-    if (!item) return;
-    setSaving(name);
+  const toggleEnabled = async (e: ProviderExtendedInfo, enabled: boolean) => {
+    if (!e.id) return;
     try {
-      const { name: _n, agent_count: _a, ...cfg } = item;
-      await api.saveProviderConfig(name, cfg);
-      toast.success(`${name} 配置已保存`);
-    } catch (e: unknown) {
-      toast.error("保存失败", (e as Error)?.message ?? String(e));
-    } finally {
-      setSaving(null);
+      await api.updateProvider(e.id, { enabled });
+      await load();
+    } catch (err: unknown) {
+      toast.error("保存失败", (err as Error)?.message ?? String(err));
     }
   };
 
-  const openKeyDialog = (name: string) => {
-    setKeyDialogProvider(name);
-    setKeyInput("");
-    setShowKey(false);
+  const saveModel = async (e: ProviderExtendedInfo, model: string) => {
+    if (!e.id) return;
+    try {
+      await api.updateProvider(e.id, { default_model: model.trim() || null });
+      toast.success(`${e.display_name} 默认模型已保存`);
+      await load();
+    } catch (err: unknown) {
+      toast.error("保存失败", (err as Error)?.message ?? String(err));
+    }
   };
 
+  // ── API key ──
   const saveKey = async () => {
-    if (!keyDialogProvider || !keyInput.trim()) return;
+    if (!keyDialogName || !keyInput.trim()) return;
     setSavingKey(true);
     try {
-      await api.setApiKey(keyDialogProvider, keyInput.trim());
-      toast.success(`${keyDialogProvider} API 密钥已保存`);
-      setKeyDialogProvider(null);
+      await api.setApiKey(keyDialogName, keyInput.trim());
+      toast.success(`${keyDialogName} API 密钥已保存`);
+      setKeyDialogName(null);
       setKeyInput("");
-      await loadAll();
+      await load();
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
     } finally {
       setSavingKey(false);
     }
   };
-
-  const saveCompatModel = async (name: string) => {
-    setSavingCompat(name);
-    try {
-      await api.setProviderDefaultModel(name, compatModelDraft[name]?.trim() || undefined);
-      toast.success(`${name} 默认模型已保存`);
-      await loadAll();
-    } catch (e: unknown) {
-      toast.error("保存失败", (e as Error)?.message ?? String(e));
-    } finally {
-      setSavingCompat(null);
-    }
-  };
-
   const deleteKey = async () => {
     if (!deleteKeyTarget) return;
     try {
       await api.deleteApiKey(deleteKeyTarget);
       toast.success(`${deleteKeyTarget} API 密钥已删除`);
       setDeleteKeyTarget(null);
-      await loadAll();
+      await load();
     } catch (e: unknown) {
       toast.error("删除失败", (e as Error)?.message ?? String(e));
     }
   };
 
-  const official = ext.filter((p) => !p.api_only);
-  const compat = ext.filter((p) => p.api_only);
+  // ── 删除条目 ──
+  const confirmDelete = async () => {
+    if (!deleteTarget?.id) return;
+    try {
+      await api.deleteProvider(deleteTarget.id);
+      toast.success(`已删除 ${deleteTarget.display_name}`);
+      setDeleteTarget(null);
+      await load();
+    } catch (e: unknown) {
+      // 引用守卫：被工作流引用时后端拒删，提示原因（不关弹窗，让用户读到）
+      toast.error("无法删除", (e as Error)?.message ?? String(e));
+    }
+  };
+
+  const cliEntries = entries.filter((e) => e.type === "cli");
+  const apiEntries = entries.filter((e) => e.type === "api");
 
   return (
     <PageShell
       width="form"
       hero={{
         title: "提供商",
-        subtitle: "CLI 凭证 · API 密钥 · 默认模型",
-        description:
-          "配置每个供应商的接入方式。官方供应商可用 CLI 登录或填 API 密钥；兼容供应商仅支持 API 直连。密钥本机 AES-256-GCM 加密存储。",
+        subtitle: "CLI / API 平级 · 自管增删",
+        description: "每个供应商是一个独立条目，标 CLI 或 API 类型。CLI 凭本地 CLI 登录、API 凭密钥直连。",
         actions: (
-          <Button variant="secondary" onClick={refreshStatus} disabled={checking} size="sm">
-            <RefreshCw className={cn("h-3.5 w-3.5", checking && "animate-spin")} />
-            {checking ? "检查中…" : "重新检查"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={recheckCli} disabled={checking}>
+              <RefreshCw className={cn("h-3.5 w-3.5", checking && "animate-spin")} />
+              {checking ? "检查中…" : "重新检查 CLI"}
+            </Button>
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="h-3.5 w-3.5" />
+              添加供应商
+            </Button>
+          </div>
         ),
       }}
     >
@@ -218,8 +195,8 @@ export function Providers(_props: { embedded?: boolean } = {}) {
         <Card className="mb-4 border-destructive/40 bg-destructive/5 p-4">
           <p className="text-sm font-medium text-destructive">加载失败：{loadError}</p>
           <p className="mt-1.5 text-xs text-muted-foreground">
-            常见原因：daemon 未重启（新 API 未生效）。请在「设置 → Daemon」点「重启 daemon」，或终端执行{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono">autopilot daemon restart</code> 后刷新。
+            常见原因：daemon 未重启。请在「设置 → Daemon」点「重启 daemon」，或终端{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono">autopilot daemon restart</code>。
           </p>
         </Card>
       )}
@@ -228,70 +205,48 @@ export function Providers(_props: { embedded?: boolean } = {}) {
         <p className="text-sm text-muted-foreground">加载中…</p>
       ) : (
         <div className="space-y-6">
-          {/* 官方供应商 */}
           <section className="space-y-3">
-            <h3 className="text-xs font-medium text-muted-foreground">官方供应商（CLI + API 双模式）</h3>
-            {official.map((p) => (
-              <ProviderCard
-                key={p.name}
-                ext={p}
-                item={items[p.name]}
-                status={statuses[p.name]}
-                models={models[p.name]}
-                saving={saving === p.name}
-                onUpdateItem={updateItem}
-                onSaveConfig={saveConfig}
-                onAddKey={openKeyDialog}
-                onDeleteKey={setDeleteKeyTarget}
-              />
+            <h3 className="text-xs font-medium text-muted-foreground">CLI 供应商（本地 CLI 子进程，凭证 CLI 自管）</h3>
+            {cliEntries.length === 0 && <EmptyHint text="暂无 CLI 供应商，点右上「添加供应商」。" />}
+            {cliEntries.map((e) => (
+              <CliCard key={e.id ?? e.name} entry={e} onToggle={toggleEnabled} onSaveModel={saveModel} onDelete={setDeleteTarget} />
             ))}
           </section>
 
-          {/* 兼容供应商 */}
-          {compat.length > 0 && (
-            <section className="space-y-3">
-              <h3 className="text-xs font-medium text-muted-foreground">
-                兼容供应商（仅 API 直连）
-              </h3>
-              {compat.map((p) => (
-                <ProviderCard
-                  key={p.name}
-                  ext={p}
-                  compatModel={compatModelDraft[p.name] ?? ""}
-                  onCompatModelChange={(v) => setCompatModelDraft((d) => ({ ...d, [p.name]: v }))}
-                  onSaveCompatModel={() => saveCompatModel(p.name)}
-                  savingCompat={savingCompat === p.name}
-                  onAddKey={openKeyDialog}
-                  onDeleteKey={setDeleteKeyTarget}
-                />
-              ))}
-            </section>
-          )}
-
-          {/* 说明 */}
-          <Card className="bg-muted/30 p-4">
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              <strong>CLI 模式</strong>：通过 Claude / Codex / Gemini 各自的 CLI 调用，凭证由 CLI 管理（终端跑对应 login 命令）。
-              <br />
-              <strong>API 模式</strong>：直连 HTTP，需在此填密钥。数据库密钥优先于环境变量（如 ANTHROPIC_API_KEY）。
-              <br />
-              <strong>CLI 命令</strong>：也可用 <code className="rounded bg-muted px-1 py-0.5 font-mono">autopilot key set &lt;provider&gt;</code> 管理密钥。
-              <br />
-              <strong>自定义兼容端点</strong>：在 <code className="rounded bg-muted px-1 py-0.5 font-mono">config.yaml</code> 的{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono">providers.&lt;名&gt;</code> 下配 base_url + env_key_name，重启 daemon 后出现在列表。
-            </p>
-          </Card>
+          <section className="space-y-3">
+            <h3 className="text-xs font-medium text-muted-foreground">API 供应商（直连 HTTP，凭密钥）</h3>
+            {apiEntries.length === 0 && <EmptyHint text="暂无 API 供应商，从「添加供应商 → API」选模板或自定义。" />}
+            {apiEntries.map((e) => (
+              <ApiCard
+                key={e.id ?? e.name}
+                entry={e}
+                onToggle={toggleEnabled}
+                onSaveModel={saveModel}
+                onSaveBaseUrl={async (model) => { if (e.id) { await api.updateProvider(e.id, { base_url: model.trim() || null }); await load(); } }}
+                onAddKey={() => { setKeyDialogName(e.name); setKeyInput(""); setShowKey(false); }}
+                onDeleteKey={() => setDeleteKeyTarget(e.name)}
+                onDelete={setDeleteTarget}
+              />
+            ))}
+          </section>
         </div>
       )}
 
-      {/* 添加/更新 API 密钥对话框 */}
-      <Dialog open={!!keyDialogProvider} onOpenChange={(v) => !v && setKeyDialogProvider(null)}>
+      {/* 添加条目 */}
+      <AddProviderDialog
+        open={addOpen}
+        templates={templates}
+        existingNames={entries.map((e) => e.name)}
+        onClose={() => setAddOpen(false)}
+        onCreated={async () => { setAddOpen(false); await load(); }}
+      />
+
+      {/* API key 对话框 */}
+      <Dialog open={!!keyDialogName} onOpenChange={(v) => !v && setKeyDialogName(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>设置 {keyDialogProvider} API 密钥</DialogTitle>
-            <DialogDescription>
-              密钥使用 AES-256-GCM 加密后存储在本地数据库。数据库密钥优先级高于环境变量。
-            </DialogDescription>
+            <DialogTitle>设置 {keyDialogName} API 密钥</DialogTitle>
+            <DialogDescription>密钥 AES-256-GCM 加密存本地数据库；优先级高于环境变量。</DialogDescription>
           </DialogHeader>
           <div className="py-2">
             <Label htmlFor="api-key">API 密钥</Label>
@@ -315,12 +270,8 @@ export function Providers(_props: { embedded?: boolean } = {}) {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setKeyDialogProvider(null)}>
-              取消
-            </Button>
-            <Button onClick={saveKey} disabled={savingKey || !keyInput.trim()}>
-              {savingKey ? "保存中…" : "保存"}
-            </Button>
+            <Button variant="outline" onClick={() => setKeyDialogName(null)}>取消</Button>
+            <Button onClick={saveKey} disabled={savingKey || !keyInput.trim()}>{savingKey ? "保存中…" : "保存"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -328,312 +279,333 @@ export function Providers(_props: { embedded?: boolean } = {}) {
       <ConfirmDialog
         open={!!deleteKeyTarget}
         title={`删除 ${deleteKeyTarget} 的 API 密钥？`}
-        message="删除后需重新录入密钥，或通过环境变量配置。此操作不可撤销。"
+        message="删除后需重新录入，或通过环境变量配置。"
         confirmText="删除"
         danger
         onConfirm={deleteKey}
         onCancel={() => setDeleteKeyTarget(null)}
       />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={`删除供应商「${deleteTarget?.display_name}」？`}
+        message={
+          <div className="space-y-2 text-sm">
+            <p>将删除该供应商条目。若被工作流引用，删除会被拦截并提示受影响的工作流。</p>
+            <p className="text-muted-foreground">删除后重新添加同名供应商可恢复引用它的工作流。</p>
+          </div>
+        }
+        confirmText="删除"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </PageShell>
   );
 }
 
-// ──────────────────────────────────────────────
-// 单个 provider 卡
-// ──────────────────────────────────────────────
+function EmptyHint({ text }: { text: string }) {
+  return <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">{text}</p>;
+}
 
-function ProviderCard({
-  ext: p,
-  item,
-  status,
-  models,
-  saving,
-  onUpdateItem,
-  onSaveConfig,
-  compatModel,
-  onCompatModelChange,
-  onSaveCompatModel,
-  savingCompat,
-  onAddKey,
-  onDeleteKey,
+// ── CLI 条目卡 ──
+function CliCard({
+  entry: e,
+  onToggle,
+  onSaveModel,
+  onDelete,
 }: {
-  ext: ProviderExtendedInfo;
-  item?: ProviderItem;
-  status?: ProviderStatus;
-  models?: ProviderModelsResult;
-  saving?: boolean;
-  onUpdateItem?: (name: string, field: keyof ProviderItem, value: string | boolean | undefined) => void;
-  onSaveConfig?: (name: string) => void;
-  compatModel?: string;
-  onCompatModelChange?: (v: string) => void;
-  onSaveCompatModel?: () => void;
-  savingCompat?: boolean;
-  onAddKey: (name: string) => void;
-  onDeleteKey: (name: string) => void;
+  entry: ProviderExtendedInfo;
+  onToggle: (e: ProviderExtendedInfo, v: boolean) => void;
+  onSaveModel: (e: ProviderExtendedInfo, model: string) => void;
+  onDelete: (e: ProviderExtendedInfo) => void;
 }) {
-  const meta = PROVIDER_META[p.name];
-  const enabled = item ? item.enabled !== false : true;
-  const editable = !p.api_only && !!onUpdateItem; // 仅官方可改启用/默认模型（providers.save 限官方）
-
+  const [model, setModel] = useState(e.default_model ?? "");
+  const login = CLI_SUBTYPES.find((s) => s.value === e.subtype)?.login;
   return (
     <Card className="p-5">
-      {/* header：名 + 类型徽标 + 综合就绪徽标 + 启用开关（官方） */}
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-base font-semibold">{p.display_name}</h3>
-          <Badge variant="outline" className="font-normal text-muted-foreground">
-            {p.api_only ? "兼容" : "官方"}
-          </Badge>
-          <OverallBadge ext={p} status={status} enabled={enabled} />
-        </div>
-        {editable && (
-          <div className="flex items-center gap-2 text-sm">
-            <Switch
-              id={`enabled-${p.name}`}
-              checked={enabled}
-              onCheckedChange={(v) => onUpdateItem!(p.name, "enabled", v)}
-            />
-            <Label htmlFor={`enabled-${p.name}`} className="cursor-pointer">
-              {enabled ? "启用" : "禁用"}
-            </Label>
-          </div>
+      <CardHeader entry={e} onToggle={onToggle} onDelete={onDelete}
+        statusBadge={<CliStatusBadge status={e.cli_status} enabled={e.enabled !== false} />} />
+      <div className="mt-2 space-y-1 text-xs">
+        {e.cli_status === "missing" && (
+          <p className="text-warning">本地未安装 <code className="bg-muted px-1 font-mono">{e.subtype}</code> CLI；装上即可用（可留着在别处跑）。</p>
         )}
+        {e.cli_version && <div><span className="text-muted-foreground">版本：</span><code className="bg-muted px-1 font-mono text-foreground">{e.cli_version}</code></div>}
+        {login && <div><span className="text-muted-foreground">登录：</span><code className="bg-muted px-1 font-mono text-foreground">{login}</code></div>}
       </div>
-
-      {/* CLI 模式块（仅 supports_cli） */}
-      {p.supports_cli && (
-        <CliBlock status={status} loginCmd={meta?.loginCmd ?? ""} />
-      )}
-
-      {/* API 模式块 */}
-      {p.supports_cli && <Separator className="my-4" />}
-      <ApiKeyBlock ext={p} onAddKey={onAddKey} onDeleteKey={onDeleteKey} />
-
-      {/* 默认模型 + 保存（仅官方可改；兼容只读展示来自预置/配置的模型） */}
-      <Separator className="my-4" />
-      {editable ? (
-        <>
-          <div className="space-y-1.5">
-            <Label htmlFor={`model-${p.name}`} className="flex flex-wrap items-center gap-2">
-              <span>默认模型</span>
-              {models && (
-                <span className="text-xs font-normal text-muted-foreground">
-                  （{models.source === "api" ? "API 实时列表" : "内置列表"}
-                  {models.error ? ` · 降级：${models.error}` : ""}）
-                </span>
-              )}
-            </Label>
-            <ModelCombobox
-              id={`model-${p.name}`}
-              value={item?.default_model || undefined}
-              onChange={(v) => onUpdateItem!(p.name, "default_model", v ?? "")}
-              options={models?.models ?? []}
-              placeholder={meta?.defaultModel ?? "provider 默认"}
-            />
-          </div>
-          <div className="mt-4 flex justify-end">
-            <Button onClick={() => onSaveConfig!(p.name)} disabled={saving}>
-              {saving ? "保存中…" : "保存"}
-            </Button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="space-y-1.5">
-            <Label htmlFor={`model-${p.name}`}>默认模型</Label>
-            <ModelCombobox
-              id={`model-${p.name}`}
-              value={compatModel || undefined}
-              onChange={(v) => onCompatModelChange?.(v ?? "")}
-              options={[]}
-              placeholder="手动输入模型名（留空走预置默认）"
-            />
-          </div>
-          <div className="mt-4 flex justify-end">
-            <Button onClick={() => onSaveCompatModel?.()} disabled={savingCompat}>
-              {savingCompat ? "保存中…" : "保存"}
-            </Button>
-          </div>
-        </>
-      )}
+      <ModelRow value={model} onChange={setModel} onSave={() => onSaveModel(e, model)} dirty={model !== (e.default_model ?? "")} hasCatalog />
     </Card>
   );
 }
 
-// ── 综合就绪徽标（OR 逻辑） ──
-
-function OverallBadge({
-  ext: p,
-  status,
-  enabled,
-}: {
-  ext: ProviderExtendedInfo;
-  status?: ProviderStatus;
-  enabled: boolean;
-}) {
-  if (!enabled) {
-    return (
-      <Badge variant="secondary" className="gap-1 font-normal text-muted-foreground">
-        已禁用
-      </Badge>
-    );
-  }
-  const cliReady = !!status?.cli_installed && !status?.error;
-  if (cliReady || p.has_api_key) {
-    return (
-      <Badge variant="success" className="gap-1">
-        <CheckCircle2 className="h-3 w-3" />
-        就绪
-      </Badge>
-    );
-  }
-  // 未就绪：CLI 装了但报错 → 异常；否则 → 未就绪/未配置
-  const label = status?.cli_installed && status?.error ? "异常" : p.api_only ? "未配置" : "未就绪";
-  return (
-    <Badge variant="warning" className="gap-1">
-      <AlertTriangle className="h-3 w-3" />
-      {label}
-    </Badge>
-  );
-}
-
-// ── CLI 模式块 ──
-
-function CliBlock({ status, loginCmd }: { status?: ProviderStatus; loginCmd: string }) {
-  let stateBadge: React.ReactNode;
-  if (!status) {
-    stateBadge = (
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <HelpCircle className="h-3 w-3" />
-        未检测
-      </span>
-    );
-  } else if (!status.cli_installed) {
-    stateBadge = (
-      <span className="flex items-center gap-1 text-xs text-warning">
-        <XCircle className="h-3 w-3" />
-        未安装
-      </span>
-    );
-  } else if (status.error) {
-    stateBadge = (
-      <span className="flex items-center gap-1 text-xs text-warning">
-        <AlertTriangle className="h-3 w-3" />
-        异常
-      </span>
-    );
-  } else {
-    stateBadge = (
-      <span className="flex items-center gap-1 text-xs text-success">
-        <CheckCircle2 className="h-3 w-3" />
-        就绪
-      </span>
-    );
-  }
-
-  return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-sm font-medium">CLI 模式</span>
-        {stateBadge}
-      </div>
-      <div className="space-y-1 text-xs">
-        {status && !status.cli_installed && status.install_hint && (
-          <div className="text-muted-foreground">
-            安装：
-            <code className="border border-border bg-muted px-1 py-0.5 font-mono text-foreground">
-              {status.install_hint}
-            </code>
-          </div>
-        )}
-        {status?.cli_installed && status.cli_path && (
-          <div>
-            <span className="text-muted-foreground">路径：</span>
-            <code className="border border-border bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_path}</code>
-          </div>
-        )}
-        {status?.cli_version && (
-          <div>
-            <span className="text-muted-foreground">版本：</span>
-            <code className="border border-border bg-muted px-1 py-0.5 font-mono text-foreground">{status.cli_version}</code>
-          </div>
-        )}
-        {status?.error && (
-          <div className="flex items-center gap-1 text-warning">
-            <AlertTriangle className="h-3 w-3" />
-            {status.error}
-          </div>
-        )}
-        <div>
-          <span className="text-muted-foreground">登录：</span>
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{loginCmd}</code>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── API 密钥块 ──
-
-function ApiKeyBlock({
-  ext: p,
+// ── API 条目卡 ──
+function ApiCard({
+  entry: e,
+  onToggle,
+  onSaveModel,
+  onSaveBaseUrl,
   onAddKey,
   onDeleteKey,
+  onDelete,
 }: {
-  ext: ProviderExtendedInfo;
-  onAddKey: (name: string) => void;
-  onDeleteKey: (name: string) => void;
+  entry: ProviderExtendedInfo;
+  onToggle: (e: ProviderExtendedInfo, v: boolean) => void;
+  onSaveModel: (e: ProviderExtendedInfo, model: string) => void;
+  onSaveBaseUrl: (url: string) => void;
+  onAddKey: () => void;
+  onDeleteKey: () => void;
+  onDelete: (e: ProviderExtendedInfo) => void;
 }) {
-  const fromEnv = p.key_source === "env";
+  const [model, setModel] = useState(e.default_model ?? "");
+  const [baseUrl, setBaseUrl] = useState(e.base_url ?? "");
+  const fromEnv = e.key_source === "env";
+  const isCompat = e.subtype === "openai-compat";
   return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-sm font-medium">API 模式</span>
-        {p.has_api_key ? (
-          <span className="flex items-center gap-1 text-xs text-success">
-            <CheckCircle2 className="h-3 w-3" />
-            {fromEnv ? "已配置 · 来自环境变量" : "已配置 · 本机加密"}
-          </span>
-        ) : (
-          <span className="flex items-center gap-1 text-xs text-warning">
-            <AlertTriangle className="h-3 w-3" />
-            未配置
-          </span>
-        )}
-      </div>
+    <Card className="p-5">
+      <CardHeader entry={e} onToggle={onToggle} onDelete={onDelete}
+        statusBadge={<ApiStatusBadge hasKey={e.has_api_key} enabled={e.enabled !== false} />} />
 
-      <div className="space-y-1 text-xs">
-        {p.base_url && (
-          <div>
-            <span className="text-muted-foreground">端点：</span>
-            <code className="border border-border bg-muted px-1 py-0.5 font-mono text-foreground">{p.base_url}</code>
-          </div>
-        )}
-        {p.has_api_key && (
+      <div className="mt-2 space-y-1.5 text-xs">
+        {/* 密钥 */}
+        <div className="flex items-center justify-between gap-2">
           <div>
             <span className="text-muted-foreground">密钥：</span>
-            <code className="border border-border bg-muted px-1 py-0.5 font-mono text-foreground">{p.key_hint}</code>
-            {fromEnv && <span className="ml-1 text-muted-foreground">（环境变量，shell 中 unset 可移除）</span>}
+            {e.has_api_key ? (
+              <span className="text-success">
+                {e.key_hint}{fromEnv && <span className="ml-1 text-muted-foreground">（环境变量，shell 中 unset 可移除）</span>}
+              </span>
+            ) : <span className="text-warning">未配置</span>}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onAddKey}>
+              <Plus className="mr-1 h-3 w-3" />{e.has_api_key ? "更新密钥" : "添加密钥"}
+            </Button>
+            {e.has_api_key && e.key_source === "db" && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={onDeleteKey}>
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+        </div>
+        {/* 端点（compat 可编辑） */}
+        {isCompat && (
+          <div className="flex items-center gap-2 pt-1">
+            <Label className="shrink-0 text-[10px] text-muted-foreground">端点</Label>
+            <Input value={baseUrl} onChange={(ev) => setBaseUrl(ev.target.value)} placeholder="https://api.example.com/v1" className="h-7 font-mono text-xs" />
+            {baseUrl !== (e.base_url ?? "") && (
+              <Button size="sm" variant="secondary" className="h-7 text-xs" onClick={() => onSaveBaseUrl(baseUrl)}>保存</Button>
+            )}
           </div>
         )}
+        {!isCompat && e.base_url && <div><span className="text-muted-foreground">端点：</span><code className="bg-muted px-1 font-mono text-foreground">{e.base_url}</code></div>}
       </div>
 
-      <div className="mt-2 flex items-center gap-1.5">
-        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => onAddKey(p.name)}>
-          <Plus className="mr-1 h-3 w-3" />
-          {p.has_api_key ? "更新密钥" : "添加密钥"}
+      <ModelRow value={model} onChange={setModel} onSave={() => onSaveModel(e, model)} dirty={model !== (e.default_model ?? "")} />
+    </Card>
+  );
+}
+
+function CardHeader({
+  entry: e,
+  onToggle,
+  onDelete,
+  statusBadge,
+}: {
+  entry: ProviderExtendedInfo;
+  onToggle: (e: ProviderExtendedInfo, v: boolean) => void;
+  onDelete: (e: ProviderExtendedInfo) => void;
+  statusBadge: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-base font-semibold">{e.display_name}</h3>
+        <Badge variant="outline" className="font-normal text-muted-foreground">{e.type === "cli" ? "CLI" : "API"}</Badge>
+        <code className="font-mono text-[10px] text-muted-foreground">{e.name}</code>
+        {statusBadge}
+      </div>
+      <div className="flex items-center gap-2">
+        <Switch checked={e.enabled !== false} onCheckedChange={(v) => onToggle(e, v)} />
+        <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => onDelete(e)}>
+          <Trash2 className="h-3.5 w-3.5" />
         </Button>
-        {p.has_api_key && p.key_source === "db" && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs text-destructive hover:text-destructive"
-            onClick={() => onDeleteKey(p.name)}
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
-        )}
       </div>
     </div>
+  );
+}
+
+function ModelRow({ value, onChange, onSave, dirty, hasCatalog }: { value: string; onChange: (v: string) => void; onSave: () => void; dirty: boolean; hasCatalog?: boolean }) {
+  return (
+    <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+      <Label className="shrink-0 text-[10px] text-muted-foreground">默认模型</Label>
+      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={hasCatalog ? "留空走内核兜底" : "手动输入模型名"} className="h-7 font-mono text-xs" />
+      {dirty && <Button size="sm" className="h-7 text-xs" onClick={onSave}>保存</Button>}
+    </div>
+  );
+}
+
+function CliStatusBadge({ status, enabled }: { status?: string | null; enabled: boolean }) {
+  if (!enabled) return <Badge variant="secondary" className="font-normal text-muted-foreground">已禁用</Badge>;
+  if (status === "ok") return <Badge variant="success" className="gap-1"><CheckCircle2 className="h-3 w-3" />就绪</Badge>;
+  if (status === "missing") return <Badge variant="warning" className="gap-1"><AlertTriangle className="h-3 w-3" />本地不支持</Badge>;
+  return <Badge variant="secondary" className="font-normal text-muted-foreground">未检测</Badge>;
+}
+
+function ApiStatusBadge({ hasKey, enabled }: { hasKey: boolean; enabled: boolean }) {
+  if (!enabled) return <Badge variant="secondary" className="font-normal text-muted-foreground">已禁用</Badge>;
+  if (hasKey) return <Badge variant="success" className="gap-1"><CheckCircle2 className="h-3 w-3" />就绪</Badge>;
+  return <Badge variant="warning" className="gap-1"><AlertTriangle className="h-3 w-3" />未配置</Badge>;
+}
+
+// ── 添加供应商对话框 ──
+function AddProviderDialog({
+  open,
+  templates,
+  existingNames,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  templates: ProviderTemplate[];
+  existingNames: string[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const toast = useToast();
+  const [type, setType] = useState<"cli" | "api">("cli");
+  const [cliSubtype, setCliSubtype] = useState("claude");
+  const [templateName, setTemplateName] = useState("__custom__");
+  const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [defaultModel, setDefaultModel] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setType("cli"); setCliSubtype("claude"); setTemplateName("__custom__");
+      setName(""); setDisplayName(""); setBaseUrl(""); setDefaultModel("");
+    }
+  }, [open]);
+
+  // 选模板 → 预填
+  const applyTemplate = (tn: string) => {
+    setTemplateName(tn);
+    if (tn === "__custom__") { setName(""); setDisplayName(""); setBaseUrl(""); setDefaultModel(""); return; }
+    const t = templates.find((x) => x.name === tn);
+    if (t) { setName(t.name); setDisplayName(t.display_name); setBaseUrl(t.base_url); setDefaultModel(t.default_model); }
+  };
+
+  const effName = type === "cli" ? (name.trim() || cliSubtype) : name.trim();
+  const nameTaken = existingNames.includes(effName);
+
+  const create = async () => {
+    if (!effName) { toast.error("需要标识名"); return; }
+    if (nameTaken) { toast.error(`名称已存在：${effName}`); return; }
+    setSaving(true);
+    try {
+      if (type === "cli") {
+        await api.createProvider({
+          name: effName,
+          display_name: displayName.trim() || CLI_SUBTYPES.find((s) => s.value === cliSubtype)?.label || effName,
+          type: "cli",
+          subtype: cliSubtype,
+          cli_login_cmd: CLI_SUBTYPES.find((s) => s.value === cliSubtype)?.login,
+          default_model: defaultModel.trim() || null,
+        });
+      } else {
+        await api.createProvider({
+          name: effName,
+          display_name: displayName.trim() || effName,
+          type: "api",
+          subtype: "openai-compat",
+          base_url: baseUrl.trim() || null,
+          default_model: defaultModel.trim() || null,
+          origin: templateName !== "__custom__" ? "template" : "user",
+        });
+      }
+      toast.success(`已添加 ${effName}`);
+      onCreated();
+    } catch (e: unknown) {
+      toast.error("添加失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>添加供应商</DialogTitle>
+          <DialogDescription>CLI 用本地 CLI 子进程跑（凭证 CLI 自管）；API 直连 HTTP（需密钥）。</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-1">
+          <div className="space-y-1.5">
+            <Label>类型</Label>
+            <Select value={type} onValueChange={(v) => setType(v as "cli" | "api")}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="cli">CLI · 本地子进程</SelectItem>
+                <SelectItem value="api">API · 直连</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {type === "cli" ? (
+            <div className="space-y-1.5">
+              <Label>CLI</Label>
+              <Select value={cliSubtype} onValueChange={setCliSubtype}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CLI_SUBTYPES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground">添加后自动探测本地是否安装；未装会标「本地不支持」。</p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>模板</Label>
+              <Select value={templateName} onValueChange={applyTemplate}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__custom__">自定义端点</SelectItem>
+                  {templates.map((t) => <SelectItem key={t.name} value={t.name}>{t.display_name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="prov-name">标识名（工作流引用键）</Label>
+            <Input id="prov-name" value={name} onChange={(e) => setName(e.target.value)}
+              placeholder={type === "cli" ? cliSubtype : "如 deepseek"} className="font-mono" />
+            {nameTaken && <p className="text-[10px] text-destructive">名称已存在：{effName}</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="prov-display">显示名（可选）</Label>
+            <Input id="prov-display" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="留空用标识/CLI 名" />
+          </div>
+
+          {type === "api" && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="prov-baseurl">Base URL</Label>
+                <Input id="prov-baseurl" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" className="font-mono" />
+              </div>
+              <p className="text-[10px] text-muted-foreground">保存后在卡片上「添加密钥」。</p>
+            </>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="prov-model">默认模型（可选）</Label>
+            <Input id="prov-model" value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} placeholder="留空走兜底" className="font-mono" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button onClick={create} disabled={saving || !effName || nameTaken}>{saving ? "添加中…" : "添加"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
