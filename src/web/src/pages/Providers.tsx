@@ -529,9 +529,10 @@ function AddProviderDialog({
   const [cName, setCName] = useState("");
   const [cBaseUrl, setCBaseUrl] = useState("");
   const [cModel, setCModel] = useState("");
+  const [cShape, setCShape] = useState("openai-compat"); // API 形状 = subtype
 
   useEffect(() => {
-    if (open) { setAdding(null); setCustomOpen(false); setCName(""); setCBaseUrl(""); setCModel(""); }
+    if (open) { setAdding(null); setCustomOpen(false); setCName(""); setCBaseUrl(""); setCModel(""); setCShape("openai-compat"); }
   }, [open]);
 
   // compat 模板归入 API 组（base_url/model 预填）
@@ -573,7 +574,7 @@ function AddProviderDialog({
         name,
         display_name: name,
         type: "api",
-        subtype: "openai-compat",
+        subtype: cShape,
         base_url: cBaseUrl.trim() || null,
         default_model: cModel.trim() || null,
         origin: "user",
@@ -628,13 +629,28 @@ function AddProviderDialog({
               className="text-xs text-muted-foreground hover:text-foreground"
               onClick={() => setCustomOpen((v) => !v)}
             >
-              {customOpen ? "▾ " : "▸ "}自定义 API 端点（自建 / 小众 OpenAI 兼容服务）
+              {customOpen ? "▾ " : "▸ "}自定义 API 端点（自建 / 转售 / Kimi Code 等兼容端点）
             </button>
             {customOpen && (
               <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="c-name" className="text-[10px]">标识名</Label>
-                  <Input id="c-name" value={cName} onChange={(e) => setCName(e.target.value)} placeholder="如 my-llm" className="h-8 font-mono text-sm" />
+                  <Input id="c-name" value={cName} onChange={(e) => setCName(e.target.value)} placeholder="如 kimi-code" className="h-8 font-mono text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="c-shape" className="text-[10px]">API 形状</Label>
+                  <select
+                    id="c-shape"
+                    value={cShape}
+                    onChange={(e) => setCShape(e.target.value)}
+                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm focus:border-accent focus:outline-none"
+                  >
+                    <option value="openai-compat">OpenAI 兼容（多数转售 / DeepSeek 类）</option>
+                    <option value="anthropic">Anthropic 兼容（Claude Code 类 / Kimi Code）</option>
+                    <option value="openai">OpenAI 官方形状</option>
+                    <option value="google">Google 官方形状</option>
+                  </select>
+                  <p className="text-[10px] text-muted-foreground">不确定就选「OpenAI 兼容」；Kimi Code 这类走 Claude 协议的选「Anthropic 兼容」。</p>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="c-url" className="text-[10px]">Base URL</Label>
