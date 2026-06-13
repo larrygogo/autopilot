@@ -286,9 +286,11 @@ export function TaskRow({ task, now, maps, req }: {
     task.requirement_id ? `← ${task.requirement_id}` : null,
   ].filter(Boolean).join(" · ");
   const card = req ? reqCardSpec(req) : null;
+  // v2 R6：行点击目标 = 需求页（一件工作的主视图，执行历史内联其中）；
+  // 无关联需求的存量游离任务才直达 /tasks/:id（单 run 深链接）。
   return (
     <RowCard
-      to={`/tasks/${task.id}`}
+      to={req ? `/requirements/${req.id}` : `/tasks/${task.id}`}
       Icon={Icon}
       tone={tone}
       spin={spin}

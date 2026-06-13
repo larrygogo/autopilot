@@ -191,6 +191,9 @@ export const api = {
   },
   // [WS-RPC] tasks.get — P3 第一批 PoC
   getTask: (id: string) => requestRpc<any>("tasks.get", { id }),
+  // [WS-RPC] tasks.listByRequirement — v2 R6：需求页 run 历史（按 seq 升序）
+  listTasksByRequirement: (reqId: string) =>
+    requestRpc<any[]>("tasks.listByRequirement", { requirementId: reqId }),
   // [WS-RPC] tasks.start
   startTask: (body: { title?: string; requirement?: string; workflow?: string; reqId?: string; requirement_id?: string }) =>
     requestRpc<any>("tasks.start", body),

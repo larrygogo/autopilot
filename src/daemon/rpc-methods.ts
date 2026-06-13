@@ -12,6 +12,7 @@
 
 import {
   listTasks,
+  listTasksByRequirement,
   getTask,
   getKv,
   getTaskLogs,
@@ -299,6 +300,21 @@ export function registerCoreRpcMethods(): void {
       const task = getTask(p.id);
       if (!task) throw new RpcError("NOT_FOUND", `task ${p.id} 不存在`);
       return task;
+    },
+  });
+
+  registerRpcMethod({
+    method: "tasks.listByRequirement",
+    description: "按需求 id 列出其全部根 run（按 seq 升序），供需求页 run 历史切换",
+    handler: (params) => {
+      const p = asObj(params);
+      const reqId = typeof p.requirementId === "string" && p.requirementId
+        ? p.requirementId
+        : (typeof p.requirement_id === "string" ? p.requirement_id : "");
+      if (!reqId) {
+        throw new RpcError("INVALID_PARAM", "需要 requirementId (string)");
+      }
+      return listTasksByRequirement(reqId);
     },
   });
 

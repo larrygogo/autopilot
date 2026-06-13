@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { PAGE_W } from "@/lib/layout";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion, Bot, UserRound, Download, Package } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type RequirementDelivery, type DeliveryFileEntry, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
 import { AttachmentUploader } from "@/components/AttachmentUploader";
@@ -15,6 +15,9 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea, Input } from "@/components/ui/input";
 import { TaskDetail } from "@/pages/TaskDetail";
+import { RunSwitcher } from "@/components/RunSwitcher";
+import { type RunLike } from "@/lib/run-label";
+import { SkeletonRows, ErrorState } from "@/components/pro";
 import { StepBar } from "@/components/StepBar";
 import { stepPosition, resolveCurrentStep, canEditRequirementContent, STEPS, type ReqStep } from "@/lib/requirement-steps";
 import { NextStepCTA } from "@/components/NextStepCTA";
@@ -436,6 +439,14 @@ export function RequirementDetail() {
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const prevStatusRef = useRef<string | undefined>(undefined);
+  // v2 R6：需求的全部根 run（execution / fix 轮），按 seq 升序。多 run 时执行记录区出切换器。
+  // undefined = 加载中（区分尚未拉取与确实为空），[] = 确实无 run（前置态）。
+  const [runs, setRuns] = useState<RunLike[] | undefined>(undefined);
+  const [runsError, setRunsError] = useState<string | null>(null);
+  // 当前选中查看的 run（多 run 时切换器控制）；默认最新（= req.task_id）或 ?run= 深链。
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const runQuery = searchParams.get("run");
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
@@ -483,6 +494,18 @@ export function RequirementDetail() {
     void refresh();
   }, [refresh]);
 
+  // v2 R6：拉取需求的全部根 run（execution / fix），按 seq 升序。
+  // 有 task_id（已进入执行性状态）才拉；前置态（task_id 空）保持 runs=[] 不渲染执行记录卡。
+  const loadRuns = useCallback(async (reqId: string) => {
+    try {
+      const list = await api.listTasksByRequirement(reqId);
+      setRuns(list as RunLike[]);
+      setRunsError(null);
+    } catch (e: unknown) {
+      setRunsError((e as Error)?.message ?? String(e));
+    }
+  }, []);
+
   // WebSocket 订阅：需求状态变化 / 问题更新时静默刷新
   // （不触发 loading 态，避免输入框被卸载导致 IME 输入中断）
   useEffect(() => {
@@ -529,6 +552,16 @@ export function RequirementDetail() {
     });
   }, [id, subscribe, refresh]);
 
+  // v2 R6：task:* 变化时重拉 run 列表（多 run 期间新 run 出现 / 状态推进要更新切换器）。
+  // 仅在已有 task_id 时订阅；payload 不带 requirement_id 时也宽松重拉（成本低、列表小）。
+  useEffect(() => {
+    if (!req?.id || !req.task_id) return;
+    const reqId = req.id;
+    return subscribe("task:*", () => {
+      void loadRuns(reqId);
+    });
+  }, [req?.id, req?.task_id, subscribe, loadRuns]);
+
   // 本地 1s tick 计时器：基于 round.started_at 推导已用秒数，
   // 避免依赖 WS 高频推送 elapsed 字段。
   useEffect(() => {
@@ -565,6 +598,25 @@ export function RequirementDetail() {
       api.listProjectWorkspaces(req.project_id).then(setProjectCodebases).catch(() => {});
     }
   }, [refresh, req?.project_id]);
+
+  useEffect(() => {
+    if (!req?.id) return;
+    if (!req.task_id) { setRuns([]); setRunsError(null); return; }
+    void loadRuns(req.id);
+  }, [req?.id, req?.task_id, loadRuns]);
+
+  // 选中 run：?run= 深链优先（仅当该 run 真存在于列表），否则默认最新（req.task_id）。
+  // 多 run 期间新 run 出现 / task_id 变化时跟随到最新（除非用户已手动切到某历史轮且它仍在列表）。
+  useEffect(() => {
+    if (!runs || runs.length === 0) { setSelectedRunId(null); return; }
+    const ids = new Set(runs.map((r) => r.id));
+    setSelectedRunId((cur) => {
+      if (cur && ids.has(cur)) return cur; // 用户当前选中仍有效，不打断
+      if (runQuery && ids.has(runQuery)) return runQuery; // ?run= 深链选轮
+      if (req?.task_id && ids.has(req.task_id)) return req.task_id; // 默认最新
+      return runs[runs.length - 1]!.id; // 兜底：seq 最大的一条
+    });
+  }, [runs, runQuery, req?.task_id]);
 
   // 工作流选项（编辑期下拉用），一次性拉取
   useEffect(() => {
@@ -1261,18 +1313,46 @@ export function RequirementDetail() {
     </Card>
   );
 
-  // 执行视图：展开常驻（带标题头），所有阶段一致呈现，不折叠
-  const taskRecord = req.task_id ? (
-    <Card id="task-record">
-      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-        <span className="text-sm font-medium">执行记录</span>
-        <span className="font-mono text-[10px] text-muted-foreground">TASK {req.task_id.slice(0, 8)}…</span>
-      </div>
-      <div className="p-5">
-        <TaskDetail key={req.task_id ?? "none"} taskId={req.task_id} embedded subscribe={subscribe} />
-      </div>
-    </Card>
-  ) : null;
+  // 执行视图：展开常驻（带标题头），所有阶段一致呈现，不折叠。
+  // v2 R6：一个需求重跑 / 修复会产生多个 run（task）。
+  //  - 前置态（task_id 空）：不渲染执行记录卡（保持现状，不加空卡）
+  //  - 单 run（runs<=1）：零噪音直接渲染 TaskDetail embedded，不加任何切换器外壳
+  //  - 多 run（runs>=2）：卡头部插横向切换器，选中轮渲染 TaskDetail embedded
+  // multiRun 视选中 run 而非固定 req.task_id（深链 / 历史轮可看）。
+  const taskRecord = (() => {
+    if (!req.task_id) return null; // empty：前置态，不渲染
+    const multiRun = !!runs && runs.length >= 2;
+    // 当前展示的 run id：多 run 用切换器选中态，否则用需求当前 run（task_id）
+    const shownTaskId = multiRun ? (selectedRunId ?? req.task_id) : req.task_id;
+    return (
+      <Card id="task-record">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+          <span className="text-sm font-medium">执行记录</span>
+          <span className="font-mono text-[10px] text-muted-foreground">TASK {shownTaskId.slice(0, 8)}…</span>
+        </div>
+        {/* loading：切换器位用骨架；多 run：切换器 */}
+        {runs === undefined ? (
+          <div className="px-4 pt-3">
+            <SkeletonRows variant="row" count={1} />
+          </div>
+        ) : multiRun ? (
+          <RunSwitcher runs={runs} activeTaskId={shownTaskId} onSelect={setSelectedRunId} />
+        ) : null}
+        <div className="p-5">
+          {runsError ? (
+            // error：runs 拉取失败 / 选中 run 异常。run 自身 failed ≠ 区 error（失败 run 正常进切换器）
+            <ErrorState
+              title="加载执行记录失败"
+              detail={runsError}
+              onRetry={() => { setRunsError(null); void loadRuns(req.id); }}
+            />
+          ) : (
+            <TaskDetail key={shownTaskId} taskId={shownTaskId} embedded subscribe={subscribe} />
+          )}
+        </div>
+      </Card>
+    );
+  })();
 
   // 澄清期 AI 状态行（出错 / 进度 / idle 三选一）
   const clarifierStatus = (

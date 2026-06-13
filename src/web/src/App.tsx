@@ -578,9 +578,9 @@ function NowRedirect({ onOpen }: { onOpen: () => void }) {
 }
 
 /**
- * /tasks/:id —— 需求页是唯一「工作页」，任务执行已内嵌其中。
- * 拉取该 task 取其 requirement_id，重定向到对应需求页。
- * 兜底：task 无 requirement_id（历史遗留，理论上不会有）→ 仍整页渲染 TaskDetail。
+ * /tasks/:id —— v2 R6：单 run 深链接（通知 view_task / 书签可达）。
+ * 不再重定向到需求页；直接整页渲染该 run 详情，页头由 TaskDetail 自带面包屑回需求页
+ * （有 requirement_id 时「← 需求 <reqId> · 执行 #N」；孤儿任务退回「返回」按钮）。
  */
 function TaskDetailRoute({
   subscribe,
@@ -589,26 +589,7 @@ function TaskDetailRoute({
 }) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [state, setState] = useState<
-    { kind: "loading" } | { kind: "redirect"; reqId: string } | { kind: "fallback" }
-  >({ kind: "loading" });
-
-  useEffect(() => {
-    if (!id) return;
-    let cancelled = false;
-    api.getTask(id)
-      .then((task) => {
-        if (cancelled) return;
-        const reqId = (task as { requirement_id?: string | null })?.requirement_id;
-        setState(reqId ? { kind: "redirect", reqId } : { kind: "fallback" });
-      })
-      .catch(() => { if (!cancelled) setState({ kind: "fallback" }); });
-    return () => { cancelled = true; };
-  }, [id]);
-
   if (!id) return <Navigate to="/tasks" replace />;
-  if (state.kind === "loading") return <PageLoader />;
-  if (state.kind === "redirect") return <Navigate to={`/requirements/${state.reqId}`} replace />;
   return <TaskDetail key={id} taskId={id} onBack={() => navigate("/tasks")} subscribe={subscribe} />;
 }
 

@@ -17,6 +17,7 @@ import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { TaskOutcomeCard } from "@/components/TaskOutcomeCard";
 import { TaskRunView } from "@/components/TaskRunView";
 import { useTaskPhaseEvents } from "@/hooks/useTaskPhaseEvents";
+import { computeRunLabels, type RunLike } from "@/lib/run-label";
 import { cn } from "@/lib/utils";
 
 interface TaskDetailProps {
@@ -49,11 +50,20 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
   const [drawerPhase, setDrawerPhase] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // v2 R6（仅独立页用）：同需求的兄弟 run，用来给面包屑算「执行 #N」业务标签。
+  const [siblingRuns, setSiblingRuns] = useState<RunLike[] | null>(null);
 
   useEffect(() => {
     api.getTask(taskId).then(setTask).catch(() => {});
     api.getTaskLogs(taskId).then(setLogs).catch(() => {});
   }, [taskId]);
+
+  // 独立页（非 embedded）且任务有归属需求时，拉兄弟 run 算面包屑 run 标签。
+  const reqIdForCrumb = (task as { requirement_id?: string | null } | null)?.requirement_id ?? null;
+  useEffect(() => {
+    if (embedded || !reqIdForCrumb) { setSiblingRuns(null); return; }
+    api.listTasksByRequirement(reqIdForCrumb).then((l) => setSiblingRuns(l as RunLike[])).catch(() => setSiblingRuns(null));
+  }, [embedded, reqIdForCrumb]);
 
   const [phaseStats, setPhaseStats] = useState<Record<string, { count: number; p50_ms: number }> | undefined>(undefined);
   useEffect(() => {
@@ -259,10 +269,25 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
         )
       ) : (
         <div className="mb-5 flex flex-wrap items-center gap-3 border-b border-border pb-4">
-          <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
-            <ArrowLeft className="h-4 w-4" />
-            返回
-          </Button>
+          {/* v2 R6：有归属需求 → 面包屑回需求页（标注本 run 的业务标签）；
+              孤儿任务（无 requirement_id）→ 退回原「返回」按钮 */}
+          {reqIdForCrumb ? (
+            <Link
+              to={`/requirements/${reqIdForCrumb}`}
+              className="-ml-1 flex items-center gap-1 text-xs text-accent hover:underline"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              需求 {reqIdForCrumb}
+              {siblingRuns && siblingRuns.length > 0 && (
+                <span className="text-muted-foreground">· {computeRunLabels(siblingRuns).get(task.id) ?? "执行"}</span>
+              )}
+            </Link>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
+              <ArrowLeft className="h-4 w-4" />
+              返回
+            </Button>
+          )}
           <div className="flex min-w-0 flex-col">
             <span className="font-mono text-[10px] text-muted-foreground">
               TASK

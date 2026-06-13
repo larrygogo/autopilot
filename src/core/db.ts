@@ -540,6 +540,22 @@ export function listRootTasksByRequirementIds(requirementIds: string[]): Task[] 
 }
 
 /**
+ * 按单个 requirement id 查其全部根 run（v2 R6）：parent_task_id IS NULL（排除并行块子任务），
+ * 按 seq 升序、再 created_at 升序排（seq 缺省/相同的历史数据用创建时间兜底稳定排序）。
+ * 供需求页执行记录区按 run 切换展示（一件工作的全部执行历史，含重跑 / fix 轮）。
+ */
+export function listTasksByRequirement(requirementId: string): Task[] {
+  const db = getDb();
+  const rows = db
+    .query<RawRow, [string]>(
+      "SELECT * FROM tasks WHERE requirement_id = ? AND parent_task_id IS NULL " +
+        "ORDER BY seq ASC, created_at ASC"
+    )
+    .all(requirementId);
+  return rows.map(rowToTask);
+}
+
+/**
  * 计算某需求下一个 run 的序号（v2 R2）：现有根任务（run）的最大 seq + 1。
  * 用 MAX 而非 COUNT：历史 run 被删除后 COUNT 会回退撞号，MAX 保证单调递增。
  * 并行块子任务（parent_task_id 非空）不是独立 run，不参与编号。
