@@ -30,7 +30,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/Modal";
+import { ModelCombobox } from "@/components/ModelCombobox";
 import { cn } from "@/lib/utils";
+
+// subtype → 官方模型目录来源（getProviderModels 仅认官方三家 name）。
+// compat 无目录（返回 null/[]，ModelCombobox 仍可自由输入）。
+const SUBTYPE_TO_CATALOG: Record<string, string> = {
+  claude: "anthropic", anthropic: "anthropic",
+  codex: "openai", openai: "openai",
+  gemini: "google", google: "google",
+};
 
 // CLI 子类型 → 默认 login 提示（展示用）
 const CLI_SUBTYPES: { value: string; label: string; login: string }[] = [
@@ -69,9 +78,25 @@ export function Providers(_props: { embedded?: boolean } = {}) {
   const toast = useToast();
   const [entries, setEntries] = useState<ProviderExtendedInfo[]>([]);
   const [templates, setTemplates] = useState<ProviderTemplate[]>([]);
+  const [models, setModels] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+
+  // 官方三家模型目录（getProviderModels 仅认官方 name），供卡片默认模型下拉
+  const loadModels = useCallback(async () => {
+    const results = await Promise.all(
+      (["anthropic", "openai", "google"] as const).map((n) =>
+        api.getProviderModels(n).then((r) => [n, r.models] as const).catch(() => [n, []] as const),
+      ),
+    );
+    setModels(Object.fromEntries(results));
+  }, []);
+
+  const modelOptionsFor = useCallback(
+    (e: ProviderExtendedInfo): string[] => models[SUBTYPE_TO_CATALOG[e.subtype ?? ""] ?? ""] ?? [],
+    [models],
+  );
 
   // API key 对话框
   const [keyDialogName, setKeyDialogName] = useState<string | null>(null);
@@ -103,7 +128,7 @@ export function Providers(_props: { embedded?: boolean } = {}) {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); loadModels(); }, [load, loadModels]);
 
   const recheckCli = async () => {
     setChecking(true);
@@ -222,7 +247,7 @@ export function Providers(_props: { embedded?: boolean } = {}) {
             <h3 className="text-xs font-medium text-muted-foreground">CLI 供应商（本地 CLI 子进程，凭证 CLI 自管）</h3>
             {cliEntries.length === 0 && <EmptyHint text="暂无 CLI 供应商，点右上「添加供应商」。" />}
             {cliEntries.map((e) => (
-              <CliCard key={e.id ?? e.name} entry={e} onToggle={toggleEnabled} onSaveModel={saveModel} onDelete={setDeleteTarget} />
+              <CliCard key={e.id ?? e.name} entry={e} modelOptions={modelOptionsFor(e)} onToggle={toggleEnabled} onSaveModel={saveModel} onDelete={setDeleteTarget} />
             ))}
           </section>
 
@@ -233,6 +258,7 @@ export function Providers(_props: { embedded?: boolean } = {}) {
               <ApiCard
                 key={e.id ?? e.name}
                 entry={e}
+                modelOptions={modelOptionsFor(e)}
                 onToggle={toggleEnabled}
                 onSaveModel={saveModel}
                 onSaveBaseUrl={async (model) => { if (e.id) { await api.updateProvider(e.id, { base_url: model.trim() || null }); await load(); } }}
@@ -324,11 +350,13 @@ function EmptyHint({ text }: { text: string }) {
 // ── CLI 条目卡 ──
 function CliCard({
   entry: e,
+  modelOptions,
   onToggle,
   onSaveModel,
   onDelete,
 }: {
   entry: ProviderExtendedInfo;
+  modelOptions: string[];
   onToggle: (e: ProviderExtendedInfo, v: boolean) => void;
   onSaveModel: (e: ProviderExtendedInfo, model: string) => void;
   onDelete: (e: ProviderExtendedInfo) => void;
@@ -346,7 +374,7 @@ function CliCard({
         {e.cli_version && <div><span className="text-muted-foreground">版本：</span><code className="bg-muted px-1 font-mono text-foreground">{e.cli_version}</code></div>}
         {login && <div><span className="text-muted-foreground">登录：</span><code className="bg-muted px-1 font-mono text-foreground">{login}</code></div>}
       </div>
-      <ModelRow value={model} onChange={setModel} onSave={() => onSaveModel(e, model)} dirty={model !== (e.default_model ?? "")} hasCatalog />
+      <ModelRow value={model} onChange={setModel} onSave={() => onSaveModel(e, model)} dirty={model !== (e.default_model ?? "")} options={modelOptions} />
     </Card>
   );
 }
@@ -354,6 +382,7 @@ function CliCard({
 // ── API 条目卡 ──
 function ApiCard({
   entry: e,
+  modelOptions,
   onToggle,
   onSaveModel,
   onSaveBaseUrl,
@@ -362,6 +391,7 @@ function ApiCard({
   onDelete,
 }: {
   entry: ProviderExtendedInfo;
+  modelOptions: string[];
   onToggle: (e: ProviderExtendedInfo, v: boolean) => void;
   onSaveModel: (e: ProviderExtendedInfo, model: string) => void;
   onSaveBaseUrl: (url: string) => void;
@@ -413,7 +443,7 @@ function ApiCard({
         {!isCompat && e.base_url && <div><span className="text-muted-foreground">端点：</span><code className="bg-muted px-1 font-mono text-foreground">{e.base_url}</code></div>}
       </div>
 
-      <ModelRow value={model} onChange={setModel} onSave={() => onSaveModel(e, model)} dirty={model !== (e.default_model ?? "")} />
+      <ModelRow value={model} onChange={setModel} onSave={() => onSaveModel(e, model)} dirty={model !== (e.default_model ?? "")} options={modelOptions} />
     </Card>
   );
 }
@@ -447,11 +477,19 @@ function CardHeader({
   );
 }
 
-function ModelRow({ value, onChange, onSave, dirty, hasCatalog }: { value: string; onChange: (v: string) => void; onSave: () => void; dirty: boolean; hasCatalog?: boolean }) {
+function ModelRow({ value, onChange, onSave, dirty, options }: { value: string; onChange: (v: string) => void; onSave: () => void; dirty: boolean; options: string[] }) {
   return (
     <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
       <Label className="shrink-0 text-[10px] text-muted-foreground">默认模型</Label>
-      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={hasCatalog ? "留空走内核兜底" : "手动输入模型名"} className="h-7 font-mono text-xs" />
+      <div className="min-w-0 flex-1">
+        <ModelCombobox
+          value={value || undefined}
+          onChange={(v) => onChange(v ?? "")}
+          options={options}
+          placeholder={options.length ? "选择或输入模型" : "输入模型名（留空走兜底）"}
+          clearable
+        />
+      </div>
       {dirty && <Button size="sm" className="h-7 text-xs" onClick={onSave}>保存</Button>}
     </div>
   );
