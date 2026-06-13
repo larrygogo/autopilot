@@ -44,15 +44,7 @@ export const BUILTIN_COMPAT_PROVIDERS: Record<string, CompatProviderPreset> = {
   //       env_key_name: MIMO_API_KEY
 };
 
-/** 三大官方 provider 名称（支持 CLI 模式） */
-const CLI_PROVIDERS = new Set(["anthropic", "openai", "google"]);
-
-/** 判断是否为仅 API 模式的供应商（无 CLI） */
-export function isCompatOnlyProvider(name: string): boolean {
-  return !CLI_PROVIDERS.has(name);
-}
-
-/** 获取供应商的预置信息（如果有） */
+/** 获取供应商的预置信息（如果有）。provider 条目化后 BUILTIN_COMPAT_PROVIDERS 转「模板目录」用。 */
 export function getCompatPreset(name: string): CompatProviderPreset | undefined {
   return BUILTIN_COMPAT_PROVIDERS[name];
 }

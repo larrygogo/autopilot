@@ -8,18 +8,27 @@ import { getPhase } from "../core/registry";
 import { loadProviders, type ProviderConfig } from "../core/config";
 import { DEFAULT_AGENT, type InlineAgentConfig } from "../core/agent-defaults";
 import { log } from "../core/logger";
-import { isCompatOnlyProvider, getCompatPreset, createCompatAdapter } from "./providers/api/compat";
+import { getCompatPreset, createCompatAdapter } from "./providers/api/compat";
 import { ApiAgentLoop } from "./providers/api/loop";
 import { ToolExecutor } from "./providers/api/tools";
 import { AnthropicApiAdapter } from "./providers/api/anthropic";
 import { OpenAIApiAdapter } from "./providers/api/openai";
 import { GoogleApiAdapter } from "./providers/api/google";
 import { resolveApiKey } from "../core/api-keys";
+import { getProviderByName } from "../core/providers";
 
-const PROVIDERS: Record<string, new (config: Record<string, unknown>) => BaseProvider> = {
-  anthropic: AnthropicProvider,
-  openai: OpenAIProvider,
-  google: GoogleProvider,
+/** CLI 类型按 subtype 选子进程 provider 类（claude/codex/gemini）。 */
+const CLI_PROVIDER_BY_SUBTYPE: Record<string, new (config: Record<string, unknown>) => BaseProvider> = {
+  claude: AnthropicProvider,
+  codex: OpenAIProvider,
+  gemini: GoogleProvider,
+};
+
+/** 官方三家 → CLI 子类（兼容回退：无 provider 条目时按 name 合成，对齐迁移前行为）。 */
+const OFFICIAL_CLI_SUBTYPE: Record<string, string> = {
+  anthropic: "claude",
+  openai: "codex",
+  google: "gemini",
 };
 
 const _cache = new Map<string, Agent>();
@@ -30,32 +39,84 @@ const _warnedLegacyString = new Set<string>();
 // ── Provider 路由 ──
 
 /**
- * 决定 phase 应使用 CLI 还是 API 模式。
+ * 决定 phase 应使用 CLI 还是 API 模式 —— **兼容回退路径**（无 provider 条目时，
+ * 按 name + config 合成，对齐 provider 条目化迁移前的旧行为）。
  *
- * 优先级：
- *   1. phase 内联 agent 显式指定 mode
- *   2. provider 级默认 mode
- *   3. compat-only provider 强制 api
- *   4. 三大官方默认 cli（向后兼容）
+ * 优先级：phase 显式 mode → provider 级 config.mode → 非官方强制 api → 官方默认 cli。
+ * 条目化后的主路径见 resolveEffectiveProvider（条目的 type 直接定 mode）。
  */
 export function resolveMode(
   phaseMode: AgentMode | undefined,
   providerCfg: ProviderConfig | undefined,
   providerName: string,
 ): AgentMode {
-  // 1. phase 内联 agent 显式指定
+  const isOfficial = providerName in OFFICIAL_CLI_SUBTYPE;
   if (phaseMode) {
-    if (phaseMode === "cli" && isCompatOnlyProvider(providerName)) {
+    if (phaseMode === "cli" && !isOfficial) {
       throw new Error(`Provider "${providerName}" 仅支持 API 模式，不能设置 mode: cli`);
     }
     return phaseMode;
   }
-  // 2. provider 级默认
   if (providerCfg?.mode) return providerCfg.mode as AgentMode;
-  // 3. compat provider 强制 api
-  if (isCompatOnlyProvider(providerName)) return "api";
-  // 4. 三大官方默认 cli
-  return "cli";
+  if (!isOfficial) return "api"; // 非官方（compat / 自定义）默认 api
+  return "cli"; // 官方默认 cli
+}
+
+/** provider 条目的有效解析结果（type/subtype + API 专属字段）。 */
+export interface EffectiveProvider {
+  name: string;
+  type: AgentMode; // cli | api
+  subtype: string; // cli: claude/codex/gemini/custom；api: anthropic/openai/google/openai-compat
+  base_url?: string;
+  env_key_name?: string;
+  default_model?: string;
+}
+
+/** DB 取条目，吞掉「表不存在 / DB 未就绪」（pre-migration / 部分测试）→ null 走回退。 */
+function safeGetProviderByName(name: string): ReturnType<typeof getProviderByName> {
+  try {
+    return getProviderByName(name);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 解析 provider 引用名 → 有效 (type, subtype) + API 字段。
+ *
+ * 主路径：providers 条目存在 → type=条目.type（phase 显式 mode 若 ≠ 条目 type 报错，断言语义）。
+ * 兼容回退：无条目（pre-migration / 测试 / DEFAULT）→ 用 resolveMode + name 合成 subtype（旧行为）。
+ */
+export function resolveEffectiveProvider(name: string, phaseMode: AgentMode | undefined): EffectiveProvider {
+  const entry = safeGetProviderByName(name);
+  if (entry) {
+    if (phaseMode && phaseMode !== entry.type) {
+      throw new Error(`Provider "${name}" 是 ${entry.type} 类型条目，phase 不能指定 mode: ${phaseMode}`);
+    }
+    return {
+      name,
+      type: entry.type,
+      subtype: entry.subtype,
+      base_url: entry.base_url ?? undefined,
+      env_key_name: entry.env_key_name ?? undefined,
+      default_model: entry.default_model ?? undefined,
+    };
+  }
+  // 兼容回退：无条目
+  const cfg = loadProviders()[name];
+  const type = resolveMode(phaseMode, cfg, name);
+  const isOfficial = name in OFFICIAL_CLI_SUBTYPE;
+  const subtype = type === "cli"
+    ? (OFFICIAL_CLI_SUBTYPE[name] ?? "custom")
+    : (isOfficial ? name : "openai-compat");
+  return {
+    name,
+    type,
+    subtype,
+    base_url: cfg?.base_url,
+    env_key_name: cfg?.env_key_name,
+    default_model: cfg?.default_model,
+  };
 }
 
 /**
@@ -64,14 +125,16 @@ export function resolveMode(
  */
 export function createAgent(config: AgentConfig): Agent {
   const providerName = config.provider ?? "anthropic";
-  const providerCfg = loadProviders()[providerName];
-  const mode = resolveMode(config.mode, providerCfg, providerName);
+  const eff = resolveEffectiveProvider(providerName, config.mode);
 
-  if (mode === "cli") {
-    // CLI 模式：使用现有 provider 子进程
-    const ProviderClass = PROVIDERS[providerName];
+  if (eff.type === "cli") {
+    // CLI 模式：按 subtype 选子进程 provider 类（claude/codex/gemini）
+    const ProviderClass = CLI_PROVIDER_BY_SUBTYPE[eff.subtype];
     if (!ProviderClass) {
-      throw new Error(`未知 provider：${providerName}，CLI 模式支持：${Object.keys(PROVIDERS).join("、")}`);
+      throw new Error(
+        `provider "${providerName}" 的 CLI 子类型 "${eff.subtype}" 暂不支持执行` +
+        `（CLI 类型支持：${Object.keys(CLI_PROVIDER_BY_SUBTYPE).join("、")}）`,
+      );
     }
     const provider = new ProviderClass(config as unknown as Record<string, unknown>);
     return new Agent(config.name, provider, config, "cli");
@@ -105,27 +168,27 @@ export function createAgent(config: AgentConfig): Agent {
  */
 async function createApiAgentLoop(config: AgentConfig, sandboxRoot: string): Promise<ApiAgentLoop> {
   const providerName = config.provider ?? "anthropic";
-  const providerCfg = loadProviders()[providerName];
+  const eff = resolveEffectiveProvider(providerName, config.mode);
 
-  const apiKey = await resolveApiKey(providerName, providerCfg?.env_key_name);
+  const apiKey = await resolveApiKey(providerName, eff.env_key_name);
   if (!apiKey) {
     throw new Error(
       `Provider "${providerName}" 的 API key 未配置。\n` +
       "请通过以下方式之一配置：\n" +
       `  1. autopilot key set ${providerName}\n` +
       `  2. 设置环境变量（参见文档）\n` +
-      `  3. Web UI → 设置 → API Keys`,
+      `  3. Web UI → 设置 → 提供商`,
     );
   }
 
-  // 创建适配器
-  const adapter = createProviderAdapter(providerName, apiKey, providerCfg);
+  // 创建适配器（按 subtype）
+  const adapter = createProviderAdapter(eff, apiKey);
   const toolExecutor = ToolExecutor.fromConfig(sandboxRoot, config.permission_mode);
 
   return new ApiAgentLoop({
     adapter,
     toolExecutor,
-    model: config.model ?? providerCfg?.default_model ?? "unknown",
+    model: config.model ?? eff.default_model ?? "unknown",
     systemPrompt: config.system_prompt,
     maxTurns: config.max_turns ?? 10,
     onStream: (delta) => {
@@ -136,31 +199,26 @@ async function createApiAgentLoop(config: AgentConfig, sandboxRoot: string): Pro
   });
 }
 
-function createProviderAdapter(
-  providerName: string,
-  apiKey: string,
-  providerCfg?: ProviderConfig,
-) {
-  const baseUrl = providerCfg?.base_url as string | undefined;
-
-  switch (providerName) {
+/** 按 provider 条目的 subtype 选 API 适配器。 */
+function createProviderAdapter(eff: EffectiveProvider, apiKey: string) {
+  const baseUrl = eff.base_url || undefined;
+  switch (eff.subtype) {
     case "anthropic":
-      return new AnthropicApiAdapter(apiKey, baseUrl || undefined);
+      return new AnthropicApiAdapter(apiKey, baseUrl);
     case "openai":
-      return new OpenAIApiAdapter(apiKey, baseUrl || undefined);
+      return new OpenAIApiAdapter(apiKey, baseUrl);
     case "google":
-      return new GoogleApiAdapter(apiKey, baseUrl || undefined);
+      return new GoogleApiAdapter(apiKey, baseUrl);
+    case "openai-compat":
     default: {
-      // compat provider（预置或自定义）
-      const preset = getCompatPreset(providerName);
-      const compatBaseUrl = baseUrl || preset?.base_url;
+      // compat：base_url 优先取条目，回退内置预置
+      const compatBaseUrl = baseUrl || getCompatPreset(eff.name)?.base_url;
       if (!compatBaseUrl) {
         throw new Error(
-          `自定义 provider "${providerName}" 需要在 config.yaml 中配置 base_url。\n` +
-          "示例：\n  providers:\n    " + providerName + ":\n      base_url: https://api.example.com/v1",
+          `provider "${eff.name}" 需要 base_url（在「设置 → 提供商」编辑该条目，或 config.yaml 配 base_url）。`,
         );
       }
-      return createCompatAdapter(apiKey, compatBaseUrl, providerName);
+      return createCompatAdapter(apiKey, compatBaseUrl, eff.name);
     }
   }
 }
@@ -200,18 +258,14 @@ export function agentForPhase(workflowName: string, phaseName: string): Agent {
   const provider = (merged["provider"] as string | undefined) ?? DEFAULT_AGENT.provider;
   merged["provider"] = provider;
 
-  // provider 层 fallback：没写 model 时用 providers.<provider>.default_model
-  const providerCfg = loadProviders()[provider];
-  if (!merged["model"]) {
-    if (providerCfg?.default_model) merged["model"] = providerCfg.default_model;
-  }
+  // 解析有效 provider（条目优先，无条目回退）：拿 type（mode）+ default_model
+  const eff = resolveEffectiveProvider(provider, merged["mode"] as AgentMode | undefined);
+  const mode = eff.type;
 
-  // 解析 mode（用于缓存 key 和 Agent 构建）
-  const mode = resolveMode(
-    merged["mode"] as AgentMode | undefined,
-    providerCfg,
-    provider,
-  );
+  // provider 层 fallback：没写 model 时用条目 / config 的 default_model
+  if (!merged["model"] && eff.default_model) {
+    merged["model"] = eff.default_model;
+  }
 
   // 缓存 key 含 mode，避免同一 phase 在 mode 变更后使用旧实例
   const cacheKey = `${workflowName}:@phase:${phaseName}:${mode}`;
