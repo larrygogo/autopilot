@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
 import { getApiToken, setApiToken, clearApiToken, shouldUseToken } from "@/lib/api-token";
 import { setRestarting } from "@/lib/ws-singleton";
+import { restartDaemonAndWait } from "@/lib/restart-daemon";
 
 // 保留 embedded 参数签名以兼容旧调用
 export function Settings({
@@ -36,6 +37,20 @@ export function Settings({
 
   const [status, setStatus] = useState<any>(null);
   const [configPath, setConfigPath] = useState<string | null>(null);
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const [restartingDaemon, setRestartingDaemon] = useState(false);
+
+  const handleRestartDaemon = async () => {
+    setConfirmRestart(false);
+    setRestartingDaemon(true);
+    try {
+      await restartDaemonAndWait(toast);
+      // 重启完拉新 status 刷新「Daemon 信息」卡（版本 / PID / 启动时间）
+      try { setStatus(await api.getStatus()); } catch { /* 容错 */ }
+    } finally {
+      setRestartingDaemon(false);
+    }
+  };
 
   useEffect(() => {
     if (section !== "general") return;
@@ -91,7 +106,19 @@ export function Settings({
       <div className="w-full">
         {status && (
           <Card className="mb-4 p-4">
-            <h3 className="mb-3 text-sm font-semibold">Daemon 信息</h3>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold">Daemon 信息</h3>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setConfirmRestart(true)}
+                disabled={restartingDaemon}
+                title="重启 daemon（拉取最新代码 / 配置生效）"
+              >
+                <RotateCw className={cn("h-4 w-4", restartingDaemon && "animate-spin")} />
+                {restartingDaemon ? "重启中…" : "重启 daemon"}
+              </Button>
+            </div>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
               <InfoField
                 label="版本"
@@ -105,8 +132,29 @@ export function Settings({
               />
               <InfoField label="端口" value={location.port || "80"} mono />
             </dl>
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              升级代码（<code className="bg-muted/40 px-1.5">git pull</code> + <code className="bg-muted/40 px-1.5">bun run build:web</code>）
+              或改 config.yaml 的 host/port 后重启生效。重启期间此页会短暂断开并自动重连。
+            </p>
           </Card>
         )}
+
+        <ConfirmDialog
+          open={confirmRestart}
+          title="重启 daemon"
+          message={
+            <div className="space-y-2 text-sm">
+              <p>将请求 supervisor 重启 daemon 进程。</p>
+              <p className="text-muted-foreground">
+                重启期间所有正在运行的任务不受影响（独立子进程），但此 Web 页面会短暂断开
+                约 1-2 秒并自动重连。裸跑模式（无 supervisor）下会退化为停止，需手动再起。
+              </p>
+            </div>
+          }
+          confirmText="重启"
+          onConfirm={handleRestartDaemon}
+          onCancel={() => setConfirmRestart(false)}
+        />
 
         <DaemonLogCard />
 
@@ -362,55 +410,14 @@ function NetworkAccessCard(): React.ReactElement {
         }
       }
       toast.success("已保存，正在重启 daemon…");
-      // 重启前先记下旧 git_sha，重启完拿新 sha 对比展示「代码切换」可视化
-      let prevSha: string | undefined;
-      try { prevSha = (await api.getStatus()).git_sha; } catch { /* 容错 */ }
-      try {
-        await api.restartDaemon();
-      } catch (e: unknown) {
-        // restart 调用本身失败（如 daemon 已退出未起完）— 提示手动 restart 兜底
-        toast.error("自动重启失败，请手动执行 `autopilot daemon restart`", (e as Error)?.message ?? String(e));
-        await refresh();
-        return res;
+      const fresh = await restartDaemonAndWait(toast);
+      if (fresh) {
+        setInfo(fresh);
+        setPortDraft(String(fresh.port));
+        if (next.host === "0.0.0.0" && fresh.lan_ips.length > 0) {
+          toast.success(`局域网访问：${fresh.lan_ips.map((ip) => `http://${ip}:${fresh.port}`).join(" / ")}`);
+        }
       }
-      // restart RPC 已发出，daemon 150ms 后 exit。锁定 WS RPC 防用户在重启
-      // 窗口期发出的 mutation 卡 5s 才反馈。轮询 getDaemonListen 走 HTTP 不
-      // 受此锁影响。
-      setRestarting(true);
-      // 轮询 getDaemonListen 等 WS 重连 + 新 daemon 起来；超时回退到刷新页面
-      const deadline = Date.now() + 15_000;
-      let recovered = false;
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 600));
-        try {
-          const fresh = await api.getDaemonListen();
-          setInfo(fresh);
-          setPortDraft(String(fresh.port));
-          // 拿新 daemon 的 git_sha，跟旧 sha 对比给一个明确的「切换信号」
-          let shaSuffix = "";
-          try {
-            const newStatus = await api.getStatus();
-            const newSha = newStatus.git_sha;
-            if (newSha && prevSha && newSha !== prevSha) {
-              shaSuffix = ` · git ${prevSha} → ${newSha}`;
-            } else if (newSha) {
-              shaSuffix = ` · git ${newSha}`;
-            }
-          } catch { /* 容错：拿不到 sha 不影响主流程 */ }
-          toast.success(`daemon 已重启，当前监听 ${fresh.host}:${fresh.port}${shaSuffix}`);
-          if (next.host === "0.0.0.0" && fresh.lan_ips.length > 0) {
-            toast.success(`局域网访问：${fresh.lan_ips.map((ip) => `http://${ip}:${fresh.port}`).join(" / ")}`);
-          }
-          recovered = true;
-          break;
-        } catch { /* 还在重启，继续等 */ }
-      }
-      if (!recovered) {
-        toast.error("daemon 重启等待超时，刷新页面尝试…");
-        setTimeout(() => location.reload(), 1000);
-      }
-      // 解锁 mutation：daemon 已稳定（或决定 reload 兜底）
-      setRestarting(false);
       return res;
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
