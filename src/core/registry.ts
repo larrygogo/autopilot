@@ -1452,11 +1452,36 @@ export interface WorkflowMetaInput {
   label?: string | null;
   /** 描述；null / 空串 = 删除该字段 */
   description?: string | null;
+  /**
+   * 声明层（v2 R5）输入闸门 requires.git：true（必须）/ "optional"（可选）/ false（不需要）
+   * 显式写键；null = 删键（回退缺省派生自 sandbox.git）。undefined = 不动。
+   */
+  requiresGit?: boolean | "optional" | null;
+  /**
+   * 声明层执行机制 sandbox.git：true = 建 git 沙盒（写键）；false / null = 不建（删键，
+   * 「不建」≡ 缺省，删键保持 yaml 干净、老副本零感知）。undefined = 不动。
+   */
+  sandboxGit?: boolean | null;
+  /**
+   * 声明层产出形态 delivers："pr" / "artifacts" 显式写；null / 空串 = 删键
+   * （回退运行时事实推断）。undefined = 不动。
+   */
+  delivers?: string | null;
 }
 
 /**
- * 在 yaml 原文上手术式修改 label / description（Document API，保留注释与其他段）。
- * 纯函数：file 来源与 db 来源（yaml_content 列）共用。
+ * 删除嵌套键后，若父 map 已空则一并删除（保持 yaml 不留 `requires: {}` 空壳）。
+ */
+function pruneEmptyMap(doc: ReturnType<typeof parseDocument>, key: string): void {
+  const node = doc.getIn([key]) as { items?: unknown[] } | undefined;
+  if (node && typeof node === "object" && Array.isArray(node.items) && node.items.length === 0) {
+    doc.deleteIn([key]);
+  }
+}
+
+/**
+ * 在 yaml 原文上手术式修改 label / description + 声明层（requires.git / sandbox.git /
+ * delivers）（Document API，保留注释与其他段）。纯函数：file 来源与 db 来源共用。
  */
 export function patchWorkflowMetaYaml(raw: string, meta: WorkflowMetaInput): string {
   const doc = parseDocument(raw);
@@ -1466,6 +1491,30 @@ export function patchWorkflowMetaYaml(raw: string, meta: WorkflowMetaInput): str
     const trimmed = typeof v === "string" ? v.trim() : v;
     if (trimmed === null || trimmed === "") doc.deleteIn([key]);
     else doc.setIn([key], trimmed);
+  }
+  // requires.git：显式值写键；null 删键 + 清空壳
+  if (meta.requiresGit !== undefined) {
+    if (meta.requiresGit === null) {
+      doc.deleteIn(["requires", "git"]);
+      pruneEmptyMap(doc, "requires");
+    } else {
+      doc.setIn(["requires", "git"], meta.requiresGit);
+    }
+  }
+  // sandbox.git：仅 true 写键；false / null 删键（不建 ≡ 缺省）
+  if (meta.sandboxGit !== undefined) {
+    if (meta.sandboxGit === true) {
+      doc.setIn(["sandbox", "git"], true);
+    } else {
+      doc.deleteIn(["sandbox", "git"]);
+      pruneEmptyMap(doc, "sandbox");
+    }
+  }
+  // delivers：顶层字段
+  if (meta.delivers !== undefined) {
+    const d = typeof meta.delivers === "string" ? meta.delivers.trim() : meta.delivers;
+    if (d === null || d === "") doc.deleteIn(["delivers"]);
+    else doc.setIn(["delivers"], d);
   }
   return doc.toString();
 }

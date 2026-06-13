@@ -405,8 +405,19 @@ export const api = {
   saveWorkflowYaml: (name: string, yaml: string) =>
     requestRpc<{ ok: boolean }>("workflows.saveYaml", { name, yaml }),
   // [WS-RPC] workflows.setMeta —— 改显示名/描述（name 是标识符不可改）
-  setWorkflowMeta: (name: string, meta: { label?: string | null; description?: string | null }) =>
-    requestRpc<{ ok: boolean }>("workflows.setMeta", { name, ...meta }),
+  setWorkflowMeta: (
+    name: string,
+    meta: {
+      label?: string | null;
+      description?: string | null;
+      /** 声明层 requires.git：true/false/"optional" 显式；null = 删键回退派生 */
+      requiresGit?: boolean | "optional" | null;
+      /** 声明层 sandbox.git：true 建沙盒；false/null 删键（不建≡缺省） */
+      sandboxGit?: boolean | null;
+      /** 声明层 delivers："pr"/"artifacts"；null = 删键回退事实推断 */
+      delivers?: string | null;
+    },
+  ) => requestRpc<{ ok: boolean }>("workflows.setMeta", { name, ...meta }),
   reloadWorkflows: () =>
     request<{ ok: boolean; workflows: any[] }>("/api/reload", { method: "POST" }),
 

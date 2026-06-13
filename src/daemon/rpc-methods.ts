@@ -945,7 +945,7 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "workflows.setMeta",
-    description: "修改工作流显示名 / 描述（name 是标识符与引用键，不可改）",
+    description: "修改工作流显示名 / 描述 + 声明层（requiresGit / sandboxGit / delivers）；name 是标识符与引用键，不可改",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
@@ -962,8 +962,33 @@ export function registerCoreRpcMethods(): void {
         }
         meta.description = p.description as string | null;
       }
-      if (meta.label === undefined && meta.description === undefined) {
-        throw new RpcError("INVALID_PARAM", "至少提供 label / description 之一");
+      // 声明层（v2 R5）：requiresGit / sandboxGit / delivers
+      if ("requiresGit" in p) {
+        const v = p.requiresGit;
+        if (v !== null && v !== true && v !== false && v !== "optional") {
+          throw new RpcError("INVALID_PARAM", "requiresGit 需为 true / false / \"optional\" / null");
+        }
+        meta.requiresGit = v as boolean | "optional" | null;
+      }
+      if ("sandboxGit" in p) {
+        const v = p.sandboxGit;
+        if (v !== null && typeof v !== "boolean") {
+          throw new RpcError("INVALID_PARAM", "sandboxGit 需为 boolean 或 null");
+        }
+        meta.sandboxGit = v as boolean | null;
+      }
+      if ("delivers" in p) {
+        const v = p.delivers;
+        if (v !== null && v !== "pr" && v !== "artifacts" && v !== "") {
+          throw new RpcError("INVALID_PARAM", "delivers 需为 \"pr\" / \"artifacts\" / null");
+        }
+        meta.delivers = v as string | null;
+      }
+      if (
+        meta.label === undefined && meta.description === undefined &&
+        meta.requiresGit === undefined && meta.sandboxGit === undefined && meta.delivers === undefined
+      ) {
+        throw new RpcError("INVALID_PARAM", "至少提供 label / description / requiresGit / sandboxGit / delivers 之一");
       }
       if (!registryGetWorkflow(p.name)) throw new RpcError("NOT_FOUND", "Workflow not found");
       const row = getWorkflowFromDb(p.name);
