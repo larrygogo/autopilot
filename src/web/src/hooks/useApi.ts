@@ -441,6 +441,35 @@ export const api = {
   // [WS-RPC] providers.setDefaultModel — 字段级写默认模型（官方 + compat），merge-safe
   setProviderDefaultModel: (name: string, model?: string) =>
     requestRpc<{ ok: boolean }>("providers.setDefaultModel", { name, model }),
+  // ── provider 条目 CRUD（条目化重构 P1）──
+  // [WS-RPC] providers.create
+  createProvider: (input: {
+    name: string;
+    display_name?: string;
+    type: "cli" | "api";
+    subtype: string;
+    cli_bin?: string | null;
+    cli_login_cmd?: string | null;
+    base_url?: string | null;
+    env_key_name?: string | null;
+    default_model?: string | null;
+    origin?: "template" | "user";
+  }) => requestRpc<{ provider: ProviderExtendedInfo }>("providers.create", input),
+  // [WS-RPC] providers.update
+  updateProvider: (
+    id: string,
+    patch: { display_name?: string; base_url?: string | null; env_key_name?: string | null; default_model?: string | null; enabled?: boolean },
+  ) => requestRpc<{ provider: ProviderExtendedInfo }>("providers.update", { id, ...patch }),
+  // [WS-RPC] providers.delete
+  deleteProvider: (id: string, force?: boolean) =>
+    requestRpc<{ ok: boolean }>("providers.delete", { id, force }),
+  // [WS-RPC] providers.templates
+  listProviderTemplates: () => requestRpc<ProviderTemplate[]>("providers.templates"),
+  // [WS-RPC] providers.detectCli
+  detectProviderCli: (id: string) =>
+    requestRpc<{ status: "ok" | "missing" | "unknown"; version?: string; install_hint?: string; error?: string }>(
+      "providers.detectCli", { id },
+    ),
 
   // API Keys
   listApiKeys: () => requestRpc<ApiKeyInfo[]>("apiKeys.list"),
@@ -1182,8 +1211,18 @@ export interface ApiKeyInfo {
 }
 
 export interface ProviderExtendedInfo {
+  // provider 条目字段（条目化重构）
+  id?: string;
   name: string;
   display_name: string;
+  type?: "cli" | "api";
+  subtype?: string;
+  enabled?: boolean;
+  origin?: "seed" | "template" | "user";
+  cli_status?: "ok" | "missing" | "unknown" | null;
+  cli_version?: string | null;
+  env_key_name?: string;
+  // 旧 shape 兼容
   supports_cli: boolean;
   supports_api: boolean;
   api_only: boolean;
@@ -1193,4 +1232,14 @@ export interface ProviderExtendedInfo {
   key_hint?: string;
   key_source?: "db" | "env";
   base_url?: string;
+}
+
+export interface ProviderTemplate {
+  name: string;
+  display_name: string;
+  type: "api";
+  subtype: "openai-compat";
+  base_url: string;
+  default_model: string;
+  env_key_name: string;
 }

@@ -5,7 +5,7 @@ import { homedir } from "os";
 import { join, sep } from "path";
 import { parse as parseYaml, parseDocument, type Document } from "yaml";
 import { tryMakePromptRunnerForPhase } from "./prompt-runner";
-import type { InlineAgentConfig } from "./agent-defaults";
+import { DEFAULT_AGENT, type InlineAgentConfig } from "./agent-defaults";
 import {
   syncFileWorkflowsToDb,
   listWorkflowsInDb,
@@ -1005,6 +1005,38 @@ export function listWorkflows(): {
       requires_git: getWorkflowGitRequirement(wf),
       delivers: wf.delivers,
     }));
+}
+
+/**
+ * 反查引用了某 provider 的工作流（provider 条目化：删除守卫 + 「无法使用」标记用）。
+ *
+ * 「引用」= phase.agent.provider === name，**或** phase 无显式 agent.provider 时隐式
+ * 引用 DEFAULT_AGENT.provider（删默认 provider 会让所有未指定的 phase 失效）。
+ * 遍历全部已注册工作流（含 __ 内置），处理 parallel 子阶段。
+ */
+export function listWorkflowsUsingProvider(providerName: string): { workflow: string; phases: string[] }[] {
+  const out: { workflow: string; phases: string[] }[] = [];
+  const effProviderOf = (ph: PhaseDefinition): string => {
+    const ag = ph.agent;
+    if (ag && typeof ag === "object" && typeof (ag as { provider?: unknown }).provider === "string") {
+      return (ag as { provider: string }).provider;
+    }
+    return DEFAULT_AGENT.provider; // 无显式 provider → 隐式引用默认
+  };
+  for (const wf of _registry.values()) {
+    const hits: string[] = [];
+    for (const phase of wf.phases) {
+      if (isParallelPhase(phase)) {
+        for (const sub of phase.parallel.phases) {
+          if (effProviderOf(sub) === providerName) hits.push(sub.name);
+        }
+      } else if (effProviderOf(phase as PhaseDefinition) === providerName) {
+        hits.push((phase as PhaseDefinition).name);
+      }
+    }
+    if (hits.length > 0) out.push({ workflow: wf.name, phases: hits });
+  }
+  return out;
 }
 
 /**

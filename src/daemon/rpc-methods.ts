@@ -45,7 +45,7 @@ import {
   listTaskRepos,
 } from "../core/sandbox";
 import { setKv, getDb } from "../core/db";
-import { discover as registryDiscover, getWorkflow as registryGetWorkflow } from "../core/registry";
+import { discover as registryDiscover, getWorkflow as registryGetWorkflow, listWorkflowsUsingProvider } from "../core/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
 import {
@@ -116,8 +116,6 @@ import {
   loadProviders,
   loadConfigRaw,
   PROVIDER_NAMES,
-  saveProvider,
-  setProviderDefaultModel,
   type ProviderName,
 } from "../core/config";
 import {
@@ -128,7 +126,17 @@ import {
   maskApiKey,
 } from "../core/api-keys";
 import { BUILTIN_COMPAT_PROVIDERS } from "../agents/providers/api/compat";
-import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
+import { detectProviderCli, detectAllProviders, probeCli } from "../agents/cli-status";
+import {
+  listProviders as listProviderEntries,
+  getProviderById,
+  getProviderByName as getProviderEntryByName,
+  createProvider,
+  updateProvider,
+  deleteProvider,
+  setProviderCliStatus,
+  type ProviderType,
+} from "../core/providers";
 import { listProviderModels } from "../agents/model-list";
 import { createAgent } from "../agents/registry";
 import { DEFAULT_AGENT } from "../core/agent-defaults";
@@ -343,14 +351,13 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "providers.list",
-    description: "返回三个内置 provider 的配置（agent_count 恒为 0：命名复用 agent 机制已移除，保留字段仅为 Web shape 兼容）",
+    description: "provider 条目列表（ProviderItem 兼容 shape：name/enabled/default_model/agent_count）",
     handler: () => {
-      const providers = loadProviders();
-      return PROVIDER_NAMES.map((name) => ({
-        name,
-        ...providers[name],
-        // 命名复用 agent 已移除；保留 agent_count 字段（恒 0）兼容 Web 旧 shape
-        agent_count: 0,
+      return listProviderEntries().map((p) => ({
+        name: p.name,
+        enabled: p.enabled !== 0,
+        default_model: p.default_model ?? undefined,
+        agent_count: 0, // 命名复用 agent 已移除；保留字段兼容旧 shape
       }));
     },
   });
@@ -1506,17 +1513,18 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "providers.save",
-    description: "保存 provider 配置 + emit config:updated",
+    description: "保存 provider 条目配置（enabled / default_model / base_url，按 name 找条目 update）+ emit config:updated",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      if (!(PROVIDER_NAMES as readonly string[]).includes(p.name)) {
-        throw new RpcError("INVALID_PARAM", `未知 provider：${p.name}`);
-      }
-      // 其他字段（除 name）都是 provider config，整体保存
-      const { name: _n, ...cfg } = p;
+      const entry = getProviderEntryByName(p.name);
+      if (!entry) throw new RpcError("NOT_FOUND", `provider 条目不存在：${p.name}`);
       try {
-        saveProvider(p.name as ProviderName, cfg);
+        updateProvider(entry.id, {
+          enabled: typeof p.enabled === "boolean" ? p.enabled : undefined,
+          default_model: typeof p.default_model === "string" ? p.default_model : undefined,
+          base_url: typeof p.base_url === "string" ? p.base_url : undefined,
+        });
         emitBus({ type: "config:updated", payload: {} });
         return { ok: true };
       } catch (e: unknown) {
@@ -1527,20 +1535,15 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "providers.setDefaultModel",
-    description: "字段级设置某 provider 的默认模型（merge-safe，支持官方 + compat 供应商）",
+    description: "字段级设置某 provider 条目的默认模型（按 name 找条目 update）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      // 权威白名单：官方 ∪ 内置 compat 预置 ∪ config 已有 provider（core 不持有此集合，留在能 import compat 的 RPC 层）
-      const known = new Set<string>([
-        ...PROVIDER_NAMES,
-        ...Object.keys(BUILTIN_COMPAT_PROVIDERS),
-        ...Object.keys(loadProviders()),
-      ]);
-      if (!known.has(p.name)) throw new RpcError("INVALID_PARAM", `未知 provider：${p.name}`);
-      const model = typeof p.model === "string" ? p.model : undefined;
+      const entry = getProviderEntryByName(p.name);
+      if (!entry) throw new RpcError("NOT_FOUND", `provider 条目不存在：${p.name}`);
+      const model = typeof p.model === "string" && p.model.trim() ? p.model.trim() : null;
       try {
-        setProviderDefaultModel(p.name, model);
+        updateProvider(entry.id, { default_model: model });
         emitBus({ type: "config:updated", payload: {} });
         return { ok: true };
       } catch (e: unknown) {
@@ -1747,11 +1750,17 @@ export function registerCoreRpcMethods(): void {
       if (!p.providers || typeof p.providers !== "object" || Array.isArray(p.providers)) {
         throw new RpcError("INVALID_PARAM", "providers must be an object");
       }
+      // 条目化后写 providers 条目（按 name 找种子条目 update）而非 config.yaml
       for (const [name, cfg] of Object.entries(p.providers as Record<string, unknown>)) {
         if (!(PROVIDER_NAMES as readonly string[]).includes(name)) continue;
-        if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
-          saveProvider(name as ProviderName, cfg as Record<string, unknown>);
-        }
+        if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
+        const c = cfg as Record<string, unknown>;
+        const entry = getProviderEntryByName(name);
+        if (!entry) continue;
+        updateProvider(entry.id, {
+          enabled: typeof c.enabled === "boolean" ? c.enabled : undefined,
+          default_model: typeof c.default_model === "string" ? c.default_model : undefined,
+        });
       }
       return { report: await runChecks({ level: 1 }) };
     },
@@ -2459,18 +2468,14 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
-  // ── 扩展 providers.list，补充 API 模式信息 ──
+  // ── providers.listExtended：provider 条目 + API key 状态富集（条目化后表后端） ──
 
   registerRpcMethod({
     method: "providers.listExtended",
-    description: "返回所有 provider 的完整信息（含 API key 状态、compat 供应商）",
+    description: "provider 条目完整信息：条目字段（id/type/subtype/enabled/origin）+ API key 状态 + 旧 shape 兼容（supports_cli/api_only/default_mode）",
     handler: () => {
-      const providers = loadProviders();
       const apiKeys = listApiKeys();
       const keyMap = new Map(apiKeys.map((k) => [k.provider, k]));
-
-      // listApiKeys() 的 env 补齐只覆盖内置 ENV_KEY_MAP；自定义 provider
-      // （或配置了 env_key_name 的）需要额外检查环境变量回落，避免 UI 误标"未配置"
       const envFallback = (
         provider: string,
         customEnvKeyName?: string,
@@ -2479,67 +2484,149 @@ export function registerCoreRpcMethods(): void {
         return envValue ? { key_hint: maskApiKey(envValue), source: "env" } : undefined;
       };
 
-      const result: Array<Record<string, unknown>> = [];
-
-      // 三大内置 provider
-      for (const name of PROVIDER_NAMES) {
-        const cfg = providers[name] || {};
-        const keyInfo = keyMap.get(name);
-        result.push({
-          name,
-          display_name: name.charAt(0).toUpperCase() + name.slice(1),
-          supports_cli: true,
-          supports_api: true,
-          api_only: false,
-          default_mode: cfg.mode || "cli",
-          default_model: cfg.default_model,
+      return listProviderEntries().map((p) => {
+        const isCli = p.type === "cli";
+        // API key 状态只对 api 类型有意义
+        const keyInfo = isCli ? undefined : (keyMap.get(p.name) || envFallback(p.name, p.env_key_name ?? undefined));
+        return {
+          // 条目字段（新）
+          id: p.id,
+          name: p.name,
+          display_name: p.display_name,
+          type: p.type,
+          subtype: p.subtype,
+          enabled: p.enabled !== 0,
+          origin: p.origin,
+          cli_status: p.cli_status,
+          cli_version: p.cli_version,
+          base_url: p.base_url ?? undefined,
+          env_key_name: p.env_key_name ?? undefined,
+          default_model: p.default_model ?? undefined,
+          // 旧 shape 兼容（PhaseAgentEditor / 过渡期提供商页 / Setup）
+          supports_cli: isCli,
+          supports_api: !isCli,
+          api_only: !isCli,
+          default_mode: p.type,
           has_api_key: !!keyInfo,
           key_hint: keyInfo?.key_hint,
           key_source: keyInfo?.source,
-          base_url: cfg.base_url,
-        });
-      }
+        };
+      });
+    },
+  });
 
-      // 预置 compat 供应商
-      for (const [name, preset] of Object.entries(BUILTIN_COMPAT_PROVIDERS)) {
-        const cfg = providers[name] || {};
-        const keyInfo = keyMap.get(name) || envFallback(name, cfg.env_key_name);
-        result.push({
+  // ── provider 条目 CRUD（条目化重构 P1） ──
+
+  registerRpcMethod({
+    method: "providers.create",
+    description: "新建 provider 条目（type=cli 时探测本地 CLI 落 cli_status）",
+    handler: async (params) => {
+      const p = asObj(params);
+      const name = typeof p.name === "string" ? p.name.trim() : "";
+      const type = p.type as ProviderType;
+      const subtype = typeof p.subtype === "string" ? p.subtype.trim() : "";
+      if (!name) throw new RpcError("INVALID_PARAM", "需要 name");
+      if (type !== "cli" && type !== "api") throw new RpcError("INVALID_PARAM", "type 需为 cli / api");
+      if (!subtype) throw new RpcError("INVALID_PARAM", "需要 subtype");
+      try {
+        const entry = createProvider({
           name,
-          display_name: preset.display_name,
-          supports_cli: false,
-          supports_api: true,
-          api_only: true,
-          default_mode: "api",
-          default_model: cfg.default_model || preset.default_model,
-          has_api_key: !!keyInfo,
-          key_hint: keyInfo?.key_hint,
-          key_source: keyInfo?.source,
-          base_url: cfg.base_url || preset.base_url,
+          display_name: typeof p.display_name === "string" && p.display_name.trim() ? p.display_name.trim() : name,
+          type,
+          subtype,
+          cli_bin: typeof p.cli_bin === "string" ? p.cli_bin : null,
+          cli_login_cmd: typeof p.cli_login_cmd === "string" ? p.cli_login_cmd : null,
+          base_url: typeof p.base_url === "string" ? p.base_url : null,
+          env_key_name: typeof p.env_key_name === "string" ? p.env_key_name : null,
+          default_model: typeof p.default_model === "string" ? p.default_model : null,
+          origin: p.origin === "template" ? "template" : "user",
         });
+        // CLI 类型：添加时探测本地可用性落库
+        if (type === "cli") {
+          const probe = await probeCli(subtype, entry.cli_bin ?? undefined);
+          setProviderCliStatus(entry.id, probe.status, probe.version ?? null);
+        }
+        emitBus({ type: "config:updated", payload: {} });
+        return { provider: getProviderById(entry.id) };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
       }
+    },
+  });
 
-      // 用户自定义 compat provider（不在内置列表中的）
-      for (const [name, cfg] of Object.entries(providers)) {
-        if (PROVIDER_NAMES.includes(name as ProviderName)) continue;
-        if (name in BUILTIN_COMPAT_PROVIDERS) continue;
-        const keyInfo = keyMap.get(name) || envFallback(name, cfg.env_key_name);
-        result.push({
-          name,
-          display_name: name,
-          supports_cli: false,
-          supports_api: true,
-          api_only: true,
-          default_mode: "api",
-          default_model: cfg.default_model,
-          has_api_key: !!keyInfo,
-          key_hint: keyInfo?.key_hint,
-          key_source: keyInfo?.source,
-          base_url: cfg.base_url,
+  registerRpcMethod({
+    method: "providers.update",
+    description: "更新 provider 条目（display_name / default_model / base_url / env_key_name / enabled）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getProviderById(p.id)) throw new RpcError("NOT_FOUND", `provider 条目不存在：${p.id}`);
+      try {
+        const updated = updateProvider(p.id, {
+          display_name: typeof p.display_name === "string" ? p.display_name : undefined,
+          base_url: p.base_url === null || typeof p.base_url === "string" ? (p.base_url as string | null) : undefined,
+          env_key_name: p.env_key_name === null || typeof p.env_key_name === "string" ? (p.env_key_name as string | null) : undefined,
+          default_model: p.default_model === null || typeof p.default_model === "string" ? (p.default_model as string | null) : undefined,
+          enabled: typeof p.enabled === "boolean" ? p.enabled : undefined,
         });
+        emitBus({ type: "config:updated", payload: {} });
+        return { provider: updated };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
       }
+    },
+  });
 
-      return result;
+  registerRpcMethod({
+    method: "providers.delete",
+    description: "删除 provider 条目（P1：硬删 + 有工作流引用则拒删；软删降级 P2）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const entry = getProviderById(p.id);
+      if (!entry) throw new RpcError("NOT_FOUND", `provider 条目不存在：${p.id}`);
+      // P1 引用守卫：被工作流引用则拒删（软删降级留 P2）
+      const refs = listWorkflowsUsingProvider(entry.name);
+      if (refs.length > 0 && !p.force) {
+        const names = refs.map((r) => r.workflow).join("、");
+        throw new RpcError("PRECONDITION_FAILED",
+          `provider「${entry.name}」被工作流引用（${names}），删除会让这些工作流无法使用。` +
+          `请先改这些工作流的 provider，或传 force 强删。`);
+      }
+      deleteProvider(p.id);
+      emitBus({ type: "config:updated", payload: {} });
+      return { ok: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.templates",
+    description: "可一键添加的 compat 模板（DeepSeek/Kimi/MiniMax 内置预置，预填 base_url + 建议模型）",
+    handler: () => {
+      return Object.entries(BUILTIN_COMPAT_PROVIDERS).map(([name, preset]) => ({
+        name,
+        display_name: preset.display_name,
+        type: "api" as const,
+        subtype: "openai-compat" as const,
+        base_url: preset.base_url,
+        default_model: preset.default_model,
+        env_key_name: preset.env_key,
+      }));
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.detectCli",
+    description: "重新探测某 cli 条目的本地可用性，落 cli_status",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const entry = getProviderById(p.id);
+      if (!entry) throw new RpcError("NOT_FOUND", `provider 条目不存在：${p.id}`);
+      if (entry.type !== "cli") throw new RpcError("INVALID_PARAM", "仅 cli 类型条目可探测");
+      const probe = await probeCli(entry.subtype, entry.cli_bin ?? undefined);
+      setProviderCliStatus(entry.id, probe.status, probe.version ?? null);
+      return { status: probe.status, version: probe.version, install_hint: probe.install_hint, error: probe.error };
     },
   });
 }
