@@ -29,13 +29,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/Modal";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +37,26 @@ const CLI_SUBTYPES: { value: string; label: string; login: string }[] = [
   { value: "claude", label: "Claude（Anthropic）", login: "claude login" },
   { value: "codex", label: "Codex（OpenAI）", login: "codex login" },
   { value: "gemini", label: "Gemini（Google）", login: "gemini auth login" },
+];
+
+// 已知供应商目录：添加时从这里选，name/display/subtype 自动派生（不让用户手填）。
+// 同一供应商（按 name）只能加一次。官方三家 CLI 与 API 作为两个独立可加项。
+interface CatalogItem {
+  name: string;
+  display_name: string;
+  type: "cli" | "api";
+  subtype: string;
+  login?: string;
+}
+const CLI_CATALOG: CatalogItem[] = [
+  { name: "anthropic", display_name: "Anthropic (Claude)", type: "cli", subtype: "claude", login: "claude login" },
+  { name: "openai", display_name: "OpenAI (Codex)", type: "cli", subtype: "codex", login: "codex login" },
+  { name: "google", display_name: "Google (Gemini)", type: "cli", subtype: "gemini", login: "gemini auth login" },
+];
+const API_OFFICIAL_CATALOG: CatalogItem[] = [
+  { name: "anthropic-api", display_name: "Anthropic API", type: "api", subtype: "anthropic" },
+  { name: "openai-api", display_name: "OpenAI API", type: "api", subtype: "openai" },
+  { name: "google-api", display_name: "Google API", type: "api", subtype: "google" },
 ];
 
 /**
@@ -457,7 +470,7 @@ function ApiStatusBadge({ hasKey, enabled }: { hasKey: boolean; enabled: boolean
   return <Badge variant="warning" className="gap-1"><AlertTriangle className="h-3 w-3" />未配置</Badge>;
 }
 
-// ── 添加供应商对话框 ──
+// ── 添加供应商对话框（目录选择式：不手填名字，已加的置灰，同一供应商只能加一次）──
 function AddProviderDialog({
   open,
   templates,
@@ -472,65 +485,87 @@ function AddProviderDialog({
   onCreated: () => void;
 }) {
   const toast = useToast();
-  const [type, setType] = useState<"cli" | "api">("cli");
-  const [cliSubtype, setCliSubtype] = useState("claude");
-  const [templateName, setTemplateName] = useState("__custom__");
-  const [name, setName] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [defaultModel, setDefaultModel] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [adding, setAdding] = useState<string | null>(null);
+  // 自定义端点子表单
+  const [customOpen, setCustomOpen] = useState(false);
+  const [cName, setCName] = useState("");
+  const [cBaseUrl, setCBaseUrl] = useState("");
+  const [cModel, setCModel] = useState("");
 
   useEffect(() => {
-    if (open) {
-      setType("cli"); setCliSubtype("claude"); setTemplateName("__custom__");
-      setName(""); setDisplayName(""); setBaseUrl(""); setDefaultModel("");
-    }
+    if (open) { setAdding(null); setCustomOpen(false); setCName(""); setCBaseUrl(""); setCModel(""); }
   }, [open]);
 
-  // 选模板 → 预填
-  const applyTemplate = (tn: string) => {
-    setTemplateName(tn);
-    if (tn === "__custom__") { setName(""); setDisplayName(""); setBaseUrl(""); setDefaultModel(""); return; }
-    const t = templates.find((x) => x.name === tn);
-    if (t) { setName(t.name); setDisplayName(t.display_name); setBaseUrl(t.base_url); setDefaultModel(t.default_model); }
-  };
+  // compat 模板归入 API 组（base_url/model 预填）
+  const apiCatalog: CatalogItem[] = [
+    ...API_OFFICIAL_CATALOG,
+    ...templates.map((t) => ({ name: t.name, display_name: t.display_name, type: "api" as const, subtype: "openai-compat" })),
+  ];
 
-  const effName = type === "cli" ? (name.trim() || cliSubtype) : name.trim();
-  const nameTaken = existingNames.includes(effName);
-
-  const create = async () => {
-    if (!effName) { toast.error("需要标识名"); return; }
-    if (nameTaken) { toast.error(`名称已存在：${effName}`); return; }
-    setSaving(true);
+  const addCatalog = async (item: CatalogItem) => {
+    setAdding(item.name);
     try {
-      if (type === "cli") {
-        await api.createProvider({
-          name: effName,
-          display_name: displayName.trim() || CLI_SUBTYPES.find((s) => s.value === cliSubtype)?.label || effName,
-          type: "cli",
-          subtype: cliSubtype,
-          cli_login_cmd: CLI_SUBTYPES.find((s) => s.value === cliSubtype)?.login,
-          default_model: defaultModel.trim() || null,
-        });
-      } else {
-        await api.createProvider({
-          name: effName,
-          display_name: displayName.trim() || effName,
-          type: "api",
-          subtype: "openai-compat",
-          base_url: baseUrl.trim() || null,
-          default_model: defaultModel.trim() || null,
-          origin: templateName !== "__custom__" ? "template" : "user",
-        });
-      }
-      toast.success(`已添加 ${effName}`);
+      const tpl = templates.find((t) => t.name === item.name);
+      await api.createProvider({
+        name: item.name,
+        display_name: item.display_name,
+        type: item.type,
+        subtype: item.subtype,
+        cli_login_cmd: item.login ?? null,
+        base_url: tpl?.base_url ?? null,
+        default_model: tpl?.default_model ?? null,
+        origin: tpl ? "template" : "user",
+      });
+      toast.success(`已添加 ${item.display_name}`);
       onCreated();
     } catch (e: unknown) {
       toast.error("添加失败", (e as Error)?.message ?? String(e));
     } finally {
-      setSaving(false);
+      setAdding(null);
     }
+  };
+
+  const addCustom = async () => {
+    const name = cName.trim();
+    if (!name) { toast.error("需要标识名"); return; }
+    if (existingNames.includes(name)) { toast.error(`名称已存在：${name}`); return; }
+    setAdding(name);
+    try {
+      await api.createProvider({
+        name,
+        display_name: name,
+        type: "api",
+        subtype: "openai-compat",
+        base_url: cBaseUrl.trim() || null,
+        default_model: cModel.trim() || null,
+        origin: "user",
+      });
+      toast.success(`已添加 ${name}`);
+      onCreated();
+    } catch (e: unknown) {
+      toast.error("添加失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setAdding(null);
+    }
+  };
+
+  const Row = ({ item }: { item: CatalogItem }) => {
+    const added = existingNames.includes(item.name);
+    return (
+      <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+        <div className="flex items-center gap-2 text-sm">
+          <span>{item.display_name}</span>
+          <code className="font-mono text-[10px] text-muted-foreground">{item.name}</code>
+        </div>
+        {added ? (
+          <span className="text-xs text-muted-foreground">已添加</span>
+        ) : (
+          <Button size="sm" variant="outline" className="h-7 text-xs" disabled={adding === item.name} onClick={() => addCatalog(item)}>
+            <Plus className="mr-1 h-3 w-3" />{adding === item.name ? "添加中…" : "添加"}
+          </Button>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -538,72 +573,50 @@ function AddProviderDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>添加供应商</DialogTitle>
-          <DialogDescription>CLI 用本地 CLI 子进程跑（凭证 CLI 自管）；API 直连 HTTP（需密钥）。</DialogDescription>
+          <DialogDescription>选一个供应商即加，名字自动；同一个只能加一次。CLI 凭本地 CLI、API 凭密钥。</DialogDescription>
         </DialogHeader>
-        <div className="space-y-3 py-1">
-          <div className="space-y-1.5">
-            <Label>类型</Label>
-            <Select value={type} onValueChange={(v) => setType(v as "cli" | "api")}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="cli">CLI · 本地子进程</SelectItem>
-                <SelectItem value="api">API · 直连</SelectItem>
-              </SelectContent>
-            </Select>
+        <div className="max-h-[60vh] space-y-4 overflow-y-auto py-1 pr-1">
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-muted-foreground">CLI（本地子进程，凭证 CLI 自管）</h4>
+            {CLI_CATALOG.map((item) => <Row key={item.name} item={item} />)}
           </div>
-
-          {type === "cli" ? (
-            <div className="space-y-1.5">
-              <Label>CLI</Label>
-              <Select value={cliSubtype} onValueChange={setCliSubtype}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {CLI_SUBTYPES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-[10px] text-muted-foreground">添加后自动探测本地是否安装；未装会标「本地不支持」。</p>
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              <Label>模板</Label>
-              <Select value={templateName} onValueChange={applyTemplate}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__custom__">自定义端点</SelectItem>
-                  {templates.map((t) => <SelectItem key={t.name} value={t.name}>{t.display_name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <Label htmlFor="prov-name">标识名（工作流引用键）</Label>
-            <Input id="prov-name" value={name} onChange={(e) => setName(e.target.value)}
-              placeholder={type === "cli" ? cliSubtype : "如 deepseek"} className="font-mono" />
-            {nameTaken && <p className="text-[10px] text-destructive">名称已存在：{effName}</p>}
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-muted-foreground">API（直连 HTTP，需密钥）</h4>
+            {apiCatalog.map((item) => <Row key={item.name} item={item} />)}
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="prov-display">显示名（可选）</Label>
-            <Input id="prov-display" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="留空用标识/CLI 名" />
-          </div>
-
-          {type === "api" && (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="prov-baseurl">Base URL</Label>
-                <Input id="prov-baseurl" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" className="font-mono" />
+          <div className="space-y-2">
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setCustomOpen((v) => !v)}
+            >
+              {customOpen ? "▾ " : "▸ "}自定义 API 端点（自建 / 小众 OpenAI 兼容服务）
+            </button>
+            {customOpen && (
+              <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="c-name" className="text-[10px]">标识名</Label>
+                  <Input id="c-name" value={cName} onChange={(e) => setCName(e.target.value)} placeholder="如 my-llm" className="h-8 font-mono text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="c-url" className="text-[10px]">Base URL</Label>
+                  <Input id="c-url" value={cBaseUrl} onChange={(e) => setCBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" className="h-8 font-mono text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="c-model" className="text-[10px]">默认模型（可选）</Label>
+                  <Input id="c-model" value={cModel} onChange={(e) => setCModel(e.target.value)} placeholder="留空走兜底" className="h-8 font-mono text-sm" />
+                </div>
+                <div className="flex justify-end">
+                  <Button size="sm" className="h-7 text-xs" disabled={!cName.trim() || adding === cName.trim()} onClick={addCustom}>
+                    添加自定义
+                  </Button>
+                </div>
               </div>
-              <p className="text-[10px] text-muted-foreground">保存后在卡片上「添加密钥」。</p>
-            </>
-          )}
-          <div className="space-y-1.5">
-            <Label htmlFor="prov-model">默认模型（可选）</Label>
-            <Input id="prov-model" value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} placeholder="留空走兜底" className="font-mono" />
+            )}
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button onClick={create} disabled={saving || !effName || nameTaken}>{saving ? "添加中…" : "添加"}</Button>
+          <Button variant="outline" onClick={onClose}>关闭</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
