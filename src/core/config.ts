@@ -328,6 +328,28 @@ export function saveProvider(name: ProviderName, cfg: ProviderConfig): void {
   writeDocument(doc);
 }
 
+const PROVIDER_NAME_RE = /^[a-z0-9_-]+$/i;
+
+/**
+ * 字段级写入某 provider 的 default_model（merge-safe：只动 default_model 单键，
+ * 保留 base_url / env_key_name 等兄弟字段与 YAML 注释）。服务任意已注册 provider
+ * （官方 + compat），故只做格式校验，业务白名单（哪些名合法）由调用方/RPC 层把关。
+ * model 为空 = 删字段回退到预置默认。
+ */
+export function setProviderDefaultModel(name: string, model?: string): void {
+  if (!name || !PROVIDER_NAME_RE.test(name)) {
+    throw new Error(`非法 provider 名：${name}`);
+  }
+  const doc = loadDocument();
+  const trimmed = model?.trim();
+  if (trimmed) {
+    doc.setIn(["providers", name, "default_model"], trimmed);
+  } else {
+    doc.deleteIn(["providers", name, "default_model"]);
+  }
+  writeDocument(doc);
+}
+
 // ──────────────────────────────────────────────
 // git 凭据配置
 // ──────────────────────────────────────────────

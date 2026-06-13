@@ -66,6 +66,8 @@ function commentsToFeedbacks(all: Comment[]): RequirementFeedback[] {
  */
 export interface InlineAgentConfig {
   provider?: string;
+  /** 执行模式：cli（子进程，官方凭证）/ api（直连，内置工具）；省略走 resolveMode 派生 */
+  mode?: "cli" | "api";
   model?: string;
   max_turns?: number;
   permission_mode?: string;
@@ -436,6 +438,9 @@ export const api = {
     requestRpc<ProviderModelsResult>("providers.models", { name }),
   // [WS-RPC] providers.listExtended — 含 API key 状态
   listProvidersExtended: () => requestRpc<ProviderExtendedInfo[]>("providers.listExtended"),
+  // [WS-RPC] providers.setDefaultModel — 字段级写默认模型（官方 + compat），merge-safe
+  setProviderDefaultModel: (name: string, model?: string) =>
+    requestRpc<{ ok: boolean }>("providers.setDefaultModel", { name, model }),
 
   // API Keys
   listApiKeys: () => requestRpc<ApiKeyInfo[]>("apiKeys.list"),

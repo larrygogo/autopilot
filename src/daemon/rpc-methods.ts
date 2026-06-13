@@ -117,6 +117,7 @@ import {
   loadConfigRaw,
   PROVIDER_NAMES,
   saveProvider,
+  setProviderDefaultModel,
   type ProviderName,
 } from "../core/config";
 import {
@@ -1516,6 +1517,30 @@ export function registerCoreRpcMethods(): void {
       const { name: _n, ...cfg } = p;
       try {
         saveProvider(p.name as ProviderName, cfg);
+        emitBus({ type: "config:updated", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.setDefaultModel",
+    description: "字段级设置某 provider 的默认模型（merge-safe，支持官方 + compat 供应商）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      // 权威白名单：官方 ∪ 内置 compat 预置 ∪ config 已有 provider（core 不持有此集合，留在能 import compat 的 RPC 层）
+      const known = new Set<string>([
+        ...PROVIDER_NAMES,
+        ...Object.keys(BUILTIN_COMPAT_PROVIDERS),
+        ...Object.keys(loadProviders()),
+      ]);
+      if (!known.has(p.name)) throw new RpcError("INVALID_PARAM", `未知 provider：${p.name}`);
+      const model = typeof p.model === "string" ? p.model : undefined;
+      try {
+        setProviderDefaultModel(p.name, model);
         emitBus({ type: "config:updated", payload: {} });
         return { ok: true };
       } catch (e: unknown) {

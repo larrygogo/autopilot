@@ -47,7 +47,6 @@ import {
   Circle,
   GitBranch,
   Inbox,
-  KeyRound,
   ListChecks,
   X,
 } from "lucide-react";
@@ -106,7 +105,6 @@ const SETTINGS_NAV_GROUPS: NavGroupDef[] = [
     items: [
       { path: "/settings", label: "通用", icon: Sliders, end: true },
       { path: "/settings/providers", label: "提供商", icon: Plug },
-      { path: "/settings/api-keys", label: "API 密钥", icon: KeyRound },
       { path: "/settings/scheduler", label: "任务调度", icon: Gauge },
       { path: "/settings/network", label: "网络访问", icon: Globe },
       { path: "/settings/daemon", label: "Daemon", icon: Server },
@@ -593,23 +591,28 @@ function TaskDetailRoute({
   return <TaskDetail key={id} taskId={id} onBack={() => navigate("/tasks")} subscribe={subscribe} />;
 }
 
-const SETTINGS_SECTIONS = new Set(["providers", "api-keys", "scheduler", "network", "daemon"]);
+const SETTINGS_SECTIONS = new Set(["providers", "scheduler", "network", "daemon"]);
 
 function SettingsRoute() {
   const { section } = useParams<{ section?: string }>();
   const [params] = useSearchParams();
 
+  // 旧链接兼容：API 密钥分区已于 2026-06-13 并入「提供商」
+  if (section === "api-keys") {
+    return <Navigate to="/settings/providers" replace />;
+  }
+
   // 旧链接兼容：/settings?tab=providers → /settings/providers
   const legacyTab = params.get("tab");
-  if (!section && legacyTab && SETTINGS_SECTIONS.has(legacyTab)) {
-    return <Navigate to={`/settings/${legacyTab}`} replace />;
+  if (!section && legacyTab && (SETTINGS_SECTIONS.has(legacyTab) || legacyTab === "api-keys")) {
+    return <Navigate to={`/settings/${legacyTab === "api-keys" ? "providers" : legacyTab}`} replace />;
   }
   if (section && !SETTINGS_SECTIONS.has(section)) {
     return <Navigate to="/settings" replace />;
   }
   return (
     <SettingsHub
-      section={(section as "providers" | "api-keys" | "scheduler" | "network" | "daemon" | undefined) ?? "general"}
+      section={(section as "providers" | "scheduler" | "network" | "daemon" | undefined) ?? "general"}
     />
   );
 }
