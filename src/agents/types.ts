@@ -25,6 +25,8 @@ export interface AgentConfig {
   /** 接入方式：cli（子进程）或 api（HTTP 直连）。不填则继承 provider 级或按默认规则 */
   mode?: AgentMode;
   permission_mode?: string;
+  /** 工具能力白名单（细粒度授权，见 tool-capabilities.ts）。缺省=全集；与 permission_mode 正交。第一刀仅 API agent 生效。 */
+  tools?: string[];
   max_turns?: number;
   max_budget_usd?: number;
   system_prompt?: string;

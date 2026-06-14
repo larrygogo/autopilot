@@ -11,6 +11,7 @@ import { log } from "../core/logger";
 import { getCompatPreset, createCompatAdapter } from "./providers/api/compat";
 import { ApiAgentLoop } from "./providers/api/loop";
 import { ToolExecutor } from "./providers/api/tools";
+import { unknownCapabilities } from "./tool-capabilities";
 import { AnthropicApiAdapter } from "./providers/api/anthropic";
 import { OpenAIApiAdapter } from "./providers/api/openai";
 import { GoogleApiAdapter } from "./providers/api/google";
@@ -183,7 +184,15 @@ async function createApiAgentLoop(config: AgentConfig, sandboxRoot: string): Pro
 
   // 创建适配器（按 subtype）
   const adapter = createProviderAdapter(eff, apiKey);
-  const toolExecutor = ToolExecutor.fromConfig(sandboxRoot, config.permission_mode);
+  // 工具授权（细粒度）：config.tools 给定时按白名单收窄；未知能力名 warn + 忽略
+  const toolCaps = Array.isArray(config.tools) ? (config.tools as string[]) : undefined;
+  if (toolCaps) {
+    const unknown = unknownCapabilities(toolCaps);
+    if (unknown.length > 0) {
+      log.warn("agent %s 的 tools 含未知能力名（已忽略）：%s", config.name, unknown.join(", "));
+    }
+  }
+  const toolExecutor = ToolExecutor.fromConfig(sandboxRoot, config.permission_mode, toolCaps);
 
   return new ApiAgentLoop({
     adapter,
