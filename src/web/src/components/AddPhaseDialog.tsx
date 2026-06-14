@@ -1,12 +1,5 @@
-import React, { useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { useState } from "react";
+import { DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,7 +20,6 @@ export interface NewPhaseData {
 const PHASE_NAME_RE = /^[a-z][a-z0-9_]*$/;
 
 interface Props {
-  open: boolean;
   onClose: () => void;
   onConfirm: (data: NewPhaseData) => void | Promise<void>;
   existingNames: string[];
@@ -35,7 +27,8 @@ interface Props {
   count: number;
 }
 
-export function AddPhaseDialog({ open, onClose, onConfirm, existingNames, count }: Props) {
+/** 新增阶段表单体（无 Dialog 壳，供 AddStepDialog 内嵌 + tab 切换）。 */
+export function AddPhaseForm({ onClose, onConfirm, existingNames, count }: Props) {
   const [name, setName] = useState("");
   const [timeoutSec, setTimeoutSec] = useState(900);
   const [insertAfter, setInsertAfter] = useState<number>(count - 1);
@@ -76,85 +69,66 @@ export function AddPhaseDialog({ open, onClose, onConfirm, existingNames, count 
         : null;
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        if (!v && !busy) close();
-      }}
-    >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>新增阶段</DialogTitle>
-          <DialogDescription>添加一个新阶段到工作流中。</DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4 py-1">
-          <div className="space-y-1.5">
-            <Label htmlFor="add-phase-name">
-              阶段名 <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="add-phase-name"
-              className={
-                nameError
-                  ? "font-mono border-destructive focus-visible:ring-destructive"
-                  : "font-mono"
-              }
-              placeholder="例如：review"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoFocus
-            />
-            <p
-              className={
-                nameError ? "text-xs text-destructive" : "text-xs text-muted-foreground"
-              }
-            >
-              {nameError ?? "将自动生成 run_<阶段名> 函数"}
-            </p>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="add-phase-timeout">超时（秒）</Label>
-            <Input
-              id="add-phase-timeout"
-              type="number"
-              min={1}
-              value={timeoutSec}
-              onChange={(e) => setTimeoutSec(parseInt(e.target.value, 10) || 0)}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>插入位置</Label>
-            <Select
-              value={String(insertAfter)}
-              onValueChange={(v) => setInsertAfter(parseInt(v, 10))}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="-1">插入到开头</SelectItem>
-                {existingNames.map((n, i) => (
-                  <SelectItem key={n} value={String(i)}>
-                    在「{n}」之后
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+    <>
+      <div className="space-y-4 py-1">
+        <div className="space-y-1.5">
+          <Label htmlFor="add-phase-name">
+            阶段名 <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            id="add-phase-name"
+            className={
+              nameError
+                ? "font-mono border-destructive focus-visible:ring-destructive"
+                : "font-mono"
+            }
+            placeholder="例如：review"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+          />
+          <p className={nameError ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
+            {nameError ?? "将自动生成 run_<阶段名> 函数"}
+          </p>
         </div>
 
-        <DialogFooter>
-          <Button variant="secondary" onClick={close} disabled={busy}>
-            取消
-          </Button>
-          <Button onClick={submit} disabled={!canSubmit}>
-            {busy ? "保存中…" : "添加"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div className="space-y-1.5">
+          <Label htmlFor="add-phase-timeout">超时（秒）</Label>
+          <Input
+            id="add-phase-timeout"
+            type="number"
+            min={1}
+            value={timeoutSec}
+            onChange={(e) => setTimeoutSec(parseInt(e.target.value, 10) || 0)}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>插入位置</Label>
+          <Select value={String(insertAfter)} onValueChange={(v) => setInsertAfter(parseInt(v, 10))}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="-1">插入到开头</SelectItem>
+              {existingNames.map((n, i) => (
+                <SelectItem key={n} value={String(i)}>
+                  在「{n}」之后
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button variant="secondary" onClick={close} disabled={busy}>
+          取消
+        </Button>
+        <Button onClick={submit} disabled={!canSubmit}>
+          {busy ? "保存中…" : "添加"}
+        </Button>
+      </DialogFooter>
+    </>
   );
 }

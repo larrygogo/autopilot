@@ -1,16 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2, Layers, Ungroup, ArrowUpFromLine, ArrowDownToLine, ChevronDown } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
+import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2, Ungroup, ArrowUpFromLine, ArrowDownToLine } from "lucide-react";
 import { api, type InlineAgentConfig } from "@/hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
-import { AddPhaseDialog, type NewPhaseData } from "./AddPhaseDialog";
-import { AddParallelDialog, type NewParallelData } from "./AddParallelDialog";
+import { AddStepDialog, type NewPhaseData, type NewParallelData } from "./AddStepDialog";
 import { PhaseAgentEditor } from "./PhaseAgentEditor";
 import { PhasePipeline } from "./PhasePipeline";
 
@@ -70,8 +63,7 @@ export function PhasePipelineEditor({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [drawerPhase, setDrawerPhase] = useState<string | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-  const [addParallelOpen, setAddParallelOpen] = useState(false);
+  const [addStepOpen, setAddStepOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingDeleteParallel, setPendingDeleteParallel] = useState<string | null>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
@@ -235,7 +227,7 @@ export function PhasePipelineEditor({
       newlyAddedRef.current.add(c.name);
     }
     setDirty(true);
-    setAddParallelOpen(false);
+    setAddStepOpen(false);
     toast.success(
       `新增并行块 ${data.name}（${data.children.length} 个子阶段，未保存，点保存生效）`,
     );
@@ -448,7 +440,7 @@ export function PhasePipelineEditor({
     // 标记为新建：之后改名不必登记 renames
     newlyAddedRef.current.add(data.name);
     setDirty(true);
-    setAddOpen(false);
+    setAddStepOpen(false);
     toast.success(`新增阶段 ${data.name}（未保存，点保存生效）`);
   }
 
@@ -651,25 +643,10 @@ export function PhasePipelineEditor({
           {dirty && <span className="ml-2 text-warning">· 未保存（{navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl"}+S 快捷保存）</span>}
         </div>
         <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Plus className="h-4 w-4" />
-                新增
-                <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setAddOpen(true)}>
-                <Plus className="h-4 w-4" />
-                阶段
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setAddParallelOpen(true)}>
-                <Layers className="h-4 w-4" />
-                并行块
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button variant="outline" size="sm" onClick={() => setAddStepOpen(true)}>
+            <Plus className="h-4 w-4" />
+            新增
+          </Button>
           <Button size="sm" onClick={save} disabled={!dirty || saving} title="保存修改（Ctrl/Cmd+S）">
             <Save className="h-4 w-4" />
             {saving ? "保存中…" : "保存修改"}
@@ -829,23 +806,16 @@ export function PhasePipelineEditor({
         </SheetContent>
       </Sheet>
 
-      <AddPhaseDialog
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
-        onConfirm={handleAddPhase}
-        existingNames={allPhaseNames}
-        count={phases.length}
-      />
-
-      <AddParallelDialog
-        open={addParallelOpen}
-        onClose={() => setAddParallelOpen(false)}
-        onConfirm={handleAddParallel}
+      <AddStepDialog
+        open={addStepOpen}
+        onClose={() => setAddStepOpen(false)}
         existingNames={allPhaseNames}
         topCount={phases.length}
         topLabels={phases.map((p) =>
           p?.parallel ? `[并行] ${p.parallel.name}` : String(p?.name ?? "?"),
         )}
+        onConfirmPhase={handleAddPhase}
+        onConfirmParallel={handleAddParallel}
       />
 
       <ConfirmDialog

@@ -14,8 +14,7 @@ import { api } from "../hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
 import { Term } from "./Term";
-import { AddPhaseDialog, type NewPhaseData } from "./AddPhaseDialog";
-import { AddParallelDialog, type NewParallelData } from "./AddParallelDialog";
+import { AddStepDialog, type NewPhaseData, type NewParallelData } from "./AddStepDialog";
 import {
   validatePhases,
   issuesForTop,
@@ -150,8 +149,7 @@ export function PhaseEditor({
   const [items, setItems] = useState<Item[]>(() => normalize(initialPhases));
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [addPhaseOpen, setAddPhaseOpen] = useState(false);
-  const [addParallelOpen, setAddParallelOpen] = useState(false);
+  const [addStepOpen, setAddStepOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
   const [orphans, setOrphans] = useState<string[]>([]);
   const [pruneConfirm, setPruneConfirm] = useState(false);
@@ -381,7 +379,7 @@ export function PhaseEditor({
     });
     newlyAddedRef.current.add(data.name);
     mark();
-    setAddPhaseOpen(false);
+    setAddStepOpen(false);
   };
 
   const addParallel = (data: NewParallelData) => {
@@ -406,7 +404,7 @@ export function PhaseEditor({
     newlyAddedRef.current.add(data.name);
     for (const c of data.children) newlyAddedRef.current.add(c.name);
     mark();
-    setAddParallelOpen(false);
+    setAddStepOpen(false);
   };
 
   const addChildToParallel = (parallelIdx: number) => {
@@ -627,13 +625,9 @@ export function PhaseEditor({
               校准 TS
             </Button>
           )}
-          <Button size="sm" variant="secondary" onClick={() => setAddParallelOpen(true)}>
-            <Layers className="h-3.5 w-3.5" />
-            并行块
-          </Button>
-          <Button size="sm" onClick={() => setAddPhaseOpen(true)}>
+          <Button size="sm" onClick={() => setAddStepOpen(true)}>
             <Plus className="h-3.5 w-3.5" />
-            新增阶段
+            新增
           </Button>
         </div>
       </div>
@@ -821,21 +815,14 @@ export function PhaseEditor({
         </div>
       )}
 
-      <AddPhaseDialog
-        open={addPhaseOpen}
-        onClose={() => setAddPhaseOpen(false)}
-        onConfirm={addPhase}
-        existingNames={allNames}
-        count={items.length}
-      />
-
-      <AddParallelDialog
-        open={addParallelOpen}
-        onClose={() => setAddParallelOpen(false)}
-        onConfirm={addParallel}
+      <AddStepDialog
+        open={addStepOpen}
+        onClose={() => setAddStepOpen(false)}
         existingNames={allNames}
         topCount={items.length}
         topLabels={items.map((it) => it.name)}
+        onConfirmPhase={addPhase}
+        onConfirmParallel={addParallel}
       />
 
       <ConfirmDialog
