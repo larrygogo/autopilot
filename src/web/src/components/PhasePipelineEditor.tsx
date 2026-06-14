@@ -1319,6 +1319,21 @@ function PhaseEditForm({
     }
   }
 
+  // 声明式判据（decision）草稿读写：支持增量填写（pass/reject 任填一个就留草稿），全空才删。
+  const decision = (raw.decision ?? {}) as {
+    pass?: string;
+    reject?: string;
+    reason_section?: string;
+    match?: string;
+  };
+  function patchDecision(p: Partial<typeof decision>) {
+    const next: Record<string, unknown> = { ...decision, ...p };
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(next)) if (typeof v === "string" && v.trim()) cleaned[k] = v;
+    onChange({ decision: Object.keys(cleaned).length ? cleaned : undefined });
+  }
+  const isPromptMode = typeof raw.prompt === "string" && raw.prompt.trim() !== "";
+
   return (
     <div className="space-y-3 pt-3">
       <div className="grid grid-cols-1 gap-2">
@@ -1433,14 +1448,58 @@ function PhaseEditForm({
           </FormRow>
         )}
 
+        {isPromptMode && raw.gate !== true && (
+          <FormRow label="判据 / 分支">
+            <div className="space-y-2">
+              <p className="text-[10px] text-muted-foreground">
+                让框架按 agent 输出自动判通过 / 驳回。判什么、用什么标记由你定；驳回会回退到上面「驳回到」的目标重做（次数上限走「最大驳回次数」，触顶暂停报人）。
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <span className="text-[10px] text-muted-foreground">通过标记</span>
+                  <Input
+                    value={decision.pass ?? ""}
+                    placeholder="如 REVIEW_RESULT: PASS"
+                    onChange={(e) => patchDecision({ pass: e.target.value })}
+                    className="h-8 font-mono text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[10px] text-muted-foreground">驳回标记</span>
+                  <Input
+                    value={decision.reject ?? ""}
+                    placeholder="如 REVIEW_RESULT: REJECT"
+                    onChange={(e) => patchDecision({ reject: e.target.value })}
+                    className="h-8 font-mono text-sm"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] text-muted-foreground">驳回理由段（可选）</span>
+                <Input
+                  value={decision.reason_section ?? ""}
+                  placeholder="如 ## 驳回理由（留空取全文）"
+                  onChange={(e) => patchDecision({ reason_section: e.target.value })}
+                  className="h-8 font-mono text-sm"
+                />
+              </div>
+              {(decision.pass || decision.reject) && !(typeof raw.reject === "string" && raw.reject) && (
+                <p className="text-[10px] text-warning">
+                  配了判据但没设「驳回到」目标——请在上面选驳回目标，否则保存会被拒。
+                </p>
+              )}
+            </div>
+          </FormRow>
+        )}
+
         <FormRow label="人工审批 (gate)">
           <div className="flex items-center gap-2">
             <Switch
               checked={raw.gate === true}
-              onCheckedChange={(v) => onChange({ gate: v ? true : undefined })}
+              onCheckedChange={(v) => onChange(v ? { gate: true, decision: undefined } : { gate: undefined })}
             />
             <span className="text-xs text-muted-foreground">
-              开启后此阶段执行完会挂起到 awaiting_，需人工点击通过/驳回
+              开启后此阶段执行完会挂起到 awaiting_，需人工点击通过/驳回（与上面的判据互斥）
             </span>
           </div>
         </FormRow>
