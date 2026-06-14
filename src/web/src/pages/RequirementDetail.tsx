@@ -342,8 +342,8 @@ function ClarifierProgressCard({
           </div>
           <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/80">
             {isCloning
-              ? "克隆需求代码库供 AI 调查（首次较慢，完成后开始提问）"
-              : `${attemptLabel} LLM 调用 · 阶段：${PHASE_LABEL[round.phase]}`}
+              ? "正在拉取代码库供 AI 阅读（第一次会慢点，好了就开始提问）"
+              : `${attemptLabel}调用 AI · ${PHASE_LABEL[round.phase]}`}
           </div>
         </div>
         <div className="font-mono text-xs tabular-nums text-muted-foreground shrink-0">
@@ -678,7 +678,7 @@ export function RequirementDetail() {
       await api.updateRequirement(id, { spec_md: specDraft });
       setEditingSpec(false);
       await refresh();
-      toast.success("规约已保存");
+      toast.success("已保存");
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -1022,7 +1022,7 @@ export function RequirementDetail() {
     <Card>
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">需求规约</span>
+          <span className="text-sm font-medium">需求内容</span>
           {req.spec_md && (req.status === "clarifying" || req.status === "drafting") && (
             <Badge variant="info">AI 整理</Badge>
           )}
@@ -1052,7 +1052,7 @@ export function RequirementDetail() {
           {!editingSpec && !canEditRequirementContent(req.status) && (
             <span
               className="font-mono text-[10px] text-muted-foreground"
-              title="审批通过后规约冻结：执行内容以入队时的快照为准。失败（failed）后可修改再重试。"
+              title="审批通过后需求内容就锁定了，按入队那一刻的版本执行。如果失败了，可以改完再重试。"
             >
               已冻结
             </span>
@@ -1067,7 +1067,7 @@ export function RequirementDetail() {
               onChange={(e) => setSpecDraft(e.target.value)}
               className="min-h-[240px] font-mono text-xs"
               disabled={savingSpec}
-              placeholder="在这里填写需求详细规约（支持 Markdown 格式）…"
+              placeholder="在这里写需求的详细内容（支持 Markdown）…"
             />
             <div className="flex justify-end gap-2">
               <Button
@@ -1091,7 +1091,7 @@ export function RequirementDetail() {
             {req.spec_md ? (
               <MarkdownView content={req.spec_md} />
             ) : (
-              <span className="italic text-muted-foreground text-sm">暂无规约内容，点「编辑」添加。</span>
+              <span className="italic text-muted-foreground text-sm">还没有内容，点「编辑」添加。</span>
             )}
           </div>
         )}
@@ -1274,8 +1274,8 @@ export function RequirementDetail() {
                 </div>
                 <p className="font-mono text-[11px] text-muted-foreground">
                   {isArtifactsDelivery
-                    ? "按上方最新意见重做产物，完成后交付新一轮（round+1）并在此回应总结"
-                    : "按上方最新意见在交付分支上修复，完成后 push 更新 PR 并在此回应总结"}
+                    ? "按上方最新意见重做产物，完成后交付新的一轮并在这里回应总结"
+                    : "按上方最新意见在交付分支上修改，完成后更新 PR 并在这里回应总结"}
                   {req.task_id ? "；实时进度与日志见下方「执行记录」" : ""}
                 </p>
               </li>
@@ -1766,7 +1766,7 @@ export function RequirementDetail() {
                       <p className="break-words text-xs leading-relaxed text-foreground/85">{req.status_reason}</p>
                     </div>
                   )}
-                  <p className="text-xs text-muted-foreground">可在上方「重新入队执行」重试，或退回草稿改规约。</p>
+                  <p className="text-xs text-muted-foreground">可在上方「重新入队执行」重试，或退回草稿改需求。</p>
                 </div>
               )}
               {req.status === "cancelled" && (
@@ -1866,7 +1866,7 @@ export function RequirementDetail() {
                       className="w-full"
                       onClick={startClarify}
                       disabled={actionBusy || (!hasWorkspaces && !gitOptional)}
-                      title={!hasWorkspaces && !gitOptional ? "请先选择代码库（澄清基于代码库的克隆进行）" : undefined}
+                      title={!hasWorkspaces && !gitOptional ? "请先选一个代码库，AI 澄清时要读它" : undefined}
                     >
                       {actionBusy
                         ? "处理中…"
@@ -1994,7 +1994,7 @@ export function RequirementDetail() {
                           )}
                           {startRunLog && (
                             <div className="flex items-center justify-between gap-2 text-sm">
-                              <span>调度器开始执行</span>
+                              <span>开始执行</span>
                               <span className="font-mono text-[11px] text-muted-foreground">
                                 {new Date(startRunLog.created_at).toLocaleString()}
                               </span>
@@ -2011,7 +2011,7 @@ export function RequirementDetail() {
                         </>
                       ) : (
                         <p className="text-xs text-muted-foreground">
-                          排队时间未记录（该需求的入队发生在状态日志上线之前）。
+                          这条需求入队较早，没留下排队时间。
                         </p>
                       )}
                     </Card>
@@ -2117,8 +2117,8 @@ export function RequirementDetail() {
         message={
           <div className="space-y-2">
             <p>
-              取消后仅保留<strong>需求本身</strong>（规约、评论、附件），
-              执行记录与沙盒将被<strong className="text-destructive">清空</strong>。
+              取消后只留下<strong>需求本身</strong>（需求内容、评论、附件），
+              执行记录和代码副本会被<strong className="text-destructive">清空</strong>。
             </p>
             {(req.status === "running" || req.status === "fix_revision") && (
               <p className="text-xs font-semibold text-foreground">
@@ -2145,7 +2145,7 @@ export function RequirementDetail() {
           <div className="space-y-2">
             <p>
               将<strong className="text-destructive">永久删除</strong>此需求及其全部执行记录
-              （规约、评论、附件、阶段日志、agent 调用、沙盒文件）。
+              （需求内容、评论、附件、运行日志、agent 调用、代码副本）。
             </p>
             {(req.status === "running" || req.status === "fix_revision") && (
               <p className="text-xs font-semibold text-foreground">

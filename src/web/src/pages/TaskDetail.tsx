@@ -398,10 +398,10 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
             <div className="flex flex-wrap items-start justify-between gap-3 p-4">
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  彻底删除该任务的 DB 记录、manifest、阶段日志、agent 调用记录与沙盒文件；此操作不可撤销。
+                  彻底删除这个任务的全部记录（运行日志、agent 调用、代码副本等）；此操作不可撤销。
                   {canCancel && (
                     <span className="ml-1 font-semibold text-foreground">
-                      任务当前非终态，请先取消后再删除。
+                      任务还在进行，请先取消再删除。
                     </span>
                   )}
                 </p>
@@ -431,7 +431,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
                   <code className="rounded bg-muted px-1 font-mono">{task.id}</code>？
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  将清理：DB 记录、task-manifest、阶段日志、agent 调用、沙盒目录，以及所有子任务。操作不可撤销。
+                  将清理这个任务的全部记录、文件以及所有子任务。操作不可撤销。
                 </p>
               </div>
             }
@@ -508,7 +508,7 @@ function TaskDetailTabs({ taskId, taskStatus }: { taskId: string; taskStatus?: s
     <div>
       <div className="mb-3 flex items-center gap-1.5 text-sm font-medium">
         <FolderTree className="h-3.5 w-3.5" />
-        沙盒
+        文件
       </div>
       <SandboxBrowser taskId={taskId} taskStatus={taskStatus} />
     </div>
@@ -544,7 +544,7 @@ function DanglingBanner({
     setBusy("cancel");
     try {
       await api.cancelTask(taskId);
-      toast.success("已取消该 dangling task");
+      toast.success("已取消该任务");
     } catch (e: unknown) {
       toast.error("取消失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -560,14 +560,13 @@ function DanglingBanner({
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-bold text-destructive">
-            ⚠ 这个任务已死（daemon 重启）
+            ⚠ 这个任务中断了（daemon 重启过）
           </h3>
           <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-            任务在 <code className="border border-border bg-muted px-1 font-mono">ask_user</code> 等待回答时 daemon 重启了。
-            agent 进程的等待 promise 在内存中丢失，即使你现在回答 agent 也收不到。
-            可以选择：<strong className="text-foreground">重新执行</strong>当前阶段（只重跑当前所在阶段，
-            不回到最初——前面已完成的 design / review 等不会重来；共用沙盒工作树已累积的改动保留），或
-            <strong className="text-foreground">取消任务</strong>新建一个。
+            任务在等你回答问题时，daemon 重启了。它丢掉了正在等待的状态，你现在回答也收不到了。
+            可以：<strong className="text-foreground">重新执行</strong>当前阶段（只重跑卡住的这一步，
+            前面做完的不会重来，已经改的文件也保留），或者
+            <strong className="text-foreground">取消任务</strong>重新建一个。
           </p>
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
