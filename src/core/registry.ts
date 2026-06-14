@@ -5,6 +5,7 @@ import { homedir } from "os";
 import { join, sep } from "path";
 import { parse as parseYaml, parseDocument, type Document } from "yaml";
 import { tryMakePromptRunnerForPhase } from "./prompt-runner";
+import type { PhaseDecision } from "./phase-decision";
 import { DEFAULT_AGENT, type InlineAgentConfig } from "./agent-defaults";
 import {
   syncFileWorkflowsToDb,
@@ -46,6 +47,12 @@ export interface PhaseDefinition {
   gate?: boolean;
   /** 等待界面的提示文案；默认 "请审阅产物后决定" */
   gate_message?: string;
+  /**
+   * 声明式判据 / 分支（仅 prompt 模式 phase 生效）。prompt-runner 跑完 agent 后按此判
+   * pass/reject：pass → 框架自动推进；reject → 回退 reject: 目标重做、数驳回、触顶转 failed。
+   * 复用 reject:/max_rejections 已生成的转换，不新增状态机机制。详见 phase-decision.ts。
+   */
+  decision?: PhaseDecision;
   /**
    * Phase 6: 是否启用 handoff 协议（spec §3.10）。
    * true 时 prompt-runner 在 prompt 末尾追加 4 段指令（Decided/Files/Risks/Remaining），
@@ -799,6 +806,9 @@ function composeDbWorkflow(
     if (typeof phaseObj.reject === "string") {
       merged.jump_trigger = `${phName}_reject`;
       merged.jump_target = phaseObj.reject;
+    }
+    if (phaseObj.decision && typeof phaseObj.decision === "object") {
+      merged.decision = phaseObj.decision as PhaseDecision;
     }
     // DB 工作流覆写 prompt：声明了 prompt → 用 prompt-runner 取代 base 的 func
     if (typeof phaseObj.prompt === "string" && phaseObj.prompt.trim()) {
