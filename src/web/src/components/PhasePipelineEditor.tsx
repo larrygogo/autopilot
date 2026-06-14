@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2, Layers, Ungroup, ArrowUpFromLine, ArrowDownToLine } from "lucide-react";
+import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2, Layers, Ungroup, ArrowUpFromLine, ArrowDownToLine, ChevronDown } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { api, type InlineAgentConfig } from "@/hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
@@ -645,14 +651,25 @@ export function PhasePipelineEditor({
           {dirty && <span className="ml-2 text-warning">· 未保存（{navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl"}+S 快捷保存）</span>}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" />
-            新增阶段
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setAddParallelOpen(true)}>
-            <Layers className="h-4 w-4" />
-            新增并行块
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Plus className="h-4 w-4" />
+                新增
+                <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setAddOpen(true)}>
+                <Plus className="h-4 w-4" />
+                阶段
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setAddParallelOpen(true)}>
+                <Layers className="h-4 w-4" />
+                并行块
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="sm" onClick={save} disabled={!dirty || saving} title="保存修改（Ctrl/Cmd+S）">
             <Save className="h-4 w-4" />
             {saving ? "保存中…" : "保存修改"}
