@@ -74,6 +74,17 @@ export interface InlineAgentConfig {
   system_prompt?: string;
 }
 
+/** 生命周期 agent 配置（lifecycle.list 返回项）。 */
+export interface LifecycleAgentInfo {
+  name: string;
+  display_name: string;
+  note: string;
+  effective: InlineAgentConfig;
+  userConfig: InlineAgentConfig | null;
+  defaults: InlineAgentConfig;
+  reqOverridable: boolean;
+}
+
 /** dry-run 时把临时 model/max_turns 覆盖合到内联配置上；全空则返回 undefined（让后端走默认）。 */
 function mergeInlineAgent(
   agent: InlineAgentConfig | undefined,
@@ -438,6 +449,12 @@ export const api = {
     requestRpc<ProviderModelsResult>("providers.models", { name }),
   // [WS-RPC] providers.listExtended — 含 API key 状态
   listProvidersExtended: () => requestRpc<ProviderExtendedInfo[]>("providers.listExtended"),
+  // ── 生命周期 agent 配置（lifecycle.* RPC）──
+  // [WS-RPC] lifecycle.list
+  listLifecycleAgents: () => requestRpc<{ agents: LifecycleAgentInfo[] }>("lifecycle.list"),
+  // [WS-RPC] lifecycle.setAgent（config=null 删段回退默认）
+  setLifecycleAgent: (name: string, config: Partial<InlineAgentConfig> | null) =>
+    requestRpc<{ ok: boolean }>("lifecycle.setAgent", { name, config }),
   // [WS-RPC] providers.setDefaultModel — 字段级写默认模型（官方 + compat），merge-safe
   setProviderDefaultModel: (name: string, model?: string) =>
     requestRpc<{ ok: boolean }>("providers.setDefaultModel", { name, model }),

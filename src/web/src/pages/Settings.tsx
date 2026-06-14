@@ -21,12 +21,13 @@ import { TimezoneSelect } from "@/components/TimezoneSelect";
 import { getApiToken, setApiToken, clearApiToken, shouldUseToken } from "@/lib/api-token";
 import { setRestarting } from "@/lib/ws-singleton";
 import { restartDaemonAndWait } from "@/lib/restart-daemon";
+import { LifecycleAgentsCard } from "@/components/LifecycleAgentsCard";
 
 // 保留 embedded 参数签名以兼容旧调用
 export function Settings({
   section = "general",
 }: {
-  section?: "general" | "scheduler" | "network" | "daemon";
+  section?: "general" | "lifecycle" | "scheduler" | "network" | "daemon";
 }) {
   const toast = useToast();
 
@@ -92,6 +93,10 @@ export function Settings({
       setConfigPath("~/.autopilot/config.yaml");
     });
   }, [section]);
+
+  if (section === "lifecycle") {
+    return <LifecycleAgentsCard />;
+  }
 
   if (section === "scheduler") {
     return <SchedulerCard />;
