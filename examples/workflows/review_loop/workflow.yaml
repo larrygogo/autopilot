@@ -1,0 +1,35 @@
+name: review_loop
+label: 评审回路示例
+description: 最小声明式判据示例——设计 → 评审（agent 判 PASS/REJECT）→ 通过则交付、驳回则回设计重做。全 prompt 模式、零 ts。展示 decision / ${HANDOFF} / ${REJECTION} 三件套，可克隆改造，也可忽略。
+requires: { git: false }
+delivers: artifacts
+phases:
+  - name: design
+    timeout: 600
+    handoff: true
+    prompt: |
+      你是方案设计者。根据下面的需求输出一份简短方案。
+
+      ## 需求
+      ${REQUIREMENT}
+
+      ${REJECTION}
+  - name: review
+    timeout: 600
+    reject: design
+    max_rejections: 3
+    prompt: |
+      评审下面的方案是否满足需求：
+
+      ## 需求
+      ${REQUIREMENT}
+
+      ## 待评审方案
+      ${HANDOFF_design}
+
+      最后必须独占一行输出 REVIEW_RESULT: PASS 或 REVIEW_RESULT: REJECT。
+      若驳回，在 "## 驳回理由" 标题下写明问题。
+    decision:
+      pass: "REVIEW_RESULT: PASS"
+      reject: "REVIEW_RESULT: REJECT"
+      reason_section: "## 驳回理由"
