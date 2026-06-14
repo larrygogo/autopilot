@@ -119,6 +119,13 @@ export interface WorkflowDefinition {
   requires?: WorkflowRequiresSpec;
   /** 产出形态声明（如 "pr" / "artifacts"）；registry 纯字符串透传，枚举语义在 daemon。缺省 = 事实推断 */
   delivers?: string;
+  /**
+   * 声明式安全闸门（spec 2026-06-14 砖 3）。true → 加载期硬拒任何用户 TS 代码：
+   * 工作流不得含 workflow.ts 函数导出，phase 只能来自框架内置原语（prompt / builtin / gate /
+   * parallel）。保证能力上界由框架钉死（tools 授权 + sandbox + 无 spawn）→「沙盒安全」，可安全
+   * 跨人运行别人写的工作流。正交于 requires（输入）/ delivers（输出）。
+   */
+  declarative?: boolean;
   phases: (PhaseDefinition | { parallel: ParallelDefinition })[];
   initial_state: string;
   terminal_states: string[];
@@ -408,6 +415,20 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
     }
   }
 
+  // 声明式安全闸门（spec 2026-06-14 砖 3）：declarative:true → 硬拒任何用户 TS 代码。
+  // 保证工作流没有任意 spawn / 文件 IO，能力上界由框架原语 + tools 授权钉死，可安全跨人运行。
+  const declarative = wfDef["declarative"] === true;
+  if (declarative && tsModule) {
+    const fnExports = Object.keys(tsModule).filter((k) => typeof tsModule![k] === "function");
+    if (fnExports.length > 0) {
+      throw new Error(
+        `声明式工作流「${wfDef["name"]}」(declarative: true) 不得包含任何 TS 函数，` +
+        `但 workflow.ts 导出了：${fnExports.join(", ")}。` +
+        `声明式工作流的 phase 只能用框架内置原语（prompt / builtin / gate / parallel）。`,
+      );
+    }
+  }
+
   // 展开阶段默认值并绑定函数
   const workflowName = typeof wfDef["name"] === "string" ? (wfDef["name"] as string) : undefined;
   const expandedPhases: (PhaseDefinition | { parallel: ParallelDefinition })[] = [];
@@ -419,12 +440,12 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
       const parExpanded = expandParallelDefaults(par, allPhaseNames);
       // 绑定子阶段函数
       for (const sub of parExpanded.phases) {
-        bindPhaseFunc(sub, tsModule, workflowName);
+        bindPhaseFunc(sub, tsModule, workflowName, declarative);
       }
       expandedPhases.push({ parallel: parExpanded });
     } else {
       const phaseExpanded = expandPhaseDefaults(phase as Record<string, unknown>, allPhaseNames);
-      bindPhaseFunc(phaseExpanded, tsModule, workflowName);
+      bindPhaseFunc(phaseExpanded, tsModule, workflowName, declarative);
       expandedPhases.push(phaseExpanded);
     }
   }
@@ -484,6 +505,7 @@ function bindPhaseFunc(
   phase: PhaseDefinition,
   tsModule: Record<string, unknown> | null,
   workflowName?: string,
+  declarative = false,
 ): void {
   const funcRef = phase.func;
   if (typeof funcRef === "function") return; // 已经是 callable
@@ -508,6 +530,33 @@ function bindPhaseFunc(
   }
 
   const funcName = typeof funcRef === "string" ? funcRef : `run_${phase.name}`;
+
+  // 声明式工作流：不绑定任何用户 TS 函数，只能 prompt-runner / 纯 gate 关卡。
+  if (declarative) {
+    if (tsModule && typeof tsModule[funcName] === "function") {
+      throw new Error(
+        `声明式工作流的阶段 "${phase.name}" 绑定了 TS 函数 "${funcName}"——` +
+        `declarative: true 工作流不得含任意用户代码（phase 只能用 prompt / builtin / gate / parallel）`,
+      );
+    }
+    if (workflowName) {
+      const promptRunner = tryMakePromptRunnerForPhase(phase, workflowName);
+      if (promptRunner) {
+        phase.func = promptRunner;
+        log.info("阶段 %s 使用 prompt-runner（声明式）", phase.name);
+        return;
+      }
+    }
+    // 纯人工关卡（gate=true，无 prompt/builtin）：no-op，runner 跑完即挂起到 awaiting_<phase>。
+    if (phase.gate === true) {
+      phase.func = async (_taskId: string) => {};
+      return;
+    }
+    throw new Error(
+      `声明式工作流的阶段 "${phase.name}" 缺少框架原语——需写 prompt / builtin: / gate（` +
+      `declarative: true 工作流不能用 run_ 函数）`,
+    );
+  }
 
   if (tsModule && typeof tsModule[funcName] === "function") {
     phase.func = tsModule[funcName] as (taskId: string) => Promise<void>;
