@@ -154,7 +154,7 @@ export function AddParallelForm({ onClose, onConfirm, existingNames, topLabels }
             <SelectContent>
               {STRATEGIES.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {s}
+                  {s === "cancel_all" ? "任一失败 → 整组失败" : "失败后其他继续"}
                 </SelectItem>
               ))}
             </SelectContent>
