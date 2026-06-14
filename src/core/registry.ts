@@ -278,14 +278,21 @@ function lintPhaseDecision(phase: Record<string, unknown>, phaseName: string): v
     throw new Error(`阶段 ${phaseName} 的 decision 必须是对象`);
   }
   const d = decision as Record<string, unknown>;
-  if (typeof d["pass"] !== "string" || typeof d["reject"] !== "string") {
-    throw new Error(`阶段 ${phaseName} 的 decision 必须同时含 pass 与 reject 字段（标记串）`);
+  const mode = d["mode"];
+  if (mode !== undefined && mode !== "marker" && mode !== "judge") {
+    throw new Error(`阶段 ${phaseName} 的 decision.mode 只能是 "marker" 或 "judge"`);
+  }
+  // marker 模式（缺省）才需要 pass/reject 标记串；judge 模式靠结构化裁判，不写标记。
+  if (mode !== "judge") {
+    if (typeof d["pass"] !== "string" || typeof d["reject"] !== "string") {
+      throw new Error(`阶段 ${phaseName} 的 decision（marker 模式）必须同时含 pass 与 reject 字段（标记串）`);
+    }
   }
   if (phase["gate"] === true) {
     throw new Error(`阶段 ${phaseName} 不能同时配 gate 与 decision（gate=人工判，decision=agent 自动判，互斥）`);
   }
   if (!phase["jump_target"]) {
-    throw new Error(`阶段 ${phaseName} 配了 decision.reject，但缺 reject 回退目标——请在该 phase 上写 reject: <目标阶段>`);
+    throw new Error(`阶段 ${phaseName} 配了 decision，但缺 reject 回退目标——请在该 phase 上写 reject: <目标阶段>`);
   }
 }
 

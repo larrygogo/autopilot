@@ -3,6 +3,7 @@ import {
   evaluatePhaseDecision,
   extractMarkdownSection,
   planDecisionAction,
+  planDecisionActionFromVerdict,
   type PhaseDecision,
 } from "../src/core/phase-decision";
 
@@ -63,6 +64,28 @@ describe("planDecisionAction", () => {
   });
   it("reject 但无 jump 目标 → misconfigured", () => {
     const a = planDecisionAction("RESULT: REJECT", D, "review", { maxRejections: 10 }, {});
+    expect(a.kind).toBe("misconfigured");
+  });
+});
+
+describe("planDecisionActionFromVerdict（marker / judge 共用后半段）", () => {
+  const meta = { jumpTrigger: "review_reject", jumpTarget: "design", maxRejections: 3 };
+  it("pass verdict → kind pass", () => {
+    expect(planDecisionActionFromVerdict({ verdict: "pass" }, "review", meta, {})).toEqual({ kind: "pass" });
+  });
+  it("ambiguous verdict → kind ambiguous", () => {
+    expect(planDecisionActionFromVerdict({ verdict: "ambiguous" }, "review", meta, {}).kind).toBe("ambiguous");
+  });
+  it("reject verdict 未触顶 → retry 计数 +1", () => {
+    const a = planDecisionActionFromVerdict({ verdict: "reject", reason: "缺测试" }, "review", meta, { review: 1 });
+    expect(a).toMatchObject({ kind: "retry", target: "design", n: 2, reason: "缺测试" });
+  });
+  it("reject verdict 触顶 → fail", () => {
+    const a = planDecisionActionFromVerdict({ verdict: "reject", reason: "x" }, "review", meta, { review: 2 });
+    expect(a).toMatchObject({ kind: "fail", n: 3, maxRejections: 3 });
+  });
+  it("reject verdict 无 jump 目标 → misconfigured", () => {
+    const a = planDecisionActionFromVerdict({ verdict: "reject", reason: "x" }, "review", { maxRejections: 10 }, {});
     expect(a.kind).toBe("misconfigured");
   });
 });

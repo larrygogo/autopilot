@@ -27,7 +27,12 @@ import { getPhaseIndex } from "./artifacts";
 import { getWorkflow, buildTransitions, type PhaseDefinition, type WorkflowDefinition } from "./registry";
 import { transition, forceTransition } from "./state-machine";
 import { notify } from "./notify";
-import { planDecisionAction, type PhaseDecision } from "./phase-decision";
+import {
+  planDecisionAction,
+  planDecisionActionFromVerdict,
+  type PhaseDecision,
+  type DecisionVerdict,
+} from "./phase-decision";
 import { createLogger } from "./logger";
 import { consumePendingPrompts } from "./task-send-prompt";
 import { emit } from "./event-bus";
@@ -408,21 +413,32 @@ export function makePromptRunner(
       ) as PhaseDefinition | undefined;
       const taskNow = getTask(taskId);
       const counts = parseRejectionCounts(taskNow as Record<string, unknown> | null);
-      const action = planDecisionAction(
-        finalText,
-        options.decision,
-        phaseName,
-        {
-          jumpTrigger: phaseDef?.jump_trigger,
-          jumpTarget: phaseDef?.jump_target,
-          maxRejections: phaseDef?.max_rejections,
-        },
-        counts,
-      );
+      const meta = {
+        jumpTrigger: phaseDef?.jump_trigger,
+        jumpTarget: phaseDef?.jump_target,
+        maxRejections: phaseDef?.max_rejections,
+      };
+
+      // marker：grep 标记同步评估；judge：另起一次强制结构化裁判，把散文收敛成 verdict。
+      let action;
+      if (options.decision.mode === "judge") {
+        const { judgeVerdict } = await import("./judge"); // 动态 import 隔离 agents 依赖
+        const verdict: DecisionVerdict = await judgeVerdict({
+          review: finalText,
+          criteria: options.decision.criteria,
+          provider: options.decision.judge_provider,
+          model: options.decision.judge_model,
+        });
+        action = planDecisionActionFromVerdict(verdict, phaseName, meta, counts);
+      } else {
+        action = planDecisionAction(finalText, options.decision, phaseName, meta, counts);
+      }
 
       if (action.kind === "ambiguous") {
         throw new Error(
-          `phase「${phaseName}」无法解析判据结论：agent 输出既未含 pass 标记「${options.decision.pass}」也未含 reject 标记「${options.decision.reject}」`,
+          options.decision.mode === "judge"
+            ? `phase「${phaseName}」结构化裁判两次仍未给出明确结论（pass/reject），已停下报人`
+            : `phase「${phaseName}」无法解析判据结论：agent 输出既未含 pass 标记「${options.decision.pass}」也未含 reject 标记「${options.decision.reject}」`,
         );
       }
       if (action.kind === "misconfigured") {
