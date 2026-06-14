@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { extractPhaseFunction } from "../src/web/src/lib/ts-extract";
+import { extractPhaseFunction, extractPhaseRunFunction } from "../src/web/src/lib/ts-extract";
 
 describe("extractPhaseFunction", () => {
   it("能切出 export async function 形式", () => {
@@ -55,6 +55,13 @@ export const handle_it = async (taskId: string): Promise<void> => {
     expect(extractPhaseFunction("export async function design() {}", "")).toBeNull();
   });
 
+  it("匹配字面函数名：用裸 phase 名匹配不到 run_<phase> 函数（这是历史 bug 的根因）", () => {
+    const src = `export async function run_design(taskId: string): Promise<void> {\n  const x = 1;\n}`;
+    // 裸 phase 名「design」匹配不到 run_design —— 调用方必须传完整函数名
+    expect(extractPhaseFunction(src, "design")).toBeNull();
+    expect(extractPhaseFunction(src, "run_design")).toContain("export async function run_design");
+  });
+
   it("函数体里嵌套 { } 也能正确配对", () => {
     const src = `
 export async function complex(t: string): Promise<void> {
@@ -72,5 +79,28 @@ export async function next(t: string): Promise<void> {}
     expect(got).toContain("export async function complex");
     expect(got).toContain("console.log(o);");
     expect(got).not.toContain("export async function next");
+  });
+});
+
+describe("extractPhaseRunFunction（封装 run_<phase> 命名约定）", () => {
+  const src = `
+export async function run_design(taskId: string): Promise<void> {
+  const x = 1;
+}
+
+export async function run_review(taskId: string): Promise<void> {
+  await review();
+}
+`;
+
+  it("传裸 phase 名即可切出 run_<phase> 函数（修复编辑器看不到脚本的 bug）", () => {
+    const got = extractPhaseRunFunction(src, "design");
+    expect(got).toContain("export async function run_design");
+    expect(got).not.toContain("run_review");
+  });
+
+  it("空输入返回 null", () => {
+    expect(extractPhaseRunFunction("", "design")).toBeNull();
+    expect(extractPhaseRunFunction(src, "")).toBeNull();
   });
 });

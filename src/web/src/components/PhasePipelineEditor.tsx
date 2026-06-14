@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { extractPhaseFunction } from "@/lib/ts-extract";
+import { extractPhaseRunFunction } from "@/lib/ts-extract";
 import { pickPhaseLabel, userPhaseLabel } from "@/lib/workflow-labels";
 
 // ──────────────────────────────────────────────
@@ -184,7 +184,8 @@ export function PhasePipelineEditor({
 
   const drawerTsCode = useMemo(() => {
     if (!drawerPhase || !tsSource) return null;
-    return extractPhaseFunction(tsSource, drawerPhase);
+    // 传裸 phase 名；run_<phase> 命名约定封在 extractPhaseRunFunction 内。
+    return extractPhaseRunFunction(tsSource, drawerPhase);
   }, [drawerPhase, tsSource]);
 
   // ── 更新单个 phase 的某字段 ──

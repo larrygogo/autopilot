@@ -10,6 +10,19 @@
  * 用括号配对扫描函数体，避免被字符串字面量里的 } 误终止——保持简单：只在朴素扫描层
  * 跟踪 { } 计数，不解析字符串/正则字面量。够用，因为 workflow.ts 通常是脚手架代码。
  */
+/**
+ * 按 phase 名切出它的执行函数源码。
+ *
+ * workflow.ts 约定：phase `<p>` 的执行函数名为 `run_<p>`（见 PhaseTsEditor 的
+ * placeholder 与保存逻辑）。本包装封装该命名约定——调用方传**裸 phase 名**即可，
+ * 不必自己拼 `run_` 前缀。曾因调用点漏拼前缀、用裸 phase 名去匹配字面函数名，
+ * 导致永远抽不到函数 → 编辑器显示「未找到函数」空白。
+ */
+export function extractPhaseRunFunction(tsSource: string, phaseName: string): string | null {
+  if (!tsSource || !phaseName) return null;
+  return extractPhaseFunction(tsSource, `run_${phaseName}`);
+}
+
 export function extractPhaseFunction(tsSource: string, phaseName: string): string | null {
   if (!tsSource || !phaseName) return null;
 
