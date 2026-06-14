@@ -21,6 +21,7 @@ import { getTaskArtifactsDir, listTaskRepos, type TaskRepoCtx } from "@autopilot
 import { appendSubPr } from "@autopilot/core/requirement-sub-prs";
 import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { notify } from "@autopilot/core/notify";
+import { deliverPr } from "@autopilot/core/deliver-pr";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
 const REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT";
@@ -409,126 +410,22 @@ export async function run_code_review(taskId: string): Promise<void> {
   }
 }
 
-/** gh pr view 判 OPEN 复用（pr edit）/ 否则 create。失败抛错（调用方按库聚合）。 */
-function ensurePr(repo: TaskRepoCtx, title: string, prBody: string): string {
-  // 检查是否已存在 **OPEN** PR：只有 open 的才复用、更新 body（如 review 驳回返工后再 submit）。
-  // closed 的必须建新 —— 重跑会删交付分支触发 GitHub 自动 close 旧 PR，gh pr view 仍会返回这个
-  // closed PR；若不判 state 就会把改动"更新"到已关闭的 PR 上，等于重跑跑完却没有有效 open PR。
-  const existingPr = Bun.spawnSync(
-    ["gh", "pr", "view", "--json", "url,state"],
-    { cwd: repo.path, stderr: "pipe" }
-  );
-  const existingOut = new TextDecoder().decode(existingPr.stdout ?? new Uint8Array()).trim();
-  let parsedExisting: { url?: string; state?: string } | null = null;
-  if (existingPr.exitCode === 0 && existingOut) {
-    try { parsedExisting = JSON.parse(existingOut) as { url?: string; state?: string }; } catch { parsedExisting = null; }
-  }
-  if (parsedExisting && parsedExisting.state === "OPEN") {
-    Bun.spawnSync(["gh", "pr", "edit", "--body", prBody], { cwd: repo.path });
-    return parsedExisting.url ?? "";
-  }
-  const createProc = Bun.spawnSync(
-    ["gh", "pr", "create", "--title", title, "--body", prBody, "--base", repo.base, "--head", repo.branch],
-    { cwd: repo.path, stderr: "pipe" }
-  );
-  if (createProc.exitCode !== 0) {
-    const errMsg = new TextDecoder().decode(createProc.stderr ?? new Uint8Array()).trim();
-    throw new Error(`创建 PR 失败：${errMsg}`);
-  }
-  return new TextDecoder().decode(createProc.stdout ?? new Uint8Array()).trim();
-}
-
 export async function run_submit_pr(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  const repos = taskRepos(taskId, task);
-  const reqId = task["requirement_id"] as string | undefined;
-
+  // 交付逻辑（逐库 commit/push/开 PR/落 sub_prs/回填 pr_url）已收进框架 core/deliver-pr。
+  // dev 专属的只剩「PR body 摘要取 design/plan.md」这个产物约定 —— 作为 prBodyContext 注入。
   const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
-  const agent = agentForPhase(task.workflow, "submit_pr");
 
-  // 逐库交付：commit → push → PR。部分失败 = 已开 PR 落库保留 + 抛错停下报人（重试幂等：
-  // 已 push 的库重入是 fast-forward no-op，OPEN PR 走 edit 复用，appendSubPr 是 UPSERT）。
-  const results: Array<{ repo: TaskRepoCtx; prUrl: string }> = [];
-  const failures: string[] = [];
-  for (const r of repos) {
-    const label = r.alias || "仓库";
-    try {
-      // 共用沙盒：各 phase 的改动已直接累积在工作树，submit_pr 落成交付 commit（空改动时容错不报错）。
-      runGit(["add", "-A"], r.path);
-      // 该库有无改动：staged 相对 base 有 diff，或已有领先 base 的本地 commit（fix 轮 / agent 自行 commit 过）
-      const staged = runGit(["diff", "--cached", "--quiet", `origin/${r.base}`], r.path, false).exitCode !== 0;
-      const ahead = runGit(["rev-list", "--count", `origin/${r.base}..HEAD`], r.path, false).stdout.trim() !== "0";
-      if (!staged && !ahead) continue; // 该库无改动 → 不开空 PR
-      runGit(["commit", "-m", `feat: ${task.title}`], r.path, false);
-      // 普通 push（不 --force）：重跑时 startNewRunForRequirement 已删远程上一轮交付分支（幂等清旧轮，
-      // GitHub 自动 close 旧 PR），新一轮 push 到全新分支不会有 non-fast-forward 冲突。
-      runGit(["push", "-u", "origin", r.branch], r.path);
+  const { prUrls } = await deliverPr(taskId, {
+    agentPhase: "submit_pr",      // 用 submit_pr phase 的内联 agent 生成 PR body（行为等价）
+    prBodyContext: planContent,
+  });
 
-      // base 用 origin/<branch>：clone 只创建源仓库 HEAD 所指分支，源仓库 checkout 在
-      // 非默认分支时本地没有 <base> ref，裸引用直接 fatal（与 code_review 同理）。
-      const diffStatResult = runGit(["diff", `origin/${r.base}...HEAD`, "--stat"], r.path);
-      const gitDiffStat = diffStatResult.stdout.slice(0, 3000);
-      const multiNote = repos.length > 1
-        ? `\n\n（本需求共涉及 ${repos.length} 个仓库的交付，当前是 ${label}；交付 PR 全集见 autopilot 需求页）`
-        : "";
-      const prPrompt =
-        `请根据以下信息生成 PR 描述（Markdown 格式）：\n\n` +
-        `## 标题\n${task.title}\n\n` +
-        `## 技术方案摘要\n${planContent.slice(0, 4000)}\n\n` +
-        `## 变更统计\n${gitDiffStat}\n\n` +
-        `请输出完整的 PR body，包含：概述、主要变更、测试说明。${multiNote}`;
-      const prResult = await agent.run(prPrompt, { cwd: r.path, timeout: 300_000 });
-
-      const prUrl = ensurePr(r, task.title, prResult.text);
-      results.push({ repo: r, prUrl });
-
-      // 每个交付 PR 都落 requirement_sub_prs 作为交付 PR 全集（单库也落——新任务全部走
-      // pr-poller 聚合验收路径，CI 自动修复回路同样覆盖单库）。极旧任务兜底布局
-      // workspace_id 为空串 → 跳过，走 main-scope 兼容路径。
-      if (r.workspace_id && reqId) {
-        const n = Number(prUrl.match(/\/pull\/(\d+)/)?.[1] ?? 0);
-        try {
-          appendSubPr({ requirement_id: reqId, child_workspace_id: r.workspace_id, pr_url: prUrl, pr_number: n });
-        } catch (e: unknown) {
-          console.warn(`记录交付 PR 失败 [${label}]：`, e instanceof Error ? e.message : e);
-        }
-      }
-    } catch (e: unknown) {
-      failures.push(`[${label}] ${(e as Error).message}`);
-    }
-  }
-
-  if (results.length === 0 && failures.length === 0) {
-    throw new Error("所有仓库均无改动，没有可交付内容");
-  }
-  if (failures.length > 0) {
-    // 停下报人：已开 PR 已落库保留；phase 失败 → 任务 failed → 需求页可见
-    throw new Error(`部分仓库交付失败（已成功 ${results.length} 个，其 PR 已保留）：\n${failures.join("\n")}`);
-  }
-
-  // 展示镜像 = 第一个交付 PR（repo.primary 是位置语义 = 集合第一个；交付 PR 全集在 sub_prs）
-  const primaryPr = results.find((x) => x.repo.primary) ?? results[0];
-  updateTask(taskId, { pr_url: primaryPr.prUrl });
-
-  // 回填 PR 到需求：需求页/产出卡从 requirement.pr_url 读（第一个交付 PR 作主显示），不回填则"需求做完了看不到 PR"。
-  if (reqId) {
-    const m = primaryPr.prUrl.match(/\/pull\/(\d+)/);
-    const prNumber = m ? Number(m[1]) : null;
-    try {
-      updateRequirement(reqId, { pr_url: primaryPr.prUrl, pr_number: prNumber });
-    } catch (e: unknown) {
-      console.warn("回填 requirement.pr_url 失败：", e instanceof Error ? e.message : e);
-    }
-  }
-
-  // clone 沙盒是独立副本，无需切回 default branch（源仓库与主机 cwd 都不受影响）。
-
-  const noteUrls = results.map((x) => x.prUrl).join(" , ");
   transition(taskId, "submit_pr_complete", {
     transitions: getTransitions(task.workflow),
-    note: `PR 已提交：${noteUrls}`,
+    note: `PR 已提交：${prUrls.join(" , ")}`,
   });
 }
