@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -50,10 +49,7 @@ export function AddStepDialog({
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className={mode === "parallel" ? "sm:max-w-lg" : "sm:max-w-md"}>
         <DialogHeader>
-          <DialogTitle>新增</DialogTitle>
-          <DialogDescription>
-            {mode === "phase" ? "添加一个新阶段到工作流中。" : "一次可填多个并发执行的子阶段。"}
-          </DialogDescription>
+          <DialogTitle>新增{mode === "phase" ? "阶段" : "并行块"}</DialogTitle>
         </DialogHeader>
 
         {/* tab 切换 */}
