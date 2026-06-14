@@ -1374,14 +1374,13 @@ function PhaseEditForm({
         <FormRow label="提示词 (prompt)">
           <Textarea
             value={typeof raw.prompt === "string" ? raw.prompt : ""}
-            placeholder={`填了 prompt 就不需要写 ts 函数；可用变量：\${TASK_TITLE} \${REQUIREMENT} \${WORKSPACE} \${PHASE}\n例：你是一位资深工程师。请根据 \${REQUIREMENT} 输出方案。`}
+            placeholder={`填了 prompt 就不需要写 ts 函数。\n可用变量：\${REQUIREMENT} 需求详情 · \${WORKSPACE} 代码目录 · \${HANDOFF} 上游各阶段交付摘要 · \${HANDOFF_<阶段名>} 指定阶段摘要 · \${REJECTION} 上次驳回理由(重做轮自动带) · \${TASK_TITLE} · \${PHASE} · \${TASK.<字段>}\n例：评审 \${HANDOFF_design} 是否满足 \${REQUIREMENT}。`}
             onChange={(e) => onChange({ prompt: e.target.value || undefined })}
             className="min-h-[100px] resize-y font-mono text-[11px] leading-relaxed"
             spellCheck={false}
           />
           <p className="mt-1 text-[10px] text-muted-foreground">
-            yaml 写 prompt → 框架自动调用 phase 内联 agent（或默认 agent）.run(prompt)，无需写 ts 函数；
-            适合简单的"调 agent 跑一段 prompt"场景，复杂分支（reject / 解析返回）仍需 ts
+            {"yaml 写 prompt → 框架自动调用 phase 内联 agent（或默认 agent）.run(prompt)，无需写 ts 函数；上游产物用 ${HANDOFF}/${HANDOFF_<阶段>} 读，不用 readFileSync。复杂分支（reject / 解析返回）仍需 ts"}
           </p>
           {typeof raw.prompt === "string" && raw.prompt.trim() && (
             <PromptDryRunner
