@@ -1,0 +1,110 @@
+name: dev_declarative
+label: "完整开发（声明式）"
+description: "dev 的零 TS 声明式版：设计 → 开发 → 代码评审（结构化裁判）→ 框架内置 PR 交付。无 workflow.ts，能力上界由框架原语 + tools 授权钉死，可安全分享/跨人运行。"
+
+# ── 声明式安全闸门（spec 2026-06-14 砖 3）──
+# declarative: true → 加载期硬拒任何用户 TS 代码：没有 workflow.ts、phase 只能用框架内置原语
+# （prompt / builtin / gate / parallel）。保证沙盒安全，可跨人运行别人写的工作流。
+declarative: true
+
+# 产出形态 = PR（与 dev 一致）；requires.git 缺省派生自 sandbox.git=true。
+delivers: pr
+sandbox:
+  git: true
+
+# ── prompt 模式红线（必读）──
+# prompt 里**绝不**叫 agent 把方案 / 评审等"阶段间通信产物"写进文件——这类内容一律写在回复正文里，
+# 框架捕获 result.text 落盘、并经 handoff 传给下游（${HANDOFF}）。否则 CLI agent 会照字面把活儿
+# 写进框架不读的文件 → 下游拿到空内容反复驳回。**代码本身**写进沙盒是另一回事（那是交付物，
+# deliver_pr 阶段用 git 读取并提交），不受此限。
+
+phases:
+  # 设计：理解需求与现有代码，产出技术方案。方案正文写在回复里（handoff），不写文件。
+  - name: design
+    label: "设计"
+    timeout: 900
+    handoff: true
+    agent:
+      label: "架构师"
+      provider: anthropic
+      permission_mode: bypassPermissions
+      tools: [read, list, search, bash]   # 只读探索代码，不授写
+    prompt: |
+      你是一位资深架构师。请为下面的需求产出一份完整、可落地的技术方案。
+
+      ## 需求
+      ${REQUIREMENT}
+
+      ## 代码沙盒
+      代码已克隆到工作目录（你的 cwd）。可用工具浏览现有结构、约定与依赖，作为设计依据。
+
+      ${REJECTION}
+
+      把方案正文**直接写在你的回复里**（系统自动保存，不要写任何文件）：需求分析、技术方案、
+      实现步骤、影响范围、测试计划。不要在本阶段改动任何代码。
+
+  # 开发：按方案实现。代码改动写进沙盒（交付物），实现说明写在回复里（handoff）。
+  - name: develop
+    label: "开发"
+    timeout: 1800
+    handoff: true
+    agent:
+      label: "开发者"
+      provider: anthropic
+      permission_mode: bypassPermissions
+      tools: [read, list, search, write, edit, bash]
+    prompt: |
+      你是一位高级开发工程师。请按下面的技术方案实现需求。
+
+      ## 技术方案
+      ${HANDOFF_design}
+
+      ${REJECTION}
+
+      在工作目录（沙盒，你的 cwd）里**直接创建 / 修改代码文件**完成开发，确保可编译、可运行。
+      **不要自己 git commit / push**（提交与开 PR 由后续交付阶段统一做）。
+      把"做了什么改动、为什么"写在你的回复里（系统自动保存为本阶段交接，不要额外写说明文件）。
+
+  # 代码评审：审查沙盒里的实际改动，自由写散文评审；框架另起结构化裁判把散文收敛成 pass/reject。
+  - name: code_review
+    label: "代码评审"
+    timeout: 1200
+    reject: develop
+    max_rejections: 3
+    agent:
+      label: "评审员"
+      provider: anthropic
+      permission_mode: bypassPermissions
+      tools: [read, list, search, bash]   # 只读审查
+    prompt: |
+      你是一位严格的代码审查专家。审查工作目录（沙盒，你的 cwd）里相对基线分支的实际代码改动，
+      判断它是否正确实现了需求与技术方案。
+
+      ## 需求
+      ${REQUIREMENT}
+
+      ## 技术方案
+      ${HANDOFF_design}
+
+      ## 开发者的改动说明
+      ${HANDOFF_develop}
+
+      可用 `git diff` 等工具查看真实改动。请就正确性、代码质量、安全性、测试覆盖给出**散文评审**，
+      指出真问题而非格式纠错（结论由系统裁判，你只需把评审意见写清楚在回复里）。
+    decision:
+      mode: judge
+      criteria: |
+        通过（pass）标准：改动正确实现了需求与技术方案的核心目标，无明显正确性 / 安全问题，
+        关键路径有基本测试或可验证。仅有 minor 风格问题不构成驳回。
+        驳回（reject）标准：存在 critical / important 缺陷——功能未实现、逻辑错误、安全隐患、
+        或与方案严重不符。
+
+  # 交付：框架内置 deliver_pr —— 逐库 commit/push/开 PR/落 sub_prs/回填 pr_url，零 TS。
+  - name: deliver
+    label: "提交 PR"
+    timeout: 600
+    builtin: deliver_pr
+    agent:
+      label: "PR 描述"
+      provider: anthropic
+      permission_mode: bypassPermissions
