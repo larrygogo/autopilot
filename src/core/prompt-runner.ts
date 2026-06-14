@@ -82,6 +82,16 @@ const HANDOFF_PROMPT_SUFFIX = `
  * 同时支持 task 上 extras 字段（setup_func 返回的字段）：
  *   ${TASK.repo_path} 等任意嵌套字段（仅一层，避免复杂表达式）
  */
+/** rejection_counts（task.extra 里的 JSON 串）所有值求和 = 总驳回轮数。 */
+function sumRejectionCounts(raw: unknown): number {
+  try {
+    const o = JSON.parse(String(raw ?? "{}")) as Record<string, number>;
+    return Object.values(o).reduce((a, b) => a + (Number(b) || 0), 0);
+  } catch {
+    return 0;
+  }
+}
+
 export function expandPromptTemplate(
   prompt: string,
   ctx: {
@@ -104,6 +114,8 @@ export function expandPromptTemplate(
     REQUIREMENT: String(ctx.task["requirement"] ?? ""),
     WORKSPACE: codeRoot,
     HANDOFF: ctx.workflow ? collectUpstreamHandoffs(ctx.taskId, ctx.workflow, ctx.phase, artifactsRoot) : "",
+    REJECTION: String(ctx.task["rejection_reason"] ?? ""),
+    REJECTION_COUNT: String(sumRejectionCounts(ctx.task["rejection_counts"])),
   };
 
   // ${VAR} 优先匹配（含 ${TASK.xxx} 和 ${HANDOFF_<NAME>}）
