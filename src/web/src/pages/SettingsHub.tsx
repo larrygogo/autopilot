@@ -10,9 +10,9 @@ export type SettingsSection = "general" | "providers" | "lifecycle" | "scheduler
 
 const SECTION_HEADER: Record<Exclude<SettingsSection, "providers">, { title: string; desc: string }> = {
   general: { title: "通用", desc: "默认偏好与桌面通知" },
-  lifecycle: { title: "生命周期 agent", desc: "澄清等平台固定阶段的 agent 默认配置（与工作流执行阶段分开）" },
-  scheduler: { title: "任务调度", desc: "全局最大并发任务数等调度行为" },
-  network: { title: "网络访问", desc: "daemon 监听地址与 API token" },
+  lifecycle: { title: "生命周期 agent", desc: "澄清、建需求这些 AI 步骤用哪个模型" },
+  scheduler: { title: "任务调度", desc: "同时能跑多少个任务" },
+  network: { title: "网络访问", desc: "谁能访问这个面板" },
   daemon: { title: "Daemon", desc: "运行状态、日志与配置文件" },
 };
 

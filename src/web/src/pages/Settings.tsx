@@ -138,8 +138,7 @@ export function Settings({
               <InfoField label="端口" value={location.port || "80"} mono />
             </dl>
             <p className="mt-3 text-[11px] text-muted-foreground">
-              升级代码（<code className="bg-muted/40 px-1.5">git pull</code> + <code className="bg-muted/40 px-1.5">bun run build:web</code>）
-              或改 config.yaml 的 host/port 后重启生效。重启期间此页会短暂断开并自动重连。
+              更新代码、或改了监听地址 / 端口后，重启让它生效。重启时这个页面会断开一两秒再自动连上。
             </p>
           </Card>
         )}
@@ -149,10 +148,10 @@ export function Settings({
           title="重启 daemon"
           message={
             <div className="space-y-2 text-sm">
-              <p>将请求 supervisor 重启 daemon 进程。</p>
+              <p>现在重启 daemon。</p>
               <p className="text-muted-foreground">
-                重启期间所有正在运行的任务不受影响（独立子进程），但此 Web 页面会短暂断开
-                约 1-2 秒并自动重连。裸跑模式（无 supervisor）下会退化为停止，需手动再起。
+                正在跑的任务不受影响，但这个页面会断开一两秒再自动连上。
+                如果 daemon 不是托管启动的，重启会变成停止，需要你手动再启动一次。
               </p>
             </div>
           }
@@ -166,10 +165,9 @@ export function Settings({
         {/* 编辑配置文件提示 */}
         <Card className="mb-4 p-4">
           <div className="mb-2">
-            <h3 className="text-sm font-semibold">编辑配置文件</h3>
+            <h3 className="text-sm font-semibold">配置文件位置</h3>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
-              日常配置请用左侧设置菜单与「工作流 / 定时任务」导航；
-              原始 YAML 请用 IDE 直接编辑文件，daemon 即时读到改动（providers / agents 无需重启）。
+              日常设置用左边的菜单就够了。想直接改原始配置，用编辑器打开下面的路径，存盘后大多即时生效。
             </p>
           </div>
           <dl className="grid grid-cols-1 gap-y-2 font-mono text-xs sm:grid-cols-[auto_1fr] sm:gap-x-4">
@@ -201,7 +199,7 @@ export function Settings({
         <div className="mb-3">
           <h3 className="text-sm font-semibold">常规偏好</h3>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            影响新建定时任务时的默认值；已创建的任务不受影响。
+            新建定时任务时的默认值，已有的任务不变。
           </p>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
@@ -287,7 +285,7 @@ function SchedulerCard(): React.ReactElement {
       <div className="mb-3">
         <h3 className="text-sm font-semibold">任务调度</h3>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          全局同时运行的任务总数上限（所有代码库合计）。写入 config.yaml 后即时生效，无需重启。
+          最多允许多少个任务同时跑（所有代码库合计）。改完马上生效。
         </p>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr] sm:items-end">
@@ -307,8 +305,8 @@ function SchedulerCard(): React.ReactElement {
           )}
         </div>
         <p className="text-[11px] text-muted-foreground">
-          内核配置：<code className="font-mono bg-muted/40 px-1.5 py-0.5">scheduler.max_concurrent_tasks</code>
-          {configured === null && !loading && <span className="ml-1">（当前未配置，生效默认 1）</span>}
+          对应 <code className="font-mono bg-muted/40 px-1.5 py-0.5">scheduler.max_concurrent_tasks</code>
+          {configured === null && !loading && <span className="ml-1">（没设置时默认 1）</span>}
         </p>
       </div>
     </Card>
@@ -517,7 +515,7 @@ function NetworkAccessCard(): React.ReactElement {
       <div className="mb-3">
         <h3 className="text-sm font-semibold">网络访问</h3>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          控制 daemon 监听范围。改后需在终端跑 <code className="bg-muted/40 px-1.5">autopilot daemon restart</code> 生效。
+          决定谁能访问这个面板。改完要重启 daemon 生效（「设置 → Daemon」里有按钮）。
         </p>
       </div>
 
@@ -529,8 +527,8 @@ function NetworkAccessCard(): React.ReactElement {
           </div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
             {isExposed
-              ? `监听 ${info.host}:${info.port}，同网段的机器都能访问`
-              : `监听 127.0.0.1:${info.port}，仅本机`}
+              ? `同一网络里的机器都能打开（${info.host}:${info.port}）`
+              : `只有这台机器能打开（127.0.0.1:${info.port}）`}
           </div>
         </div>
         <Switch
@@ -634,7 +632,7 @@ function NetworkAccessCard(): React.ReactElement {
                   </Button>
                 )}
               </div>
-              {!tokenLocked && <div>仅本机来源免 token，外部访问必须带</div>}
+              {!tokenLocked && <div>本机访问免令牌，外部机器访问必须带上</div>}
             </div>
           ) : (
             <span className="text-warning">未设置。切到"局域网开放"时必须设置，否则同网段任何人都能访问 daemon。</span>
@@ -725,7 +723,7 @@ function NetworkAccessCard(): React.ReactElement {
         )}
 
         <p className="mt-2 text-[10px] text-muted-foreground">
-          注：MCP <code className="font-mono">/mcp</code> 路由走独立 token（mcp-config 管理），不受此控制
+          MCP 的 <code className="font-mono">/mcp</code> 接口用另一个令牌（在 mcp-config 里管），不受这里影响。
         </p>
       </div>
 
@@ -986,7 +984,7 @@ function DesktopNotifyCard(): React.ReactElement {
       <div className="mb-3">
         <h3 className="text-sm font-semibold">桌面通知</h3>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          tab 切到后台时，有新的"待你处理"事项弹桌面通知。仅本机生效。
+          切到别的标签页时，有需要你处理的事就弹个桌面通知。只在本机有效。
         </p>
       </div>
       {permission === "unsupported" && (

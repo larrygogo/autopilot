@@ -213,8 +213,8 @@ export function Providers(_props: { embedded?: boolean } = {}) {
       width="form"
       hero={{
         title: "提供商",
-        subtitle: "CLI / API 平级 · 自管增删",
-        description: "每个供应商是一个独立条目，标 CLI 或 API 类型。CLI 凭本地 CLI 登录、API 凭密钥直连。",
+        subtitle: "你的模型来源",
+        description: "每个供应商单独一条，按需添加或删除。CLI 用本地命令行登录，API 填密钥直接连。",
         actions: (
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm" onClick={recheckCli} disabled={checking}>
@@ -233,7 +233,7 @@ export function Providers(_props: { embedded?: boolean } = {}) {
         <Card className="mb-4 border-destructive/40 bg-destructive/5 p-4">
           <p className="text-sm font-medium text-destructive">加载失败：{loadError}</p>
           <p className="mt-1.5 text-xs text-muted-foreground">
-            常见原因：daemon 未重启。请在「设置 → Daemon」点「重启 daemon」，或终端{" "}
+            多半是 daemon 还没重启。去「设置 → Daemon」点「重启 daemon」，或在终端跑{" "}
             <code className="rounded bg-muted px-1 py-0.5 font-mono">autopilot daemon restart</code>。
           </p>
         </Card>
@@ -244,16 +244,16 @@ export function Providers(_props: { embedded?: boolean } = {}) {
       ) : (
         <div className="space-y-6">
           <section className="space-y-3">
-            <h3 className="text-xs font-medium text-muted-foreground">CLI 供应商（本地 CLI 子进程，凭证 CLI 自管）</h3>
-            {cliEntries.length === 0 && <EmptyHint text="暂无 CLI 供应商，点右上「添加供应商」。" />}
+            <h3 className="text-xs font-medium text-muted-foreground">CLI 供应商（用本地命令行登录）</h3>
+            {cliEntries.length === 0 && <EmptyHint text="还没有 CLI 供应商，点右上「添加供应商」。" />}
             {cliEntries.map((e) => (
               <CliCard key={e.id ?? e.name} entry={e} modelOptions={modelOptionsFor(e)} onToggle={toggleEnabled} onSaveModel={saveModel} onDelete={setDeleteTarget} />
             ))}
           </section>
 
           <section className="space-y-3">
-            <h3 className="text-xs font-medium text-muted-foreground">API 供应商（直连 HTTP，凭密钥）</h3>
-            {apiEntries.length === 0 && <EmptyHint text="暂无 API 供应商，从「添加供应商 → API」选模板或自定义。" />}
+            <h3 className="text-xs font-medium text-muted-foreground">API 供应商（填密钥连接）</h3>
+            {apiEntries.length === 0 && <EmptyHint text="还没有 API 供应商，点右上「添加供应商」选一个或自定义。" />}
             {apiEntries.map((e) => (
               <ApiCard
                 key={e.id ?? e.name}
@@ -285,7 +285,7 @@ export function Providers(_props: { embedded?: boolean } = {}) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>设置 {keyDialogName} API 密钥</DialogTitle>
-            <DialogDescription>密钥 AES-256-GCM 加密存本地数据库；优先级高于环境变量。</DialogDescription>
+            <DialogDescription>密钥会加密保存在本机，优先于环境变量里的设置。</DialogDescription>
           </DialogHeader>
           <div className="py-2">
             <Label htmlFor="api-key">API 密钥</Label>
@@ -318,7 +318,7 @@ export function Providers(_props: { embedded?: boolean } = {}) {
       <ConfirmDialog
         open={!!deleteKeyTarget}
         title={`删除 ${deleteKeyTarget} 的 API 密钥？`}
-        message="删除后需重新录入，或通过环境变量配置。"
+        message="删掉后要重新填，或者改用环境变量。"
         confirmText="删除"
         danger
         onConfirm={deleteKey}
@@ -330,8 +330,8 @@ export function Providers(_props: { embedded?: boolean } = {}) {
         title={`删除供应商「${deleteTarget?.display_name}」？`}
         message={
           <div className="space-y-2 text-sm">
-            <p>将删除该供应商条目。若被工作流引用，删除会被拦截并提示受影响的工作流。</p>
-            <p className="text-muted-foreground">删除后重新添加同名供应商可恢复引用它的工作流。</p>
+            <p>删掉这个供应商。如果有工作流正在用它，会拦下来并告诉你是哪些。</p>
+            <p className="text-muted-foreground">之后重新添加同名供应商，用它的工作流就能恢复。</p>
           </div>
         }
         confirmText="删除"
@@ -369,7 +369,7 @@ function CliCard({
         statusBadge={<CliStatusBadge status={e.cli_status} enabled={e.enabled !== false} />} />
       <div className="mt-2 space-y-1 text-xs">
         {e.cli_status === "missing" && (
-          <p className="text-warning">本地未安装 <code className="bg-muted px-1 font-mono">{e.subtype}</code> CLI；装上即可用（可留着在别处跑）。</p>
+          <p className="text-warning">本机没装 <code className="bg-muted px-1 font-mono">{e.subtype}</code> 命令行，装好后就能用；也可以先留着。</p>
         )}
         {e.cli_version && <div><span className="text-muted-foreground">版本：</span><code className="bg-muted px-1 font-mono text-foreground">{e.cli_version}</code></div>}
         {login && <div><span className="text-muted-foreground">登录：</span><code className="bg-muted px-1 font-mono text-foreground">{login}</code></div>}
@@ -415,7 +415,7 @@ function ApiCard({
             <span className="text-muted-foreground">密钥：</span>
             {e.has_api_key ? (
               <span className="text-success">
-                {e.key_hint}{fromEnv && <span className="ml-1 text-muted-foreground">（环境变量，shell 中 unset 可移除）</span>}
+                {e.key_hint}{fromEnv && <span className="ml-1 text-muted-foreground">（来自环境变量）</span>}
               </span>
             ) : <span className="text-warning">未配置</span>}
           </div>
@@ -486,7 +486,7 @@ function ModelRow({ value, onChange, onSave, dirty, options }: { value: string; 
           value={value || undefined}
           onChange={(v) => onChange(v ?? "")}
           options={options}
-          placeholder={options.length ? "选择或输入模型" : "输入模型名（留空走兜底）"}
+          placeholder={options.length ? "选择或输入模型" : "输入模型名（留空用默认）"}
           clearable
         />
       </div>
@@ -612,15 +612,15 @@ function AddProviderDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>添加供应商</DialogTitle>
-          <DialogDescription>选一个供应商即加，名字自动；同一个只能加一次。CLI 凭本地 CLI、API 凭密钥。</DialogDescription>
+          <DialogDescription>选一个就添加，同一个只能加一次。</DialogDescription>
         </DialogHeader>
         <div className="max-h-[60vh] space-y-4 overflow-y-auto py-1 pr-1">
           <div className="space-y-2">
-            <h4 className="text-xs font-medium text-muted-foreground">CLI（本地子进程，凭证 CLI 自管）</h4>
+            <h4 className="text-xs font-medium text-muted-foreground">CLI（用本地命令行登录）</h4>
             {CLI_CATALOG.map((item) => <Row key={item.name} item={item} />)}
           </div>
           <div className="space-y-2">
-            <h4 className="text-xs font-medium text-muted-foreground">API（直连 HTTP，需密钥）</h4>
+            <h4 className="text-xs font-medium text-muted-foreground">API（填密钥连接）</h4>
             {apiCatalog.map((item) => <Row key={item.name} item={item} />)}
           </div>
           <div className="space-y-2">
@@ -629,7 +629,7 @@ function AddProviderDialog({
               className="text-xs text-muted-foreground hover:text-foreground"
               onClick={() => setCustomOpen((v) => !v)}
             >
-              {customOpen ? "▾ " : "▸ "}自定义 API 端点（自建 / 转售 / Kimi Code 等兼容端点）
+              {customOpen ? "▾ " : "▸ "}自定义 API 端点（自建、转售或 Kimi Code 这类）
             </button>
             {customOpen && (
               <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
@@ -658,7 +658,7 @@ function AddProviderDialog({
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="c-model" className="text-[10px]">默认模型（可选）</Label>
-                  <Input id="c-model" value={cModel} onChange={(e) => setCModel(e.target.value)} placeholder="留空走兜底" className="h-8 font-mono text-sm" />
+                  <Input id="c-model" value={cModel} onChange={(e) => setCModel(e.target.value)} placeholder="留空用默认" className="h-8 font-mono text-sm" />
                 </div>
                 <div className="flex justify-end">
                   <Button size="sm" className="h-7 text-xs" disabled={!cName.trim() || adding === cName.trim()} onClick={addCustom}>

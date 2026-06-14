@@ -88,7 +88,7 @@ export function LifecycleAgentsCard() {
       if (permMode) cfg.permission_mode = permMode;
       if (sysPrompt.trim()) cfg.system_prompt = sysPrompt;
       await api.setLifecycleAgent("clarify", Object.keys(cfg).length ? cfg : null);
-      toast.success("已保存（daemon 实时读盘，下次澄清生效）");
+      toast.success("已保存，下次澄清生效");
       await load();
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
@@ -101,7 +101,7 @@ export function LifecycleAgentsCard() {
     setSaving(true);
     try {
       await api.setLifecycleAgent("clarify", null);
-      toast.success("已重置为内置默认");
+      toast.success("已恢复默认");
       await load();
     } catch (e: unknown) {
       toast.error("重置失败", (e as Error)?.message ?? String(e));
@@ -117,9 +117,9 @@ export function LifecycleAgentsCard() {
     <div className="space-y-4">
       <Card className="p-4">
         <div className="mb-3">
-          <h3 className="text-sm font-semibold">需求澄清 agent（clarify）</h3>
+          <h3 className="text-sm font-semibold">需求澄清 <span className="font-mono text-[10px] font-normal text-muted-foreground">clarify</span></h3>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            平台固定生命周期阶段，**不属于任何工作流**。{info?.note}。留空的字段跟随内置默认。
+            开始做需求前，AI 会先读你的代码、跟你对话把需求理清。这里决定它用哪个模型、怎么跑；没填的项走默认。
           </p>
         </div>
 
@@ -141,7 +141,7 @@ export function LifecycleAgentsCard() {
               onChange={(v) => setModel(v ?? "")}
               options={modelOptions}
               clearable
-              placeholder={loadingModels ? "加载模型…" : "留空走 provider 默认"}
+              placeholder={loadingModels ? "加载模型…" : "留空用默认模型"}
             />
           </div>
           <div className="space-y-1.5">
@@ -170,12 +170,12 @@ export function LifecycleAgentsCard() {
             className="font-mono text-[11px] leading-relaxed"
           />
           <p className="text-[10px] text-muted-foreground">
-            ⚠ 抽取/建工作流复用此 provider/model，但有各自系统提示词——这里只改澄清的提示词。
+            这条只改澄清时的提示词。建需求、生成工作流也用上面的模型，但提示词各自独立。
           </p>
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-2">
-          <p className="text-[10px] text-muted-foreground">改后 daemon 实时读盘，下次澄清生效。</p>
+          <p className="text-[10px] text-muted-foreground">保存后下次澄清就生效。</p>
           <div className="flex items-center gap-1.5">
             <Button variant="ghost" size="sm" onClick={reset} disabled={saving}>重置默认</Button>
             <Button size="sm" onClick={save} disabled={saving}>{saving ? "保存中…" : "保存"}</Button>
@@ -185,9 +185,10 @@ export function LifecycleAgentsCard() {
 
       <Card className="bg-muted/30 p-4">
         <p className="text-xs leading-relaxed text-muted-foreground">
-          生命周期 agent 是平台固定阶段（澄清 / 一句话抽取 / AI 建工作流）的 agent，与执行阶段（工作流的
-          design/develop…）分开——后者在「工作流」里按 phase 配。澄清还可在单个需求页就地覆盖（失败时换模型重试）。
-          CLI 等价：<code className="rounded bg-muted px-1 py-0.5 font-mono">autopilot lifecycle set clarify --provider …</code>
+          这里管的是平台自带的几个 AI 步骤（澄清、建需求、生成工作流）。工作流里的执行阶段（设计、开发……）
+          在「工作流」页按阶段单独配。单个需求也能在它自己的页面临时换个模型，比如澄清失败时重试。
+          <br />
+          命令行：<code className="rounded bg-muted px-1 py-0.5 font-mono">autopilot lifecycle set clarify --provider …</code>
         </p>
       </Card>
     </div>

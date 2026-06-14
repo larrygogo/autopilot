@@ -1568,7 +1568,7 @@ export function registerCoreRpcMethods(): void {
           {
             name: "clarify",
             display_name: "需求澄清",
-            note: "澄清 / 一句话抽取 / AI 建工作流 共用此配置（各自系统提示词独立）",
+            note: "澄清、一句话建需求、AI 生成工作流都用这套设置",
             effective: c.effective,
             userConfig: hasUser ? c.userConfig : null,
             defaults: c.defaults,
