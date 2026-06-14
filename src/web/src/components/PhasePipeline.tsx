@@ -1,11 +1,11 @@
 import React from "react";
-import { ArrowRight, RotateCcw, Loader2, CheckCircle2, AlertCircle, Clock, Hand, Bot } from "lucide-react";
+import { ArrowDown, RotateCcw, Loader2, CheckCircle2, AlertCircle, Clock, Hand, Bot } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { pickPhaseLabel } from "@/lib/workflow-labels";
 
 // ──────────────────────────────────────────────
-// 流水线视图 — 横向显示工作流阶段，并行块以分叉展示
+// 流水线视图 — 纵向（自上而下）显示工作流阶段，并行块内子阶段横向分叉
 // ──────────────────────────────────────────────
 
 export type PhasePipelineRunStatus = "pending" | "running" | "done" | "failed" | "skipped" | "awaiting" | "idle";
@@ -131,12 +131,12 @@ export function PhasePipeline({ phases, highlight, onHoverPhase, currentState, o
 
   return (
     <div className="space-y-3">
-      <div className="scrollbar-thin flex items-stretch gap-2 overflow-x-auto pb-1">
+      <div className="flex flex-col items-center gap-1.5">
         {entries.map((entry, i) => (
           <React.Fragment key={i}>
             {i > 0 && (
-              <ArrowRight
-                className="h-4 w-4 shrink-0 self-center text-muted-foreground"
+              <ArrowDown
+                className="h-4 w-4 shrink-0 text-muted-foreground"
                 aria-hidden="true"
               />
             )}
