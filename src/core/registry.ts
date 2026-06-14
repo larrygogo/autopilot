@@ -43,6 +43,12 @@ export interface PhaseDefinition {
   jump_target?: string;
   max_rejections?: number;
   _jump_origin?: string;
+  /**
+   * 框架内置 phase 原语（声明式工作流用，无需 run_ 函数）。
+   * 当前支持：`deliver_pr`（逐库 commit/push/开 PR/落 sub_prs，见 deliver-pr.ts）。
+   * 优先级高于 ts 函数 / prompt-runner —— bindPhaseFunc 识别后绑内置实现。
+   */
+  builtin?: string;
   /** 跑完后挂起到 awaiting_<name>，等 UI 决断（pass/reject）才推进 */
   gate?: boolean;
   /** 等待界面的提示文案；默认 "请审阅产物后决定" */
@@ -474,6 +480,25 @@ function bindPhaseFunc(
 ): void {
   const funcRef = phase.func;
   if (typeof funcRef === "function") return; // 已经是 callable
+
+  // 框架内置 phase 原语（声明式工作流，零 TS）。优先于 ts 函数 / prompt-runner。
+  // 用 dynamic import 绑定，避免 registry → deliver-pr → registry 静态环依赖。
+  if (typeof phase.builtin === "string" && phase.builtin.trim() !== "") {
+    const builtinName = phase.builtin.trim();
+    const phaseName = phase.name;
+    if (builtinName === "deliver_pr") {
+      phase.func = async (taskId: string) => {
+        const { deliverPrPhase } = await import("./deliver-pr");
+        await deliverPrPhase(taskId, phaseName);
+      };
+      return;
+    }
+    log.warn("阶段 %s 声明了未知内置原语 builtin: %s", phaseName, builtinName);
+    phase.func = async (_taskId: string) => {
+      throw new Error(`阶段 "${phaseName}" 声明的内置原语 "${builtinName}" 不存在`);
+    };
+    return;
+  }
 
   const funcName = typeof funcRef === "string" ? funcRef : `run_${phase.name}`;
 

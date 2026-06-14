@@ -13,6 +13,8 @@ import { getTask, updateTask } from "./db";
 import { updateRequirement } from "./requirements";
 import { appendSubPr } from "./requirement-sub-prs";
 import { agentForPhase } from "../agents/registry";
+import { getWorkflow } from "./registry";
+import { collectUpstreamHandoffs } from "./prompt-runner";
 import { listTaskRepos, type TaskRepoCtx } from "./sandbox";
 import { getCurrentSandboxDir } from "./task-context";
 import { createLogger } from "./logger";
@@ -171,4 +173,20 @@ export async function deliverPr(taskId: string, opts: DeliverPrOpts = {}): Promi
   }
 
   return { prUrls: results.map((x) => x.prUrl) };
+}
+
+/**
+ * 内置 `deliver_pr` phase 的执行体（声明式工作流的「砖 2」）。
+ * bindPhaseFunc 识别 `builtin: deliver_pr` 后绑定到此。
+ *
+ * = `deliverPr`（PR body 上下文取上游 handoff 链，零业务约定）+ **不做 transition**：
+ * 依赖 runner 在 phase func 返回后自动跑 `complete_trigger` 推进（与 prompt-runner pass
+ * 分支同机制），故内置交付不必知道自己叫什么 phase、下一个状态是什么。
+ */
+export async function deliverPrPhase(taskId: string, phaseName: string): Promise<void> {
+  const task = getTask(taskId);
+  if (!task) throw new Error(`任务不存在：${taskId}`);
+  const wf = getWorkflow(task.workflow as string);
+  const prBodyContext = wf ? collectUpstreamHandoffs(taskId, wf, phaseName) : "";
+  await deliverPr(taskId, { agentPhase: phaseName, prBodyContext });
 }
