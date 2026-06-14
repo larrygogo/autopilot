@@ -58,14 +58,16 @@ marker 模式（grep agent 散文里的 `PASS`/`REJECT`）不严谨：① 模型
 
 ## 分刀落地顺序（每刀独立 PR，bun test + typecheck 绿）
 
-1. **deliverPr 提取**（内部重构、零行为变化）：`run_submit_pr` → `core/deliver-pr.ts`，dev 改薄壳。回归面最小、独立可测、不需 sync。
-2. **`builtin: deliver_pr` phase + bindPhaseFunc 识别**：内置交付 phase 跑通（新 fixture 单测）。
-3. **`completeStructured` + `AdapterOptions.tool_choice`（anthropic/openai/google）**：结构化输出底座（mock adapter 验 tool_choice 透传 + verdict 解析）。
-4. **judge.ts + phase-decision/prompt-runner 接入**：judge 模式跑通（拆 `planDecisionActionFromVerdict`，单测 verdict→action）。
-5. **declarative 闸门**：加载期硬拒 run_（单测违规工作流报错）。
-6. **dev_declarative 示例 + dogfood**：端到端验证"全声明式跑完整 PR 闭环"——这是声明式表达力的验收 + 闸门可行性证明。
-7. **（稳定后，follow-up）dev 切 declarative + workflow sync**：dogfood 确认 judge 质量 + deliver_pr 多库无回归后再迁（避免 sync 伤老用户）。
-8. **（更后，独立产品面）分发/分享 surface**：工作流打包/导入/跨人运行/签名——建在 1-7 的安全原语之上，单独 spec。
+> 进度（2026-06-14）：砖 1-6 已落地，全绿。砖 7/8 待人工活体 dogfood + 独立产品决策。
+
+1. ✅ **deliverPr 提取**（内部重构、零行为变化）：`run_submit_pr` → `core/deliver-pr.ts`，dev 改薄壳。commit e1f0ce7。
+2. ✅ **`builtin: deliver_pr` phase + bindPhaseFunc 识别**：内置交付 phase（`deliverPrPhase`，不 transition 靠 runner 自动推进）。commit c67af63。
+3. ✅ **`completeStructured` + `AdapterOptions.tool_choice`（anthropic/openai/google）**：结构化输出底座（`src/agents/structured.ts` + `resolveApiAdapter`）。commit 03058fb。
+4. ✅ **judge.ts + phase-decision/prompt-runner 接入**：judge 模式（拆 `planDecisionActionFromVerdict`，judge 失败→ambiguous 停下报人不退回 grep）。commit a85f898。
+5. ✅ **declarative 闸门**：加载期硬拒 run_（`declarative: true` → workflow.ts 含函数导出即抛错；phase 只能 prompt/builtin/gate/parallel）。commit 55f6edd。
+6. ✅ **dev_declarative 示例 + 静态验收**：`examples/workflows/dev_declarative/`（全声明式 design→develop→code_review(judge)→deliver(builtin)）。load-test 钉死组合。**活体 dogfood（真 agent+真 PR）留人工跑**。commit 6c7fa89。
+7. **（稳定后，follow-up）dev 切 declarative + workflow sync**：dogfood 确认 judge 质量 + deliver_pr 多库无回归后再迁（避免 sync 伤老用户）。**未做**。
+8. **（更后，独立产品面）分发/分享 surface**：工作流打包/导入/跨人运行/签名——建在 1-7 的安全原语之上，单独 spec。**未做**。
 
 ## 关键回归风险（architect 清单摘要）
 
