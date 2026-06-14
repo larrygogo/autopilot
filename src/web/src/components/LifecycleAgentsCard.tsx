@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ModelCombobox } from "@/components/ModelCombobox";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -36,6 +37,10 @@ export function LifecycleAgentsCard() {
   const [permMode, setPermMode] = useState("");
   const [sysPrompt, setSysPrompt] = useState("");
 
+  // 模型目录（按当前生效 provider 拉；compat provider 可能为空，Combobox 仍支持手输）
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -59,6 +64,19 @@ export function LifecycleAgentsCard() {
     }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  // 当前生效 provider：草稿优先，否则用默认（effective）。变化时拉模型目录。
+  const activeProvider = provider || info?.effective.provider || "";
+  useEffect(() => {
+    if (!activeProvider) { setModelOptions([]); return; }
+    let cancelled = false;
+    setLoadingModels(true);
+    api.getProviderModels(activeProvider)
+      .then((r) => { if (!cancelled) setModelOptions(r.models ?? []); })
+      .catch(() => { if (!cancelled) setModelOptions([]); })
+      .finally(() => { if (!cancelled) setLoadingModels(false); });
+    return () => { cancelled = true; };
+  }, [activeProvider]);
 
   const save = async () => {
     setSaving(true);
@@ -118,7 +136,13 @@ export function LifecycleAgentsCard() {
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">模型</Label>
-            <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="留空走 provider 默认" className="h-9 font-mono text-sm" />
+            <ModelCombobox
+              value={model || undefined}
+              onChange={(v) => setModel(v ?? "")}
+              options={modelOptions}
+              clearable
+              placeholder={loadingModels ? "加载模型…" : "留空走 provider 默认"}
+            />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">最大轮数<span className="ml-1 text-[10px]">（默认 {eff.max_turns}）</span></Label>
