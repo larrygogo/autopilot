@@ -108,3 +108,34 @@ export function claudeDisallowFor(caps: string[]): string[] {
   }
   return CLAUDE_GATEABLE_TOOLS.filter((t) => !keep.has(t));
 }
+
+// ──────────────────────────────────────────────
+// CLI codex / gemini 粗档回退（第二刀补完）
+// ──────────────────────────────────────────────
+
+/** 写/执行类能力——含其一即「需要写权限」，否则视为只读集。 */
+const WRITE_CLASS_CAPS: readonly Capability[] = ["write", "edit", "delete", "bash"];
+
+/**
+ * caps 是否为「只读集」（不含 write/edit/delete/bash 任一）。
+ * codex/gemini 无逐工具开关，只能据此塌缩成读/写两档。
+ */
+export function isReadOnlyCaps(caps: string[]): boolean {
+  return !caps.some((c) => isKnownCapability(c) && (WRITE_CLASS_CAPS as readonly string[]).includes(c));
+}
+
+/**
+ * codex `-s` 沙箱粗档回退：只读集 → read-only；否则保持已配置档（缺省 workspace-write）。
+ * 只收紧、不放宽（不会把 workspace-write 提到 danger-full-access）。
+ */
+export function coarsenCodexSandbox(caps: string[], configured: string): string {
+  return isReadOnlyCaps(caps) ? "read-only" : configured;
+}
+
+/**
+ * gemini approval_mode 粗档回退：只读集 → 强制 "default"（不自动批准写/shell，非交互下等效只读）；
+ * 否则保持已配置（不擅自放宽到 yolo）。
+ */
+export function coarsenGeminiApproval(caps: string[], configured: string): string {
+  return isReadOnlyCaps(caps) ? "default" : configured;
+}

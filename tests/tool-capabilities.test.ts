@@ -4,6 +4,9 @@ import {
   unknownCapabilities,
   isKnownCapability,
   claudeDisallowFor,
+  isReadOnlyCaps,
+  coarsenCodexSandbox,
+  coarsenGeminiApproval,
   CONTROL_CHANNEL_API_TOOLS,
   CLAUDE_GATEABLE_TOOLS,
 } from "../src/agents/tool-capabilities";
@@ -80,6 +83,29 @@ describe("claudeDisallowFor（CLI claude · disallow 补集）", () => {
     const dis = claudeDisallowFor(["read", "telepathy"]);
     expect(dis).toContain("Bash"); // 仍拒
     expect(dis).not.toContain("Read");
+  });
+});
+
+describe("codex / gemini 粗档回退", () => {
+  it("isReadOnlyCaps：含 write/edit/delete/bash 任一 = 非只读", () => {
+    expect(isReadOnlyCaps(["read", "search", "list", "web_fetch"])).toBe(true);
+    expect(isReadOnlyCaps(["read", "write"])).toBe(false);
+    expect(isReadOnlyCaps(["bash"])).toBe(false);
+    expect(isReadOnlyCaps(["delete"])).toBe(false);
+    expect(isReadOnlyCaps([])).toBe(true);
+  });
+
+  it("coarsenCodexSandbox：只读集 → read-only；否则保持配置", () => {
+    expect(coarsenCodexSandbox(["read", "search"], "workspace-write")).toBe("read-only");
+    expect(coarsenCodexSandbox(["write"], "workspace-write")).toBe("workspace-write");
+    // 不放宽：非只读集保持原配置，不会提到 danger-full-access
+    expect(coarsenCodexSandbox(["bash"], "workspace-write")).toBe("workspace-write");
+  });
+
+  it("coarsenGeminiApproval：只读集 → 强制 default；否则保持配置", () => {
+    expect(coarsenGeminiApproval(["read"], "yolo")).toBe("default");
+    expect(coarsenGeminiApproval(["write"], "yolo")).toBe("yolo"); // 不擅自收紧已放开的写场景
+    expect(coarsenGeminiApproval(["read"], "default")).toBe("default");
   });
 });
 

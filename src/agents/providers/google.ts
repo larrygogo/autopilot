@@ -1,6 +1,7 @@
 import { BaseProvider } from "./base";
 import type { AgentResult, RunOptions } from "../types";
 import { createLogger } from "../../core/logger";
+import { coarsenGeminiApproval } from "../tool-capabilities";
 
 const agentLog = createLogger("agent.google");
 
@@ -60,7 +61,13 @@ export class GoogleProvider extends BaseProvider {
 
     // 权限姿态（C2）：默认收紧（不自动批准危险工具）；用户可在 phase 的 agent config 里
     // 显式配 approval_mode: "yolo" / "auto_edit" 开放，与 claude/codex 的可配置模型对齐。
-    const approvalMode = (this.config["approval_mode"] as string | undefined) ?? "default";
+    const configuredApproval = (this.config["approval_mode"] as string | undefined) ?? "default";
+    // 细粒度工具授权（第二刀粗档回退）：gemini 无逐工具开关，只读集 → 强制 default（不自动批准写/shell）。
+    const toolCaps = Array.isArray(this.config["tools"]) ? (this.config["tools"] as string[]) : undefined;
+    const approvalMode = toolCaps ? coarsenGeminiApproval(toolCaps, configuredApproval) : configuredApproval;
+    if (toolCaps && approvalMode !== configuredApproval) {
+      agentLog.warn("gemini 无逐工具授权，tools 塌缩为审批粗档：approval_mode=%s", approvalMode);
+    }
     const sandbox = this.config["sandbox"] === true;
     const argv = buildGeminiArgv({ model, approvalMode, sandbox });
     argv.push("-p", buildGeminiPrompt(systemPrompt, prompt));
