@@ -117,8 +117,10 @@ import {
   loadConfigRaw,
   PROVIDER_NAMES,
   saveProvider,
+  saveLifecycleAgent,
   type ProviderName,
 } from "../core/config";
+import { effectiveClarifyConfig } from "./clarifier-agent";
 import {
   listApiKeys,
   setApiKey,
@@ -1545,6 +1547,59 @@ export function registerCoreRpcMethods(): void {
       const model = typeof p.model === "string" && p.model.trim() ? p.model.trim() : null;
       try {
         updateProvider(entry.id, { default_model: model });
+        emitBus({ type: "config:updated", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  // ── 生命周期 agent 配置（lifecycle: 段；P1 仅 clarify，extract/author 共用其配置）──
+
+  registerRpcMethod({
+    method: "lifecycle.list",
+    description: "生命周期 agent 配置列表（P1：clarify；effective=生效配置 + userConfig=用户显式写的 + defaults=代码兜底）",
+    handler: () => {
+      const c = effectiveClarifyConfig();
+      const hasUser = Object.keys(c.userConfig).length > 0;
+      return {
+        agents: [
+          {
+            name: "clarify",
+            display_name: "需求澄清",
+            note: "澄清 / 一句话抽取 / AI 建工作流 共用此配置（各自系统提示词独立）",
+            effective: c.effective,
+            userConfig: hasUser ? c.userConfig : null,
+            defaults: c.defaults,
+            reqOverridable: true,
+          },
+        ],
+      };
+    },
+  });
+
+  registerRpcMethod({
+    method: "lifecycle.setAgent",
+    description: "写/删某生命周期 agent 配置（config=null 删段回退默认）。P1 仅支持 name=clarify",
+    handler: (params) => {
+      const p = asObj(params);
+      if (p.name !== "clarify") throw new RpcError("INVALID_PARAM", "P1 仅支持 name=clarify");
+      let cfg: Record<string, unknown> | null = null;
+      if (p.config !== null && p.config !== undefined) {
+        const c = asObj(p.config);
+        // 只取已知字段（InlineAgentConfig 形状），空值视为不设
+        cfg = {};
+        if (typeof c.provider === "string" && c.provider) cfg.provider = c.provider;
+        if (typeof c.model === "string" && c.model) cfg.model = c.model;
+        if (c.mode === "cli" || c.mode === "api") cfg.mode = c.mode;
+        if (typeof c.max_turns === "number" && c.max_turns > 0) cfg.max_turns = c.max_turns;
+        if (typeof c.permission_mode === "string" && c.permission_mode) cfg.permission_mode = c.permission_mode;
+        if (typeof c.system_prompt === "string" && c.system_prompt.trim()) cfg.system_prompt = c.system_prompt;
+        if (Object.keys(cfg).length === 0) cfg = null; // 全空 = 回退默认
+      }
+      try {
+        saveLifecycleAgent("clarify", cfg);
         emitBus({ type: "config:updated", payload: {} });
         return { ok: true };
       } catch (e: unknown) {

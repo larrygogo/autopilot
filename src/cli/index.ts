@@ -26,6 +26,7 @@ import {
 } from "../core/providers";
 import { listWorkflowsUsingProvider } from "../core/registry";
 import { probeCli } from "../agents/cli-status";
+import { loadLifecycleConfig, saveLifecycleAgent } from "../core/config";
 import { registerRequirementCommands } from "./requirements-cli";
 import { registerProjectCommands } from "./project";
 import { registerWorkspaceCommands } from "./workspace";
@@ -1415,6 +1416,79 @@ provider
     }
     coreDeleteProvider(entry.id);
     console.log(`✓ 已删除 provider 条目：${entry.name}`);
+  });
+
+// ── 生命周期 agent 配置（lifecycle: 段；P1 仅 clarify。core 直连，daemon 实时读盘生效）──
+
+const lifecycle = program.command("lifecycle").description("平台生命周期 agent 配置（澄清等，全局默认）");
+
+lifecycle
+  .command("list")
+  .description("查看生命周期 agent 配置（用户 override，未列字段走内置默认）")
+  .action(async () => {
+    initDb();
+    await runPendingMigrations();
+    const cfg = loadLifecycleConfig();
+    const clarify = cfg.clarify ?? {};
+    console.log("生命周期 agent（P1：clarify —— 澄清 / 抽取 / 建工作流共用）：\n");
+    if (Object.keys(clarify).length === 0) {
+      console.log("  clarify：未配置，走内置默认（anthropic / 15 turns / bypassPermissions）");
+    } else {
+      console.log("  clarify（用户 override）：");
+      for (const [k, v] of Object.entries(clarify)) {
+        const val = typeof v === "string" && v.length > 60 ? v.slice(0, 60) + "…" : v;
+        console.log(`    ${k}: ${val}`);
+      }
+    }
+    console.log("\n未列字段走内置默认；用 `autopilot lifecycle set clarify --provider …` 配置。");
+  });
+
+lifecycle
+  .command("set <name>")
+  .description("设置生命周期 agent（P1 仅 clarify）；未给的字段保留")
+  .option("--provider <name>", "provider（如 kimi-code）")
+  .option("--model <model>", "默认模型")
+  .option("--max-turns <n>", "最大轮数", (v) => parseInt(v, 10))
+  .option("--permission-mode <mode>", "权限模式（default/bypassPermissions/cautious/...）")
+  .option("--system-prompt <text>", "系统提示词")
+  .option("--system-prompt-file <path>", "从文件读系统提示词")
+  .action(async (name: string, opts: {
+    provider?: string; model?: string; maxTurns?: number; permissionMode?: string; systemPrompt?: string; systemPromptFile?: string;
+  }) => {
+    if (name !== "clarify") { console.error("P1 仅支持 clarify"); process.exit(1); }
+    initDb();
+    await runPendingMigrations();
+    // 在现有 override 上叠加（未给的字段保留）
+    const cur = (loadLifecycleConfig().clarify ?? {}) as Record<string, unknown>;
+    const next: Record<string, unknown> = { ...cur };
+    if (opts.provider !== undefined) next.provider = opts.provider;
+    if (opts.model !== undefined) next.model = opts.model;
+    if (opts.maxTurns !== undefined && !Number.isNaN(opts.maxTurns)) next.max_turns = opts.maxTurns;
+    if (opts.permissionMode !== undefined) next.permission_mode = opts.permissionMode;
+    if (opts.systemPromptFile) {
+      const { readFileSync } = await import("fs");
+      next.system_prompt = readFileSync(opts.systemPromptFile, "utf-8");
+    } else if (opts.systemPrompt !== undefined) {
+      next.system_prompt = opts.systemPrompt;
+    }
+    try {
+      saveLifecycleAgent("clarify", Object.keys(next).length ? next : null);
+      console.log(`✓ 已保存 lifecycle.clarify（${Object.keys(next).join(", ") || "空=回退默认"}）。daemon 实时读盘，下次澄清生效。`);
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+lifecycle
+  .command("reset <name>")
+  .description("清除生命周期 agent 配置，回退内置默认")
+  .action(async (name: string) => {
+    if (name !== "clarify") { console.error("P1 仅支持 clarify"); process.exit(1); }
+    initDb();
+    await runPendingMigrations();
+    saveLifecycleAgent("clarify", null);
+    console.log("✓ 已重置 lifecycle.clarify，回退内置默认。");
   });
 
 /**
