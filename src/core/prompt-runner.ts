@@ -131,16 +131,20 @@ export function expandPromptTemplate(
     REJECTION_COUNT: String(sumRejectionCounts(ctx.task["rejection_counts"])),
   };
 
-  // ${VAR} 优先匹配（含 ${TASK.xxx} 和 ${HANDOFF_<NAME>}）
-  let out = prompt.replace(/\$\{([A-Z_][A-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\}/g, (m, key: string) => {
+  // ${HANDOFF_<phase>}：phase 名通常小写，下面通用 ${VAR} 正则只认大写 key、会整体漏掉，
+  // 故单独先跑一遍。（历史 bug：${HANDOFF_design} 一直没被替换，agent 收到字面占位符 →
+  // 评审拿到空内容反复驳回。dogfood req-023 暴露，2026-06-14 修。）
+  let out = ctx.workflow
+    ? prompt.replace(/\$\{HANDOFF_([a-zA-Z][a-zA-Z0-9_]*)\}/g, (_m, phaseName: string) =>
+        readPhaseHandoff(ctx.taskId, ctx.workflow!, phaseName.toLowerCase(), artifactsRoot) ?? "")
+    : prompt;
+
+  // ${VAR} 匹配（含 ${TASK.xxx}）
+  out = out.replace(/\$\{([A-Z_][A-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)\}/g, (m, key: string) => {
     if (key.startsWith("TASK.")) {
       const field = key.slice("TASK.".length);
       const v = ctx.task[field];
       return v == null ? m : String(v);
-    }
-    if (key.startsWith("HANDOFF_") && ctx.workflow) {
-      const phaseName = key.slice("HANDOFF_".length).toLowerCase();
-      return readPhaseHandoff(ctx.taskId, ctx.workflow, phaseName, artifactsRoot) ?? "";
     }
     return builtins[key] ?? m;
   });

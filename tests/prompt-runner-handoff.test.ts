@@ -236,6 +236,21 @@ describe("expandPromptTemplate ${HANDOFF}", () => {
     expect(out).toContain("ONLY_DRAFT");
   });
 
+  it("${HANDOFF_design} 小写 phase 后缀也能取（历史 bug：通用 ${VAR} 正则只认大写、整体漏掉）", () => {
+    const wf = buildWorkflow([{ name: "design" }, { name: "review" }]);
+    writeHandoff("t-9", 0, "design", "DESIGN_PLAN");
+
+    const out = expandPromptTemplate("评审：\n${HANDOFF_design}\n", {
+      taskId: "t-9",
+      phase: "review",
+      task: {},
+      workflow: wf,
+      workspaceRoot: wsRootFor("t-9"),
+    });
+    expect(out).toContain("DESIGN_PLAN");
+    expect(out).not.toContain("${HANDOFF_design}"); // 字面占位符必须消失
+  });
+
   it("无 workflow 时 ${HANDOFF} 留空（防 ctx 退化）", () => {
     const out = expandPromptTemplate("${HANDOFF}", {
       taskId: "t-8",
