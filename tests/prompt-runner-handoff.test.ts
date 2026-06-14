@@ -194,8 +194,9 @@ describe("collectUpstreamHandoffs + readPhaseHandoff", () => {
   it("全无 handoff 时返回降级提示", () => {
     const wf = buildWorkflow([{ name: "draft" }, { name: "polish" }]);
     const result = collectUpstreamHandoffs("t-4", wf, "polish", wsRootFor("t-4"));
-    expect(result).toContain("上游无 handoff");
-    expect(result).toContain("agent_output.md");
+    expect(result).toContain("未提供 handoff");
+    // 降级提示不再叫 agent 去读文件（prompt 模式：只依据提示判断，文件 I/O 框架包办）
+    expect(result).toContain("不要去读取任何文件");
   });
 
   it("readPhaseHandoff 单 phase 读取", () => {

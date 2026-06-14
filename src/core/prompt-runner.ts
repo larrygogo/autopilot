@@ -61,7 +61,7 @@ const HANDOFF_PROMPT_SUFFIX = `
 
 ## Handoff（必填，给下一阶段读）
 
-在 agent_output.md 末尾输出以下 4 段，每段非空（无内容写「无」），用 markdown 二级标题分隔：
+把以下 4 段直接写在你这次回复的正文末尾（不要写文件、不要操作任何文件），每段非空（无内容写「无」），用 markdown 二级标题分隔：
 - ## Decided    做了什么决定（关键选择 + 理由）
 - ## Files      关键文件路径（绝对 / 相对皆可）
 - ## Risks      给下一阶段的风险与注意点
@@ -205,7 +205,7 @@ export function collectUpstreamHandoffs(
     }
   }
   if (parts.length === 0) {
-    return "（上游无 handoff 产物。请基于 ${REQUIREMENT} 与 agent_output.md 全文判断。）";
+    return "（上游未提供 handoff 摘要。请仅依据本提示中已给出的需求与上下文判断，不要去读取任何文件。）";
   }
   return parts.join("\n\n---\n\n");
 }
