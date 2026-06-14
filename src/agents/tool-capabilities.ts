@@ -66,3 +66,45 @@ export function expandToApiTools(caps: string[]): Set<string> {
 export function unknownCapabilities(caps: string[]): string[] {
   return caps.filter((c) => !isKnownCapability(c));
 }
+
+// ──────────────────────────────────────────────
+// CLI claude 映射（第二刀）
+// ──────────────────────────────────────────────
+
+/**
+ * claude CLI 内建工具中，本框架据能力授权做门禁的集合。
+ * 不在此集的工具（TodoWrite / Task / mcp__autopilot__* 等）不受 tools 授权影响。
+ */
+export const CLAUDE_GATEABLE_TOOLS = [
+  "Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch", "NotebookEdit",
+] as const;
+
+/** 能力 → claude CLI 应保留（放行）的内建工具名。 */
+const CAPABILITY_TO_CLAUDE_TOOLS: Record<Capability, readonly string[]> = {
+  read: ["Read"],
+  list: ["Glob"],
+  search: ["Grep", "Glob"],
+  write: ["Write", "NotebookEdit"],
+  edit: ["Edit", "NotebookEdit"],
+  delete: [], // claude 无独立删除工具（经 Bash rm/mv）；授 delete 不解锁任何内建工具，需另配 bash
+  bash: ["Bash"],
+  web_fetch: ["WebFetch"],
+  web_search: ["WebSearch"],
+};
+
+/**
+ * 给定能力白名单，返回 claude CLI 应 **disallow** 的内建工具（= 门禁集 − 已授权保留的）。
+ *
+ * 为什么是 disallow 补集而非 allow：claude 的 `--allowed-tools` 是「免确认放行」而非
+ * 「只留这些」，内建工具不在 allow 列表里照样可用——真限制必须靠 `--disallowed-tools` 拒掉
+ * 没授权的那些。控制/MCP 工具与不在门禁集的工具不受影响。
+ */
+export function claudeDisallowFor(caps: string[]): string[] {
+  const keep = new Set<string>();
+  for (const c of caps) {
+    if (isKnownCapability(c)) {
+      for (const t of CAPABILITY_TO_CLAUDE_TOOLS[c]) keep.add(t);
+    }
+  }
+  return CLAUDE_GATEABLE_TOOLS.filter((t) => !keep.has(t));
+}

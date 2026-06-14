@@ -3,7 +3,9 @@ import {
   expandToApiTools,
   unknownCapabilities,
   isKnownCapability,
+  claudeDisallowFor,
   CONTROL_CHANNEL_API_TOOLS,
+  CLAUDE_GATEABLE_TOOLS,
 } from "../src/agents/tool-capabilities";
 
 describe("expandToApiTools", () => {
@@ -44,6 +46,40 @@ describe("expandToApiTools", () => {
     expect(t.has("read_file")).toBe(true);
     expect(t.has("bash")).toBe(true);
     expect([...t].some((x) => x.includes("telepathy"))).toBe(false);
+  });
+});
+
+describe("claudeDisallowFor（CLI claude · disallow 补集）", () => {
+  it("read+search → 拒掉写/执行/web 类（保留 Read/Grep/Glob）", () => {
+    const dis = claudeDisallowFor(["read", "search"]);
+    expect(dis).toContain("Write");
+    expect(dis).toContain("Edit");
+    expect(dis).toContain("Bash");
+    expect(dis).toContain("WebFetch");
+    expect(dis).toContain("WebSearch");
+    expect(dis).toContain("NotebookEdit");
+    expect(dis).not.toContain("Read");
+    expect(dis).not.toContain("Grep");
+    expect(dis).not.toContain("Glob");
+  });
+
+  it("授 bash → Bash 不在拒绝列表", () => {
+    expect(claudeDisallowFor(["bash"])).not.toContain("Bash");
+  });
+
+  it("空授权 → 门禁集全拒", () => {
+    expect(claudeDisallowFor([]).sort()).toEqual([...CLAUDE_GATEABLE_TOOLS].sort());
+  });
+
+  it("授全部能力 → 一个都不拒", () => {
+    const all = ["read", "list", "search", "write", "edit", "delete", "bash", "web_fetch", "web_search"];
+    expect(claudeDisallowFor(all)).toEqual([]);
+  });
+
+  it("未知能力名不影响（被忽略）", () => {
+    const dis = claudeDisallowFor(["read", "telepathy"]);
+    expect(dis).toContain("Bash"); // 仍拒
+    expect(dis).not.toContain("Read");
   });
 });
 

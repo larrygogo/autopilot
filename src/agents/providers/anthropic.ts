@@ -4,6 +4,7 @@ import { BaseProvider } from "./base";
 import type { AgentResult, RunOptions, ChatOptions, ChatResult } from "../types";
 import { createLogger } from "../../core/logger";
 import { AUTOPILOT_HOME } from "../../index";
+import { claudeDisallowFor, unknownCapabilities } from "../tool-capabilities";
 
 const agentLog = createLogger("agent.anthropic");
 
@@ -421,7 +422,18 @@ export class AnthropicProvider extends BaseProvider {
     // 禁用 Claude 内建 AskUserQuestion：autopilot 用 MCP ask_user 接管人机交互通道。
     const mcpConfigPath = resolveMcpConfigPath();
     const allowedTools = mcpConfigPath ? ["mcp__autopilot__*"] : undefined;
-    const disallowedTools = mcpConfigPath ? ["AskUserQuestion"] : undefined;
+    const disallowedTools: string[] = mcpConfigPath ? ["AskUserQuestion"] : [];
+
+    // 细粒度工具授权（第二刀）：phase 声明 tools 时，拒掉未授权的 claude 内建工具（disallow 补集）。
+    // claude 的 --allowed-tools 是「免确认」非「只留这些」，真限制靠 --disallowed-tools。
+    const toolCaps = Array.isArray(this.config["tools"]) ? (this.config["tools"] as string[]) : undefined;
+    if (toolCaps) {
+      const unknown = unknownCapabilities(toolCaps);
+      if (unknown.length > 0) {
+        agentLog.warn("agent tools 含未知能力名（已忽略）：%s", unknown.join(", "));
+      }
+      disallowedTools.push(...claudeDisallowFor(toolCaps));
+    }
 
     const argv = buildClaudeArgv({
       model,
@@ -430,7 +442,7 @@ export class AnthropicProvider extends BaseProvider {
       resumeSessionId: this.sessionId,
       mcpConfigPath,
       allowedTools,
-      disallowedTools,
+      disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
     });
 
     let text = "";
