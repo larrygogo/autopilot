@@ -408,7 +408,8 @@ function AppInner() {
             <SidebarContent wsState={wsState} groups={sidebarNav.groups} back={sidebarNav.back} />
           </aside>
 
-          <main className="min-w-0 flex-1 overflow-y-auto scrollbar-thin">
+          {/* 移动端底部留白：避免内容被常驻浮动 dock（fixed bottom，lg:hidden）遮住；lg 以上无 dock 不留 */}
+          <main className="min-w-0 flex-1 overflow-y-auto scrollbar-thin pb-24 lg:pb-0">
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route path="/" element={<Navigate to="/tasks" replace />} />
