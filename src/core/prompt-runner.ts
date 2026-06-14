@@ -20,11 +20,14 @@ import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { agentForPhase } from "../agents/registry";
 import type { InlineAgentConfig } from "./agent-defaults";
-import { getTask } from "./db";
+import { getTask, updateTask } from "./db";
 import { getTaskSandbox, getTaskArtifactsDir } from "./sandbox";
 import { getCurrentSandboxDir } from "./task-context";
 import { getPhaseIndex } from "./artifacts";
-import { getWorkflow, type PhaseDefinition, type WorkflowDefinition } from "./registry";
+import { getWorkflow, buildTransitions, type PhaseDefinition, type WorkflowDefinition } from "./registry";
+import { transition, forceTransition } from "./state-machine";
+import { notify } from "./notify";
+import { planDecisionAction, type PhaseDecision } from "./phase-decision";
 import { createLogger } from "./logger";
 import { consumePendingPrompts } from "./task-send-prompt";
 import { emit } from "./event-bus";
@@ -82,6 +85,16 @@ const HANDOFF_PROMPT_SUFFIX = `
  * 同时支持 task 上 extras 字段（setup_func 返回的字段）：
  *   ${TASK.repo_path} 等任意嵌套字段（仅一层，避免复杂表达式）
  */
+/** 读 task 上的 rejection_counts（在 extra JSON 里）。解析失败 → 空对象。 */
+function parseRejectionCounts(task: Record<string, unknown> | null): Record<string, number> {
+  if (!task) return {};
+  try {
+    return JSON.parse(String(task["rejection_counts"] ?? "{}")) as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
 /** rejection_counts（task.extra 里的 JSON 串）所有值求和 = 总驳回轮数。 */
 function sumRejectionCounts(raw: unknown): number {
   try {
@@ -273,6 +286,8 @@ export function makePromptRunner(
     timeoutSec?: number;
     /** Phase 6: 启用 handoff 协议（spec §3.10）。true 时 prompt 末尾追加 4 段指令，跑完解析写 handoff.md */
     handoff?: boolean;
+    /** 声明式判据 / 分支（spec 2026-06-14）。跑完 agent 后按此判 pass/reject。 */
+    decision?: PhaseDecision;
   } = {},
 ): (taskId: string) => Promise<void> {
   return async (taskId: string) => {
@@ -379,6 +394,70 @@ export function makePromptRunner(
         log.info("prompt-runner handoff 写入完成 [task=%s phase=%s]", taskId, phaseName);
       }
     }
+
+    // ── 声明式判据 / 分支（spec 2026-06-14）──
+    // pass：什么都不做，runner 自动 complete_trigger 推进。
+    // reject：自己先 transition 走（抑制 runner 自动推进），回退重做 / 触顶 failed。
+    if (options.decision) {
+      const phaseDef = wf.phases.find(
+        (p) => !("parallel" in p) && (p as PhaseDefinition).name === phaseName,
+      ) as PhaseDefinition | undefined;
+      const taskNow = getTask(taskId);
+      const counts = parseRejectionCounts(taskNow as Record<string, unknown> | null);
+      const action = planDecisionAction(
+        finalText,
+        options.decision,
+        phaseName,
+        {
+          jumpTrigger: phaseDef?.jump_trigger,
+          jumpTarget: phaseDef?.jump_target,
+          maxRejections: phaseDef?.max_rejections,
+        },
+        counts,
+      );
+
+      if (action.kind === "ambiguous") {
+        throw new Error(
+          `phase「${phaseName}」无法解析判据结论：agent 输出既未含 pass 标记「${options.decision.pass}」也未含 reject 标记「${options.decision.reject}」`,
+        );
+      }
+      if (action.kind === "misconfigured") {
+        throw new Error(action.reason);
+      }
+      if (action.kind === "fail") {
+        if (taskNow) {
+          try {
+            await notify(
+              taskNow,
+              `「${phaseDef?.label ?? phaseName}」反复驳回 ${action.n} 次（≥ ${action.maxRejections}），已暂停等待人工。最近理由：${action.reason.slice(0, 200)}`,
+              "task-failed",
+            );
+          } catch { /* notify 失败不阻塞 */ }
+        }
+        updateTask(taskId, {
+          rejection_counts: JSON.stringify(action.counts),
+          rejection_reason: action.reason,
+        });
+        forceTransition(taskId, "failed", `${phaseName} 判据驳回 ${action.n} 次，已暂停等待人工`);
+        return;
+      }
+      if (action.kind === "retry") {
+        const transitions = buildTransitions(wf);
+        updateTask(taskId, {
+          rejection_counts: JSON.stringify(action.counts),
+          rejection_reason: action.reason,
+        });
+        transition(taskId, action.jumpTrigger, { transitions, note: `判据驳回（第${action.n}次）` });
+        transition(taskId, action.retryTrigger, {
+          transitions,
+          note: `回退 ${action.target} 重做（第${action.n}次）`,
+        });
+        const { runInBackground } = await import("./runner"); // 动态 import 破循环依赖
+        runInBackground(taskId, action.target);
+        return;
+      }
+      // action.kind === "pass" → 落空，runner 自动推进
+    }
   };
 }
 
@@ -396,5 +475,6 @@ export function tryMakePromptRunnerForPhase(
     agent: phase.agent,
     timeoutSec: phase.timeout,
     handoff: phase.handoff === true,
+    decision: (phase as Record<string, unknown>)["decision"] as PhaseDecision | undefined,
   });
 }
