@@ -131,12 +131,12 @@ export function PhasePipeline({ phases, highlight, onHoverPhase, currentState, o
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col items-center gap-1.5">
+      <div className="flex flex-col items-stretch gap-1.5">
         {entries.map((entry, i) => (
           <React.Fragment key={i}>
             {i > 0 && (
               <ArrowDown
-                className="h-4 w-4 shrink-0 text-muted-foreground"
+                className="h-4 w-4 shrink-0 self-center text-muted-foreground"
                 aria-hidden="true"
               />
             )}
