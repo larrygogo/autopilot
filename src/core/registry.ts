@@ -256,7 +256,31 @@ export function expandPhaseDefaults(
     expanded["jump_target"] = legacyRetryTarget;
   }
 
+  lintPhaseDecision(expanded, name);
+
   return expanded as PhaseDefinition;
+}
+
+/**
+ * 声明式判据（decision）author-time 配置 lint：在加载/派生时前置报错，避免运行期才炸。
+ * 调用点须保证 phase 已展开 reject 语法糖（jump_target 已派生）。
+ */
+function lintPhaseDecision(phase: Record<string, unknown>, phaseName: string): void {
+  const decision = phase["decision"];
+  if (decision === undefined) return;
+  if (typeof decision !== "object" || decision === null) {
+    throw new Error(`阶段 ${phaseName} 的 decision 必须是对象`);
+  }
+  const d = decision as Record<string, unknown>;
+  if (typeof d["pass"] !== "string" || typeof d["reject"] !== "string") {
+    throw new Error(`阶段 ${phaseName} 的 decision 必须同时含 pass 与 reject 字段（标记串）`);
+  }
+  if (phase["gate"] === true) {
+    throw new Error(`阶段 ${phaseName} 不能同时配 gate 与 decision（gate=人工判，decision=agent 自动判，互斥）`);
+  }
+  if (!phase["jump_target"]) {
+    throw new Error(`阶段 ${phaseName} 配了 decision.reject，但缺 reject 回退目标——请在该 phase 上写 reject: <目标阶段>`);
+  }
 }
 
 function expandParallelDefaults(
@@ -810,6 +834,7 @@ function composeDbWorkflow(
     if (phaseObj.decision && typeof phaseObj.decision === "object") {
       merged.decision = phaseObj.decision as PhaseDecision;
     }
+    lintPhaseDecision(merged as unknown as Record<string, unknown>, phName);
     // DB 工作流覆写 prompt：声明了 prompt → 用 prompt-runner 取代 base 的 func
     if (typeof phaseObj.prompt === "string" && phaseObj.prompt.trim()) {
       (merged as Record<string, unknown>)["prompt"] = phaseObj.prompt;
