@@ -810,10 +810,12 @@ export function PhasePipelineEditor({
         open={addStepOpen}
         onClose={() => setAddStepOpen(false)}
         existingNames={allPhaseNames}
-        topCount={phases.length}
-        topLabels={phases.map((p) =>
-          p?.parallel ? `[并行] ${p.parallel.name}` : String(p?.name ?? "?"),
-        )}
+        topLabels={phases.map((p) => {
+          const par = p?.parallel as { name?: string; label?: string } | undefined;
+          return par
+            ? `[并行] ${pickPhaseLabel({ name: String(par.name ?? "?"), label: par.label })}`
+            : pickPhaseLabel({ name: String(p?.name ?? "?"), label: p?.label as string | undefined });
+        })}
         onConfirmPhase={handleAddPhase}
         onConfirmParallel={handleAddParallel}
       />

@@ -16,9 +16,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   existingNames: string[];
-  /** 顶层条目数（阶段插入默认位 + 并行块插入位） */
-  topCount: number;
-  /** 顶层条目显示名（插入位下拉） */
+  /** 顶层条目显示标签（中文优先；插入位下拉） */
   topLabels: string[];
   onConfirmPhase: (data: NewPhaseData) => void | Promise<void>;
   onConfirmParallel: (data: NewParallelData) => void | Promise<void>;
@@ -33,7 +31,6 @@ export function AddStepDialog({
   open,
   onClose,
   existingNames,
-  topCount,
   topLabels,
   onConfirmPhase,
   onConfirmParallel,
@@ -76,14 +73,13 @@ export function AddStepDialog({
             onClose={onClose}
             onConfirm={onConfirmPhase}
             existingNames={existingNames}
-            count={topCount}
+            topLabels={topLabels}
           />
         ) : (
           <AddParallelForm
             onClose={onClose}
             onConfirm={onConfirmParallel}
             existingNames={existingNames}
-            topCount={topCount}
             topLabels={topLabels}
           />
         )}

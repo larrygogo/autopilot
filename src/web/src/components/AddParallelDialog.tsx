@@ -28,9 +28,7 @@ interface Props {
   onConfirm: (data: NewParallelData) => void | Promise<void>;
   /** 所有已有阶段名（含并行块内），防重名 */
   existingNames: string[];
-  /** 顶层条目数量 */
-  topCount: number;
-  /** 顶层条目显示名（用于"在 X 之后"） */
+  /** 顶层条目显示标签（中文优先；插入位下拉 + 默认插到末尾） */
   topLabels: string[];
 }
 
@@ -45,18 +43,18 @@ const DEFAULT_CHILDREN: ChildRow[] = [
 ];
 
 /** 新增并行块表单体（无 Dialog 壳，供 AddStepDialog 内嵌 + tab 切换）。 */
-export function AddParallelForm({ onClose, onConfirm, existingNames, topCount, topLabels }: Props) {
+export function AddParallelForm({ onClose, onConfirm, existingNames, topLabels }: Props) {
   const [name, setName] = useState("");
   const [failStrategy, setFailStrategy] = useState<string>("cancel_all");
   const [children, setChildren] = useState<ChildRow[]>(DEFAULT_CHILDREN);
-  const [insertAfter, setInsertAfter] = useState(topCount - 1);
+  const [insertAfter, setInsertAfter] = useState(topLabels.length - 1);
   const [busy, setBusy] = useState(false);
 
   const reset = () => {
     setName("");
     setFailStrategy("cancel_all");
     setChildren(DEFAULT_CHILDREN.map((c) => ({ ...c })));
-    setInsertAfter(topCount - 1);
+    setInsertAfter(topLabels.length - 1);
   };
 
   const close = () => {
@@ -125,7 +123,7 @@ export function AddParallelForm({ onClose, onConfirm, existingNames, topCount, t
 
   return (
     <>
-      <div className="space-y-4 py-1">
+      <div className="scrollbar-thin max-h-[58vh] space-y-4 overflow-y-auto py-1 pr-0.5">
         <div className="space-y-1.5">
           <Label htmlFor="add-par-name">
             并行块名 <span className="text-destructive">*</span>

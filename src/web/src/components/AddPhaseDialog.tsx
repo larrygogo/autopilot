@@ -22,22 +22,23 @@ const PHASE_NAME_RE = /^[a-z][a-z0-9_]*$/;
 interface Props {
   onClose: () => void;
   onConfirm: (data: NewPhaseData) => void | Promise<void>;
+  /** 防重名：全部已用名（含并行子节点） */
   existingNames: string[];
-  /** 当前阶段列表长度，用于插入位置选项 */
-  count: number;
+  /** 顶层条目的显示标签（中文优先），用于"插入到 X 之后"——只列顶层，索引对齐顶层位置 */
+  topLabels: string[];
 }
 
 /** 新增阶段表单体（无 Dialog 壳，供 AddStepDialog 内嵌 + tab 切换）。 */
-export function AddPhaseForm({ onClose, onConfirm, existingNames, count }: Props) {
+export function AddPhaseForm({ onClose, onConfirm, existingNames, topLabels }: Props) {
   const [name, setName] = useState("");
   const [timeoutSec, setTimeoutSec] = useState(900);
-  const [insertAfter, setInsertAfter] = useState<number>(count - 1);
+  const [insertAfter, setInsertAfter] = useState<number>(topLabels.length - 1);
   const [busy, setBusy] = useState(false);
 
   const reset = () => {
     setName("");
     setTimeoutSec(900);
-    setInsertAfter(count - 1);
+    setInsertAfter(topLabels.length - 1);
   };
 
   const close = () => {
@@ -70,7 +71,7 @@ export function AddPhaseForm({ onClose, onConfirm, existingNames, count }: Props
 
   return (
     <>
-      <div className="space-y-4 py-1">
+      <div className="scrollbar-thin max-h-[58vh] space-y-4 overflow-y-auto py-1 pr-0.5">
         <div className="space-y-1.5">
           <Label htmlFor="add-phase-name">
             阶段名 <span className="text-destructive">*</span>
@@ -111,9 +112,9 @@ export function AddPhaseForm({ onClose, onConfirm, existingNames, count }: Props
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="-1">插入到开头</SelectItem>
-              {existingNames.map((n, i) => (
-                <SelectItem key={n} value={String(i)}>
-                  在「{n}」之后
+              {topLabels.map((l, i) => (
+                <SelectItem key={i} value={String(i)}>
+                  在「{l}」之后
                 </SelectItem>
               ))}
             </SelectContent>

@@ -15,6 +15,7 @@ import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
 import { Term } from "./Term";
 import { AddStepDialog, type NewPhaseData, type NewParallelData } from "./AddStepDialog";
+import { pickPhaseLabel } from "@/lib/workflow-labels";
 import {
   validatePhases,
   issuesForTop,
@@ -819,8 +820,11 @@ export function PhaseEditor({
         open={addStepOpen}
         onClose={() => setAddStepOpen(false)}
         existingNames={allNames}
-        topCount={items.length}
-        topLabels={items.map((it) => it.name)}
+        topLabels={items.map((it) =>
+          it.kind === "parallel"
+            ? `[并行] ${it.name}`
+            : pickPhaseLabel({ name: it.name, label: it.extras?.label as string | undefined }),
+        )}
         onConfirmPhase={addPhase}
         onConfirmParallel={addParallel}
       />
