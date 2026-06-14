@@ -15,6 +15,7 @@ import { unknownCapabilities } from "./tool-capabilities";
 import { AnthropicApiAdapter } from "./providers/api/anthropic";
 import { OpenAIApiAdapter } from "./providers/api/openai";
 import { GoogleApiAdapter } from "./providers/api/google";
+import type { ProviderAdapter } from "./providers/api/types";
 import { resolveApiKey } from "../core/api-keys";
 import { getProviderByName } from "../core/providers";
 
@@ -208,8 +209,53 @@ async function createApiAgentLoop(config: AgentConfig, sandboxRoot: string): Pro
   });
 }
 
+/**
+ * 解析「纯 API 适配器」——结构化裁判 / 单次结构化调用（completeStructured）用。
+ * 强制 API 语义（不建 ApiAgentLoop / ToolExecutor / 子进程），与 createApiAgentLoop
+ * 共用 createProviderAdapter + resolveApiKey。
+ *
+ * provider 解析：api 类型条目直接用其 subtype/base_url/env；无 api 条目（含 cli 条目 /
+ * pre-migration）→ 按官方名合成 api subtype（anthropic/openai/google），其余回退 openai-compat。
+ */
+export async function resolveApiAdapter(providerName: string): Promise<{
+  adapter: ProviderAdapter;
+  defaultModel?: string;
+}> {
+  const entry = safeGetProviderByName(providerName);
+  let eff: EffectiveProvider;
+  if (entry && entry.type === "api") {
+    eff = {
+      name: providerName,
+      type: "api",
+      subtype: entry.subtype,
+      base_url: entry.base_url ?? undefined,
+      env_key_name: entry.env_key_name ?? undefined,
+      default_model: entry.default_model ?? undefined,
+    };
+  } else {
+    const cfg = loadProviders()[providerName];
+    const isOfficial = providerName in OFFICIAL_CLI_SUBTYPE;
+    eff = {
+      name: providerName,
+      type: "api",
+      subtype: isOfficial ? providerName : "openai-compat",
+      base_url: cfg?.base_url,
+      env_key_name: cfg?.env_key_name,
+      default_model: cfg?.default_model,
+    };
+  }
+  const apiKey = await resolveApiKey(providerName, eff.env_key_name);
+  if (!apiKey) {
+    throw new Error(
+      `结构化调用的 provider "${providerName}" 未配置 API key` +
+      `（autopilot key set ${providerName}，或在「设置 → 提供商」配置）`,
+    );
+  }
+  return { adapter: createProviderAdapter(eff, apiKey), defaultModel: eff.default_model };
+}
+
 /** 按 provider 条目的 subtype 选 API 适配器。 */
-function createProviderAdapter(eff: EffectiveProvider, apiKey: string) {
+function createProviderAdapter(eff: EffectiveProvider, apiKey: string): ProviderAdapter {
   const baseUrl = eff.base_url || undefined;
   switch (eff.subtype) {
     case "anthropic":

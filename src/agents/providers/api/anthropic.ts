@@ -42,6 +42,9 @@ export class AnthropicApiAdapter implements ProviderAdapter {
         input_schema: t.input_schema,
       }));
     }
+    if (options.tool_choice) {
+      body["tool_choice"] = { type: "tool", name: options.tool_choice.name };
+    }
     if (options.stop_sequences) body["stop_sequences"] = options.stop_sequences;
     if (options.temperature !== undefined) body["temperature"] = options.temperature;
 

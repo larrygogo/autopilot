@@ -58,6 +58,12 @@ export class GoogleApiAdapter implements ProviderAdapter {
       }];
     }
 
+    if (options.tool_choice) {
+      body["toolConfig"] = {
+        functionCallingConfig: { mode: "ANY", allowedFunctionNames: [options.tool_choice.name] },
+      };
+    }
+
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

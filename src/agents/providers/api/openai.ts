@@ -45,6 +45,9 @@ export class OpenAIApiAdapter implements ProviderAdapter {
         },
       }));
     }
+    if (options.tool_choice) {
+      body["tool_choice"] = { type: "function", function: { name: options.tool_choice.name } };
+    }
     if (options.temperature !== undefined) body["temperature"] = options.temperature;
     if (options.stop_sequences) body["stop"] = options.stop_sequences;
 
