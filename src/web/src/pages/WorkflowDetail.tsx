@@ -52,27 +52,6 @@ const DELIVERS_TEXT: Record<DeliversCode, string> = {
   artifacts: "文件产物",
 };
 
-/**
- * 把状态机起始状态（pending_<首阶段名>）解析回该阶段的中文业务标签。
- * 决策台不暴露状态 token：显示「设计」而非「pending_design」。
- * 匹配不到（脏数据 / 老工作流）回退首阶段 label，再回退去前缀的名字。
- */
-function initialPhaseLabel(detail: WorkflowDetailData | null): string {
-  const phases = (detail?.phases as Array<Record<string, unknown>>) ?? [];
-  const key = String(detail?.initial_state ?? "").replace(/^pending_/, "");
-  const labelOf = (p: Record<string, unknown> | undefined): string | undefined => {
-    if (!p) return undefined;
-    const par = p.parallel as { name?: string; label?: string } | undefined;
-    if (par) return par.label || par.name;
-    return (p.label as string | undefined) || (p.name as string | undefined);
-  };
-  // 优先按 initial_state 精确匹配，否则取首阶段
-  for (const p of phases) {
-    const par = p.parallel as { name?: string } | undefined;
-    if ((par?.name ?? p.name) === key) return labelOf(p) ?? key;
-  }
-  return labelOf(phases[0]) ?? key ?? "—";
-}
 
 interface WorkflowDetailData {
   name: string;
@@ -261,17 +240,8 @@ export function WorkflowDetail() {
               <p className="mb-3 text-sm text-muted-foreground">{detail.description}</p>
             )}
 
-            <DescList
-              columns={3}
-              items={[
-                { label: "起始阶段", value: initialPhaseLabel(detail) },
-                { label: "终态数", value: detail.terminal_states?.length ?? 0 },
-                { label: "阶段数", value: detail.phases?.length ?? 0 },
-              ]}
-            />
-
             {/* 声明层（v2 R5）：决定这个工作流如何约束需求的输入/产出，只读露出供决策 */}
-            <div className="mt-3 border-t border-border pt-3">
+            <div>
               <DescList
                 columns={3}
                 items={[
