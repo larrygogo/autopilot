@@ -41,7 +41,7 @@ function readDelivers(detail: WorkflowDetailData | null): DeliversCode {
 }
 // 只读展示用人话短标签
 const REQ_GIT_TEXT: Record<ReqGitCode, string> = {
-  inherit: "默认（派生）",
+  inherit: "默认（自动判断）",
   true: "必须",
   optional: "可选",
   false: "不需要",
@@ -378,7 +378,7 @@ export function WorkflowDetail() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="inherit">跟随默认（按是否建 git 沙盒推断）</SelectItem>
+              <SelectItem value="inherit">跟随默认（看是否建 git 沙盒）</SelectItem>
               <SelectItem value="true">必须有代码库</SelectItem>
               <SelectItem value="optional">可选</SelectItem>
               <SelectItem value="false">不需要代码库</SelectItem>
@@ -388,7 +388,7 @@ export function WorkflowDetail() {
 
         <FormField
           label="建 git 沙盒"
-          hint="任务运行时是否克隆代码库到沙盒，阶段函数在里面改文件"
+          hint="任务运行时把代码库克隆下来，让各阶段在里面改文件"
         >
           <Select value={metaSandboxGit} onValueChange={(v) => setMetaSandboxGit(v as SandboxGitCode)}>
             <SelectTrigger>
@@ -396,7 +396,7 @@ export function WorkflowDetail() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="off">不建（默认，纯文本 / 产物类）</SelectItem>
-              <SelectItem value="on">建（克隆代码库到任务沙盒）</SelectItem>
+              <SelectItem value="on">建（把代码库克隆到任务目录）</SelectItem>
             </SelectContent>
           </Select>
         </FormField>

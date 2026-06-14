@@ -157,8 +157,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
 
       {!configured && !expanded && (
         <p className="mt-1.5 text-[10px] text-muted-foreground">
-          使用默认 agent（DEFAULT_AGENT）：anthropic / claude-sonnet-4-6。
-          展开可为本阶段单独覆盖 provider / 模型 / 系统提示词等。
+          用默认 agent（anthropic / claude-sonnet-4-6）。展开可以给这个阶段单独换提供商、模型、提示词。
         </p>
       )}
 
@@ -167,8 +166,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
           {!configured ? (
             <div className="rounded-lg border border-border bg-muted/30 p-3">
               <p className="text-[11px] text-muted-foreground">
-                本阶段未配置内联 agent，运行时使用默认 agent（DEFAULT_AGENT）。
-                点下方按钮开始为本阶段单独配置。
+                这个阶段还没单独配 agent，会用默认的（anthropic / claude-sonnet-4-6）。想单独配就点下面。
               </p>
               <Button variant="outline" size="sm" className="mt-2 h-7" onClick={enableConfig}>
                 <Bot className="h-3.5 w-3.5" />
@@ -211,13 +209,13 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                     onChange={(v) => update("model", v)}
                     options={draft.provider ? models[draft.provider]?.models ?? [] : []}
                     placeholder={
-                      modelsLoading ? "加载模型…" : draft.provider ? "留空走 provider 默认" : "先选 provider"
+                      modelsLoading ? "加载模型…" : draft.provider ? "留空用默认模型" : "先选提供商"
                     }
                     clearable
                     disabled={!draft.provider}
                   />
                   {modelsError && (
-                    <p className="text-[10px] text-warning">模型列表加载失败，可手动输入模型名</p>
+                    <p className="text-[10px] text-warning">模型列表加载失败，直接手输模型名也行</p>
                   )}
                 </div>
 
@@ -226,7 +224,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                   <Input
                     type="number"
                     min={1}
-                    placeholder="留空走默认"
+                    placeholder="留空用默认"
                     value={draft.max_turns ?? ""}
                     onChange={(e) =>
                       update("max_turns", e.target.value ? parseInt(e.target.value, 10) : undefined)
@@ -247,7 +245,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={DEFAULT_VALUE}>默认（不写则走内核兜底）</SelectItem>
+                      <SelectItem value={DEFAULT_VALUE}>默认（不设就用内置）</SelectItem>
                       {PERMISSION_MODES.map((p) => (
                         <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
                       ))}
@@ -267,7 +265,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                 </Label>
                 <Textarea
                   className="min-h-[120px] resize-y font-mono text-[11px] leading-relaxed"
-                  placeholder="本阶段特化的 agent 系统提示词。留空则沿用默认 agent 的 system_prompt。"
+                  placeholder="这个阶段专用的提示词。留空就用默认 agent 的。"
                   value={draft.system_prompt ?? ""}
                   onChange={(e) => update("system_prompt", e.target.value || undefined)}
                   spellCheck={false}
@@ -276,7 +274,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
 
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[10px] text-muted-foreground">
-                  改完点流水线底部「保存修改」生效。空字段沿用默认 agent。
+                  改完点流水线底部的「保存修改」。没填的项用默认 agent。
                 </p>
                 <div className="flex items-center gap-1.5">
                   <Button variant="outline" size="sm" className="h-7" onClick={() => setDryRunOpen(true)}>

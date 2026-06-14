@@ -59,7 +59,7 @@ export function Setup() {
       }
     }
     if (Object.keys(payload).length === 0) {
-      toast.error("至少选一个 provider", "");
+      toast.error("至少选一个提供商", "");
       return;
     }
     try {
@@ -95,17 +95,17 @@ export function Setup() {
   return (
     <PageShell width="focus" hero={{ title: "首跑向导", subtitle: "完成 2 步即可开始使用 autopilot" }}>
 
-      <SetupProgress current={step} labels={["Provider", "代码库"]} />
+      <SetupProgress current={step} labels={["提供商", "代码库"]} />
 
       {step === 2 && minimumReady && (
         <div className="mb-4 rounded-md border border-border px-3 py-2 text-xs">
-          ✓ 核心配置已就绪 · 第 2 步可选
+          ✓ 必填的都好了 · 第 2 步可选
         </div>
       )}
 
       {step === 1 && (
         <section className="space-y-4">
-          <h2 className="text-sm font-bold">1/2 · 启用 Provider</h2>
+          <h2 className="text-sm font-bold">1/2 · 选择提供商</h2>
           {ALL_PROVIDERS.map((p) => (
             <div key={p.name} className="flex items-center gap-3">
               <Checkbox
@@ -125,7 +125,7 @@ export function Setup() {
             </div>
           ))}
           <p className="text-xs text-muted-foreground">
-            ⚠ 凭证需在终端手动登录：
+            还要在终端登录一下：
             {ALL_PROVIDERS.filter((p) => enabledProviders[p.name]).map((p) => (
               <code key={p.name} className="mx-1">$ {p.loginHint}</code>
             ))}
@@ -152,14 +152,14 @@ export function Setup() {
               placeholder="https://github.com/owner/repo 或 git@host:owner/repo.git"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              无需本地 clone，任务执行时自动从远程拉取；提交时会验证仓库可达性
+              不用先 clone 到本地，跑任务时会自动从远程拉。点「完成」时先帮你检查能不能连上。
             </p>
           </div>
           <div className="flex justify-end gap-2 pt-4">
             <Button variant="ghost" onClick={() => setStep(1)} disabled={cbSubmitting}>← 上一步</Button>
             <Button variant="outline" onClick={() => submitStep2OrSkip(true)} disabled={cbSubmitting}>跳过</Button>
             <Button onClick={() => submitStep2OrSkip(false)} disabled={cbSubmitting}>
-              {cbSubmitting ? "验证远程仓库…" : "完成"}
+              {cbSubmitting ? "检查仓库中…" : "完成"}
             </Button>
           </div>
         </section>
