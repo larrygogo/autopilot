@@ -267,19 +267,6 @@
     font-variant-ligatures: none;
   }
 
-  /* 编号块：实色方块 → 圆角柔和徽标 */
-  .bp-num-block {
-    font-family: var(--font-display);
-    font-weight: 600;
-    background: var(--primary);
-    color: var(--primary-foreground);
-    border-radius: var(--radius-sm);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-  }
-
   /* MarkdownView 容器：长串断行兜底 */
   .prose-bp {
     overflow-wrap: anywhere;

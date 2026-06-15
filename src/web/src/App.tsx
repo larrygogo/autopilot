@@ -305,7 +305,7 @@ function AppInner() {
         {/* Supabase 式全宽顶栏：logo + 面包屑在左，工具区在右；侧栏下沉到顶栏之下 */}
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3 md:px-4">
           <Link to="/tasks" className="flex shrink-0 items-center gap-2">
-            <div className="bp-num-block h-6 w-6 text-xs">A</div>
+            <img src="/logo.svg" alt="Autopilot" className="h-6 w-6" />
             <span className="hidden text-sm font-bold sm:inline">Autopilot</span>
           </Link>
           {projectCtx ? (
