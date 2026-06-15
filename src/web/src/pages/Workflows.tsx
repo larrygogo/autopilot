@@ -3,7 +3,6 @@ import { FormDialog, FormField, PageShell } from "@/components/pro";
 import { Plus } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
 import { useNavigate } from "react-router-dom";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
 import { WorkflowCatalog } from "@/components/WorkflowCatalog";
@@ -26,7 +25,6 @@ export function Workflows() {
   const { subscribe } = useWebSocket();
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [newOpen, setNewOpen] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [cloneSource, setCloneSource] = useState<string | null>(null);
   const [cloneName, setCloneName] = useState("");
@@ -82,22 +80,13 @@ export function Workflows() {
         onNew={() => setTemplatePickerOpen(true)}
       />
 
-      <NewWorkflowDialog
-        open={newOpen}
-        onClose={() => setNewOpen(false)}
-        onCreated={() => refresh()}
-      />
-
       <NewWorkflowFromTemplate
         open={templatePickerOpen}
         onCancel={() => setTemplatePickerOpen(false)}
-        onCreated={(_name) => {
+        onCreated={(name) => {
           setTemplatePickerOpen(false);
-          refresh();
-        }}
-        onFromScratch={() => {
-          setTemplatePickerOpen(false);
-          setNewOpen(true);
+          // 模板 / 导入 / 从零都汇流到详情页，与 AI 路径一致（创建即落地→进编辑场）
+          navigate(`/workflows/${encodeURIComponent(name)}`);
         }}
         onFromAI={() => {
           setTemplatePickerOpen(false);

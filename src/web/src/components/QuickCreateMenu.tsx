@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
-import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
 
 /**
  * 全局「+」快捷创建菜单 — 挂在 header 右侧，任意页面一键创建需求 / 工作流 / 项目。
@@ -22,7 +21,6 @@ import { NewWorkflowDialog } from "@/components/NewWorkflowDialog";
  */
 export function QuickCreateMenu() {
   const navigate = useNavigate();
-  const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
 
   return (
@@ -80,26 +78,14 @@ export function QuickCreateMenu() {
       <NewWorkflowFromTemplate
         open={templatePickerOpen}
         onCancel={() => setTemplatePickerOpen(false)}
-        onCreated={(_name) => {
+        onCreated={(name) => {
           setTemplatePickerOpen(false);
-          navigate("/workflows");
-        }}
-        onFromScratch={() => {
-          setTemplatePickerOpen(false);
-          setNewWorkflowOpen(true);
+          // 与列表页一致：模板 / 导入 / 从零都汇流详情页
+          navigate(`/workflows/${encodeURIComponent(name)}`);
         }}
         onFromAI={() => {
           setTemplatePickerOpen(false);
           navigate("/workflows/new-with-ai");
-        }}
-      />
-
-      <NewWorkflowDialog
-        open={newWorkflowOpen}
-        onClose={() => setNewWorkflowOpen(false)}
-        onCreated={() => {
-          setNewWorkflowOpen(false);
-          navigate("/workflows");
         }}
       />
     </>

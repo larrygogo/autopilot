@@ -20,15 +20,13 @@ const FROM_AI = "__from_ai__";
 interface Props {
   open: boolean;
   onCancel: () => void;
-  /** 模板创建成功；调用方需重拉 workflow list */
+  /** 创建成功（模板 / 导入 / 从零都走这里），传新工作流名；调用方统一 navigate 到详情页 */
   onCreated: (name: string) => void;
-  /** 用户选了「从零开始」，调用方应该弹现有的 NewWorkflowDialog */
-  onFromScratch: () => void;
   /** 用户选了「✨ 用 AI 创建」，调用方应该 navigate 到 /workflows/new-with-ai */
   onFromAI: () => void;
 }
 
-export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScratch, onFromAI }: Props) {
+export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromAI }: Props) {
   const toast = useToast();
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -92,10 +90,6 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
       onFromAI();
       return;
     }
-    if (selected === FROM_SCRATCH) {
-      onFromScratch();
-      return;
-    }
     if (!newName.trim()) {
       toast.error("请输入工作流名字", "");
       return;
@@ -104,11 +98,18 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
       toast.error("名字只允许字母 / 数字 / . _ -", "");
       return;
     }
+    const name = newName.trim();
     setSubmitting(true);
     try {
-      await api.createWorkflowFromTemplate({ template: selected, name: newName.trim() });
-      toast.success(`已从模板 ${selected} 创建 ${newName.trim()}`);
-      onCreated(newName.trim());
+      if (selected === FROM_SCRATCH) {
+        // 从零 = 建一个含默认单阶段（后端 firstPhase 缺省 step1）的空工作流，落地后进详情页搭。
+        await api.createWorkflow({ name });
+        toast.success(`已创建空白工作流 ${name}`);
+      } else {
+        await api.createWorkflowFromTemplate({ template: selected, name });
+        toast.success(`已从模板 ${selected} 创建 ${name}`);
+      }
+      onCreated(name);
       setNewName("");
     } catch (e: unknown) {
       toast.error("创建失败", (e as Error)?.message ?? String(e));
@@ -176,8 +177,8 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
                     : "border-border hover:border-foreground/60",
                 )}
               >
-                <span className="text-sm font-bold">⊕ 从零开始（高级）</span>
-                <p className="mt-0.5 text-xs text-muted-foreground">不基于模板，手工写所有 phases / agents</p>
+                <span className="text-sm font-bold">⊕ 从零开始</span>
+                <p className="mt-0.5 text-xs text-muted-foreground">建一个含单个默认阶段的空白工作流，落地后进详情页搭 phases / agents</p>
               </button>
             </div>
           </div>
@@ -221,7 +222,7 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
             </div>
           </div>
 
-          {selected && selected !== FROM_SCRATCH && selected !== FROM_AI && (
+          {selected && selected !== FROM_AI && (
             <div className="space-y-1.5">
               <Label htmlFor="wf-name" className="bp-label">
                 新工作流名字
@@ -244,9 +245,7 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
               ? "创建中..."
               : selected === FROM_AI
               ? "✨ 用 AI 描述 →"
-              : selected === FROM_SCRATCH
-              ? "下一步 →"
-              : "创建"}
+              : "创建并编辑"}
           </Button>
         </DialogFooter>
       </DialogContent>
