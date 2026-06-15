@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, copyFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { parseDocument } from "yaml";
 import {
   getWorkflowYamlPath,
@@ -96,8 +96,6 @@ export function setWorkflowPhases(workflowName: string, phases: PhaseEntryInput[
   const cleaned = phases.map((p) => cleanPhaseEntry(p));
   doc.setIn(["phases"], cleaned);
 
-  // 备份原文件
-  copyFileSync(yamlPath, yamlPath + ".bak");
   writeFileSync(yamlPath, doc.toString(), "utf-8");
 }
 
@@ -184,7 +182,6 @@ export function setWorkflowMeta(workflowName: string, meta: WorkflowMetaInput): 
   const yamlPath = getWorkflowYamlPath(workflowName);
   if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
   const raw = readFileSync(yamlPath, "utf-8");
-  copyFileSync(yamlPath, yamlPath + ".bak");
   writeFileSync(yamlPath, patchWorkflowMetaYaml(raw, meta), "utf-8");
 }
 

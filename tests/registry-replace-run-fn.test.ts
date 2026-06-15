@@ -47,8 +47,8 @@ export async function run_review(taskId: string): Promise<void> {
     expect(got).toContain("NEW body");
     expect(got).not.toContain("OLD body");
     expect(got).toContain("export async function run_review");
-    // 备份生成
-    expect(existsSync(tsPath + ".bak")).toBe(true);
+    // 不再留 .bak 兄弟文件（write-only 死重已移除，靠 git / 重编辑兜底）
+    expect(existsSync(tsPath + ".bak")).toBe(false);
   });
 
   it("旧函数不存在 → 追加到文件末尾，mode=appended", () => {

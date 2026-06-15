@@ -1,6 +1,6 @@
 import type { TransitionTable } from "../state-machine";
 import { log } from "../logger";
-import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync } from "fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { homedir } from "os";
 import { join, sep } from "path";
 import { parse as parseYaml } from "yaml";
@@ -1238,10 +1238,6 @@ export function saveWorkflowYaml(workflowName: string, yamlContent: string): voi
   const yamlPath = join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.yaml");
   if (!existsSync(join(getAutopilotHomeDynamic(), "workflows", workflowName))) {
     throw new Error(`工作流目录不存在：${workflowName}`);
-  }
-  // 备份
-  if (existsSync(yamlPath)) {
-    copyFileSync(yamlPath, yamlPath + ".bak");
   }
   writeFileSync(yamlPath, yamlContent, "utf-8");
 }

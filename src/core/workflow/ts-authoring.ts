@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, copyFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { getWorkflow, getWorkflowTsPath, type PhaseEntryInput } from "./registry";
 import { collectPhaseNames } from "./registry-authoring";
 
@@ -49,7 +49,6 @@ export function syncWorkflowTs(workflowName: string): SyncTsResult {
   const appended = missing.map((name) => renderRunFunctionStub(name)).join("\n\n");
   const newContent = content.replace(/\s*$/, "") + "\n\n" + appended + "\n";
 
-  copyFileSync(tsPath, tsPath + ".bak");
   writeFileSync(tsPath, newContent, "utf-8");
 
   return { added: missing, orphans, modified: true, legacy_signature: legacy };
@@ -92,7 +91,6 @@ export function renameRunFunctions(
   }
 
   if (renamed.length > 0) {
-    copyFileSync(tsPath, tsPath + ".bak");
     writeFileSync(tsPath, content, "utf-8");
   }
   return { renamed };
@@ -101,7 +99,7 @@ export function renameRunFunctions(
 /**
  * 删除 workflow.ts 中指定的 run_<name> 函数声明（整个函数）。
  * 用字符级 tokenizer 处理字符串 / 注释 / 模板字符串，平衡花括号定位函数体结束。
- * 写入前先备份 .bak。返回真正删除的函数名。
+ * 返回真正删除的函数名。
  */
 export function pruneOrphanRunFunctions(
   workflowName: string,
@@ -130,7 +128,6 @@ export function pruneOrphanRunFunctions(
   }
 
   if (removed.length > 0) {
-    copyFileSync(tsPath, tsPath + ".bak");
     writeFileSync(tsPath, content, "utf-8");
   }
   return { removed };
@@ -141,7 +138,6 @@ export function pruneOrphanRunFunctions(
  *
  * - newCode 必须以 `export (async) function run_<phase>(` 开头（防止函数名 mismatch）。
  * - 若旧函数不存在 → 追加到文件末尾；存在 → 字符级精确替换。
- * - 写入前 .bak 备份。
  *
  * 不修改函数声明以外的 ts 代码（import、其它函数、注释等）。
  */
@@ -166,7 +162,6 @@ export function replaceRunFunction(
     throw new Error(`workflow.ts 不存在：${workflowName}`);
   }
   const content = readFileSync(tsPath, "utf-8");
-  copyFileSync(tsPath, tsPath + ".bak");
 
   const range = findRunFunctionRange(content, phase);
   let next: string;
