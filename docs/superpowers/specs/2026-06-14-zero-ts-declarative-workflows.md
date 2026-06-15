@@ -1,5 +1,12 @@
 # 零 TS 声明式工作流：结构化裁判 + 框架交付 + 安全闸门
 
+> **⚠ 部分撤回（2026-06-15）**：用户深挖边界后定论——**PR 交付的动作是工作流的肉，不进框架**。
+> 据此**退役砖1（core/deliver-pr）、砖2（builtin deliver_pr 机制）、砖6（dev_declarative 示例）**：
+> deliverPr 搬回 `dev/workflow.ts` 的 run_submit_pr 内联，builtin phase 机制整体删除。
+> 判据：框架给骨（沙盒 + git/gh 工具 + 追踪原语 appendSubPr/poller），工作流给肉（怎么交付）。
+> **保留砖3/4/5/7**（结构化输出 / judge / 声明式安全闸门 / dev 判定升级——都是真骨）。
+> 零 TS 工作流走 **artifacts** 交付轴，不开箱即用 PR 交付。详见 memory `zero-ts-declarative-workflows`。
+>
 > 状态：设计 spec（architect + pm 压过），待评审、分刀实现。
 > 日期：2026-06-14
 > 产品方向锚点：**autopilot 朝「工作流可分享/分发」走**（用户 2026-06-14 拍板）。这把"声明式安全闸门"从过度设计提升为地基。
