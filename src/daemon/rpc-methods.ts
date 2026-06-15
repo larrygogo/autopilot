@@ -27,11 +27,9 @@ import {
   getWorkflowTs as registryGetWorkflowTs,
   saveWorkflowYaml,
   deleteWorkflowDir,
-  setWorkflowMeta,
-  patchWorkflowMetaYaml,
-  type WorkflowMetaInput,
   reload as reloadRegistry,
 } from "../core/registry";
+import { setWorkflowMeta, patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/registry-authoring";
 import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb } from "../core/workflows";
 import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow-templates";
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";

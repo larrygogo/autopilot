@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, copyFileSync, writeFileSync } from "fs";
-import { getWorkflow, getWorkflowTsPath, collectPhaseNames, type PhaseEntryInput } from "./registry";
+import { getWorkflow, getWorkflowTsPath, type PhaseEntryInput } from "./registry";
+import { collectPhaseNames } from "./registry-authoring";
 
 /**
  * workflow.ts 源码改写（authoring）——从 registry.ts 拆出的叶子模块。

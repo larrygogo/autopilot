@@ -3,7 +3,7 @@
  * 的写键 / 删键 / 空 map 清理，且保留注释与其他段。纯函数单测。
  */
 import { describe, it, expect } from "bun:test";
-import { patchWorkflowMetaYaml } from "../src/core/registry";
+import { patchWorkflowMetaYaml } from "../src/core/registry-authoring";
 
 const BASE = `name: demo
 label: 演示流

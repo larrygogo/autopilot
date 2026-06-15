@@ -77,9 +77,9 @@ import {
   saveWorkflowYaml,
   createWorkflow,
   deleteWorkflowDir,
-  setWorkflowPhases,
   type PhaseEntryInput,
 } from "../core/registry";
+import { setWorkflowPhases } from "../core/registry-authoring";
 import {
   syncWorkflowTs,
   renameRunFunctions,
