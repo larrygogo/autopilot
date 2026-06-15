@@ -1230,27 +1230,43 @@ export function RequirementDetail() {
           <ol className="space-y-2.5">
             {/* 对话双方用底色 + 图标区分：用户/GitHub = 中性卡，Agent 回应 = accent 淡底卡 */}
             {feedbacks.map((fb) => {
-              const isAgent = fb.from_role === "agent";
+              // residue = 上一次失败 run 沉淀的历史评审遗留（非本 PR 评审）——必须跟「Agent 修复」
+              // 和当前 PR 评审意见区分开，否则历史驳回原话会被误读成对当前 PR 的结论。
+              const subtype = fb.subtype ?? (fb.from_role === "agent" ? "fix" : "review");
+              const isResidue = subtype === "residue";
+              const isFix = subtype === "fix";
               return (
                 <li
                   key={fb.id}
                   className={cn(
                     "rounded-md border p-3",
-                    isAgent ? "border-accent/25 bg-accent/5" : "border-border bg-muted/30",
+                    isResidue
+                      ? "border-border bg-muted/20"
+                      : isFix
+                        ? "border-accent/25 bg-accent/5"
+                        : "border-border bg-muted/30",
                   )}
                 >
                   <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                    {isAgent
-                      ? <Bot className="h-3.5 w-3.5 text-accent" />
-                      : <UserRound className="h-3.5 w-3.5 text-muted-foreground" />}
-                    <span className={cn("text-xs font-medium", isAgent ? "text-accent" : "text-foreground")}>
-                      {isAgent ? "Agent 修复" : (SOURCE_LABEL[fb.source] ?? fb.source)}
+                    {isResidue
+                      ? <History className="h-3.5 w-3.5 text-muted-foreground" />
+                      : isFix
+                        ? <Bot className="h-3.5 w-3.5 text-accent" />
+                        : <UserRound className="h-3.5 w-3.5 text-muted-foreground" />}
+                    <span className={cn("text-xs font-medium", isFix ? "text-accent" : "text-muted-foreground")}>
+                      {isResidue ? "上次执行遗留" : isFix ? "Agent 修复" : (SOURCE_LABEL[fb.source] ?? fb.source)}
                     </span>
+                    {isResidue && (
+                      <Badge variant="muted" className="text-[10px]">历史 · 非本 PR 评审</Badge>
+                    )}
                     <span className="font-mono text-[10px] text-muted-foreground">
                       {new Date(fb.created_at).toLocaleString()}
                     </span>
                   </div>
-                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
+                  <pre className={cn(
+                    "whitespace-pre-wrap break-words font-mono text-xs leading-relaxed",
+                    isResidue ? "text-muted-foreground" : "text-foreground",
+                  )}>
                     {fb.body}
                   </pre>
                 </li>

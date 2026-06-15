@@ -2,6 +2,9 @@ import type { Notification } from "../lib/notification-types";
 import { rpcCall } from "../lib/ws-singleton";
 import { RpcCallError, type CallOptions } from "../lib/ws-rpc-client";
 import { getApiToken, shouldUseToken } from "../lib/api-token";
+import { classifyFeedback, type FeedbackSubtype } from "../lib/feedback-classify";
+
+export type { FeedbackSubtype };
 
 const BASE = "";
 
@@ -53,6 +56,7 @@ function commentsToFeedbacks(all: Comment[]): RequirementFeedback[] {
       requirement_id: c.requirement_id,
       source: c.from_role === "github" ? "github_review" : "manual",
       from_role: c.from_role,
+      subtype: classifyFeedback(c.from_role, c.body),
       body: c.body,
       github_review_id: c.github_review_id,
       created_at: c.created_at,
@@ -1170,6 +1174,8 @@ export interface RequirementFeedback {
   source: "github_review" | "manual";
   /** 原始评论角色（user/github/agent）—— agent = 修复执行器的总结 */
   from_role?: string;
+  /** 子类：residue=历史失败 run 评审遗留（非本 PR）/ fix=Agent 修复总结 / review=用户/GitHub 评审意见 */
+  subtype?: FeedbackSubtype;
   body: string;
   github_review_id: string | null;
   created_at: number;

@@ -99,6 +99,8 @@ export function reportRunOutcome(reqId: string, runId: string, outcome: RunOutco
     // 评审知识沉淀（防撞墙-失忆-重撞）：终态时把 run 侧最后一轮评审驳回原话写成需求
     // 评论（kind=feedback, from_role=agent），scheduler 重跑拼 requirement 文本时会带上，
     // 让新一轮 design v1 即带着上轮发现的架构约束。沉淀失败不阻塞状态同步。
+    // ⚠ body 前缀「【执行评审遗留」是 Web 区分「历史遗留 vs Agent 修复」的判别标记
+    //   （src/web/src/hooks/useApi.ts classifyFeedback FEEDBACK_RESIDUE_PREFIX）——改前缀须同步。
     if (isTerminal) {
       try {
         const task = getTask(runId);
