@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { Loader2, Plus } from "lucide-react";
 import { api, type Project } from "@/hooks/useApi";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -85,82 +87,71 @@ export function Start() {
 
   return (
     <PageShell width="focus" hero={{ title: "开始", subtitle: "说说你想做什么，AI 帮你整理成需求" }}>
-
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="project" className="bp-label">项目 *</Label>
-          {!loadingProjects && projects.length === 0 ? (
-            // 首跑空项目兜底：inline 一行创建，避免把用户卡死在 disabled select
-            <div className="space-y-2 rounded-lg border border-accent/40 bg-accent/5 p-3">
-              <p className="text-xs font-medium text-accent">
-                还没有项目 · 先建一个
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newProjectName}
-                  onChange={(e) => setNewProjectName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && newProjectName.trim()) void handleCreateProject();
-                  }}
-                  placeholder="项目名（如 我的副业 / autopilot-demo）"
-                  disabled={creatingProject}
-                  className="flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm focus:border-accent focus:outline-none"
-                  autoFocus
-                />
-                <Button
-                  variant="default"
-                  size="sm"
-                  disabled={creatingProject || !newProjectName.trim()}
-                  onClick={() => void handleCreateProject()}
-                  className="rounded-md text-[11px]"
-                >
-                  {creatingProject ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                  {creatingProject ? "创建中..." : "创建并继续"}
-                </Button>
+      <Card className="space-y-4 p-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="project">
+              项目 <span className="text-destructive">*</span>
+            </Label>
+            {!loadingProjects && projects.length === 0 ? (
+              // 首跑空项目兜底：inline 一行创建，避免把用户卡死在 disabled select
+              <div className="space-y-2 rounded-md border border-accent/40 bg-accent/5 p-3">
+                <p className="text-xs font-medium text-accent">还没有项目 · 先建一个</p>
+                <div className="flex gap-2">
+                  <Input
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newProjectName.trim()) void handleCreateProject();
+                    }}
+                    placeholder="项目名（如 我的副业 / autopilot-demo）"
+                    disabled={creatingProject}
+                    autoFocus
+                  />
+                  <Button
+                    variant="default"
+                    disabled={creatingProject || !newProjectName.trim()}
+                    onClick={() => void handleCreateProject()}
+                    className="shrink-0"
+                  >
+                    {creatingProject ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    {creatingProject ? "创建中…" : "创建并继续"}
+                  </Button>
+                </div>
               </div>
-            </div>
-          ) : (
-            <Select value={projectId} onValueChange={setProjectId} disabled={loadingProjects || projects.length <= 1}>
-              <SelectTrigger id="project">
-                <SelectValue placeholder={loadingProjects ? "加载中..." : "选择项目"} />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name} <span className="text-muted-foreground ml-2">{p.id}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
+            ) : (
+              <Select value={projectId} onValueChange={setProjectId} disabled={loadingProjects || projects.length <= 1}>
+                <SelectTrigger id="project">
+                  <SelectValue placeholder={loadingProjects ? "加载中…" : "选择项目"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name} <span className="ml-2 text-muted-foreground">{p.id}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="raw" className="bp-label">说说你想做什么</Label>
-          <textarea
-            id="raw"
-            value={rawText}
-            onChange={(e) => setRawText(e.target.value)}
-            rows={12}
-            placeholder="例如：给登录页加忘记密码功能。需要邮件重置..."
-            className="w-full text-sm border border-border bg-background px-3 py-2 rounded-md focus:outline-none focus:border-accent"
-          />
-        </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="raw">说说你想做什么</Label>
+            <Textarea
+              id="raw"
+              value={rawText}
+              onChange={(e) => setRawText(e.target.value)}
+              rows={10}
+              placeholder="例如：给登录页加忘记密码功能。需要邮件重置…"
+            />
+          </div>
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button
-            variant="default"
-            size="default"
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-            className="rounded-md text-[11px]"
-          >
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-            {submitting ? "AI 整理中..." : "生成需求 →"}
-          </Button>
-        </div>
-      </div>
+          <div className="flex justify-end">
+            <Button variant="default" disabled={!canSubmit} onClick={handleSubmit}>
+              {submitting ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+              {submitting ? "AI 整理中…" : "生成需求 →"}
+            </Button>
+          </div>
+        </Card>
     </PageShell>
   );
 }
