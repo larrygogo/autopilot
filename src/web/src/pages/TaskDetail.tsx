@@ -257,13 +257,20 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
     </div>
   ) : null;
 
+  // 用户只关心需求 + 第几次执行（#N），不看 task 内核 id。run 标签由 computeRunLabels 按 seq 算；
+  // embedded 模式 siblingRuns 为 null（需求页 RunSwitcher 已示 #N），退回中性「执行记录」。
+  const thisRunLabel =
+    siblingRuns && siblingRuns.length > 0
+      ? (computeRunLabels(siblingRuns).get(task.id) ?? "执行")
+      : "执行记录";
+
   return (
     <div className={cn(embedded ? "w-full" : PAGE_W)}>
       {/* Header — 整页模式：返回 + task.id + 状态 + 操作组。embedded 时由需求页承担页头，仅保留操作组 */}
       {embedded ? (
         actionGroup && (
           <div className="mb-4 flex items-center justify-between gap-3">
-            <span className="font-mono text-[10px] text-muted-foreground">任务执行 · {task.id}</span>
+            <span className="text-[10px] text-muted-foreground">执行记录</span>
             {actionGroup}
           </div>
         )
@@ -289,11 +296,9 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
             </Button>
           )}
           <div className="flex min-w-0 flex-col">
-            <span className="font-mono text-[10px] text-muted-foreground">
-              TASK
-            </span>
-            <h2 className="truncate font-mono text-xl font-bold text-foreground sm:text-2xl">
-              {task.id}
+            <span className="text-[10px] text-muted-foreground">{thisRunLabel}</span>
+            <h2 className="truncate text-xl font-bold text-foreground sm:text-2xl">
+              {task.title}
             </h2>
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -427,8 +432,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
             message={
               <div className="space-y-2">
                 <p>
-                  确认永久删除任务{" "}
-                  <code className="rounded bg-muted px-1 font-mono">{task.id}</code>？
+                  确认永久删除「{task.title}」的这次{thisRunLabel}？
                 </p>
                 <p className="text-xs text-muted-foreground">
                   将清理这个任务的全部记录、文件以及所有子任务。操作不可撤销。
@@ -446,7 +450,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
         title="取消任务"
         message={
           <span>
-            确认取消任务 <code className="rounded bg-muted px-1 font-mono">{task.id}</code>？正在运行的阶段将被中止。
+            确认取消「{task.title}」的这次{thisRunLabel}？正在运行的阶段将被中止。
           </span>
         }
         confirmText="取消任务"

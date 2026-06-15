@@ -107,7 +107,7 @@ export function NotificationItem({
       {n.actions.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {n.actions.map((action, idx) => {
-            const resolved = resolveNotificationIntent(action.intent);
+            const resolved = resolveNotificationIntent(action.intent, n.context);
             const variant =
               action.kind === "primary" ? "default" : action.kind === "danger" ? "destructive" : "outline";
             if (resolved.href) {

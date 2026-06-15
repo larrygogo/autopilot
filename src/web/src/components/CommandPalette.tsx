@@ -214,7 +214,7 @@ export function CommandPaletteContent({
                   onSelect={run(() => onSelectTask(t.id))}
                 >
                   <FileText className="h-4 w-4" />
-                  <span className="font-mono text-xs text-muted-foreground shrink-0 whitespace-nowrap">{t.id}</span>
+                  {/* id 仅留在 value 里供搜索，不展示给用户（只关心需求/标题） */}
                   <span className="truncate min-w-0 flex-1">{t.title}</span>
                   <CommandShortcut>{t.status}</CommandShortcut>
                 </CommandItem>

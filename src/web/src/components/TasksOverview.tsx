@@ -93,7 +93,6 @@ export function TasksOverview({
                 onClick={() => onSelectTask(t.id)}
                 className="flex cursor-pointer items-center gap-3 px-2 py-1 font-mono text-xs hover:bg-destructive/10"
               >
-                <span className="text-muted-foreground">{t.id}</span>
                 <span className="truncate font-sans">{t.title}</span>
                 <span className="ml-auto text-muted-foreground">点击进入并取消</span>
               </li>
@@ -115,7 +114,6 @@ export function TasksOverview({
                 onClick={() => onSelectTask(t.id)}
                 className="flex cursor-pointer items-center gap-3 px-2 py-1 font-mono text-xs hover:bg-warning/10"
               >
-                <span className="text-muted-foreground">{t.id}</span>
                 <span className="truncate font-sans">{t.title}</span>
                 <span className="ml-auto text-muted-foreground">
                   {formatAgo(now - new Date(t.updated_at).getTime())} 前
