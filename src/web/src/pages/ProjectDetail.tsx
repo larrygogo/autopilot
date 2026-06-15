@@ -3,14 +3,11 @@ import { PAGE_W } from "@/lib/layout";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, FolderGit2, Inbox, Plus, RefreshCw,
-  Trash2, Pencil, List, Archive, Loader2, Hand,
+  Trash2, Pencil,
 } from "lucide-react";
 import { api, type Project, type Workspace, type Requirement } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { TimeGroupedList, RequirementRow, type TimedRow } from "@/components/PipelineList";
-import { tsToMs } from "@/lib/pipeline-time";
-import { projectReqTab, type ProjectReqTab } from "@/lib/requirement-buckets";
+import { RequirementPipeline } from "@/components/RequirementPipeline";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -57,7 +54,6 @@ export function ProjectDetail({ projectId, section = "requirements" }: ProjectDe
   const [workflowLabels, setWorkflowLabels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [reqTab, setReqTab] = useState<string>("all");
 
   // 项目设置（settings section 内联表单，原编辑 dialog 已收编于此）
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -112,18 +108,7 @@ export function ProjectDetail({ projectId, section = "requirements" }: ProjectDe
     return unsub;
   }, [projectId, subscribe]);
 
-  // 需求 4 段 tab 分桶（与流水线页同构；项目页需求自己代表全生命周期）
-  const reqBuckets = useMemo(() => {
-    const buckets: Record<ProjectReqTab, Requirement[]> = { human: [], running: [], archived: [] };
-    for (const r of requirements) buckets[projectReqTab(r.status)].push(r);
-    return buckets;
-  }, [requirements]);
-
   const now = Date.now();
-  const rowsOf = (list: Requirement[]): TimedRow[] =>
-    list
-      .map((r) => ({ key: r.id, ts: tsToMs(r.updated_at), node: <RequirementRow req={r} now={now} maps={{ workflows: workflowLabels }} /> }))
-      .sort((a, b) => b.ts - a.ts);
 
   // ── 需求 ──────────────────────────────────────
 
@@ -467,48 +452,13 @@ export function ProjectDetail({ projectId, section = "requirements" }: ProjectDe
             )}
           </Card>
         ) : (
-          <Tabs value={reqTab} onValueChange={setReqTab}>
-            <TabsList className="w-full justify-start overflow-x-auto overflow-y-hidden">
-              <TabsTrigger value="all" className="gap-1.5">
-                <List className="h-3.5 w-3.5 text-foreground/70" />
-                全部
-                <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{requirements.length}</span>
-              </TabsTrigger>
-              <TabsTrigger value="human" className="gap-1.5">
-                <Hand className="h-3.5 w-3.5 text-warning" />
-                等待人工
-                <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{reqBuckets.human.length}</span>
-              </TabsTrigger>
-              <TabsTrigger value="running" className="gap-1.5">
-                <Loader2 className="h-3.5 w-3.5 text-accent" />
-                运行中
-                <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{reqBuckets.running.length}</span>
-              </TabsTrigger>
-              <TabsTrigger value="archived" className="gap-1.5">
-                <Archive className="h-3.5 w-3.5 text-muted-foreground" />
-                归档
-                <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">{reqBuckets.archived.length}</span>
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="all">
-              {/* 「全部」= 活跃（等待人工 + 运行中），不含归档（已完成/已取消只在「归档」看），与流水线一致 */}
-              <TimeGroupedList rows={rowsOf([...reqBuckets.human, ...reqBuckets.running])} now={now} />
-            </TabsContent>
-            {([
-              ["human", reqBuckets.human, "没有等你处理的需求"],
-              ["running", reqBuckets.running, "没有正在推进的需求"],
-              ["archived", reqBuckets.archived, "还没有归档的需求"],
-            ] as Array<[string, Requirement[], string]>).map(([key, list, empty]) => (
-              <TabsContent key={key} value={key}>
-                {list.length > 0 ? (
-                  <TimeGroupedList rows={rowsOf(list)} now={now} />
-                ) : (
-                  <p className="py-10 text-center font-mono text-[11px] text-muted-foreground">{empty}</p>
-                )}
-              </TabsContent>
-            ))}
-          </Tabs>
+          // 与流水线页共用同一组件，唯一差别是范围（这里只传本项目的需求）。
+          <RequirementPipeline
+            requirements={requirements}
+            now={now}
+            nameMaps={{ workflows: workflowLabels }}
+            emptyHint="暂无需求"
+          />
         )}
       </section>
       )}
