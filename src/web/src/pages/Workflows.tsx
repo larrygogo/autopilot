@@ -3,7 +3,7 @@ import { FormDialog, FormField, PageShell } from "@/components/pro";
 import { Plus } from "lucide-react";
 import { api } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
 import { WorkflowCatalog } from "@/components/WorkflowCatalog";
 import { WorkflowHealthBanner } from "@/components/WorkflowHealthBanner";
@@ -22,6 +22,7 @@ interface WorkflowInfo {
 export function Workflows() {
   const toast = useToast();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { subscribe } = useWebSocket();
   const [workflows, setWorkflows] = useState<WorkflowInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +42,16 @@ export function Workflows() {
   useEffect(() => {
     refresh();
   }, []);
+
+  // 顶栏 QuickCreate「新工作流」导航过来时带 ?new=1：自动打开入口弹窗，
+  // 入口组件只在本页实例化一份（QuickCreate 只做导航快捷方式，不再自实例化）。
+  useEffect(() => {
+    if (searchParams.get("new") === "1") {
+      setTemplatePickerOpen(true);
+      searchParams.delete("new");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // WS：daemon 重载工作流（修复孤儿 / discover 新增等）后自动同步列表
   useEffect(() => {
@@ -107,10 +118,12 @@ export function Workflows() {
             throw new Error("名字只允许字母 / 数字 / . _ -");
           }
           // 用专门的"克隆已有工作流"API，而非 from-template（后者只克隆 examples 模板）
-          await api.cloneWorkflow(cloneSource, cloneName.trim());
-          toast.success(`已克隆 ${cloneSource} → ${cloneName.trim()}`);
+          const target = cloneName.trim();
+          await api.cloneWorkflow(cloneSource, target);
+          toast.success(`已克隆 ${cloneSource} → ${target}`);
           setCloneName("");
-          refresh();
+          // 与新建主链路一致：克隆后进新工作流详情页（而非停列表）
+          navigate(`/workflows/${encodeURIComponent(target)}`);
         }}
       >
         <FormField label="新名字" htmlFor="clone-name">

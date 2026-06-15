@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, FolderPlus, GitBranch, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,7 +9,6 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
 
 /**
  * 全局「+」快捷创建菜单 — 挂在 header 右侧，任意页面一键创建需求 / 工作流 / 项目。
@@ -21,7 +19,6 @@ import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
  */
 export function QuickCreateMenu() {
   const navigate = useNavigate();
-  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
 
   return (
     <>
@@ -55,7 +52,7 @@ export function QuickCreateMenu() {
 
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem onSelect={() => setTemplatePickerOpen(true)}>
+          <DropdownMenuItem onSelect={() => navigate("/workflows?new=1")}>
             <GitBranch className="h-3.5 w-3.5" />
             <span>新工作流</span>
             <span className="ml-auto font-mono text-[10px] text-muted-foreground">
@@ -74,20 +71,6 @@ export function QuickCreateMenu() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      <NewWorkflowFromTemplate
-        open={templatePickerOpen}
-        onCancel={() => setTemplatePickerOpen(false)}
-        onCreated={(name) => {
-          setTemplatePickerOpen(false);
-          // 与列表页一致：模板 / 导入 / 从零都汇流详情页
-          navigate(`/workflows/${encodeURIComponent(name)}`);
-        }}
-        onFromAI={() => {
-          setTemplatePickerOpen(false);
-          navigate("/workflows/new-with-ai");
-        }}
-      />
     </>
   );
 }
