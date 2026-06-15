@@ -1,6 +1,6 @@
-import { getDb, getTask, now, TABLE_COLUMNS, PROTECTED_COLUMNS } from "./db";
+import { getDb, getTask, now, closeOpenPhaseEvents, TABLE_COLUMNS, PROTECTED_COLUMNS } from "./db";
 import { emit } from "./event-bus";
-import { appendTaskEvent } from "./task-logs";
+import { appendTaskEvent } from "./task/logs";
 import { appendTransition as appendManifestTransition } from "./manifest";
 
 // ──────────────────────────────────────────────
@@ -144,7 +144,26 @@ export function transition(
   emit({ type: "task:transition", payload: { taskId, from: fromStatus, to: toStatus, trigger, note: opts.note ?? null } });
   appendTaskEvent(taskId, { type: "transition", from: fromStatus, to: toStatus, trigger, note: opts.note });
 
+  closeOpenEventsIfTerminal(taskId, toStatus);
+
   return [fromStatus, toStatus];
+}
+
+/**
+ * 进入终态时关闭遗留的 open phase event（标 aborted）——清理义务在状态机单点收口，
+ * 所有转换入口（workflow 内 transition cancel / watcher forceTransition /
+ * cancelTaskAction / bridge…）统一经过，不再逐入口补（dogfood req-012：workflow
+ * 驳回触顶直接 transition cancel 不走 cancelTaskAction，4 个轮次永远转圈累计 97h）。
+ *
+ * 终态判定用启发式（活跃前缀 pending_/running_/awaiting_/waiting_ 与中间态后缀
+ * _rejected 之外即终态）：状态机本身不持有 terminal_states 表（在 workflow 定义里），
+ * 误判面只剩自定义非常规中间态——即便误关，下一 phase 启动会开新 event，伤害有限。
+ */
+function closeOpenEventsIfTerminal(taskId: string, toStatus: string): void {
+  if (/^(pending|running|awaiting|waiting)_/.test(toStatus) || /_rejected$/.test(toStatus)) return;
+  try {
+    closeOpenPhaseEvents(taskId);
+  } catch { /* 清理失败不阻塞转换主流程 */ }
 }
 
 /**
@@ -222,6 +241,8 @@ export function forceTransition(
 
   emit({ type: "task:transition", payload: { taskId, from: capturedFromStatus, to: toStatus, trigger: "force_transition", note } });
   appendTaskEvent(taskId, { type: "transition", from: capturedFromStatus, to: toStatus, trigger: "force_transition", note });
+
+  closeOpenEventsIfTerminal(taskId, toStatus);
 }
 
 /**

@@ -31,6 +31,10 @@ export interface Task {
   parallel_group: string | null;
   /** 关联需求 id（reqId），可空兼容历史无关联任务。migration 019 加入。 */
   requirement_id: string | null;
+  /** run 种类（v2 R2，migration 044）：execution=主执行；fix=修复轮（R3 接入） */
+  kind: string;
+  /** 需求内 run 序号（v2 R2，migration 044）：同一需求第几次执行，供排序/展示 */
+  seq: number;
   [key: string]: unknown;
 }
 
@@ -102,6 +106,8 @@ export const TABLE_COLUMNS = new Set([
   "parallel_index",
   "parallel_group",
   "requirement_id",
+  "kind",
+  "seq",
 ]);
 
 // 受保护的列字段，不允许通过 extraUpdates/updateTask 修改
@@ -153,6 +159,27 @@ export function now(): string {
   return new Date().toISOString();
 }
 
+/**
+ * 原子地「生成 id → INSERT」：撞 UNIQUE / PRIMARY KEY 时自动换号重试。
+ *
+ * 消除 `const id = nextXxxId(); insert(id)` 两步之间的并发撞号窗口（architect 审查 H3：
+ * SELECT MAX+1 与 INSERT 非原子，daemon 与 run-phase 子进程并发写同库时两侧可能拿到同号）。
+ * id 是 `xxx-NNN` 格式字符串（非 autoincrement），故用「乐观插入 + 撞号重试」而非序列表。
+ * 仅对约束冲突重试；其它错误立即抛。
+ */
+export function insertWithFreshId<T>(genId: () => string, insert: (id: string) => T, retries = 8): T {
+  for (let attempt = 0; ; attempt++) {
+    const id = genId();
+    try {
+      return insert(id);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (attempt < retries && /UNIQUE constraint|PRIMARY KEY|constraint failed/i.test(msg)) continue;
+      throw e;
+    }
+  }
+}
+
 // ──────────────────────────────────────────────
 // 内部辅助
 // ──────────────────────────────────────────────
@@ -200,6 +227,10 @@ export interface CreateTaskOpts {
   extra?: Record<string, unknown>;
   /** 关联需求 id；可空（命令行手动创建 task 时无 requirement） */
   requirementId?: string | null;
+  /** run 种类（缺省 execution）。v2 R2：task = 需求的执行历史项 */
+  kind?: string;
+  /** 需求内 run 序号（缺省 1）。重跑=新 run 时由 task-factory 计算递增 */
+  seq?: number;
   /**
    * 工作流定义快照。若提供则同步写入 task-manifest.json 作为权威源（gsd-style）。
    * 省略时只写 DB（测试 / 老路径兼容）。
@@ -212,8 +243,8 @@ export function createTask(opts: CreateTaskOpts): void {
   const ts = now();
   db.run(
     "INSERT INTO tasks" +
-    " (id, title, workflow, status, channel, notify_target, extra, created_at, updated_at, requirement_id)" +
-    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    " (id, title, workflow, status, channel, notify_target, extra, created_at, updated_at, requirement_id, kind, seq)" +
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
       opts.id,
       opts.title,
@@ -225,6 +256,8 @@ export function createTask(opts: CreateTaskOpts): void {
       ts,
       ts,
       opts.requirementId ?? null,
+      opts.kind ?? "execution",
+      opts.seq ?? 1,
     ]
   );
   if (opts.workflowSnapshot) {
@@ -528,6 +561,36 @@ export function listRootTasksByRequirementIds(requirementIds: string[]): Task[] 
 }
 
 /**
+ * 按单个 requirement id 查其全部根 run（v2 R6）：parent_task_id IS NULL（排除并行块子任务），
+ * 按 seq 升序、再 created_at 升序排（seq 缺省/相同的历史数据用创建时间兜底稳定排序）。
+ * 供需求页执行记录区按 run 切换展示（一件工作的全部执行历史，含重跑 / fix 轮）。
+ */
+export function listTasksByRequirement(requirementId: string): Task[] {
+  const db = getDb();
+  const rows = db
+    .query<RawRow, [string]>(
+      "SELECT * FROM tasks WHERE requirement_id = ? AND parent_task_id IS NULL " +
+        "ORDER BY seq ASC, created_at ASC"
+    )
+    .all(requirementId);
+  return rows.map(rowToTask);
+}
+
+/**
+ * 计算某需求下一个 run 的序号（v2 R2）：现有根任务（run）的最大 seq + 1。
+ * 用 MAX 而非 COUNT：历史 run 被删除后 COUNT 会回退撞号，MAX 保证单调递增。
+ * 并行块子任务（parent_task_id 非空）不是独立 run，不参与编号。
+ */
+export function nextRunSeqForRequirement(requirementId: string): number {
+  const row = getDb()
+    .query<{ s: number | null }, [string]>(
+      "SELECT MAX(seq) AS s FROM tasks WHERE requirement_id = ? AND parent_task_id IS NULL"
+    )
+    .get(requirementId);
+  return (row?.s ?? 0) + 1;
+}
+
+/**
  * 原子级联删除一组 task：先删 task_logs / task_phase_events，再删 tasks 本身。
  * 仅做 DB 层删除，不动文件/锁/manifest；不 emit 事件。
  * 由 task-delete.ts 统一协调，高层负责预校验与外部副作用清理。
@@ -569,7 +632,8 @@ export interface TaskPhaseEvent {
   id: number;
   task_id: string;
   phase: string;
-  status: "running" | "done" | "awaiting" | "failed";
+  /** aborted = daemon 重启 / watcher 恢复 / 取消时被打断的轮次（closeOpenPhaseEvents 写入） */
+  status: "running" | "done" | "awaiting" | "failed" | "aborted";
   started_at: number;
   ended_at: number | null;
 }
@@ -608,19 +672,6 @@ export function closeOpenPhaseEvents(taskId: string): void {
   );
 }
 
-/**
- * 清空某 task 的全部运行历史记录（phase events + 状态转换日志）。
- * 用于重跑重置：重跑是全新一轮，旧轮的阶段进度/状态记录不该残留（否则流水线图仍显示
- * 上一轮的 ✓ 和耗时）。只清 DB 记录，文件类（实时日志/agent 调用）由调用方另清。
- */
-export function clearTaskRunHistory(taskId: string): void {
-  const db = getDb();
-  db.transaction(() => {
-    db.run("DELETE FROM task_phase_events WHERE task_id = ?", [taskId]);
-    db.run("DELETE FROM task_logs WHERE task_id = ?", [taskId]);
-  })();
-}
-
 /** 列出某 task 全部 phase event，按 started_at 升序。 */
 export function listTaskPhaseEvents(taskId: string): TaskPhaseEvent[] {
   const db = getDb();
@@ -631,24 +682,30 @@ export function listTaskPhaseEvents(taskId: string): TaskPhaseEvent[] {
     .all(taskId);
 }
 
+/** getWorkflowPhaseStats 取样上限：只用最近 N 条 done 事件算 P50（防 phase_events 无限增长拖慢）。 */
+const PHASE_STATS_SAMPLE_LIMIT = 2000;
+
 /**
  * 同工作流历史 phase 耗时统计 — 用作"还要多久"参考值。
  * 只计入 status='done' 且 ended_at 非空的事件；每 phase 应用层算 P50（中位数）。
- * 数据规模通常很小（一个 workflow phase 完成事件最多几百条），不需要 SQL window function。
+ * 取**最近 PHASE_STATS_SAMPLE_LIMIT 条**（ended_at DESC）：phase_events 是 append-only 无清理，
+ * 不封顶则随历史线性变慢（architect 审查 H4 温水隐患）；近期窗口同时让 ETA 反映当前性能更准。
  */
 export function getWorkflowPhaseStats(workflow: string): Record<string, { count: number; p50_ms: number }> {
   const db = getDb();
   const rows = db
-    .query<{ phase: string; dur: number }, [string]>(
+    .query<{ phase: string; dur: number }, [string, number]>(
       `SELECT e.phase AS phase, (e.ended_at - e.started_at) AS dur
        FROM task_phase_events e
        JOIN tasks t ON t.id = e.task_id
        WHERE t.workflow = ?
          AND e.status = 'done'
          AND e.ended_at IS NOT NULL
-         AND e.ended_at > e.started_at`
+         AND e.ended_at > e.started_at
+       ORDER BY e.ended_at DESC
+       LIMIT ?`
     )
-    .all(workflow);
+    .all(workflow, PHASE_STATS_SAMPLE_LIMIT);
 
   const byPhase = new Map<string, number[]>();
   for (const r of rows) {

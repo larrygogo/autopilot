@@ -56,12 +56,29 @@ export interface AdapterResponse {
   stopReason: string;
 }
 
+// ── 工具选择强制 ──
+
+/**
+ * 强制工具选择（结构化输出用）。`type:"force"` = 模型本轮**必须**调用名为 `name` 的工具，
+ * 不得只回散文。各 adapter 翻译成自家格式（anthropic tool_choice / openai tool_choice /
+ * google functionCallingConfig.mode=ANY）。供 completeStructured 把自由散文收敛成结构化结论。
+ */
+export type ToolChoice = { type: "force"; name: string };
+
 // ── 适配器选项 ──
 
 export interface AdapterOptions {
   model: string;
   max_tokens?: number;
   tools?: ToolDefinition[];
+  /** 强制模型调用指定工具（结构化输出）。缺省 = 模型自由决定是否调工具。 */
+  tool_choice?: ToolChoice;
+  /**
+   * 结构化判据专用：要求模型本次**不思考**直接给结构化结论。部分思考原生端点（如 Kimi Code）
+   * 在思考开启时拒绝强制 tool_choice（400），需关思考。各 adapter 按自家端点翻译（仅必要端点生效，
+   * 其余无操作）。普通 agent 调用不设此项，思考照常。
+   */
+  disable_thinking?: boolean;
   stop_sequences?: string[];
   temperature?: number;
   signal?: AbortSignal;

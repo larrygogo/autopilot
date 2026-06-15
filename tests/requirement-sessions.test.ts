@@ -19,7 +19,7 @@ import {
   deleteSession,
   SNAPSHOT_MAX_TURNS,
   type ConversationTurn,
-} from "../src/core/requirement-sessions";
+} from "../src/core/requirements/sessions";
 
 function initSchema(): void {
   const db = new Database(":memory:");

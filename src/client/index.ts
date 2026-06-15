@@ -50,8 +50,19 @@ export class AutopilotClient {
   get getSession() { return this.http.getSession.bind(this.http); }
   get deleteSession() { return this.http.deleteSession.bind(this.http); }
   get getSessionMessages() { return this.http.getSessionMessages.bind(this.http); }
-  get listNowCards() { return this.http.listNowCards.bind(this.http); }
-  get dismissNowCard() { return this.http.dismissNowCard.bind(this.http); }
+  get setRequirementWorkspaces() { return this.http.setRequirementWorkspaces.bind(this.http); }
+  get transitionRequirement() { return this.http.transitionRequirement.bind(this.http); }
+  get listRequirementSubPrs() { return this.http.listRequirementSubPrs.bind(this.http); }
+  get listRequirementDeliveries() { return this.http.listRequirementDeliveries.bind(this.http); }
+  get addRequirementFeedback() { return this.http.addRequirementFeedback.bind(this.http); }
+  get listRequirementComments() { return this.http.listRequirementComments.bind(this.http); }
+  get answerRequirementQuestion() { return this.http.answerRequirementQuestion.bind(this.http); }
+  get enqueueRequirement() { return this.http.enqueueRequirement.bind(this.http); }
+  get listNotifications() { return this.http.listNotifications.bind(this.http); }
+  get notificationUnreadCount() { return this.http.notificationUnreadCount.bind(this.http); }
+  get markNotificationsRead() { return this.http.markNotificationsRead.bind(this.http); }
+  get markAllNotificationsRead() { return this.http.markAllNotificationsRead.bind(this.http); }
+  get dismissNotification() { return this.http.dismissNotification.bind(this.http); }
   get createRequirement() { return this.http.createRequirement.bind(this.http); }
   get updateRequirement() { return this.http.updateRequirement.bind(this.http); }
   get getRequirement() { return this.http.getRequirement.bind(this.http); }

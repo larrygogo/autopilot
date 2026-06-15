@@ -1,7 +1,10 @@
-import type { NowCard } from "../lib/now-types";
+import type { Notification } from "../lib/notification-types";
 import { rpcCall } from "../lib/ws-singleton";
 import { RpcCallError, type CallOptions } from "../lib/ws-rpc-client";
 import { getApiToken, shouldUseToken } from "../lib/api-token";
+import { classifyFeedback, type FeedbackSubtype } from "../lib/feedback-classify";
+
+export type { FeedbackSubtype };
 
 const BASE = "";
 
@@ -52,6 +55,8 @@ function commentsToFeedbacks(all: Comment[]): RequirementFeedback[] {
       id: ++fakeId,
       requirement_id: c.requirement_id,
       source: c.from_role === "github" ? "github_review" : "manual",
+      from_role: c.from_role,
+      subtype: classifyFeedback(c.from_role, c.body),
       body: c.body,
       github_review_id: c.github_review_id,
       created_at: c.created_at,
@@ -65,10 +70,23 @@ function commentsToFeedbacks(all: Comment[]): RequirementFeedback[] {
  */
 export interface InlineAgentConfig {
   provider?: string;
+  /** 执行模式：cli（子进程，官方凭证）/ api（直连，内置工具）；省略走 resolveMode 派生 */
+  mode?: "cli" | "api";
   model?: string;
   max_turns?: number;
   permission_mode?: string;
   system_prompt?: string;
+}
+
+/** 生命周期 agent 配置（lifecycle.list 返回项）。 */
+export interface LifecycleAgentInfo {
+  name: string;
+  display_name: string;
+  note: string;
+  effective: InlineAgentConfig;
+  userConfig: InlineAgentConfig | null;
+  defaults: InlineAgentConfig;
+  reqOverridable: boolean;
 }
 
 /** dry-run 时把临时 model/max_turns 覆盖合到内联配置上；全空则返回 undefined（让后端走默认）。 */
@@ -190,6 +208,9 @@ export const api = {
   },
   // [WS-RPC] tasks.get — P3 第一批 PoC
   getTask: (id: string) => requestRpc<any>("tasks.get", { id }),
+  // [WS-RPC] tasks.listByRequirement — v2 R6：需求页 run 历史（按 seq 升序）
+  listTasksByRequirement: (reqId: string) =>
+    requestRpc<any[]>("tasks.listByRequirement", { requirementId: reqId }),
   // [WS-RPC] tasks.start
   startTask: (body: { title?: string; requirement?: string; workflow?: string; reqId?: string; requirement_id?: string }) =>
     requestRpc<any>("tasks.start", body),
@@ -269,6 +290,10 @@ export const api = {
         description: string;
         source?: "db" | "file";
         derives_from?: string | null;
+        /** 声明层（v2 R5）：git 输入要求（含 sandbox.git 缺省派生） */
+        requires_git?: boolean | "optional";
+        /** 声明层（v2 R5）：产出形态（"pr"/"artifacts"…，缺省 = 事实推断） */
+        delivers?: string;
       }>
     >("workflows.list"),
   // [WS-RPC] workflows.get
@@ -388,7 +413,7 @@ export const api = {
     request<{
       text: string;
       durationMs: number;
-      usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+      usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; total_cost_usd?: number };
     }>(
       `/api/workflows/${workflowName}/dry-run`,
       { method: "POST", body: JSON.stringify(body) },
@@ -396,6 +421,20 @@ export const api = {
   // [WS-RPC] workflows.saveYaml
   saveWorkflowYaml: (name: string, yaml: string) =>
     requestRpc<{ ok: boolean }>("workflows.saveYaml", { name, yaml }),
+  // [WS-RPC] workflows.setMeta —— 改显示名/描述（name 是标识符不可改）
+  setWorkflowMeta: (
+    name: string,
+    meta: {
+      label?: string | null;
+      description?: string | null;
+      /** 声明层 requires.git：true/false/"optional" 显式；null = 删键回退派生 */
+      requiresGit?: boolean | "optional" | null;
+      /** 声明层 sandbox.git：true 建沙盒；false/null 删键（不建≡缺省） */
+      sandboxGit?: boolean | null;
+      /** 声明层 delivers："pr"/"artifacts"；null = 删键回退事实推断 */
+      delivers?: string | null;
+    },
+  ) => requestRpc<{ ok: boolean }>("workflows.setMeta", { name, ...meta }),
   reloadWorkflows: () =>
     request<{ ok: boolean; workflows: any[] }>("/api/reload", { method: "POST" }),
 
@@ -414,6 +453,44 @@ export const api = {
     requestRpc<ProviderModelsResult>("providers.models", { name }),
   // [WS-RPC] providers.listExtended — 含 API key 状态
   listProvidersExtended: () => requestRpc<ProviderExtendedInfo[]>("providers.listExtended"),
+  // ── 生命周期 agent 配置（lifecycle.* RPC）──
+  // [WS-RPC] lifecycle.list
+  listLifecycleAgents: () => requestRpc<{ agents: LifecycleAgentInfo[] }>("lifecycle.list"),
+  // [WS-RPC] lifecycle.setAgent（config=null 删段回退默认）
+  setLifecycleAgent: (name: string, config: Partial<InlineAgentConfig> | null) =>
+    requestRpc<{ ok: boolean }>("lifecycle.setAgent", { name, config }),
+  // [WS-RPC] providers.setDefaultModel — 字段级写默认模型（官方 + compat），merge-safe
+  setProviderDefaultModel: (name: string, model?: string) =>
+    requestRpc<{ ok: boolean }>("providers.setDefaultModel", { name, model }),
+  // ── provider 条目 CRUD（条目化重构 P1）──
+  // [WS-RPC] providers.create
+  createProvider: (input: {
+    name: string;
+    display_name?: string;
+    type: "cli" | "api";
+    subtype: string;
+    cli_bin?: string | null;
+    cli_login_cmd?: string | null;
+    base_url?: string | null;
+    env_key_name?: string | null;
+    default_model?: string | null;
+    origin?: "template" | "user";
+  }) => requestRpc<{ provider: ProviderExtendedInfo }>("providers.create", input),
+  // [WS-RPC] providers.update
+  updateProvider: (
+    id: string,
+    patch: { display_name?: string; base_url?: string | null; env_key_name?: string | null; default_model?: string | null; enabled?: boolean },
+  ) => requestRpc<{ provider: ProviderExtendedInfo }>("providers.update", { id, ...patch }),
+  // [WS-RPC] providers.delete
+  deleteProvider: (id: string, force?: boolean) =>
+    requestRpc<{ ok: boolean }>("providers.delete", { id, force }),
+  // [WS-RPC] providers.templates
+  listProviderTemplates: () => requestRpc<ProviderTemplate[]>("providers.templates"),
+  // [WS-RPC] providers.detectCli
+  detectProviderCli: (id: string) =>
+    requestRpc<{ status: "ok" | "missing" | "unknown"; version?: string; install_hint?: string; error?: string }>(
+      "providers.detectCli", { id },
+    ),
 
   // API Keys
   listApiKeys: () => requestRpc<ApiKeyInfo[]>("apiKeys.list"),
@@ -425,19 +502,10 @@ export const api = {
   // Agents — 命名复用 agent 机制已删除（Phase 3）。
   // agent 配置现在内联挂在 phase 上；试跑见下方 dryRunAgent（收内联配置对象）。
 
-  // Chat
-  chat: (body: { message: string; session_id?: string; agent?: string; workflow?: string; title?: string }) =>
-    request<{ session_id: string; message: ChatMessage }>("/api/chat", {
-      method: "POST", body: JSON.stringify(body),
-    }),
-  // [WS-RPC] sessions.list
-  listSessions: () => requestRpc<ChatSessionManifest[]>("sessions.list"),
-  // [WS-RPC] sessions.get
-  getSession: (id: string) =>
-    requestRpc<ChatSessionManifest & { messages: ChatMessage[] }>("sessions.get", { id }),
-  // [WS-RPC] sessions.delete
-  deleteSession: (id: string) =>
-    requestRpc<{ ok: true }>("sessions.delete", { id }),
+  // Chat（独立对话页已于 2026-06-11 删除；后端 chat/sessions 设施保留给需求澄清使用）
+
+  // [WS-RPC] agents.defaultAgent —— phase 省略 agent / 留空字段时兜底的 DEFAULT_AGENT（编辑器展示默认值）
+  getDefaultAgent: () => requestRpc<InlineAgentConfig>("agents.defaultAgent"),
 
   // Defaults（用户偏好）
   // [WS-RPC] defaults.get
@@ -505,7 +573,7 @@ export const api = {
       elapsed_ms: number;
       result: {
         text: string;
-        usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+        usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; total_cost_usd?: number };
       };
     }>(
       "agents.dryRun",
@@ -523,16 +591,8 @@ export const api = {
   // [WS-RPC] projects.create
   createProject: (body: { name: string; description?: string }) =>
     requestRpc<{ project: Project }>("projects.create", body).then((r) => r.project),
-  // [WS-RPC] projects.createWithWorkspace — 原子创建项目 + 工作区
-  createProjectWithWorkspace: (body: {
-    name: string;
-    remote_url: string;
-    /** 历史兼容；新流程不再传 */
-    path?: string;
-    alias?: string;
-    description?: string;
-  }) =>
-    requestRpc<{ project: Project; workspace: Workspace }>("projects.createWithWorkspace", body),
+  // projects.createWithWorkspace（原子创建项目+代码库）现仅 CLI 在用；
+  // Web 新建项目已简化为只填名称/描述，代码库在项目「代码库」分区单独关联
   // [WS-RPC] projects.update
   updateProject: (id: string, body: { name?: string; description?: string | null }) =>
     requestRpc<{ project: Project }>("projects.update", { id, ...body }).then((r) => r.project),
@@ -542,12 +602,8 @@ export const api = {
   // [WS-RPC] projects.workspaces
   listProjectWorkspaces: (projectId: string) =>
     requestRpc<{ workspaces: Workspace[] }>("projects.workspaces", { id: projectId }).then((r) => r.workspaces),
-  // [WS-RPC] projects.addWorkspace
-  createProjectWorkspace: (
-    projectId: string,
-    body: { alias: string; remote_url: string; default_branch?: string; github_owner?: string | null; github_repo?: string | null },
-  ) =>
-    requestRpc<{ workspace: Workspace }>("projects.addWorkspace", { id: projectId, ...body }).then((r) => r.workspace),
+  // projects.addWorkspace 是远程化前的本地 path 模式老接口（alias+path 必填），Web 不再调用；
+  // 新建代码库统一走 workspaces.create（见 createWorkspace，仅凭远程 URL 注册）
   // [WS-RPC] workspaces.delete —— 默认拒删 in-use workspace；force=true 才允许级联清空
   deleteWorkspace: (workspaceId: string, force = false) =>
     requestRpc<{ ok: true }>("workspaces.delete", { id: workspaceId, force }),
@@ -565,13 +621,20 @@ export const api = {
   // [WS-RPC] workspaces.create
   createWorkspace: (body: {
     alias: string;
-    path: string;
+    path?: string;
+    remote_url?: string;
     default_branch?: string;
     github_owner?: string | null;
     github_repo?: string | null;
     project_id?: string;
   }) =>
     requestRpc<Workspace>("workspaces.create", body),
+  // [WS-RPC] requirements.setWorkspaces —— 澄清前确认代码库集合（开始澄清后冻结；failed 例外；无主/副之分）
+  setRequirementWorkspaces: (id: string, workspaceIds: string[]) =>
+    requestRpc<{ requirement: Requirement; workspace_ids: string[] }>("requirements.setWorkspaces", {
+      id,
+      workspace_ids: workspaceIds,
+    }),
   // [WS-RPC] workspaces.detect —— 从本地路径探测 git 信息，用于创建表单自动填充
   detectWorkspace: (path: string) =>
     requestRpc<{
@@ -712,6 +775,21 @@ export const api = {
   listRequirementSubPrs: (id: string) =>
     requestRpc<{ sub_prs: RequirementSubPr[] }>("requirements.subPrs", { id }).then((r) => r.sub_prs),
 
+  // [WS-RPC] requirements.deliveries —— artifacts 交付轮次记录（验收卡用）
+  listRequirementDeliveries: (id: string) =>
+    requestRpc<{ deliveries: RequirementDelivery[] }>("requirements.deliveries", { id }).then((r) => r.deliveries),
+
+  // [WS-RPC] requirements.listDeliveryFiles —— 某验收轮文件列表（缺省最新轮）
+  listDeliveryFiles: (id: string, round?: number) =>
+    requestRpc<{ round: number; files: DeliveryFileEntry[] }>(
+      "requirements.listDeliveryFiles",
+      round !== undefined ? { id, round } : { id },
+    ),
+
+  /** 交付物单文件下载 URL（HTTP 二进制通道） */
+  deliveryDownloadUrl: (id: string, round: number, path: string) =>
+    `/api/requirements/${encodeURIComponent(id)}/deliveries/download?round=${round}&path=${encodeURIComponent(path)}`,
+
   // [WS-RPC] requirements.specRevisions
   listSpecRevisions: (id: string) =>
     requestRpc<{ revisions: SpecRevision[] }>("requirements.specRevisions", { id }).then((r) => r.revisions),
@@ -720,6 +798,8 @@ export const api = {
   getClarifierRound: (id: string) =>
     requestRpc<{ round: ClarifierRoundState | null }>("requirements.clarifierRound", { id })
       .then((r) => r.round),
+
+  // requirements.fixRound 已移除（v2 R3：fix = 标准 run，进度看 requirement.task_id 指向的任务）
 
   // Comments（统一评论线程：question / feedback / handoff）
   // [WS-RPC] comments.list
@@ -774,12 +854,41 @@ export const api = {
       method: "DELETE",
     }),
 
-  // /now state-derivation engine (PR 1 backend)
-  // [WS-RPC] now.cards（RPC handler 直接返回数组，不再 wrap cards 字段）
-  listNowCards: () => requestRpc<NowCard[]>("now.cards"),
-  // [WS-RPC] now.dismissCard
-  dismissNowCard: (cardId: string) =>
-    requestRpc<{ ok: true }>("now.dismissCard", { id: cardId }),
+  // Notifications（事件型通知流）
+  // [WS-RPC] notifications.list
+  listNotifications: (opts: {
+    limit?: number;
+    before_id?: number;
+    unread_only?: boolean;
+    include_dismissed?: boolean;
+  } = {}) =>
+    requestRpc<{ items: Notification[]; next_before_id: number | null }>(
+      "notifications.list",
+      opts,
+    ),
+  // [WS-RPC] notifications.unreadCount
+  notificationUnreadCount: () =>
+    requestRpc<{ count: number }>("notifications.unreadCount"),
+  // [WS-RPC] notifications.markRead
+  markNotificationsRead: (ids: number[]) =>
+    requestRpc<{ updated: number }>("notifications.markRead", { ids }),
+  // [WS-RPC] notifications.markAllRead
+  markAllNotificationsRead: () =>
+    requestRpc<{ updated: number }>("notifications.markAllRead"),
+  // [WS-RPC] notifications.markReadByRelated —— 点进任务/需求详情页自动消化相关通知
+  markNotificationsReadByRelated: (relatedType: "task" | "requirement", relatedId: string) =>
+    requestRpc<{ updated: number; ids: number[] }>("notifications.markReadByRelated", {
+      related_type: relatedType,
+      related_id: relatedId,
+    }),
+  // [WS-RPC] notifications.dismiss
+  dismissNotification: (id: number) =>
+    requestRpc<{ ok: true }>("notifications.dismiss", { id }),
+  // [WS-RPC] providers.health（轻量内存态，通知面板 banner 用）
+  providersHealth: () =>
+    requestRpc<Array<{ provider: string; healthy: boolean; last_reason?: string }>>(
+      "providers.health",
+    ),
 };
 
 export interface Attachment {
@@ -918,7 +1027,7 @@ export interface AgentCallSummary {
   provider?: string;
   model?: string;
   elapsed_ms?: number;
-  usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+  usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; total_cost_usd?: number };
   error?: string;
   prompt_preview: string;
   result_preview: string;
@@ -936,25 +1045,6 @@ export interface SandboxEntry {
   type: "file" | "dir";
   size?: number;
   mtime?: number;
-}
-
-export interface ChatMessage {
-  role: "user" | "assistant" | "system";
-  content: string;
-  ts: string;
-  usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
-}
-
-export interface ChatSessionManifest {
-  version: 1;
-  id: string;
-  title?: string;
-  agent: string;
-  workflow?: string;
-  provider_session_id?: string;
-  created_at: string;
-  updated_at: string;
-  message_count: number;
 }
 
 export interface WorkspaceHealthResult {
@@ -1028,7 +1118,10 @@ export interface Question {
 
 export interface Requirement {
   id: string;
+  /** 冗余缓存 = 集合第一个（主库语义已废除）；真相在 workspace_ids */
   workspace_id: string | null;
+  /** 需求关联的代码库集合（requirement_workspaces；RPC 层附带） */
+  workspace_ids?: string[];
   project_id: string;
   title: string;
   status: string;
@@ -1054,14 +1147,38 @@ export interface Requirement {
   status_before_terminal: string | null;
   /** 执行用的工作流名；null = 未显式选择（调度回退默认 dev）。审批后随内容冻结 */
   workflow: string | null;
+  /** 输入形态确认（迁移 045）：null=未确认 / 'git'=基于代码库 / 'none'=确认无库 */
+  input_mode?: string | null;
   created_at: number;
   updated_at: number;
+}
+
+/** 需求交付物轮次记录（requirement_deliveries，artifacts 验收用） */
+export interface RequirementDelivery {
+  id: string;
+  requirement_id: string;
+  task_id: string | null;
+  round: number;
+  /** 相对需求运行时目录的落点（deliveries/round-<N>） */
+  path: string;
+  summary: string | null;
+  created_at: number;
+}
+
+export interface DeliveryFileEntry {
+  path: string;
+  size: number;
+  mtime: number;
 }
 
 export interface RequirementFeedback {
   id: number;
   requirement_id: string;
   source: "github_review" | "manual";
+  /** 原始评论角色（user/github/agent）—— agent = 修复执行器的总结 */
+  from_role?: string;
+  /** 子类：residue=历史失败 run 评审遗留（非本 PR）/ fix=Agent 修复总结 / review=用户/GitHub 评审意见 */
+  subtype?: FeedbackSubtype;
   body: string;
   github_review_id: string | null;
   created_at: number;
@@ -1090,7 +1207,7 @@ export interface SpecRevision {
 export interface ClarifierRoundState {
   req_id: string;
   started_at: number;
-  phase: "preparing" | "calling-llm" | "parsing" | "writing" | "done" | "aborted" | "errored";
+  phase: "preparing" | "cloning-repo" | "calling-llm" | "parsing" | "writing" | "done" | "aborted" | "errored";
   attempt: 0 | 1;
   prompt: string | null;
   last_parse_error: string | null;
@@ -1120,8 +1237,18 @@ export interface ApiKeyInfo {
 }
 
 export interface ProviderExtendedInfo {
+  // provider 条目字段（条目化重构）
+  id?: string;
   name: string;
   display_name: string;
+  type?: "cli" | "api";
+  subtype?: string;
+  enabled?: boolean;
+  origin?: "seed" | "template" | "user";
+  cli_status?: "ok" | "missing" | "unknown" | null;
+  cli_version?: string | null;
+  env_key_name?: string;
+  // 旧 shape 兼容
   supports_cli: boolean;
   supports_api: boolean;
   api_only: boolean;
@@ -1131,4 +1258,14 @@ export interface ProviderExtendedInfo {
   key_hint?: string;
   key_source?: "db" | "env";
   base_url?: string;
+}
+
+export interface ProviderTemplate {
+  name: string;
+  display_name: string;
+  type: "api";
+  subtype: "openai-compat";
+  base_url: string;
+  default_model: string;
+  env_key_name: string;
 }

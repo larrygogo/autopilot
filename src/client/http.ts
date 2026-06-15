@@ -10,9 +10,9 @@ import type { Task, TaskLog } from "../core/db";
 import type { DaemonStatus, GraphData } from "../daemon/protocol";
 import type { SessionManifest, ChatMessage } from "../core/sessions";
 import type { Requirement } from "../core/requirements";
-import type { NowCard } from "../core/now-types";
+import type { Notification } from "../core/notify/types";
 import { WsRpcCaller, toWsUrl, WsRpcError } from "./ws-rpc";
-export type { NowCard };
+export type { Notification };
 
 // ──────────────────────────────────────────────
 // 类型定义（保留 HttpClient 历史 shape，不破坏 CLI / 测试调用方）
@@ -312,14 +312,80 @@ export class HttpClient {
     throw new Error("getSessionMessages 暂未迁到 WS RPC（用 getSession 拿全部 messages）");
   }
 
-  // ── /now state-derivation engine ──
-
-  async listNowCards(): Promise<NowCard[]> {
-    return this.call("now.cards");
+  async transitionRequirement(id: string, to: string): Promise<{ requirement: Requirement }> {
+    return this.call("requirements.transition", { id, to });
   }
 
-  async dismissNowCard(cardId: string): Promise<{ ok: true }> {
-    return this.call("now.dismissCard", { id: cardId });
+  /** 审批通过入队（对 spec 签字，入队后内容冻结；闸门校验集合×delivers） */
+  async enqueueRequirement(id: string): Promise<{ requirement: Requirement }> {
+    return this.call("requirements.enqueue", { id });
+  }
+
+  async listRequirementSubPrs(id: string): Promise<{ sub_prs: Array<{ pr_url: string; pr_number: number }> }> {
+    return this.call("requirements.subPrs", { id });
+  }
+
+  async listRequirementDeliveries(id: string): Promise<{
+    deliveries: Array<{ id: string; requirement_id: string; task_id: string | null; round: number; path: string; summary: string | null; created_at: number }>;
+  }> {
+    return this.call("requirements.deliveries", { id });
+  }
+
+  /** 注入反馈评论（kind=feedback）；需求处于 awaiting_review 时 daemon 自动转 fix_revision */
+  async addRequirementFeedback(id: string, body: string): Promise<{ comment: { id: string } }> {
+    return this.call("comments.add", { requirementId: id, kind: "feedback", from_role: "user", body });
+  }
+
+  /** 列需求评论（澄清问答/反馈线程） */
+  async listRequirementComments(id: string): Promise<{ comments: Array<{ id: string; kind: string; from_role: string; parent_id: string | null; body: string; suggestions: string[] | null; status: string; created_at: number }> }> {
+    return this.call("comments.list", { requirementId: id });
+  }
+
+  /**
+   * 回答澄清问题 = 追加回复 + resolve 问题（两步合一，对齐 Web 行为）。
+   * clarifier 监听 requirement:question-resolved 才进下一轮——只回复不 resolve 会卡住。
+   */
+  async answerRequirementQuestion(id: string, questionId: string, body: string): Promise<{ ok: true }> {
+    await this.call("comments.add", { requirementId: id, kind: "question", from_role: "user", parent_id: questionId, body });
+    await this.call("comments.resolve", { id: questionId });
+    return { ok: true };
+  }
+
+  async setRequirementWorkspaces(
+    id: string,
+    workspaceIds: string[],
+  ): Promise<{ requirement: Requirement & { workspace_ids: string[] }; workspace_ids: string[] }> {
+    return this.call("requirements.setWorkspaces", {
+      id,
+      workspace_ids: workspaceIds,
+    });
+  }
+
+  // ── Notifications（事件型通知流） ──
+
+  async listNotifications(opts: {
+    limit?: number;
+    before_id?: number;
+    unread_only?: boolean;
+    include_dismissed?: boolean;
+  } = {}): Promise<{ items: Notification[]; next_before_id: number | null }> {
+    return this.call("notifications.list", opts);
+  }
+
+  async notificationUnreadCount(): Promise<{ count: number }> {
+    return this.call("notifications.unreadCount");
+  }
+
+  async markNotificationsRead(ids: number[]): Promise<{ updated: number }> {
+    return this.call("notifications.markRead", { ids });
+  }
+
+  async markAllNotificationsRead(): Promise<{ updated: number }> {
+    return this.call("notifications.markAllRead");
+  }
+
+  async dismissNotification(id: number): Promise<{ ok: true }> {
+    return this.call("notifications.dismiss", { id });
   }
 
   // ── Requirements ──
@@ -347,6 +413,8 @@ export class HttpClient {
     spec_md?: string;
     workspace_id?: string | null;
     workflow?: string | null;
+    clarifier_provider?: string | null;
+    clarifier_model?: string | null;
   }): Promise<{ requirement: { id: string; status: string; title: string } }> {
     return this.call("requirements.update", { id, ...body });
   }

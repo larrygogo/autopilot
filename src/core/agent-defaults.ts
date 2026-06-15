@@ -17,6 +17,12 @@ export interface InlineAgentConfig {
   mode?: "cli" | "api";
   max_turns?: number;
   permission_mode?: string;
+  /**
+   * 工具能力白名单（细粒度授权，规范能力名见 tool-capabilities.ts）。
+   * 缺省 = 全集（现状）；[] = 仅控制通道。与 permission_mode 正交（前者管"给哪些"，后者管"防护强度"）。
+   * 第一刀仅 API agent 生效；CLI agent 第二刀。
+   */
+  tools?: string[];
   system_prompt?: string;
   [key: string]: unknown;
 }

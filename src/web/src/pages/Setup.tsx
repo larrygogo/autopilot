@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PageShell } from "@/components/pro";
 import { useNavigate } from "react-router-dom";
 import { api, type DoctorReportWithDismiss } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
@@ -20,7 +21,7 @@ export function Setup() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  // 命名复用 agent 删除后，首跑向导从 3 步简化为 2 步：Provider → 工作区。
+  // 命名复用 agent 删除后，首跑向导从 3 步简化为 2 步：Provider → 代码库。
   // agent 配置不再在向导里单独配，改由每个工作流的 phase 内联编辑（默认 agent 兜底）。
   const [step, setStep] = useState<1 | 2>(1);
   const [report, setReport] = useState<DoctorReportWithDismiss | null>(null);
@@ -58,7 +59,7 @@ export function Setup() {
       }
     }
     if (Object.keys(payload).length === 0) {
-      toast.error("至少选一个 provider", "");
+      toast.error("至少选一个提供商", "");
       return;
     }
     try {
@@ -78,39 +79,33 @@ export function Setup() {
         // 后端写库前会 git ls-remote 验证可达性（可能耗时数秒）
         await api.setupWorkspace({ name: cbName.trim(), remote_url: cbRemoteUrl.trim() });
       } catch (e: unknown) {
-        toast.error("创建工作区失败", (e as Error)?.message ?? String(e));
+        toast.error("创建代码库失败", (e as Error)?.message ?? String(e));
         return;
       } finally {
         setCbSubmitting(false);
       }
     }
     await api.setupDismiss().catch(() => {});
-    navigate("/now");
+    navigate("/tasks");
   }
 
   // 核心就绪 = 至少启用了一个 provider（命名 agent 检查已移除）
   const minimumReady = report && report.checks.find((c) => c.id === "providers.has-enabled")?.status === "ok";
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      <header className="mb-4 border-b border-border pb-3">
-        <h1 className="font-display text-2xl font-bold">首跑向导 · SETUP</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          完成 3 步即可开始使用 autopilot
-        </p>
-      </header>
+    <PageShell width="focus" hero={{ title: "首跑向导", subtitle: "完成 2 步即可开始使用 autopilot" }}>
 
-      <SetupProgress current={step} labels={["Provider", "工作区"]} />
+      <SetupProgress current={step} labels={["提供商", "代码库"]} />
 
       {step === 2 && minimumReady && (
         <div className="mb-4 rounded-md border border-border px-3 py-2 text-xs">
-          ✓ 核心配置已就绪 · 第 2 步可选
+          ✓ 必填的都好了 · 第 2 步可选
         </div>
       )}
 
       {step === 1 && (
         <section className="space-y-4">
-          <h2 className="text-sm font-bold">1/2 · 启用 Provider</h2>
+          <h2 className="text-sm font-bold">1/2 · 选择提供商</h2>
           {ALL_PROVIDERS.map((p) => (
             <div key={p.name} className="flex items-center gap-3">
               <Checkbox
@@ -130,7 +125,7 @@ export function Setup() {
             </div>
           ))}
           <p className="text-xs text-muted-foreground">
-            ⚠ 凭证需在终端手动登录：
+            还要在终端登录一下：
             {ALL_PROVIDERS.filter((p) => enabledProviders[p.name]).map((p) => (
               <code key={p.name} className="mx-1">$ {p.loginHint}</code>
             ))}
@@ -143,7 +138,7 @@ export function Setup() {
 
       {step === 2 && (
         <section className="space-y-4">
-          <h2 className="text-sm font-bold">2/2 · 添加工作区（可选）</h2>
+          <h2 className="text-sm font-bold">2/2 · 添加代码库（可选）</h2>
           <div>
             <Label htmlFor="cb-name">名称</Label>
             <Input id="cb-name" value={cbName} onChange={(e) => setCbName(e.target.value)} placeholder="my-project" />
@@ -157,18 +152,18 @@ export function Setup() {
               placeholder="https://github.com/owner/repo 或 git@host:owner/repo.git"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              无需本地 clone，任务执行时自动从远程拉取；提交时会验证仓库可达性
+              不用先 clone 到本地，跑任务时会自动从远程拉。点「完成」时先帮你检查能不能连上。
             </p>
           </div>
           <div className="flex justify-end gap-2 pt-4">
             <Button variant="ghost" onClick={() => setStep(1)} disabled={cbSubmitting}>← 上一步</Button>
             <Button variant="outline" onClick={() => submitStep2OrSkip(true)} disabled={cbSubmitting}>跳过</Button>
             <Button onClick={() => submitStep2OrSkip(false)} disabled={cbSubmitting}>
-              {cbSubmitting ? "验证远程仓库…" : "完成"}
+              {cbSubmitting ? "检查仓库中…" : "完成"}
             </Button>
           </div>
         </section>
       )}
-    </div>
+    </PageShell>
   );
 }

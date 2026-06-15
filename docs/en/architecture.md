@@ -118,7 +118,7 @@ Each **phase function** still follows the Push model: when a phase completes, `r
 | `protocol.ts` | JSON protocol type definitions (the `AutopilotEvent` union type) |
 | `pid.ts` | PID file management + persisting listen info (host/port) |
 | `supervisor.ts` | Subprocess keep-alive (auto-restart when the daemon exits abnormally) |
-| `requirement-scheduler.ts` | Subscribes to `requirement:status-changed` events; the `tickRepo` algorithm (group-level lock: parent + submodules as a single scheduling slot) |
+| `requirement-scheduler.ts` | Subscribes to `requirement:status-changed` events; `tick()` is a pure global-cap FIFO (active = count of running\|fix_revision ≤ `scheduler.max_concurrent_tasks`; queued requirements start in created_at order; per-repo serialization was removed since sandboxed clones make repos non-conflicting); also runs a catch-up tick on daemon startup to pick up stale queued requirements |
 | `pr-poller.ts` | Periodically runs `gh pr view` to fetch parent PR status for all requirements in `awaiting_review`: `CHANGES_REQUESTED` → `inject_feedback`; `MERGED` → `transition req → done` |
 
 ### `src/agents/` (LLM call wrappers)
@@ -154,7 +154,7 @@ sequenceDiagram
     Chat->>DB: mark_requirement_ready + enqueue_requirement
     DB-->>Sch: emit requirement:status-changed (to=queued)
 
-    Sch->>Sch: tickRepo(repo) — check active within the group (parent+submodules)
+    Sch->>Sch: tick() — global active count < cap, pick oldest queued (FIFO)
     Sch->>R: startTaskFromTemplate(req_dev, repo_id, requirement_id)
     R->>DB: createTask + workflow snapshot
     R->>A: run_design (architect agent writes plan.md)

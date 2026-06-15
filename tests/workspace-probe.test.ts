@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { probeRemote, buildAuthUrl } from "../src/core/workspace-health";
+import { probeRemote, buildAuthUrl } from "../src/core/sandbox/workspace-health";
 
 describe("buildAuthUrl", () => {
   it("HTTPS URL 注入 token（纯字母数字 token 无需编码）", () => {

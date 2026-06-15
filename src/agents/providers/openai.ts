@@ -1,6 +1,7 @@
 import { BaseProvider } from "./base";
 import type { AgentResult, RunOptions } from "../types";
 import { createLogger } from "../../core/logger";
+import { coarsenCodexSandbox } from "../tool-capabilities";
 
 const agentLog = createLogger("agent.openai");
 
@@ -14,7 +15,13 @@ export class OpenAIProvider extends BaseProvider {
   async run(prompt: string, options?: RunOptions): Promise<AgentResult> {
     const model = this.resolveModel(options, "o4-mini");
     const systemPrompt = this.resolveSystemPrompt(options);
-    const sandbox = (this.config["sandbox"] as string | undefined) ?? "workspace-write";
+    const configuredSandbox = (this.config["sandbox"] as string | undefined) ?? "workspace-write";
+    // 细粒度工具授权（第二刀粗档回退）：codex 无逐工具开关，只读集 → -s read-only。
+    const toolCaps = Array.isArray(this.config["tools"]) ? (this.config["tools"] as string[]) : undefined;
+    const sandbox = toolCaps ? coarsenCodexSandbox(toolCaps, configuredSandbox) : configuredSandbox;
+    if (toolCaps && sandbox !== configuredSandbox) {
+      agentLog.warn("codex 无逐工具授权，tools 塌缩为沙箱粗档：-s %s", sandbox);
+    }
 
     // codex exec：非交互式，--json 输出 JSONL 事件流
     const argv: string[] = ["codex", "exec", "--json", "--skip-git-repo-check"];

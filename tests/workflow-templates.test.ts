@@ -7,7 +7,7 @@ import {
   cloneTemplate,
   diffWorkflowTemplate,
   syncWorkflowTemplate,
-} from "../src/core/workflow-templates";
+} from "../src/core/workflow/templates";
 
 let tmpHome: string;
 

@@ -61,7 +61,7 @@ function DiffTable({ patch }: { patch: string }) {
 
 /**
  * 验收视图：任务工作树相对 base 分支的按文件 diff。
- * 每个文件一个可折叠块（默认收起，首文件展开），头部 +N/-N 统计。
+ * 每个文件一个可折叠块（全部默认收起），头部 +N/-N 统计。
  */
 export function TaskFileDiffsCard({ taskId, reloadKey }: { taskId: string; reloadKey?: unknown }) {
   const [files, setFiles] = useState<TaskFileDiff[] | null>(null);
@@ -73,8 +73,7 @@ export function TaskFileDiffsCard({ taskId, reloadKey }: { taskId: string; reloa
     try {
       const f = await api.getTaskDiffFiles(taskId);
       setFiles(f);
-      // 默认展开第一个文件，其余收起
-      if (f.length > 0) setOpen((prev) => (Object.keys(prev).length ? prev : { [f[0].file]: true }));
+      // 全部默认收起（文件列表 + 增删统计已足够概览，点击文件名再看 diff）
     } catch {
       setFiles([]);
     } finally {

@@ -8,70 +8,40 @@
  * 新订阅者通过 registerSnapshotProvider 拿到当前 snapshot。
  */
 
-import { PROVIDER_NAMES_LIST, PROVIDER_DEFAULTS, type ProviderDefaultsName } from "../core/provider-defaults";
 import { recordProviderCliStatus, listAllProviderHealth } from "../core/provider-health";
+import { listProviders as listProviderEntries, setProviderCliStatus } from "../core/providers";
+import { probeCli } from "../agents/cli-status";
 import { createLogger } from "../core/logger";
 import { registerSnapshotProvider } from "./ws";
 import type { AutopilotEvent } from "../core/events";
 
 const log = createLogger("provider-cli-monitor");
 
-const PROBE_TIMEOUT_MS = 5000;
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
-interface ProbeResult {
-  ok: boolean;
-  version?: string;
-  reason?: string;
-}
-
-async function probeCli(cli: string): Promise<ProbeResult> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
-  try {
-    const proc = Bun.spawn([cli, "--version"], {
-      stdout: "pipe",
-      stderr: "pipe",
-      stdin: "ignore",
-      signal: controller.signal,
-    });
-    const exitCode = await proc.exited;
-    clearTimeout(timer);
-    if (exitCode === 0) {
-      const stdout = await new Response(proc.stdout).text();
-      const stderr = await new Response(proc.stderr).text();
-      const text = (stdout || stderr).trim();
-      const version = text.split(/\s+/).find((s) => /\d+\.\d+/.test(s));
-      return { ok: true, version };
-    }
-    return { ok: false, reason: `${cli} 退出码 ${exitCode}` };
-  } catch (e: unknown) {
-    clearTimeout(timer);
-    const aborted = controller.signal.aborted;
-    return {
-      ok: false,
-      reason: aborted ? `探测超时（${PROBE_TIMEOUT_MS}ms）` : e instanceof Error ? e.message : String(e),
-    };
-  }
-}
-
+/**
+ * 遍历 DB 里的 cli 类型 provider 条目，逐个探测本地可用性：
+ *   1. 落库到条目的 cli_status（重启可见）
+ *   2. 同步内存健康态（给 banner / provider:health snapshot）
+ */
 async function probeAll(): Promise<void> {
+  let cliEntries: ReturnType<typeof listProviderEntries>;
+  try {
+    cliEntries = listProviderEntries().filter((p) => p.type === "cli");
+  } catch (e: unknown) {
+    log.warn("读取 provider 条目失败（providers 表未就绪？）：%s", e instanceof Error ? e.message : String(e));
+    return;
+  }
   await Promise.all(
-    PROVIDER_NAMES_LIST.map(async (name) => {
-      const def = PROVIDER_DEFAULTS[name as ProviderDefaultsName];
-      const result = await probeCli(def.cli);
-      if (result.ok) {
-        recordProviderCliStatus(name, {
-          cli_status: "ok",
-          cli_version: result.version,
-        });
-        log.debug("CLI 探测成功 [%s]: %s %s", name, def.cli, result.version ?? "(no version)");
+    cliEntries.map(async (p) => {
+      const probe = await probeCli(p.subtype, p.cli_bin ?? undefined);
+      setProviderCliStatus(p.id, probe.status, probe.version ?? null);
+      if (probe.status === "ok") {
+        recordProviderCliStatus(p.name, { cli_status: "ok", cli_version: probe.version });
+        log.debug("CLI 探测成功 [%s]: %s %s", p.name, p.subtype, probe.version ?? "(no version)");
       } else {
-        recordProviderCliStatus(name, {
-          cli_status: "missing",
-          cli_install_hint: def.install_hint,
-        });
-        log.debug("CLI 探测失败 [%s]: %s", name, result.reason);
+        recordProviderCliStatus(p.name, { cli_status: "missing", cli_install_hint: probe.install_hint });
+        log.debug("CLI 探测失败 [%s]: %s", p.name, probe.error ?? probe.status);
       }
     }),
   );

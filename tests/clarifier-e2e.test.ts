@@ -19,41 +19,39 @@ import { up as m015 } from "../src/migrations/015-clarifier-error";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as m032 } from "../src/migrations/032-requirement-attachments";
 import { up as m034 } from "../src/migrations/034-requirement-sessions";
+import { up as m035 } from "../src/migrations/035-notifications";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createRequirement, setRequirementStatus, getRequirementById } from "../src/core/requirements";
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 import { enableBus, disableBus } from "../src/core/event-bus";
-import { createDefaultAggregator, type Aggregator } from "../src/core/now-aggregator";
-import { setNowAggregator } from "../src/daemon/routes-now";
+import { initNotificationRecorder } from "../src/daemon/notification-recorder";
+import { listNotifications } from "../src/core/notify/stream";
 import { _setClarifyFnForTest, initRequirementClarifier, disposeRequirementClarifier } from "../src/daemon/requirement-clarifier";
 
 describe("clarifier e2e — 完整链路", () => {
-  let agg: Aggregator;
+  let disposeRecorder: (() => void) | null = null;
 
   beforeAll(async () => {
     const db = new Database(":memory:");
-    [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m019, m021, m024, m032, m034].forEach(fn => fn(db));
+    [m001, m002, m004, m005, m006, m007, m008, m009, m010, m011, m012, m013, m014, m015, m019, m021, m024, m032, m034, m035].forEach(fn => fn(db));
     _setDbForTest(db);
     registerCoreRpcMethods();
     createProject({ id: "p1", name: "测试项目" });
     enableBus();
     initRequirementClarifier();
-    agg = createDefaultAggregator();
-    await agg.start();
-    setNowAggregator(agg);
+    disposeRecorder = initNotificationRecorder();
   });
 
   afterAll(() => {
-    agg.dispose();
-    setNowAggregator(null);
+    disposeRecorder?.();
     disposeRequirementClarifier();
     _setClarifyFnForTest(null);
     disableBus();
   });
 
-  it("US-1: 创建需求 → 进 clarifying → AI 提一个问题 → /now 出 1 卡", async () => {
+  it("US-1: 创建需求 → 进 clarifying → AI 提一个问题 → 记 agent_question 通知", async () => {
     createRequirement({ id: "e2e-1", project_id: "p1", title: "测试需求", spec_md: "" });
 
     _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => ({
@@ -73,10 +71,10 @@ describe("clarifier e2e — 完整链路", () => {
     expect(req?.spec_md).toContain("目标");
     expect(req?.active_question_id).toBeTruthy();
 
-    const cards = agg.getCards();
-    const card = cards.find(c => c.id === "open-question:e2e-1");
-    expect(card).toBeDefined();
-    expect(card?.subtitle).toContain("目标用户是谁");
+    const { items } = listNotifications({ limit: 50 });
+    const n = items.find((x) => x.type === "agent_question" && x.related_id === "e2e-1");
+    expect(n).toBeDefined();
+    expect(n?.body).toContain("目标用户是谁");
   });
 
   it("US-1 续：回答问题 → AI 跑下一轮 → spec_md 变 + 新问题", async () => {
@@ -110,7 +108,7 @@ describe("clarifier e2e — 完整链路", () => {
     expect(req2?.active_question_id).not.toBe(activeQid);
   });
 
-  it("US-4: finish-clarification → 进 awaiting_approval + /now 卡片移除", async () => {
+  it("US-4: finish-clarification → 进 awaiting_approval + 记等审批通知", async () => {
     // 清除注入的 mock，防止 finish-clarification 解除 active question 时触发的
     // question-resolved 事件导致 clarifier 再跑一轮并写入新 active_question_id
     _setClarifyFnForTest(async (_prompt, _reqId, _sessionRef) => ({
@@ -132,8 +130,11 @@ describe("clarifier e2e — 完整链路", () => {
     expect(req?.status).toBe("awaiting_approval");
     expect(req?.active_question_id).toBeNull();
 
-    const cards = agg.getCards();
-    expect(cards.find(c => c.id === "open-question:e2e-1")).toBeUndefined();
+    // 事件型语义：历史 agent_question 通知保留，新增一条等审批通知
+    const { items } = listNotifications({ limit: 50 });
+    expect(
+      items.find((x) => x.type === "requirement_awaiting_approval" && x.related_id === "e2e-1"),
+    ).toBeDefined();
   });
 
   it("requirements.specRevisions 看修订历史", async () => {

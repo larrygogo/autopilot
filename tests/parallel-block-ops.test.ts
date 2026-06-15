@@ -15,7 +15,7 @@ import {
   _clearRegistry,
   type ParallelDefinition,
   type PhaseDefinition,
-} from "../src/core/registry";
+} from "../src/core/workflow/registry";
 
 let tmpHome: string;
 

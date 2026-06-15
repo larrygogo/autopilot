@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
@@ -15,7 +15,8 @@ import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate026 } from "../src/migrations/026-requirement-schedule-error";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest } from "../src/core/db";
-import { createWorkspace } from "../src/core/workspaces";
+import type { Task } from "../src/core/db";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createProject } from "../src/core/projects";
 import {
   createRequirement,
@@ -24,7 +25,12 @@ import {
   nextRequirementId,
   listRequirements,
 } from "../src/core/requirements";
-import { tickRepo } from "../src/daemon/requirement-scheduler";
+import {
+  tick,
+  initRequirementScheduler,
+  disposeRequirementScheduler,
+  _setTaskStartersForTest,
+} from "../src/daemon/requirement-scheduler";
 
 /** 把需求推到目标状态 */
 function pushTo(id: string, target: "queued" | "running") {
@@ -35,7 +41,27 @@ function pushTo(id: string, target: "queued" | "running") {
   for (const s of steps[target]) setRequirementStatus(id, s);
 }
 
-describe("tickRepo 全局并发上限", () => {
+/** 测试 seam：mock 起任务成功（记录调用顺序，不真 clone / 跑 agent） */
+function mockStartOk(calls: string[]) {
+  _setTaskStartersForTest({
+    startTaskFromTemplate: async (opts) => {
+      const reqId = String(opts.requirement_id);
+      calls.push(reqId);
+      return { id: `tsk-${reqId}` } as unknown as Task;
+    },
+  });
+}
+
+/** 轮询等待条件成立（drain / 启动补 tick 是异步触发的） */
+async function waitFor(cond: () => boolean, timeoutMs = 500): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (cond()) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+describe("tick 全局并发上限 FIFO", () => {
   let db: Database;
   let tmpCfgDir: string;
   let tmpCfgFile: string;
@@ -55,7 +81,7 @@ describe("tickRepo 全局并发上限", () => {
     migrate033(db);
     _setDbForTest(db);
     createProject({ id: "proj-global", name: "global-test-proj" });
-    // 三个独立 workspace（无 remote_url → startTaskFromTemplate 失败→ rollback "ready"）
+    // 三个独立 workspace（无 remote_url → 真实 startTaskFromTemplate 失败 → rollback "ready"）
     createWorkspace({ id: "ws-g1", project_id: "proj-global", alias: "g1", path: "/tmp/g1", default_branch: "main" });
     createWorkspace({ id: "ws-g2", project_id: "proj-global", alias: "g2", path: "/tmp/g2", default_branch: "main" });
     createWorkspace({ id: "ws-g3", project_id: "proj-global", alias: "g3", path: "/tmp/g3", default_branch: "main" });
@@ -77,10 +103,16 @@ describe("tickRepo 全局并发上限", () => {
   beforeEach(() => {
     writeFileSync(tmpCfgFile, "", "utf-8"); // 重置 max=1（默认）
     db.run("DELETE FROM requirement_comments WHERE kind = 'feedback'");
+    db.run("DELETE FROM requirement_workspaces");
     db.run("DELETE FROM requirements");
   });
 
-  // ──────── 基础阻塞行为 ────────
+  afterEach(() => {
+    disposeRequirementScheduler();
+    _setTaskStartersForTest(null);
+  });
+
+  // ──────── 基础阻塞行为（真实 startTaskFromTemplate 失败路径，不用 seam）────────
 
   it("N=1（默认）：ws-g1 有 running，ws-g2 的 queued 被全局上限阻塞", async () => {
     const idA = nextRequirementId();
@@ -91,13 +123,13 @@ describe("tickRepo 全局并发上限", () => {
     createRequirement({ id: idB, project_id: "proj-global", workspace_id: "ws-g2", title: "B" });
     pushTo(idB, "queued");
 
-    await tickRepo("ws-g2");
+    await tick();
 
-    // globalActive=1 >= N=1 → tickGroup 提前返回，idB 保持 queued
+    // active=1 >= N=1 → tickBody 提前返回，idB 保持 queued
     expect(getRequirementById(idB)?.status).toBe("queued");
   });
 
-  it("N=2：1 个 running 时不阻塞另一 workspace（调度器尝试启动，startTaskFromTemplate 失败回滚 → ready）", async () => {
+  it("N=2：1 个 running 时不阻塞下一个 queued（调度器尝试启动，startTaskFromTemplate 真实失败回滚 → ready）", async () => {
     writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
 
     const idA = nextRequirementId();
@@ -108,11 +140,11 @@ describe("tickRepo 全局并发上限", () => {
     createRequirement({ id: idB, project_id: "proj-global", workspace_id: "ws-g2", title: "B" });
     pushTo(idB, "queued");
 
-    await tickRepo("ws-g2");
+    await tick();
 
-    // globalActive=1 < N=2 → 调度器尝试启动 ws-g2 的任务。
+    // active=1 < N=2 → 调度器尝试启动 idB。
     // 测试环境无真实 workflow/remote_url，startTaskFromTemplate 抛错 →
-    // tickGroup error handler 回滚：status = "ready"，schedule_error 写入。
+    // 失败回滚：status = "ready"，schedule_error 写入。
     // "ready"（而非 "queued"）证明没被全局上限拦截。
     const req = getRequirementById(idB);
     expect(req?.status).toBe("ready");
@@ -134,120 +166,154 @@ describe("tickRepo 全局并发上限", () => {
     createRequirement({ id: idC, project_id: "proj-global", workspace_id: "ws-g3", title: "C" });
     pushTo(idC, "queued");
 
-    await tickRepo("ws-g3");
+    await tick();
 
-    // globalActive=2 >= N=2 → 调度器提前返回，idC 保持 queued
+    // active=2 >= N=2 → 调度器提前返回，idC 保持 queued
     expect(getRequirementById(idC)?.status).toBe("queued");
+    const allActive = listRequirements({}).filter(
+      (r) => r.status === "running" || r.status === "fix_revision",
+    );
+    expect(allActive.length).toBeLessThanOrEqual(2); // 不超量
   });
 
-  it("workspace_id = null 的高层需求不计入全局 active", async () => {
-    // 直接写 DB：模拟 workspace_id=null 的需求处于 running 状态
-    // （正常流程不会发生，但需要守卫防止未来意外影响调度）
-    db.run(`
-      INSERT INTO requirements (id, title, status, project_id, workspace_id, created_at, updated_at)
-      VALUES ('req-null-ws', 'null ws req', 'running', 'proj-global', NULL, 0, 0)
-    `);
+  // ──────── 全局 FIFO（created_at 序，跨 workspace）────────
 
-    const idB = nextRequirementId();
-    createRequirement({ id: idB, project_id: "proj-global", workspace_id: "ws-g1", title: "B" });
-    pushTo(idB, "queued");
+  it("queued 按 created_at 先进先出调度（与 workspace 无关）", async () => {
+    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 3\n", "utf-8");
 
-    await tickRepo("ws-g1");
-
-    // workspace_id=null 的 running 不占槽位，ws-g1 的 queued 应被调度尝试
-    // startTaskFromTemplate 失败 → "ready"（不应该是 "queued"）
-    expect(getRequirementById(idB)?.status).not.toBe("queued");
-    expect(getRequirementById(idB)?.status).toBe("ready");
-  });
-
-  // ──────── TOCTOU 全局锁：pending queue 不丢失 ────────
-
-  it("全局锁：并发 tickRepo 时，被锁阻塞的 tick 进入 pending，锁释放后自动重试（不永久丢失）", async () => {
-    // 两个 workspace 各有 queued 需求，无 running（N=1）
-    const idB = nextRequirementId();
-    createRequirement({ id: idB, project_id: "proj-global", workspace_id: "ws-g1", title: "B" });
-    pushTo(idB, "queued");
-
-    const idC = nextRequirementId();
-    createRequirement({ id: idC, project_id: "proj-global", workspace_id: "ws-g2", title: "C" });
-    pushTo(idC, "queued");
-
-    // 同时发起两个 tick（Promise.all 让两个调用"同时"进入 tickRepo）
-    // 期望：
-    //   - ws-g1 的 tick 先获取全局锁，尝试 startTaskFromTemplate → 失败 → "ready"
-    //   - ws-g2 的 tick 发现锁被占用，加入 _pendingTicks 后立即 resolve
-    //   - ws-g1 tick 完成后，drain 异步触发 ws-g2 的 tick
-    //   - ws-g2 tick 也尝试 startTaskFromTemplate → 失败 → "ready"
-    await Promise.all([tickRepo("ws-g1"), tickRepo("ws-g2")]);
-
-    // 等待 drain 链完成：ws-g2 的 tick 通过微任务触发，整个 tick 是 async 的。
-    // 轮询最多 500ms（实测通常 < 50ms）
-    const deadline = Date.now() + 500;
-    while (Date.now() < deadline) {
-      if (getRequirementById(idC)?.status !== "queued") break;
-      await new Promise((r) => setTimeout(r, 10));
-    }
-
-    // 两个需求都不应停留在 "queued"（均被调度器处理过，失败后回滚 → "ready"）
-    // 关键断言：ws-g2 的需求最终脱离了 "queued"，证明 pending queue 没有丢失它
-    expect(getRequirementById(idB)?.status).not.toBe("queued");
-    expect(getRequirementById(idC)?.status).not.toBe("queued");
-  });
-
-  it("同组锁：同组并发 tickRepo 时，被挡的 tick 也进 pending 重试（Copilot review：不 skip-and-forget）", async () => {
-    // 同一 workspace 两条 queued 需求 + 并发两个 tick。
-    // 单次 tick 只处理最老一条 candidate；若第二个 tick 被同组锁 skip-and-forget，
-    // 第二条需求将永久停在 queued（测试中无事件循环兜底）。
-    // 修复后：被挡 tick 入 _pendingTicks，drain 重试处理第二条 → 两条都脱离 queued。
-    const idB = nextRequirementId();
-    createRequirement({ id: idB, project_id: "proj-global", workspace_id: "ws-g1", title: "B" });
-    pushTo(idB, "queued");
-
-    const idC = nextRequirementId();
-    createRequirement({ id: idC, project_id: "proj-global", workspace_id: "ws-g1", title: "C" });
-    pushTo(idC, "queued");
-
-    await Promise.all([tickRepo("ws-g1"), tickRepo("ws-g1")]);
-
-    const deadline = Date.now() + 500;
-    while (Date.now() < deadline) {
-      if (
-        getRequirementById(idB)?.status !== "queued" &&
-        getRequirementById(idC)?.status !== "queued"
-      ) {
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 10));
-    }
-
-    expect(getRequirementById(idB)?.status).not.toBe("queued");
-    expect(getRequirementById(idC)?.status).not.toBe("queued");
-  });
-
-  it("全局计数在 N 上限满时不超量（running 数 ≤ N）", async () => {
-    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
-
-    // 已有 2 running
     const idA = nextRequirementId();
     createRequirement({ id: idA, project_id: "proj-global", workspace_id: "ws-g1", title: "A" });
-    pushTo(idA, "running");
-
+    pushTo(idA, "queued");
     const idB = nextRequirementId();
     createRequirement({ id: idB, project_id: "proj-global", workspace_id: "ws-g2", title: "B" });
-    pushTo(idB, "running");
-
-    // 第 3 个试图入队
+    pushTo(idB, "queued");
     const idC = nextRequirementId();
     createRequirement({ id: idC, project_id: "proj-global", workspace_id: "ws-g3", title: "C" });
     pushTo(idC, "queued");
 
-    await tickRepo("ws-g3");
+    // 显式设 created_at：C 最老 → A → B 最新（与创建顺序、id 序均不同）
+    db.run("UPDATE requirements SET created_at = 100 WHERE id = ?", [idC]);
+    db.run("UPDATE requirements SET created_at = 200 WHERE id = ?", [idA]);
+    db.run("UPDATE requirements SET created_at = 300 WHERE id = ?", [idB]);
 
-    // 调度器看到 2 running >= N=2，不尝试启动
-    const allActive = listRequirements({}).filter(
-      (r) => r.workspace_id !== null && (r.status === "running" || r.status === "fix_revision"),
-    );
-    expect(allActive.length).toBeLessThanOrEqual(2); // 不超量
-    expect(getRequirementById(idC)?.status).toBe("queued"); // 第 3 个被阻塞
+    const calls: string[] = [];
+    mockStartOk(calls);
+    await tick();
+
+    expect(calls).toEqual([idC, idA, idB]); // 严格 FIFO
+    expect(getRequirementById(idC)?.status).toBe("running");
+    expect(getRequirementById(idA)?.status).toBe("running");
+    expect(getRequirementById(idB)?.status).toBe("running");
+  });
+
+  it("N=2：一次 tick 填满两个空槽，第 3 个（最新）保持 queued", async () => {
+    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
+
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const id = nextRequirementId();
+      createRequirement({ id, project_id: "proj-global", workspace_id: `ws-g${i + 1}`, title: `R${i}` });
+      pushTo(id, "queued");
+      db.run("UPDATE requirements SET created_at = ? WHERE id = ?", [(i + 1) * 100, id]);
+      ids.push(id);
+    }
+
+    const calls: string[] = [];
+    mockStartOk(calls);
+    await tick();
+
+    expect(calls).toEqual([ids[0], ids[1]]); // 一次事件填满两槽（FIFO 取最老两个）
+    expect(getRequirementById(ids[0])?.status).toBe("running");
+    expect(getRequirementById(ids[1])?.status).toBe("running");
+    expect(getRequirementById(ids[2])?.status).toBe("queued");
+  });
+
+  it("起任务失败不占槽：失败候选回滚 ready 后继续尝试下一个 queued", async () => {
+    // N=1，两个 queued：第一个起失败（不占槽）→ 同一次 tick 内继续调度第二个
+    const idA = nextRequirementId();
+    createRequirement({ id: idA, project_id: "proj-global", workspace_id: "ws-g1", title: "A" });
+    pushTo(idA, "queued");
+    const idB = nextRequirementId();
+    createRequirement({ id: idB, project_id: "proj-global", workspace_id: "ws-g2", title: "B" });
+    pushTo(idB, "queued");
+    db.run("UPDATE requirements SET created_at = 100 WHERE id = ?", [idA]);
+    db.run("UPDATE requirements SET created_at = 200 WHERE id = ?", [idB]);
+
+    const calls: string[] = [];
+    _setTaskStartersForTest({
+      startTaskFromTemplate: async (opts) => {
+        const reqId = String(opts.requirement_id);
+        calls.push(reqId);
+        if (reqId === idA) throw new Error("boom");
+        return { id: `tsk-${reqId}` } as unknown as Task;
+      },
+    });
+    await tick();
+
+    expect(calls).toEqual([idA, idB]);
+    expect(getRequirementById(idA)?.status).toBe("ready"); // 失败可见
+    expect(getRequirementById(idA)?.schedule_error).toContain("boom");
+    expect(getRequirementById(idB)?.status).toBe("running");
+  });
+
+  // ──────── daemon 启动补 tick ────────
+
+  it("initRequirementScheduler 启动时补一次 tick，捡起存量 queued（重启场景）", async () => {
+    const id = nextRequirementId();
+    createRequirement({ id, project_id: "proj-global", workspace_id: "ws-g1", title: "stale-queued" });
+    pushTo(id, "queued"); // 模拟 daemon 重启前已入队、事件已消逝
+
+    const calls: string[] = [];
+    mockStartOk(calls);
+    try {
+      initRequirementScheduler(); // 末尾 void tick()
+      await waitFor(() => getRequirementById(id)?.status === "running");
+      expect(calls).toEqual([id]);
+      expect(getRequirementById(id)?.status).toBe("running");
+    } finally {
+      disposeRequirementScheduler();
+    }
+  });
+
+  // ──────── TOCTOU 全局锁：pending 标志不丢 tick ────────
+
+  it("全局锁：tick 进行中再触发 tick → 记 pending，锁释放后补跑（不丢失）", async () => {
+    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
+
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((r) => (releaseFirst = r));
+    const calls: string[] = [];
+    _setTaskStartersForTest({
+      startTaskFromTemplate: async (opts) => {
+        const reqId = String(opts.requirement_id);
+        calls.push(reqId);
+        if (calls.length === 1) await firstGate; // 第一个 start 挂起，模拟 tick 进行中
+        return { id: `tsk-${reqId}` } as unknown as Task;
+      },
+    });
+
+    const idA = nextRequirementId();
+    createRequirement({ id: idA, project_id: "proj-global", workspace_id: "ws-g1", title: "A" });
+    pushTo(idA, "queued");
+
+    const p1 = tick(); // 持锁，A 的 start 挂在 gate 上
+    await waitFor(() => calls.length === 1);
+
+    // tick 进行中：新需求入队并触发第二个 tick → 被锁挡住，置 _pendingTick 后立即返回
+    const idB = nextRequirementId();
+    createRequirement({ id: idB, project_id: "proj-global", workspace_id: "ws-g2", title: "B" });
+    pushTo(idB, "queued");
+    db.run("UPDATE requirements SET created_at = created_at + 1000 WHERE id = ?", [idB]);
+    await tick();
+    expect(getRequirementById(idB)?.status).toBe("queued"); // 还没轮到（被锁挡住）
+
+    releaseFirst();
+    await p1;
+
+    // 锁释放后 pending 补跑（微任务异步触发）→ idB 被调度
+    await waitFor(() => getRequirementById(idB)?.status === "running");
+    expect(calls).toEqual([idA, idB]);
+    expect(getRequirementById(idA)?.status).toBe("running");
+    expect(getRequirementById(idB)?.status).toBe("running");
   });
 });

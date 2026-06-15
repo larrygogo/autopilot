@@ -25,6 +25,8 @@ export interface AgentConfig {
   /** 接入方式：cli（子进程）或 api（HTTP 直连）。不填则继承 provider 级或按默认规则 */
   mode?: AgentMode;
   permission_mode?: string;
+  /** 工具能力白名单（细粒度授权，见 tool-capabilities.ts）。缺省=全集；与 permission_mode 正交。第一刀仅 API agent 生效。 */
+  tools?: string[];
   max_turns?: number;
   max_budget_usd?: number;
   system_prompt?: string;
@@ -33,7 +35,16 @@ export interface AgentConfig {
 
 export interface AgentResult {
   text: string;
-  usage?: { input_tokens?: number; output_tokens?: number; total_cost_usd?: number };
+  usage?: {
+    /** 未走缓存的新输入 token（Anthropic 开 prompt cache 时只是零头，真实输入看 cache 两项） */
+    input_tokens?: number;
+    output_tokens?: number;
+    /** prompt cache 写入量（按 1.25x 计价的部分） */
+    cache_creation_input_tokens?: number;
+    /** prompt cache 命中读取量（agent loop 的输入大头） */
+    cache_read_input_tokens?: number;
+    total_cost_usd?: number;
+  };
 }
 
 export interface RunOptions {
@@ -94,9 +105,6 @@ export interface ChatResult {
   text: string;
   /** provider 本次返回的 session id（后续续对话用） */
   providerSessionId?: string;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    total_cost_usd?: number;
-  };
+  /** 形状与 AgentResult["usage"] 一致（含 prompt cache 读/写 token） */
+  usage?: AgentResult["usage"];
 }

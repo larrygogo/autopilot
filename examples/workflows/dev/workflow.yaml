@@ -3,6 +3,10 @@ label: "完整开发"
 description: "完整开发流程（设计 → 评审 → 开发 → 代码审查 → PR）"
 setup_func: setup_dev_task
 
+# 声明层（v2 R5）：产出形态 = PR（enqueue 预检「无库 × delivers:pr」交叉拒；运行时仍以事实为准）。
+# requires.git 不写 —— 缺省派生自 sandbox.git=true（必须有代码库）。
+delivers: pr
+
 # 独立 clone 沙盒：把需求绑定的 workspace 仓库 `git clone --local` 到任务运行目录，
 # 一个完全独立的 git 副本。run 阶段全程在副本里跑 git，**用户源码仓库零痕迹**
 # （不在源仓库 .git 留 worktree 注册 / 临时分支；删除纯 rmSync 不碰源仓库）。
@@ -62,11 +66,4 @@ phases:
     label: "提交 PR"
     timeout: 300
     sandbox: { code: read-write, deliver: true }
-    # run_submit_pr 用 agent 生成 PR 描述，沿用评审员配置
-    agent:
-      label: "评审员"
-      provider: anthropic
-      model: claude-sonnet-4-6
-      permission_mode: bypassPermissions
-      max_turns: 5
-      system_prompt: "你是代码审查员。关注正确性、可读性、边界与失败处理。找出真问题而非格式纠错；按 critical / important / minor 分级反馈。"
+    # 纯机械交付（commit/push/开 PR）：run_submit_pr 直接拼模板 PR body，不调 AI，无需 agent。

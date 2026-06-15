@@ -24,19 +24,17 @@ interface CliSpec {
   install: string;
 }
 
+// CLI 规格按 subtype（provider 条目化：claude/codex/gemini）。官方 name → subtype 复用。
+const SUBTYPE_CLI_SPEC: Record<string, CliSpec> = {
+  claude: { bin: "claude", install: "npm i -g @anthropic-ai/claude-code  # 然后 `claude login`" },
+  codex: { bin: "codex", install: "npm i -g @openai/codex  # 然后 `codex login`" },
+  gemini: { bin: "gemini", install: "npm i -g @google/gemini-cli  # 然后 `gemini auth login`" },
+};
+
 const CLI_SPEC: Record<ProviderName, CliSpec> = {
-  anthropic: {
-    bin: "claude",
-    install: "npm i -g @anthropic-ai/claude-code  # 然后 `claude login`",
-  },
-  openai: {
-    bin: "codex",
-    install: "npm i -g @openai/codex  # 然后 `codex login`",
-  },
-  google: {
-    bin: "gemini",
-    install: "npm i -g @google/gemini-cli  # 然后 `gemini auth login`",
-  },
+  anthropic: SUBTYPE_CLI_SPEC.claude,
+  openai: SUBTYPE_CLI_SPEC.codex,
+  google: SUBTYPE_CLI_SPEC.gemini,
 };
 
 async function runShort(argv: string[], timeoutMs = 3000): Promise<{ ok: boolean; stdout: string; stderr: string; err?: string }> {
@@ -106,4 +104,34 @@ export async function detectAllProviders(): Promise<Record<ProviderName, Provide
   const out = {} as Record<ProviderName, ProviderCliStatus>;
   for (const r of results) out[r.name] = r;
   return out;
+}
+
+// ── provider 条目化：按 subtype 探测 CLI（含自定义 binary） ──
+
+export interface CliProbeResult {
+  status: "ok" | "missing" | "unknown";
+  version?: string;
+  path?: string;
+  install_hint?: string;
+  error?: string;
+}
+
+/**
+ * 按 subtype（claude/codex/gemini）或自定义 binary 探测本地 CLI 可用性。
+ * 供 provider 条目（type=cli）的添加探测 + 后台刷新用。
+ */
+export async function probeCli(subtype: string, customBin?: string): Promise<CliProbeResult> {
+  const spec = SUBTYPE_CLI_SPEC[subtype];
+  const bin = customBin || spec?.bin;
+  if (!bin) return { status: "unknown", error: `未知 CLI 子类型：${subtype}（且未提供自定义 binary）` };
+
+  const path = Bun.which(bin);
+  if (!path) {
+    return { status: "missing", install_hint: spec?.install, error: `未在 PATH 中找到 \`${bin}\`` };
+  }
+  const ver = await runShort([bin, "--version"]);
+  if (!ver.ok) {
+    return { status: "unknown", path, install_hint: spec?.install, error: `\`${bin} --version\` 运行失败：${ver.stderr || ver.err || "unknown"}` };
+  }
+  return { status: "ok", path, version: firstLine(ver.stdout) ?? firstLine(ver.stderr) };
 }

@@ -7,6 +7,7 @@
 
 import type { ProviderAdapter, AdapterOptions, AdapterResponse, MessageParam, ToolUseBlock } from "./types";
 import { ApiError } from "./anthropic";
+import { isKimiHost } from "./kimi";
 
 const DEFAULT_BASE_URL = "https://api.openai.com";
 
@@ -16,6 +17,8 @@ export class OpenAIApiAdapter implements ProviderAdapter {
   constructor(
     private apiKey: string,
     private baseUrl: string = DEFAULT_BASE_URL,
+    /** 可选 User-Agent 覆盖（某些端点如 Kimi Code 按 UA 限定只给编码 Agent 用） */
+    private userAgent?: string,
   ) {}
 
   async completeStream(
@@ -43,6 +46,15 @@ export class OpenAIApiAdapter implements ProviderAdapter {
         },
       }));
     }
+    if (options.tool_choice) {
+      body["tool_choice"] = { type: "function", function: { name: options.tool_choice.name } };
+    }
+    // 关思考（结构化判据）：Kimi 思考原生端点在思考开启时拒绝强制 tool_choice（400），
+    // 用 Moonshot/Kimi 的 `thinking:{type:disabled}` 关掉。仅对 kimi host 生效——该参数是
+    // 端点专属，发给真 OpenAI 会 400，故 host-sniff（与下方 userAgent 的 kimi 处理一致）。
+    if (options.disable_thinking && isKimiHost(this.baseUrl)) {
+      body["thinking"] = { type: "disabled" };
+    }
     if (options.temperature !== undefined) body["temperature"] = options.temperature;
     if (options.stop_sequences) body["stop"] = options.stop_sequences;
 
@@ -51,6 +63,7 @@ export class OpenAIApiAdapter implements ProviderAdapter {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
+        ...(this.userAgent ? { "User-Agent": this.userAgent } : {}),
       },
       body: JSON.stringify(body),
       signal: options.signal,
@@ -73,6 +86,9 @@ export class OpenAIApiAdapter implements ProviderAdapter {
     let buf = "";
 
     let text = "";
+    // 推理模型（如 kimi-for-coding）先流 reasoning_content（思考）再给 content。
+    // 单独累计，content 为空时作回退 —— 否则推理模型整段输出被丢成「(无输出)」。
+    let reasoning = "";
     // 流式 tool_calls 拼接：Map<index, { id, name, arguments }>
     const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
     let usage = { input_tokens: 0, output_tokens: 0 };
@@ -89,8 +105,10 @@ export class OpenAIApiAdapter implements ProviderAdapter {
           const line = buf.slice(0, nlIdx).trim();
           buf = buf.slice(nlIdx + 1);
 
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6);
+          // SSE 规范里冒号后空格可选：OpenAI 发 "data: {…}"，Kimi Code 发 "data:{…}"。
+          // 只认带空格会把 Kimi 的每行都跳过 → 整段输出丢空。统一去前缀 + trim 兼容两者。
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
           if (data === "[DONE]") continue;
 
           let event: Record<string, unknown>;
@@ -122,6 +140,11 @@ export class OpenAIApiAdapter implements ProviderAdapter {
           if (typeof delta["content"] === "string") {
             text += delta["content"];
             if (onDelta) onDelta(delta["content"] as string);
+          }
+          // 推理增量（reasoning_content）：推送以便进度可见 + 累计作 content 空时的回退
+          if (typeof delta["reasoning_content"] === "string") {
+            reasoning += delta["reasoning_content"];
+            if (onDelta) onDelta(delta["reasoning_content"] as string);
           }
 
           // 工具调用增量
@@ -164,7 +187,8 @@ export class OpenAIApiAdapter implements ProviderAdapter {
     }
 
     return {
-      text,
+      // content 为空（推理模型整段都是 reasoning）时回退用 reasoning，避免输出丢成空
+      text: text || reasoning,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage,
       stopReason: stopReason ?? "stop",

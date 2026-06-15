@@ -118,7 +118,7 @@ autopilot dashboard             ← 浏览器打开 daemon serve 的 SPA
 | `protocol.ts` | JSON 协议类型定义（`AutopilotEvent` 联合类型） |
 | `pid.ts` | PID 文件管理 + 监听信息（host/port）持久化 |
 | `supervisor.ts` | 子进程保活（daemon 异常退出时自动重启） |
-| `requirement-scheduler.ts` | 订阅 `requirement:status-changed` 事件；`tickRepo` 算法（组级锁：父 + 子模块作为单一调度槽） |
+| `requirement-scheduler.ts` | 订阅 `requirement:status-changed` 事件；`tick()` 纯全局上限 FIFO（active = running\|fix_revision 计数 ≤ `scheduler.max_concurrent_tasks`，queued 按 created_at 先进先出；沙盒隔离后仓库非冲突域，按仓库串行已废除）；daemon 启动时补一次 tick 捡存量 queued |
 | `pr-poller.ts` | 定时跑 `gh pr view` 拉所有 `awaiting_review` 状态需求的父 PR 状态：`CHANGES_REQUESTED` → `inject_feedback`；`MERGED` → `transition req → done` |
 
 ### `src/agents/`（LLM 调用封装）
@@ -154,7 +154,7 @@ sequenceDiagram
     Chat->>DB: mark_requirement_ready + enqueue_requirement
     DB-->>Sch: emit requirement:status-changed (to=queued)
 
-    Sch->>Sch: tickRepo(repo) — 检查组内（父+子模块）active
+    Sch->>Sch: tick() — 全局 active 计数 < 并发上限则按 FIFO 取最老 queued
     Sch->>R: startTaskFromTemplate(req_dev, repo_id, requirement_id)
     R->>DB: createTask + workflow snapshot
     R->>A: run_design (architect agent 写 plan.md)

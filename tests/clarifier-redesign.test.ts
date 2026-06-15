@@ -21,8 +21,8 @@ import { up as m034 } from "../src/migrations/034-requirement-sessions";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
 import { createRequirement, getRequirementById, setRequirementStatus } from "../src/core/requirements";
-import { listSpecRevisionsByRequirement } from "../src/core/spec-revisions";
-import { listQuestionsByRequirement } from "../src/core/requirement-questions";
+import { listSpecRevisionsByRequirement } from "../src/core/requirements/spec-revisions";
+import { listQuestionsByRequirement } from "../src/core/requirements/questions";
 import { enableBus, disableBus } from "../src/core/event-bus";
 import { runClarifierRound, _setClarifyFnForTest } from "../src/daemon/requirement-clarifier";
 
@@ -171,7 +171,7 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     // 与此同时 watchdog 也触发 round B。round A 完成更快，已写入 qst-new + setActive(qst-new)。
     // 此时 round B 的 LLM 也回来，本测试模拟 round B：active 已从 qst-pre 变成 qst-new，应放弃。
 
-    const { createQuestion } = await import("../src/core/requirement-questions");
+    const { createQuestion } = await import("../src/core/requirements/questions");
     const { setActiveQuestionId } = await import("../src/core/requirements");
 
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "原稿" });

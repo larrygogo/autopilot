@@ -12,6 +12,7 @@
 
 import {
   listTasks,
+  listTasksByRequirement,
   getTask,
   getKv,
   getTaskLogs,
@@ -27,20 +28,19 @@ import {
   saveWorkflowYaml,
   deleteWorkflowDir,
   reload as reloadRegistry,
-} from "../core/registry";
-import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb } from "../core/workflows";
-import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow-templates";
+} from "../core/workflow/registry";
+import { setWorkflowMeta, patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
+import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb } from "../core/workflow/workflows";
+import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow/templates";
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
 import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig, loadSchedulerConfig, saveSchedulerConfig, systemTimezone, isValidTimezone } from "../core/config";
 import { requestRestart, requestShutdown } from "./index";
 import { loadApiToken } from "../core/api-token";
-import {
-  listSandboxDir,
-  readSandboxFile,
-  scanTaskSandboxes,
-} from "../core/sandbox";
+import { listTaskRepos } from "../core/sandbox";
+import { listSandboxDir, readSandboxFile } from "../core/sandbox/browse";
+import { scanTaskSandboxes } from "../core/sandbox/retention";
 import { setKv, getDb } from "../core/db";
-import { discover as registryDiscover, getWorkflow as registryGetWorkflow } from "../core/registry";
+import { discover as registryDiscover, getWorkflow as registryGetWorkflow, listWorkflowsUsingProvider } from "../core/workflow/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
 import {
@@ -53,9 +53,9 @@ import {
   DEFAULT_PROJECT_ID,
 } from "../core/projects";
 import { listRequirementsByProject } from "../core/requirements";
-import { listWorkspaces, getWorkspaceById, getWorkspaceByAlias, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, projectHasTopWorkspace, getTopWorkspaceForProject } from "../core/workspaces";
-import { listSubmodules, discoverSubmodules } from "../core/submodules";
-import { checkWorkspaceHealth, detectWorkspaceGit, probeRemote, parseGithubFromRemote } from "../core/workspace-health";
+import { listWorkspaces, getWorkspaceById, getWorkspaceByAlias, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, getTopWorkspaceForProject } from "../core/sandbox/workspaces";
+import { listSubmodules, discoverSubmodules } from "../core/sandbox/submodules";
+import { checkWorkspaceHealth, detectWorkspaceGit, probeRemote, parseGithubFromRemote } from "../core/sandbox/workspace-health";
 import {
   listSessions as listChatSessions,
   deleteSession as deleteChatSession,
@@ -64,18 +64,36 @@ import {
 } from "../core/sessions";
 import { readDaemonFileLog, getDaemonFileLogPath } from "../core/logger";
 import {
+  listNotifications,
+  unreadCount as notificationUnreadCount,
+  markRead as markNotificationsRead,
+  markAllRead as markAllNotificationsRead,
+  markReadByRelated as markNotificationsReadByRelated,
+  dismissNotification,
+} from "../core/notify/stream";
+import { listUnhealthy } from "../core/provider-health";
+import {
   listRequirements as coreListRequirements,
   getRequirementById,
   createRequirement as coreCreateRequirement,
   updateRequirement as coreUpdateRequirement,
-  setRequirementStatus,
-  nextRequirementId,
-  finishClarification,
+  setRequirementStatus,  finishClarification,
   listRequirementStatusLogs,
+  listRequirementWorkspaceIds,
+  listRequirementWorkspaces,
+  setRequirementWorkspaces as coreSetRequirementWorkspaces,
   type Requirement,
 } from "../core/requirements";
-import { listSubPrs } from "../core/requirement-sub-prs";
-import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
+
+/** 给需求响应附 workspace_ids（requirement_workspaces 集合；RPC 层 join，core 返回类型不动） */
+function attachWorkspaceIds<T extends { id: string }>(reqs: T[]): Array<T & { workspace_ids: string[] }> {
+  const map = listRequirementWorkspaceIds(reqs.map((r) => r.id));
+  return reqs.map((r) => ({ ...r, workspace_ids: map.get(r.id) ?? [] }));
+}
+import { listSubPrs } from "../core/requirements/sub-prs";
+import { listDeliveries, listDeliveryFiles, maxDeliveryRound } from "../core/requirements/deliveries";
+import { validateWorkflowInput } from "./workflow-declarations";
+import { listSpecRevisionsByRequirement } from "../core/requirements/spec-revisions";
 import { getRound as getClarifierRound } from "./clarifier-progress";
 import { runClarifierRound } from "./requirement-clarifier";
 import { runClarifierExtract } from "./requirement-extract";
@@ -86,14 +104,16 @@ import {
   resolveComment,
   nextCommentId,
   type Comment,
-} from "../core/requirement-comments";
+} from "../core/requirements/comments";
 import {
   loadProviders,
   loadConfigRaw,
   PROVIDER_NAMES,
   saveProvider,
+  saveLifecycleAgent,
   type ProviderName,
 } from "../core/config";
+import { effectiveClarifyConfig } from "./clarifier-agent";
 import {
   listApiKeys,
   setApiKey,
@@ -102,7 +122,17 @@ import {
   maskApiKey,
 } from "../core/api-keys";
 import { BUILTIN_COMPAT_PROVIDERS } from "../agents/providers/api/compat";
-import { detectProviderCli, detectAllProviders } from "../agents/cli-status";
+import { detectProviderCli, detectAllProviders, probeCli } from "../agents/cli-status";
+import {
+  listProviders as listProviderEntries,
+  getProviderById,
+  getProviderByName as getProviderEntryByName,
+  createProvider,
+  updateProvider,
+  deleteProvider,
+  setProviderCliStatus,
+  type ProviderType,
+} from "../core/providers";
 import { listProviderModels } from "../agents/model-list";
 import { createAgent } from "../agents/registry";
 import { DEFAULT_AGENT } from "../core/agent-defaults";
@@ -112,9 +142,7 @@ import {
   readPhaseLog,
   listAgentCalls,
   getAgentCall,
-} from "../core/task-logs";
-import { getNowAggregator } from "./routes-now";
-import { dismissCard as coreDismissCard } from "../core/now-dismiss";
+} from "../core/task/logs";
 import { phaseIndex, parseDecisionCounts, renderDecisionMd } from "./routes";
 import { computeTaskOutcome } from "./task-outcome";
 import {
@@ -127,9 +155,9 @@ import {
   cancelTasksForRequirements,
   TaskActionError,
 } from "./task-actions";
-import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
+import { startTaskFromTemplate, StartTaskError } from "../core/task/factory";
 import { startTaskFromPrompt } from "./start-from-prompt";
-import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "../core/task-delete";
+import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "../core/task/delete";
 import { registerRpcMethod, hasRpcMethod, RpcError } from "./rpc";
 import { wsManager } from "./ws";
 import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
@@ -165,9 +193,10 @@ function generateUniqueAlias(projectId: string, baseAlias: string): string {
 }
 
 /** 在 daemon 启动早期调用一次。重复调用幂等（检查 daemon.status 是否已注册）。 */
-export function registerCoreRpcMethods(): void {
-  if (hasRpcMethod("daemon.status")) return;
-
+// registerCoreRpcMethods 已拆成下列按域分组的子函数（架构师审查：原为单个 2500 行函数）。
+// 各子函数只是 registerRpcMethod 调用的分组容器，共享模块作用域（零 import 变化）。
+// 注：method 历史按「迁移批次」落位、非严格按命名空间聚集，故个别分组含相邻域的少量方法。
+function registerCoreQueryRpc(): void {
   registerRpcMethod({
     method: "daemon.status",
     description: "返回 daemon version / git_sha / started_at / pid / uptime / 各状态任务数",
@@ -205,9 +234,23 @@ export function registerCoreRpcMethods(): void {
           `host "${host}" 不可绑定。可选：localhost / 127.0.0.1 / 0.0.0.0 / ${lanIps.join(" / ") || "(无 LAN IP)"}`,
         );
       }
+      // 切到暴露 host 且未设防 → 自动生成 token 配套（与 SEC-6 启动门同语义：
+      // 不留「配置矛盾等重启引爆」的窗口）。返回一次性明文供调用方展示。
+      let generatedToken: string | null = null;
+      const { isExposedHost: isExposed, getApiTokenState: tokenState, reloadApiToken: reloadToken } =
+        await import("./routes");
+      const { hasAnyUser: anyUser } = await import("../core/auth");
+      let hasUser = false;
+      try { hasUser = anyUser(); } catch { /* users 表未建（极简测试库）→ 视为无用户 */ }
+      if (isExposed(host) && !tokenState().is_set && !hasUser) {
+        const { generateApiToken, saveApiToken } = await import("../core/api-token");
+        generatedToken = generateApiToken();
+        saveApiToken(generatedToken);
+        reloadToken();
+      }
       const cur = loadDaemonConfig();
       saveDaemonConfig({ ...cur, host });
-      return { ok: true, host, restart_required: true };
+      return { ok: true, host, restart_required: true, generated_token: generatedToken };
     },
   });
 
@@ -267,6 +310,21 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
+    method: "tasks.listByRequirement",
+    description: "按需求 id 列出其全部根 run（按 seq 升序），供需求页 run 历史切换",
+    handler: (params) => {
+      const p = asObj(params);
+      const reqId = typeof p.requirementId === "string" && p.requirementId
+        ? p.requirementId
+        : (typeof p.requirement_id === "string" ? p.requirement_id : "");
+      if (!reqId) {
+        throw new RpcError("INVALID_PARAM", "需要 requirementId (string)");
+      }
+      return listTasksByRequirement(reqId);
+    },
+  });
+
+  registerRpcMethod({
     method: "workflows.list",
     description: "列出已注册的工作流（含 source / derives_from）",
     handler: () => {
@@ -290,14 +348,13 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "providers.list",
-    description: "返回三个内置 provider 的配置（agent_count 恒为 0：命名复用 agent 机制已移除，保留字段仅为 Web shape 兼容）",
+    description: "provider 条目列表（ProviderItem 兼容 shape：name/enabled/default_model/agent_count）",
     handler: () => {
-      const providers = loadProviders();
-      return PROVIDER_NAMES.map((name) => ({
-        name,
-        ...providers[name],
-        // 命名复用 agent 已移除；保留 agent_count 字段（恒 0）兼容 Web 旧 shape
-        agent_count: 0,
+      return listProviderEntries().map((p) => ({
+        name: p.name,
+        enabled: p.enabled !== 0,
+        default_model: p.default_model ?? undefined,
+        agent_count: 0, // 命名复用 agent 已移除；保留字段兼容旧 shape
       }));
     },
   });
@@ -311,27 +368,86 @@ export function registerCoreRpcMethods(): void {
   // agents.list 已移除（Phase 3：命名复用 agent 机制删除）。
   // Web Agents 页运行时会拿到 METHOD_NOT_FOUND，留待 Phase 4 处理客户端。
 
+  // ── notifications（事件型通知流；旧 now.* 派生快照体系已于 2026-06-11 移除） ──
+
   registerRpcMethod({
-    method: "now.cards",
-    description: "Now 页卡片列表（daemon 未启动时返回空数组）",
-    handler: () => {
-      const agg = getNowAggregator();
-      return agg ? agg.getCards() : [];
+    method: "notifications.list",
+    description: "通知列表（id 倒序游标分页；默认不含已删除）",
+    handler: (params) => {
+      const p = asObj(params);
+      return listNotifications({
+        limit: typeof p.limit === "number" ? p.limit : undefined,
+        before_id: typeof p.before_id === "number" ? p.before_id : undefined,
+        unread_only: p.unread_only === true,
+        include_dismissed: p.include_dismissed === true,
+      });
     },
   });
 
   registerRpcMethod({
-    method: "now.dismissCard",
-    description: "标记 Now 卡片已忽略（持久化 dismiss + 同步 aggregator 内存）",
+    method: "notifications.unreadCount",
+    description: "未读通知数（排除已删除）",
+    handler: () => ({ count: notificationUnreadCount() }),
+  });
+
+  registerRpcMethod({
+    method: "notifications.markRead",
+    description: "标记通知已读（幂等，只动仍未读的行）",
     handler: (params) => {
       const p = asObj(params);
-      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
-      coreDismissCard(p.id);
-      // 跟原 HTTP handler 行为一致：同步内存 aggregator，让 markDismissed 触发 emit
-      const agg = getNowAggregator();
-      if (agg) agg.markDismissed(p.id);
+      if (!Array.isArray(p.ids) || p.ids.length === 0 || !p.ids.every((x) => typeof x === "number")) {
+        throw new RpcError("INVALID_PARAM", "需要非空 number[] ids");
+      }
+      const updated = markNotificationsRead(p.ids as number[]);
+      emitBus({ type: "notification:read", payload: { ids: p.ids as number[] } });
+      return { updated };
+    },
+  });
+
+  registerRpcMethod({
+    method: "notifications.markReadByRelated",
+    description: "按关联实体批量已读（用户点进任务/需求详情页即视为消化了相关通知）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (p.related_type !== "task" && p.related_type !== "requirement" && p.related_type !== "system") {
+        throw new RpcError("INVALID_PARAM", "related_type 需为 task / requirement / system");
+      }
+      if (typeof p.related_id !== "string" || !p.related_id) {
+        throw new RpcError("INVALID_PARAM", "需要 related_id");
+      }
+      const ids = markNotificationsReadByRelated(p.related_type, p.related_id);
+      if (ids.length > 0) emitBus({ type: "notification:read", payload: { ids } });
+      return { updated: ids.length, ids };
+    },
+  });
+
+  registerRpcMethod({
+    method: "notifications.markAllRead",
+    description: "全部标为已读（幂等）",
+    handler: () => {
+      const updated = markAllNotificationsRead();
+      emitBus({ type: "notification:all_read", payload: {} });
+      return { updated };
+    },
+  });
+
+  registerRpcMethod({
+    method: "notifications.dismiss",
+    description: "删除（隐藏）一条通知；幂等",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "number") throw new RpcError("INVALID_PARAM", "需要 number id");
+      const ok = dismissNotification(p.id);
+      if (!ok) throw new RpcError("NOT_FOUND", `通知 ${p.id} 不存在`);
+      emitBus({ type: "notification:dismissed", payload: { id: p.id } });
       return { ok: true };
     },
+  });
+
+  registerRpcMethod({
+    method: "providers.health",
+    description: "当前不健康的 provider 列表（轻量内存态，给通知面板 banner 初始拉取）",
+    handler: () => listUnhealthy(),
   });
 
   registerRpcMethod({
@@ -355,6 +471,9 @@ export function registerCoreRpcMethods(): void {
     handler: () => ({ yaml: loadConfigRaw() }),
   });
 
+}
+
+function registerTaskRpc(): void {
   // ── 第三批：tasks.* / workflows.* 查询类（10 个） ──
 
   registerRpcMethod({
@@ -430,6 +549,18 @@ export function registerCoreRpcMethods(): void {
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const task = getTask(p.id);
       if (!task) throw new RpcError("NOT_FOUND", "task not found");
+      const { computeFileDiffs } = await import("./task-outcome");
+      // 统一 multi-clone 布局：按 .worktree.json 的 repos 逐库取 diff（单库 = 长度 1；
+      // 多库文件路径加 <dir>/ 前缀区分归属）。旧 mode=clone 任务 listTaskRepos 返回
+      // 根路径单项（dir=""），行为与原 repo_path 直跑一致。
+      const repos = listTaskRepos(p.id).filter((r) => existsSync(r.path));
+      if (repos.length > 0) {
+        const files = repos.flatMap((r) =>
+          computeFileDiffs(r.path, r.base).map((f) => (r.dir ? { ...f, file: `${r.dir}/${f.file}` } : f)),
+        );
+        return { files };
+      }
+      // 无布局元数据（极旧任务）：回退 repo_path 直跑
       const repoPath = (task as Record<string, unknown>).repo_path as string | undefined;
       if (!repoPath || !existsSync(repoPath)) return { files: [] };
       const reqId = (task as Record<string, unknown>).requirement_id as string | undefined;
@@ -441,7 +572,6 @@ export function registerCoreRpcMethods(): void {
           if (ws?.default_branch) base = ws.default_branch;
         }
       }
-      const { computeFileDiffs } = await import("./task-outcome");
       return { files: computeFileDiffs(repoPath, base) };
     },
   });
@@ -518,7 +648,7 @@ export function registerCoreRpcMethods(): void {
           (typeof p.workspace_alias === "string" && p.workspace_alias.trim() ? p.workspace_alias.trim() : undefined) ??
           (typeof p.codebase_alias === "string" && p.codebase_alias.trim() ? p.codebase_alias.trim() : undefined);
         if (!workspaceId && aliasParam) {
-          const workspaces = await import("../core/workspaces");
+          const workspaces = await import("../core/sandbox/workspaces");
           const ws = workspaces.listWorkspaces({ includeSubmodules: true }).find((c) => c.alias === aliasParam);
           if (!ws) throw new RpcError("NOT_FOUND", `找不到别名为 "${aliasParam}" 的 workspace`);
           workspaceId = ws.id;
@@ -542,7 +672,7 @@ export function registerCoreRpcMethods(): void {
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const prompt = typeof p.prompt === "string" ? p.prompt : "";
       if (!prompt.trim()) throw new RpcError("INVALID_PARAM", "需要 prompt");
-      const { sendPromptToTask } = await import("../core/task-send-prompt");
+      const { sendPromptToTask } = await import("../core/task/send-prompt");
       const result = sendPromptToTask(p.id, prompt, { source: "user" });
       if (!result.accepted) {
         if (result.reason === "TASK_TERMINAL") throw new RpcError("TASK_TERMINAL", "task 已是终态，无法接受新 prompt");
@@ -570,7 +700,7 @@ export function registerCoreRpcMethods(): void {
         (typeof p.workspace_alias === "string" && p.workspace_alias.trim() ? p.workspace_alias.trim() : undefined) ??
         (typeof p.codebase_alias === "string" && p.codebase_alias.trim() ? p.codebase_alias.trim() : undefined);
       if (!workspaceId && aliasParam) {
-        const workspaces = await import("../core/workspaces");
+        const workspaces = await import("../core/sandbox/workspaces");
         const ws = workspaces.listWorkspaces({ includeSubmodules: true }).find((c) => c.alias === aliasParam);
         if (!ws) throw new RpcError("NOT_FOUND", `找不到别名为 "${aliasParam}" 的 workspace`);
         workspaceId = ws.id;
@@ -644,6 +774,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerWorkflowRpc(): void {
   // ── 第五批：workflows.* 域（11 个，含查询 + 简单 mutation） ──
 
   registerRpcMethod({
@@ -822,6 +955,70 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
+    method: "workflows.setMeta",
+    description: "修改工作流显示名 / 描述 + 声明层（requiresGit / sandboxGit / delivers）；name 是标识符与引用键，不可改",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const meta: WorkflowMetaInput = {};
+      if ("label" in p) {
+        if (p.label !== null && typeof p.label !== "string") {
+          throw new RpcError("INVALID_PARAM", "label 需为字符串或 null");
+        }
+        meta.label = p.label as string | null;
+      }
+      if ("description" in p) {
+        if (p.description !== null && typeof p.description !== "string") {
+          throw new RpcError("INVALID_PARAM", "description 需为字符串或 null");
+        }
+        meta.description = p.description as string | null;
+      }
+      // 声明层（v2 R5）：requiresGit / sandboxGit / delivers
+      if ("requiresGit" in p) {
+        const v = p.requiresGit;
+        if (v !== null && v !== true && v !== false && v !== "optional") {
+          throw new RpcError("INVALID_PARAM", "requiresGit 需为 true / false / \"optional\" / null");
+        }
+        meta.requiresGit = v as boolean | "optional" | null;
+      }
+      if ("sandboxGit" in p) {
+        const v = p.sandboxGit;
+        if (v !== null && typeof v !== "boolean") {
+          throw new RpcError("INVALID_PARAM", "sandboxGit 需为 boolean 或 null");
+        }
+        meta.sandboxGit = v as boolean | null;
+      }
+      if ("delivers" in p) {
+        const v = p.delivers;
+        if (v !== null && v !== "pr" && v !== "artifacts" && v !== "") {
+          throw new RpcError("INVALID_PARAM", "delivers 需为 \"pr\" / \"artifacts\" / null");
+        }
+        meta.delivers = v as string | null;
+      }
+      if (
+        meta.label === undefined && meta.description === undefined &&
+        meta.requiresGit === undefined && meta.sandboxGit === undefined && meta.delivers === undefined
+      ) {
+        throw new RpcError("INVALID_PARAM", "至少提供 label / description / requiresGit / sandboxGit / delivers 之一");
+      }
+      if (!registryGetWorkflow(p.name)) throw new RpcError("NOT_FOUND", "Workflow not found");
+      const row = getWorkflowFromDb(p.name);
+      try {
+        if (row && row.source === "db") {
+          updateDbWorkflow(p.name, { yaml_content: patchWorkflowMetaYaml(row.yaml_content, meta) });
+        } else {
+          setWorkflowMeta(p.name, meta);
+        }
+        await reloadRegistry();
+        emitBus({ type: "workflow:reloaded", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
     method: "workflows.delete",
     description: "删除工作流（区分 source）",
     handler: async (params) => {
@@ -845,6 +1042,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerRequirementRpc(): void {
   // ── 第六批：requirements.* 域（16 个） ──
 
   registerRpcMethod({
@@ -858,7 +1058,7 @@ export function registerCoreRpcMethods(): void {
       const project_id = typeof p.project_id === "string" ? p.project_id : undefined;
       const status = typeof p.status === "string" ? p.status : undefined;
       return {
-        requirements: coreListRequirements({ workspace_id, project_id, status }),
+        requirements: attachWorkspaceIds(coreListRequirements({ workspace_id, project_id, status })),
       };
     },
   });
@@ -872,9 +1072,48 @@ export function registerCoreRpcMethods(): void {
       const r = getRequirementById(p.id);
       if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
       return {
-        requirement: r,
+        requirement: attachWorkspaceIds([r])[0],
         comments: listComments(p.id),
       };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.setWorkspaces",
+    description: "澄清前确认需求的代码库集合（整体替换；显式空集 = 确认无库 input_mode='none'；开始澄清后冻结——澄清基于已选库做，临时换库会让澄清失效。failed 例外 = 重试设计用途）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      // 空数组合法（v2 R5：显式空集 = 确认无库，配合 requires.git 非 true 的工作流走纯文本闭环）
+      if (
+        !Array.isArray(p.workspace_ids) ||
+        !p.workspace_ids.every((x) => typeof x === "string" && x)
+      ) {
+        throw new RpcError("INVALID_PARAM", "需要 string[] workspace_ids（空数组 = 确认无库）");
+      }
+      const wsIds = [...new Set(p.workspace_ids as string[])];
+      // primary_workspace_id 入参接受但忽略（主库概念已废除，2026-06-12；兼容老 web-dist 一版）
+      const cur = getRequirementById(p.id);
+      if (!cur) throw new RpcError("NOT_FOUND", "requirement not found");
+      // 开始澄清即冻结：澄清 agent 基于已选代码库的浅 clone 调查提问，
+      // 中途换库会让已完成的澄清失效（failed 例外 = 重试设计用途，用户自担）
+      const EDITABLE_STATUSES = new Set(["drafting", "failed"]);
+      if (!EDITABLE_STATUSES.has(cur.status)) {
+        throw new RpcError(
+          "INVALID_STATE",
+          `代码库集合在开始澄清后冻结（当前状态 ${cur.status}）——澄清基于已选代码库进行，中途更换会使澄清结论失效。`,
+        );
+      }
+      for (const wid of wsIds) {
+        const ws = getWorkspaceById(wid);
+        if (!ws) throw new RpcError("NOT_FOUND", `workspace 不存在：${wid}`);
+        if (ws.project_id !== cur.project_id) {
+          throw new RpcError("PRECONDITION_FAILED", `代码库 ${ws.alias}（${wid}）不属于该需求的项目`);
+        }
+      }
+      coreSetRequirementWorkspaces(p.id, wsIds);
+      const updated = getRequirementById(p.id)!;
+      return { requirement: attachWorkspaceIds([updated])[0], workspace_ids: wsIds };
     },
   });
 
@@ -927,24 +1166,19 @@ export function registerCoreRpcMethods(): void {
       if (!projectId) {
         throw new RpcError("INVALID_PARAM", "project_id 必填（或提供 workspace_id 由 daemon 反查）");
       }
-      // 强制：项目必须关联工作区才能创建/运行需求
-      const topWs = getTopWorkspaceForProject(projectId);
-      if (!topWs) {
-        throw new RpcError("PRECONDITION_FAILED", "项目未关联工作区，请先添加工作区再创建需求");
-      }
-      // 项目:工作区 1:1 —— 未显式指定时自动派生项目唯一工作区，免去用户手动绑定。
-      if (!workspaceId) workspaceId = topWs.id;
-      const id = nextRequirementId();
-      coreCreateRequirement({
-        id,
+      // v2 R5：项目无工作区不再拒建需求（无库需求可走 requires.git 非 true 的工作流闭环）；
+      // 未显式指定时自动派生项目默认工作区作预选（无则 workspace_id=NULL，由确认卡 / 闸门把关）。
+      if (!workspaceId) workspaceId = getTopWorkspaceForProject(projectId)?.id ?? null;
+      const created = coreCreateRequirement({
         project_id: projectId,
         workspace_id: workspaceId,
         title,
         spec_md: typeof p.spec_md === "string" ? p.spec_md : "",
         chat_session_id: (p.chat_session_id as string | null | undefined) ?? null,
       });
-      const clarifying = setRequirementStatus(id, "clarifying");
-      return { requirement: clarifying };
+      // 停在 drafting：澄清依赖代码库 clone，须由用户确认代码库后显式进入澄清
+      // （自动派生的默认库只是预选；Web 在需求页确认、CLI 用 req clarify / -c 显式指定时自动开始）
+      return { requirement: created };
     },
   });
 
@@ -987,6 +1221,12 @@ export function registerCoreRpcMethods(): void {
         workflow: (typeof p.workflow === "string" || p.workflow === null) ? p.workflow : undefined,
       });
       if (!updated) throw new RpcError("NOT_FOUND", "requirement not found");
+      // setWorkflow 闸门（v2 R5）：换工作流时声明校验不通过 → 响应带 warning（不阻断，enqueue 兜底重验）
+      if (p.workflow !== undefined) {
+        const hasWs = listRequirementWorkspaces(p.id).length > 0 || !!updated.workspace_id;
+        const warning = validateWorkflowInput(updated.workflow, hasWs, { crossCheckDelivers: true });
+        if (warning) return { requirement: updated, warning: `${warning}（入队时将被拦截）` };
+      }
       return { requirement: updated };
     },
   });
@@ -1016,22 +1256,41 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (typeof p.to !== "string" || !p.to.trim()) throw new RpcError("INVALID_PARAM", "to 必填");
-      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      const cur = getRequirementById(p.id);
+      if (!cur) throw new RpcError("NOT_FOUND", "requirement not found");
+      // 澄清前置（v2 R5 起按所选工作流的 requires.git 动态校验）：
+      //   requires.git=true → 卡集合非空（澄清 agent 在已选代码库的浅 clone 中工作；真相在集合表）
+      //   "optional"/false  → 集合空也放行（确认 input_mode='none'，clarifier 走纯文本模式）
+      if (p.to.trim() === "clarifying") {
+        const hasWs = listRequirementWorkspaces(p.id).length > 0;
+        const reason = validateWorkflowInput(cur.workflow, hasWs);
+        if (reason) throw new RpcError("PRECONDITION_FAILED", `${reason}（澄清基于代码库的克隆进行）`);
+        if (!hasWs && cur.input_mode !== "none") {
+          try { coreUpdateRequirement(p.id, { input_mode: "none" }); } catch { /* 列缺失旧库容错 */ }
+        }
+      }
       return { requirement: setRequirementStatus(p.id, p.to.trim()) };
     },
   });
 
   registerRpcMethod({
     method: "requirements.enqueue",
-    description: "入队执行（必须已关联 workspace 且 spec_md 非空）",
+    description: "入队执行（spec_md 非空；代码库要求按所选工作流的 requires.git 动态校验，集合空 × delivers:pr 交叉拒）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const r = getRequirementById(p.id);
       if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
-      if (!r.workspace_id) throw new RpcError("PRECONDITION_FAILED", "请先关联工作区再入队");
+      // v2 R5：按所选工作流动态校验（requires.git=true 卡集合非空；optional/false 放行；
+      // 交叉校验 = 集合空 × delivers:pr 拒——PR 无处可开）
+      const hasWs = listRequirementWorkspaces(p.id).length > 0 || !!r.workspace_id;
+      const reason = validateWorkflowInput(r.workflow, hasWs, { crossCheckDelivers: true });
+      if (reason) throw new RpcError("PRECONDITION_FAILED", reason);
       if (!(r.spec_md ?? "").trim()) {
         throw new RpcError("PRECONDITION_FAILED", "需求规约为空，请先完成澄清或手动填写规约");
+      }
+      if (!hasWs && r.input_mode !== "none") {
+        try { coreUpdateRequirement(p.id, { input_mode: "none" }); } catch { /* 列缺失旧库容错 */ }
       }
       return { requirement: setRequirementStatus(p.id, "queued") };
     },
@@ -1072,6 +1331,32 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
+    method: "requirements.deliveries",
+    description: "需求的交付物轮次记录（artifacts 验收用；每验收轮一行，round 升序）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      return { deliveries: listDeliveries(p.id) };
+    },
+  });
+
+  registerRpcMethod({
+    method: "requirements.listDeliveryFiles",
+    description: "某验收轮的交付物文件列表（缺省最新轮；只列文件 + 下载，不做渲染预览）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getRequirementById(p.id)) throw new RpcError("NOT_FOUND", "requirement not found");
+      const round = typeof p.round === "number" && Number.isInteger(p.round) && p.round >= 1
+        ? p.round
+        : maxDeliveryRound(p.id);
+      if (round < 1) return { round: 0, files: [] };
+      return { round, files: listDeliveryFiles(p.id, round) };
+    },
+  });
+
+  registerRpcMethod({
     method: "requirements.specRevisions",
     description: "需求 spec_md 修改历史",
     handler: (params) => {
@@ -1092,6 +1377,9 @@ export function registerCoreRpcMethods(): void {
       return { round: getClarifierRound(p.id) ?? null };
     },
   });
+
+  // requirements.fixRound 已移除（v2 R3）：fix = 标准 run，修复进度即 task 进度
+  //（requirement.task_id 指向 fix run，执行视图 / task logs / agent-calls 直接可看）。
 
   registerRpcMethod({
     method: "requirements.retryClarify",
@@ -1199,6 +1487,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerProviderAgentRpc(): void {
   // ── 第七批：providers + agents CRUD（8 个） ──
 
   registerRpcMethod({
@@ -1229,17 +1520,90 @@ export function registerCoreRpcMethods(): void {
 
   registerRpcMethod({
     method: "providers.save",
-    description: "保存 provider 配置 + emit config:updated",
+    description: "保存 provider 条目配置（enabled / default_model / base_url，按 name 找条目 update）+ emit config:updated",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      if (!(PROVIDER_NAMES as readonly string[]).includes(p.name)) {
-        throw new RpcError("INVALID_PARAM", `未知 provider：${p.name}`);
-      }
-      // 其他字段（除 name）都是 provider config，整体保存
-      const { name: _n, ...cfg } = p;
+      const entry = getProviderEntryByName(p.name);
+      if (!entry) throw new RpcError("NOT_FOUND", `provider 条目不存在：${p.name}`);
       try {
-        saveProvider(p.name as ProviderName, cfg);
+        updateProvider(entry.id, {
+          enabled: typeof p.enabled === "boolean" ? p.enabled : undefined,
+          default_model: typeof p.default_model === "string" ? p.default_model : undefined,
+          base_url: typeof p.base_url === "string" ? p.base_url : undefined,
+        });
+        emitBus({ type: "config:updated", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.setDefaultModel",
+    description: "字段级设置某 provider 条目的默认模型（按 name 找条目 update）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const entry = getProviderEntryByName(p.name);
+      if (!entry) throw new RpcError("NOT_FOUND", `provider 条目不存在：${p.name}`);
+      const model = typeof p.model === "string" && p.model.trim() ? p.model.trim() : null;
+      try {
+        updateProvider(entry.id, { default_model: model });
+        emitBus({ type: "config:updated", payload: {} });
+        return { ok: true };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  // ── 生命周期 agent 配置（lifecycle: 段；P1 仅 clarify，extract/author 共用其配置）──
+
+  registerRpcMethod({
+    method: "lifecycle.list",
+    description: "生命周期 agent 配置列表（P1：clarify；effective=生效配置 + userConfig=用户显式写的 + defaults=代码兜底）",
+    handler: () => {
+      const c = effectiveClarifyConfig();
+      const hasUser = Object.keys(c.userConfig).length > 0;
+      return {
+        agents: [
+          {
+            name: "clarify",
+            display_name: "需求澄清",
+            note: "澄清、一句话建需求、AI 生成工作流都用这套设置",
+            effective: c.effective,
+            userConfig: hasUser ? c.userConfig : null,
+            defaults: c.defaults,
+            reqOverridable: true,
+          },
+        ],
+      };
+    },
+  });
+
+  registerRpcMethod({
+    method: "lifecycle.setAgent",
+    description: "写/删某生命周期 agent 配置（config=null 删段回退默认）。P1 仅支持 name=clarify",
+    handler: (params) => {
+      const p = asObj(params);
+      if (p.name !== "clarify") throw new RpcError("INVALID_PARAM", "P1 仅支持 name=clarify");
+      let cfg: Record<string, unknown> | null = null;
+      if (p.config !== null && p.config !== undefined) {
+        const c = asObj(p.config);
+        // 只取已知字段（InlineAgentConfig 形状），空值视为不设
+        cfg = {};
+        if (typeof c.provider === "string" && c.provider) cfg.provider = c.provider;
+        if (typeof c.model === "string" && c.model) cfg.model = c.model;
+        if (c.mode === "cli" || c.mode === "api") cfg.mode = c.mode;
+        if (typeof c.max_turns === "number" && c.max_turns > 0) cfg.max_turns = c.max_turns;
+        if (typeof c.permission_mode === "string" && c.permission_mode) cfg.permission_mode = c.permission_mode;
+        if (typeof c.system_prompt === "string" && c.system_prompt.trim()) cfg.system_prompt = c.system_prompt;
+        if (Object.keys(cfg).length === 0) cfg = null; // 全空 = 回退默认
+      }
+      try {
+        saveLifecycleAgent("clarify", cfg);
         emitBus({ type: "config:updated", payload: {} });
         return { ok: true };
       } catch (e: unknown) {
@@ -1295,6 +1659,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerSandboxSetupRpc(): void {
   // ── 第八批：sandbox + defaults + setup mutation（8 个） ──
 
   registerRpcMethod({
@@ -1373,6 +1740,12 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
+    method: "agents.defaultAgent",
+    description: "phase 省略 agent / 留空字段时兜底的内置 DEFAULT_AGENT（编辑器把它当默认值展示）",
+    handler: () => ({ ...DEFAULT_AGENT }),
+  });
+
+  registerRpcMethod({
     method: "defaults.save",
     description: "保存用户偏好（目前只有 timezone）",
     handler: (params) => {
@@ -1446,10 +1819,19 @@ export function registerCoreRpcMethods(): void {
       if (!p.providers || typeof p.providers !== "object" || Array.isArray(p.providers)) {
         throw new RpcError("INVALID_PARAM", "providers must be an object");
       }
+      // onboarding 写 config.yaml（doctor 诊断暂仍读 config，P1 务实保留）+ 同步条目表
       for (const [name, cfg] of Object.entries(p.providers as Record<string, unknown>)) {
         if (!(PROVIDER_NAMES as readonly string[]).includes(name)) continue;
-        if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
-          saveProvider(name as ProviderName, cfg as Record<string, unknown>);
+        if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
+        const c = cfg as Record<string, unknown>;
+        saveProvider(name as ProviderName, c);
+        // 同步到 providers 条目（运行时以条目为准）
+        const entry = getProviderEntryByName(name);
+        if (entry) {
+          updateProvider(entry.id, {
+            enabled: typeof c.enabled === "boolean" ? c.enabled : undefined,
+            default_model: typeof c.default_model === "string" ? c.default_model : undefined,
+          });
         }
       }
       return { report: await runChecks({ level: 1 }) };
@@ -1477,11 +1859,7 @@ export function registerCoreRpcMethods(): void {
           projectId = proj.id;
         }
       }
-      // 1:1 守卫（DM-06）：与 workspaces.create / projects.createForProject 一致，把"项目已有
-      // 顶层 workspace"的裸 SQLite UNIQUE 约束错换成结构化 RpcError。
-      if (projectHasTopWorkspace(projectId)) {
-        throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
-      }
+      // 项目:代码库已放开 1:N（迁移 037），不再做 1:1 守卫
       // Fail fast：与 workspaces.create 同款 —— 写 DB 前验证远程可达性 + 探测默认分支
       const gitCfg = loadGitConfig();
       const probe = probeRemote(remoteUrl, gitCfg.token);
@@ -1519,6 +1897,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerMiscMutationRpc(): void {
   // ── 第十批：收尾（decide + daemon.log + projects mutation + sessions，10 个） ──
 
   registerRpcMethod({
@@ -1738,7 +2119,7 @@ export function registerCoreRpcMethods(): void {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (!getProjectById(p.id)) throw new RpcError("NOT_FOUND", "project not found");
-      return { requirements: listRequirementsByProject(p.id) };
+      return { requirements: attachWorkspaceIds(listRequirementsByProject(p.id)) };
     },
   });
 
@@ -1753,10 +2134,6 @@ export function registerCoreRpcMethods(): void {
       const alias = typeof p.alias === "string" ? p.alias.trim() : "";
       const pathField = typeof p.path === "string" ? p.path.trim() : "";
       if (!alias || !pathField) throw new RpcError("INVALID_PARAM", "alias 和 path 必填");
-      // 1:1：每个项目仅允许一个工作区（submodule 不计入）
-      if (projectHasTopWorkspace(p.id)) {
-        throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
-      }
       // 服务端兜底探测：未显式给的字段自动从 git 仓库识别（显式值优先）
       const detected = detectWorkspaceGit(pathField);
       const explicitBranch = typeof p.default_branch === "string" && p.default_branch.trim()
@@ -1789,6 +2166,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerWorkspaceRpc(): void {
   // ── workspaces.* —— Workspace CRUD + submodules / healthcheck ──
 
   registerRpcMethod({
@@ -1833,10 +2213,6 @@ export function registerCoreRpcMethods(): void {
       if (!alias) throw new RpcError("INVALID_PARAM", "alias 必填");
 
       const projectId = typeof p.project_id === "string" ? p.project_id.trim() : "";
-      // 1:1：每个项目仅允许一个工作区（submodule 不计入）
-      if (projectId && projectHasTopWorkspace(projectId)) {
-        throw new RpcError("PRECONDITION_FAILED", "每个项目仅允许一个工作区，该项目已有工作区");
-      }
 
       // 解析 remote_url：优先显式传入，其次从 github owner/repo 构造，再回退本地 path 探测
       let remoteUrl: string | null = null;
@@ -1965,9 +2341,15 @@ export function registerCoreRpcMethods(): void {
       // 调用方必须显式 force: true 才能继续（前端弹 confirm dialog）
       if (!p.force) {
         const { getDb } = await import("../core/db");
+        // workspace_id 缓存列 + 集合表（requirement_workspaces）都算引用，UNION 按需求去重
         const row = getDb()
-          .query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM requirements WHERE workspace_id = ?")
-          .get(p.id);
+          .query<{ n: number }, [string, string]>(
+            "SELECT COUNT(*) AS n FROM (" +
+              "SELECT id FROM requirements WHERE workspace_id = ? " +
+              "UNION SELECT requirement_id FROM requirement_workspaces WHERE workspace_id = ?" +
+            ")",
+          )
+          .get(p.id, p.id);
         const affected = row?.n ?? 0;
         if (affected > 0) {
           throw new RpcError(
@@ -2051,6 +2433,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerSessionEtcRpc(): void {
   // ── sessions（chat 历史会话查询 / 删除；流式 chat 接口留 HTTP） ──
 
   registerRpcMethod({
@@ -2164,18 +2549,14 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
-  // ── 扩展 providers.list，补充 API 模式信息 ──
+  // ── providers.listExtended：provider 条目 + API key 状态富集（条目化后表后端） ──
 
   registerRpcMethod({
     method: "providers.listExtended",
-    description: "返回所有 provider 的完整信息（含 API key 状态、compat 供应商）",
+    description: "provider 条目完整信息：条目字段（id/type/subtype/enabled/origin）+ API key 状态 + 旧 shape 兼容（supports_cli/api_only/default_mode）",
     handler: () => {
-      const providers = loadProviders();
       const apiKeys = listApiKeys();
       const keyMap = new Map(apiKeys.map((k) => [k.provider, k]));
-
-      // listApiKeys() 的 env 补齐只覆盖内置 ENV_KEY_MAP；自定义 provider
-      // （或配置了 env_key_name 的）需要额外检查环境变量回落，避免 UI 误标"未配置"
       const envFallback = (
         provider: string,
         customEnvKeyName?: string,
@@ -2184,69 +2565,166 @@ export function registerCoreRpcMethods(): void {
         return envValue ? { key_hint: maskApiKey(envValue), source: "env" } : undefined;
       };
 
-      const result: Array<Record<string, unknown>> = [];
-
-      // 三大内置 provider
-      for (const name of PROVIDER_NAMES) {
-        const cfg = providers[name] || {};
-        const keyInfo = keyMap.get(name);
-        result.push({
-          name,
-          display_name: name.charAt(0).toUpperCase() + name.slice(1),
-          supports_cli: true,
-          supports_api: true,
-          api_only: false,
-          default_mode: cfg.mode || "cli",
-          default_model: cfg.default_model,
+      return listProviderEntries().map((p) => {
+        const isCli = p.type === "cli";
+        // API key 状态只对 api 类型有意义
+        const keyInfo = isCli ? undefined : (keyMap.get(p.name) || envFallback(p.name, p.env_key_name ?? undefined));
+        return {
+          // 条目字段（新）
+          id: p.id,
+          name: p.name,
+          display_name: p.display_name,
+          type: p.type,
+          subtype: p.subtype,
+          enabled: p.enabled !== 0,
+          origin: p.origin,
+          cli_status: p.cli_status,
+          cli_version: p.cli_version,
+          base_url: p.base_url ?? undefined,
+          env_key_name: p.env_key_name ?? undefined,
+          default_model: p.default_model ?? undefined,
+          // 旧 shape 兼容（PhaseAgentEditor / 过渡期提供商页 / Setup）
+          supports_cli: isCli,
+          supports_api: !isCli,
+          api_only: !isCli,
+          default_mode: p.type,
           has_api_key: !!keyInfo,
           key_hint: keyInfo?.key_hint,
           key_source: keyInfo?.source,
-          base_url: cfg.base_url,
-        });
-      }
-
-      // 预置 compat 供应商
-      for (const [name, preset] of Object.entries(BUILTIN_COMPAT_PROVIDERS)) {
-        const cfg = providers[name] || {};
-        const keyInfo = keyMap.get(name) || envFallback(name, cfg.env_key_name);
-        result.push({
-          name,
-          display_name: preset.display_name,
-          supports_cli: false,
-          supports_api: true,
-          api_only: true,
-          default_mode: "api",
-          default_model: cfg.default_model || preset.default_model,
-          has_api_key: !!keyInfo,
-          key_hint: keyInfo?.key_hint,
-          key_source: keyInfo?.source,
-          base_url: cfg.base_url || preset.base_url,
-        });
-      }
-
-      // 用户自定义 compat provider（不在内置列表中的）
-      for (const [name, cfg] of Object.entries(providers)) {
-        if (PROVIDER_NAMES.includes(name as ProviderName)) continue;
-        if (name in BUILTIN_COMPAT_PROVIDERS) continue;
-        const keyInfo = keyMap.get(name) || envFallback(name, cfg.env_key_name);
-        result.push({
-          name,
-          display_name: name,
-          supports_cli: false,
-          supports_api: true,
-          api_only: true,
-          default_mode: "api",
-          default_model: cfg.default_model,
-          has_api_key: !!keyInfo,
-          key_hint: keyInfo?.key_hint,
-          key_source: keyInfo?.source,
-          base_url: cfg.base_url,
-        });
-      }
-
-      return result;
+        };
+      });
     },
   });
+
+  // ── provider 条目 CRUD（条目化重构 P1） ──
+
+  registerRpcMethod({
+    method: "providers.create",
+    description: "新建 provider 条目（type=cli 时探测本地 CLI 落 cli_status）",
+    handler: async (params) => {
+      const p = asObj(params);
+      const name = typeof p.name === "string" ? p.name.trim() : "";
+      const type = p.type as ProviderType;
+      const subtype = typeof p.subtype === "string" ? p.subtype.trim() : "";
+      if (!name) throw new RpcError("INVALID_PARAM", "需要 name");
+      if (type !== "cli" && type !== "api") throw new RpcError("INVALID_PARAM", "type 需为 cli / api");
+      if (!subtype) throw new RpcError("INVALID_PARAM", "需要 subtype");
+      try {
+        const entry = createProvider({
+          name,
+          display_name: typeof p.display_name === "string" && p.display_name.trim() ? p.display_name.trim() : name,
+          type,
+          subtype,
+          cli_bin: typeof p.cli_bin === "string" ? p.cli_bin : null,
+          cli_login_cmd: typeof p.cli_login_cmd === "string" ? p.cli_login_cmd : null,
+          base_url: typeof p.base_url === "string" ? p.base_url : null,
+          env_key_name: typeof p.env_key_name === "string" ? p.env_key_name : null,
+          default_model: typeof p.default_model === "string" ? p.default_model : null,
+          origin: p.origin === "template" ? "template" : "user",
+        });
+        // CLI 类型：添加时探测本地可用性落库
+        if (type === "cli") {
+          const probe = await probeCli(subtype, entry.cli_bin ?? undefined);
+          setProviderCliStatus(entry.id, probe.status, probe.version ?? null);
+        }
+        emitBus({ type: "config:updated", payload: {} });
+        return { provider: getProviderById(entry.id) };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.update",
+    description: "更新 provider 条目（display_name / default_model / base_url / env_key_name / enabled）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (!getProviderById(p.id)) throw new RpcError("NOT_FOUND", `provider 条目不存在：${p.id}`);
+      try {
+        const updated = updateProvider(p.id, {
+          display_name: typeof p.display_name === "string" ? p.display_name : undefined,
+          base_url: p.base_url === null || typeof p.base_url === "string" ? (p.base_url as string | null) : undefined,
+          env_key_name: p.env_key_name === null || typeof p.env_key_name === "string" ? (p.env_key_name as string | null) : undefined,
+          default_model: p.default_model === null || typeof p.default_model === "string" ? (p.default_model as string | null) : undefined,
+          enabled: typeof p.enabled === "boolean" ? p.enabled : undefined,
+        });
+        emitBus({ type: "config:updated", payload: {} });
+        return { provider: updated };
+      } catch (e: unknown) {
+        throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.delete",
+    description: "删除 provider 条目（P1：硬删 + 有工作流引用则拒删；软删降级 P2）",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const entry = getProviderById(p.id);
+      if (!entry) throw new RpcError("NOT_FOUND", `provider 条目不存在：${p.id}`);
+      // P1 引用守卫：被工作流引用则拒删（软删降级留 P2）
+      const refs = listWorkflowsUsingProvider(entry.name);
+      if (refs.length > 0 && !p.force) {
+        const names = refs.map((r) => r.workflow).join("、");
+        throw new RpcError("PRECONDITION_FAILED",
+          `provider「${entry.name}」被工作流引用（${names}），删除会让这些工作流无法使用。` +
+          `请先改这些工作流的 provider，或传 force 强删。`);
+      }
+      deleteProvider(p.id);
+      emitBus({ type: "config:updated", payload: {} });
+      return { ok: true };
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.templates",
+    description: "可一键添加的 compat 模板（DeepSeek/Kimi/MiniMax 内置预置，预填 base_url + 建议模型）",
+    handler: () => {
+      return Object.entries(BUILTIN_COMPAT_PROVIDERS).map(([name, preset]) => ({
+        name,
+        display_name: preset.display_name,
+        type: "api" as const,
+        subtype: "openai-compat" as const,
+        base_url: preset.base_url,
+        default_model: preset.default_model,
+        env_key_name: preset.env_key,
+      }));
+    },
+  });
+
+  registerRpcMethod({
+    method: "providers.detectCli",
+    description: "重新探测某 cli 条目的本地可用性，落 cli_status",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      const entry = getProviderById(p.id);
+      if (!entry) throw new RpcError("NOT_FOUND", `provider 条目不存在：${p.id}`);
+      if (entry.type !== "cli") throw new RpcError("INVALID_PARAM", "仅 cli 类型条目可探测");
+      const probe = await probeCli(entry.subtype, entry.cli_bin ?? undefined);
+      setProviderCliStatus(entry.id, probe.status, probe.version ?? null);
+      return { status: probe.status, version: probe.version, install_hint: probe.install_hint, error: probe.error };
+    },
+  });
+}
+
+/** 注册全部内核 RPC method（按域分组调用，原单个 2500 行函数已拆为下列子函数）。 */
+export function registerCoreRpcMethods(): void {
+  // 幂等守卫（原在函数体首行）：已注册则跳过，防测试 / 多次调用重复注册
+  if (hasRpcMethod("daemon.status")) return;
+  registerCoreQueryRpc();
+  registerTaskRpc();
+  registerWorkflowRpc();
+  registerRequirementRpc();
+  registerProviderAgentRpc();
+  registerSandboxSetupRpc();
+  registerMiscMutationRpc();
+  registerWorkspaceRpc();
+  registerSessionEtcRpc();
 }
 
 function countTasksByStatus(): Record<string, number> {

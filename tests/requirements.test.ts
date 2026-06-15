@@ -13,7 +13,7 @@ import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest, initDb } from "../src/core/db";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createProject } from "../src/core/projects";
 import {
   createRequirement,
@@ -30,11 +30,11 @@ import {
   appendFeedback,
   listFeedbacks,
   latestFeedback,
-} from "../src/core/requirement-feedbacks";
+} from "../src/core/requirements/feedbacks";
 import {
   createQuestion,
   addReply,
-} from "../src/core/requirement-questions";
+} from "../src/core/requirements/questions";
 
 describe("migration 005-requirements（pre-008 schema 验证）", () => {
   it("创建 requirements 表，含全部 spec 字段", () => {

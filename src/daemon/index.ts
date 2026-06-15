@@ -5,7 +5,7 @@ import { installAutopilotResolver } from "../core/autopilot-resolver";
 import { initDb, closeDb, listTasks, updateTask, closeOpenPhaseEvents } from "../core/db";
 import { forceTransition } from "../core/state-machine";
 import { runPendingMigrations } from "../core/migrate";
-import { discover } from "../core/registry";
+import { discover } from "../core/workflow/registry";
 import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
 import { runInBackground } from "../core/runner";
 import { initDaemonFileLog, log } from "../core/logger";
@@ -15,16 +15,17 @@ import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
 import { startServerWithRetry } from "./server";
 import { setWebDistDir, reloadApiToken, getApiTokenState, extendAllowedOrigins, detectLanIPv4, isExposedHost, startupAuthBlocked } from "./routes";
+import { generateApiToken, saveApiToken } from "../core/api-token";
 import { hasAnyUser } from "../core/auth";
-import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo } from "./pid";
+import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo, writeRestartFlag, consumeRestartFlag } from "./pid";
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
 import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
 import { initProviderCliMonitor, disposeProviderCliMonitor } from "./provider-cli-monitor";
 import { runClarifierWatchdog } from "./clarifier-watchdog";
 import { initRequirementTaskBridge, disposeRequirementTaskBridge } from "./requirement-task-bridge";
+import { initFixRevisionRunner, disposeFixRevisionRunner } from "./fix-revision-runner";
+import { initDoneWorkspaceCleanup, disposeDoneWorkspaceCleanup } from "./done-workspace-cleanup";
 import { initMcpRuntime, disposeMcpRuntime } from "./mcp-runtime";
-import { createDefaultAggregator, type Aggregator } from "../core/now-aggregator";
-import { setNowAggregator } from "./routes-now";
 import type { AutopilotEvent } from "./protocol";
 import { RESTART_SENTINEL_CODE, FATAL_CONFIG_CODE } from "./supervisor";
 import { writeFileSync, existsSync, unlinkSync, watch as fsWatch } from "fs";
@@ -35,9 +36,6 @@ import { writeFileSync, existsSync, unlinkSync, watch as fsWatch } from "fs";
 // 走相同的 shutdown 清理路径但 exit code 不同。
 // ──────────────────────────────────────────────
 let _activeShutdown: ((exitCode: number) => void) | null = null;
-
-/** 主动 respawn 标志文件路径：让新 daemon 启动时识别"上一次是主动重启不是崩溃" */
-const restartFlagPath = (): string => join(AUTOPILOT_HOME, "runtime", "restart.flag");
 
 /**
  * 由 RPC 等内部调用方触发 daemon 重启。
@@ -53,11 +51,7 @@ const restartFlagPath = (): string => join(AUTOPILOT_HOME, "runtime", "restart.f
  */
 export function requestRestart(delayMs = 100): boolean {
   if (!_activeShutdown) return false;
-  try {
-    writeFileSync(restartFlagPath(), String(Date.now()), "utf-8");
-  } catch (e: unknown) {
-    console.warn("写 restart.flag 失败（继续重启，但运行中 task 会被标 dangling）：", e);
-  }
+  writeRestartFlag();
   const fn = _activeShutdown;
   setTimeout(() => fn(RESTART_SENTINEL_CODE), delayMs);
   return true;
@@ -77,18 +71,7 @@ export function requestShutdown(delayMs = 150): boolean {
   return true;
 }
 
-/**
- * 检查并消费 restart.flag。返回 true 表示这次启动是主动 respawn 的延续。
- * 调用方负责在消费后决定是否对 running_* task 做自动重启。
- */
-function consumeRestartFlag(): boolean {
-  const p = restartFlagPath();
-  if (!existsSync(p)) return false;
-  try {
-    unlinkSync(p);
-  } catch { /* 删失败也不影响逻辑，下次启动还会再读到（保守做法） */ }
-  return true;
-}
+// restart.flag 的写入/消费 helpers 收口在 pid.ts（CLI `daemon restart` 也要写 flag）
 
 // ──────────────────────────────────────────────
 // Daemon 入口
@@ -152,20 +135,34 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   // 安全门（SEC-6）：暴露 host 必须已设防（API token 或登录用户），否则内网裸奔。
   // 移到 initDb/migrations 后以便查 hasAnyUser——A2 后 JWT 是服务端一等鉴权，有用户=已设防。
+  //
+  // 2026-06-11 起从「拒启 exit(2)」改为「自动设防」：无防护时自动生成 token 写入
+  // runtime/api-token 并继续启动 —— 生成后系统即是设防状态（远端必须提供 token，
+  // TokenGate 会拦），安全语义不降级，而「配置矛盾 → 重启才引爆 → 启不起来」的
+  // 反复事故（2026-06-10/11 两次）从根上消除。仅 token 写盘失败时才退回拒启。
   {
     const tokenState = getApiTokenState();
     if (startupAuthBlocked(host, tokenState.is_set, hasAnyUser(), !!opts.insecureNoAuth)) {
-      // supervisor 模式下子进程 stderr 被 ignore，console.error 用户看不到；
-      // 必须同时写 daemon.log，否则表象只是"无法启动"（2026-06-10 事故）
-      log.error(
-        "SEC-6 启动安全门拦截：host=%s 对外暴露但未设防（无 API token / 无登录用户），daemon 退出 (code=2)。" +
-        "解法：Web 设置页生成 token / 写 runtime/api-token 文件 / 设 AUTOPILOT_API_TOKEN / 切回 127.0.0.1 / --insecure-no-auth",
-        host,
-      );
-      console.error(`
-错误：daemon 配置为监听 ${host}（对外暴露），但既未设置 API token、也无登录用户。
-
-这意味着同网段的任何人都能访问你的任务、凭证、Agent 调用，等于内网裸奔。
+      try {
+        const token = generateApiToken();
+        saveApiToken(token);
+        reloadApiToken();
+        log.warn(
+          "SEC-6 安全门：host=%s 对外暴露但未设防 → 已自动生成 API token 并继续启动。" +
+          "远端访问需提供 token（本机 Web 设置页 → 网络访问 可查看/轮换；文件在 runtime/api-token）",
+          host,
+        );
+      } catch (e: unknown) {
+        // 自动设防失败（如磁盘只读）→ 维持拒启语义
+        // supervisor 模式下子进程 stderr 被 ignore，console.error 用户看不到；
+        // 必须同时写 daemon.log，否则表象只是"无法启动"（2026-06-10 事故）
+        log.error(
+          "SEC-6 启动安全门拦截：host=%s 对外暴露未设防，且自动生成 token 失败（%s），daemon 退出 (code=2)。" +
+          "解法：Web 设置页生成 token / 写 runtime/api-token 文件 / 设 AUTOPILOT_API_TOKEN / 切回 127.0.0.1 / --insecure-no-auth",
+          host, e instanceof Error ? e.message : String(e),
+        );
+        console.error(`
+错误：daemon 配置为监听 ${host}（对外暴露）且未设防，自动生成 API token 失败。
 
 请选择以下之一：
   1. 在 Web 设置页生成 token 或创建登录用户（推荐）
@@ -174,7 +171,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   4. 切回 127.0.0.1（autopilot daemon stop && autopilot daemon run，或改 config.yaml）
   5. 明知风险仍要继续：autopilot daemon run --insecure-no-auth
 `);
-      process.exit(FATAL_CONFIG_CODE);
+        process.exit(FATAL_CONFIG_CODE);
+      }
     }
   }
 
@@ -231,11 +229,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const { registerCoreRpcMethods } = await import("./rpc-methods");
   registerCoreRpcMethods();
 
-  // 启动 /now 状态推导引擎
-  const nowAggregator: Aggregator = createDefaultAggregator();
-  await nowAggregator.start();
-  setNowAggregator(nowAggregator);
-  log.info("now-aggregator 已启动，当前卡片数 %d", nowAggregator.getCards().length);
+  // 启动通知 recorder（事件型通知流；必须先于 scheduler / 恢复逻辑挂订阅，避免漏记）
+  const { initNotificationRecorder } = await import("./notification-recorder");
+  const disposeNotificationRecorder = initNotificationRecorder();
 
   // 启动 requirement-scheduler（订阅 event-bus）
   initRequirementScheduler();
@@ -245,6 +241,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   initProviderCliMonitor();
   // 桥接 task 状态变化 → 同步 requirement 状态
   initRequirementTaskBridge();
+  // fix_revision 修复执行器（v2 R3：注册内置 __fix 工作流 + fix_revision → 创建 kind=fix
+  // 标准 run）。必须先于 recoverDanglingTasks——恢复 running_fix 任务要能找到 __fix 工作流。
+  initFixRevisionRunner();
+  // 需求完成即清任务 workspace（交付已在远程 PR，本地 clone 占空间无保留价值）
+  initDoneWorkspaceCleanup();
 
   // 桥接：事件总线 → WebSocket 广播
   bus.on("*", (event: AutopilotEvent) => {
@@ -331,8 +332,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     disposeRequirementClarifier();
     disposeProviderCliMonitor();
     disposeRequirementTaskBridge();
-    nowAggregator.dispose();
-    setNowAggregator(null);
+    disposeFixRevisionRunner();
+    disposeDoneWorkspaceCleanup();
+    disposeNotificationRecorder();
     disableBus();
     // server.stop 必须 await 完成后才能 exit：它是异步的（等 socket 真正关闭），
     // 同步调用后立刻 process.exit 会让进程死在 socket 关闭中途——浏览器保持着

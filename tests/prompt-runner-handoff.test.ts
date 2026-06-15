@@ -20,8 +20,8 @@ import {
   collectUpstreamHandoffs,
   readPhaseHandoff,
   expandPromptTemplate,
-} from "../src/core/prompt-runner";
-import type { WorkflowDefinition, PhaseDefinition } from "../src/core/registry";
+} from "../src/core/workflow/prompt-runner";
+import type { WorkflowDefinition, PhaseDefinition } from "../src/core/workflow/registry";
 
 let tmpHome: string;
 
@@ -194,8 +194,9 @@ describe("collectUpstreamHandoffs + readPhaseHandoff", () => {
   it("全无 handoff 时返回降级提示", () => {
     const wf = buildWorkflow([{ name: "draft" }, { name: "polish" }]);
     const result = collectUpstreamHandoffs("t-4", wf, "polish", wsRootFor("t-4"));
-    expect(result).toContain("上游无 handoff");
-    expect(result).toContain("agent_output.md");
+    expect(result).toContain("未提供 handoff");
+    // 降级提示不再叫 agent 去读文件（prompt 模式：只依据提示判断，文件 I/O 框架包办）
+    expect(result).toContain("不要去读取任何文件");
   });
 
   it("readPhaseHandoff 单 phase 读取", () => {
@@ -234,6 +235,21 @@ describe("expandPromptTemplate ${HANDOFF}", () => {
       workspaceRoot: wsRootFor("t-7"),
     });
     expect(out).toContain("ONLY_DRAFT");
+  });
+
+  it("${HANDOFF_design} 小写 phase 后缀也能取（历史 bug：通用 ${VAR} 正则只认大写、整体漏掉）", () => {
+    const wf = buildWorkflow([{ name: "design" }, { name: "review" }]);
+    writeHandoff("t-9", 0, "design", "DESIGN_PLAN");
+
+    const out = expandPromptTemplate("评审：\n${HANDOFF_design}\n", {
+      taskId: "t-9",
+      phase: "review",
+      task: {},
+      workflow: wf,
+      workspaceRoot: wsRootFor("t-9"),
+    });
+    expect(out).toContain("DESIGN_PLAN");
+    expect(out).not.toContain("${HANDOFF_design}"); // 字面占位符必须消失
   });
 
   it("无 workflow 时 ${HANDOFF} 留空（防 ctx 退化）", () => {

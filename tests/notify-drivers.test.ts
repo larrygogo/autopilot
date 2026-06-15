@@ -10,11 +10,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { getEnabledDrivers, type NotifyDriverConfig } from "../src/core/notify-drivers";
-import { createWindowsToastDriver } from "../src/core/notify-drivers/windows-toast";
-import { createMacosOsascriptDriver } from "../src/core/notify-drivers/macos-osascript";
-import { createLinuxNotifySendDriver } from "../src/core/notify-drivers/linux-notify-send";
-import { createSlackWebhookDriver } from "../src/core/notify-drivers/slack-webhook";
+import { getEnabledDrivers, type NotifyDriverConfig } from "../src/core/notify/drivers";
+import { createWindowsToastDriver } from "../src/core/notify/drivers/windows-toast";
+import { createMacosOsascriptDriver } from "../src/core/notify/drivers/macos-osascript";
+import { createLinuxNotifySendDriver } from "../src/core/notify/drivers/linux-notify-send";
+import { createSlackWebhookDriver } from "../src/core/notify/drivers/slack-webhook";
 
 const fakeTask = {
   id: "t-1",

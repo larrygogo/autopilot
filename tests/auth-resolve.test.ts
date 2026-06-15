@@ -32,8 +32,11 @@ beforeEach(async () => {
   reloadApiToken();
 });
 afterEach(() => {
-  if (oldHome !== undefined) process.env.AUTOPILOT_HOME = oldHome; else delete process.env.AUTOPILOT_HOME;
+  // ⚠️ deleteApiToken 的路径按「调用时」的 AUTOPILOT_HOME 重算 —— 必须在恢复 env 之前调，
+  // 否则删的是用户真实 ~/.autopilot/runtime/api-token（2026-06-11 事故：每跑一次
+  // bun test 就清一次生产 token，远程访问全挂）。
   try { deleteApiToken(); } catch { /* ignore */ }
+  if (oldHome !== undefined) process.env.AUTOPILOT_HOME = oldHome; else delete process.env.AUTOPILOT_HOME;
   reloadApiToken();
   _setDbForTest(null);
   rmSync(tmpHome, { recursive: true, force: true });

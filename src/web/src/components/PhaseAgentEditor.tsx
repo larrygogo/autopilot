@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Bot, RotateCcw, PlayCircle } from "lucide-react";
-import { api, type InlineAgentConfig, type ProviderModelsResult } from "../hooks/useApi";
+import { api, type InlineAgentConfig, type ProviderModelsResult, type ProviderExtendedInfo } from "../hooks/useApi";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,9 +24,21 @@ import { AgentDryRunDialog } from "@/components/AgentDryRunDialog";
 // markup / 样式沿用原 WorkflowAgentDialog 的表单，保持视觉一致。
 // ──────────────────────────────────────────────
 
-const PROVIDERS = ["anthropic", "openai", "google"] as const;
-const PERMISSION_MODES = ["auto", "ask", "readonly", "deny"] as const;
 const DEFAULT_VALUE = "__default__";
+
+// 能拉模型列表的 provider（model-list 仅支持官方三家；compat 走手动输入模型名）
+const MODEL_LIST_PROVIDERS = ["anthropic", "openai", "google"] as const;
+
+// permission_mode：cli（透传 Claude Code --permission-mode）与 api（内置工具执行器分级）
+// 两套值合并为一个列表，default / bypassPermissions 两边共有合一，各自独有的标注适用模式。
+// 中文 label 仅展示，写回 yaml 用 value 原值。
+const PERMISSION_MODES = [
+  { value: "default", label: "默认 · 危险操作有防护" },
+  { value: "acceptEdits", label: "自动接受编辑（CLI）" },
+  { value: "plan", label: "计划模式 · 只读规划（CLI）" },
+  { value: "cautious", label: "谨慎 · 禁用 bash（API）" },
+  { value: "bypassPermissions", label: "跳过所有确认 · 放开" },
+] as const;
 
 interface Props {
   /** 当前 phase 上的内联 agent 配置；无则 undefined（= 用默认 agent） */
@@ -43,6 +55,7 @@ function normalizeInline(raw: unknown): InlineAgentConfig | undefined {
   const a = raw as Record<string, unknown>;
   const out: InlineAgentConfig = {};
   if (typeof a.provider === "string") out.provider = a.provider;
+  if (a.mode === "cli" || a.mode === "api") out.mode = a.mode;
   if (typeof a.model === "string") out.model = a.model;
   if (typeof a.max_turns === "number") out.max_turns = a.max_turns;
   if (typeof a.permission_mode === "string") out.permission_mode = a.permission_mode;
@@ -59,7 +72,10 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
   const [models, setModels] = useState<Record<string, ProviderModelsResult>>({});
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState(false);
+  const [providers, setProviders] = useState<ProviderExtendedInfo[]>([]);
   const [dryRunOpen, setDryRunOpen] = useState(false);
+  // 兜底 DEFAULT_AGENT（留空字段时实际生效的默认值）——展开后拉一次，用作各字段 placeholder
+  const [defaultAgent, setDefaultAgent] = useState<InlineAgentConfig | null>(null);
 
   // 切换 phase 时（configured 变化）重置展开态
   useEffect(() => {
@@ -68,12 +84,24 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
     // eslint-disable-line react-hooks/exhaustive-deps
   }, [configured]);
 
-  // 展开时拉三家 provider 的模型列表（给 ModelCombobox 选项）
+  // 展开时拉可选 provider 列表（官方 + compat 预置 + config 自定义）
+  useEffect(() => {
+    if (!expanded) return;
+    api.listProvidersExtended().then(setProviders).catch(() => setProviders([]));
+  }, [expanded]);
+
+  // 展开时拉一次 DEFAULT_AGENT —— 各字段留空时把它当 placeholder 显示（让用户看到默认值）
+  useEffect(() => {
+    if (!expanded || defaultAgent) return;
+    api.getDefaultAgent().then(setDefaultAgent).catch(() => {});
+  }, [expanded, defaultAgent]);
+
+  // 展开时拉官方三家 provider 的模型列表（给 ModelCombobox 选项；compat 走手动输入）
   useEffect(() => {
     if (!expanded) return;
     setModelsLoading(true);
     setModelsError(false);
-    Promise.all(PROVIDERS.map((n) => api.getProviderModels(n).catch(() => null)))
+    Promise.all(MODEL_LIST_PROVIDERS.map((n) => api.getProviderModels(n).catch(() => null)))
       .then((list) => {
         const map: Record<string, ProviderModelsResult> = {};
         let any = false;
@@ -99,6 +127,10 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
     }
     onChange(base);
   }
+
+  // 历史/未知值（如老副本写的 auto）：原样显示标「历史值」，不偷改
+  const permValues = PERMISSION_MODES.map((o) => o.value) as readonly string[];
+  const permIsHistorical = !!draft.permission_mode && !permValues.includes(draft.permission_mode);
 
   function enableConfig() {
     onChange({});
@@ -133,8 +165,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
 
       {!configured && !expanded && (
         <p className="mt-1.5 text-[10px] text-muted-foreground">
-          使用默认 agent（DEFAULT_AGENT）：anthropic / claude-sonnet-4-6。
-          展开可为本阶段单独覆盖 provider / 模型 / 系统提示词等。
+          用默认 agent（anthropic / claude-sonnet-4-6）。展开可以给这个阶段单独换提供商、模型、提示词。
         </p>
       )}
 
@@ -143,8 +174,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
           {!configured ? (
             <div className="rounded-lg border border-border bg-muted/30 p-3">
               <p className="text-[11px] text-muted-foreground">
-                本阶段未配置内联 agent，运行时使用默认 agent（DEFAULT_AGENT）。
-                点下方按钮开始为本阶段单独配置。
+                这个阶段还没单独配 agent，会用默认的（anthropic / claude-sonnet-4-6）。想单独配就点下面。
               </p>
               <Button variant="outline" size="sm" className="mt-2 h-7" onClick={enableConfig}>
                 <Bot className="h-3.5 w-3.5" />
@@ -155,9 +185,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
             <>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label className="bp-label text-[10px] text-muted-foreground">
-                    提供商 (provider)
-                  </Label>
+                  <Label className="bp-label text-[10px] text-muted-foreground">提供商</Label>
                   <Select
                     value={draft.provider ?? DEFAULT_VALUE}
                     onValueChange={(v) => update("provider", v === DEFAULT_VALUE ? undefined : v)}
@@ -166,22 +194,51 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={DEFAULT_VALUE}>（默认 · anthropic）</SelectItem>
-                      {PROVIDERS.map((p) => (
-                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                      <SelectItem value={DEFAULT_VALUE}>默认 · anthropic</SelectItem>
+                      {providers.map((p) => (
+                        <SelectItem key={p.name} value={p.name}>
+                          {p.display_name}
+                          {p.api_only ? " · API" : ""}
+                          {!p.has_api_key && p.api_only ? "（未配密钥）" : ""}
+                        </SelectItem>
                       ))}
+                      {/* 当前值不在列表（自定义已删 / 列表未加载完）→ 原样显示，不丢选中态 */}
+                      {draft.provider && !providers.some((p) => p.name === draft.provider) && (
+                        <SelectItem value={draft.provider}>{draft.provider}</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="bp-label text-[10px] text-muted-foreground">
-                    最大轮数 (max_turns)
-                  </Label>
+                  <Label className="bp-label text-[10px] text-muted-foreground">模型</Label>
+                  <ModelCombobox
+                    value={draft.model}
+                    onChange={(v) => update("model", v)}
+                    options={draft.provider ? models[draft.provider]?.models ?? [] : []}
+                    placeholder={
+                      modelsLoading
+                        ? "加载模型…"
+                        : !draft.provider
+                          ? "先选提供商"
+                          : defaultAgent?.model
+                            ? `留空用默认（${defaultAgent.model}）`
+                            : "留空用默认模型"
+                    }
+                    clearable
+                    disabled={!draft.provider}
+                  />
+                  {modelsError && (
+                    <p className="text-[10px] text-warning">模型列表加载失败，直接手输模型名也行</p>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="bp-label text-[10px] text-muted-foreground">最大轮数</Label>
                   <Input
                     type="number"
                     min={1}
-                    placeholder="留空走默认"
+                    placeholder={defaultAgent?.max_turns != null ? `留空用默认（${defaultAgent.max_turns}）` : "留空用默认"}
                     value={draft.max_turns ?? ""}
                     onChange={(e) =>
                       update("max_turns", e.target.value ? parseInt(e.target.value, 10) : undefined)
@@ -191,28 +248,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="bp-label text-[10px] text-muted-foreground">
-                    模型 (model)
-                  </Label>
-                  <ModelCombobox
-                    value={draft.model}
-                    onChange={(v) => update("model", v)}
-                    options={draft.provider ? models[draft.provider]?.models ?? [] : []}
-                    placeholder={
-                      modelsLoading ? "加载模型…" : draft.provider ? "留空走 provider 默认" : "先选 provider"
-                    }
-                    clearable
-                    disabled={!draft.provider}
-                  />
-                  {modelsError && (
-                    <p className="text-[10px] text-warning">模型列表加载失败，可手动输入模型名</p>
-                  )}
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="bp-label text-[10px] text-muted-foreground">
-                    权限模式 (permission_mode)
-                  </Label>
+                  <Label className="bp-label text-[10px] text-muted-foreground">权限模式</Label>
                   <Select
                     value={draft.permission_mode ?? DEFAULT_VALUE}
                     onValueChange={(v) =>
@@ -223,10 +259,15 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={DEFAULT_VALUE}>（默认 · auto）</SelectItem>
+                      <SelectItem value={DEFAULT_VALUE}>默认（{defaultAgent?.permission_mode ?? "内置"}）</SelectItem>
                       {PERMISSION_MODES.map((p) => (
-                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                        <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
                       ))}
+                      {permIsHistorical && (
+                        <SelectItem value={draft.permission_mode!}>
+                          {draft.permission_mode}（历史值）
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -235,19 +276,27 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
               <div className="space-y-1.5">
                 <Label className="bp-label text-[10px] text-muted-foreground">
                   系统提示词 (system_prompt)
+                  {draft.system_prompt == null && defaultAgent?.system_prompt && (
+                    <span className="ml-1.5 font-normal text-[10px] text-muted-foreground/70">· 当前为默认值，直接改即覆盖</span>
+                  )}
                 </Label>
                 <Textarea
                   className="min-h-[120px] resize-y font-mono text-[11px] leading-relaxed"
-                  placeholder="本阶段特化的 agent 系统提示词。留空则沿用默认 agent 的 system_prompt。"
-                  value={draft.system_prompt ?? ""}
-                  onChange={(e) => update("system_prompt", e.target.value || undefined)}
+                  placeholder="这个阶段专用的人设。留空就用默认 agent 的。"
+                  // 留空时预填默认人设（可编辑黑字）；保存时「值==默认」按留空处理，不把默认烤进 yaml
+                  // —— 不改 = 继续跟随默认（默认变了自动跟），改了才持久化成本阶段专属。
+                  value={draft.system_prompt ?? defaultAgent?.system_prompt ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    update("system_prompt", v && v !== defaultAgent?.system_prompt ? v : undefined);
+                  }}
                   spellCheck={false}
                 />
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[10px] text-muted-foreground">
-                  改完点流水线底部「保存修改」生效。空字段沿用默认 agent。
+                  改完点流水线底部的「保存修改」。没填的项用默认 agent。
                 </p>
                 <div className="flex items-center gap-1.5">
                   <Button variant="outline" size="sm" className="h-7" onClick={() => setDryRunOpen(true)}>

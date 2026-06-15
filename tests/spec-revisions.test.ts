@@ -15,7 +15,7 @@ import { up as m013 } from "../src/migrations/013-active-question-id";
 import { up as m014 } from "../src/migrations/014-resolve-orphan-open-questions";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
 import { _setDbForTest } from "../src/core/db";
-import { createSpecRevision, listSpecRevisionsByRequirement } from "../src/core/spec-revisions";
+import { createSpecRevision, listSpecRevisionsByRequirement } from "../src/core/requirements/spec-revisions";
 
 function initSchema(): void {
   const db = new Database(":memory:");

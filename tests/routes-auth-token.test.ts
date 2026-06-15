@@ -62,10 +62,12 @@ describe("checkAuth 鉴权路径", () => {
   });
 
   afterAll(() => {
-    // 先恢复 env（让 deleteApiToken 只删 tmpHome 下文件，不碰真实文件）
+    // ⚠️ deleteApiToken 的路径按「调用时」的 AUTOPILOT_HOME 重算 —— 必须在恢复 env
+    // 之前调（此时还指向 tmpHome）。旧代码顺序反了：先恢复 env 再删，删的是用户真实
+    // ~/.autopilot/runtime/api-token，只是被下面的备份兜底掩盖了。
+    try { deleteApiToken(); } catch { /* ignore */ }
     if (oldHome !== undefined) process.env.AUTOPILOT_HOME = oldHome;
     else delete process.env.AUTOPILOT_HOME;
-    try { deleteApiToken(); } catch { /* ignore */ }
     reloadApiToken();
     _setDbForTest(null);
     // 兜底：如果 backup 有但真实文件不在，恢复

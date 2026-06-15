@@ -1,11 +1,11 @@
 import { getTask, touchTaskHeartbeat, updateTask, startTaskPhase, endTaskPhase } from "./db";
 import { acquireLock, releaseLock } from "./infra";
 import { log, setPhase, resetPhase, setTaskId } from "./logger";
-import { appendTaskEvent } from "./task-logs";
-import { runWithTaskContext } from "./task-context";
-import { registerRun, unregisterRun } from "./task-lifecycle";
+import { appendTaskEvent } from "./task/logs";
+import { runWithTaskContext } from "./task/context";
+import { registerRun, unregisterRun } from "./task/lifecycle";
 import { transition, forceTransition, InvalidTransitionError } from "./state-machine";
-import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./registry";
+import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./workflow/registry";
 import { getTaskSandbox } from "./sandbox";
 import { closeAgents } from "../agents/registry";
 import { clearPhaseRecoveryCount } from "./watcher";
@@ -195,7 +195,7 @@ export async function executePhase(taskId: string, phase: string): Promise<void>
     // prompt-runner 跑完会自动 consumePendingPrompts；ts phase 函数需自己显式调，
     // 忘调则在此 warn 让用户能从日志看到。不 fail，仅提醒。
     try {
-      const { peekPendingPrompts } = await import("./task-send-prompt");
+      const { peekPendingPrompts } = await import("./task/send-prompt");
       const unconsumed = peekPendingPrompts(taskId);
       if (unconsumed.length > 0) {
         log.warn(

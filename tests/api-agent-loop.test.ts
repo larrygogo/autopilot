@@ -419,7 +419,7 @@ describe("apiLoopInitPromise 失败后清除锁（I-1）", () => {
     });
 
     // 手动模拟 task context（ensureApiLoop 需要 ctx.sandboxDir）
-    const { runWithTaskContext } = await import("../src/core/task-context");
+    const { runWithTaskContext } = await import("../src/core/task/context");
     const ctx = {
       taskId: "test-001",
       phase: "develop",

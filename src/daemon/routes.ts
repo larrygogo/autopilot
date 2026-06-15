@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { readdir } from "node:fs/promises";
 import { timingSafeEqual } from "node:crypto";
+import { invokeRpcMethod } from "./rpc";
 import { join, resolve, sep, dirname, parse as parsePath } from "path";
 import {
   signJwt,
@@ -32,36 +33,30 @@ import { DEFAULT_AGENT } from "../core/agent-defaults";
 import type { ListTasksFilters } from "../core/db";
 import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
-import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
-import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "../core/task-delete";
-import { cancelTaskAction, restartTaskAction, answerTaskAction, decideTaskAction, releaseTaskSandboxAction, cancelRequirementWithTasks, cancelTasksForRequirements, TaskActionError } from "./task-actions";
+import { startTaskFromTemplate, StartTaskError } from "../core/task/factory";
+import { releaseTaskSandboxAction, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
-import { listWorkspaces, getWorkspaceById, getTopWorkspaceForProject } from "../core/workspaces";
-import { listSubPrs } from "../core/requirement-sub-prs";
+import { listWorkspaces } from "../core/sandbox/workspaces";
+import { listSubPrs } from "../core/requirements/sub-prs";
 import {
   listRequirements,
   getRequirementById,
-  createRequirement,
-  updateRequirement,
-  setRequirementStatus,
-  nextRequirementId,
   finishClarification,
 } from "../core/requirements";
+import { resolveDeliveryFilePath, maxDeliveryRound } from "../core/requirements/deliveries";
 import {
   saveAttachment,
   listAttachments as listReqAttachments,
   getAttachmentById as getReqAttachmentById,
   deleteAttachment as deleteReqAttachment,
-} from "../core/requirement-attachments";
+} from "../core/requirements/attachments";
 import {
   listComments,
-  createComment,
   getCommentById,
   resolveComment,
-  nextCommentId,
-} from "../core/requirement-comments";
+} from "../core/requirements/comments";
 import type { Requirement } from "../core/requirements";
-import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
+import { listSpecRevisionsByRequirement } from "../core/requirements/spec-revisions";
 import { runClarifierRound } from "./requirement-clarifier";
 import { getRound } from "./clarifier-progress";
 import { handleMcpHttp } from "../agents/mcp-server";
@@ -82,19 +77,21 @@ import {
   saveWorkflowYaml,
   createWorkflow,
   deleteWorkflowDir,
-  setWorkflowPhases,
+  type PhaseEntryInput,
+} from "../core/workflow/registry";
+import { setWorkflowPhases } from "../core/workflow/registry-authoring";
+import {
   syncWorkflowTs,
   renameRunFunctions,
   pruneOrphanRunFunctions,
   replaceRunFunction,
-  type PhaseEntryInput,
-} from "../core/registry";
+} from "../core/workflow/ts-authoring";
 import {
   listWorkflowsInDb,
   getWorkflowFromDb,
   updateDbWorkflow,
   deleteDbWorkflow,
-} from "../core/workflows";
+} from "../core/workflow/workflows";
 import {
   loadDaemonConfig,
   saveDaemonConfig,
@@ -104,14 +101,13 @@ import {
 import type { Agent } from "../agents/agent";
 import { loadApiToken, previewApiToken, saveApiToken, deleteApiToken, generateApiToken } from "../core/api-token";
 import {
-  ensureTaskSandbox,
   listSandboxDir,
   readSandboxFile,
   resolveSandboxPath,
   spawnSandboxZip,
   sandboxSize,
-} from "../core/sandbox";
-import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task-logs";
+} from "../core/sandbox/browse";
+import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task/logs";
 import { emit } from "../core/event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -422,7 +418,18 @@ function makeResponders(req: Request) {
       headers: { "Content-Type": "application/json", ...cors },
     });
   const error = (message: string, status = 400): Response => json({ error: message }, status);
-  return { json, error };
+  /**
+   * 把 HTTP 端点转发到 WS RPC handler，消除 routes 与 rpc-methods 的双实现 drift
+   * （单一真相 = RPC handler；routes 退化成 HTTP↔RPC 形状翻译）。RpcError code → HTTP status。
+   */
+  const forwardRpc = async (rpcMethod: string, params: unknown): Promise<Response> => {
+    const r = await invokeRpcMethod(rpcMethod, params);
+    if (r.ok) return json(r.payload);
+    const code = r.error.code;
+    const status = code === "NOT_FOUND" ? 404 : code === "CONFLICT" ? 409 : code === "INTERNAL" ? 500 : 400;
+    return error(r.error.message, status);
+  };
+  return { json, error, forwardRpc };
 }
 
 function extractParam(path: string, pattern: RegExp): string | null {
@@ -468,7 +475,7 @@ export function renderDecisionMd(d: { phase: string; decision: string; note: str
 // ──────────────────────────────────────────────
 
 // 字母表去掉容易混淆的字符（0/1/o/i/l）以及 4（团队偏好）
-// task id 生成与任务启动逻辑已迁到 src/core/task-factory.ts
+// task id 生成与任务启动逻辑已迁到 src/core/task/factory.ts
 
 // ──────────────────────────────────────────────
 // 静态文件服务
@@ -532,8 +539,15 @@ function serveStatic(urlPath: string): Response | null {
   if (requestedFile && existsSync(requestedFile)) {
     const ext = requestedFile.substring(requestedFile.lastIndexOf("."));
     const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
+    // SPA 缓存策略：不设头时浏览器走启发式缓存，index.html 被缓存 → 发版后仍引用
+    // 旧 hash bundle，「改了没生效」反复发作。带内容 hash 的 /assets/* 可永久缓存
+    // （hash 变路径即变）；HTML 必须每次协商。
+    const isHashedAsset = /[/\\]assets[/\\]/.test(requestedFile);
+    const cacheControl = isHashedAsset
+      ? "public, max-age=31536000, immutable"
+      : "no-cache";
     return new Response(Bun.file(requestedFile), {
-      headers: { "Content-Type": contentType },
+      headers: { "Content-Type": contentType, "Cache-Control": cacheControl },
     });
   }
 
@@ -542,7 +556,7 @@ function serveStatic(urlPath: string): Response | null {
     const indexPath = join(rootDir, "index.html");
     if (existsSync(indexPath)) {
       return new Response(Bun.file(indexPath), {
-        headers: { "Content-Type": "text/html" },
+        headers: { "Content-Type": "text/html", "Cache-Control": "no-cache" },
       });
     }
   }
@@ -558,7 +572,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
   const url = new URL(req.url);
   const method = req.method;
   const path = url.pathname;
-  const { json, error } = makeResponders(req);
+  const { json, error, forwardRpc } = makeResponders(req);
   const cors = corsHeaders(req);
 
   // CORS preflight — 只为 allowlist 中的 Origin 放行
@@ -607,15 +621,9 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
   }
 
   try {
-    // ── /now 路由（PR 1：状态推导引擎）──
+    // ── /api/now/* 已随旧 Now 体系移除（通知走 WS RPC notifications.*）──
     if (path.startsWith("/api/now/")) {
-      const { handleNowRequest } = await import("./routes-now");
-      const nowRes = await handleNowRequest(req, url);
-      if (nowRes) {
-        const headers = new Headers(nowRes.headers);
-        for (const [k, v] of Object.entries(cors)) headers.set(k, v);
-        return new Response(nowRes.body, { status: nowRes.status, headers });
-      }
+      return error("Removed: use WS RPC `notifications.*`", 410);
     }
 
     // ── API Routes ──
@@ -806,85 +814,27 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         spec_md?: string;
         chat_session_id?: string | null;
       };
-      let workspaceId = body.workspace_id ?? null;
-      if (!body.title?.trim()) {
-        return error("title 必填");
-      }
-      // 必须能确定 project_id：要么调用方直接传，要么从 workspace 反查
-      let projectId = body.project_id?.trim();
-      if (workspaceId) {
-        const ws = getWorkspaceById(workspaceId);
-        if (!ws) return error("workspace not found", 404);
-        projectId = projectId ?? ws.project_id;
-      }
-      if (!projectId) {
-        return error("project_id 必填（或提供 workspace_id 由 daemon 反查）");
-      }
-      // 强制项目须关联工作区；项目:工作区 1:1 → 未显式指定时自动派生，免手动绑定
-      const topWs = getTopWorkspaceForProject(projectId);
-      if (!topWs) {
-        return error("项目未关联工作区，请先添加工作区再创建需求");
-      }
-      if (!workspaceId) workspaceId = topWs.id;
-      const id = nextRequirementId();
-      try {
-        createRequirement({
-          id,
-          project_id: projectId,
-          workspace_id: workspaceId,
-          title: body.title.trim(),
-          spec_md: body.spec_md ?? "",
-          chat_session_id: body.chat_session_id ?? null,
-        });
-        // 自动进入澄清流程（触发 requirement-clarifier 后台生成问题）
-        const clarifying = setRequirementStatus(id, "clarifying");
-        return json({ requirement: clarifying }, 201);
-      } catch (e: unknown) {
-        return error((e as Error).message, 500);
-      }
+      // 项目/工作区派生 + 校验 + 停 drafting 全归 RPC requirements.create 单一真相
+      return forwardRpc("requirements.create", body);
     }
 
     // POST /api/requirements/:id/transition
     const reqTransitionMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/transition$/);
     if (reqTransitionMatch && method === "POST") {
       const body = (await req.json()) as { to?: string };
-      if (!body.to?.trim()) return error("to 必填");
-      if (!getRequirementById(reqTransitionMatch)) return error("requirement not found", 404);
-      try {
-        return json({ requirement: setRequirementStatus(reqTransitionMatch, body.to.trim()) });
-      } catch (e: unknown) {
-        return error((e as Error).message);
-      }
+      return forwardRpc("requirements.transition", { id: reqTransitionMatch, to: body.to });
     }
 
     // POST /api/requirements/:id/enqueue
     const reqEnqueueMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/enqueue$/);
     if (reqEnqueueMatch && method === "POST") {
-      const id = reqEnqueueMatch;
-      const r = getRequirementById(id);
-      if (!r) return error("requirement not found", 404);
-      if (!r.workspace_id) return error("请先关联工作区再入队");
-      if (!(r.spec_md ?? "").trim()) {
-        return error("需求规约为空，请先完成澄清或手动填写规约");
-      }
-      // 仅置 queued；调度器（src/daemon/requirement-scheduler.ts）会监听 status 变化触发创建 task
-      try {
-        return json({ requirement: setRequirementStatus(id, "queued") });
-      } catch (e: unknown) {
-        return error((e as Error).message);
-      }
+      return forwardRpc("requirements.enqueue", { id: reqEnqueueMatch });
     }
-
 
     // POST /api/requirements/:id/cancel
     const reqCancelMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/cancel$/);
     if (reqCancelMatch && method === "POST") {
-      if (!getRequirementById(reqCancelMatch)) return error("requirement not found", 404);
-      try {
-        return json(cancelRequirementWithTasks(reqCancelMatch));
-      } catch (e: unknown) {
-        return error((e as Error).message);
-      }
+      return forwardRpc("requirements.cancel", { id: reqCancelMatch });
     }
 
     // GET /api/requirements/:id/sub-prs 已迁 WS RPC requirements.subPrs
@@ -997,6 +947,36 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       return json({ ok: true });
     }
 
+    // ─────────── Requirement Deliveries（artifacts 交付物下载，v2 R5） ───────────
+
+    // GET /api/requirements/:id/deliveries/download?round=N&path=<relative> —— 二进制原样下载单文件
+    const reqDeliveryDownloadMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/deliveries\/download$/);
+    if (method === "GET" && reqDeliveryDownloadMatch) {
+      const reqId = reqDeliveryDownloadMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      const relPath = url.searchParams.get("path") ?? "";
+      if (!relPath) return error("path 参数必填", 400);
+      const roundParam = url.searchParams.get("round");
+      const round = roundParam ? parseInt(roundParam, 10) : maxDeliveryRound(reqId);
+      if (!Number.isInteger(round) || round < 1) return error("无可下载的交付轮", 404);
+      try {
+        const abs = resolveDeliveryFilePath(reqId, round, relPath);
+        if (!abs) return error("非法路径", 400);
+        const file = Bun.file(abs);
+        if (!(await file.exists())) return error("文件不存在", 404);
+        const fileName = relPath.split(/[/\\]/).pop() ?? "file";
+        return new Response(file, {
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+            ...cors,
+          },
+        });
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 400);
+      }
+    }
+
     // ─────────── Comments（评论线程：question / feedback / handoff） ───────────
 
     // POST /api/requirements/:reqId/comments/:cid/resolve
@@ -1033,9 +1013,6 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
 
     // POST /api/requirements/:reqId/comments
     if (method === "POST" && reqCommentsMatch) {
-      const reqId = reqCommentsMatch;
-      const r = getRequirementById(reqId);
-      if (!r) return error("requirement not found", 404);
       const body = (await req.json()) as {
         kind?: "question" | "feedback" | "handoff";
         from_role?: "agent" | "user" | "github";
@@ -1044,39 +1021,15 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         suggestions?: string[];
         github_review_id?: string;
       };
-      if (!body.kind) return error("kind 必填");
-      if (!body.from_role) return error("from_role 必填");
-      if (!body.body?.trim()) return error("body 必填");
-      const id = nextCommentId();
-      const comment = createComment({
-        id,
-        requirement_id: reqId,
-        kind: body.kind,
-        from_role: body.from_role,
-        body: body.body.trim(),
-        parent_id: body.parent_id ?? null,
-        suggestions: body.suggestions,
-        github_review_id: body.github_review_id ?? null,
-      });
-      // feedback 注入：若 requirement 当前 awaiting_review，触发 fix_revision
-      // （原 inject_feedback endpoint 的行为，spec §3.2 统一进 comments.add）
-      if (body.kind === "feedback" && r.status === "awaiting_review") {
-        try {
-          setRequirementStatus(reqId, "fix_revision");
-        } catch (e: unknown) {
-          log.warn("comments.add(feedback) 触发 fix_revision 失败（反馈已写入）[req=%s err=%s]", reqId, (e as Error).message);
-        }
-      }
-      return json({ comment }, 201);
+      return forwardRpc("comments.add", { requirementId: reqCommentsMatch, ...body });
     }
 
     // GET|PUT|DELETE /api/requirements/:id
     const reqDetailMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)$/);
     if (reqDetailMatch) {
-      const r = getRequirementById(reqDetailMatch);
-      if (!r) return error("requirement not found", 404);
-
       if (method === "GET") {
+        const r = getRequirementById(reqDetailMatch);
+        if (!r) return error("requirement not found", 404);
         return json({ requirement: r, comments: listComments(reqDetailMatch) });
       }
       if (method === "PUT") {
@@ -1086,20 +1039,12 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
           workspace_id?: string | null;
           chat_session_id?: string | null;
         };
-        if (body.title !== undefined && !body.title.trim()) {
-          return error("title 不能为空");
-        }
-        if (body.workspace_id !== undefined && body.workspace_id !== null) {
-          if (!getWorkspaceById(body.workspace_id)) return error("workspace not found", 404);
-        }
-        return json({ requirement: updateRequirement(reqDetailMatch, body) });
+        return forwardRpc("requirements.update", { id: reqDetailMatch, ...body });
       }
       if (method === "DELETE") {
-        // 删一件工作 = 需求 + 其名下全部任务（含运行中）。先 best-effort 停 agent 再强删，
-        // 与 WS RPC requirements.delete / 项目级联删除同一语义，不留孤儿任务。
-        cancelTasksForRequirements([reqDetailMatch]);
-        const { deletedTasks } = deleteRequirementWithTasks(reqDetailMatch);
-        return json({ ok: true, deletedTasks: deletedTasks.length });
+        // 删一件工作 = 需求 + 其名下全部任务（含运行中）。与 WS RPC requirements.delete 同一语义，
+        // 不留孤儿任务（转发到单一真相 handler）。
+        return forwardRpc("requirements.delete", { id: reqDetailMatch });
       }
     }
 
@@ -1114,65 +1059,34 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     // POST /api/tasks/:id/cancel
     const cancelMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/cancel$/);
     if (method === "POST" && cancelMatch) {
-      try {
-        return json(cancelTaskAction(cancelMatch));
-      } catch (e: unknown) {
-        if (e instanceof TaskActionError) return error(e.message, e.status);
-        return error(e instanceof Error ? e.message : String(e), 500);
-      }
+      return forwardRpc("tasks.cancel", { id: cancelMatch });
     }
 
     // POST /api/tasks/:id/send_prompt — 运行中 task 追加 prompt（spec §3.8）
     const sendPromptMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/send_prompt$/);
     if (method === "POST" && sendPromptMatch) {
       const body = (await req.json()) as { prompt?: string };
-      const prompt = typeof body.prompt === "string" ? body.prompt : "";
-      if (!prompt.trim()) return error("prompt 必填");
-      const { sendPromptToTask } = await import("../core/task-send-prompt");
-      const result = sendPromptToTask(sendPromptMatch, prompt, { source: "user" });
-      if (!result.accepted) {
-        if (result.reason === "TASK_TERMINAL") return error("TASK_TERMINAL: task 已是终态，无法接受新 prompt", 409);
-        if (result.reason === "NO_PROMPT_TARGET") return error("task 不存在", 404);
-        return error(result.reason ?? "rejected", 400);
-      }
-      return json({ mode: result.mode, accepted: true });
+      return forwardRpc("tasks.sendPrompt", { id: sendPromptMatch, prompt: body.prompt });
     }
 
     // POST /api/tasks/:id/restart — 把未完成的任务从当前阶段重新执行（dangling 救援用）
     const restartMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/restart$/);
     if (method === "POST" && restartMatch) {
-      try {
-        return json(restartTaskAction(restartMatch));
-      } catch (e: unknown) {
-        if (e instanceof TaskActionError) return error(e.message, e.status);
-        return error(e instanceof Error ? e.message : String(e), 500);
-      }
+      return forwardRpc("tasks.restart", { id: restartMatch });
     }
 
     // POST /api/tasks/:id/answer — 用户回答 agent 的 ask_user 提问
     const answerMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/answer$/);
     if (method === "POST" && answerMatch) {
       const body = await req.json() as { text?: string };
-      try {
-        return json(await answerTaskAction(answerMatch, body.text ?? ""));
-      } catch (e: unknown) {
-        if (e instanceof TaskActionError) return error(e.message, e.status);
-        return error(e instanceof Error ? e.message : String(e), 500);
-      }
+      return forwardRpc("tasks.answer", { id: answerMatch, text: body.text ?? "" });
     }
 
     // POST /api/tasks/:id/decide  — gate phase 的人工决断（pass / reject / cancel）
     const decideMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)\/decide$/);
     if (method === "POST" && decideMatch) {
       const body = await req.json() as { decision: string; note?: string };
-      try {
-        return json(decideTaskAction(decideMatch, body.decision, body.note ?? "", {
-          phaseIndex, parseDecisionCounts, renderDecisionMd,
-        }));
-      } catch (e: unknown) {
-        if (e instanceof TaskActionError) return error(e.message, e.status);
-        return error(e instanceof Error ? e.message : String(e), 500);
-      }
+      return forwardRpc("tasks.decide", { id: decideMatch, decision: body.decision, note: body.note ?? "" });
     }
 
     // POST /api/tasks/:id/transition
@@ -1272,13 +1186,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     // DELETE /api/tasks/:id — 彻底删除任务（DB + 文件 + 锁；仅终态）
     const taskDeleteMatch = extractParam(path, /^\/api\/tasks\/([\w.\-]+)$/);
     if (method === "DELETE" && taskDeleteMatch) {
-      try {
-        const res = cascadeDeleteTask(taskDeleteMatch);
-        return json({ ok: true, deleted: res.deleted });
-      } catch (e: unknown) {
-        if (e instanceof DeleteTaskError) return error(e.message, e.status);
-        return error(e instanceof Error ? e.message : String(e), 500);
-      }
+      return forwardRpc("tasks.delete", { id: taskDeleteMatch });
     }
 
     // GET /api/sandboxes/usage 已迁到 WS RPC: sandboxes.usage
@@ -1433,7 +1341,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
 
     // GET /api/workflows/health — 扫描 yaml.name 跟目录名不一致 / 重名碰撞
     if (method === "GET" && path === "/api/workflows/health") {
-      const { scanWorkflowHealth } = await import("../core/workflow-templates");
+      const { scanWorkflowHealth } = await import("../core/workflow/templates");
       return json(scanWorkflowHealth());
     }
 
@@ -1442,9 +1350,9 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       const body = await req.json().catch(() => null) as { dir?: string } | null;
       if (!body?.dir) return error("dir is required", 400);
       try {
-        const { fixOrphanWorkflow } = await import("../core/workflow-templates");
+        const { fixOrphanWorkflow } = await import("../core/workflow/templates");
         const r = fixOrphanWorkflow(body.dir);
-        const { discover } = await import("../core/registry");
+        const { discover } = await import("../core/workflow/registry");
         await discover();
         emit({ type: "workflow:reloaded", payload: {} });
         return json({ ok: true, ...r });
@@ -1463,9 +1371,9 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         return error("name (target) required", 400);
       }
       try {
-        const { cloneWorkflow } = await import("../core/workflow-templates");
+        const { cloneWorkflow } = await import("../core/workflow/templates");
         cloneWorkflow(srcName, body.name);
-        const { discover } = await import("../core/registry");
+        const { discover } = await import("../core/workflow/registry");
         await discover();
         emit({ type: "workflow:reloaded", payload: {} });
         return json({ ok: true, name: body.name }, 201);
@@ -1489,10 +1397,10 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         return error("name 只允许字母 / 数字 / ._- ", 400);
       }
       try {
-        const { cloneTemplate } = await import("../core/workflow-templates");
+        const { cloneTemplate } = await import("../core/workflow/templates");
         cloneTemplate(body.template, body.name);
         // 重新发现新加入的工作流
-        const { discover } = await import("../core/registry");
+        const { discover } = await import("../core/workflow/registry");
         await discover();
         return json({ ok: true, name: body.name }, 201);
       } catch (e: unknown) {

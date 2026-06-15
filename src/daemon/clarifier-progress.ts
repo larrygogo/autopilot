@@ -15,7 +15,7 @@ export interface ClarifierRoundState {
   req_id: string;
   /** epoch ms，本轮开始时间 */
   started_at: number;
-  phase: "preparing" | "calling-llm" | "parsing" | "writing" | "done" | "aborted" | "errored";
+  phase: "preparing" | "cloning-repo" | "calling-llm" | "parsing" | "writing" | "done" | "aborted" | "errored";
   /** 0 = 第一次尝试；1 = 重试（最多 2 次） */
   attempt: 0 | 1;
   /** 本轮 prompt，截断到 16384 字符 */

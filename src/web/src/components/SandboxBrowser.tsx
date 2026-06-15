@@ -245,8 +245,8 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
                         type="button"
                         onClick={() => (e.type === "dir" ? enterDir(e.name) : openFile(e))}
                         className={cn(
-                          "flex w-full items-center gap-2 border-l-2 border-transparent px-2.5 py-1.5 text-left transition-colors hover:bg-secondary",
-                          active && "border-accent bg-accent/12 text-foreground hover:bg-accent/15",
+                          "flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-secondary",
+                          active && "bg-accent/12 text-foreground hover:bg-accent/15",
                         )}
                       >
                         {e.type === "dir" ? (
@@ -312,7 +312,7 @@ export function SandboxBrowser({ taskId, taskStatus }: Props) {
                       二进制文件，无法文本预览。点击「下载」。
                     </p>
                   ) : (
-                    <CodeViewer code={file.content} />
+                    <CodeViewer code={file.content} filename={file.path} />
                   )}
                 </div>
               </div>

@@ -68,6 +68,7 @@ export function getTaskDir(taskId: string): string {
     throw new Error(`Invalid task ID: ${taskId}. Must match /^[\\w.\\-]+$/`);
   }
 
+  // Stage 0 有意不收口 getTaskRoot：锁相关路径不随需求中心化运行时迁移（spec 2026-06-12 E1：锁不迁，减少 Stage 2 面）。
   const taskDir = join(getAutopilotHome(), "runtime", "tasks", taskId);
 
   if (!existsSync(taskDir)) {

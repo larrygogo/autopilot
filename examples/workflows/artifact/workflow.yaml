@@ -1,0 +1,34 @@
+name: artifact
+label: "产物交付"
+description: "产出文件类交付物（设计图 / 网页 demo / 文档）：制作 → 交付到需求 deliveries/ → 需求级人工验收（通过 = done；驳回 = fix_revision 修复轮重做产物）"
+# v2 R5 正式形态（原「探针」已升级）：
+#   - 交付落点 = runtime/requirements/<reqId>/deliveries/round-<N>/（deliverArtifacts promote 落表，
+#     原 AUTOPILOT_HOME/deliverables/ workaround 已废弃）
+#   - 验收 = 需求级 awaiting_review（Web 验收卡 / CLI req accept|reject），produce 的 gate hack 已移除
+#   - 驳回回路 = fix_revision → __fix run 的 artifacts 模式（重做产物 promote round+1）
+setup_func: setup_artifact_task
+
+# 声明层：代码库可选（有就 clone 作只读参考，没有走纯文本澄清 + 空沙盒）；产出 = artifacts
+requires:
+  git: "optional"
+delivers: artifacts
+
+sandbox:
+  git: true   # 需求挂了代码库就 clone 作只读参考；agent 不 push、不开 PR；无库时退化空目录
+
+phases:
+  # produce：agent 产出交付物到沙盒 deliverables/。验收统一走需求级 awaiting_review
+  # （run done → 判定 hasDeliveries → 需求转 awaiting_review 等人工验收），不再 gate 挂起。
+  - name: produce
+    label: "制作"
+    timeout: 1800
+    agent:
+      label: "制作者"
+      provider: anthropic
+      permission_mode: bypassPermissions
+
+  # deliver：无 agent 的机械交付。deliverArtifacts 把 deliverables/ promote 到需求
+  # deliveries/round-<N>/ 并落 requirement_deliveries 一行（沙盒在需求 done 后会被清）。
+  - name: deliver
+    label: "交付"
+    timeout: 300

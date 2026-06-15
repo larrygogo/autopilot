@@ -55,7 +55,7 @@ afterEach(() => {
 });
 
 describe("ensureTaskSandbox git worktree 模式", () => {
-  it("git=true + 真实 git 仓库 → worktree add 成功 + 写 .worktree.json", async () => {
+  it("git=true + 真实 git 仓库 → 统一子目录布局 clone 成功 + 写 .worktree.json", async () => {
     initGitRepo(codebasePath, "main");
 
     const script = `
@@ -65,7 +65,8 @@ const cfg = { git: true, branch_prefix: "autopilot/" };
 const codebase = { id: "cb-1", remote_url: ${JSON.stringify(codebasePath)}, default_branch: "main" };
 const ws = ensureTaskSandbox("t-wt-1", "wf", cfg, codebase);
 const meta = getTaskWorktreeMeta("t-wt-1");
-console.log(JSON.stringify({ ws, exists: existsSync(ws), hasGit: existsSync(ws + "/.git"), meta }));
+// 统一布局：单库（无 alias）clone 到 ./<workspace_id>/ 子目录，根不再是仓库
+console.log(JSON.stringify({ ws, exists: existsSync(ws), rootGit: existsSync(ws + "/.git"), subGit: existsSync(ws + "/cb-1/.git"), meta }));
 `;
     const proc = Bun.spawn(["bun", "-e", script], {
       stdout: "pipe", stderr: "pipe",
@@ -76,14 +77,16 @@ console.log(JSON.stringify({ ws, exists: existsSync(ws), hasGit: existsSync(ws +
     const r = JSON.parse(out.trim());
 
     expect(r.exists).toBe(true);
-    expect(r.hasGit).toBe(true); // worktree 子目录有 .git 文件指向主 repo
+    expect(r.rootGit).toBe(false);
+    expect(r.subGit).toBe(true); // 单库也在子目录（alias 缺省回退 workspace id）
     expect(r.meta).not.toBeNull();
-    expect(r.meta.workspace_id).toBe("cb-1");
+    expect(r.meta.workspace_id).toBe("cb-1"); // 顶层镜像 repos[0]
     expect(r.meta.branch).toBe("autopilot/t-wt-1");
     expect(r.meta.base).toBe("main");
+    expect(r.meta.repos.length).toBe(1);
   });
 
-  it("clone 模式：交付分支用 -B 覆盖（独立仓库，无需 -2 防冲突后缀）+ mode=clone", async () => {
+  it("clone 沙盒：交付分支用 -B 覆盖（独立仓库，无需 -2 防冲突后缀）+ mode=multi-clone", async () => {
     initGitRepo(codebasePath, "main");
     // 源仓库预先有同名分支：clone 带过来后 checkout -B 直接覆盖，独立仓库无冲突
     Bun.spawnSync(["git", "-C", codebasePath, "branch", "autopilot/t-wt-2"], { stdout: "pipe", stderr: "pipe" });
@@ -102,7 +105,7 @@ console.log(JSON.stringify({ meta: getTaskWorktreeMeta("t-wt-2") }));
     const out = await new Response(proc.stdout).text();
     const r = JSON.parse(out.trim());
     expect(r.meta.branch).toBe("autopilot/t-wt-2"); // -B 覆盖，无 -2 后缀
-    expect(r.meta.mode).toBe("clone");
+    expect(r.meta.mode).toBe("multi-clone");
   });
 
   it("codebase 非 git 仓库 → warn 退化空目录（不抛错）", async () => {

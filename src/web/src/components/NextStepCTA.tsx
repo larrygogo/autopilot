@@ -15,6 +15,7 @@
  * 右侧 ACTIONS 卡仍保留作为"完整操作"列表（含次要/危险动作）。
  */
 
+import type { ReactNode } from "react";
 import { ArrowRight, ArrowDown, RotateCcw, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -22,7 +23,7 @@ interface NextStepConfig {
   cta: string;
   hint: string;
   Icon: typeof ArrowRight;
-  action: "markReady" | "enqueue" | "approve" | "retry" | "scrollToQuestions" | "scrollToFeedback";
+  action: "markReady" | "enqueue" | "approve" | "retry" | "scrollToQuestions";
   /** failed 状态用 destructive 色调，其他用 accent */
   tone?: "accent" | "destructive";
 }
@@ -32,30 +33,25 @@ export interface NextStepCTAProps {
   /** drafting/clarifying 时的未答问题数（影响 CTA 文案） */
   openQuestionCount?: number;
   busy?: boolean;
+  /** 渲染在主按钮左侧的附加决策控件（如审批/入队/重试时的工作流选择） */
+  extra?: ReactNode;
   onMarkReady?: () => void;
   onEnqueue?: () => void;
   onApprove?: () => void;
   onRetry?: () => void;
   onScrollToQuestions?: () => void;
-  onScrollToFeedback?: () => void;
 }
 
 function resolve(status: string, openQuestionCount: number): NextStepConfig | null {
-  if (status === "drafting" || status === "clarifying") {
+  // drafting 不出 banner：代码库确认卡自带「确认代码库，开始 AI 澄清」主按钮（带上下文的入口），
+  // 这里再出一个「开始 AI 澄清」就是同一动作的重复入口。
+  if (status === "clarifying") {
     if (openQuestionCount > 0) {
       return {
         cta: `去回答 ${openQuestionCount} 个问题`,
         hint: "AI 还有问题待你回答，回答完才能进入下一步。",
         Icon: ArrowDown,
         action: "scrollToQuestions",
-      };
-    }
-    if (status === "drafting") {
-      return {
-        cta: "标为已澄清",
-        hint: "AI 已经把需求整理好，确认无误后进入审批。",
-        Icon: ArrowRight,
-        action: "markReady",
       };
     }
     // clarifying + 没未答问题 = 跑批中（ClarifierProgressCard / Idle 兜底自己显示），不重复
@@ -77,22 +73,8 @@ function resolve(status: string, openQuestionCount: number): NextStepConfig | nu
       action: "approve",
     };
   }
-  if (status === "awaiting_review") {
-    return {
-      cta: "去填写审查意见",
-      hint: "PR 已生成，请在下方反馈区填写审查意见，或直接标记合并。",
-      Icon: ArrowDown,
-      action: "scrollToFeedback",
-    };
-  }
-  if (status === "fix_revision") {
-    return {
-      cta: "去提交修复反馈",
-      hint: "Agent 正在修复，可在下方反馈区注入新的修改建议。",
-      Icon: ArrowDown,
-      action: "scrollToFeedback",
-    };
-  }
+  // awaiting_review / fix_revision 不出 banner：「审查与修复」卡已置顶（头部即决策条
+  // —— PR 链接 + 验收通过按钮 + 发布输入框），再出滚动引导是重复入口。
   if (status === "failed") {
     return {
       cta: "重新入队执行",
@@ -116,7 +98,6 @@ export function NextStepCTA(props: NextStepCTAProps) {
       case "approve": return props.onApprove;
       case "retry": return props.onRetry;
       case "scrollToQuestions": return props.onScrollToQuestions;
-      case "scrollToFeedback": return props.onScrollToFeedback;
     }
   })();
 
@@ -143,16 +124,19 @@ export function NextStepCTA(props: NextStepCTAProps) {
         </span>
         <p className="text-sm leading-relaxed text-foreground">{cfg.hint}</p>
       </div>
-      <Button
-        size="lg"
-        variant={isDanger ? "destructive" : "default"}
-        disabled={props.busy}
-        onClick={handler}
-        className="shrink-0 rounded-md text-xs"
-      >
-        {props.busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Icon className="mr-1.5 h-4 w-4" />}
-        {props.busy ? "处理中…" : cfg.cta}
-      </Button>
+      <div className="flex shrink-0 flex-wrap items-center gap-3">
+        {props.extra}
+        <Button
+          size="lg"
+          variant={isDanger ? "destructive" : "default"}
+          disabled={props.busy}
+          onClick={handler}
+          className="shrink-0 rounded-md text-xs"
+        >
+          {props.busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Icon className="mr-1.5 h-4 w-4" />}
+          {props.busy ? "处理中…" : cfg.cta}
+        </Button>
+      </div>
     </div>
   );
 }

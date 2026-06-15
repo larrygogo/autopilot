@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { PAGE_W } from "@/lib/layout";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2 } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion, Bot, UserRound, Download, Package } from "lucide-react";
+import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type RequirementDelivery, type DeliveryFileEntry, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
 import { AttachmentUploader } from "@/components/AttachmentUploader";
+import { RequirementWorkspacePicker } from "@/components/RequirementWorkspacePicker";
 import { AttachmentList } from "@/components/AttachmentList";
 import { TaskFileDiffsCard } from "@/components/TaskFileDiffsCard";
 import { SandboxBrowser } from "@/components/SandboxBrowser";
@@ -13,8 +15,11 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea, Input } from "@/components/ui/input";
 import { TaskDetail } from "@/pages/TaskDetail";
+import { RunSwitcher } from "@/components/RunSwitcher";
+import { type RunLike } from "@/lib/run-label";
+import { SkeletonRows, ErrorState } from "@/components/pro";
 import { StepBar } from "@/components/StepBar";
-import { stepPosition, resolveCurrentStep, canEditRequirementContent, STEPS, type ReqStep } from "@/lib/requirement-steps";
+import { stepPosition, resolveCurrentStep, canEditRequirementContent, STEPS, STEP_ORDER, type ReqStep } from "@/lib/requirement-steps";
 import { NextStepCTA } from "@/components/NextStepCTA";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -60,7 +65,7 @@ const STATUS_VARIANT: Record<
 const TERMINAL_STATUSES = new Set(["done", "cancelled"]);
 
 const SOURCE_LABEL: Record<string, string> = {
-  manual: "手动",
+  manual: "审查意见",
   github_review: "GitHub Review",
 };
 
@@ -137,7 +142,7 @@ function ClarifierOverrideDialog({
         <DialogHeader>
           <DialogTitle>此需求的澄清模型</DialogTitle>
           <DialogDescription>
-            仅作用于本需求。继承全局表示用 /settings?tab=clarifier 的默认。
+            仅作用于本需求。继承全局表示用提供商默认模型。
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -296,6 +301,7 @@ function renderQuestion(q: Question, deps: RenderQuestionDeps): React.ReactNode 
 
 const PHASE_LABEL: Record<ClarifierRoundState["phase"], string> = {
   preparing: "准备 prompt",
+  "cloning-repo": "克隆代码库",
   "calling-llm": "调用 LLM 中",
   parsing: "解析返回（重试中）",
   writing: "写入 spec / 问题",
@@ -306,6 +312,7 @@ const PHASE_LABEL: Record<ClarifierRoundState["phase"], string> = {
 
 const ACTIVE_PHASES = new Set<ClarifierRoundState["phase"]>([
   "preparing",
+  "cloning-repo",
   "calling-llm",
   "parsing",
   "writing",
@@ -323,16 +330,20 @@ function ClarifierProgressCard({
   onToggleTrace: () => void;
 }): React.ReactNode {
   const attemptLabel = round.attempt === 0 ? "第 1 次" : "第 2 次（重试）";
+  // clone 阶段还没碰 LLM —— 显示「初始化代码库」而不是误导性的「LLM 调用」
+  const isCloning = round.phase === "cloning-repo";
   return (
     <Card className="p-5">
       <div className="flex items-center gap-3">
         <Loader2 className="h-4 w-4 animate-spin text-accent shrink-0" />
         <div className="flex-1 min-w-0">
           <div className="font-mono text-xs text-muted-foreground">
-            AI 正在思考…
+            {isCloning ? "正在初始化代码库…" : "AI 正在思考…"}
           </div>
           <div className="mt-0.5 font-mono text-[10px] text-muted-foreground/80">
-            {attemptLabel} LLM 调用 · 阶段：{PHASE_LABEL[round.phase]}
+            {isCloning
+              ? "正在拉取代码库供 AI 阅读（第一次会慢点，好了就开始提问）"
+              : `${attemptLabel}调用 AI · ${PHASE_LABEL[round.phase]}`}
           </div>
         </div>
         <div className="font-mono text-xs tabular-nums text-muted-foreground shrink-0">
@@ -352,7 +363,7 @@ function ClarifierProgressCard({
       {traceOpen && (
         <div className="mt-3 space-y-3">
           {round.last_parse_error && (
-            <div className="border border-l-4 border-border border-l-destructive bg-card px-3 py-2 rounded-md">
+            <div className="border border-border bg-card px-3 py-2 rounded-md">
               <p className="font-mono text-[10px] text-destructive mb-1">
                 上次解析失败
               </p>
@@ -378,7 +389,8 @@ function ClarifierProgressCard({
 }
 
 export function RequirementDetail() {
-  const { id } = useParams<{ id: string }>();
+  // RESTful 深链：/requirements/:id/:step/:runId（step/runId 可缺）。
+  const { id, step: stepParam, runId: runParam } = useParams<{ id: string; step?: string; runId?: string }>();
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -419,19 +431,29 @@ export function RequirementDetail() {
   const [round, setRound] = useState<ClarifierRoundState | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
-  const [selectedStep, setSelectedStep] = useState<ReqStep | null>(null);
   const [statusLogs, setStatusLogs] = useState<RequirementStatusLog[]>([]);
-  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string }[]>([]);
+  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string; requires_git?: boolean | "optional"; delivers?: string }[]>([]);
+  const [deliveries, setDeliveries] = useState<RequirementDelivery[]>([]);
+  const [deliveryFiles, setDeliveryFiles] = useState<{ round: number; files: DeliveryFileEntry[] } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const prevStatusRef = useRef<string | undefined>(undefined);
+  // v2 R6：需求的全部根 run（execution / fix 轮），按 seq 升序。多 run 时执行记录区出切换器。
+  // undefined = 加载中（区分尚未拉取与确实为空），[] = 确实无 run（前置态）。
+  const [runs, setRuns] = useState<RunLike[] | undefined>(undefined);
+  const [runsError, setRunsError] = useState<string | null>(null);
+  // 当前选中查看的 run（多 run 时切换器控制）；默认最新（= req.task_id）或 ?run= 深链。
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  // 深链（RESTful 路径段）：每个阶段 / 每个 run 有独立可分享 URL。
+  // 缺 step → 当前阶段（跟随最新）；缺 runId → 最新 run（见下 selectedRunId 解析）。
+  const runQuery = runParam ?? null;
+  const stepQuery = stepParam ?? null;
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
     if (!opts.silent) setLoading(true);
     try {
-      const [data, repoList, sub, qs, rd, slogs, atts] = await Promise.all([
+      const [data, repoList, sub, qs, rd, slogs, atts, dels] = await Promise.all([
         api.getRequirement(id),
         api.listWorkspaces(),
         api.listRequirementSubPrs(id).catch(() => [] as RequirementSubPr[]),
@@ -439,6 +461,7 @@ export function RequirementDetail() {
         api.getClarifierRound(id).catch(() => null),
         api.listRequirementStatusLogs(id).catch(() => [] as RequirementStatusLog[]),
         api.listAttachments(id).catch(() => [] as Attachment[]),
+        api.listRequirementDeliveries(id).catch(() => [] as RequirementDelivery[]),
       ]);
       setReq(data.requirement);
       setFeedbacks(data.feedbacks);
@@ -450,8 +473,19 @@ export function RequirementDetail() {
       setRound(rd);
       setStatusLogs(slogs);
       setAttachments(atts);
+      setDeliveries(dels);
+      // artifacts 验收卡：最新轮文件列表（无交付记录则清空）
+      if (dels.length > 0) {
+        api.listDeliveryFiles(id).then(setDeliveryFiles).catch(() => setDeliveryFiles(null));
+      } else {
+        setDeliveryFiles(null);
+      }
     } catch (e: unknown) {
-      if (!opts.silent) toast.error("加载失败", (e as Error)?.message ?? String(e));
+      const msg = (e as Error)?.message ?? String(e);
+      // 需求不存在（已删除 / 链接失效）：不弹 toast，由页面空态承接；其他错误（网络等）仍 toast
+      if (!opts.silent && !/not.?found/i.test(msg)) {
+        toast.error("加载失败", msg);
+      }
     } finally {
       if (!opts.silent) setLoading(false);
     }
@@ -460,6 +494,18 @@ export function RequirementDetail() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // v2 R6：拉取需求的全部根 run（execution / fix），按 seq 升序。
+  // 有 task_id（已进入执行性状态）才拉；前置态（task_id 空）保持 runs=[] 不渲染执行记录卡。
+  const loadRuns = useCallback(async (reqId: string) => {
+    try {
+      const list = await api.listTasksByRequirement(reqId);
+      setRuns(list as RunLike[]);
+      setRunsError(null);
+    } catch (e: unknown) {
+      setRunsError((e as Error)?.message ?? String(e));
+    }
+  }, []);
 
   // WebSocket 订阅：需求状态变化 / 问题更新时静默刷新
   // （不触发 loading 态，避免输入框被卸载导致 IME 输入中断）
@@ -507,6 +553,16 @@ export function RequirementDetail() {
     });
   }, [id, subscribe, refresh]);
 
+  // v2 R6：task:* 变化时重拉 run 列表（多 run 期间新 run 出现 / 状态推进要更新切换器）。
+  // 仅在已有 task_id 时订阅；payload 不带 requirement_id 时也宽松重拉（成本低、列表小）。
+  useEffect(() => {
+    if (!req?.id || !req.task_id) return;
+    const reqId = req.id;
+    return subscribe("task:*", () => {
+      void loadRuns(reqId);
+    });
+  }, [req?.id, req?.task_id, subscribe, loadRuns]);
+
   // 本地 1s tick 计时器：基于 round.started_at 推导已用秒数，
   // 避免依赖 WS 高频推送 elapsed 字段。
   useEffect(() => {
@@ -536,28 +592,42 @@ export function RequirementDetail() {
     api.listProjectWorkspaces(req.project_id).then(setProjectCodebases).catch(() => setProjectCodebases([]));
   }, [req?.project_id]);
 
+  // 代码库反写后：静默重拉需求（workspace_ids）+ 项目代码库列表（自定义新建后出现新条目）
+  const reloadWorkspaces = useCallback(() => {
+    void refresh({ silent: true });
+    if (req?.project_id) {
+      api.listProjectWorkspaces(req.project_id).then(setProjectCodebases).catch(() => {});
+    }
+  }, [refresh, req?.project_id]);
+
+  useEffect(() => {
+    if (!req?.id) return;
+    if (!req.task_id) { setRuns([]); setRunsError(null); return; }
+    void loadRuns(req.id);
+  }, [req?.id, req?.task_id, loadRuns]);
+
+  // 选中 run：?run= 深链优先（仅当该 run 真存在于列表），否则默认最新（req.task_id）。
+  // 多 run 期间新 run 出现 / task_id 变化时跟随到最新（除非用户已手动切到某历史轮且它仍在列表）。
+  useEffect(() => {
+    if (!runs || runs.length === 0) { setSelectedRunId(null); return; }
+    const ids = new Set(runs.map((r) => r.id));
+    setSelectedRunId((cur) => {
+      if (cur && ids.has(cur)) return cur; // 用户当前选中仍有效，不打断
+      if (runQuery && ids.has(runQuery)) return runQuery; // ?run= 深链选轮
+      if (req?.task_id && ids.has(req.task_id)) return req.task_id; // 默认最新
+      return runs[runs.length - 1]!.id; // 兜底：seq 最大的一条
+    });
+  }, [runs, runQuery, req?.task_id]);
+
   // 工作流选项（编辑期下拉用），一次性拉取
   useEffect(() => {
     api.listWorkflows()
-      .then((ws) => setWorkflowOptions(ws.map((w) => ({ name: w.name, label: w.label, description: w.description ?? "" }))))
+      .then((ws) => setWorkflowOptions(ws.map((w) => ({ name: w.name, label: w.label, description: w.description ?? "", requires_git: w.requires_git, delivers: w.delivers }))))
       .catch(() => { /* 拉不到时下拉退化为只显示当前值 */ });
   }, []);
 
-  // 默认选中当前步；status 变化时，若用户没手动切走则跟随到新当前步，否则不打断。
-  useEffect(() => {
-    if (!req) return;
-    const cur = resolveCurrentStep(req.status, req.status_before_terminal);
-    const prev = prevStatusRef.current;
-    prevStatusRef.current = req.status;
-    if (prev === undefined) {
-      setSelectedStep(cur); // 初次加载：默认当前步（终态时为死亡步）
-      return;
-    }
-    if (prev !== req.status) {
-      const prevStep = resolveCurrentStep(prev, null);
-      setSelectedStep((sel) => (sel === null || sel === prevStep ? cur : sel));
-    }
-  }, [req?.status]);
+  // 选中阶段不再用本地 state —— 改由 ?step= 驱动（见下 activeStep）。缺 ?step 时 activeStep 自然
+  // 等于 currentStep（随 status 推进自动跟随），有 ?step 时 pin 在该阶段，行为与旧 effect 等价且可分享。
 
   const repoAlias = useMemo(() => {
     if (!req) return "";
@@ -596,7 +666,7 @@ export function RequirementDetail() {
       await api.updateRequirement(id, { spec_md: specDraft });
       setEditingSpec(false);
       await refresh();
-      toast.success("规约已保存");
+      toast.success("已保存");
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -647,7 +717,7 @@ export function RequirementDetail() {
   async function enqueue() {
     if (!id || !req) return;
     if (!req.workspace_id) {
-      toast.error("请先关联工作区", "需要绑定工作区才能入队执行，请在下方选择工作区。");
+      toast.error("请先选择代码库", "需要至少一个代码库才能入队执行，请在审批面板的「代码库」卡片中选择。");
       return;
     }
     // optimistic：UI 立刻反映 queued 状态，不等服务端响应
@@ -706,6 +776,24 @@ export function RequirementDetail() {
     }
   }
 
+  /** drafting → clarifying：用户确认代码库后显式开始澄清（守卫在 RPC：代码库集合为空会被拒） */
+  async function startClarify() {
+    if (!id || !req) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setActionBusy(true);
+    try {
+      await api.transitionRequirement(id, "clarifying");
+      await refresh({ silent: true });
+      toast.success("已开始澄清，AI 正在克隆代码库并调查");
+    } catch (e: unknown) {
+      toast.error("开始澄清失败", (e as Error)?.message ?? String(e));
+    } finally {
+      busyRef.current = false;
+      setActionBusy(false);
+    }
+  }
+
   async function resumeClarify() {
     if (!id || !req) return;
     if (busyRef.current) return;
@@ -744,24 +832,7 @@ export function RequirementDetail() {
     }
   }
 
-  async function requestFix() {
-    if (!id || !req) return;
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setActionBusy(true);
-    const prev = req;
-    setReq({ ...req, status: "fix_revision" });
-    try {
-      await api.transitionRequirement(id, "fix_revision");
-      toast.success("已标记需要修改，Agent 将继续修复");
-    } catch (e: unknown) {
-      setReq(prev);
-      toast.error("操作失败", (e as Error)?.message ?? String(e));
-    } finally {
-      busyRef.current = false;
-      setActionBusy(false);
-    }
-  }
+  // 「要求修改」已并入审查对话卡：发布带正文的审查意见即触发修复（空转 fix_revision 无意义，已删 requestFix）
 
   async function retryFromFailed() {
     if (!id || !req) return;
@@ -807,6 +878,7 @@ export function RequirementDetail() {
     setSubmittingFeedback(true);
     try {
       await api.injectFeedback(id, prevBody.trim());
+      await refresh({ silent: true }); // 反馈历史 + 状态（awaiting_review→fix_revision）立即可见
       toast.success("反馈已提交");
     } catch (e: unknown) {
       setFeedbackBody(prevBody); // 失败把内容恢复让用户改后再试
@@ -883,11 +955,54 @@ export function RequirementDetail() {
     }
   }
 
-  if (loading) return <div className="p-6 text-sm text-muted-foreground">加载中…</div>;
-  if (!req) return <div className="p-6 text-sm text-muted-foreground">需求不存在</div>;
+  if (loading) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin" />
+        <p className="mt-3 text-xs">加载需求…</p>
+      </div>
+    );
+  }
+  if (!req) {
+    // 不存在（已删除 / 链接失效）：页面空态承接，不弹 toast
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center px-4">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-card">
+          <FileQuestion className="h-7 w-7 text-muted-foreground/60" />
+        </div>
+        <h2 className="mt-5 text-lg font-semibold">需求不存在</h2>
+        <p className="mt-1.5 max-w-sm text-center text-sm text-muted-foreground">
+          这条需求可能已被删除，或者链接已失效。
+          {id && <span className="mt-1 block font-mono text-[11px] text-muted-foreground/70">{id}</span>}
+        </p>
+        <div className="mt-6 flex items-center gap-2">
+          <Button size="sm" onClick={() => navigate("/tasks")}>
+            <ArrowLeft className="h-3.5 w-3.5" />
+            返回流水线
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => navigate("/library")}>
+            查看项目
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const currentStep = resolveCurrentStep(req.status, req.status_before_terminal);
-  const activeStep: ReqStep = selectedStep ?? currentStep;
+  // ?step= 合法则 pin 到该阶段，否则跟随当前阶段（缺省 = 最新生命周期）。
+  const activeStep: ReqStep =
+    stepQuery && (STEP_ORDER as string[]).includes(stepQuery) ? (stepQuery as ReqStep) : currentStep;
+
+  // 阶段 / run 深链写入（RESTful 路径）：选当前阶段 = 回到 /requirements/:id（「跟随最新」默认），
+  // 其余 pin 到 /:id/:step；选 run = /:id/execute/:taskId。replace:true 不堆历史栈，URL 仍实时反映。
+  const selectStep = (step: ReqStep) => {
+    navigate(step === currentStep ? `/requirements/${id}` : `/requirements/${id}/${step}`, { replace: true });
+  };
+  const selectRun = (taskId: string) => {
+    setSelectedRunId(taskId); // 立即反馈，URL 随后同步
+    navigate(`/requirements/${id}/execute/${taskId}`, { replace: true });
+  };
+
   const isTerminal = TERMINAL_STATUSES.has(req.status);
   const isAborted = req.status === "cancelled" || req.status === "failed";
   const openQuestions = questions.filter((q) => q.status === "open");
@@ -908,7 +1023,7 @@ export function RequirementDetail() {
     <Card>
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">需求规约</span>
+          <span className="text-sm font-medium">需求内容</span>
           {req.spec_md && (req.status === "clarifying" || req.status === "drafting") && (
             <Badge variant="info">AI 整理</Badge>
           )}
@@ -938,7 +1053,7 @@ export function RequirementDetail() {
           {!editingSpec && !canEditRequirementContent(req.status) && (
             <span
               className="font-mono text-[10px] text-muted-foreground"
-              title="审批通过后规约冻结：执行内容以入队时的快照为准。失败（failed）后可修改再重试。"
+              title="审批通过后需求内容就锁定了，按入队那一刻的版本执行。如果失败了，可以改完再重试。"
             >
               已冻结
             </span>
@@ -953,7 +1068,7 @@ export function RequirementDetail() {
               onChange={(e) => setSpecDraft(e.target.value)}
               className="min-h-[240px] font-mono text-xs"
               disabled={savingSpec}
-              placeholder="在这里填写需求详细规约（支持 Markdown 格式）…"
+              placeholder="在这里写需求的详细内容（支持 Markdown）…"
             />
             <div className="flex justify-end gap-2">
               <Button
@@ -977,7 +1092,7 @@ export function RequirementDetail() {
             {req.spec_md ? (
               <MarkdownView content={req.spec_md} />
             ) : (
-              <span className="italic text-muted-foreground text-sm">暂无规约内容，点「编辑」添加。</span>
+              <span className="italic text-muted-foreground text-sm">还没有内容，点「编辑」添加。</span>
             )}
           </div>
         )}
@@ -988,13 +1103,15 @@ export function RequirementDetail() {
   const subPrCard = subPrs.length > 0 ? (
     <Card>
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-        <span className="text-sm font-medium">关联子 PR</span>
+        <span className="text-sm font-medium">交付 PR</span>
         <Badge variant="secondary">{subPrs.length}</Badge>
       </div>
       <ul className="divide-y divide-border">
         {subPrs.map((p) => (
           <li key={p.id} className="flex items-center gap-3 px-4 py-2 font-mono text-xs">
-            <span className="text-muted-foreground">{p.child_workspace_id}</span>
+            <span className="text-muted-foreground">
+              {projectCodebases.find((cb) => cb.id === p.child_workspace_id)?.alias ?? p.child_workspace_id}
+            </span>
             <a
               href={p.pr_url}
               target="_blank"
@@ -1010,61 +1127,258 @@ export function RequirementDetail() {
     </Card>
   ) : null;
 
-  const feedbackCard = (feedbacks.length > 0 || req.status === "awaiting_review" || req.status === "fix_revision") ? (
-    <Card id="feedback-section">
-      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-sm font-medium">反馈历史</span>
-        {feedbacks.length > 0 && (
-          <Badge variant="muted" className="ml-auto">{feedbacks.length}</Badge>
-        )}
+  // artifacts 交付（v2 R5）：有交付物记录且无任何交付 PR（hasPr 优先——混合交付不支持，PR 赢）
+  const hasAnyPr = !!req.pr_url || (req.pr_number ?? 0) > 0 || subPrs.length > 0;
+  const isArtifactsDelivery = deliveries.length > 0 && !hasAnyPr;
+  const latestDelivery = deliveries.length > 0 ? deliveries[deliveries.length - 1] : null;
+
+  const fmtSize = (n: number) =>
+    n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`;
+
+  // 交付物验收卡：最新轮文件列表 + 下载（只列不渲染——范围控制）。通过/驳回动作在
+  // 「审查与修复」卡头部（验收通过按钮）与底部输入框（驳回 = 发布审查意见），与 PR 验收同管道。
+  const deliveriesCard = latestDelivery ? (
+    <Card>
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+        <Package className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-sm font-medium">交付物</span>
+        <Badge variant="secondary">第 {latestDelivery.round} 轮</Badge>
+        <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+          {new Date(latestDelivery.created_at).toLocaleString()}
+        </span>
       </div>
-      <div className="p-5">
-        {feedbacks.length === 0 ? (
-          <p className="font-mono text-xs text-muted-foreground">等待 PR review 反馈…</p>
-        ) : (
-          <ol className="space-y-3">
-            {feedbacks.map((fb) => (
-              <li key={fb.id} className="border-l-2 border-accent/60 pl-3">
-                <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline">{SOURCE_LABEL[fb.source] ?? fb.source}</Badge>
-                  <span className="font-mono text-[10px] text-muted-foreground">
-                    {new Date(fb.created_at).toLocaleString()}
-                  </span>
-                </div>
-                <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
-                  {fb.body}
-                </pre>
+      <div className="space-y-3 p-5">
+        {latestDelivery.summary && (
+          <div className="scrollbar-thin max-h-[280px] overflow-auto rounded-md border border-border bg-muted/30 p-3">
+            <MarkdownView content={latestDelivery.summary} />
+          </div>
+        )}
+        {deliveryFiles && deliveryFiles.round === latestDelivery.round && deliveryFiles.files.length > 0 ? (
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {deliveryFiles.files.map((f) => (
+              <li key={f.path} className="flex items-center gap-3 px-3 py-2 font-mono text-xs">
+                <span className="min-w-0 flex-1 truncate" title={f.path}>{f.path}</span>
+                <span className="shrink-0 text-muted-foreground">{fmtSize(f.size)}</span>
+                <a
+                  href={api.deliveryDownloadUrl(req.id, latestDelivery.round, f.path)}
+                  className="inline-flex shrink-0 items-center gap-1 text-accent hover:underline"
+                  title="下载此文件"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  下载
+                </a>
               </li>
             ))}
-          </ol>
+          </ul>
+        ) : (
+          <p className="font-mono text-xs text-muted-foreground">
+            交付目录暂无可列出的文件（可能已被清理或尚未同步）。
+          </p>
+        )}
+        {deliveries.length > 1 && (
+          <p className="font-mono text-[10px] text-muted-foreground">
+            共 {deliveries.length} 轮交付（驳回重交递增）；历史轮文件在
+            runtime/requirements/{req.id}/deliveries/ 下。
+          </p>
         )}
       </div>
     </Card>
   ) : null;
 
-  // 执行视图：展开常驻（带标题头），所有阶段一致呈现，不折叠
-  const taskRecord = req.task_id ? (
-    <Card>
-      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-        <span className="text-sm font-medium">执行记录</span>
-        <span className="font-mono text-[10px] text-muted-foreground">TASK {req.task_id.slice(0, 8)}…</span>
+  // 审查与修复对话卡（验收步专属）：时间线（审查意见 / GitHub review / Agent 修复回应 +
+  // 进行中的修复进度条目）+ 底部发布输入框 —— 每发一条意见，对应的「正在做什么 / 进度 /
+  // 结果」都回到同一个时间线里，不再分散在执行页的多个卡片。
+  // residue（上一次失败 run 沉淀的历史评审遗留）不属于当前 PR 的审查线程，整体不在验收卡显示
+  // ——它只服务 scheduler 重跑上下文（后端直接读 comments），跟当前 PR 评审无关。
+  const reviewThread = feedbacks.filter(
+    (fb) => (fb.subtype ?? (fb.from_role === "agent" ? "fix" : "review")) !== "residue",
+  );
+  const reviewThreadCard = (
+    <Card id="feedback-section">
+      {/* 头部 = 验收决策条：标题 + PR 链接在左，「验收通过」主按钮在右（原独立决策条已并入） */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-sm font-medium">审查与修复</span>
+        {reviewThread.length > 0 && (
+          <Badge variant="muted">{reviewThread.length}</Badge>
+        )}
+        {req.pr_url && (
+          <a
+            href={req.pr_url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline"
+          >
+            PR #{req.pr_number}
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+        {req.status === "awaiting_review" && (
+          <Button
+            variant="default"
+            size="sm"
+            className="ml-auto text-xs"
+            onClick={() => void markDone()}
+            disabled={actionBusy}
+          >
+            <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> 验收通过 · 完成
+          </Button>
+        )}
       </div>
       <div className="p-5">
-        <TaskDetail key={req.task_id ?? "none"} taskId={req.task_id} embedded subscribe={subscribe} />
+        {reviewThread.length === 0 && req.status !== "fix_revision" ? (
+          <p className="font-mono text-xs text-muted-foreground">
+            {isArtifactsDelivery
+              ? "还没有审查记录。查看上方交付物后：通过点「验收通过」；不满意发布审查意见，Agent 会按意见重做产物并在此回应。"
+              : "还没有审查记录。发布审查意见后 Agent 会按意见修复并在此回应；GitHub 上的 Request Changes 与 CI 失败也会自动进入这里。"}
+          </p>
+        ) : (
+          <ol className="space-y-2.5">
+            {/* 对话双方用底色 + 图标区分：用户/GitHub = 中性卡，Agent 回应 = accent 淡底卡。
+                residue 已在 reviewThread 过滤掉，此处只剩当前 PR 的评审意见 / Agent 修复回应。 */}
+            {reviewThread.map((fb) => {
+              const isFix = (fb.subtype ?? (fb.from_role === "agent" ? "fix" : "review")) === "fix";
+              return (
+                <li
+                  key={fb.id}
+                  className={cn(
+                    "rounded-md border p-3",
+                    isFix ? "border-accent/25 bg-accent/5" : "border-border bg-muted/30",
+                  )}
+                >
+                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                    {isFix
+                      ? <Bot className="h-3.5 w-3.5 text-accent" />
+                      : <UserRound className="h-3.5 w-3.5 text-muted-foreground" />}
+                    <span className={cn("text-xs font-medium", isFix ? "text-accent" : "text-muted-foreground")}>
+                      {isFix ? "Agent 修复" : (SOURCE_LABEL[fb.source] ?? fb.source)}
+                    </span>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {new Date(fb.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
+                    {fb.body}
+                  </pre>
+                </li>
+              );
+            })}
+            {/* 进行中的修复 = 时间线的活跃条目。fix 是标准 run（v2 R3）：实时进度 / 日志 /
+                agent 调用全在下方「执行记录」（task_id 已指向修复轮），此处只给状态 + 跳转 */}
+            {req.status === "fix_revision" && (
+              <li className="rounded-md border border-accent/25 bg-accent/5 p-3">
+                <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+                  <span className="text-xs font-medium text-accent">Agent 修复执行中</span>
+                  {req.task_id && (
+                    <a
+                      href="#task-record"
+                      className="ml-auto font-mono text-[11px] text-accent hover:underline"
+                    >
+                      查看执行 →
+                    </a>
+                  )}
+                </div>
+                <p className="font-mono text-[11px] text-muted-foreground">
+                  {isArtifactsDelivery
+                    ? "按上方最新意见重做产物，完成后交付新的一轮并在这里回应总结"
+                    : "按上方最新意见在交付分支上修改，完成后更新 PR 并在这里回应总结"}
+                  {req.task_id ? "；实时进度与日志见下方「执行记录」" : ""}
+                </p>
+              </li>
+            )}
+          </ol>
+        )}
       </div>
+      {/* 发布入口：验收中 / 修复中都可追加意见（修复中追加 = 下一轮修复的输入）。
+          status 即活跃性判据 —— done/cancelled 回看时自动无输入框 */}
+      {(req.status === "awaiting_review" || req.status === "fix_revision") && (
+        <div className="border-t border-border p-4">
+          <Textarea
+            value={feedbackBody}
+            onChange={(e) => setFeedbackBody(e.target.value)}
+            placeholder={req.status === "awaiting_review"
+              ? "填写审查意见…（发布后 Agent 立即开始修复，进度和结果会回到这里）"
+              : "补充意见…（当前修复完成后，新意见会触发下一轮修复）"}
+            className="min-h-[72px] text-xs"
+            disabled={submittingFeedback}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
+            }}
+          />
+          <div className="mt-2 flex justify-end">
+            <Button
+              size="sm"
+              onClick={() => void inject()}
+              disabled={submittingFeedback || !feedbackBody.trim()}
+            >
+              {submittingFeedback ? "发布中…" : "发布审查意见"}
+            </Button>
+          </div>
+        </div>
+      )}
     </Card>
-  ) : null;
+  );
+
+  // 执行视图：展开常驻（带标题头），所有阶段一致呈现，不折叠。
+  // v2 R6：一个需求重跑 / 修复会产生多个 run（task）。
+  //  - 前置态（task_id 空）：不渲染执行记录卡（保持现状，不加空卡）
+  //  - 单 run（runs<=1）：零噪音直接渲染 TaskDetail embedded，不加任何切换器外壳
+  //  - 多 run（runs>=2）：卡头部插横向切换器，选中轮渲染 TaskDetail embedded
+  // multiRun 视选中 run 而非固定 req.task_id（深链 / 历史轮可看）。
+  const taskRecord = (() => {
+    if (!req.task_id) return null; // empty：前置态，不渲染
+    const multiRun = !!runs && runs.length >= 2;
+    // 当前展示的 run id：多 run 用切换器选中态，否则用需求当前 run（task_id）
+    const shownTaskId = multiRun ? (selectedRunId ?? req.task_id) : req.task_id;
+    return (
+      <Card id="task-record">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+          <span className="text-sm font-medium">执行记录</span>
+        </div>
+        {/* loading：切换器位用骨架；多 run：切换器 */}
+        {runs === undefined ? (
+          <div className="px-4 pt-3">
+            <SkeletonRows variant="row" count={1} />
+          </div>
+        ) : multiRun ? (
+          <RunSwitcher runs={runs} activeTaskId={shownTaskId} onSelect={selectRun} />
+        ) : null}
+        <div className="p-5">
+          {runsError ? (
+            // error：runs 拉取失败 / 选中 run 异常。run 自身 failed ≠ 区 error（失败 run 正常进切换器）
+            <ErrorState
+              title="加载执行记录失败"
+              detail={runsError}
+              onRetry={() => { setRunsError(null); void loadRuns(req.id); }}
+            />
+          ) : (
+            <TaskDetail key={shownTaskId} taskId={shownTaskId} embedded subscribe={subscribe} />
+          )}
+        </div>
+      </Card>
+    );
+  })();
 
   // 澄清期 AI 状态行（出错 / 进度 / idle 三选一）
   const clarifierStatus = (
     <>
       {req.clarifier_error && req.status === "clarifying" && (
-        <Card className="p-5 border-l-4 border-l-destructive">
+        <Card className="p-5">
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-1 min-w-0">
               <div className="font-mono text-xs text-destructive font-medium">⚠ 澄清出错</div>
               <p className="text-sm text-muted-foreground break-words">{req.clarifier_error}</p>
+              {/* 换模型入口：失败时也可达（不再卡在 questions>0），换个模型重试 */}
+              <button
+                type="button"
+                onClick={() => setClarifierDialogOpen(true)}
+                className="inline-flex items-center gap-1 pt-1 font-mono text-[10px] text-muted-foreground hover:text-accent"
+                title="换个模型再重试澄清"
+              >
+                <Settings2 className="h-3 w-3" />
+                澄清模型：{req.clarifier_model ?? req.clarifier_provider ?? "全局默认"} · 点击更换
+              </button>
             </div>
             <Button
               size="sm"
@@ -1223,7 +1537,7 @@ export function RequirementDetail() {
   ) : null;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-6">
+    <div className={PAGE_W}>
       {/* 顶部导航条 */}
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <Button
@@ -1257,7 +1571,7 @@ export function RequirementDetail() {
                 if (e.key === "Enter") { e.preventDefault(); saveTitle(); }
                 if (e.key === "Escape") { setEditingTitle(false); setTitleDraft(req.title); }
               }}
-              className="h-auto break-words py-1.5 font-display text-2xl font-bold leading-tight sm:text-3xl"
+              className="h-auto break-words py-1.5 text-lg font-semibold leading-tight tracking-tight lg:text-2xl"
               placeholder="需求标题"
             />
             <div className="flex items-center gap-2">
@@ -1275,9 +1589,10 @@ export function RequirementDetail() {
             </div>
           </div>
         ) : (
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-3">
             <div className="flex min-w-0 items-start gap-2">
-              <h1 className="break-words font-display text-3xl font-bold leading-[1.1] sm:text-4xl">
+              {/* 与 PageHero 标题排版对齐（衬线 4xl hero 已废弃） */}
+              <h1 className="break-words text-lg font-semibold leading-tight tracking-tight lg:text-2xl">
                 {req.title}
               </h1>
               {canEditRequirementContent(req.status) && (
@@ -1294,7 +1609,7 @@ export function RequirementDetail() {
               )}
             </div>
             {/* 需求级操作：取消（非终态）/ 删除，常驻右上（原危险区折叠已移除） */}
-            <div className="flex shrink-0 gap-2 pt-1">
+            <div className="flex shrink-0 gap-2 lg:pt-1">
               {!isTerminal && (
                 <Button
                   variant="outline"
@@ -1321,7 +1636,10 @@ export function RequirementDetail() {
         )}
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           <Badge variant={STATUS_VARIANT[req.status] ?? "outline"}>
-            {STATUS_LABEL[req.status] ?? req.status}
+            {/* artifacts 交付（无 PR）：验收信号 = 本页人工通过/驳回，不是 PR review */}
+            {req.status === "awaiting_review" && isArtifactsDelivery
+              ? "待验收"
+              : STATUS_LABEL[req.status] ?? req.status}
           </Badge>
           {project && (
             <Link
@@ -1348,55 +1666,85 @@ export function RequirementDetail() {
             不再露 TASK id —— 用户视角「需求」就是这件工作本身，task 是内核执行概念 */}
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground">
           <span>ID <code className="text-accent">{req.id}</code></span>
+          {/* 代码库平铺：集合内全部库平级展示（主库概念已废除，workspace_id 只是缓存列） */}
           <span>
-            工作区{" "}
-            {req.workspace_id
-              ? (projectCodebases.find((cb) => cb.id === req.workspace_id)?.alias ?? req.workspace_id)
-              : "未关联"}
+            代码库{" "}
+            {(() => {
+              const ids = (req.workspace_ids?.length ?? 0) > 0
+                ? req.workspace_ids!
+                : req.workspace_id ? [req.workspace_id] : [];
+              if (ids.length === 0) return "未关联";
+              return ids
+                .map((wid) => projectCodebases.find((cb) => cb.id === wid)?.alias ?? wid)
+                .join(" · ");
+            })()}
           </span>
-          <span className="inline-flex items-center gap-1">
-            工作流{" "}
-            {canEditRequirementContent(req.status) ? (
-              <select
-                value={req.workflow ?? "dev"}
-                onChange={(e) => void changeWorkflow(e.target.value)}
-                disabled={savingWorkflow || workflowOptions.length === 0}
-                className="rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[11px] focus:border-accent focus:outline-none"
-                title="该需求入队后用哪个工作流执行；审批后冻结"
-              >
-                {workflowOptions.length === 0 && <option value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</option>}
-                {workflowOptions.map((w) => (
-                  // 业务标签（中文 label）为主，内核名括注（无 label 的工作流只显示 name）
-                  <option key={w.name} value={w.name}>{w.label ? `${w.label}（${w.name}）` : w.name}</option>
-                ))}
-              </select>
-            ) : (
-              <code title={`审批后工作流随内容冻结（内核名：${req.workflow ?? "dev"}）`}>
-                {workflowOptions.find((w) => w.name === (req.workflow ?? "dev"))?.label ?? req.workflow ?? "dev"}
-              </code>
-            )}
-          </span>
+          {/* 工作流：审批通过后才在元信息展示（审批前尚未定案，选择器在「下一步」banner）。
+              终态（failed/cancelled）按死亡前状态判断是否已过审批 */}
+          {(() => {
+            const PRE_APPROVAL = new Set(["drafting", "clarifying", "ready", "awaiting_approval"]);
+            const effective = isAborted ? (req.status_before_terminal ?? req.status) : req.status;
+            if (PRE_APPROVAL.has(effective)) return null;
+            return (
+              <span className="inline-flex items-center gap-1">
+                工作流{" "}
+                <code title={`内核名：${req.workflow ?? "dev"}（审批后随内容冻结）`}>
+                  {workflowOptions.find((w) => w.name === (req.workflow ?? "dev"))?.label ?? req.workflow ?? "dev"}
+                </code>
+              </span>
+            );
+          })()}
           <span>创建 {new Date(req.created_at).toLocaleString()}</span>
           <span>更新 {new Date(req.updated_at).toLocaleString()}</span>
         </div>
       </header>
 
-      {/* 步骤进度条：6 步可点击，默认当前步 */}
-      <div className="mb-5 rounded-lg border border-border bg-card/40 px-4 py-3">
-        <StepBar status={req.status} statusBeforeTerminal={req.status_before_terminal} selected={activeStep} onSelect={setSelectedStep} />
+      {/* 步骤进度条：6 步可点击，默认当前步；窄屏非选中步只显示数字圈 + overflow 兜底 */}
+      <div className="mb-5 overflow-x-auto rounded-lg border border-border bg-card/40 px-3 py-3 sm:px-4">
+        <StepBar status={req.status} statusBeforeTerminal={req.status_before_terminal} selected={activeStep} onSelect={selectStep} />
       </div>
 
-      {/* 下一步主 CTA banner */}
+      {/* 下一步主 CTA banner；审批/入队/重试 = 决定执行方式的时刻，工作流选择内联在按钮旁 */}
       <NextStepCTA
         status={req.status}
         openQuestionCount={openQuestions.length}
         busy={actionBusy}
+        extra={
+          canEditRequirementContent(req.status) &&
+          ["ready", "awaiting_approval", "failed"].includes(req.status) ? (
+            <div
+              className="flex items-center gap-2"
+              title="该需求入队后用哪个工作流执行；审批后冻结"
+            >
+              <span className="shrink-0 text-xs text-muted-foreground">工作流</span>
+              <Select
+                value={req.workflow ?? "dev"}
+                onValueChange={(v) => void changeWorkflow(v)}
+                disabled={savingWorkflow || workflowOptions.length === 0}
+              >
+                <SelectTrigger className="h-10 w-auto min-w-[170px] gap-2 bg-background text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {workflowOptions.length === 0 && (
+                    <SelectItem value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</SelectItem>
+                  )}
+                  {workflowOptions.map((w) => (
+                    // 业务标签（中文 label）为主，内核名括注（无 label 的工作流只显示 name）
+                    <SelectItem key={w.name} value={w.name}>
+                      {w.label ? `${w.label}（${w.name}）` : w.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : undefined
+        }
         onMarkReady={markReady}
         onEnqueue={enqueue}
         onApprove={approve}
         onRetry={() => void retryFromFailed()}
         onScrollToQuestions={() => scrollToSection("clarification-section")}
-        onScrollToFeedback={() => scrollToSection("feedback-section")}
       />
 
       {/* 主体：单列（元信息已上移标题下、危险区沉底，不再有右侧栏） */}
@@ -1406,7 +1754,7 @@ export function RequirementDetail() {
           {activeStep !== currentStep && (
             <button
               type="button"
-              onClick={() => setSelectedStep(currentStep)}
+              onClick={() => selectStep(currentStep)}
               className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
             >
               ↩ 回到当前步骤（{STEPS.find((s) => s.key === currentStep)?.label}）
@@ -1424,7 +1772,7 @@ export function RequirementDetail() {
                       <p className="break-words text-xs leading-relaxed text-foreground/85">{req.status_reason}</p>
                     </div>
                   )}
-                  <p className="text-xs text-muted-foreground">可在上方「重新入队执行」重试，或退回草稿改规约。</p>
+                  <p className="text-xs text-muted-foreground">可在上方「重新入队执行」重试，或退回草稿改需求。</p>
                 </div>
               )}
               {req.status === "cancelled" && (
@@ -1474,8 +1822,80 @@ export function RequirementDetail() {
             const readonly = pos === "past";
 
             if (activeStep === "clarify") {
+              // drafting = 澄清未开始：先确认工作流 + 代码库（澄清 agent 在其浅 clone 中调查），再显式开始
+              if (req.status === "drafting" && !readonly) {
+                // 守卫与 RPC 同口径：代码库集合非空（workspace_id 只是缓存列）；
+                // 所选工作流 requires.git 非 true（"optional"/false）时允许空集确认（v2 R5 无库闭环）
+                const hasWorkspaces = (req.workspace_ids?.length ?? 0) > 0 || !!req.workspace_id;
+                const wfDecl = workflowOptions.find((w) => w.name === (req.workflow ?? "dev"));
+                const gitOptional = !!wfDecl && wfDecl.requires_git !== undefined && wfDecl.requires_git !== true;
+                return (
+                  <>
+                    {/* 工作流先于代码库确认：requires.git 由所选工作流决定（业务标签 + 内核名叠加） */}
+                    <Card className="p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="shrink-0 text-sm font-semibold">工作流</span>
+                        <Select
+                          value={req.workflow ?? "dev"}
+                          onValueChange={(v) => void changeWorkflow(v)}
+                          disabled={savingWorkflow || actionBusy || workflowOptions.length === 0}
+                        >
+                          <SelectTrigger className="h-9 w-auto min-w-[170px] gap-2 bg-background text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {workflowOptions.length === 0 && (
+                              <SelectItem value={req.workflow ?? "dev"}>{req.workflow ?? "dev"}</SelectItem>
+                            )}
+                            {workflowOptions.map((w) => (
+                              <SelectItem key={w.name} value={w.name}>
+                                {w.label ? `${w.label}（${w.name}）` : w.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {gitOptional ? "此工作流不要求代码库" : "此工作流需要代码库"}
+                          {wfDecl?.delivers ? ` · 交付 ${wfDecl.delivers === "pr" ? "PR" : wfDecl.delivers}` : ""}
+                        </span>
+                      </div>
+                    </Card>
+                    <RequirementWorkspacePicker
+                      requirement={req}
+                      workspaces={projectCodebases}
+                      disabled={actionBusy}
+                      allowEmpty={gitOptional}
+                      emptyHint={`工作流「${wfDecl?.label ?? wfDecl?.name ?? req.workflow ?? "dev"}」不要求代码库`}
+                      onChanged={reloadWorkspaces}
+                    />
+                    <Button
+                      className="w-full"
+                      onClick={startClarify}
+                      disabled={actionBusy || (!hasWorkspaces && !gitOptional)}
+                      title={!hasWorkspaces && !gitOptional ? "请先选一个代码库，AI 澄清时要读它" : undefined}
+                    >
+                      {actionBusy
+                        ? "处理中…"
+                        : hasWorkspaces
+                          ? "确认代码库，开始 AI 澄清 →"
+                          : gitOptional
+                            ? "确认无代码库，开始 AI 澄清 →"
+                            : "确认代码库，开始 AI 澄清 →"}
+                    </Button>
+                    {specCard}
+                    {attachmentSection}
+                  </>
+                );
+              }
               return (
                 <>
+                  {/* 澄清进行中/回看：常驻展示已确认的代码库（冻结，只读） */}
+                  <RequirementWorkspacePicker
+                    requirement={req}
+                    workspaces={projectCodebases}
+                    readOnly
+                    onChanged={reloadWorkspaces}
+                  />
                   {clarifierStatus}
                   {chatCard}
                   {!readonly && (
@@ -1500,7 +1920,7 @@ export function RequirementDetail() {
               return (
                 <>
                   {req.schedule_error && (
-                    <Card className="border-l-4 border-l-destructive p-4">
+                    <Card className="p-4">
                       <div className="flex items-start gap-2">
                         <span className="shrink-0 text-destructive">⚠</span>
                         <div className="min-w-0 text-sm">
@@ -1535,6 +1955,13 @@ export function RequirementDetail() {
                     </Card>
                   ) : (
                     <>
+                      {/* 审批阶段：代码库在澄清前确认、开始澄清即冻结（中途换库会让澄清失效），只读展示 */}
+                      <RequirementWorkspacePicker
+                        requirement={req}
+                        workspaces={projectCodebases}
+                        readOnly
+                        onChanged={reloadWorkspaces}
+                      />
                       {specCard}
                       {attachmentSection}
                       {req.status === "awaiting_approval" && (
@@ -1573,7 +2000,7 @@ export function RequirementDetail() {
                           )}
                           {startRunLog && (
                             <div className="flex items-center justify-between gap-2 text-sm">
-                              <span>调度器开始执行</span>
+                              <span>开始执行</span>
                               <span className="font-mono text-[11px] text-muted-foreground">
                                 {new Date(startRunLog.created_at).toLocaleString()}
                               </span>
@@ -1590,7 +2017,7 @@ export function RequirementDetail() {
                         </>
                       ) : (
                         <p className="text-xs text-muted-foreground">
-                          排队时间未记录（该需求的入队发生在状态日志上线之前）。
+                          这条需求入队较早，没留下排队时间。
                         </p>
                       )}
                     </Card>
@@ -1615,32 +2042,6 @@ export function RequirementDetail() {
                 <>
                   {subPrCard}
                   {taskRecord}
-                  {!readonly && req.status === "fix_revision" && (
-                    <Card className="p-5">
-                      <p className="mb-2 text-xs text-muted-foreground">修复阶段反馈（注入后 Agent 会据此修改）：</p>
-                      <Textarea
-                        value={feedbackBody}
-                        onChange={(e) => setFeedbackBody(e.target.value)}
-                        placeholder="填写修改建议…"
-                        className="min-h-[80px] text-xs"
-                        disabled={submittingFeedback}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void inject();
-                        }}
-                      />
-                      <div className="mt-2 flex justify-end">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void inject()}
-                          disabled={submittingFeedback || !feedbackBody.trim()}
-                        >
-                          {submittingFeedback ? "提交中…" : "注入反馈"}
-                        </Button>
-                      </div>
-                    </Card>
-                  )}
-                  {feedbackCard}
                 </>
               );
             }
@@ -1648,29 +2049,13 @@ export function RequirementDetail() {
             if (activeStep === "review") {
               return (
                 <>
-                  {/* 验收步 = 看改动本身：只显示按文件 diff + 一行决策条（其余执行细节在执行步） */}
-                  {!readonly && (
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card/40 px-4 py-2.5">
-                      <span className="text-sm font-medium">
-                        验收
-                        {req.pr_url && (
-                          <a href={req.pr_url} target="_blank" rel="noreferrer" className="ml-3 inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline">
-                            PR #{req.pr_number}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        )}
-                      </span>
-                      <div className="flex gap-2">
-                        <Button variant="default" size="sm" className="text-xs" onClick={() => void markDone()} disabled={actionBusy}>
-                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> 验收通过 · 完成
-                        </Button>
-                        <Button variant="outline" size="sm" className="text-xs" onClick={() => void requestFix()} disabled={actionBusy}>
-                          ↩ 要求修改
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  {req.task_id ? (
+                  {/* 验收步：artifacts 交付时交付物卡置顶（文件列表 + 下载），通过/驳回在下方
+                      「审查与修复」卡（与 PR 验收同管道）；PR 交付时审查与修复对话置顶
+                      （头部即决策条：PR 链接 + 验收通过按钮），改动 diff 在下方供对照。
+                      id=feedback-section 是 NextStepCTA 的滚动锚 */}
+                  {isArtifactsDelivery && deliveriesCard}
+                  {reviewThreadCard}
+                  {isArtifactsDelivery ? null : req.task_id ? (
                     <TaskFileDiffsCard taskId={req.task_id} reloadKey={req.status} />
                   ) : (
                     <Card className="p-6 text-center text-sm text-muted-foreground">无关联执行，没有可验收的改动。</Card>
@@ -1701,6 +2086,8 @@ export function RequirementDetail() {
                     </div>
                   </Card>
                 )}
+                {/* artifacts 交付：完成步常驻交付物卡（交付物随需求保留，沙盒清理不影响下载） */}
+                {isArtifactsDelivery && deliveriesCard}
                 {req.task_id && <SandboxBrowser taskId={req.task_id} taskStatus={undefined} />}
               </>
             );
@@ -1736,8 +2123,8 @@ export function RequirementDetail() {
         message={
           <div className="space-y-2">
             <p>
-              取消后仅保留<strong>需求本身</strong>（规约、评论、附件），
-              执行记录与沙盒将被<strong className="text-destructive">清空</strong>。
+              取消后只留下<strong>需求本身</strong>（需求内容、评论、附件），
+              执行记录和代码副本会被<strong className="text-destructive">清空</strong>。
             </p>
             {(req.status === "running" || req.status === "fix_revision") && (
               <p className="text-xs font-semibold text-foreground">
@@ -1764,7 +2151,7 @@ export function RequirementDetail() {
           <div className="space-y-2">
             <p>
               将<strong className="text-destructive">永久删除</strong>此需求及其全部执行记录
-              （规约、评论、附件、阶段日志、agent 调用、沙盒文件）。
+              （需求内容、评论、附件、运行日志、agent 调用、代码副本）。
             </p>
             {(req.status === "running" || req.status === "fix_revision") && (
               <p className="text-xs font-semibold text-foreground">

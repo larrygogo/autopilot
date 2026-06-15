@@ -1,19 +1,18 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Layers, Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { Layers, Plus, RefreshCw, Pencil, Trash2, MoreHorizontal } from "lucide-react";
+import { ConfirmDialog, EmptyState, EntityGrid, EntityList, ErrorState, FormDialog, FormField, PageHero, PageShell, SkeletonRows, ViewToggle, useViewMode, type EntityCardItem } from "@/components/pro";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { api, type Project } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { cn } from "@/lib/utils";
@@ -25,12 +24,9 @@ import { cn } from "@/lib/utils";
 interface FormState {
   name: string;
   description: string;
-  // 仅新建场景使用（edit 模式不显示这两字段）
-  remote_url: string;
-  alias: string;
 }
 
-const EMPTY_FORM: FormState = { name: "", description: "", remote_url: "", alias: "" };
+const EMPTY_FORM: FormState = { name: "", description: "" };
 
 function ProjectsTab() {
   const navigate = useNavigate();
@@ -43,13 +39,14 @@ function ProjectsTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
 
 
 
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
-  const [deleteInput, setDeleteInput] = useState("");
   const [deleting, setDeleting] = useState(false);
+
+  // grid / list 视图（localStorage 记住偏好）
+  const [view, setView] = useViewMode("library.projects.view");
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -80,67 +77,45 @@ function ProjectsTab() {
   const openEditDialog = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingProject(p);
-    setForm({ name: p.name, description: p.description ?? "", remote_url: "", alias: "" });
+    setForm({ name: p.name, description: p.description ?? "" });
     setDialogOpen(true);
   };
 
   const closeDialog = () => {
-    if (saving) return;
     setDialogOpen(false);
     setEditingProject(null);
   };
 
+  // busy / 内联错误 / 成功关闭由 FormDialog 骨架接管：抛错 = 失败（内联展示），正常返回 = 成功
   const save = async () => {
     const name = form.name.trim();
-    if (!name) {
-      toast.error("验证失败", "项目名称不能为空");
-      return;
+    if (editingProject) {
+      // 编辑：只改 name / description，不动代码库
+      await api.updateProject(editingProject.id, {
+        name,
+        description: form.description.trim() || null,
+      });
+      toast.success(`已更新项目「${name}」`);
+    } else {
+      // 新建：只要名称/描述；代码库稍后在项目的「代码库」分区关联
+      await api.createProject({
+        name,
+        description: form.description.trim() || undefined,
+      });
+      toast.success(`已创建项目「${name}」，可在项目的「代码库」里关联 Git 仓库`);
     }
-    setSaving(true);
-    try {
-      if (editingProject) {
-        // 编辑：只改 name / description，不动工作区
-        await api.updateProject(editingProject.id, {
-          name,
-          description: form.description.trim() || null,
-        });
-        toast.success(`已更新项目「${name}」`);
-      } else {
-        // 新建：必须提供远程地址
-        const remoteUrl = form.remote_url.trim();
-        if (!remoteUrl) {
-          toast.error("验证失败", "远程仓库地址不能为空");
-          setSaving(false);
-          return;
-        }
-        await api.createProjectWithWorkspace({
-          name,
-          remote_url: remoteUrl,
-          alias: form.alias.trim() || undefined,
-          description: form.description.trim() || undefined,
-        });
-        toast.success(`已创建项目「${name}」并关联工作区`);
-      }
-      setDialogOpen(false);
-      setEditingProject(null);
-      refresh();
-    } catch (e: unknown) {
-      toast.error(editingProject ? "更新失败" : "创建失败", (e as Error)?.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
+    setEditingProject(null);
+    refresh();
   };
 
   const openDeleteDialog = (p: Project, e: React.MouseEvent) => {
     e.stopPropagation();
     setDeleteTarget(p);
-    setDeleteInput("");
   };
 
   const closeDeleteDialog = () => {
     if (deleting) return;
     setDeleteTarget(null);
-    setDeleteInput("");
   };
 
   const confirmDelete = async () => {
@@ -150,7 +125,6 @@ function ProjectsTab() {
       await api.deleteProject(deleteTarget.id);
       toast.success(`已删除项目「${deleteTarget.name}」`);
       setDeleteTarget(null);
-      setDeleteInput("");
       refresh();
     } catch (e: unknown) {
       toast.error("删除失败", (e as Error)?.message ?? String(e));
@@ -159,225 +133,130 @@ function ProjectsTab() {
     }
   };
 
+  // Supabase 式操作菜单（grid 卡片右上角 / list 行尾共用）
+  const projectMenu = (project: Project) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        onClick={(e) => e.stopPropagation()}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        aria-label={`项目 ${project.name} 操作`}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-36" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuItem className="gap-2" onSelect={() => openEditDialog(project, { stopPropagation: () => {} } as React.MouseEvent)}>
+          <Pencil className="h-3.5 w-3.5" />
+          编辑
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="gap-2 text-destructive focus:text-destructive"
+          onSelect={() => openDeleteDialog(project, { stopPropagation: () => {} } as React.MouseEvent)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          删除
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
+  const projectItems: EntityCardItem[] = projects.map((project) => ({
+    key: project.id,
+    title: project.name,
+    subtitle: project.id,
+    description: project.description || undefined,
+    meta: `创建于 ${new Date(project.created_at).toLocaleDateString("zh-CN")}`,
+    menu: projectMenu(project),
+    icon: Layers,
+    onOpen: () => navigate("/projects/" + project.id),
+  }));
+
   return (
-    <div className="space-y-4 pt-4">
+    <div className="space-y-4">
+      {/* 列表页统一骨架：PageHero（标题+副标+主创建按钮）+ 工具行（计数+视图切换） */}
+      <PageHero
+        title="项目"
+        subtitle="按项目维度查看 / 新建 / 进入工作台"
+        actions={
+          <Button onClick={openCreateDialog}>
+            <Plus className="h-4 w-4" />
+            新建项目
+          </Button>
+        }
+      />
       <div className="flex items-center justify-between gap-3">
         <p className="bp-label text-muted-foreground">
           共 {projects.length} 个项目
         </p>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={openCreateDialog}>
-            <Plus className="h-4 w-4" />
-            新建项目
-          </Button>
-        </div>
+        <ViewToggle view={view} onChange={setView} />
       </div>
 
-      {loadError && (
-        <Card className="border-destructive/50 p-4">
-          <p className="text-sm text-destructive">加载失败：{loadError}</p>
-        </Card>
-      )}
+      {loadError && <ErrorState title="加载项目失败" detail={loadError} onRetry={refresh} />}
 
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      )}
+      {loading && <SkeletonRows variant="card" count={3} />}
 
       {!loading && !loadError && projects.length === 0 && (
-        <Card className="p-10 text-center">
-          <Layers className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
-          <p className="mb-4 text-sm text-muted-foreground">
-            暂无项目，点「新建项目」开始创建第一个项目。
-          </p>
-          <Button size="sm" onClick={openCreateDialog}>
-            <Plus className="h-4 w-4" />
-            新建项目
-          </Button>
-        </Card>
+        <EmptyState
+          size="page"
+          icon={Layers}
+          title="暂无项目"
+          hint="项目是需求与代码库的工作台，先建一个开始"
+          action={
+            <Button size="sm" onClick={openCreateDialog}>
+              <Plus className="h-4 w-4" />
+              新建项目
+            </Button>
+          }
+        />
       )}
 
-      {!loading && projects.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => (
-            <Card
-              key={project.id}
-              className="flex cursor-pointer flex-col p-4 transition-colors hover:border-accent"
-              onClick={() => navigate("/projects/" + project.id)}
-            >
-              {/* eyebrow + 项目 id（蓝图风） */}
-              <div className="mb-2 flex items-center gap-2 bp-label text-muted-foreground">
-                <Layers className="h-3 w-3" />
-                <span className="font-mono">{project.id}</span>
-              </div>
-              <h3 className="text-base font-bold leading-tight line-clamp-2">
-                {project.name}
-              </h3>
-              {project.description && (
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground line-clamp-2">
-                  {project.description}
-                </p>
-              )}
-              {/* 底部 footer：创建时间 + 永远可见的 edit / delete（不依赖 hover，键盘 / 触屏均可达） */}
-              <div className="mt-auto flex items-center justify-between border-t border-border pt-2">
-                <span className="text-[11px] text-muted-foreground">
-                  创建于 {new Date(project.created_at).toLocaleDateString("zh-CN")}
-                </span>
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={(e) => openEditDialog(project, e)}
-                    disabled={deleteTarget?.id === project.id}
-                    title="编辑"
-                    aria-label={`编辑项目 ${project.name}`}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={(e) => openDeleteDialog(project, e)}
-                    disabled={deleteTarget?.id === project.id}
-                    title="删除"
-                    aria-label={`删除项目 ${project.name}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
+      {/* grid / list：共享实体目录模板（EntityCards，与工作流目录同款） */}
+      {!loading && projects.length > 0 && view === "grid" && <EntityGrid items={projectItems} />}
+      {!loading && projects.length > 0 && view === "list" && <EntityList items={projectItems} />}
 
-      {/* 新建 / 编辑 dialog */}
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) closeDialog(); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editingProject ? "编辑项目" : "新建项目"}</DialogTitle>
-            <DialogDescription>
-              {editingProject
-                ? "修改项目名称或描述。"
-                : "填写项目名称和工作区路径，一步完成绑定。"}
-            </DialogDescription>
-          </DialogHeader>
+      {/* 新建 / 编辑 dialog（FormDialog 骨架：busy/内联错误/Enter 提交由骨架接管） */}
+      <FormDialog
+        open={dialogOpen}
+        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        title={editingProject ? "编辑项目" : "新建项目"}
+        description={
+          editingProject
+            ? "修改项目名称或描述。"
+            : "填写名称即可创建；Git 仓库稍后在项目的「代码库」里关联。"
+        }
+        submitText={editingProject ? "保存" : "创建"}
+        submitDisabled={!form.name.trim()}
+        onSubmit={save}
+      >
+        <FormField label="名称" required htmlFor="project-name">
+          <Input
+            id="project-name"
+            placeholder="例如：My Awesome App"
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          />
+        </FormField>
+        <FormField label="描述（可选）" htmlFor="project-description">
+          <Input
+            id="project-description"
+            placeholder="简短描述项目用途"
+            value={form.description}
+            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+          />
+        </FormField>
+      </FormDialog>
 
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="project-name">
-                名称 <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="project-name"
-                placeholder="例如：My Awesome App"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="project-description">描述（可选）</Label>
-              <Input
-                id="project-description"
-                placeholder="简短描述项目用途"
-                value={form.description}
-                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
-              />
-            </div>
-
-            {/* 远程地址 + alias 字段：仅新建时显示 */}
-            {!editingProject && (
-              <>
-                <div className="space-y-1.5">
-                  <Label htmlFor="project-remote">
-                    远程仓库地址 <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="project-remote"
-                    placeholder="https://github.com/owner/repo.git"
-                    value={form.remote_url}
-                    onChange={(e) => setForm((f) => ({ ...f, remote_url: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    写入前会执行 git ls-remote 验证远程可达性
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label htmlFor="project-alias">工作区别名（可选）</Label>
-                  <Input
-                    id="project-alias"
-                    placeholder="自动从仓库名推导"
-                    value={form.alias}
-                    onChange={(e) => setForm((f) => ({ ...f, alias: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
-                  />
-                </div>
-              </>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDialog} disabled={saving}>
-              取消
-            </Button>
-            <Button onClick={() => void save()} disabled={saving}>
-              {saving ? (editingProject ? "保存中…" : "创建中…") : (editingProject ? "保存" : "创建")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 删除确认 dialog */}
-      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) closeDeleteDialog(); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>删除项目</DialogTitle>
-            <DialogDescription>
-              此操作将永久删除项目及其下所有工作区和需求，且不可恢复。
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3 py-2">
-            <p className="text-sm text-muted-foreground">
-              请输入项目名称{" "}
-              <span className="font-medium text-foreground">
-                {deleteTarget?.name}
-              </span>{" "}
-              以确认删除：
-            </p>
-            <Input
-              placeholder={deleteTarget?.name}
-              value={deleteInput}
-              onChange={(e) => setDeleteInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && deleteInput === deleteTarget?.name) void confirmDelete();
-              }}
-              autoFocus
-            />
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDeleteDialog} disabled={deleting}>
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => void confirmDelete()}
-              disabled={deleting || deleteInput !== deleteTarget?.name}
-            >
-              {deleting ? "删除中…" : "确认删除"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* 删除确认：不可逆且高代价 → ConfirmDialog confirmWord（规范 docs/web-components.md §3） */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="删除项目"
+        message="此操作将永久删除项目及其下所有代码库和需求，且不可恢复。"
+        danger
+        confirmWord={deleteTarget?.name}
+        confirmText="确认删除"
+        onConfirm={confirmDelete}
+        onCancel={closeDeleteDialog}
+      />
     </div>
   );
 }
@@ -387,17 +266,11 @@ function ProjectsTab() {
 // ---------------------------------------------------------------------------
 
 export function Library() {
-  // 历史 tab 已并入「现在」页，本页只剩项目列表
+  // 历史 tab 已并入「现在」页，本页只剩项目列表（页头在 ProjectsTab 内，
+  // 新建按钮要挂 PageHero actions 而 dialog state 在 tab 组件里）
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
-      <header className="mb-4 border-b border-border pb-3">
-        <h1 className="font-display text-2xl font-bold">项目</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          按项目维度查看 / 新建 / 进入工作台
-        </p>
-      </header>
-
+    <PageShell width="content">
       <ProjectsTab />
-    </div>
+    </PageShell>
   );
 }

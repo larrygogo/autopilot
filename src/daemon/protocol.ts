@@ -138,8 +138,8 @@ export function getChannelsForEvent(event: AutopilotEvent): string[] {
       channels.push("provider:*");
       break;
     }
-    case "now": {
-      channels.push("now:*");
+    case "notification": {
+      channels.push("notification:*");
       break;
     }
   }

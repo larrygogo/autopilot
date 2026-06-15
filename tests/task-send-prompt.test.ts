@@ -22,12 +22,13 @@ import { up as m008 } from "../src/migrations/008-projects";
 import { up as m009 } from "../src/migrations/009-nullable-codebase";
 import { up as m019 } from "../src/migrations/019-task-requirement-id";
 import { up as m024 } from "../src/migrations/024-codebase-to-workspace";
+import { up as m044 } from "../src/migrations/044-task-run-columns";
 import { _setDbForTest, createTask, updateTask, appendPendingPrompt, getTask } from "../src/core/db";
 import {
   sendPromptToTask,
   consumePendingPrompts,
   peekPendingPrompts,
-} from "../src/core/task-send-prompt";
+} from "../src/core/task/send-prompt";
 import { registerPending, answerPending, hasPending } from "../src/agents/pending-questions";
 
 describe("sendPromptToTask 三档分支", () => {
@@ -35,7 +36,7 @@ describe("sendPromptToTask 三档分支", () => {
 
   beforeAll(() => {
     db = new Database(":memory:");
-    [m001, m004, m005, m006, m007, m008, m009, m019, m024].forEach((fn) => fn(db));
+    [m001, m004, m005, m006, m007, m008, m009, m019, m024, m044].forEach((fn) => fn(db));
     _setDbForTest(db);
   });
 
@@ -142,7 +143,7 @@ describe("consumePendingPrompts + peekPendingPrompts", () => {
 
   beforeAll(() => {
     db = new Database(":memory:");
-    [m001, m004, m005, m006, m007, m008, m009, m019].forEach((fn) => fn(db));
+    [m001, m004, m005, m006, m007, m008, m009, m019, m044].forEach((fn) => fn(db));
     _setDbForTest(db);
   });
 

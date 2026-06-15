@@ -1,5 +1,6 @@
 import { existsSync } from "fs";
 import { getTask, listTaskPhaseEvents, getDb } from "../core/db";
+import { listTaskRepos } from "../core/sandbox";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("task-outcome");
@@ -57,32 +58,38 @@ export async function computeTaskOutcome(taskId: string): Promise<TaskOutcome | 
     .sort((a, b) => b.duration_ms - a.duration_ms)
     .slice(0, 3);
 
-  // 2) PR 链接（从 requirement 拉）
-  let pr_url: string | null = null;
-  let pr_number: number | null = null;
+  // 2) PR 链接（取**本 run 自己的** pr_url —— 存于 task.extra，submit_pr 交付时回填）。
+  //    刻意不从 requirement 拉：多 run 下 requirement.pr_url 只反映最新 run，否则历史 / 失败 run
+  //    会借显最新 run 的 PR（dogfood req-023：失败的 run#1 误显 run#2 交付的 PR #96）。
+  //    task 无独立 pr_number 列，从 url 解析。
   const reqId = (task as Record<string, unknown>).requirement_id as string | undefined;
-  if (reqId) {
-    try {
-      const row = getDb()
-        .query<{ pr_url: string | null; pr_number: number | null }, [string]>(
-          "SELECT pr_url, pr_number FROM requirements WHERE id = ?"
-        )
-        .get(reqId);
-      pr_url = row?.pr_url ?? null;
-      pr_number = row?.pr_number ?? null;
-    } catch (e: unknown) {
-      log.warn("拉 PR 信息失败 [task=%s req=%s]: %s", taskId, reqId, e instanceof Error ? e.message : String(e));
-    }
-  }
+  const ownPrUrl = (task as Record<string, unknown>).pr_url as string | undefined;
+  const pr_url: string | null = ownPrUrl ?? null;
+  const pr_number: number | null = pr_url ? (Number(pr_url.match(/\/pull\/(\d+)/)?.[1]) || null) : null;
 
   // 3) sandbox + diff_stat
-  // 共用沙盒模型下代码改动在任务 clone 工作树里（repo_path）。对它跑 git diff（add -A +
-  // diff --cached <base>）统计 committed + 未提交 + 未跟踪新文件。
+  // 统一 multi-clone 布局：按 .worktree.json 的 repos 逐库统计（add -A + diff --cached
+  // origin/<base>，覆盖 committed + 未提交 + 未跟踪）后求和。单库 = 长度 1；旧 mode=clone
+  // 任务 listTaskRepos 返回根路径单项，行为与原 repo_path 直跑一致。
+  // 无布局元数据（极旧任务）回退 repo_path 直跑。
   const repo_path = ((task as Record<string, unknown>).repo_path as string | undefined) ?? null;
   const sandbox_path =
     repo_path ?? ((task as Record<string, unknown>).workspace_path as string | undefined) ?? null;
   let diff_stat: DiffStat | null = null;
-  if (sandbox_path && existsSync(sandbox_path)) {
+  let repos: ReturnType<typeof listTaskRepos> = [];
+  try {
+    repos = listTaskRepos(taskId).filter((r) => existsSync(r.path));
+  } catch { /* 布局元数据读取失败 → 走 repo_path 兜底 */ }
+  if (repos.length > 0) {
+    for (const r of repos) {
+      const s = computeDiffStat(r.path, r.base);
+      if (!s) continue;
+      if (!diff_stat) diff_stat = { files: 0, insertions: 0, deletions: 0 };
+      diff_stat.files += s.files;
+      diff_stat.insertions += s.insertions;
+      diff_stat.deletions += s.deletions;
+    }
+  } else if (sandbox_path && existsSync(sandbox_path)) {
     const baseBranch = resolveBaseBranch(reqId);
     diff_stat = computeDiffStat(sandbox_path, baseBranch);
   }

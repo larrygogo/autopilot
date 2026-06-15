@@ -1,7 +1,7 @@
 import { getDb } from "./db";
 import { listRequirements, deleteRequirement } from "./requirements";
-import { listWorkspaces, deleteWorkspace } from "./workspaces";
-import { forceDeleteTasksForProject } from "./task-delete";
+import { listWorkspaces, deleteWorkspace } from "./sandbox/workspaces";
+import { forceDeleteTasksForProject } from "./task/delete";
 
 // ──────────────────────────────────────────────
 // 类型定义

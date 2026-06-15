@@ -11,7 +11,7 @@ import { Database } from "bun:sqlite";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { runPendingMigrations } from "../src/core/migrate";
 import { createProject, nextProjectId } from "../src/core/projects";
-import { createWorkspace, nextWorkspaceId } from "../src/core/workspaces";
+import { createWorkspace, nextWorkspaceId } from "../src/core/sandbox/workspaces";
 import { _setExtractFnForTest } from "../src/daemon/requirement-extract";
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";

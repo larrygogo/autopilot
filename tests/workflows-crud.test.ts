@@ -10,7 +10,7 @@ import {
   updateDbWorkflow,
   deleteDbWorkflow,
   upsertFileWorkflow,
-} from "../src/core/workflows";
+} from "../src/core/workflow/workflows";
 
 describe("workflows CRUD", () => {
   let db: Database;

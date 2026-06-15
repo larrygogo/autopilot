@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import {
   parseGitmodulesContent,
   type SubmoduleEntry,
-} from "../src/core/gitmodules-parser";
+} from "../src/core/sandbox/gitmodules-parser";
 
 describe("parseGitmodulesContent", () => {
   it("解析单个子模块 + branch", () => {

@@ -1,4 +1,5 @@
 import React from "react";
+import { EmptyState } from "@/components/pro";
 import { taskStatusZh, taskTriggerZh } from "@/lib/run-view-logic";
 
 interface LogEntry {
@@ -19,11 +20,7 @@ interface LogEntry {
 export function LogTimeline({ logs, phaseLabelOf }: { logs: LogEntry[]; phaseLabelOf?: (phase: string) => string }) {
   const labelOf = phaseLabelOf ?? ((p: string) => p);
   if (logs.length === 0) {
-    return (
-      <div className="px-3 py-4 text-xs text-muted-foreground">
-        暂无日志 · NO ENTRIES
-      </div>
-    );
+    return <EmptyState size="inline" title="暂无状态转移记录" />;
   }
 
   return (
@@ -59,7 +56,9 @@ export function LogTimeline({ logs, phaseLabelOf }: { logs: LogEntry[]; phaseLab
               [{taskTriggerZh(log.trigger_name, labelOf)}]
             </span>
           )}
-          {log.note && <span className="text-muted-foreground">{log.note}</span>}
+          {/* break-all：note 里的长 URL（如 PR 链接）无空格可断，flex 子项的 min-content
+              会撑出横向溢出（break-words 不缩 min-content，移动端实测溢出屏幕） */}
+          {log.note && <span className="min-w-0 break-all text-muted-foreground">{log.note}</span>}
         </div>
       ))}
     </div>

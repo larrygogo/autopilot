@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { PAGE_W } from "@/lib/layout";
 import { Link } from "react-router-dom";
 import { ArrowLeft, FolderTree, Hand, Check, X, MessageCircleQuestion, Send, AlertTriangle, RotateCcw, Trash2 } from "lucide-react";
 import { api } from "@/hooks/useApi";
@@ -16,6 +17,7 @@ import { TaskProgressCard } from "@/components/TaskProgressCard";
 import { TaskOutcomeCard } from "@/components/TaskOutcomeCard";
 import { TaskRunView } from "@/components/TaskRunView";
 import { useTaskPhaseEvents } from "@/hooks/useTaskPhaseEvents";
+import { computeRunLabels, type RunLike } from "@/lib/run-label";
 import { cn } from "@/lib/utils";
 
 interface TaskDetailProps {
@@ -48,11 +50,20 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
   const [drawerPhase, setDrawerPhase] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // v2 R6（仅独立页用）：同需求的兄弟 run，用来给面包屑算「执行 #N」业务标签。
+  const [siblingRuns, setSiblingRuns] = useState<RunLike[] | null>(null);
 
   useEffect(() => {
     api.getTask(taskId).then(setTask).catch(() => {});
     api.getTaskLogs(taskId).then(setLogs).catch(() => {});
   }, [taskId]);
+
+  // 独立页（非 embedded）且任务有归属需求时，拉兄弟 run 算面包屑 run 标签。
+  const reqIdForCrumb = (task as { requirement_id?: string | null } | null)?.requirement_id ?? null;
+  useEffect(() => {
+    if (embedded || !reqIdForCrumb) { setSiblingRuns(null); return; }
+    api.listTasksByRequirement(reqIdForCrumb).then((l) => setSiblingRuns(l as RunLike[])).catch(() => setSiblingRuns(null));
+  }, [embedded, reqIdForCrumb]);
 
   const [phaseStats, setPhaseStats] = useState<Record<string, { count: number; p50_ms: number }> | undefined>(undefined);
   useEffect(() => {
@@ -178,7 +189,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
 
   if (!task) {
     return (
-      <div className={cn("text-sm text-muted-foreground", embedded ? "py-6" : "mx-auto w-full max-w-6xl px-5 py-8")}>加载中…</div>
+      <div className={cn("text-sm text-muted-foreground", embedded ? "py-6" : PAGE_W)}>加载中…</div>
     );
   }
 
@@ -246,28 +257,48 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
     </div>
   ) : null;
 
+  // 用户只关心需求 + 第几次执行（#N），不看 task 内核 id。run 标签由 computeRunLabels 按 seq 算；
+  // embedded 模式 siblingRuns 为 null（需求页 RunSwitcher 已示 #N），退回中性「执行记录」。
+  const thisRunLabel =
+    siblingRuns && siblingRuns.length > 0
+      ? (computeRunLabels(siblingRuns).get(task.id) ?? "执行")
+      : "执行记录";
+
   return (
-    <div className={cn(embedded ? "w-full" : "mx-auto w-full max-w-6xl px-5 py-6")}>
+    <div className={cn(embedded ? "w-full" : PAGE_W)}>
       {/* Header — 整页模式：返回 + task.id + 状态 + 操作组。embedded 时由需求页承担页头，仅保留操作组 */}
       {embedded ? (
         actionGroup && (
           <div className="mb-4 flex items-center justify-between gap-3">
-            <span className="font-mono text-[10px] text-muted-foreground">任务执行 · {task.id}</span>
+            <span className="text-[10px] text-muted-foreground">执行记录</span>
             {actionGroup}
           </div>
         )
       ) : (
         <div className="mb-5 flex flex-wrap items-center gap-3 border-b border-border pb-4">
-          <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
-            <ArrowLeft className="h-4 w-4" />
-            返回
-          </Button>
+          {/* v2 R6：有归属需求 → 面包屑回需求页（标注本 run 的业务标签）；
+              孤儿任务（无 requirement_id）→ 退回原「返回」按钮 */}
+          {reqIdForCrumb ? (
+            <Link
+              to={`/requirements/${reqIdForCrumb}`}
+              className="-ml-1 flex items-center gap-1 text-xs text-accent hover:underline"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              需求 {reqIdForCrumb}
+              {siblingRuns && siblingRuns.length > 0 && (
+                <span className="text-muted-foreground">· {computeRunLabels(siblingRuns).get(task.id) ?? "执行"}</span>
+              )}
+            </Link>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
+              <ArrowLeft className="h-4 w-4" />
+              返回
+            </Button>
+          )}
           <div className="flex min-w-0 flex-col">
-            <span className="font-mono text-[10px] text-muted-foreground">
-              TASK
-            </span>
-            <h2 className="truncate font-mono text-xl font-bold text-foreground sm:text-2xl">
-              {task.id}
+            <span className="text-[10px] text-muted-foreground">{thisRunLabel}</span>
+            <h2 className="truncate text-xl font-bold text-foreground sm:text-2xl">
+              {task.title}
             </h2>
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -290,7 +321,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
 
       {/* 来源需求卡片（task.requirement_id 存在时显示）— embedded 时已在需求页内，冗余故隐藏 */}
       {!embedded && task.requirement_id && (
-        <Card className="mb-3 border-l-4 border-l-accent/60 px-4 py-2.5">
+        <Card className="mb-3 px-4 py-2.5">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <span className="font-mono text-[10px] text-muted-foreground">
@@ -372,10 +403,10 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
             <div className="flex flex-wrap items-start justify-between gap-3 p-4">
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  彻底删除该任务的 DB 记录、manifest、阶段日志、agent 调用记录与沙盒文件；此操作不可撤销。
+                  彻底删除这个任务的全部记录（运行日志、agent 调用、代码副本等）；此操作不可撤销。
                   {canCancel && (
                     <span className="ml-1 font-semibold text-foreground">
-                      任务当前非终态，请先取消后再删除。
+                      任务还在进行，请先取消再删除。
                     </span>
                   )}
                 </p>
@@ -401,11 +432,10 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
             message={
               <div className="space-y-2">
                 <p>
-                  确认永久删除任务{" "}
-                  <code className="rounded bg-muted px-1 font-mono">{task.id}</code>？
+                  确认永久删除「{task.title}」的这次{thisRunLabel}？
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  将清理：DB 记录、task-manifest、阶段日志、agent 调用、沙盒目录，以及所有子任务。操作不可撤销。
+                  将清理这个任务的全部记录、文件以及所有子任务。操作不可撤销。
                 </p>
               </div>
             }
@@ -420,7 +450,7 @@ export function TaskDetail({ taskId, onBack, subscribe, embedded = false }: Task
         title="取消任务"
         message={
           <span>
-            确认取消任务 <code className="rounded bg-muted px-1 font-mono">{task.id}</code>？正在运行的阶段将被中止。
+            确认取消「{task.title}」的这次{thisRunLabel}？正在运行的阶段将被中止。
           </span>
         }
         confirmText="取消任务"
@@ -482,7 +512,7 @@ function TaskDetailTabs({ taskId, taskStatus }: { taskId: string; taskStatus?: s
     <div>
       <div className="mb-3 flex items-center gap-1.5 text-sm font-medium">
         <FolderTree className="h-3.5 w-3.5" />
-        沙盒
+        文件
       </div>
       <SandboxBrowser taskId={taskId} taskStatus={taskStatus} />
     </div>
@@ -518,7 +548,7 @@ function DanglingBanner({
     setBusy("cancel");
     try {
       await api.cancelTask(taskId);
-      toast.success("已取消该 dangling task");
+      toast.success("已取消该任务");
     } catch (e: unknown) {
       toast.error("取消失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -534,14 +564,13 @@ function DanglingBanner({
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-bold text-destructive">
-            ⚠ 这个任务已死（daemon 重启）
+            ⚠ 这个任务中断了（daemon 重启过）
           </h3>
           <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-            任务在 <code className="border border-border bg-muted px-1 font-mono">ask_user</code> 等待回答时 daemon 重启了。
-            agent 进程的等待 promise 在内存中丢失，即使你现在回答 agent 也收不到。
-            可以选择：<strong className="text-foreground">重新执行</strong>当前阶段（只重跑当前所在阶段，
-            不回到最初——前面已完成的 design / review 等不会重来；共用沙盒工作树已累积的改动保留），或
-            <strong className="text-foreground">取消任务</strong>新建一个。
+            任务在等你回答问题时，daemon 重启了。它丢掉了正在等待的状态，你现在回答也收不到了。
+            可以：<strong className="text-foreground">重新执行</strong>当前阶段（只重跑卡住的这一步，
+            前面做完的不会重来，已经改的文件也保留），或者
+            <strong className="text-foreground">取消任务</strong>重新建一个。
           </p>
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row">

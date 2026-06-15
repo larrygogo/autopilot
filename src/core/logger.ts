@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync, readFileSync } from "fs";
 import { dirname } from "path";
 import { emit } from "./event-bus";
-import { appendPhaseLog } from "./task-logs";
+import { appendPhaseLog } from "./task/logs";
 
 let currentPhaseTag = "SYSTEM";
 let currentPhaseName: string | undefined;  // 原始小写名称（用于文件名）

@@ -6,6 +6,7 @@ import { tmpdir } from "os";
 import {
   loadProviders,
   saveProvider,
+  setProviderDefaultModel,
   PROVIDER_NAMES,
   loadGithubConfig,
 } from "../src/core/config";
@@ -71,6 +72,45 @@ describe("providers 段读写", () => {
     expect(providers.anthropic.default_model).toBe("claude-sonnet-4-6");
     expect(providers.anthropic.enabled).toBeUndefined();
     expect((providers.anthropic as any).unknown_field).toBeUndefined();
+  });
+});
+
+describe("setProviderDefaultModel（字段级写默认模型）", () => {
+  it("写 compat provider 默认模型 → loadProviders 可读", () => {
+    setProviderDefaultModel("deepseek", "deepseek-reasoner");
+    expect(loadProviders().deepseek?.default_model).toBe("deepseek-reasoner");
+  });
+
+  it("不丢兄弟字段：只改 default_model，base_url / env_key_name 仍在", () => {
+    writeFileSync(
+      tmpFile,
+      "providers:\n  mimo:\n    base_url: https://api.mimo.ai/v1\n    env_key_name: MIMO_API_KEY\n",
+      "utf-8",
+    );
+    setProviderDefaultModel("mimo", "mimo-large");
+    const mimo = loadProviders().mimo as Record<string, unknown>;
+    expect(mimo.default_model).toBe("mimo-large");
+    expect(mimo.base_url).toBe("https://api.mimo.ai/v1");
+    expect(mimo.env_key_name).toBe("MIMO_API_KEY");
+  });
+
+  it("空 model 删除 default_model 字段", () => {
+    setProviderDefaultModel("deepseek", "deepseek-chat");
+    expect(loadProviders().deepseek?.default_model).toBe("deepseek-chat");
+    setProviderDefaultModel("deepseek", "");
+    expect(loadProviders().deepseek?.default_model).toBeUndefined();
+  });
+
+  it("段不存在时自动创建，只含 default_model", () => {
+    setProviderDefaultModel("kimi", "moonshot-v1-32k");
+    const kimi = loadProviders().kimi as Record<string, unknown>;
+    expect(kimi.default_model).toBe("moonshot-v1-32k");
+    expect(Object.keys(kimi)).toEqual(["default_model"]);
+  });
+
+  it("非法 name 抛错", () => {
+    expect(() => setProviderDefaultModel("", "x")).toThrow(/非法 provider/);
+    expect(() => setProviderDefaultModel("bad name!", "x")).toThrow(/非法 provider/);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { isSafeGitRef } from "../src/core/workspaces";
+import { isSafeGitRef } from "../src/core/sandbox/workspaces";
 
 // SEC-4: default_branch 流向 git 位置参数（checkout -B <branch> <base>、gh pr create --base <ref>），
 // 用户自设 leading-dash 的 default_branch 会被 git 当选项注入。isSafeGitRef 是写入闸。

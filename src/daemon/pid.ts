@@ -134,3 +134,31 @@ export function isSupervisorRunning(): boolean {
   }
   return true;
 }
+
+// ──────────────────────────────────────────────
+// restart.flag —— 主动重启标志：新 daemon 启动时识别「上一次是主动重启不是崩溃」，
+// 从而对 running_* task 走自动 respawn（关旧 phase event + 立即重跑）而非标
+// dangling 等用户。daemon.restart RPC 与 CLI `daemon restart` 都应写它——
+// CLI 路径曾漏写，导致被打断任务落到 dangling 分支、最终靠 watcher 卡死判定
+// 兜底恢复（慢几分钟，且修复前还会留僵尸 open phase event）。
+// ──────────────────────────────────────────────
+
+function restartFlagFile(): string {
+  return join(home(), "runtime", "restart.flag");
+}
+
+export function writeRestartFlag(): void {
+  try {
+    writeFileSync(restartFlagFile(), String(Date.now()), "utf-8");
+  } catch { /* 写失败不阻塞重启，代价是 task 被标 dangling 等用户 */ }
+}
+
+/** 检查并消费 restart.flag。返回 true 表示这次启动是主动重启的延续。 */
+export function consumeRestartFlag(): boolean {
+  const p = restartFlagFile();
+  if (!existsSync(p)) return false;
+  try {
+    unlinkSync(p);
+  } catch { /* 删失败也不影响逻辑，下次启动还会再读到（保守做法） */ }
+  return true;
+}

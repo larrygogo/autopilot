@@ -10,10 +10,10 @@ import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest } from "../src/core/db";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createProject } from "../src/core/projects";
 import { createRequirement, deleteRequirement } from "../src/core/requirements";
-import { appendSubPr, listSubPrs } from "../src/core/requirement-sub-prs";
+import { appendSubPr, listSubPrs } from "../src/core/requirements/sub-prs";
 
 describe("requirement-sub-prs CRUD", () => {
   let db: Database;

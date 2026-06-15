@@ -9,7 +9,8 @@ test("statusToStep: 12 个 status 映射到 6 步", () => {
   expect(statusToStep("awaiting_approval")).toBe("approve");
   expect(statusToStep("queued")).toBe("queue");
   expect(statusToStep("running")).toBe("execute");
-  expect(statusToStep("fix_revision")).toBe("execute");
+  // fix_revision 属验收循环（验收 ⇄ 修复），当前步留在「验收」
+  expect(statusToStep("fix_revision")).toBe("review");
   expect(statusToStep("awaiting_review")).toBe("review");
   expect(statusToStep("done")).toBe("done");
   expect(statusToStep("failed")).toBe("done");
