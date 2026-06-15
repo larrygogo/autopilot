@@ -66,7 +66,7 @@ marker 模式（grep agent 散文里的 `PASS`/`REJECT`）不严谨：① 模型
 4. ✅ **judge.ts + phase-decision/prompt-runner 接入**：judge 模式（拆 `planDecisionActionFromVerdict`，judge 失败→ambiguous 停下报人不退回 grep）。commit a85f898。
 5. ✅ **declarative 闸门**：加载期硬拒 run_（`declarative: true` → workflow.ts 含函数导出即抛错；phase 只能 prompt/builtin/gate/parallel）。commit 55f6edd。
 6. ✅ **dev_declarative 示例 + 静态验收**：`examples/workflows/dev_declarative/`（全声明式 design→develop→code_review(judge)→deliver(builtin)）。load-test 钉死组合。**活体 dogfood（真 agent+真 PR）留人工跑**。commit 6c7fa89。
-7. **（稳定后，follow-up）dev 切 declarative + workflow sync**：dogfood 确认 judge 质量 + deliver_pr 多库无回归后再迁（避免 sync 伤老用户）。**未做**。
+7. ✅ **dev 判定升级（保留 TS）**：用户选「判定升级」而非整体切 declarative——dev 的 run_review/run_code_review 把 `text.includes(REVIEW_RESULT)` 标记匹配换成 `judgeVerdict`，**保留全部 diff 编排健壮性**（截断护栏/rejection 历史/逐库 stat），计数键不变。commit 8bdc6e6。配套 commit 8205de0：实测 kimi-code（用户唯一的 key）思考端点拒绝强制 tool_choice（400），加 `disable_thinking`（kimi host → `thinking:{type:disabled}`）解冲突。**⚠ shipping 待定**：judge 走 API 模式需 key，给所有 dev 用户加 API-key 依赖（claude-CLI 订阅用户也没 anthropic key）——合主前需定 shipping 默认 provider / 是否 opt-in。当前 JUDGE_PROVIDER=kimi-code 仅本机 dogfood 值。**活体 dogfood 仍待人工跑**。
 8. **（更后，独立产品面）分发/分享 surface**：工作流打包/导入/跨人运行/签名——建在 1-7 的安全原语之上，单独 spec。**未做**。
 
 ## 关键回归风险（architect 清单摘要）
