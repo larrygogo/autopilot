@@ -504,6 +504,9 @@ export const api = {
 
   // Chat（独立对话页已于 2026-06-11 删除；后端 chat/sessions 设施保留给需求澄清使用）
 
+  // [WS-RPC] agents.defaultAgent —— phase 省略 agent / 留空字段时兜底的 DEFAULT_AGENT（编辑器展示默认值）
+  getDefaultAgent: () => requestRpc<InlineAgentConfig>("agents.defaultAgent"),
+
   // Defaults（用户偏好）
   // [WS-RPC] defaults.get
   getDefaults: () =>

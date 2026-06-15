@@ -74,6 +74,8 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
   const [modelsError, setModelsError] = useState(false);
   const [providers, setProviders] = useState<ProviderExtendedInfo[]>([]);
   const [dryRunOpen, setDryRunOpen] = useState(false);
+  // 兜底 DEFAULT_AGENT（留空字段时实际生效的默认值）——展开后拉一次，用作各字段 placeholder
+  const [defaultAgent, setDefaultAgent] = useState<InlineAgentConfig | null>(null);
 
   // 切换 phase 时（configured 变化）重置展开态
   useEffect(() => {
@@ -87,6 +89,12 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
     if (!expanded) return;
     api.listProvidersExtended().then(setProviders).catch(() => setProviders([]));
   }, [expanded]);
+
+  // 展开时拉一次 DEFAULT_AGENT —— 各字段留空时把它当 placeholder 显示（让用户看到默认值）
+  useEffect(() => {
+    if (!expanded || defaultAgent) return;
+    api.getDefaultAgent().then(setDefaultAgent).catch(() => {});
+  }, [expanded, defaultAgent]);
 
   // 展开时拉官方三家 provider 的模型列表（给 ModelCombobox 选项；compat 走手动输入）
   useEffect(() => {
@@ -209,7 +217,13 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                     onChange={(v) => update("model", v)}
                     options={draft.provider ? models[draft.provider]?.models ?? [] : []}
                     placeholder={
-                      modelsLoading ? "加载模型…" : draft.provider ? "留空用默认模型" : "先选提供商"
+                      modelsLoading
+                        ? "加载模型…"
+                        : !draft.provider
+                          ? "先选提供商"
+                          : defaultAgent?.model
+                            ? `留空用默认（${defaultAgent.model}）`
+                            : "留空用默认模型"
                     }
                     clearable
                     disabled={!draft.provider}
@@ -224,7 +238,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                   <Input
                     type="number"
                     min={1}
-                    placeholder="留空用默认"
+                    placeholder={defaultAgent?.max_turns != null ? `留空用默认（${defaultAgent.max_turns}）` : "留空用默认"}
                     value={draft.max_turns ?? ""}
                     onChange={(e) =>
                       update("max_turns", e.target.value ? parseInt(e.target.value, 10) : undefined)
@@ -245,7 +259,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={DEFAULT_VALUE}>默认（不设就用内置）</SelectItem>
+                      <SelectItem value={DEFAULT_VALUE}>默认（{defaultAgent?.permission_mode ?? "内置"}）</SelectItem>
                       {PERMISSION_MODES.map((p) => (
                         <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
                       ))}
@@ -265,7 +279,11 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
                 </Label>
                 <Textarea
                   className="min-h-[120px] resize-y font-mono text-[11px] leading-relaxed"
-                  placeholder="这个阶段专用的提示词。留空就用默认 agent 的。"
+                  placeholder={
+                    defaultAgent?.system_prompt
+                      ? `留空 = 用默认人设（下面这段就是默认值）：\n\n${defaultAgent.system_prompt}`
+                      : "这个阶段专用的人设。留空就用默认 agent 的。"
+                  }
                   value={draft.system_prompt ?? ""}
                   onChange={(e) => update("system_prompt", e.target.value || undefined)}
                   spellCheck={false}

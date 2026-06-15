@@ -1733,6 +1733,12 @@ export function registerCoreRpcMethods(): void {
   });
 
   registerRpcMethod({
+    method: "agents.defaultAgent",
+    description: "phase 省略 agent / 留空字段时兜底的内置 DEFAULT_AGENT（编辑器把它当默认值展示）",
+    handler: () => ({ ...DEFAULT_AGENT }),
+  });
+
+  registerRpcMethod({
     method: "defaults.save",
     description: "保存用户偏好（目前只有 timezone）",
     handler: (params) => {
