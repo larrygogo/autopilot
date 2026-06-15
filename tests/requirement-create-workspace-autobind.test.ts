@@ -9,7 +9,7 @@ import { Database } from "bun:sqlite";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { runPendingMigrations } from "../src/core/migrate";
 import { createProject } from "../src/core/projects";
-import { createWorkspace, getTopWorkspaceForProject } from "../src/core/workspaces";
+import { createWorkspace, getTopWorkspaceForProject } from "../src/core/sandbox/workspaces";
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 

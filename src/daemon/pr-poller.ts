@@ -7,7 +7,7 @@ import {
 import { createComment, nextCommentId } from "../core/requirements/comments";
 import { listSubPrs, updateSubPrWatermark, updateSubPrCiState } from "../core/requirements/sub-prs";
 import { hasDeliveries } from "../core/requirements/deliveries";
-import { getWorkspaceById } from "../core/workspaces";
+import { getWorkspaceById } from "../core/sandbox/workspaces";
 import { loadGithubConfig } from "../core/config";
 import { emit } from "../core/event-bus";
 import { createLogger } from "../core/logger";

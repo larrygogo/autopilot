@@ -31,7 +31,7 @@ import { up as migrate045 } from "../src/migrations/045-requirement-input-mode";
 import { up as migrate046 } from "../src/migrations/046-requirement-deliveries";
 import { _setDbForTest, createTask } from "../src/core/db";
 import { createProject } from "../src/core/projects";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import {
   createRequirement,
   getRequirementById,

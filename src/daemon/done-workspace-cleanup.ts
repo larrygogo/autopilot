@@ -21,7 +21,7 @@ import { onEvent, offEvent } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { getRequirementById } from "../core/requirements";
 import { getTaskRoot, removeTaskWorktree } from "../core/sandbox";
-import { deleteRequirementCodebase } from "../core/codebase";
+import { deleteRequirementCodebase } from "../core/sandbox/codebase";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("done-workspace-cleanup");

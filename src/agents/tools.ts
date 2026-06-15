@@ -30,7 +30,7 @@ import { buildTransitions } from "../core/registry";
 import { startTaskFromTemplate } from "../core/task/factory";
 import { randomUUID } from "crypto";
 import { log } from "../core/logger";
-import { listWorkspaces, getWorkspaceById } from "../core/workspaces";
+import { listWorkspaces, getWorkspaceById } from "../core/sandbox/workspaces";
 import {
   listRequirements,
   getRequirementById,

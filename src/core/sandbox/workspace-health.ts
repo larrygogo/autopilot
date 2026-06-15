@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "fs";
-import { loadGitConfig } from "./config";
+import { loadGitConfig } from "../config";
 
 /**
  * git 子进程的非交互环境：凭证缺失时**快速失败**而不是等待终端输入 / 弹凭证窗——

@@ -1,6 +1,6 @@
 import { existsSync, appendFileSync } from "fs";
 import { join } from "path";
-import { log } from "./logger";
+import { log } from "../logger";
 
 /**
  * clone 完成后的共享收尾（sync）：建/续交付分支 + 写 `.git/info/exclude`。

@@ -1,8 +1,8 @@
 import { existsSync, statSync, readdirSync, rmSync } from "fs";
 import { join } from "path";
-import { log } from "./logger";
-import { loadConfig } from "./config";
-import { dirSizeBytes, tasksRootDir, requirementsRootDir, removeTaskWorktree } from "./sandbox";
+import { log } from "../logger";
+import { loadConfig } from "../config";
+import { dirSizeBytes, tasksRootDir, requirementsRootDir, removeTaskWorktree } from "./index";
 
 /**
  * 代码 clone 自动清理（retention）：扫占用 + 按 days / max_total_mb 清理。

@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, existsSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { applyRetentionPolicy } from "../src/core/sandbox-retention";
+import { applyRetentionPolicy } from "../src/core/sandbox/retention";
 
 let tmpRoot: string; // 模拟 AUTOPILOT_HOME/runtime/tasks
 

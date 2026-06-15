@@ -13,9 +13,9 @@ import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { up as migrate044 } from "../src/migrations/044-task-run-columns";
 import { _setDbForTest } from "../src/core/db";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createProject } from "../src/core/projects";
-import { discoverSubmodules, listSubmodules } from "../src/core/submodules";
+import { discoverSubmodules, listSubmodules } from "../src/core/sandbox/submodules";
 
 describe("migration 006-submodules", () => {
   // 注：此 describe 测的是迁移 006 当时的原始 schema（列名 child_repo_id），

@@ -19,7 +19,7 @@ import {
   createProject, getProjectById, listProjects,
   updateProject, deleteProject, nextProjectId,
 } from "../src/core/projects";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createRequirement } from "../src/core/requirements";
 import { createQuestion } from "../src/core/requirements/questions";
 

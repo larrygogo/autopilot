@@ -16,7 +16,7 @@ import { tmpdir } from "os";
 import { up as migrate044 } from "../src/migrations/044-task-run-columns";
 import { _setDbForTest } from "../src/core/db";
 import * as sandbox from "../src/core/sandbox";
-import * as retention from "../src/core/sandbox-retention";
+import * as retention from "../src/core/sandbox/retention";
 import * as manifestModule from "../src/core/manifest";
 
 // ──────────────────────────────────────────────

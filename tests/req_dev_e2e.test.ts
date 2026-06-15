@@ -14,7 +14,7 @@ import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { up as migrate044 } from "../src/migrations/044-task-run-columns";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createProject } from "../src/core/projects";
 import { createRequirement } from "../src/core/requirements";
 import { startTaskFromTemplate } from "../src/core/task/factory";

@@ -4,7 +4,7 @@ import { onEvent, offEvent, emit } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
 import { getRequirementById, updateRequirement, setActiveQuestionId, setRequirementStatus, listRequirementWorkspaces } from "../core/requirements";
 import { getProjectById } from "../core/projects";
-import type { Workspace } from "../core/workspaces";
+import type { Workspace } from "../core/sandbox/workspaces";
 import {
   createComment,
   nextCommentId,
@@ -21,7 +21,7 @@ import { buildClarifierAgent } from "./clarifier-agent";
 import { parseLlmYamlWrapper } from "../core/llm-yaml";
 import { listAttachments, buildAttachmentContext } from "../core/requirements/attachments";
 import { ensureRequirementClones } from "../core/requirements/clone";
-import { deleteRequirementCodebase } from "../core/codebase";
+import { deleteRequirementCodebase } from "../core/sandbox/codebase";
 import {
   getSession,
   upsertSession,

@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { log } from "./logger";
+import { log } from "../logger";
 
 export interface SubmoduleEntry {
   name: string;

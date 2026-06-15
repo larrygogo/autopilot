@@ -20,11 +20,11 @@ import { runInBackground } from "@autopilot/core/runner";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 import { getTaskSandbox } from "@autopilot/core/sandbox";
-import { getWorkspaceById } from "@autopilot/core/workspaces";
+import { getWorkspaceById } from "@autopilot/core/sandbox/workspaces";
 import { setRequirementStatus, getRequirementById } from "@autopilot/core/requirements";
 import { forceTransition } from "@autopilot/core/state-machine";
 import { latestFeedback } from "@autopilot/core/requirements/feedbacks";
-import { listSubmodules } from "@autopilot/core/submodules";
+import { listSubmodules } from "@autopilot/core/sandbox/submodules";
 import { appendSubPr } from "@autopilot/core/requirements/sub-prs";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";

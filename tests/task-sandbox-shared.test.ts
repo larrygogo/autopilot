@@ -120,7 +120,7 @@ describe("共用沙盒 · 需求级重跑 = 新 run（v2 R2，替代 resetTaskFo
   it("startNewRunForRequirement：旧 run 历史保留（workspace 清掉）、新 run clone 落需求级 codebase/、task_id/seq 更新", async () => {
     const { createTask, getTask, startTaskPhase, listTaskPhaseEvents } = await import("../src/core/db");
     const { createProject } = await import("../src/core/projects");
-    const { createWorkspace } = await import("../src/core/workspaces");
+    const { createWorkspace } = await import("../src/core/sandbox/workspaces");
     const { createRequirement, getRequirementById, updateRequirement, nextRequirementId } = await import("../src/core/requirements");
     const { startNewRunForRequirement } = await import("../src/core/task/factory");
     const { getTaskRoot } = await import("../src/core/sandbox");
@@ -195,7 +195,7 @@ describe("共用沙盒 · 需求级重跑 = 新 run（v2 R2，替代 resetTaskFo
   it("活跃 run 守卫：当前 run 非终态时 startNewRunForRequirement / startTaskFromTemplate 均 409", async () => {
     const { createTask } = await import("../src/core/db");
     const { createProject } = await import("../src/core/projects");
-    const { createWorkspace } = await import("../src/core/workspaces");
+    const { createWorkspace } = await import("../src/core/sandbox/workspaces");
     const { createRequirement, updateRequirement, nextRequirementId } = await import("../src/core/requirements");
     const { startNewRunForRequirement, startTaskFromTemplate } = await import("../src/core/task/factory");
     const registry = await import("../src/core/registry");
@@ -237,7 +237,7 @@ describe("共用沙盒 · 全流程集成（真 runner → 共用 clone → phas
     const { computeDiffStat } = await import("../src/daemon/task-outcome");
     const { createTask, updateTask, getTask } = await import("../src/core/db");
     const { createProject } = await import("../src/core/projects");
-    const { createWorkspace } = await import("../src/core/workspaces");
+    const { createWorkspace } = await import("../src/core/sandbox/workspaces");
     const registry = await import("../src/core/registry");
 
     // phase 函数完全不知道路径：沙盒根从 ALS 上下文取（runner 注入 getTaskSandbox(id)），

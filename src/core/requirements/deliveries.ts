@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "fs";
 import { join, resolve, sep } from "path";
 import { getDb, getTask, insertWithFreshId } from "../db";
-import { getRequirementDir } from "../codebase";
+import { getRequirementDir } from "../sandbox/codebase";
 import { log } from "../logger";
 
 // ──────────────────────────────────────────────

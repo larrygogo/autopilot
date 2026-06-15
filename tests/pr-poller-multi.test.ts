@@ -19,7 +19,7 @@ import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { up as migrate038 } from "../src/migrations/038-sub-pr-review-watermark";
 import { up as migrate039 } from "../src/migrations/039-sub-pr-ci-watermark";
 import { _setDbForTest } from "../src/core/db";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createProject } from "../src/core/projects";
 import {
   createRequirement,

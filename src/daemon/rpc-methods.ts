@@ -37,8 +37,8 @@ import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig
 import { requestRestart, requestShutdown } from "./index";
 import { loadApiToken } from "../core/api-token";
 import { listTaskRepos } from "../core/sandbox";
-import { listSandboxDir, readSandboxFile } from "../core/sandbox-browse";
-import { scanTaskSandboxes } from "../core/sandbox-retention";
+import { listSandboxDir, readSandboxFile } from "../core/sandbox/browse";
+import { scanTaskSandboxes } from "../core/sandbox/retention";
 import { setKv, getDb } from "../core/db";
 import { discover as registryDiscover, getWorkflow as registryGetWorkflow, listWorkflowsUsingProvider } from "../core/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
@@ -53,9 +53,9 @@ import {
   DEFAULT_PROJECT_ID,
 } from "../core/projects";
 import { listRequirementsByProject } from "../core/requirements";
-import { listWorkspaces, getWorkspaceById, getWorkspaceByAlias, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, getTopWorkspaceForProject } from "../core/workspaces";
-import { listSubmodules, discoverSubmodules } from "../core/submodules";
-import { checkWorkspaceHealth, detectWorkspaceGit, probeRemote, parseGithubFromRemote } from "../core/workspace-health";
+import { listWorkspaces, getWorkspaceById, getWorkspaceByAlias, createWorkspace, updateWorkspace, deleteWorkspace, nextWorkspaceId, getTopWorkspaceForProject } from "../core/sandbox/workspaces";
+import { listSubmodules, discoverSubmodules } from "../core/sandbox/submodules";
+import { checkWorkspaceHealth, detectWorkspaceGit, probeRemote, parseGithubFromRemote } from "../core/sandbox/workspace-health";
 import {
   listSessions as listChatSessions,
   deleteSession as deleteChatSession,
@@ -648,7 +648,7 @@ function registerTaskRpc(): void {
           (typeof p.workspace_alias === "string" && p.workspace_alias.trim() ? p.workspace_alias.trim() : undefined) ??
           (typeof p.codebase_alias === "string" && p.codebase_alias.trim() ? p.codebase_alias.trim() : undefined);
         if (!workspaceId && aliasParam) {
-          const workspaces = await import("../core/workspaces");
+          const workspaces = await import("../core/sandbox/workspaces");
           const ws = workspaces.listWorkspaces({ includeSubmodules: true }).find((c) => c.alias === aliasParam);
           if (!ws) throw new RpcError("NOT_FOUND", `找不到别名为 "${aliasParam}" 的 workspace`);
           workspaceId = ws.id;
@@ -700,7 +700,7 @@ function registerTaskRpc(): void {
         (typeof p.workspace_alias === "string" && p.workspace_alias.trim() ? p.workspace_alias.trim() : undefined) ??
         (typeof p.codebase_alias === "string" && p.codebase_alias.trim() ? p.codebase_alias.trim() : undefined);
       if (!workspaceId && aliasParam) {
-        const workspaces = await import("../core/workspaces");
+        const workspaces = await import("../core/sandbox/workspaces");
         const ws = workspaces.listWorkspaces({ includeSubmodules: true }).find((c) => c.alias === aliasParam);
         if (!ws) throw new RpcError("NOT_FOUND", `找不到别名为 "${aliasParam}" 的 workspace`);
         workspaceId = ws.id;

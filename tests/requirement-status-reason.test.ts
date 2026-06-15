@@ -29,7 +29,7 @@ import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { up as migrate044 } from "../src/migrations/044-task-run-columns";
 import { _setDbForTest, createTask, getTask, getDb } from "../src/core/db";
 import { createProject } from "../src/core/projects";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import {
   createRequirement,
   getRequirementById,

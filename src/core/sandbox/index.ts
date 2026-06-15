@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join, resolve, sep } from "path";
-import { AUTOPILOT_HOME } from "../index";
-import { log } from "./logger";
-import { loadConfig } from "./config";
+import { AUTOPILOT_HOME } from "../../index";
+import { log } from "../logger";
+import { loadConfig } from "../config";
 import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspace-health";
 import { ensureCodebase, getRequirementCodebaseRoot, safeAliasDir } from "./codebase";
 import { finalizeDeliveryClone } from "./git-clone";
@@ -88,7 +88,7 @@ export function _clearTaskRootCacheForTest(): void {
 function lookupRequirementId(taskId: string): string | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const db = require("./db") as typeof import("./db");
+    const db = require("../db") as typeof import("../db");
     return db.getTask(taskId)?.requirement_id ?? null;
   } catch {
     return null;
@@ -843,7 +843,7 @@ function isCurrentRunOfRequirement(taskId: string, reqId?: string): boolean {
   try {
     // 惰性 require：避免 sandbox→requirements 的静态环（同 lookupRequirementId 的理由）
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const reqs = require("./requirements") as typeof import("./requirements");
+    const reqs = require("../requirements") as typeof import("../requirements");
     return reqs.getRequirementById(reqId)?.task_id === taskId;
   } catch {
     return false;

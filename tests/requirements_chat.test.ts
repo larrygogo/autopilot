@@ -13,7 +13,7 @@ import { up as migrate029 } from "../src/migrations/029-requirement-status-befor
 import { up as migrate030 } from "../src/migrations/030-requirement-status-logs";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest, initDb } from "../src/core/db";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createProject } from "../src/core/projects";
 import {
   createRequirement,

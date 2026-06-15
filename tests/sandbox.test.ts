@@ -4,7 +4,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { getTaskSandbox, ensureTaskSandbox, isBenignBranchDeleteError } from "../src/core/sandbox";
-import { resolveSandboxPath } from "../src/core/sandbox-browse";
+import { resolveSandboxPath } from "../src/core/sandbox/browse";
 
 describe("isBenignBranchDeleteError（RERUN-07：区分良性 404 vs 真失败）", () => {
   it("404 / 分支不存在 → 良性（幂等成功）", () => {

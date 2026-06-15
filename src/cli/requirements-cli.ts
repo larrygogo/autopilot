@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "fs";
 import { createInterface } from "node:readline";
 import { AutopilotClient, DEFAULT_PORT } from "../client/index";
 import { readListenInfo } from "../daemon/pid";
-import type { Workspace } from "../core/workspaces";
+import type { Workspace } from "../core/sandbox/workspaces";
 
 /**
  * 交互式读多行描述。

@@ -2,7 +2,7 @@ import { getDb, insertWithFreshId } from "../db";
 import { emit } from "../event-bus";
 import { log } from "../logger";
 import { resolveComment } from "./comments";
-import { listWorkspaces, type Workspace } from "../workspaces";
+import { listWorkspaces, type Workspace } from "../sandbox/workspaces";
 import { deleteRequirementRuntimeDir } from "./clone";
 import { deleteDeliveriesForRequirement } from "./deliveries";
 

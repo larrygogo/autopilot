@@ -1,10 +1,10 @@
 import { existsSync, statSync } from "fs";
 import { join } from "path";
-import { getDb } from "./db";
+import { getDb } from "../db";
 import { getWorkspaceById, createWorkspace, listWorkspaces, nextWorkspaceId, type Workspace } from "./workspaces";
 import { parseGitmodulesFile } from "./gitmodules-parser";
 import { parseGithubFromRemote } from "./workspace-health";
-import { log } from "./logger";
+import { log } from "../logger";
 
 export interface DiscoverResult {
   added: Workspace[];      // 本次新增的子模块

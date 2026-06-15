@@ -18,7 +18,7 @@ import {
   deleteRequirementCodebase,
   getRequirementCodebaseRoot,
   readCodebaseManifest,
-} from "../src/core/codebase";
+} from "../src/core/sandbox/codebase";
 
 let tmpHome: string;
 let prevHome: string | undefined;
@@ -220,7 +220,7 @@ describe("deleteRequirementCodebase", () => {
 
 describe("retention 新轨（需求级 codebase）", () => {
   it("终态需求超期被清、非终态永不清；旧任务轨不受影响", async () => {
-    const { applyRetentionPolicy } = await import("../src/core/sandbox-retention");
+    const { applyRetentionPolicy } = await import("../src/core/sandbox/retention");
     const { utimesSync } = await import("fs");
     const now = Date.now();
     const old = (now - 30 * 86400 * 1000) / 1000;
@@ -258,7 +258,7 @@ describe("retention 新轨（需求级 codebase）", () => {
   });
 
   it("不传 isRequirementTerminal → codebase 一律不清（保守默认）", async () => {
-    const { applyRetentionPolicy } = await import("../src/core/sandbox-retention");
+    const { applyRetentionPolicy } = await import("../src/core/sandbox/retention");
     const { utimesSync } = await import("fs");
     const now = Date.now();
     const old = (now - 30 * 86400 * 1000) / 1000;

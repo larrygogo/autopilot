@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
-import { AUTOPILOT_HOME } from "../index";
-import { log } from "./logger";
+import { AUTOPILOT_HOME } from "../../index";
+import { log } from "../logger";
 import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspace-health";
 import { finalizeDeliveryClone } from "./git-clone";
 

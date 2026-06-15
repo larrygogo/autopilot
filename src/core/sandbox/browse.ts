@@ -1,6 +1,6 @@
 import { existsSync, statSync, readdirSync, readFileSync } from "fs";
 import { join, resolve, sep } from "path";
-import { getTaskSandbox, getTaskArtifactsDir, dirSizeBytes } from "./sandbox";
+import { getTaskSandbox, getTaskArtifactsDir, dirSizeBytes } from "./index";
 
 /**
  * 任务沙盒内容浏览（UI / RPC 消费）：路径安全解析 + 列目录 + 读文件预览 + 打包 + 占用统计。

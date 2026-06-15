@@ -6,7 +6,7 @@ import {
   type Requirement,
 } from "../core/requirements";
 import { ensureDefaultProject } from "../core/projects";
-import { getWorkspaceById, listWorkspaces } from "../core/workspaces";
+import { getWorkspaceById, listWorkspaces } from "../core/sandbox/workspaces";
 import { validateWorkflowInput } from "./workflow-declarations";
 import { runClarifierExtract } from "./requirement-extract";
 

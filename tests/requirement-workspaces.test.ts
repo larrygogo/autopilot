@@ -31,7 +31,7 @@ import { up as m043 } from "../src/migrations/043-workspace-id-demote-backfill";
 import { up as m045 } from "../src/migrations/045-requirement-input-mode";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import {
   createRequirement,
   getRequirementById,

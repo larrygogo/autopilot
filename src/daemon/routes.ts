@@ -36,7 +36,7 @@ import { executePhase } from "../core/runner";
 import { startTaskFromTemplate, StartTaskError } from "../core/task/factory";
 import { releaseTaskSandboxAction, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
-import { listWorkspaces } from "../core/workspaces";
+import { listWorkspaces } from "../core/sandbox/workspaces";
 import { listSubPrs } from "../core/requirements/sub-prs";
 import {
   listRequirements,
@@ -106,7 +106,7 @@ import {
   resolveSandboxPath,
   spawnSandboxZip,
   sandboxSize,
-} from "../core/sandbox-browse";
+} from "../core/sandbox/browse";
 import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task/logs";
 import { emit } from "../core/event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";

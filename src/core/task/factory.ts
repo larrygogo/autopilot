@@ -4,7 +4,7 @@ import { discover, getWorkflow, listWorkflows, isParallelPhase, getTerminalState
 import { snapshotWorkflow } from "../manifest";
 import { ensureTaskSandbox, ensureRunCodebaseSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskSandbox, bindTaskRunRoot, removeTaskWorktree, type WorkspaceRef } from "../sandbox";
 import { rmSync } from "fs";
-import { getWorkspaceById } from "../workspaces";
+import { getWorkspaceById } from "../sandbox/workspaces";
 import { getRequirementById, updateRequirement, listRequirementWorkspaces } from "../requirements";
 import { clearSubPrs } from "../requirements/sub-prs";
 import { isLocked } from "../infra";

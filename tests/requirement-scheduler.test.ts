@@ -17,7 +17,7 @@ import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { up as migrate044 } from "../src/migrations/044-task-run-columns";
 import { _setDbForTest } from "../src/core/db";
 import type { Task } from "../src/core/db";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createProject } from "../src/core/projects";
 import {
   createRequirement,
