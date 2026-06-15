@@ -12,7 +12,6 @@
 import { getTask, updateTask } from "./db";
 import { updateRequirement } from "./requirements";
 import { appendSubPr } from "./requirement-sub-prs";
-import { agentForPhase } from "../agents/registry";
 import { getWorkflow } from "./registry";
 import { collectUpstreamHandoffs } from "./prompt-runner";
 import { listTaskRepos, type TaskRepoCtx } from "./sandbox";
@@ -86,8 +85,6 @@ function resolveRepos(taskId: string, task: NonNullable<ReturnType<typeof getTas
 }
 
 export interface DeliverPrOpts {
-  /** 用哪个 phase 的内联 agent 生成 PR body；缺省 "submit_pr"（不存在则走 DEFAULT_AGENT）。 */
-  agentPhase?: string;
   /** 拼进 PR body「技术方案摘要」的上下文（dev 传 plan.md；声明式可传 handoff 汇总）。缺省仅用 diff stat。 */
   prBodyContext?: string;
   /** commit / PR 标题；缺省 task.title。 */
@@ -111,7 +108,6 @@ export async function deliverPr(taskId: string, opts: DeliverPrOpts = {}): Promi
   const reqId = task["requirement_id"] as string | undefined;
   const title = opts.title ?? (task["title"] as string);
   const planContext = opts.prBodyContext ?? "";
-  const agent = agentForPhase(task.workflow as string, opts.agentPhase ?? "submit_pr");
 
   const results: Array<{ repo: TaskRepoCtx; prUrl: string }> = [];
   const failures: string[] = [];
@@ -130,15 +126,14 @@ export async function deliverPr(taskId: string, opts: DeliverPrOpts = {}): Promi
         repos.length > 1
           ? `\n\n（本需求共涉及 ${repos.length} 个仓库的交付，当前是 ${label}；交付 PR 全集见 autopilot 需求页）`
           : "";
-      const prPrompt =
-        `请根据以下信息生成 PR 描述（Markdown 格式）：\n\n` +
-        `## 标题\n${title}\n\n` +
-        `## 技术方案摘要\n${planContext.slice(0, 4000)}\n\n` +
-        `## 变更统计\n${diffStat}\n\n` +
-        `请输出完整的 PR body，包含：概述、主要变更、测试说明。${multiNote}`;
-      const prResult = await agent.run(prPrompt, { cwd: r.path, timeout: 300_000 });
+      // PR body = 模板拼接（技术方案摘要 + 变更统计），不调 AI ——
+      // 交付是机械动作；PR 描述够用即可（由用户 review/merge），省一次 LLM 调用 + 去掉失败点。
+      const prBody =
+        (planContext.trim() ? `## 技术方案摘要\n\n${planContext.slice(0, 8000)}\n\n` : "") +
+        `## 变更统计\n\n\`\`\`\n${diffStat || "（无 diff stat）"}\n\`\`\`` +
+        multiNote;
 
-      const prUrl = ensurePr(r, title, prResult.text);
+      const prUrl = ensurePr(r, title, prBody);
       results.push({ repo: r, prUrl });
 
       if (r.workspace_id && reqId) {
@@ -188,5 +183,5 @@ export async function deliverPrPhase(taskId: string, phaseName: string): Promise
   if (!task) throw new Error(`任务不存在：${taskId}`);
   const wf = getWorkflow(task.workflow as string);
   const prBodyContext = wf ? collectUpstreamHandoffs(taskId, wf, phaseName) : "";
-  await deliverPr(taskId, { agentPhase: phaseName, prBodyContext });
+  await deliverPr(taskId, { prBodyContext });
 }

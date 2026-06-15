@@ -66,11 +66,4 @@ phases:
     label: "提交 PR"
     timeout: 300
     sandbox: { code: read-write, deliver: true }
-    # run_submit_pr 用 agent 生成 PR 描述，沿用评审员配置
-    agent:
-      label: "评审员"
-      provider: anthropic
-      model: claude-sonnet-4-6
-      permission_mode: bypassPermissions
-      max_turns: 5
-      system_prompt: "你是代码审查员。关注正确性、可读性、边界与失败处理。找出真问题而非格式纠错；按 critical / important / minor 分级反馈。"
+    # 纯机械交付（commit/push/开 PR）：PR body 由框架 deliverPr 模板拼接，不调 AI，无需 agent。

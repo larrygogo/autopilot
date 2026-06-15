@@ -437,10 +437,8 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
 
-  const { prUrls } = await deliverPr(taskId, {
-    agentPhase: "submit_pr",      // 用 submit_pr phase 的内联 agent 生成 PR body（行为等价）
-    prBodyContext: planContent,
-  });
+  // PR body 由框架模板拼接（plan.md 摘要 + diff stat），不调 AI —— 交付是机械动作。
+  const { prUrls } = await deliverPr(taskId, { prBodyContext: planContent });
 
   transition(taskId, "submit_pr_complete", {
     transitions: getTransitions(task.workflow),
