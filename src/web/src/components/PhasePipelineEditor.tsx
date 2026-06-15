@@ -666,6 +666,25 @@ export function PhasePipelineEditor({
     return { idx: -1, total: phases.length, isParallelChild: false };
   }, [drawerPhase, phases]);
 
+  // 合法的 reject 目标：只能往回跳（后端 setWorkflowPhases 校验 reject ∈ 当前 phase 之前的
+  // 顶层条目）。这里把约束前移到下拉选项层——只列当前 phase 所在顶层位置之前的条目名
+  // （顶层普通 phase 名 / 并行块名；并行子节点名不入 orderedNames，故不作为目标）。
+  const drawerRejectTargets = useMemo(() => {
+    const idx = drawerTopIdx.idx;
+    if (idx < 0) return [];
+    const targets: string[] = [];
+    for (let i = 0; i < idx; i += 1) {
+      const p = phases[i];
+      if (!p) continue;
+      if (p.parallel) {
+        if (typeof p.parallel.name === "string") targets.push(p.parallel.name);
+      } else if (typeof p.name === "string") {
+        targets.push(p.name);
+      }
+    }
+    return targets;
+  }, [drawerTopIdx.idx, phases]);
+
   function handleDeletePhase(name: string) {
     // 清理 renames：若被删的 name 是某条改名的目标，撤销该条；新建后又删除的 name 也清掉
     newlyAddedRef.current.delete(name);
@@ -852,6 +871,7 @@ export function PhasePipelineEditor({
                     raw={drawerPhaseLocation.raw}
                     workflowName={workflowName}
                     allPhaseNames={allPhaseNames}
+                    rejectTargets={drawerRejectTargets}
                     isTopLevel={drawerPhaseLocation.kind === "top"}
                     parallelBlockNames={parallelBlockNames}
                     onChange={(patch) => updatePhaseField(phaseName, patch)}
@@ -1427,6 +1447,7 @@ function PhaseEditForm({
   raw,
   workflowName,
   allPhaseNames,
+  rejectTargets,
   isTopLevel,
   parallelBlockNames,
   onChange,
@@ -1437,6 +1458,8 @@ function PhaseEditForm({
   raw: PhaseRaw;
   workflowName: string;
   allPhaseNames: string[];
+  /** 合法的 reject 目标（只能往回跳）——已由父级按当前 phase 的顶层位置过滤 */
+  rejectTargets: string[];
   /** true 表示当前 phase 在顶层（顶层时可"移入并行块"；并行子项时可"移出"） */
   isTopLevel: boolean;
   /** 现有并行块名列表（顶层 phase 用） */
@@ -1447,8 +1470,17 @@ function PhaseEditForm({
   onMoveIntoParallel: (parallelName: string) => void;
   onMoveOutOfParallel: () => void;
 }) {
-  // 排除自己
-  const rejectCandidates = allPhaseNames.filter((n) => n !== raw.name);
+  // reject 只能往回跳：候选 = 父级按位置过滤后的合法目标（排除自己）。
+  // 若当前已存的 reject 值因重排变得不合法，仍并入候选保证它在下拉里可见（否则 Select 渲染不出 label）。
+  const curReject = typeof raw.reject === "string" ? raw.reject : "";
+  const rejectCandidates = (() => {
+    const valid = rejectTargets.filter((n) => n !== raw.name);
+    if (curReject && curReject !== raw.name && !valid.includes(curReject)) {
+      return [...valid, curReject];
+    }
+    return valid;
+  })();
+  const rejectValueInvalid = !!curReject && !rejectTargets.includes(curReject);
   const phaseName = String(raw.name ?? "");
 
   // 本地缓存 name 输入：用户改完 onBlur 才提交 rename
@@ -1579,10 +1611,24 @@ function PhaseEditForm({
               {rejectCandidates.map((n) => (
                 <SelectItem key={n} value={n} className="font-mono">
                   {n}
+                  {n === curReject && rejectValueInvalid ? "（已不在前序，请重选）" : ""}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {rejectCandidates.length === 0 ? (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              没有可驳回的目标——驳回只能回退到本阶段之前的阶段，当前阶段已是第一个。
+            </p>
+          ) : rejectValueInvalid ? (
+            <p className="mt-1 text-[10px] text-warning">
+              当前「{curReject}」已排到本阶段之后，驳回只能往回跳；请改选前序阶段，否则保存会被拒。
+            </p>
+          ) : (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              只列出本阶段之前的阶段（驳回只能往回跳）。
+            </p>
+          )}
         </FormRow>
 
         {typeof raw.reject === "string" && raw.reject !== "" && (
