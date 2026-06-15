@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Save, Trash2, ArrowLeft, ArrowRight, Play, Loader2, Ungroup, ArrowUpFromLine, ArrowDownToLine } from "lucide-react";
+import { Plus, Save, Trash2, ArrowUp, ArrowDown, Play, Loader2, Ungroup, ArrowUpFromLine, ArrowDownToLine } from "lucide-react";
 import { api, type InlineAgentConfig } from "@/hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
@@ -731,8 +731,8 @@ export function PhasePipelineEditor({
                       onClick={() => handleMovePhase(phaseName, "left")}
                       disabled={drawerTopIdx.idx <= 0}
                     >
-                      <ArrowLeft className="h-4 w-4" />
-                      左移
+                      <ArrowUp className="h-4 w-4" />
+                      前移
                     </Button>
                     <Button
                       variant="outline"
@@ -740,8 +740,8 @@ export function PhasePipelineEditor({
                       onClick={() => handleMovePhase(phaseName, "right")}
                       disabled={drawerTopIdx.idx < 0 || drawerTopIdx.idx >= drawerTopIdx.total - 1}
                     >
-                      <ArrowRight className="h-4 w-4" />
-                      右移
+                      <ArrowDown className="h-4 w-4" />
+                      后移
                     </Button>
                     <span className="font-mono text-[10px] text-muted-foreground">
                       第 {drawerTopIdx.idx + 1} / {drawerTopIdx.total} 个
