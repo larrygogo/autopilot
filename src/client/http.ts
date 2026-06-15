@@ -355,6 +355,14 @@ export class HttpClient {
     return this.call("requirements.get", { id });
   }
 
+  async listRequirements(filters?: {
+    status?: string;
+    project_id?: string;
+    workspace_id?: string;
+  }): Promise<{ requirements: Requirement[] }> {
+    return this.call("requirements.list", filters ?? {});
+  }
+
   /** 优雅停机：daemon 自己关 socket 后 exit 0（避免 Windows 硬杀产生 zombie LISTEN） */
   async shutdownDaemon(): Promise<{ ok: boolean; scheduled_in_ms: number }> {
     return this.call("daemon.shutdown", undefined, { timeoutMs: 3000 });
