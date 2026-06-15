@@ -1454,7 +1454,8 @@ export interface PhaseInput {
   name: string;
   timeout?: number;
   reject?: string | null;
-  retry_on_failure?: boolean;
+  // 注：retry_on_failure 等字段不在框架白名单内——它们走 cleanSinglePhase 的
+  // 通用未知字段透传（写进 yaml 但执行引擎不消费），不作为一等字段声明。
   [key: string]: unknown;
 }
 

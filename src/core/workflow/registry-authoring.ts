@@ -199,10 +199,10 @@ function cleanSinglePhase(p: PhaseInput): Record<string, unknown> {
   const out: Record<string, unknown> = { name: p.name };
   if (typeof p.timeout === "number" && p.timeout > 0) out.timeout = p.timeout;
   if (p.reject) out.reject = p.reject;
-  if (p.retry_on_failure) out.retry_on_failure = p.retry_on_failure;
-  // 保留未知扩展字段（忽略已处理的 name/timeout/reject/retry_on_failure）
+  // 保留未知扩展字段（含 retry_on_failure 等框架不消费的字段——原样透传不丢弃，
+  // 但不当一等字段处理，避免误导成「内核已支持的能力」）
   for (const [k, v] of Object.entries(p)) {
-    if (["name", "timeout", "reject", "retry_on_failure"].includes(k)) continue;
+    if (["name", "timeout", "reject"].includes(k)) continue;
     if (v === undefined || v === null || v === "") continue;
     out[k] = v;
   }
