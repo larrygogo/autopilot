@@ -30,9 +30,14 @@ import { judgeVerdict } from "@autopilot/core/judge";
 const JUDGE_PROVIDER = "kimi-code";
 
 // 评审裁判标准（拼进结构化裁判 prompt，替代旧的 REVIEW_RESULT 标记约定）。
+// design 评审刻意从宽：它是早期闸门，后面还有 develop + code_review 兜底，评审里"可在开发阶段
+// 处理的 gap"不该把方案打回（否则 design↔review 易在 important-but-addressable 问题上空转触顶）。
 const DESIGN_REVIEW_CRITERIA =
-  "通过(pass)：方案完整覆盖需求、技术可行、风险与测试有交代。\n" +
-  "驳回(reject)：关键设计缺失 / 不可行 / 重大风险未处理 / 与需求严重不符。仅 minor 表述问题不驳回。";
+  "判定对象是【设计方案】而非最终代码——后面还有完整的开发 + 代码审查环节兜底，无需在设计阶段追求面面俱到。\n" +
+  "通过(pass)：架构方向正确、技术可行、核心需求有覆盖即可。**可在开发阶段处理的 gap 一律不构成驳回**——" +
+  "包括边界 case 未写全、次要规格未钉死、测试细节、可读性/命名建议、以及评审标注为 Important/minor 但不影响架构成立的问题。\n" +
+  "驳回(reject)：仅当存在【架构性硬伤】——技术方向错误 / 方案不可行 / 核心需求遗漏 / 重大风险且方案毫无意识。\n" +
+  "原则：评审即便挑了不少刺，只要架构站得住、能据此往下开发，就判 pass，把细节留给后续环节。";
 const CODE_REVIEW_CRITERIA =
   "通过(pass)：改动正确实现了需求与技术方案的核心目标，无明显正确性/安全问题，关键路径可验证。仅 minor 风格问题不驳回。\n" +
   "驳回(reject)：critical/important 缺陷——功能未实现 / 逻辑错误 / 安全隐患 / 与方案严重不符。";
