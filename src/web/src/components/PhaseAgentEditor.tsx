@@ -276,16 +276,20 @@ export function PhaseAgentEditor({ agent, onChange, phaseName }: Props) {
               <div className="space-y-1.5">
                 <Label className="bp-label text-[10px] text-muted-foreground">
                   系统提示词 (system_prompt)
+                  {draft.system_prompt == null && defaultAgent?.system_prompt && (
+                    <span className="ml-1.5 font-normal text-[10px] text-muted-foreground/70">· 当前为默认值，直接改即覆盖</span>
+                  )}
                 </Label>
                 <Textarea
                   className="min-h-[120px] resize-y font-mono text-[11px] leading-relaxed"
-                  placeholder={
-                    defaultAgent?.system_prompt
-                      ? `留空 = 用默认人设（下面这段就是默认值）：\n\n${defaultAgent.system_prompt}`
-                      : "这个阶段专用的人设。留空就用默认 agent 的。"
-                  }
-                  value={draft.system_prompt ?? ""}
-                  onChange={(e) => update("system_prompt", e.target.value || undefined)}
+                  placeholder="这个阶段专用的人设。留空就用默认 agent 的。"
+                  // 留空时预填默认人设（可编辑黑字）；保存时「值==默认」按留空处理，不把默认烤进 yaml
+                  // —— 不改 = 继续跟随默认（默认变了自动跟），改了才持久化成本阶段专属。
+                  value={draft.system_prompt ?? defaultAgent?.system_prompt ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    update("system_prompt", v && v !== defaultAgent?.system_prompt ? v : undefined);
+                  }}
                   spellCheck={false}
                 />
               </div>
