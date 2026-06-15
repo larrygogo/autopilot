@@ -6,6 +6,7 @@
  */
 
 import { OpenAIApiAdapter } from "./openai";
+import { kimiCodingAgentUa } from "./kimi";
 import type { ProviderAdapter } from "./types";
 
 // ── 预置供应商 ──
@@ -65,23 +66,13 @@ export function getCompatPreset(name: string): CompatProviderPreset | undefined 
  * @param baseUrl 自定义 base_url（覆盖预置端点）
  * @param providerName 供应商名称（用于日志标识）
  */
-// 部分编码专用端点（如 Kimi Code）按 User-Agent 限定只给编码 Agent 调用，普通 UA 返回 403。
-// autopilot API 模式本身就是编码 Agent，对这些 host 注入被认可的 coding-agent UA。
-const CODING_AGENT_UA = "claude-cli/2.1.176 (external, cli)";
-function codingAgentUaFor(baseUrl: string): string | undefined {
-  try {
-    return new URL(baseUrl).hostname.endsWith("kimi.com") ? CODING_AGENT_UA : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function createCompatAdapter(
   apiKey: string,
   baseUrl: string,
   providerName?: string,
 ): ProviderAdapter {
-  const adapter = new OpenAIApiAdapter(apiKey, baseUrl, codingAgentUaFor(baseUrl));
+  // 编码专用端点（如 Kimi Code）的 UA 闸门收口在 kimi.ts（非编码 UA 返回 403）
+  const adapter = new OpenAIApiAdapter(apiKey, baseUrl, kimiCodingAgentUa(baseUrl));
   // 用闭包包一层，让 name 能正确反映 compat provider
   return {
     get name() { return providerName || "compat"; },

@@ -7,17 +7,9 @@
 
 import type { ProviderAdapter, AdapterOptions, AdapterResponse, MessageParam, ToolUseBlock } from "./types";
 import { ApiError } from "./anthropic";
+import { isKimiHost } from "./kimi";
 
 const DEFAULT_BASE_URL = "https://api.openai.com";
-
-/** 是否 Kimi（Moonshot）系端点——决定是否使用 Kimi 专属的 `thinking:{type:disabled}` 关思考语法。 */
-function isKimiHost(baseUrl: string): boolean {
-  try {
-    return new URL(baseUrl).hostname.endsWith("kimi.com");
-  } catch {
-    return false;
-  }
-}
 
 export class OpenAIApiAdapter implements ProviderAdapter {
   readonly name = "openai";
