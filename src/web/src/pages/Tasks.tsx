@@ -19,7 +19,7 @@ import {
  * 流水线 — 一条工作从「需求」到「任务」的全生命周期全景视图。
  *
  * 状态简化为 4 段（按"球在谁那边"）：
- *  - 全部
+ *  - 全部：活跃工作（= 等待人工 + 运行中）；**不含归档**（已完成/已取消只在「归档」看）
  *  - 等待人工：草稿/待审批(需求) + 任务等待人工 + 失败需关注（需要你介入）
  *  - 运行中：调查中(需求) + 进行中/待执行(任务)（AI 自动推进）
  *  - 归档：已完成/已取消
@@ -179,7 +179,12 @@ export function Tasks() {
       })),
     ].sort((a, b) => b.ts - a.ts);
 
-  const allRows = useMemo(() => tabs.flatMap(rowsOf).sort((a, b) => b.ts - a.ts), [tabs, now]);
+  // 「全部」= 等待人工 + 运行中，**不含归档**（已完成 / 已取消的需求只在「归档」tab 看，
+  // 不混进活跃总览）。
+  const allRows = useMemo(
+    () => tabs.filter((t) => t.key !== "archived").flatMap(rowsOf).sort((a, b) => b.ts - a.ts),
+    [tabs, now],
+  );
   const tabCount = (t: PipelineTab) => t.reqs.length + t.tasks.length;
 
   const hasAny = tasks.length > 0 || requirements.length > 0;
