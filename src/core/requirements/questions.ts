@@ -11,14 +11,14 @@
  * - createQuestion / addReply 仍生成 qst- / qst-r 前缀 id，避免破坏测试断言
  */
 
-import { getDb } from "./db";
+import { getDb } from "../db";
 import {
   createComment,
   getCommentById,
   listComments,
   resolveComment,
   type Comment,
-} from "./requirement-comments";
+} from "./comments";
 
 // ──────────────────────────────────────────────
 // 旧类型（保留兼容）

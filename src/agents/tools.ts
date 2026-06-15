@@ -37,7 +37,7 @@ import {
   createRequirement,
   updateRequirement,
   setRequirementStatus,} from "../core/requirements";
-import { createComment, nextCommentId } from "../core/requirement-comments";
+import { createComment, nextCommentId } from "../core/requirements/comments";
 
 type ToolContent = { content: Array<{ type: "text"; text: string }> };
 

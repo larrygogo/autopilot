@@ -9,8 +9,8 @@ import {
   createComment,
   nextCommentId,
   listComments,
-} from "../core/requirement-comments";
-import { createSpecRevision } from "../core/spec-revisions";
+} from "../core/requirements/comments";
+import { createSpecRevision } from "../core/requirements/spec-revisions";
 import { createLogger } from "../core/logger";
 import {
   startRound,
@@ -19,15 +19,15 @@ import {
 } from "./clarifier-progress";
 import { buildClarifierAgent } from "./clarifier-agent";
 import { parseLlmYamlWrapper } from "../core/llm-yaml";
-import { listAttachments, buildAttachmentContext } from "../core/requirement-attachments";
-import { ensureRequirementClones } from "../core/requirement-clone";
+import { listAttachments, buildAttachmentContext } from "../core/requirements/attachments";
+import { ensureRequirementClones } from "../core/requirements/clone";
 import { deleteRequirementCodebase } from "../core/codebase";
 import {
   getSession,
   upsertSession,
   deleteSession,
   type ConversationTurn,
-} from "../core/requirement-sessions";
+} from "../core/requirements/sessions";
 import type { ProviderName } from "../core/config";
 
 const log = createLogger("requirement-clarifier");

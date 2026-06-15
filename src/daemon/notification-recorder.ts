@@ -15,8 +15,8 @@ import type { AutopilotEvent } from "../core/events";
 import { getTask } from "../core/db";
 import { getDb } from "../core/db";
 import { getRequirementById } from "../core/requirements";
-import { listSubPrs } from "../core/requirement-sub-prs";
-import { hasDeliveries } from "../core/requirement-deliveries";
+import { listSubPrs } from "../core/requirements/sub-prs";
+import { hasDeliveries } from "../core/requirements/deliveries";
 import { createNotification, pruneNotifications } from "../core/notify/stream";
 import type { CreateNotificationInput } from "../core/notify/stream";
 import {

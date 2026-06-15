@@ -152,7 +152,7 @@ import {
   setRequirementStatus,
   setActiveQuestionId,
 } from "../src/core/requirements";
-import { createQuestion } from "../src/core/requirement-questions";
+import { createQuestion } from "../src/core/requirements/questions";
 import {
   runClarifierRound,
   _setClarifyFnForTest,

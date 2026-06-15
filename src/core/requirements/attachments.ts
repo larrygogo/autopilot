@@ -8,8 +8,8 @@
 
 import { mkdirSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { join, extname } from "path";
-import { AUTOPILOT_HOME } from "../index";
-import { getDb } from "./db";
+import { AUTOPILOT_HOME } from "../../index";
+import { getDb } from "../db";
 
 // ──────────────────────────────────────────────
 // 类型

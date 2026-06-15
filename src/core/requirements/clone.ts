@@ -1,13 +1,13 @@
 import { existsSync, rmSync } from "fs";
-import { log } from "./logger";
+import { log } from "../logger";
 import {
   ensureCodebase,
   deleteRequirementCodebase,
   getRequirementCodebaseRoot,
   getRequirementDir,
   type CodebaseFidelity,
-} from "./codebase";
-import type { Workspace } from "./workspaces";
+} from "../codebase";
+import type { Workspace } from "../workspaces";
 
 // ──────────────────────────────────────────────
 // 需求级代码 clone —— 澄清阶段入口（v2 R4 起是 ensureCodebase 的薄壳）

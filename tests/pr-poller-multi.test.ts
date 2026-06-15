@@ -28,8 +28,8 @@ import {
   updateRequirement,
   nextRequirementId,
 } from "../src/core/requirements";
-import { listFeedbacks } from "../src/core/requirement-feedbacks";
-import { appendSubPr, listSubPrs } from "../src/core/requirement-sub-prs";
+import { listFeedbacks } from "../src/core/requirements/feedbacks";
+import { appendSubPr, listSubPrs } from "../src/core/requirements/sub-prs";
 import { pollOne, _setGhRunnerForTest, type GhRunner } from "../src/daemon/pr-poller";
 
 describe("pr-poller 多 PR 聚合", () => {

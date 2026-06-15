@@ -31,7 +31,7 @@ import {
   latestComment,
   resolveComment,
   nextCommentId,
-} from "../src/core/requirement-comments";
+} from "../src/core/requirements/comments";
 
 describe("requirement_comments CRUD", () => {
   let db: Database;

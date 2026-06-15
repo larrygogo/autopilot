@@ -8,7 +8,7 @@ import {
   listRequirementWorkspaces,
 } from "../core/requirements";
 import type { Requirement } from "../core/requirements";
-import { listComments } from "../core/requirement-comments";
+import { listComments } from "../core/requirements/comments";
 import { getTask } from "../core/db";
 import { startTaskFromTemplate, startNewRunForRequirement } from "../core/task/factory";
 import { createLogger } from "../core/logger";

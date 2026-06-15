@@ -6,7 +6,7 @@ import { ensureTaskSandbox, ensureRunCodebaseSandbox, deleteRemoteDeliverBranch,
 import { rmSync } from "fs";
 import { getWorkspaceById } from "../workspaces";
 import { getRequirementById, updateRequirement, listRequirementWorkspaces } from "../requirements";
-import { clearSubPrs } from "../requirement-sub-prs";
+import { clearSubPrs } from "../requirements/sub-prs";
 import { isLocked } from "../infra";
 import { forgetTaskRecoveryState } from "../watcher";
 import { executePhase } from "../runner";

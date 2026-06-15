@@ -19,7 +19,7 @@ import {
   nextRequirementId,
   listRequirements,
 } from "../src/core/requirements";
-import { appendFeedback, listFeedbacks } from "../src/core/requirement-feedbacks";
+import { appendFeedback, listFeedbacks } from "../src/core/requirements/feedbacks";
 
 describe("调度器集成（不走真实 task runner，验证状态流转）", () => {
   let db: Database;

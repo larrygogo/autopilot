@@ -13,7 +13,7 @@ import { _setDbForTest } from "../src/core/db";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 import { createRequirement, nextRequirementId } from "../src/core/requirements";
-import { appendSubPr } from "../src/core/requirement-sub-prs";
+import { appendSubPr } from "../src/core/requirements/sub-prs";
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 

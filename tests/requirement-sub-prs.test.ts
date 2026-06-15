@@ -13,7 +13,7 @@ import { _setDbForTest } from "../src/core/db";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 import { createRequirement, deleteRequirement } from "../src/core/requirements";
-import { appendSubPr, listSubPrs } from "../src/core/requirement-sub-prs";
+import { appendSubPr, listSubPrs } from "../src/core/requirements/sub-prs";
 
 describe("requirement-sub-prs CRUD", () => {
   let db: Database;

@@ -21,7 +21,7 @@ import {
 } from "../src/core/projects";
 import { createWorkspace } from "../src/core/workspaces";
 import { createRequirement } from "../src/core/requirements";
-import { createQuestion } from "../src/core/requirement-questions";
+import { createQuestion } from "../src/core/requirements/questions";
 
 describe("projects CRUD", () => {
   let sqlite: Database;

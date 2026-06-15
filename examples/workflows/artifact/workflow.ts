@@ -20,7 +20,7 @@ import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { getTaskArtifactsDir } from "@autopilot/core/sandbox";
-import { deliverArtifacts } from "@autopilot/core/requirement-deliveries";
+import { deliverArtifacts } from "@autopilot/core/requirements/deliveries";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 
 const DELIVERABLES_DIR = "deliverables";

@@ -6,12 +6,12 @@
  * 等代码全面用 Comment 直接渲染时，本文件可整体删除（spec follow-up）。
  */
 
-import { getDb } from "./db";
+import { getDb } from "../db";
 import {
   createComment,
   nextCommentId,
   type Comment,
-} from "./requirement-comments";
+} from "./comments";
 
 export interface RequirementFeedback {
   id: number;

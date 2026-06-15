@@ -9,7 +9,7 @@ import { mkdirSync, existsSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
-const MODULE = join(import.meta.dir, "..", "src", "core", "requirement-clone").replace(/\\/g, "/");
+const MODULE = join(import.meta.dir, "..", "src", "core", "requirements", "clone").replace(/\\/g, "/");
 
 let tmpHome: string;
 let repoA: string;

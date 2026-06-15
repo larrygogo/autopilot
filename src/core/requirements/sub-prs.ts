@@ -1,4 +1,4 @@
-import { getDb } from "./db";
+import { getDb } from "../db";
 
 /**
  * 交付 PR 记录（原「子模块 PR」；多代码库需求时 = 各库交付 PR 的全集，含主库）。

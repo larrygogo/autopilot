@@ -18,7 +18,7 @@ import { runInBackground } from "@autopilot/core/runner";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
 import { getTaskArtifactsDir, listTaskRepos, type TaskRepoCtx } from "@autopilot/core/sandbox";
-import { appendSubPr } from "@autopilot/core/requirement-sub-prs";
+import { appendSubPr } from "@autopilot/core/requirements/sub-prs";
 import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { notify } from "@autopilot/core/notify";
 import { judgeVerdict } from "@autopilot/core/judge";

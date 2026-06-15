@@ -39,8 +39,8 @@ import {
   updateRequirement,
   nextRequirementId,
 } from "../src/core/requirements";
-import { listComments } from "../src/core/requirement-comments";
-import { appendSubPr } from "../src/core/requirement-sub-prs";
+import { listComments } from "../src/core/requirements/comments";
+import { appendSubPr } from "../src/core/requirements/sub-prs";
 import { reportRunOutcome } from "../src/daemon/run-outcome";
 import { _releaseAllLocks } from "../src/core/infra";
 

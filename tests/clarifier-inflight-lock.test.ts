@@ -37,7 +37,7 @@ import {
   setRequirementStatus,
   setActiveQuestionId,
 } from "../src/core/requirements";
-import { createQuestion, listQuestionsByRequirement } from "../src/core/requirement-questions";
+import { createQuestion, listQuestionsByRequirement } from "../src/core/requirements/questions";
 import { enableBus, disableBus, emit } from "../src/core/event-bus";
 import {
   runClarifierRound,
@@ -46,7 +46,7 @@ import {
   initRequirementClarifier,
   disposeRequirementClarifier,
 } from "../src/daemon/requirement-clarifier";
-import { resolveQuestion } from "../src/core/requirement-questions";
+import { resolveQuestion } from "../src/core/requirements/questions";
 
 function initSchema(): void {
   const db = new Database(":memory:");

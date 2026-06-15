@@ -17,9 +17,9 @@
  */
 
 import { getRequirementById, setRequirementStatus, canTransitionStatus } from "../core/requirements";
-import { createComment, nextCommentId } from "../core/requirement-comments";
-import { listSubPrs } from "../core/requirement-sub-prs";
-import { hasDeliveries } from "../core/requirement-deliveries";
+import { createComment, nextCommentId } from "../core/requirements/comments";
+import { listSubPrs } from "../core/requirements/sub-prs";
+import { hasDeliveries } from "../core/requirements/deliveries";
 import { getTask } from "../core/db";
 import { createLogger } from "../core/logger";
 

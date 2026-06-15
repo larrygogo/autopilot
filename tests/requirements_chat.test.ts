@@ -22,7 +22,7 @@ import {
   updateRequirement,
   nextRequirementId,
 } from "../src/core/requirements";
-import { appendFeedback, listFeedbacks } from "../src/core/requirement-feedbacks";
+import { appendFeedback, listFeedbacks } from "../src/core/requirements/feedbacks";
 
 describe("chat tools 集成（直接走 core 函数验证流程）", () => {
   let db: Database;

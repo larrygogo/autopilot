@@ -37,26 +37,26 @@ import { startTaskFromTemplate, StartTaskError } from "../core/task/factory";
 import { releaseTaskSandboxAction, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { listWorkspaces } from "../core/workspaces";
-import { listSubPrs } from "../core/requirement-sub-prs";
+import { listSubPrs } from "../core/requirements/sub-prs";
 import {
   listRequirements,
   getRequirementById,
   finishClarification,
 } from "../core/requirements";
-import { resolveDeliveryFilePath, maxDeliveryRound } from "../core/requirement-deliveries";
+import { resolveDeliveryFilePath, maxDeliveryRound } from "../core/requirements/deliveries";
 import {
   saveAttachment,
   listAttachments as listReqAttachments,
   getAttachmentById as getReqAttachmentById,
   deleteAttachment as deleteReqAttachment,
-} from "../core/requirement-attachments";
+} from "../core/requirements/attachments";
 import {
   listComments,
   getCommentById,
   resolveComment,
-} from "../core/requirement-comments";
+} from "../core/requirements/comments";
 import type { Requirement } from "../core/requirements";
-import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
+import { listSpecRevisionsByRequirement } from "../core/requirements/spec-revisions";
 import { runClarifierRound } from "./requirement-clarifier";
 import { getRound } from "./clarifier-progress";
 import { handleMcpHttp } from "../agents/mcp-server";

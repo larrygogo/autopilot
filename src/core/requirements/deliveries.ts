@@ -1,8 +1,8 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "fs";
 import { join, resolve, sep } from "path";
-import { getDb, getTask, insertWithFreshId } from "./db";
-import { getRequirementDir } from "./codebase";
-import { log } from "./logger";
+import { getDb, getTask, insertWithFreshId } from "../db";
+import { getRequirementDir } from "../codebase";
+import { log } from "../logger";
 
 // ──────────────────────────────────────────────
 // 需求交付物（requirement_deliveries，迁移 046）—— 交付物抽象 P0 产出侧（v2 R5）

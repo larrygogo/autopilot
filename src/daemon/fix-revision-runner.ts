@@ -34,11 +34,11 @@ import {
   updateRequirement,
   listRequirements,
 } from "../core/requirements";
-import { listFeedbacks } from "../core/requirement-feedbacks";
-import { createComment, nextCommentId } from "../core/requirement-comments";
+import { listFeedbacks } from "../core/requirements/feedbacks";
+import { createComment, nextCommentId } from "../core/requirements/comments";
 import { listTaskRepos, getTaskSandbox, getTaskWorktreeMeta, type TaskRepoCtx } from "../core/sandbox";
-import { listSubPrs, type RequirementSubPr } from "../core/requirement-sub-prs";
-import { hasDeliveries, deliverArtifacts, maxDeliveryRound, getDeliveryRoundDir } from "../core/requirement-deliveries";
+import { listSubPrs, type RequirementSubPr } from "../core/requirements/sub-prs";
+import { hasDeliveries, deliverArtifacts, maxDeliveryRound, getDeliveryRoundDir } from "../core/requirements/deliveries";
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "fs";
 import { join } from "path";
 import { getTask } from "../core/db";

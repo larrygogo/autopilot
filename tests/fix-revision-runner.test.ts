@@ -47,9 +47,9 @@ import {
   updateRequirement,
   nextRequirementId,
 } from "../src/core/requirements";
-import { appendFeedback, listFeedbacks } from "../src/core/requirement-feedbacks";
-import { appendSubPr } from "../src/core/requirement-sub-prs";
-import { deliverArtifacts, listDeliveries, getDeliveryRoundDir } from "../src/core/requirement-deliveries";
+import { appendFeedback, listFeedbacks } from "../src/core/requirements/feedbacks";
+import { appendSubPr } from "../src/core/requirements/sub-prs";
+import { deliverArtifacts, listDeliveries, getDeliveryRoundDir } from "../src/core/requirements/deliveries";
 import { getWorkflow, listWorkflows, reload, _clearRegistry } from "../src/core/registry";
 import { getTaskRoot, getTaskSandbox, _clearTaskRootCacheForTest } from "../src/core/sandbox";
 import { executePhase } from "../src/core/runner";

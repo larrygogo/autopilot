@@ -90,10 +90,10 @@ function attachWorkspaceIds<T extends { id: string }>(reqs: T[]): Array<T & { wo
   const map = listRequirementWorkspaceIds(reqs.map((r) => r.id));
   return reqs.map((r) => ({ ...r, workspace_ids: map.get(r.id) ?? [] }));
 }
-import { listSubPrs } from "../core/requirement-sub-prs";
-import { listDeliveries, listDeliveryFiles, maxDeliveryRound } from "../core/requirement-deliveries";
+import { listSubPrs } from "../core/requirements/sub-prs";
+import { listDeliveries, listDeliveryFiles, maxDeliveryRound } from "../core/requirements/deliveries";
 import { validateWorkflowInput } from "./workflow-declarations";
-import { listSpecRevisionsByRequirement } from "../core/spec-revisions";
+import { listSpecRevisionsByRequirement } from "../core/requirements/spec-revisions";
 import { getRound as getClarifierRound } from "./clarifier-progress";
 import { runClarifierRound } from "./requirement-clarifier";
 import { runClarifierExtract } from "./requirement-extract";
@@ -104,7 +104,7 @@ import {
   resolveComment,
   nextCommentId,
   type Comment,
-} from "../core/requirement-comments";
+} from "../core/requirements/comments";
 import {
   loadProviders,
   loadConfigRaw,

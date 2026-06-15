@@ -23,9 +23,9 @@ import { getTaskSandbox } from "@autopilot/core/sandbox";
 import { getWorkspaceById } from "@autopilot/core/workspaces";
 import { setRequirementStatus, getRequirementById } from "@autopilot/core/requirements";
 import { forceTransition } from "@autopilot/core/state-machine";
-import { latestFeedback } from "@autopilot/core/requirement-feedbacks";
+import { latestFeedback } from "@autopilot/core/requirements/feedbacks";
 import { listSubmodules } from "@autopilot/core/submodules";
-import { appendSubPr } from "@autopilot/core/requirement-sub-prs";
+import { appendSubPr } from "@autopilot/core/requirements/sub-prs";
 
 const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
 const REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT";

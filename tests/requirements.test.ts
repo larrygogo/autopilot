@@ -30,11 +30,11 @@ import {
   appendFeedback,
   listFeedbacks,
   latestFeedback,
-} from "../src/core/requirement-feedbacks";
+} from "../src/core/requirements/feedbacks";
 import {
   createQuestion,
   addReply,
-} from "../src/core/requirement-questions";
+} from "../src/core/requirements/questions";
 
 describe("migration 005-requirements（pre-008 schema 验证）", () => {
   it("创建 requirements 表，含全部 spec 字段", () => {

@@ -4,9 +4,9 @@ import {
   setRequirementStatus,
   updateRequirement,
 } from "../core/requirements";
-import { createComment, nextCommentId } from "../core/requirement-comments";
-import { listSubPrs, updateSubPrWatermark, updateSubPrCiState } from "../core/requirement-sub-prs";
-import { hasDeliveries } from "../core/requirement-deliveries";
+import { createComment, nextCommentId } from "../core/requirements/comments";
+import { listSubPrs, updateSubPrWatermark, updateSubPrCiState } from "../core/requirements/sub-prs";
+import { hasDeliveries } from "../core/requirements/deliveries";
 import { getWorkspaceById } from "../core/workspaces";
 import { loadGithubConfig } from "../core/config";
 import { emit } from "../core/event-bus";

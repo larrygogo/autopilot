@@ -18,15 +18,15 @@ const ALLOWLIST = new Set([
   "src/core/rebuild-index.ts",   // 索引重建：从 manifest INSERT/UPDATE 回 DB
   "src/core/workspaces.ts",      // workspaces 表（Phase 2 由 codebases 改名）：SQLite 即权威源，无 manifest 同步需求
   "src/core/projects.ts",        // projects 表：SQLite 即权威源（CRUD 模块），无 manifest 同步需求
-  "src/core/requirements.ts",    // requirements 表：SQLite 即权威源，无 manifest 同步需求
-  "src/core/requirement-feedbacks.ts", // 旧 shim：转发到 requirement-comments.ts（Phase 2 后保留兼容，无独立写）
-  "src/core/requirement-questions.ts", // 旧 shim：转发到 requirement-comments.ts（Phase 2 后保留兼容）
-  "src/core/requirement-comments.ts", // 统一评论表：question / feedback / handoff 合并后的 SQLite 权威源
-  "src/core/requirement-attachments.ts", // requirement_attachments 表：SQLite 即权威源，附件 CRUD 无 manifest 同步需求
-  "src/core/requirement-sub-prs.ts", // requirement_sub_prs 表：SQLite 即权威源，无 manifest 同步需求
-  "src/core/requirement-deliveries.ts", // requirement_deliveries 表：SQLite 即权威源，交付物轮次记录（v2 R5）
-  "src/core/requirement-sessions.ts", // requirement_sessions 表：SQLite 即权威源，澄清会话状态无 manifest 同步需求
-  "src/core/spec-revisions.ts",  // spec_revisions 表：SQLite 即权威源，spec 修订历史无 manifest 同步需求
+  "src/core/requirements/index.ts",    // requirements 表：SQLite 即权威源，无 manifest 同步需求
+  "src/core/requirements/feedbacks.ts", // 旧 shim：转发到 requirement-comments.ts（Phase 2 后保留兼容，无独立写）
+  "src/core/requirements/questions.ts", // 旧 shim：转发到 requirement-comments.ts（Phase 2 后保留兼容）
+  "src/core/requirements/comments.ts", // 统一评论表：question / feedback / handoff 合并后的 SQLite 权威源
+  "src/core/requirements/attachments.ts", // requirement_attachments 表：SQLite 即权威源，附件 CRUD 无 manifest 同步需求
+  "src/core/requirements/sub-prs.ts", // requirement_sub_prs 表：SQLite 即权威源，无 manifest 同步需求
+  "src/core/requirements/deliveries.ts", // requirement_deliveries 表：SQLite 即权威源，交付物轮次记录（v2 R5）
+  "src/core/requirements/sessions.ts", // requirement_sessions 表：SQLite 即权威源，澄清会话状态无 manifest 同步需求
+  "src/core/requirements/spec-revisions.ts",  // spec_revisions 表：SQLite 即权威源，spec 修订历史无 manifest 同步需求
   "src/core/submodules.ts",      // submodules：通过 createRepo 写 repos 表，SQLite 即权威源
   "src/core/workflows.ts",       // workflows 表：SQLite 即权威源（file 工作流由 daemon 同步），无 manifest 同步需求
   "src/migrations/008-projects.ts", // P1 项目工作台改造：codebases 表重建需 INSERT 数据 copy（DDL+一次性数据迁移，无 manifest 同步需求）
@@ -44,7 +44,7 @@ const ALLOWLIST = new Set([
   "src/migrations/043-workspace-id-demote-backfill.ts", // 主库语义降级：集合↔缓存列双向回填校验（一次性数据迁移，幂等）
   "src/migrations/044-task-run-columns.ts", // run 多历史：tasks 加 kind/seq + 按需求分组回填 seq（一次性数据迁移，幂等）
   "src/migrations/045-requirement-input-mode.ts", // 输入形态声明：加列 + 回填 'git'（一次性数据迁移，幂等）
-  "src/core/notifications.ts",     // notifications 表：SQLite 即权威源，事件型通知流（替代 Now 派生快照）
+  "src/core/notify/stream.ts",     // notifications 表：SQLite 即权威源，事件型通知流（替代 Now 派生快照）
   "src/core/auth.ts",              // users 表：SQLite 即权威源，密码/会话状态无 manifest 同步需求
   "src/core/api-keys.ts",          // api_keys 表：SQLite 即权威源，API 密钥加密存储无 manifest 同步需求
   "src/core/providers.ts",         // providers 表：SQLite 即权威源，provider 条目 CRUD（条目化重构 P1）

@@ -20,7 +20,7 @@ import {
   updateRequirement,
   nextRequirementId,
 } from "../src/core/requirements";
-import { listFeedbacks } from "../src/core/requirement-feedbacks";
+import { listFeedbacks } from "../src/core/requirements/feedbacks";
 import { pollOne, _setGhRunnerForTest, type GhRunner } from "../src/daemon/pr-poller";
 
 describe("pr-poller pollOne", () => {

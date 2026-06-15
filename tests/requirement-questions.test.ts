@@ -19,7 +19,7 @@ import { createRequirement } from "../src/core/requirements";
 import {
   createQuestion, addReply, resolveQuestion,
   listQuestionsByRequirement, getQuestionById, nextQuestionId,
-} from "../src/core/requirement-questions";
+} from "../src/core/requirements/questions";
 
 describe("requirement-questions 评论线程", () => {
   let sqlite: Database;

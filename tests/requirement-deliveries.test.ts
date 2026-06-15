@@ -1,5 +1,5 @@
 /**
- * requirement_deliveries（迁移 045/046 + core/requirement-deliveries，v2 R5）：
+ * requirement_deliveries（迁移 045/046 + core/requirements/deliveries，v2 R5）：
  *   - 迁移幂等（重复跑 up 不炸、结果一致；045 回填只补 NULL）
  *   - deliverArtifacts：promote 到 runtime/requirements/<reqId>/deliveries/round-<N>/、
  *     round 递增、同 round 目标先清（幂等）、空目录/缺目录拒绝
@@ -45,7 +45,7 @@ import {
   listDeliveryFiles,
   resolveDeliveryFilePath,
   getDeliveryRoundDir,
-} from "../src/core/requirement-deliveries";
+} from "../src/core/requirements/deliveries";
 import { _clearTaskRootCacheForTest } from "../src/core/sandbox";
 import { _releaseAllLocks } from "../src/core/infra";
 
