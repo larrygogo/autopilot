@@ -682,24 +682,30 @@ export function listTaskPhaseEvents(taskId: string): TaskPhaseEvent[] {
     .all(taskId);
 }
 
+/** getWorkflowPhaseStats 取样上限：只用最近 N 条 done 事件算 P50（防 phase_events 无限增长拖慢）。 */
+const PHASE_STATS_SAMPLE_LIMIT = 2000;
+
 /**
  * 同工作流历史 phase 耗时统计 — 用作"还要多久"参考值。
  * 只计入 status='done' 且 ended_at 非空的事件；每 phase 应用层算 P50（中位数）。
- * 数据规模通常很小（一个 workflow phase 完成事件最多几百条），不需要 SQL window function。
+ * 取**最近 PHASE_STATS_SAMPLE_LIMIT 条**（ended_at DESC）：phase_events 是 append-only 无清理，
+ * 不封顶则随历史线性变慢（architect 审查 H4 温水隐患）；近期窗口同时让 ETA 反映当前性能更准。
  */
 export function getWorkflowPhaseStats(workflow: string): Record<string, { count: number; p50_ms: number }> {
   const db = getDb();
   const rows = db
-    .query<{ phase: string; dur: number }, [string]>(
+    .query<{ phase: string; dur: number }, [string, number]>(
       `SELECT e.phase AS phase, (e.ended_at - e.started_at) AS dur
        FROM task_phase_events e
        JOIN tasks t ON t.id = e.task_id
        WHERE t.workflow = ?
          AND e.status = 'done'
          AND e.ended_at IS NOT NULL
-         AND e.ended_at > e.started_at`
+         AND e.ended_at > e.started_at
+       ORDER BY e.ended_at DESC
+       LIMIT ?`
     )
-    .all(workflow);
+    .all(workflow, PHASE_STATS_SAMPLE_LIMIT);
 
   const byPhase = new Map<string, number[]>();
   for (const r of rows) {
