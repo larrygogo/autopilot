@@ -86,12 +86,14 @@ import {
   createWorkflow,
   deleteWorkflowDir,
   setWorkflowPhases,
+  type PhaseEntryInput,
+} from "../core/registry";
+import {
   syncWorkflowTs,
   renameRunFunctions,
   pruneOrphanRunFunctions,
   replaceRunFunction,
-  type PhaseEntryInput,
-} from "../core/registry";
+} from "../core/workflow-ts-authoring";
 import {
   listWorkflowsInDb,
   getWorkflowFromDb,
