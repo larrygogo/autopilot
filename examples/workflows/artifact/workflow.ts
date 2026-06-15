@@ -18,7 +18,7 @@ import { getTask } from "@autopilot/core/db";
 import { transition } from "@autopilot/core/state-machine";
 import { getWorkflow, buildTransitions } from "@autopilot/core/workflow/registry";
 import { agentForPhase } from "@autopilot/agents/registry";
-import { getCurrentSandboxDir } from "@autopilot/core/task-context";
+import { getCurrentSandboxDir } from "@autopilot/core/task/context";
 import { getTaskArtifactsDir } from "@autopilot/core/sandbox";
 import { deliverArtifacts } from "@autopilot/core/requirements/deliveries";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
