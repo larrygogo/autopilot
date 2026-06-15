@@ -31,6 +31,7 @@ const ALLOWLIST = new Set([
   "src/core/workflows.ts",       // workflows 表：SQLite 即权威源（file 工作流由 daemon 同步），无 manifest 同步需求
   "src/migrations/008-projects.ts", // P1 项目工作台改造：codebases 表重建需 INSERT 数据 copy（DDL+一次性数据迁移，无 manifest 同步需求）
   "src/migrations/009-nullable-codebase.ts", // requirements.codebase_id NOT NULL → NULLable 需表重建（DDL+一次性数据迁移）
+  "src/migrations/019-task-requirement-id.ts", // 每任务必有需求 Phase 1：反向回填 tasks.requirement_id（一次性数据迁移；跨行 UPDATE...SET，整文件扫描升级后才被护栏抓到）
   "src/migrations/021-requirement-comments.ts", // Phase 2 合并：把 questions+replies+feedbacks 迁移到 requirement_comments（一次性数据迁移）
   "src/migrations/023-backfill-orphan-task-requirements.ts", // 每个任务必有需求 Phase 1：回填历史游离 task 的 requirement（一次性数据迁移）
   "src/migrations/024-codebase-to-workspace.ts", // Phase 2：codebase→workspace 表/列/id 改名（DDL + UPDATE 数据迁移，无 manifest 同步需求）
@@ -50,7 +51,12 @@ const ALLOWLIST = new Set([
   "src/migrations/047-providers-table.ts", // provider 条目化：建表 + 种子官方三家 + 导入 config compat（一次性数据迁移，幂等）
 ]);
 
-const WRITE_SQL_RE = /\b(INSERT\s+(OR\s+\w+\s+)?INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|REPLACE\s+INTO)\b/i;
+// 注：`\s` 已含换行，故整文件扫描（而非逐行）即可抓住跨行写法
+//   `UPDATE foo\n  SET ...`（旧逐行版会漏判，是 single-writer 护栏的真实破口）。
+// 作用域 = 行级数据写入（INSERT/UPDATE/DELETE/REPLACE）vs manifest 同步，**不含 DDL**
+//   （DROP/CREATE/ALTER 是 schema 变更、归迁移，纳入只会把所有 CREATE TABLE IF NOT EXISTS
+//    守卫和迁移误报成噪音，与本不变式无关）。
+const WRITE_SQL_RE = /\b(INSERT\s+(OR\s+\w+\s+)?INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|REPLACE\s+INTO)\b/gi;
 
 function listTsFilesIn(dir: string): string[] {
   const out: string[] = [];
@@ -76,12 +82,14 @@ describe("single-writer invariant", () => {
     for (const abs of files) {
       const rel = abs.slice(repoRoot.length + 1).replace(/\\/g, "/");
       if (ALLOWLIST.has(rel)) continue;
-      const lines = readFileSync(abs, "utf-8").split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (WRITE_SQL_RE.test(line)) {
-          violations.push({ file: rel, line: i + 1, text: line.trim() });
-        }
+      const content = readFileSync(abs, "utf-8");
+      const re = new RegExp(WRITE_SQL_RE.source, "gi");
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(content)) !== null) {
+        // 整文件偏移 → 行号（match.index 前的换行数 + 1）
+        const line = content.slice(0, m.index).split("\n").length;
+        // 匹配体可能跨行（多行 UPDATE...SET），折叠空白便于阅读
+        violations.push({ file: rel, line, text: m[0].replace(/\s+/g, " ") });
       }
     }
 
