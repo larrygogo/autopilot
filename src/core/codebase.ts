@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
 import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspace-health";
+import { finalizeDeliveryClone } from "./git-clone";
 
 // ──────────────────────────────────────────────
 // 需求级 codebase —— 「一件工作一份 clone」（需求中心架构 v2 R4）
@@ -331,39 +332,13 @@ async function cloneRepo(
   }
 
   if (opts.fidelity === "full") {
-    const git = (...a: string[]) => Bun.spawnSync(["git", "-C", dest, ...a], { stdout: "pipe", stderr: "pipe" });
-    if (opts.checkoutExisting) {
-      // fix run 续作模式：checkout 既有远程交付分支，不从 base 新建（不重置交付内容）。
-      // 远程无此分支 = 该库本轮无交付 PR → 停在默认分支只读参考，不视为失败。
-      const hasRemote = git("rev-parse", "--verify", "--quiet", `origin/${opts.branch}`).exitCode === 0;
-      if (hasRemote) {
-        const co = git("checkout", "-B", opts.branch, `origin/${opts.branch}`);
-        if (co.exitCode !== 0) {
-          log.warn("checkout 既有交付分支失败 [req=%s ws=%s branch=%s]: %s", reqId, ws.id, opts.branch,
-            new TextDecoder().decode(co.stderr ?? new Uint8Array()).slice(0, 200));
-        }
-      } else {
-        log.info("远程无交付分支 %s，保持默认分支（该库本轮无交付，只读参考）[req=%s ws=%s]",
-          opts.branch, reqId, ws.id);
-      }
-    } else {
-      // 基于 origin/<base> 建交付分支（完整 clone 后所有分支均作为 origin/<x> 可用）
-      const baseRef = git("rev-parse", "--verify", "--quiet", `origin/${opts.base}`).exitCode === 0
-        ? `origin/${opts.base}` : opts.base;
-      const co = git("checkout", "-B", opts.branch, baseRef);
-      if (co.exitCode !== 0) {
-        log.warn("clone 后建交付分支失败 [req=%s ws=%s branch=%s base=%s]: %s", reqId, ws.id, opts.branch, opts.base,
-          new TextDecoder().decode(co.stderr ?? new Uint8Array()).slice(0, 200));
-        // 不致命：仍在克隆的默认分支，尽量跑
-      }
-    }
-    // .git/info/exclude：让阶段产物目录不进 PR
-    try {
-      const excludeFile = join(dest, ".git", "info", "exclude");
-      if (existsSync(join(dest, ".git", "info"))) {
-        appendFileSync(excludeFile, "\n# autopilot 阶段产物（不进交付 PR）\n/[0-9][0-9]-*/\n");
-      }
-    } catch { /* exclude 写失败不阻塞任务 */ }
+    // 建/续交付分支 + 写 exclude（与 sandbox.ts legacy 路径共用 finalizeDeliveryClone）
+    finalizeDeliveryClone(dest, {
+      base: opts.base,
+      branch: opts.branch,
+      checkoutExisting: opts.checkoutExisting,
+      logCtx: `req=${reqId} ws=${ws.id}`,
+    });
   }
 
   log.info("需求 codebase clone 创建 [req=%s ws=%s fidelity=%s branch=%s]", reqId, ws.id, opts.fidelity,

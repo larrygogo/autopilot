@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, statSync, copyFileSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join, resolve, sep } from "path";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
 import { loadConfig } from "./config";
 import { buildAuthUrl, resolveGitToken, GIT_NONINTERACTIVE_ENV } from "./workspace-health";
 import { ensureCodebase, getRequirementCodebaseRoot, safeAliasDir } from "./codebase";
+import { finalizeDeliveryClone } from "./git-clone";
 
 // alias → 安全子目录名的实现已随 codebase 原语迁到 codebase.ts；保留 re-export 兼容既有 import
 export { safeAliasDir } from "./codebase";
@@ -487,45 +488,8 @@ function cloneOneRepo(
     Bun.spawnSync(["git", "-C", dest, "remote", "set-url", "origin", cleanUrl], { stderr: "pipe" });
   }
 
-  if (checkoutExisting) {
-    // fix run 续作模式（v2 R3）：checkout 既有远程交付分支，不从 base 新建（不重置交付内容）。
-    // 远程无此分支 = 该库本轮无交付 PR → 停在克隆的默认分支只读参考，不视为失败。
-    const hasRemoteBranch = Bun.spawnSync(
-      ["git", "-C", dest, "rev-parse", "--verify", "--quiet", `origin/${branch}`],
-      { stderr: "pipe" },
-    ).exitCode === 0;
-    if (hasRemoteBranch) {
-      const co = Bun.spawnSync(["git", "-C", dest, "checkout", "-B", branch, `origin/${branch}`], { stderr: "pipe" });
-      if (co.exitCode !== 0) {
-        const stderr = co.stderr ? new TextDecoder().decode(co.stderr) : "";
-        log.warn("checkout 既有交付分支失败 [task=%s branch=%s]: %s", taskId, branch, stderr.slice(0, 200));
-      }
-    } else {
-      log.info("远程无交付分支 %s，保持默认分支（该库本轮无交付，只读参考）[task=%s workspace=%s]",
-        branch, taskId, workspace.id);
-    }
-  } else {
-    // 基于 origin/<base> 建交付分支（完整 clone 后所有分支均作为 origin/<x> 可用）
-    const baseRef = Bun.spawnSync(
-      ["git", "-C", dest, "rev-parse", "--verify", "--quiet", `origin/${base}`],
-      { stderr: "pipe" },
-    ).exitCode === 0 ? `origin/${base}` : base;
-
-    const co = Bun.spawnSync(["git", "-C", dest, "checkout", "-B", branch, baseRef], { stderr: "pipe" });
-    if (co.exitCode !== 0) {
-      const stderr = co.stderr ? new TextDecoder().decode(co.stderr) : "";
-      log.warn("clone 后建交付分支失败 [task=%s branch=%s base=%s]: %s", taskId, branch, base, stderr.slice(0, 200));
-      // 不致命：仍在克隆的默认分支，尽量跑
-    }
-  }
-
-  // .git/info/exclude：让阶段产物目录不进 PR
-  try {
-    const excludeFile = join(dest, ".git", "info", "exclude");
-    if (existsSync(join(dest, ".git", "info"))) {
-      appendFileSync(excludeFile, "\n# autopilot 阶段产物（不进交付 PR）\n/[0-9][0-9]-*/\n");
-    }
-  } catch { /* exclude 写失败不阻塞任务 */ }
+  // 建/续交付分支 + 写 exclude（与 codebase.ts 生产路径共用 finalizeDeliveryClone）
+  finalizeDeliveryClone(dest, { base, branch, checkoutExisting, logCtx: `task=${taskId} ws=${workspace.id}` });
 
   return true;
 }
