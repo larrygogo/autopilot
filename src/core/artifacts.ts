@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getTaskArtifactsDir, getTaskRoot } from "./sandbox";
-import { isParallelPhase, type WorkflowDefinition } from "./registry";
+import { isParallelPhase, type WorkflowDefinition } from "./workflow/registry";
 import type { AgentCallRecord } from "./task/logs";
 
 const PHASE_NAME_RE = /^[a-z][a-z0-9_]*$/;

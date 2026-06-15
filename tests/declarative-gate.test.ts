@@ -7,7 +7,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { loadYamlWorkflow, _clearRegistry } from "../src/core/registry";
+import { loadYamlWorkflow, _clearRegistry } from "../src/core/workflow/registry";
 
 const tmpDirs: string[] = [];
 

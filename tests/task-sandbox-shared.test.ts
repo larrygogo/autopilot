@@ -124,7 +124,7 @@ describe("共用沙盒 · 需求级重跑 = 新 run（v2 R2，替代 resetTaskFo
     const { createRequirement, getRequirementById, updateRequirement, nextRequirementId } = await import("../src/core/requirements");
     const { startNewRunForRequirement } = await import("../src/core/task/factory");
     const { getTaskRoot } = await import("../src/core/sandbox");
-    const registry = await import("../src/core/registry");
+    const registry = await import("../src/core/workflow/registry");
     registry._clearRegistry();
     registry.register({
       name: "shr_wf",
@@ -198,7 +198,7 @@ describe("共用沙盒 · 需求级重跑 = 新 run（v2 R2，替代 resetTaskFo
     const { createWorkspace } = await import("../src/core/sandbox/workspaces");
     const { createRequirement, updateRequirement, nextRequirementId } = await import("../src/core/requirements");
     const { startNewRunForRequirement, startTaskFromTemplate } = await import("../src/core/task/factory");
-    const registry = await import("../src/core/registry");
+    const registry = await import("../src/core/workflow/registry");
     registry._clearRegistry();
     registry.register({
       name: "shr_wf",
@@ -238,7 +238,7 @@ describe("共用沙盒 · 全流程集成（真 runner → 共用 clone → phas
     const { createTask, updateTask, getTask } = await import("../src/core/db");
     const { createProject } = await import("../src/core/projects");
     const { createWorkspace } = await import("../src/core/sandbox/workspaces");
-    const registry = await import("../src/core/registry");
+    const registry = await import("../src/core/workflow/registry");
 
     // phase 函数完全不知道路径：沙盒根从 ALS 上下文取（runner 注入 getTaskSandbox(id)），
     // 仓库位置走 listTaskRepos（统一布局的唯一消费接口）——与 dev workflow 同款链路。

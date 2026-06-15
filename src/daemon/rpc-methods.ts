@@ -28,10 +28,10 @@ import {
   saveWorkflowYaml,
   deleteWorkflowDir,
   reload as reloadRegistry,
-} from "../core/registry";
-import { setWorkflowMeta, patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/registry-authoring";
-import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb } from "../core/workflows";
-import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow-templates";
+} from "../core/workflow/registry";
+import { setWorkflowMeta, patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
+import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb } from "../core/workflow/workflows";
+import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow/templates";
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
 import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig, loadSchedulerConfig, saveSchedulerConfig, systemTimezone, isValidTimezone } from "../core/config";
 import { requestRestart, requestShutdown } from "./index";
@@ -40,7 +40,7 @@ import { listTaskRepos } from "../core/sandbox";
 import { listSandboxDir, readSandboxFile } from "../core/sandbox/browse";
 import { scanTaskSandboxes } from "../core/sandbox/retention";
 import { setKv, getDb } from "../core/db";
-import { discover as registryDiscover, getWorkflow as registryGetWorkflow, listWorkflowsUsingProvider } from "../core/registry";
+import { discover as registryDiscover, getWorkflow as registryGetWorkflow, listWorkflowsUsingProvider } from "../core/workflow/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
 import {

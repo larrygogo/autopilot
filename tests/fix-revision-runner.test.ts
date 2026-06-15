@@ -50,7 +50,7 @@ import {
 import { appendFeedback, listFeedbacks } from "../src/core/requirements/feedbacks";
 import { appendSubPr } from "../src/core/requirements/sub-prs";
 import { deliverArtifacts, listDeliveries, getDeliveryRoundDir } from "../src/core/requirements/deliveries";
-import { getWorkflow, listWorkflows, reload, _clearRegistry } from "../src/core/registry";
+import { getWorkflow, listWorkflows, reload, _clearRegistry } from "../src/core/workflow/registry";
 import { getTaskRoot, getTaskSandbox, _clearTaskRootCacheForTest } from "../src/core/sandbox";
 import { executePhase } from "../src/core/runner";
 import { enableBus, disableBus } from "../src/core/event-bus";

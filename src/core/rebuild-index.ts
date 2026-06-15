@@ -9,7 +9,7 @@ import {
   type WorkflowSnapshot,
   type TransitionRecord,
 } from "./manifest";
-import { getWorkflow } from "./registry";
+import { getWorkflow } from "./workflow/registry";
 import { log } from "./logger";
 
 // ──────────────────────────────────────────────

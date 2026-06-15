@@ -16,7 +16,7 @@ import {
   listWorkflows,
   _clearRegistry,
   type WorkflowDefinition,
-} from "../src/core/registry";
+} from "../src/core/workflow/registry";
 import { resolveWorkflowDecl, validateWorkflowInput } from "../src/daemon/workflow-declarations";
 
 const tmpDirs: string[] = [];

@@ -20,8 +20,8 @@ import {
   collectUpstreamHandoffs,
   readPhaseHandoff,
   expandPromptTemplate,
-} from "../src/core/prompt-runner";
-import type { WorkflowDefinition, PhaseDefinition } from "../src/core/registry";
+} from "../src/core/workflow/prompt-runner";
+import type { WorkflowDefinition, PhaseDefinition } from "../src/core/workflow/registry";
 
 let tmpHome: string;
 

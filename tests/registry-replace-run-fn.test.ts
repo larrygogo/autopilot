@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { replaceRunFunction } from "../src/core/workflow-ts-authoring";
+import { replaceRunFunction } from "../src/core/workflow/ts-authoring";
 
 let tmpHome: string;
 let wfDir: string;

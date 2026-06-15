@@ -1,6 +1,6 @@
 import { getTask, getSubTasks, deleteTaskRecords, listRootTasksByRequirementIds, type Task } from "../db";
 import { listRequirements, deleteRequirement } from "../requirements";
-import { getWorkflow } from "../registry";
+import { getWorkflow } from "../workflow/registry";
 import { deleteTaskRuntimeDir } from "../sandbox";
 import { releaseLock } from "../infra";
 import { forgetTaskRecoveryState } from "../watcher";

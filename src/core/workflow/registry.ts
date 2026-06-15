@@ -1,12 +1,12 @@
-import type { TransitionTable } from "./state-machine";
-import { log } from "./logger";
+import type { TransitionTable } from "../state-machine";
+import { log } from "../logger";
 import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync } from "fs";
 import { homedir } from "os";
 import { join, sep } from "path";
 import { parse as parseYaml } from "yaml";
 import { tryMakePromptRunnerForPhase } from "./prompt-runner";
 import type { PhaseDecision } from "./phase-decision";
-import { DEFAULT_AGENT, type InlineAgentConfig } from "./agent-defaults";
+import { DEFAULT_AGENT, type InlineAgentConfig } from "../agent-defaults";
 import {
   syncFileWorkflowsToDb,
   listWorkflowsInDb,
@@ -362,7 +362,7 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
     try {
       const { statSync, readFileSync, writeFileSync, mkdirSync } = await import("fs");
       const { join: joinPath, dirname: dirnamePath, basename: basenamePath, relative: relativePath } = await import("path");
-      const { getAutopilotSrcPath } = await import("./autopilot-resolver");
+      const { getAutopilotSrcPath } = await import("../autopilot-resolver");
 
       const mtime = statSync(tsPath).mtimeMs;
       let importPath = tsPath;

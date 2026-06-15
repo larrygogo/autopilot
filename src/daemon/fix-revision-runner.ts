@@ -47,7 +47,7 @@ import {
   expandPhaseDefaults,
   type WorkflowDefinition,
   type PhaseDefinition,
-} from "../core/registry";
+} from "../core/workflow/registry";
 import { startTaskFromTemplate, isTaskTerminal, StartTaskError } from "../core/task/factory";
 import { agentForPhase } from "../agents/registry";
 import type { InlineAgentConfig } from "../core/agent-defaults";

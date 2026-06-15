@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { scanWorkflowHealth, fixOrphanWorkflow } from "../src/core/workflow-templates";
+import { scanWorkflowHealth, fixOrphanWorkflow } from "../src/core/workflow/templates";
 
 let tmpHome: string;
 

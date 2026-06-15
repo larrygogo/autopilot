@@ -9,7 +9,7 @@ import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { rebuildIndexFromManifests, rebuildManifestsFromIndex } from "../core/rebuild-index";
 import { getTaskSandbox } from "../core/sandbox";
-import { discover } from "../core/registry";
+import { discover } from "../core/workflow/registry";
 import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
 import { loadDaemonConfig } from "../core/config";
 import { registerWorkflowCommands } from "./workflow";
@@ -24,7 +24,7 @@ import {
   setProviderCliStatus as coreSetProviderCliStatus,
   type ProviderType,
 } from "../core/providers";
-import { listWorkflowsUsingProvider } from "../core/registry";
+import { listWorkflowsUsingProvider } from "../core/workflow/registry";
 import { probeCli } from "../agents/cli-status";
 import { loadLifecycleConfig, saveLifecycleAgent } from "../core/config";
 import { registerRequirementCommands } from "./requirements-cli";
@@ -1582,7 +1582,7 @@ program
     const devWorkflowDir = join(AUTOPILOT_HOME, "workflows", "dev");
     if (!existsSync(devWorkflowDir)) {
       try {
-        const { cloneTemplate } = await import("../core/workflow-templates");
+        const { cloneTemplate } = await import("../core/workflow/templates");
         cloneTemplate("dev", "dev");
         console.log(`已装入默认工作流：${devWorkflowDir}`);
       } catch (e: unknown) {
@@ -1597,7 +1597,7 @@ program
     const adHocWorkflowDir = join(AUTOPILOT_HOME, "workflows", "ad-hoc");
     if (!existsSync(adHocWorkflowDir)) {
       try {
-        const { cloneTemplate } = await import("../core/workflow-templates");
+        const { cloneTemplate } = await import("../core/workflow/templates");
         cloneTemplate("ad-hoc", "ad-hoc");
         console.log(`已装入 ad-hoc 工作流：${adHocWorkflowDir}`);
       } catch (e: unknown) {

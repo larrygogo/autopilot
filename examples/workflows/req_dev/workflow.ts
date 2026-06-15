@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getTask, updateTask } from "@autopilot/core/db";
 import { transition } from "@autopilot/core/state-machine";
-import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
+import { getWorkflow, buildTransitions } from "@autopilot/core/workflow/registry";
 import { runInBackground } from "@autopilot/core/runner";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";

@@ -1,6 +1,6 @@
 import { getTask, createTask, closeOpenPhaseEvents, nextRunSeqForRequirement } from "../db";
 import type { Task } from "../db";
-import { discover, getWorkflow, listWorkflows, isParallelPhase, getTerminalStates } from "../registry";
+import { discover, getWorkflow, listWorkflows, isParallelPhase, getTerminalStates } from "../workflow/registry";
 import { snapshotWorkflow } from "../manifest";
 import { ensureTaskSandbox, ensureRunCodebaseSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskSandbox, bindTaskRunRoot, removeTaskWorktree, type WorkspaceRef } from "../sandbox";
 import { rmSync } from "fs";

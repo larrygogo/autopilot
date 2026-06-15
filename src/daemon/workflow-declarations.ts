@@ -12,7 +12,7 @@
  * 工作流未注册（老 dev 副本缺失等）→ 保守按 requires.git=true（与改造前行为一致）。
  */
 
-import { getWorkflow, getWorkflowGitRequirement } from "../core/registry";
+import { getWorkflow, getWorkflowGitRequirement } from "../core/workflow/registry";
 
 export type DeliveryKind = "pr" | "artifacts" | "auto";
 

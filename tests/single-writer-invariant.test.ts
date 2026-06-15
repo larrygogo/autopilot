@@ -28,7 +28,7 @@ const ALLOWLIST = new Set([
   "src/core/requirements/sessions.ts", // requirement_sessions 表：SQLite 即权威源，澄清会话状态无 manifest 同步需求
   "src/core/requirements/spec-revisions.ts",  // spec_revisions 表：SQLite 即权威源，spec 修订历史无 manifest 同步需求
   "src/core/sandbox/submodules.ts",      // submodules：通过 createRepo 写 repos 表，SQLite 即权威源
-  "src/core/workflows.ts",       // workflows 表：SQLite 即权威源（file 工作流由 daemon 同步），无 manifest 同步需求
+  "src/core/workflow/workflows.ts",       // workflows 表：SQLite 即权威源（file 工作流由 daemon 同步），无 manifest 同步需求
   "src/migrations/008-projects.ts", // P1 项目工作台改造：codebases 表重建需 INSERT 数据 copy（DDL+一次性数据迁移，无 manifest 同步需求）
   "src/migrations/009-nullable-codebase.ts", // requirements.codebase_id NOT NULL → NULLable 需表重建（DDL+一次性数据迁移）
   "src/migrations/019-task-requirement-id.ts", // 每任务必有需求 Phase 1：反向回填 tasks.requirement_id（一次性数据迁移；跨行 UPDATE...SET，整文件扫描升级后才被护栏抓到）

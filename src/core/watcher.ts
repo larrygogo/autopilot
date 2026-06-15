@@ -3,8 +3,8 @@ import { isLocked } from "./infra";
 import { log } from "./logger";
 import { runInBackground } from "./runner";
 import { forceTransition } from "./state-machine";
-import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./registry";
-import type { PhaseDefinition, ParallelDefinition } from "./registry";
+import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./workflow/registry";
+import type { PhaseDefinition, ParallelDefinition } from "./workflow/registry";
 import { emit } from "./event-bus";
 import { applyRetentionPolicy, loadRetentionPolicy } from "./sandbox/retention";
 

@@ -78,20 +78,20 @@ import {
   createWorkflow,
   deleteWorkflowDir,
   type PhaseEntryInput,
-} from "../core/registry";
-import { setWorkflowPhases } from "../core/registry-authoring";
+} from "../core/workflow/registry";
+import { setWorkflowPhases } from "../core/workflow/registry-authoring";
 import {
   syncWorkflowTs,
   renameRunFunctions,
   pruneOrphanRunFunctions,
   replaceRunFunction,
-} from "../core/workflow-ts-authoring";
+} from "../core/workflow/ts-authoring";
 import {
   listWorkflowsInDb,
   getWorkflowFromDb,
   updateDbWorkflow,
   deleteDbWorkflow,
-} from "../core/workflows";
+} from "../core/workflow/workflows";
 import {
   loadDaemonConfig,
   saveDaemonConfig,
@@ -1341,7 +1341,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
 
     // GET /api/workflows/health — 扫描 yaml.name 跟目录名不一致 / 重名碰撞
     if (method === "GET" && path === "/api/workflows/health") {
-      const { scanWorkflowHealth } = await import("../core/workflow-templates");
+      const { scanWorkflowHealth } = await import("../core/workflow/templates");
       return json(scanWorkflowHealth());
     }
 
@@ -1350,9 +1350,9 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       const body = await req.json().catch(() => null) as { dir?: string } | null;
       if (!body?.dir) return error("dir is required", 400);
       try {
-        const { fixOrphanWorkflow } = await import("../core/workflow-templates");
+        const { fixOrphanWorkflow } = await import("../core/workflow/templates");
         const r = fixOrphanWorkflow(body.dir);
-        const { discover } = await import("../core/registry");
+        const { discover } = await import("../core/workflow/registry");
         await discover();
         emit({ type: "workflow:reloaded", payload: {} });
         return json({ ok: true, ...r });
@@ -1371,9 +1371,9 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         return error("name (target) required", 400);
       }
       try {
-        const { cloneWorkflow } = await import("../core/workflow-templates");
+        const { cloneWorkflow } = await import("../core/workflow/templates");
         cloneWorkflow(srcName, body.name);
-        const { discover } = await import("../core/registry");
+        const { discover } = await import("../core/workflow/registry");
         await discover();
         emit({ type: "workflow:reloaded", payload: {} });
         return json({ ok: true, name: body.name }, 201);
@@ -1397,10 +1397,10 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         return error("name 只允许字母 / 数字 / ._- ", 400);
       }
       try {
-        const { cloneTemplate } = await import("../core/workflow-templates");
+        const { cloneTemplate } = await import("../core/workflow/templates");
         cloneTemplate(body.template, body.name);
         // 重新发现新加入的工作流
-        const { discover } = await import("../core/registry");
+        const { discover } = await import("../core/workflow/registry");
         await discover();
         return json({ ok: true, name: body.name }, 201);
       } catch (e: unknown) {

@@ -5,7 +5,7 @@ import {
   planDecisionAction,
   planDecisionActionFromVerdict,
   type PhaseDecision,
-} from "../src/core/phase-decision";
+} from "../src/core/workflow/phase-decision";
 
 const D: PhaseDecision = { pass: "RESULT: PASS", reject: "RESULT: REJECT", reason_section: "## 驳回理由" };
 

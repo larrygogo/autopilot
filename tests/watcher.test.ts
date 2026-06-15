@@ -110,7 +110,7 @@ function makeTestWorkflowWithParallel() {
 describe("watcher - checkStuckTasks", () => {
   let sqlite: Database;
   let dbModule: typeof import("../src/core/db");
-  let registryModule: typeof import("../src/core/registry");
+  let registryModule: typeof import("../src/core/workflow/registry");
   let watcherModule: typeof import("../src/core/watcher");
   let infraModule: typeof import("../src/core/infra");
 
@@ -127,7 +127,7 @@ describe("watcher - checkStuckTasks", () => {
     dbModule.initDb();
 
     // 3. 获取其他模块引用
-    registryModule = await import("../src/core/registry");
+    registryModule = await import("../src/core/workflow/registry");
     watcherModule = await import("../src/core/watcher");
     infraModule = await import("../src/core/infra");
 

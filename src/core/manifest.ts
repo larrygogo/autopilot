@@ -3,7 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { atomicWriteSync } from "./atomic-write";
 import { log } from "./logger";
-import { isParallelPhase, type WorkflowDefinition, type PhaseDefinition, type ParallelDefinition, type WorkflowSandboxSpec } from "./registry";
+import { isParallelPhase, type WorkflowDefinition, type PhaseDefinition, type ParallelDefinition, type WorkflowSandboxSpec } from "./workflow/registry";
 import { getTaskRoot, bindTaskRunRoot } from "./sandbox";
 import type { TransitionTable } from "./state-machine";
 

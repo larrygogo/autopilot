@@ -13,7 +13,7 @@ import { join } from "path";
 import { getTask, updateTask } from "@autopilot/core/db";
 import { updateRequirement } from "@autopilot/core/requirements";
 import { transition, forceTransition } from "@autopilot/core/state-machine";
-import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
+import { getWorkflow, buildTransitions } from "@autopilot/core/workflow/registry";
 import { runInBackground } from "@autopilot/core/runner";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getPhaseIndex } from "@autopilot/core/artifacts";
@@ -21,7 +21,7 @@ import { getTaskArtifactsDir, listTaskRepos, type TaskRepoCtx } from "@autopilot
 import { appendSubPr } from "@autopilot/core/requirements/sub-prs";
 import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { notify } from "@autopilot/core/notify";
-import { judgeVerdict } from "@autopilot/core/judge";
+import { judgeVerdict } from "@autopilot/core/workflow/judge";
 
 // 结构化裁判 provider：dev 的 review agent 走 anthropic CLI（订阅，无 API key），但结构化裁判
 // 需 API 模式 + 强制 tool_choice。这里指向用户已配的 kimi-code（openai-compat，已实测兼容

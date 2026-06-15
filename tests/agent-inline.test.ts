@@ -9,10 +9,10 @@
  */
 
 import { describe, expect, test, beforeEach } from "bun:test";
-import { register } from "../src/core/registry";
+import { register } from "../src/core/workflow/registry";
 import { agentForPhase, _resetForTest } from "../src/agents/registry";
 import { DEFAULT_AGENT } from "../src/core/agent-defaults";
-import type { WorkflowDefinition, PhaseDefinition } from "../src/core/registry";
+import type { WorkflowDefinition, PhaseDefinition } from "../src/core/workflow/registry";
 
 const WF = "wf_inline_agent_test";
 

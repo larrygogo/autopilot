@@ -20,7 +20,7 @@ import { Database } from "bun:sqlite";
 import { _setDbForTest, initDb, createTask, getTask } from "../src/core/db";
 import { runPendingMigrations } from "../src/core/migrate";
 import { executePhase } from "../src/core/runner";
-import * as registry from "../src/core/registry";
+import * as registry from "../src/core/workflow/registry";
 
 afterEach(() => {
   _clearRunsForTest();

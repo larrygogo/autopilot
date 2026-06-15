@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "path";
 import { getTask } from "@autopilot/core/db";
 import { transition } from "@autopilot/core/state-machine";
-import { getWorkflow, buildTransitions } from "@autopilot/core/registry";
+import { getWorkflow, buildTransitions } from "@autopilot/core/workflow/registry";
 import { agentForPhase } from "@autopilot/agents/registry";
 import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { getTaskArtifactsDir } from "@autopilot/core/sandbox";

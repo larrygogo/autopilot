@@ -9,9 +9,9 @@
  * 返回 ambiguous（由 prompt-runner 翻成"停下报人"），**不退回 grep**（退回就破功）。
  */
 
-import { completeStructured, type CompleteStructuredOpts } from "../agents/structured";
+import { completeStructured, type CompleteStructuredOpts } from "../../agents/structured";
 import type { DecisionVerdict } from "./phase-decision";
-import { createLogger } from "./logger";
+import { createLogger } from "../logger";
 
 /** 结构化调用的注入种子（测试可塞假实现，避免全局 mock.module 污染其它测试文件）。 */
 export type StructuredFn = <T = Record<string, unknown>>(opts: CompleteStructuredOpts) => Promise<T>;

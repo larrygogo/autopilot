@@ -18,25 +18,25 @@
 
 import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { agentForPhase } from "../agents/registry";
-import type { InlineAgentConfig } from "./agent-defaults";
-import { getTask, updateTask } from "./db";
-import { getTaskSandbox, getTaskArtifactsDir } from "./sandbox";
-import { getCurrentSandboxDir } from "./task/context";
-import { getPhaseIndex } from "./artifacts";
+import { agentForPhase } from "../../agents/registry";
+import type { InlineAgentConfig } from "../agent-defaults";
+import { getTask, updateTask } from "../db";
+import { getTaskSandbox, getTaskArtifactsDir } from "../sandbox";
+import { getCurrentSandboxDir } from "../task/context";
+import { getPhaseIndex } from "../artifacts";
 import { getWorkflow, buildTransitions, type PhaseDefinition, type WorkflowDefinition } from "./registry";
-import { transition, forceTransition } from "./state-machine";
-import { notify } from "./notify";
+import { transition, forceTransition } from "../state-machine";
+import { notify } from "../notify";
 import {
   planDecisionAction,
   planDecisionActionFromVerdict,
   type PhaseDecision,
   type DecisionVerdict,
 } from "./phase-decision";
-import { createLogger } from "./logger";
-import { consumePendingPrompts } from "./task/send-prompt";
-import { emit } from "./event-bus";
-import { appendTaskEvent } from "./task/logs";
+import { createLogger } from "../logger";
+import { consumePendingPrompts } from "../task/send-prompt";
+import { emit } from "../event-bus";
+import { appendTaskEvent } from "../task/logs";
 
 const log = createLogger("prompt-runner");
 
@@ -472,7 +472,7 @@ export function makePromptRunner(
           transitions,
           note: `回退 ${action.target} 重做（第${action.n}次）`,
         });
-        const { runInBackground } = await import("./runner"); // 动态 import 破循环依赖
+        const { runInBackground } = await import("../runner"); // 动态 import 破循环依赖
         runInBackground(taskId, action.target);
         return;
       }

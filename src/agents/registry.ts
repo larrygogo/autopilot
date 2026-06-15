@@ -4,7 +4,7 @@ import type { BaseProvider } from "./providers/base";
 import { AnthropicProvider } from "./providers/anthropic";
 import { OpenAIProvider } from "./providers/openai";
 import { GoogleProvider } from "./providers/google";
-import { getPhase } from "../core/registry";
+import { getPhase } from "../core/workflow/registry";
 import { loadProviders, type ProviderConfig } from "../core/config";
 import { DEFAULT_AGENT, type InlineAgentConfig } from "../core/agent-defaults";
 import { log } from "../core/logger";

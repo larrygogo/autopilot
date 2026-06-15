@@ -1,5 +1,5 @@
 import { log } from "../logger";
-import { getWorkflow } from "../registry";
+import { getWorkflow } from "../workflow/registry";
 import type { Task } from "../db";
 import { loadNotifyDrivers } from "../config";
 import { getEnabledDrivers, type NotifyDriver, type NotifyEvent } from "./drivers";

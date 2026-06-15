@@ -14,19 +14,19 @@
 import { defineTool, type RegisteredTool } from "./mcp-tools";
 import { z } from "zod";
 import { listTasks, getTask, getTaskLogs } from "../core/db";
-import { listWorkflows, getWorkflow, isParallelPhase } from "../core/registry";
-import { reload as reloadRegistry } from "../core/registry";
+import { listWorkflows, getWorkflow, isParallelPhase } from "../core/workflow/registry";
+import { reload as reloadRegistry } from "../core/workflow/registry";
 import {
   listWorkflowsInDb,
   createDbWorkflow,
   updateDbWorkflow,
   deleteDbWorkflow,
   getWorkflowFromDb,
-} from "../core/workflows";
+} from "../core/workflow/workflows";
 import { listSessions, readManifest as readSessionManifest } from "../core/sessions";
 import { VERSION } from "../index";
 import { transition, canTransition } from "../core/state-machine";
-import { buildTransitions } from "../core/registry";
+import { buildTransitions } from "../core/workflow/registry";
 import { startTaskFromTemplate } from "../core/task/factory";
 import { randomUUID } from "crypto";
 import { log } from "../core/logger";

@@ -5,7 +5,7 @@ import { appendTaskEvent } from "./task/logs";
 import { runWithTaskContext } from "./task/context";
 import { registerRun, unregisterRun } from "./task/lifecycle";
 import { transition, forceTransition, InvalidTransitionError } from "./state-machine";
-import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./registry";
+import { getWorkflow, getPhase, getPhaseFunc, buildTransitions, getTerminalStates, getNextPhase, isParallelPhase, type ParallelDefinition, type WorkflowDefinition } from "./workflow/registry";
 import { getTaskSandbox } from "./sandbox";
 import { closeAgents } from "../agents/registry";
 import { clearPhaseRecoveryCount } from "./watcher";

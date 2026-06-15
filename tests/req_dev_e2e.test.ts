@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { _setDbForTest, initDb, getTask } from "../src/core/db";
-import { _clearRegistry, register } from "../src/core/registry";
+import { _clearRegistry, register } from "../src/core/workflow/registry";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
 import { up as migrate004 } from "../src/migrations/004-repos";
@@ -19,7 +19,7 @@ import { createProject } from "../src/core/projects";
 import { createRequirement } from "../src/core/requirements";
 import { startTaskFromTemplate } from "../src/core/task/factory";
 import { setup_req_dev_task } from "../examples/workflows/req_dev/workflow";
-import type { WorkflowDefinition } from "../src/core/registry";
+import type { WorkflowDefinition } from "../src/core/workflow/registry";
 
 describe("req_dev e2e smoke", () => {
   let sqlite: Database;

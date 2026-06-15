@@ -4,7 +4,7 @@
  * 验证：verdict 收敛 / 重试一次 / 失败→ambiguous（不退回 grep）。
  */
 import { describe, it, expect } from "bun:test";
-import { judgeVerdictWith, type StructuredFn } from "../src/core/judge";
+import { judgeVerdictWith, type StructuredFn } from "../src/core/workflow/judge";
 
 /** 把"返回值/抛错"序列包装成 StructuredFn。 */
 function seq(...steps: Array<{ ret?: { verdict?: string; reason?: string }; err?: string }>): {

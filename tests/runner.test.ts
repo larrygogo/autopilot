@@ -80,7 +80,7 @@ function makeTestWorkflow(phaseFn: (taskId: string) => Promise<void>) {
 describe("runner - executePhase", () => {
   let sqlite: Database;
   let dbModule: typeof import("../src/core/db");
-  let registryModule: typeof import("../src/core/registry");
+  let registryModule: typeof import("../src/core/workflow/registry");
   let runnerModule: typeof import("../src/core/runner");
 
   beforeEach(async () => {
@@ -96,7 +96,7 @@ describe("runner - executePhase", () => {
     dbModule.initDb();
 
     // 3. 获取其他模块引用
-    registryModule = await import("../src/core/registry");
+    registryModule = await import("../src/core/workflow/registry");
     runnerModule = await import("../src/core/runner");
 
     // 4. 清空注册表

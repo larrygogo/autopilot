@@ -5,7 +5,7 @@ import { installAutopilotResolver } from "../core/autopilot-resolver";
 import { initDb, closeDb, listTasks, updateTask, closeOpenPhaseEvents } from "../core/db";
 import { forceTransition } from "../core/state-machine";
 import { runPendingMigrations } from "../core/migrate";
-import { discover } from "../core/registry";
+import { discover } from "../core/workflow/registry";
 import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
 import { runInBackground } from "../core/runner";
 import { initDaemonFileLog, log } from "../core/logger";

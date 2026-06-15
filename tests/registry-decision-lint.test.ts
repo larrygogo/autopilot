@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { expandPhaseDefaults } from "../src/core/registry";
+import { expandPhaseDefaults } from "../src/core/workflow/registry";
 
 // expandPhaseDefaults(phase, allPhaseNames) 是 yaml 加载时逐 phase 展开（含 reject 语法糖 +
 // decision lint）的入口。直接喂 phase 对象即可单测 lint，无需起完整工作流。

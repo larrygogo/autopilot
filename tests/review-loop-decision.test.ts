@@ -17,8 +17,8 @@ import {
   _clearRegistry,
   type WorkflowDefinition,
   type PhaseDefinition,
-} from "../src/core/registry";
-import { planDecisionAction } from "../src/core/phase-decision";
+} from "../src/core/workflow/registry";
+import { planDecisionAction } from "../src/core/workflow/phase-decision";
 
 const EXAMPLE_DIR = join(import.meta.dir, "..", "examples", "workflows", "review_loop");
 

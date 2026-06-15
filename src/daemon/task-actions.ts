@@ -18,7 +18,7 @@ import { forceDeleteTasksForRequirement } from "../core/task/delete";
 import { transition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
 import { abortRun } from "../core/task/lifecycle";
-import { getWorkflow, buildTransitions, isParallelPhase } from "../core/registry";
+import { getWorkflow, buildTransitions, isParallelPhase } from "../core/workflow/registry";
 import { getTaskArtifactsDir, deleteTaskSandbox } from "../core/sandbox";
 import { isLocked } from "../core/infra";
 import { forgetTaskRecoveryState } from "../core/watcher";

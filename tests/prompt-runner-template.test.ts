@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { expandPromptTemplate } from "../src/core/prompt-runner";
+import { expandPromptTemplate } from "../src/core/workflow/prompt-runner";
 
 describe("expandPromptTemplate · REJECTION", () => {
   const base = { taskId: "t1", phase: "design", workspaceRoot: "/tmp/x" };
