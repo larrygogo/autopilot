@@ -10,7 +10,7 @@ import type { Task, TaskLog } from "../core/db";
 import type { DaemonStatus, GraphData } from "../daemon/protocol";
 import type { SessionManifest, ChatMessage } from "../core/sessions";
 import type { Requirement } from "../core/requirements";
-import type { Notification } from "../core/notification-types";
+import type { Notification } from "../core/notify/types";
 import { WsRpcCaller, toWsUrl, WsRpcError } from "./ws-rpc";
 export type { Notification };
 

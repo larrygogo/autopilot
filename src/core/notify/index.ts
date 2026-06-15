@@ -1,8 +1,8 @@
-import { log } from "./logger";
-import { getWorkflow } from "./registry";
-import type { Task } from "./db";
-import { loadNotifyDrivers } from "./config";
-import { getEnabledDrivers, type NotifyDriver, type NotifyEvent } from "./notify-drivers";
+import { log } from "../logger";
+import { getWorkflow } from "../registry";
+import type { Task } from "../db";
+import { loadNotifyDrivers } from "../config";
+import { getEnabledDrivers, type NotifyDriver, type NotifyEvent } from "./drivers";
 
 /**
  * 发送任务通知。

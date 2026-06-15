@@ -1,4 +1,4 @@
-import type { NotificationActionIntent } from "../core/notification-types";
+import type { NotificationActionIntent } from "../core/notify/types";
 
 // 通知 intent → 终端只读标签（CLI/TUI observer 共享）。
 // observer-only 定位：不出落点/不可操作，副作用类标注「去 Web」提示用户去决策台处理。

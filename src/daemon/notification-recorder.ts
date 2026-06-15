@@ -17,12 +17,12 @@ import { getDb } from "../core/db";
 import { getRequirementById } from "../core/requirements";
 import { listSubPrs } from "../core/requirement-sub-prs";
 import { hasDeliveries } from "../core/requirement-deliveries";
-import { createNotification, pruneNotifications } from "../core/notifications";
-import type { CreateNotificationInput } from "../core/notifications";
+import { createNotification, pruneNotifications } from "../core/notify/stream";
+import type { CreateNotificationInput } from "../core/notify/stream";
 import {
   notificationContextForRequirement,
   notificationContextForTask,
-} from "../core/notification-context";
+} from "../core/notify/context";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("notification-recorder");

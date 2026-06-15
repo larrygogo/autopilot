@@ -1,5 +1,5 @@
 import type { NotifyDriver, NotifyDriverConfig, NotifyDriverFactory } from "./types";
-import { log } from "../logger";
+import { log } from "../../logger";
 import { createWindowsToastDriver } from "./windows-toast";
 import { createMacosOsascriptDriver } from "./macos-osascript";
 import { createLinuxNotifySendDriver } from "./linux-notify-send";

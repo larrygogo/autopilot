@@ -1,12 +1,12 @@
-import { getDb } from "./db";
+import { getDb } from "../db";
 import type {
   Notification,
   NotificationAction,
   NotificationContext,
   NotificationRelatedType,
   NotificationType,
-} from "./notification-types";
-import { SEVERITY_OF } from "./notification-types";
+} from "./types";
+import { SEVERITY_OF } from "./types";
 
 /**
  * notifications 表的唯一写入者（single-writer 白名单成员）+ 查询。

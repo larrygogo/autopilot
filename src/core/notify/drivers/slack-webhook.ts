@@ -1,5 +1,5 @@
 import type { NotifyDriver, NotifyDriverConfig, NotifyPayload, NotifyEvent } from "./types";
-import { log } from "../logger";
+import { log } from "../../logger";
 
 /**
  * Slack webhook driver。

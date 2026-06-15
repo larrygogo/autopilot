@@ -1,5 +1,5 @@
 import type { NotifyDriver, NotifyDriverConfig, NotifyPayload, NotifyEvent } from "./types";
-import { log } from "../logger";
+import { log } from "../../logger";
 
 /**
  * macOS notify driver via osascript（macOS 内建，无外部依赖）。

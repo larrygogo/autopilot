@@ -1,4 +1,4 @@
-import type { Task } from "../db";
+import type { Task } from "../../db";
 
 /**
  * 通知事件类别。调用 notify(task, message, event) 的 event 字段值。

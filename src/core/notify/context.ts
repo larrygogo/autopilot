@@ -6,8 +6,8 @@
  * 由旧 card-sources/context.ts 平移而来；旧体系 teardown 后此文件是唯一实现。
  */
 
-import { getDb } from "./db";
-import type { NotificationContext } from "./notification-types";
+import { getDb } from "../db";
+import type { NotificationContext } from "./types";
 
 interface CtxRow {
   requirement_id: string;

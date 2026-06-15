@@ -8,7 +8,7 @@ import { up as migrate035 } from "../src/migrations/035-notifications";
 import { _setDbForTest } from "../src/core/db";
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
-import { createNotification } from "../src/core/notifications";
+import { createNotification } from "../src/core/notify/stream";
 
 describe("notifications.* RPC", () => {
   let db: Database;

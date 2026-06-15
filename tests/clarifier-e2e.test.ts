@@ -27,7 +27,7 @@ import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 import { enableBus, disableBus } from "../src/core/event-bus";
 import { initNotificationRecorder } from "../src/daemon/notification-recorder";
-import { listNotifications } from "../src/core/notifications";
+import { listNotifications } from "../src/core/notify/stream";
 import { _setClarifyFnForTest, initRequirementClarifier, disposeRequirementClarifier } from "../src/daemon/requirement-clarifier";
 
 describe("clarifier e2e — 完整链路", () => {

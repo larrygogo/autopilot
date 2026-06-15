@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { Notification, NotificationSeverity } from "../../core/notification-types";
+import type { Notification, NotificationSeverity } from "../../core/notify/types";
 import { notificationIntentToLabel } from "../../client/notification-intent";
 
 const SEVERITY_COLOR: Record<NotificationSeverity, string> = {

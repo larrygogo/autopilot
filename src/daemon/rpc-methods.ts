@@ -70,7 +70,7 @@ import {
   markAllRead as markAllNotificationsRead,
   markReadByRelated as markNotificationsReadByRelated,
   dismissNotification,
-} from "../core/notifications";
+} from "../core/notify/stream";
 import { listUnhealthy } from "../core/provider-health";
 import {
   listRequirements as coreListRequirements,

@@ -12,7 +12,7 @@ import {
   markReadByRelated,
   dismissNotification,
   pruneNotifications,
-} from "../src/core/notifications";
+} from "../src/core/notify/stream";
 
 describe("notifications core", () => {
   beforeEach(() => {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { AutopilotClient, AutopilotEvent } from "../../client/index";
-import type { Notification } from "../../core/notification-types";
+import type { Notification } from "../../core/notify/types";
 
 /**
  * TUI 通知流（observer-only）：只读最近通知 + 订阅增量头插。

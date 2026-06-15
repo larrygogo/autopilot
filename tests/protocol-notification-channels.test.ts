@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { getChannelsForEvent } from "../src/daemon/protocol";
 import type { AutopilotEvent } from "../src/core/events";
-import type { Notification } from "../src/core/notification-types";
+import type { Notification } from "../src/core/notify/types";
 
 const fakeNotification: Notification = {
   id: 1,

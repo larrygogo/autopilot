@@ -12,7 +12,7 @@
 
 import type { Task } from "./db";
 import type { ChatMessage } from "./sessions";
-import type { Notification } from "./notification-types";
+import type { Notification } from "./notify/types";
 
 export type AutopilotEvent =
   | { type: "task:created"; payload: { task: Task } }

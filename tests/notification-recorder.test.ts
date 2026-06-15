@@ -5,7 +5,7 @@ import { _setDbForTest } from "../src/core/db";
 import { enableBus, disableBus, emit, onEvent, offEvent } from "../src/core/event-bus";
 import type { AutopilotEvent } from "../src/core/events";
 import { initNotificationRecorder } from "../src/daemon/notification-recorder";
-import { listNotifications } from "../src/core/notifications";
+import { listNotifications } from "../src/core/notify/stream";
 
 /** 最小表夹具：只建 recorder 读取路径需要的列（getTask/getRequirementById 是 SELECT *） */
 function setupDb(): Database {
