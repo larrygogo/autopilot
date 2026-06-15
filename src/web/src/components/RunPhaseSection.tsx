@@ -316,7 +316,7 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
                 {lines.map((line, i) => {
                   const lvl = extractLevel(line);
                   return (
-                    <div key={i} className={cn("whitespace-pre-wrap break-words", lvl ? LEVEL_TEXT[lvl] : "text-foreground")}>
+                    <div key={i} className={cn("w-max whitespace-pre", lvl ? LEVEL_TEXT[lvl] : "text-foreground")}>
                       {line}
                     </div>
                   );
