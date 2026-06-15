@@ -492,7 +492,8 @@ export function ProjectDetail({ projectId, section = "requirements" }: ProjectDe
             </TabsList>
 
             <TabsContent value="all">
-              <TimeGroupedList rows={rowsOf(requirements)} now={now} />
+              {/* 「全部」= 活跃（等待人工 + 运行中），不含归档（已完成/已取消只在「归档」看），与流水线一致 */}
+              <TimeGroupedList rows={rowsOf([...reqBuckets.human, ...reqBuckets.running])} now={now} />
             </TabsContent>
             {([
               ["human", reqBuckets.human, "没有等你处理的需求"],
