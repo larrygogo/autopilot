@@ -29,6 +29,8 @@ import {
   type ConversationTurn,
 } from "../core/requirements/sessions";
 import type { ProviderName } from "../core/config";
+import { runWithTaskContext } from "../core/task/context";
+import { tmpdir } from "node:os";
 
 const log = createLogger("requirement-clarifier");
 
@@ -60,6 +62,18 @@ export function _setClarifyFnForTest(fn: ClarifyFn | null): void {
   _clarifyFn = fn ?? callClaude;
 }
 
+// 测试用：注入替代 buildClarifierAgent 的工厂函数，验证非 Anthropic 路径的 context 注入
+// 仅测试使用；生产路径始终用真实 buildClarifierAgent
+type BuildAgentFn = typeof buildClarifierAgent;
+let _buildAgentFn: BuildAgentFn = buildClarifierAgent;
+
+export function _setBuildAgentFnForTest(fn: BuildAgentFn | null): void {
+  _buildAgentFn = fn ?? buildClarifierAgent;
+}
+
+/** 测试用：直接调用 callClaude 以验证有 cwd 时的 context 注入逻辑（绕过 _runClarifierRoundInner 的 clone 步骤） */
+export const _callClaudeForTest: ClarifyFn = (...args) => callClaude(...args);
+
 async function callClaude(
   prompt: string,
   reqId: string,
@@ -74,7 +88,7 @@ async function callClaude(
     const override: { provider?: ProviderName; model?: string } = {};
     if (req?.clarifier_provider) override.provider = req.clarifier_provider as ProviderName;
     if (req?.clarifier_model) override.model = req.clarifier_model;
-    agent = buildClarifierAgent(override);
+    agent = _buildAgentFn(override);
     // N-2 修复：从 agent 实例读取实际 provider，避免与 buildClarifierAgent() 内部推导逻辑 desync
     resolvedProvider = (agent.config.provider ?? "anthropic") as ProviderName;
   } catch (e: unknown) {
@@ -91,7 +105,17 @@ async function callClaude(
   } else {
     // OpenAI/Google：chat() 未实现（base.ts 抛错），沿用 run()，不做 session 跟踪
     // 传入的 sessionRef 被忽略；返回 newSessionRef = undefined
-    const result = await agent.run(prompt, cwd ? { cwd } : undefined);
+    //
+    // API 模式 ensureApiLoop() 需要 task context 中的 sandboxDir（见 agent.ts）。
+    // 澄清没有真实 task，用澄清专用占位 taskId，日志落 runtime/tasks/clarify-<reqId>/
+    // 不污染真实 task 的 agent-calls.jsonl。
+    // cwd 不存在（纯文本模式）时用 tmpdir() 兜底——API loop 仍能初始化，
+    // ToolExecutor 的 sandboxRoot 指向系统临时目录（agent 只读 prompt 不需要访问代码）。
+    const sandboxDir = cwd ?? tmpdir();
+    const result = await runWithTaskContext(
+      { taskId: `clarify-${reqId}`, phase: "clarifying", sandboxDir },
+      () => agent.run(prompt, cwd ? { cwd } : undefined),
+    );
     const rawText = result.text.trim();
     if (!rawText) throw new Error("clarifier agent 返回空");
     return { rawText, newSessionRef: undefined };
