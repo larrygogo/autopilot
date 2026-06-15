@@ -197,9 +197,10 @@ function generateUniqueAlias(projectId: string, baseAlias: string): string {
 }
 
 /** 在 daemon 启动早期调用一次。重复调用幂等（检查 daemon.status 是否已注册）。 */
-export function registerCoreRpcMethods(): void {
-  if (hasRpcMethod("daemon.status")) return;
-
+// registerCoreRpcMethods 已拆成下列按域分组的子函数（架构师审查：原为单个 2500 行函数）。
+// 各子函数只是 registerRpcMethod 调用的分组容器，共享模块作用域（零 import 变化）。
+// 注：method 历史按「迁移批次」落位、非严格按命名空间聚集，故个别分组含相邻域的少量方法。
+function registerCoreQueryRpc(): void {
   registerRpcMethod({
     method: "daemon.status",
     description: "返回 daemon version / git_sha / started_at / pid / uptime / 各状态任务数",
@@ -474,6 +475,9 @@ export function registerCoreRpcMethods(): void {
     handler: () => ({ yaml: loadConfigRaw() }),
   });
 
+}
+
+function registerTaskRpc(): void {
   // ── 第三批：tasks.* / workflows.* 查询类（10 个） ──
 
   registerRpcMethod({
@@ -774,6 +778,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerWorkflowRpc(): void {
   // ── 第五批：workflows.* 域（11 个，含查询 + 简单 mutation） ──
 
   registerRpcMethod({
@@ -1039,6 +1046,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerRequirementRpc(): void {
   // ── 第六批：requirements.* 域（16 个） ──
 
   registerRpcMethod({
@@ -1483,6 +1493,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerProviderAgentRpc(): void {
   // ── 第七批：providers + agents CRUD（8 个） ──
 
   registerRpcMethod({
@@ -1652,6 +1665,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerSandboxSetupRpc(): void {
   // ── 第八批：sandbox + defaults + setup mutation（8 个） ──
 
   registerRpcMethod({
@@ -1887,6 +1903,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerMiscMutationRpc(): void {
   // ── 第十批：收尾（decide + daemon.log + projects mutation + sessions，10 个） ──
 
   registerRpcMethod({
@@ -2153,6 +2172,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerWorkspaceRpc(): void {
   // ── workspaces.* —— Workspace CRUD + submodules / healthcheck ──
 
   registerRpcMethod({
@@ -2417,6 +2439,9 @@ export function registerCoreRpcMethods(): void {
     },
   });
 
+}
+
+function registerSessionEtcRpc(): void {
   // ── sessions（chat 历史会话查询 / 删除；流式 chat 接口留 HTTP） ──
 
   registerRpcMethod({
@@ -2691,6 +2716,21 @@ export function registerCoreRpcMethods(): void {
       return { status: probe.status, version: probe.version, install_hint: probe.install_hint, error: probe.error };
     },
   });
+}
+
+/** 注册全部内核 RPC method（按域分组调用，原单个 2500 行函数已拆为下列子函数）。 */
+export function registerCoreRpcMethods(): void {
+  // 幂等守卫（原在函数体首行）：已注册则跳过，防测试 / 多次调用重复注册
+  if (hasRpcMethod("daemon.status")) return;
+  registerCoreQueryRpc();
+  registerTaskRpc();
+  registerWorkflowRpc();
+  registerRequirementRpc();
+  registerProviderAgentRpc();
+  registerSandboxSetupRpc();
+  registerMiscMutationRpc();
+  registerWorkspaceRpc();
+  registerSessionEtcRpc();
 }
 
 function countTasksByStatus(): Record<string, number> {
