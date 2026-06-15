@@ -43,6 +43,56 @@ import { pickPhaseLabel, userPhaseLabel } from "@/lib/workflow-labels";
 
 type PhaseRaw = Record<string, unknown>;
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** 列出 ts 源码里所有 run_<name> 函数名（与后端 extractRunFunctions 三种形式对齐）。 */
+function listRunFunctionNames(src: string): string[] {
+  const names = new Set<string>();
+  const patterns = [
+    /export\s+async\s+function\s+run_([A-Za-z0-9_]+)/g,
+    /export\s+function\s+run_([A-Za-z0-9_]+)/g,
+    /export\s+const\s+run_([A-Za-z0-9_]+)\s*=/g,
+  ];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) names.add(m[1]);
+  }
+  return [...names];
+}
+
+/** 收集 phases 里所有"会绑定 run_ 函数"的 name（顶层普通 phase + 并行子节点，不含并行块容器本身——与后端 collectPhaseNames 对齐）。 */
+function runFnBearingNames(phases: any[]): string[] {
+  const out: string[] = [];
+  for (const p of phases) {
+    if (!p || typeof p !== "object") continue;
+    if (p.parallel) {
+      const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+      for (const s of subs) if (typeof s?.name === "string") out.push(s.name);
+    } else if (typeof p.name === "string") {
+      out.push(p.name);
+    }
+  }
+  return out;
+}
+
+/** 把一段 ts 代码里的函数声明 run_<old> 改写为 run_<new>（仅声明行，不动函数体内的字符串/注释）。 */
+function rewriteRunFnHeader(code: string, oldName: string, newName: string): string {
+  const re = new RegExp(`(export\\s+(?:async\\s+)?function\\s+)run_${escapeRegex(oldName)}(\\s*\\()`);
+  return code.replace(re, `$1run_${newName}$2`);
+}
+
+/** 保存将对 workflow.ts 产生的副作用预览（改名 / 新建 stub / 孤儿）。 */
+interface SaveImpact {
+  /** run_old → run_new */
+  renames: { from: string; to: string }[];
+  /** 将被新建 stub 的函数名（phase 无对应 run_ 函数） */
+  willCreate: string[];
+  /** 不再被任何 phase 引用的 run_ 函数（孤儿，框架不自动删） */
+  orphans: string[];
+}
+
 interface Props {
   workflowName: string;
   initialPhases: any[];
@@ -68,6 +118,12 @@ export function PhasePipelineEditor({
   const [pendingDeleteParallel, setPendingDeleteParallel] = useState<string | null>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
 
+  // ── ts 函数草稿：从「应用代码」即时落盘改为纳入批量保存（与字段改动同一个 dirty / 同一次保存）。
+  // key = 当前 phase 名；value = 用户编辑后的完整 run_<phase> 源码。改名时一并迁移 key 并改写函数头。──
+  const [tsDrafts, setTsDrafts] = useState<Record<string, string>>({});
+  // 保存前的副作用确认（含 rename / 孤儿时弹出，避免破坏性操作静默发生）
+  const [pendingSaveImpact, setPendingSaveImpact] = useState<SaveImpact | null>(null);
+
   // ── rename 追踪：保存时把 oldName→newName 一起传给后端，让 workflow.ts 里
   // run_<old> 函数也一并 rename，避免产生孤儿 ──
   const renamesRef = useRef<Map<string, string>>(new Map());
@@ -83,12 +139,38 @@ export function PhasePipelineEditor({
   useEffect(() => {
     setPhases(initialPhases);
     setDirty(false);
+    setTsDrafts({});
     resetDraftTracking();
   }, [initialPhases, workflowName, resetDraftTracking]);
 
+  // ts 草稿是否有真实改动（与源码里的原函数比对；改名后的新名在旧源码里取不到 → 视为有改动）。
+  const tsDirty = useMemo(() => {
+    for (const [name, draft] of Object.entries(tsDrafts)) {
+      const original = (tsSource ? extractPhaseRunFunction(tsSource, name) : null) ?? "";
+      if (draft.trim() !== original.trim()) return true;
+    }
+    return false;
+  }, [tsDrafts, tsSource]);
+
+  // 字段改动（dirty）与 ts 改动（tsDirty）合并成单一"有未保存修改"信号 → 单一保存模型。
+  const anyDirty = dirty || tsDirty;
+
+  // 收集需要写回 workflow.ts 的 ts 草稿（与原函数不同、非空），保存时在 setWorkflowPhases 之后逐个 flush。
+  const collectTsEdits = useCallback((): { name: string; code: string }[] => {
+    const edits: { name: string; code: string }[] = [];
+    const bearing = new Set(runFnBearingNames(phases));
+    for (const [name, draft] of Object.entries(tsDrafts)) {
+      if (!bearing.has(name)) continue; // 该 phase 已被删除 / 改名迁移走，跳过
+      const original = (tsSource ? extractPhaseRunFunction(tsSource, name) : null) ?? "";
+      if (draft.trim() === "" || draft.trim() === original.trim()) continue;
+      edits.push({ name, code: draft });
+    }
+    return edits;
+  }, [phases, tsDrafts, tsSource]);
+
   // 离开页面 / 关闭窗口前提示：有未保存修改时弹原生 confirm
   useEffect(() => {
-    if (!dirty) return;
+    if (!anyDirty) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       // 现代浏览器忽略自定义文案，必须设置 returnValue 才会弹提示
@@ -96,19 +178,19 @@ export function PhasePipelineEditor({
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [dirty]);
+  }, [anyDirty]);
 
   // Ctrl+S / Cmd+S 保存修改
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        if (dirty && !saving) void saveRef.current?.();
+        if (anyDirty && !saving) void saveRef.current?.();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dirty, saving]);
+  }, [anyDirty, saving]);
   // save 函数引用 — 给 keydown 闭包用，避免依赖整个 save 函数变更触发 listener 重绑
   const saveRef = useRef<(() => Promise<void>) | null>(null);
 
@@ -421,6 +503,21 @@ export function PhasePipelineEditor({
     for (const [k, v] of Array.from(renames.entries())) {
       if (v === blockName) renames.delete(k);
     }
+    // 被删并行块的子节点 ts 草稿一并清理（collectTsEdits 已按现存 name 过滤，这里只为 tsDirty 不残留）
+    const droppedChildren = new Set<string>();
+    for (const p of phases) {
+      if (p?.parallel?.name === blockName) {
+        const subs: PhaseRaw[] = Array.isArray(p.parallel.phases) ? p.parallel.phases : [];
+        for (const s of subs) if (typeof s?.name === "string") droppedChildren.add(s.name);
+      }
+    }
+    if (droppedChildren.size > 0) {
+      setTsDrafts((prev) => {
+        const next: Record<string, string> = {};
+        for (const [k, v] of Object.entries(prev)) if (!droppedChildren.has(k)) next[k] = v;
+        return next;
+      });
+    }
     setDrawerPhase(null);
     setDirty(true);
     setPendingDeleteParallel(null);
@@ -496,6 +593,13 @@ export function PhasePipelineEditor({
       }),
     );
 
+    // 迁移该 phase 的 ts 草稿：key 改名 + 改写函数声明头 run_<old> → run_<new>
+    setTsDrafts((prev) => {
+      if (!(oldName in prev)) return prev;
+      const { [oldName]: code, ...rest } = prev;
+      return { ...rest, [newName]: rewriteRunFnHeader(code, oldName, newName) };
+    });
+
     // drawer 当前指向的就是被改名的 phase，更新引用
     setDrawerPhase((cur) => (cur === oldName ? newName : cur));
     setDirty(true);
@@ -565,6 +669,11 @@ export function PhasePipelineEditor({
   function handleDeletePhase(name: string) {
     // 清理 renames：若被删的 name 是某条改名的目标，撤销该条；新建后又删除的 name 也清掉
     newlyAddedRef.current.delete(name);
+    setTsDrafts((prev) => {
+      if (!(name in prev)) return prev;
+      const { [name]: _drop, ...rest } = prev;
+      return rest;
+    });
     const renames = renamesRef.current;
     for (const [k, v] of Array.from(renames.entries())) {
       if (v === name) renames.delete(k);
@@ -601,29 +710,72 @@ export function PhasePipelineEditor({
   }
 
   // ── 保存 ──
+  // 当前有效的 rename 映射：只发"目标 newName 仍存在"的（用户可能删过中间产物）。
+  const computeValidRenames = useCallback((): Record<string, string> => {
+    const currentNames = new Set(allPhaseNames);
+    const valid: Record<string, string> = {};
+    for (const [oldName, newName] of renamesRef.current.entries()) {
+      if (currentNames.has(newName)) valid[oldName] = newName;
+    }
+    return valid;
+  }, [allPhaseNames]);
+
+  // 预测本次保存对 workflow.ts 的副作用，用于保存前确认（把事后 toast 提到事前）。
+  const computeSaveImpact = useCallback((): SaveImpact => {
+    const valid = computeValidRenames();
+    const renames = Object.entries(valid).map(([from, to]) => ({ from, to }));
+    const existing = tsSource ? listRunFunctionNames(tsSource) : [];
+    // 应用 rename 后源码里"将存在"的函数名集合
+    const existingAfter = new Set(existing.map((n) => valid[n] ?? n));
+    const bearing = runFnBearingNames(phases);
+    const bearingSet = new Set(bearing);
+    const willCreate = bearing.filter((n) => !existingAfter.has(n));
+    const orphans = [...existingAfter].filter((n) => !bearingSet.has(n));
+    return { renames, willCreate, orphans };
+  }, [computeValidRenames, tsSource, phases]);
+
   async function save() {
-    if (!dirty || saving) return;
+    if (!anyDirty || saving) return;
+    const impact = computeSaveImpact();
+    // 破坏性 / 意外副作用（改名、产生孤儿）先弹确认；纯字段或纯新增直接保存不打断。
+    if (impact.renames.length > 0 || impact.orphans.length > 0) {
+      setPendingSaveImpact(impact);
+      return;
+    }
+    await doSave();
+  }
+
+  async function doSave() {
+    if (saving) return;
     setSaving(true);
     try {
-      // 只发"目标 newName 仍存在"的 rename（用户可能删过中间产物）
-      const currentNames = new Set(allPhaseNames);
-      const validRenames: Record<string, string> = {};
-      for (const [oldName, newName] of renamesRef.current.entries()) {
-        if (currentNames.has(newName)) validRenames[oldName] = newName;
-      }
-      const renamesToSend =
-        Object.keys(validRenames).length > 0 ? validRenames : undefined;
-
-      const res = await api.setWorkflowPhases(workflowName, phases, true, renamesToSend);
-      setDirty(false);
-      resetDraftTracking();
-      const ts = res.ts;
-      const renamed = res.renamed ?? [];
+      const valid = computeValidRenames();
+      const renamesToSend = Object.keys(valid).length > 0 ? valid : undefined;
       const parts: string[] = [];
+
+      // 1. 结构 / 字段 / rename —— 仅当有结构改动时调用（纯 ts 改动跳过，避免无谓重写 yaml）。
+      let res: Awaited<ReturnType<typeof api.setWorkflowPhases>> | null = null;
+      if (dirty) {
+        res = await api.setWorkflowPhases(workflowName, phases, true, renamesToSend);
+      }
+
+      // 2. ts 函数草稿 —— 在 rename 完成之后写回（此时文件里函数名已是新名，header 匹配）。
+      const edits = collectTsEdits();
+      for (const { name, code } of edits) {
+        await api.setWorkflowPhaseFn(workflowName, name, code);
+      }
+
+      setDirty(false);
+      setTsDrafts({});
+      resetDraftTracking();
+
+      const ts = res?.ts;
+      const renamed = res?.renamed ?? [];
       if (renamed.length > 0) parts.push(`已改名 ${renamed.length} 个函数：${renamed.join(", ")}`);
       if (ts?.added?.length) parts.push(`新增 ${ts.added.length} 个函数：${ts.added.join(", ")}`);
+      if (edits.length > 0) parts.push(`写回 ${edits.length} 个 ts 函数：${edits.map((e) => e.name).join(", ")}`);
       if (ts?.orphans?.length) parts.push(`检测到 ${ts.orphans.length} 个孤儿函数（手工清理或下次保存自动同步）`);
-      if (res.ts_error) parts.push(`ts 同步警告：${res.ts_error}`);
+      if (res?.ts_error) parts.push(`ts 同步警告：${res.ts_error}`);
       toast.success(parts.length > 0 ? `已保存 · ${parts.join("；")}` : "已保存");
       onSaved?.();
     } catch (e: unknown) {
@@ -640,14 +792,14 @@ export function PhasePipelineEditor({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-mono text-[11px] text-muted-foreground">
           流水线编辑 · 点击节点编辑
-          {dirty && <span className="ml-2 text-warning">· 未保存（{navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl"}+S 快捷保存）</span>}
+          {anyDirty && <span className="ml-2 text-warning">· 未保存（{navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl"}+S 快捷保存）</span>}
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setAddStepOpen(true)}>
             <Plus className="h-4 w-4" />
             新增
           </Button>
-          <Button size="sm" onClick={save} disabled={!dirty || saving} title="保存修改（Ctrl/Cmd+S）">
+          <Button size="sm" onClick={save} disabled={!anyDirty || saving} title="保存修改（Ctrl/Cmd+S）">
             <Save className="h-4 w-4" />
             {saving ? "保存中…" : "保存修改"}
           </Button>
@@ -709,11 +861,11 @@ export function PhasePipelineEditor({
                   />
 
                   <PhaseTsEditor
-                    workflowName={workflowName}
                     phaseName={phaseName}
-                    initialCode={drawerTsCode}
+                    originalCode={drawerTsCode}
+                    value={tsDrafts[phaseName] ?? drawerTsCode ?? ""}
+                    onChange={(code) => setTsDrafts((prev) => ({ ...prev, [phaseName]: code }))}
                     hasPrompt={typeof drawerPhaseLocation.raw.prompt === "string" && (drawerPhaseLocation.raw.prompt as string).trim() !== ""}
-                    onSaved={() => onSaved?.()}
                   />
                 </>
               )}
@@ -792,12 +944,12 @@ export function PhasePipelineEditor({
                   size="sm"
                   onClick={() => {
                     setDrawerPhase(null);
-                    if (dirty) void save();
+                    if (anyDirty) void save();
                   }}
                   disabled={saving}
                 >
                   <Save className="h-4 w-4" />
-                  {dirty ? "保存并关闭" : "关闭"}
+                  {anyDirty ? "保存并关闭" : "关闭"}
                 </Button>
               </SheetFooter>
             </>
@@ -853,6 +1005,46 @@ export function PhasePipelineEditor({
         danger
         onConfirm={() => { if (pendingDeleteParallel) handleDeleteParallel(pendingDeleteParallel); }}
         onCancel={() => setPendingDeleteParallel(null)}
+      />
+
+      <ConfirmDialog
+        open={!!pendingSaveImpact}
+        title="保存将改写 workflow.ts"
+        message={
+          <div className="space-y-2 text-sm">
+            <p className="text-muted-foreground">本次保存会对 workflow.ts 做以下结构改动，确认后写入：</p>
+            {pendingSaveImpact?.renames.length ? (
+              <div>
+                <div className="mb-1 font-mono text-[11px] text-foreground">重命名函数（{pendingSaveImpact.renames.length}）</div>
+                <ul className="space-y-0.5">
+                  {pendingSaveImpact.renames.map((r) => (
+                    <li key={r.from} className="font-mono text-[11px] text-muted-foreground">
+                      <code>run_{r.from}</code> → <code>run_{r.to}</code>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {pendingSaveImpact?.willCreate.length ? (
+              <div>
+                <div className="mb-1 font-mono text-[11px] text-foreground">新建函数 stub（{pendingSaveImpact.willCreate.length}）</div>
+                <p className="font-mono text-[11px] text-muted-foreground">{pendingSaveImpact.willCreate.map((n) => `run_${n}`).join(", ")}</p>
+              </div>
+            ) : null}
+            {pendingSaveImpact?.orphans.length ? (
+              <div>
+                <div className="mb-1 font-mono text-[11px] text-warning">孤儿函数（{pendingSaveImpact.orphans.length}）</div>
+                <p className="font-mono text-[11px] text-muted-foreground">
+                  {pendingSaveImpact.orphans.map((n) => `run_${n}`).join(", ")}
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">这些函数已无 phase 引用；框架不会自动删除，保留在文件里需手工清理。</p>
+              </div>
+            ) : null}
+          </div>
+        }
+        confirmText="确认保存"
+        onConfirm={() => { setPendingSaveImpact(null); void doSave(); }}
+        onCancel={() => setPendingSaveImpact(null)}
       />
     </div>
   );
@@ -1169,89 +1361,61 @@ function PromptDryRunner({
 }
 
 // ──────────────────────────────────────────────
-// 子组件：ts 函数代码编辑器（独立草稿 + 应用按钮）
+// 子组件：ts 函数代码编辑器（受控草稿，纳入父级批量保存）
+//
+// 不再独立即时落盘——编辑只更新父级 tsDrafts，与字段改动共用同一个「保存修改」。
+// 这样关闭抽屉/离开页面前的未保存提示对 ts 改动同样生效，不会出现"ts 已写盘、字段丢失"的割裂。
 // ──────────────────────────────────────────────
 
 function PhaseTsEditor({
-  workflowName,
   phaseName,
-  initialCode,
+  originalCode,
+  value,
+  onChange,
   hasPrompt,
-  onSaved,
 }: {
-  workflowName: string;
   phaseName: string;
-  initialCode: string | null;
-  /** 该 phase 在 yaml 里有 prompt 字段：用于显示"prompt 驱动 vs ts 函数"优先级提示 */
+  /** 源码里现存的本阶段函数（用于判断"prompt 驱动 vs ts 函数"提示与脏标记） */
+  originalCode: string | null;
+  value: string;
+  onChange: (code: string) => void;
+  /** 该 phase 在 yaml 里有 prompt 字段：用于显示优先级提示 */
   hasPrompt?: boolean;
-  onSaved?: () => void;
 }) {
-  const toast = useToast();
-  const [draft, setDraft] = useState(initialCode ?? "");
-  const [saving, setSaving] = useState(false);
-
-  // initialCode 变化时（外部 reload ts、切换 phase）重置草稿
-  useEffect(() => { setDraft(initialCode ?? ""); }, [initialCode, phaseName]);
-
-  const dirty = draft.trim() !== (initialCode ?? "").trim();
-  const empty = draft.trim() === "";
-
-  async function apply() {
-    setSaving(true);
-    try {
-      const r = await api.setWorkflowPhaseFn(workflowName, phaseName, draft);
-      toast.success(r.mode === "appended" ? "已新增函数到 workflow.ts" : "已更新 workflow.ts");
-      onSaved?.();
-    } catch (e: unknown) {
-      toast.error("写入 ts 失败", (e as Error)?.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
-  }
+  const dirty = value.trim() !== (originalCode ?? "").trim();
 
   return (
     <section className="mt-4">
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <span className="font-mono text-[10px] text-muted-foreground">
           执行函数 · workflow.ts
-          {dirty && <span className="ml-2 text-warning">· 未保存</span>}
+          {dirty && <span className="ml-2 text-warning">· 未保存（随底部「保存修改」一并写回）</span>}
         </span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={apply}
-          disabled={saving || !dirty || empty}
-          className="h-7 px-2"
-        >
-          <Save className="h-3 w-3" />
-          {saving ? "写入中…" : "应用代码"}
-        </Button>
       </div>
-      {hasPrompt && initialCode === null && (
+      {hasPrompt && originalCode === null && (
         <p className="mb-1 border border-success/40 bg-success/5 p-2 text-[11px] text-success">
           该阶段由 prompt 驱动（yaml 里有 prompt 字段），框架自动调 agent.run；无需 ts 函数
         </p>
       )}
-      {hasPrompt && initialCode !== null && (
+      {hasPrompt && originalCode !== null && (
         <p className="mb-1 border border-warning/40 bg-warning/5 p-2 text-[11px] text-warning">
           该阶段同时有 prompt 字段和 ts 函数；框架会优先调用 ts 函数（prompt 字段被忽略）
         </p>
       )}
-      {!hasPrompt && initialCode === null && draft === "" && (
+      {!hasPrompt && originalCode === null && value === "" && (
         <p className="mb-1 border border-border bg-muted/30 p-2 text-[11px] text-muted-foreground">
           未找到 <code className="font-mono">run_{phaseName}</code> 函数；上面填 prompt 即可零代码运行，或在下方编写完整 ts 函数
         </p>
       )}
       <Textarea
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         placeholder={`export async function run_${phaseName}(taskId: string): Promise<void> {\n  // TODO\n}`}
         className="scrollbar-thin h-56 resize-none border border-border bg-card p-3 font-mono text-[11px] leading-relaxed"
         spellCheck={false}
-        disabled={saving}
       />
       <p className="mt-1 text-[10px] text-muted-foreground">
-        必须以 <code className="font-mono">export async function run_{phaseName}(</code> 开头；应用前会自动备份原 ts 为 .bak
+        必须以 <code className="font-mono">export async function run_{phaseName}(</code> 开头；保存时随字段改动一并写回 workflow.ts
       </p>
     </section>
   );
