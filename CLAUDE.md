@@ -33,7 +33,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **内核不为某个 UI 妥协命名** —— 客户端层负责翻译。Web 上业务标签与内核名**叠加显示**（hover / 详情侧栏 / 操作历史同时露出 trigger 名），不是替换；让懂行用户能反向映射，不懂的人可忽略
 - 添加新功能时先问三连：「决策时刻要不要点这个按钮？自动化要不要调这个？观察时要不要看这条信息？」前两个决定它在 Web / CLI 怎么长，第三个决定 TUI 是否补
 - 警惕 Web 的业务语言反渗内核：trigger 改名压力必须挡在客户端层，不能让 state-machine 退让
-- **工作流自定义的产品支持范围 = PR 交付形态的定制轴 + artifacts 文件产物交付**（2026-06-12 定位声明；同日「交付物抽象 P0」随 v2 R5 落地，泛化闸门已按计划开了「产出轴一格」）：澄清 / 调度 / 验收 / fix_revision 修复回路 / CI 自动修复这些增值服务长在「需求 → 交付物」闭环上，run 终结判定**以事实为准**（run-outcome：hasPr **优先**→ awaiting_review 交 pr-poller；无 PR 有 deliveries → awaiting_review 人工验收；都无 → done。混合交付不支持，PR 赢）——自定义工作流只要最终交付 PR 或调 `deliverArtifacts` 落表，全套照拿；「自定义」指定制这条管线，**不是任意流程编排平台**。**工作流声明层（v2 R5）**：workflow.yaml 顶层 `requires: {git: true|false|"optional"}`（缺省派生自 sandbox.git，老副本零感知）+ `delivers: pr|artifacts`（缺省=事实推断）；registry（core）只透传形状 + lint，枚举语义全在 `src/daemon/workflow-declarations.ts`；三闸门（transition→clarifying / enqueue（含集合空×delivers:pr 交叉拒）/ setWorkflow=update 带 warning 不阻断）按 `req.workflow ?? "dev"` 动态校验，**无库需求可走完整闭环**（create 不再因项目无 workspace 拒建、setWorkspaces 接受显式空集=确认无库、clarifier 空集走纯文本；`requirements.input_mode` 列=迁移 045：NULL 未确认/'git'/'none'）。**artifacts 交付**：`deliverArtifacts`（src/core/requirement-deliveries.ts，single-writer 白名单）promote 产物到 `runtime/requirements/<reqId>/deliveries/round-<N>/` + 落 `requirement_deliveries` 表（迁移 046，每验收轮一行）；验收 = 需求级 awaiting_review（poller 对无 PR 有 deliveries 静默 skip；Web 需求页验收卡=文件列表+下载（不做 iframe 渲染）+「验收通过」/驳回（=发布审查意见，与 PR 驳回同管道）；CLI `req accept`（有交付 PR 时拒绝——签字处唯一在 GitHub merge）/ `req reject -m`；驳回 → fix_revision → __fix run **artifacts 模式**（种入上一轮产物增量重做 → promote round+1）；通知 `requirement_awaiting_review` 仅 artifacts 需求记录，PR 路径零变化）。examples/workflows/artifact 已正式化（探针 gate hack 移除，老用户 `workflow sync artifact --apply`）。action 型产出（发邮件等不可逆动作）仍不做；教学 fixture（doc_gen / data_pipeline 等）定位不变
+- **工作流自定义的产品支持范围 = PR 交付形态的定制轴 + artifacts 文件产物交付**（2026-06-12 定位声明；同日「交付物抽象 P0」随 v2 R5 落地，泛化闸门已按计划开了「产出轴一格」）：澄清 / 调度 / 验收 / fix_revision 修复回路 / CI 自动修复这些增值服务长在「需求 → 交付物」闭环上，run 终结判定**以事实为准**（run-outcome：hasPr **优先**→ awaiting_review 交 pr-poller；无 PR 有 deliveries → awaiting_review 人工验收；都无 → done。混合交付不支持，PR 赢）——自定义工作流只要最终交付 PR 或调 `deliverArtifacts` 落表，全套照拿；「自定义」指定制这条管线，**不是任意流程编排平台**。**工作流声明层（v2 R5）**：workflow.yaml 顶层 `requires: {git: true|false|"optional"}`（缺省派生自 sandbox.git，老副本零感知）+ `delivers: pr|artifacts`（缺省=事实推断）；registry（core）只透传形状 + lint，枚举语义全在 `src/daemon/workflow-declarations.ts`；三闸门（transition→clarifying / enqueue（含集合空×delivers:pr 交叉拒）/ setWorkflow=update 带 warning 不阻断）按 `req.workflow ?? "dev"` 动态校验，**无库需求可走完整闭环**（create 不再因项目无 workspace 拒建、setWorkspaces 接受显式空集=确认无库、clarifier 空集走纯文本；`requirements.input_mode` 列=迁移 045：NULL 未确认/'git'/'none'）。**artifacts 交付**：`deliverArtifacts`（src/core/requirements/deliveries.ts，single-writer 白名单）promote 产物到 `runtime/requirements/<reqId>/deliveries/round-<N>/` + 落 `requirement_deliveries` 表（迁移 046，每验收轮一行）；验收 = 需求级 awaiting_review（poller 对无 PR 有 deliveries 静默 skip；Web 需求页验收卡=文件列表+下载（不做 iframe 渲染）+「验收通过」/驳回（=发布审查意见，与 PR 驳回同管道）；CLI `req accept`（有交付 PR 时拒绝——签字处唯一在 GitHub merge）/ `req reject -m`；驳回 → fix_revision → __fix run **artifacts 模式**（种入上一轮产物增量重做 → promote round+1）；通知 `requirement_awaiting_review` 仅 artifacts 需求记录，PR 路径零变化）。examples/workflows/artifact 已正式化（探针 gate hack 移除，老用户 `workflow sync artifact --apply`）。action 型产出（发邮件等不可逆动作）仍不做；教学 fixture（doc_gen / data_pipeline 等）定位不变
 
 ## 架构概要
 
@@ -47,7 +47,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **执行视图 = 线性时间线**（`TaskRunView`，2026-06-10 重构）：每轮 phase 执行（含驳回重做）按实际发生顺序独立成块往下追加（不在原 section 上 ×N 折叠），日志按本轮时间窗切片（logger 落盘 UTC 字符串，`parseLineTs` 必须按 UTC 解析），agent 调用按时间窗内联到对应轮；未执行 phase 灰色占位垫底；daemon 重启被打断的轮次标 `aborted`（灰圈）。纯逻辑在 `src/web/src/lib/run-view-logic.ts`（buildTimeline / filterLinesToWindow / assignAgentCalls）
 - **插件化工作流**：`AUTOPILOT_HOME/workflows/`（用户）工作流自动发现
 - **YAML 工作流定义**：`workflow.yaml` 定义结构，`workflow.ts` 只写阶段函数
-- **工作流注册中心**：`src/core/registry.ts` 自动发现、注册、查询工作流
+- **工作流注册中心**：`src/core/workflow/registry.ts` 自动发现、注册、查询工作流
 - **状态自动推导**：从 phase name 自动生成 pending/running/trigger，支持简写
 - **并行阶段支持**：`parallel:` 语法支持 fork/join 并行执行
 - **状态机驱动**：`src/core/state-machine.ts` 动态加载转换表，原子性状态转换（乐观锁）
@@ -58,8 +58,8 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **Phase 内联 Agent**：每个 phase 在 `workflow.yaml` 里内联配置自己的 agent（`agent: {provider, model, system_prompt, max_turns, permission_mode}`）；省略则用 `DEFAULT_AGENT` 兜底。无"全局命名可复用 agent"概念（已于 2026-06 移除）。model 缺省时回退到 `providers.<provider>.default_model`
 - **Web UI 工作流编辑器**：阶段 CRUD / 并行块 / 驳回 / **phase 内联 agent 编辑**全图形化，`workflow.ts` 自动同步（改名重命名函数、追加缺失、孤儿清理）
 - **项目工作台**：两层数据模型 `Project ⊃ Workspace`，需求挂项目维度，支持 AI 调查 + 评论线程 + 用户审批流。**项目上下文壳层 = Supabase 式**（2026-06-11）：进入 `/projects/:id` 后顶栏面包屑换成项目切换器（`ProjectSwitcher` 下拉换项目/新建），左侧导航换成项目级菜单（需求 / 代码库 / 设置，子路由 `/projects/:id/:section`；**无概览页**，裸 `/projects/:id` 重定向到需求子页），顶部「← 项目列表」返回全局导航
-- **流水线（原"看板"）**：Web 的 `/tasks` 页（导航名「流水线」）把**需求 + 任务**合到一处看全生命周期，4 段 tab（全部 / 等待人工 / 运行中 / 归档），列表内按时间分组（今天/昨天/…），行是 Claude Code 风卡片。流水线是默认首页。**「Now 决策收件箱」已整体替换为「通知系统」**（2026-06-11，机制级重构非改名）：旧模型 = 11 个 card-source 从当前状态**派生**内存快照（状态变了卡片消失，aggregator + `now.*` RPC + `now:*` 频道，已全部删除，`/api/now/*` 410）；新模型 = **append-only 事件流**落 `notifications` 表（迁移 035/036，写入收口 `src/core/notifications.ts` 进 single-writer 白名单）。daemon 驻留 `notification-recorder` 订阅 event-bus 把领域事件翻译成通知行（task 终态/await_review、需求 awaiting_approval、agent 提问、clarifier/schedule 错误、watcher 恢复；新增 `requirement:schedule-error` 事件）；**read/dismiss 双状态独立**，RPC = `notifications.list/unreadCount/markRead/markAllRead/dismiss`，WS 频道 `notification:*`；保留策略 30 天/500 行。**持续状态不进通知流**：provider 不健康走面板顶部 `ProviderHealthBanner`（`providers.health` RPC + provider:* 订阅，恢复自动消失），空态走 NowEmptyGuide。badge=未读数（不再是"当前 error+decision 卡数"，状态看板职责归流水线「等待人工」tab）。三端：Web `NotificationsPanel`（右侧面板，optimistic 已读/删除）、CLI `autopilot notifications list/read/dismiss`（`now` 留隐藏 deprecated 别名一版）、TUI `NotificationList`（observer-only 不可操作）。`/now` 路由仍重定向到 `/tasks` 并自动展开面板
-- **评论线程**：`requirement_questions` + `requirement_question_replies`，Agent 调查期主动提问，用户回复后继续。**澄清的代码上下文**（2026-06-11，自主探索模型）：①**需求级浅 clone 拉全集代码库**（v2 R4 起 = 需求 codebase：`runtime/requirements/<reqId>/codebase/<alias>/` 每库一个子目录 + 清单 `.codebase.json`，与执行完整 clone **同一份**——`src/core/codebase.ts` 的 `ensureCodebase(fidelity:"shallow")`，`requirement-clone.ts` 的 `ensureRequirementClones` 是薄壳；clarifier 首轮 ensure 幂等复用、`--depth 1 --single-branch`、并行 clone、按库降级——失败库走远程快照、全失败纯文本；旧 `workspace/<alias>/` 布局检测删除重建）——**clone 就绪时不预拼接任何文档/结构快照**，prompt 如实告知克隆形态（浅克隆 = 深度 1/单分支/无历史；**failed 重澄清复用既有 full clone 时如实声明交付分支 + 可能有上轮遗留脏树，不静默 reset**），探索方式交给 agent 自主（读任意文件、搜索、git 命令、`git fetch --deepen` 加深历史），目标导向 = 了解项目以提出精准问题、代码能答的不问用户；clarifier `permission_mode: bypassPermissions`（default 下 Bash 被拒跑不了 git，信任级同 dev develop 阶段）+ max_turns 15，prompt 明确禁 push/改远程。生命周期 = done 即清（done-workspace-cleanup）；cancelled 仅清纯浅 clone（含 full 的留给 retention 按需求终态清）；删除需求整树删；failed 整份保留（重澄清 / fix 续作还要用）。② clone 失败降级：本地 path（老工作区）或 `gh api` 远程拉**结构事实 + 自述文档快照**（prompt 声明可能过期、仅作线索）。③ 全失败 = 纯文本模式
+- **流水线（原"看板"）**：Web 的 `/tasks` 页（导航名「流水线」）把**需求 + 任务**合到一处看全生命周期，4 段 tab（全部 / 等待人工 / 运行中 / 归档），列表内按时间分组（今天/昨天/…），行是 Claude Code 风卡片。流水线是默认首页。**「Now 决策收件箱」已整体替换为「通知系统」**（2026-06-11，机制级重构非改名）：旧模型 = 11 个 card-source 从当前状态**派生**内存快照（状态变了卡片消失，aggregator + `now.*` RPC + `now:*` 频道，已全部删除，`/api/now/*` 410）；新模型 = **append-only 事件流**落 `notifications` 表（迁移 035/036，写入收口 `src/core/notify/stream.ts` 进 single-writer 白名单）。daemon 驻留 `notification-recorder` 订阅 event-bus 把领域事件翻译成通知行（task 终态/await_review、需求 awaiting_approval、agent 提问、clarifier/schedule 错误、watcher 恢复；新增 `requirement:schedule-error` 事件）；**read/dismiss 双状态独立**，RPC = `notifications.list/unreadCount/markRead/markAllRead/dismiss`，WS 频道 `notification:*`；保留策略 30 天/500 行。**持续状态不进通知流**：provider 不健康走面板顶部 `ProviderHealthBanner`（`providers.health` RPC + provider:* 订阅，恢复自动消失），空态走 NowEmptyGuide。badge=未读数（不再是"当前 error+decision 卡数"，状态看板职责归流水线「等待人工」tab）。三端：Web `NotificationsPanel`（右侧面板，optimistic 已读/删除）、CLI `autopilot notifications list/read/dismiss`（`now` 留隐藏 deprecated 别名一版）、TUI `NotificationList`（observer-only 不可操作）。`/now` 路由仍重定向到 `/tasks` 并自动展开面板
+- **评论线程**：`requirement_questions` + `requirement_question_replies`，Agent 调查期主动提问，用户回复后继续。**澄清的代码上下文**（2026-06-11，自主探索模型）：①**需求级浅 clone 拉全集代码库**（v2 R4 起 = 需求 codebase：`runtime/requirements/<reqId>/codebase/<alias>/` 每库一个子目录 + 清单 `.codebase.json`，与执行完整 clone **同一份**——`src/core/sandbox/codebase.ts` 的 `ensureCodebase(fidelity:"shallow")`，`requirement-clone.ts` 的 `ensureRequirementClones` 是薄壳；clarifier 首轮 ensure 幂等复用、`--depth 1 --single-branch`、并行 clone、按库降级——失败库走远程快照、全失败纯文本；旧 `workspace/<alias>/` 布局检测删除重建）——**clone 就绪时不预拼接任何文档/结构快照**，prompt 如实告知克隆形态（浅克隆 = 深度 1/单分支/无历史；**failed 重澄清复用既有 full clone 时如实声明交付分支 + 可能有上轮遗留脏树，不静默 reset**），探索方式交给 agent 自主（读任意文件、搜索、git 命令、`git fetch --deepen` 加深历史），目标导向 = 了解项目以提出精准问题、代码能答的不问用户；clarifier `permission_mode: bypassPermissions`（default 下 Bash 被拒跑不了 git，信任级同 dev develop 阶段）+ max_turns 15，prompt 明确禁 push/改远程。生命周期 = done 即清（done-workspace-cleanup）；cancelled 仅清纯浅 clone（含 full 的留给 retention 按需求终态清）；删除需求整树删；failed 整份保留（重澄清 / fix 续作还要用）。② clone 失败降级：本地 path（老工作区）或 `gh api` 远程拉**结构事实 + 自述文档快照**（prompt 声明可能过期、仅作线索）。③ 全失败 = 纯文本模式
 - **框架零业务知识**：核心模块不含任何工作流专属常量或逻辑
 - **用户空间分离**：`AUTOPILOT_HOME`（默认 `~/.autopilot/`）存放用户配置、工作流和运行时数据
 
@@ -96,23 +96,22 @@ autopilot/
 ├── src/                           # TypeScript 源码
 │   ├── index.ts                   # VERSION + AUTOPILOT_HOME
 │   ├── core/                      # 框架核心（通用引擎 + 事件发射）
-│   │   ├── db.ts                  # SQLite 数据库 + emit task:created/updated
+│   │   │                          # 2026-06-15 按子域分目录：63 文件 → 5 子目录 + 26 根文件
+│   │   ├── db.ts                  # SQLite 数据库 + emit task:created/updated（根=引擎核心/跨域）
 │   │   ├── state-machine.ts       # 状态机 + emit task:transition
 │   │   ├── runner.ts              # 执行引擎 + emit phase:started/completed/error
-│   │   ├── registry.ts            # 工作流插件注册 & 发现 & YAML 加载
-│   │   ├── infra.ts               # 文件锁（PID 存活检测 + 僵尸锁清理）
-│   │   ├── notify.ts              # 通知系统
-│   │   ├── logger.ts              # 阶段标签日志 + emit log:entry
 │   │   ├── watcher.ts             # 卡死任务检测 + emit watcher:recovery
-│   │   ├── migrate.ts             # 数据库迁移引擎
-│   │   ├── config.ts              # 配置加载 & 校验
-│   │   ├── projects.ts            # Project CRUD（id: proj-NNN）
-│   │   ├── workspaces.ts          # Workspace CRUD（id: ws-NNN，原 codebases.ts→repos.ts）
-│   │   ├── workspace-health.ts    # Workspace 健康检查（原 codebase-health.ts）
-│   │   ├── requirements.ts        # Requirement CRUD（含 project_id + workspace_id）
-│   │   ├── requirement-questions.ts # 评论线程 CRUD（id: qst-NNN）
-│   │   ├── event-bus.ts           # 事件总线（enableBus 懒激活；core 无条件 emit）
-│   │   └── events.ts              # 事件协议类型定义
+│   │   ├── migrate.ts / infra.ts / logger.ts / config.ts / event-bus.ts / events.ts / manifest.ts
+│   │   ├── projects.ts / auth.ts / api-keys.ts / providers.ts / sessions.ts …  # 跨域 CRUD（留根）
+│   │   ├── workflow/              # 工作流子系统：registry(.ts→registry.ts) / registry-authoring /
+│   │   │                          #   ts-authoring / workflows / templates / prompt-runner /
+│   │   │                          #   phase-decision / judge
+│   │   ├── requirements/          # 需求子系统：index.ts(主 CRUD) / attachments / clone / comments /
+│   │   │                          #   deliveries / feedbacks / questions / sessions / sub-prs / spec-revisions
+│   │   ├── sandbox/               # 代码 provisioning：index.ts(任务沙盒) / browse / retention /
+│   │   │                          #   codebase / git-clone / workspaces / workspace-health / submodules / gitmodules-parser
+│   │   ├── task/                  # 任务子系统：context / delete / factory / lifecycle / logs / send-prompt
+│   │   └── notify/                # 通知子系统：index.ts(OS 推送) / stream / types / context / drivers/
 │   ├── daemon/                    # Daemon 进程
 │   │   ├── index.ts               # Daemon 入口（init→server→watcher→signal）
 │   │   ├── server.ts              # Bun.serve() HTTP+WS 统一服务
@@ -157,7 +156,7 @@ autopilot/
 
 > **命名说明（2026-06 Phase 2 改名）**：内核「用户代码库」概念全量改名 **Workspace**（表 `workspaces`、id `ws-NNN`、列 `workspace_id`/`parent_workspace_id`、RPC `workspaces.*`、CLI `autopilot workspace`）。注意与**任务运行沙盒** `sandbox`（每 task 的独立运行目录，Phase 1 由旧 `workspace` 改名而来）区分：**workspace = 用户的源码仓库，sandbox = 任务的临时执行目录**，互不相干。`.worktree.json` 里历史字段名保持兼容旧 `codebase_*` 读取。
 >
-> **sandbox = 需求级 codebase（v2 R4「一件工作一份 clone」；原则：用户仓库零痕迹）**：代码 clone 归需求所有——`runtime/requirements/<reqId>/codebase/<alias>/`（清单 `.codebase.json` 在需求根），澄清浅 clone 与执行完整 clone 是**同一份**，统一由 `src/core/codebase.ts` 的 `ensureCodebase(reqId, wsList, {fidelity, deliverBranch, checkoutExisting})` 供给：clarifying = shallow（`--depth 1`）；task 启动（task-factory → `ensureRunCodebaseSandbox`）= full + 交付分支，**浅→全升级 = 整库删除重 clone**（不 --unshallow——bypassPermissions agent 可能弄脏浅 clone）；fix run = fidelity+分支幂等命中**零重 clone**（交付分支工作树原地续作）；重跑 = 删 codebase + 删远程 feat/ 分支 + 新交付分支全新 clone（旧 run 历史保留）。**统一 multi-clone 布局：单库也是子目录**，主库概念已废除，repos[0] 只是「集合第一个」位置语义；完整克隆非浅克隆；workspace 仅凭远程 URL 注册。**一个需求的所有 run / 所有 phase 共用这一份 clone**——各 phase 直接在工作树改文件、跨 phase 可见，`submit_pr` 才 `git add -A && commit && push`。**源仓库全程零痕迹**（删除纯 rmSync；token clone 后抹除 origin），交付 push 规范分支 `feat/<需求>` + PR。`runs/<taskId>/.worktree.json` 是镜像投影：`mode:"multi-clone"` + `repos_root:"codebase"` + `requirement_id`（repos[].dir 相对沙盒根——`getTaskSandbox` 据此把新 git 任务的沙盒根重定向到需求 codebase/，非 git 工作流仍用 `runs/<id>/workspace/`）；存量任务（runtime/tasks/ 旧根、R2/R3 期 runs/<id>/workspace/、旧 `mode:"clone"` 根即仓库）reader 全保留，历史任务可浏览/清理/删分支。`listTaskRepos(taskId)` 是消费布局的唯一接口（形状不变——R4 对 dev workflow **零 sync**）。清理：需求 done 即清 codebase（done-workspace-cleanup）；retention 新轨扫 `requirements/*/codebase/` **只清终态需求**（done/cancelled/failed，非终态永不清——fix run 的保障），旧轨（任务 workspace/）照常。⚠ 老用户 dev workflow 副本默认把 workspace 根当仓库根，统一布局下**所有 git 任务都会坏**，必须 `autopilot workflow sync dev --apply`（R4 本身无需再 sync）。
+> **sandbox = 需求级 codebase（v2 R4「一件工作一份 clone」；原则：用户仓库零痕迹）**：代码 clone 归需求所有——`runtime/requirements/<reqId>/codebase/<alias>/`（清单 `.codebase.json` 在需求根），澄清浅 clone 与执行完整 clone 是**同一份**，统一由 `src/core/sandbox/codebase.ts` 的 `ensureCodebase(reqId, wsList, {fidelity, deliverBranch, checkoutExisting})` 供给：clarifying = shallow（`--depth 1`）；task 启动（task-factory → `ensureRunCodebaseSandbox`）= full + 交付分支，**浅→全升级 = 整库删除重 clone**（不 --unshallow——bypassPermissions agent 可能弄脏浅 clone）；fix run = fidelity+分支幂等命中**零重 clone**（交付分支工作树原地续作）；重跑 = 删 codebase + 删远程 feat/ 分支 + 新交付分支全新 clone（旧 run 历史保留）。**统一 multi-clone 布局：单库也是子目录**，主库概念已废除，repos[0] 只是「集合第一个」位置语义；完整克隆非浅克隆；workspace 仅凭远程 URL 注册。**一个需求的所有 run / 所有 phase 共用这一份 clone**——各 phase 直接在工作树改文件、跨 phase 可见，`submit_pr` 才 `git add -A && commit && push`。**源仓库全程零痕迹**（删除纯 rmSync；token clone 后抹除 origin），交付 push 规范分支 `feat/<需求>` + PR。`runs/<taskId>/.worktree.json` 是镜像投影：`mode:"multi-clone"` + `repos_root:"codebase"` + `requirement_id`（repos[].dir 相对沙盒根——`getTaskSandbox` 据此把新 git 任务的沙盒根重定向到需求 codebase/，非 git 工作流仍用 `runs/<id>/workspace/`）；存量任务（runtime/tasks/ 旧根、R2/R3 期 runs/<id>/workspace/、旧 `mode:"clone"` 根即仓库）reader 全保留，历史任务可浏览/清理/删分支。`listTaskRepos(taskId)` 是消费布局的唯一接口（形状不变——R4 对 dev workflow **零 sync**）。清理：需求 done 即清 codebase（done-workspace-cleanup）；retention 新轨扫 `requirements/*/codebase/` **只清终态需求**（done/cancelled/failed，非终态永不清——fix run 的保障），旧轨（任务 workspace/）照常。⚠ 老用户 dev workflow 副本默认把 workspace 根当仓库根，统一布局下**所有 git 任务都会坏**，必须 `autopilot workflow sync dev --apply`（R4 本身无需再 sync）。
 >
 > **历史**：早期用 git worktree（污染源仓库，已废弃）；2026-06 曾试「agent 级即用即焚副本 + cumulative.patch 全量 patch」模型，因复杂度高、bug 多（深度审计 EPH-01~08），2026-06-09 **revert 回任务级共用 clone**（见 `docs/superpowers/specs/2026-06-09-shared-task-sandbox-design.md`）。**并行块在共用沙盒下不隔离子阶段工作树，暂不支持并行写（YAGNI）**。
 
@@ -170,7 +169,7 @@ autopilot/
 | Question | `requirement_questions` | `qst-NNN` | Agent 调查期提问，含多轮回复 |
 
 **核心不变式：每个 Task 必有一个 Requirement 作为前置**（不存在游离任务）。需求+任务是「一件工作」的前后两段。
-- Requirement 真实状态机（见 `src/core/requirements.ts` ALLOWED_TRANSITIONS）：
+- Requirement 真实状态机（见 `src/core/requirements/index.ts` ALLOWED_TRANSITIONS）：
   `drafting → clarifying → ready → (awaiting_approval) → queued → running → awaiting_review ⇄ fix_revision → done`，另有 `cancelled` / `failed`（failed 可回 queued/awaiting_approval 重试）。
   **创建后停 drafting，确认代码库是进入澄清的前置**（2026-06-11）：澄清依赖代码库浅 clone，`requirements.create` 不再自动转 clarifying；Web 需求页 drafting 态显示代码库确认卡（自动派生主库为预选）+「开始 AI 澄清」按钮，CLI `req new -c`/cwd 推断成功时自动开始、否则提示 `req clarify <id>`；`requirements.transition → clarifying` 在 RPC 层守卫主库非空（core 原语不限以便测试夹具）。
   ⚠️ 不是早期文档写的 `draft/investigating` —— 那是过期简化，别照它写过滤逻辑。
