@@ -863,13 +863,18 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       const r = getRequirementById(id);
       if (!r) return error("requirement not found", 404);
       // v2 R5：按所选工作流动态校验（与 RPC requirements.enqueue 同口径）
+      const hasWs = listRequirementWorkspaces(id).length > 0 || !!r.workspace_id;
       {
-        const hasWs = listRequirementWorkspaces(id).length > 0 || !!r.workspace_id;
         const reason = validateWorkflowInput(r.workflow, hasWs, { crossCheckDelivers: true });
         if (reason) return error(reason);
       }
       if (!(r.spec_md ?? "").trim()) {
         return error("需求规约为空，请先完成澄清或手动填写规约");
+      }
+      // 无库需求回填 input_mode='none'（与 RPC requirements.enqueue 同口径——此前 HTTP 路径漏了
+      // 这步，导致 web 入队与 CLI 入队对澄清闸门判据行为不一致的 drift）
+      if (!hasWs && r.input_mode !== "none") {
+        try { updateRequirement(id, { input_mode: "none" }); } catch { /* 列缺失旧库容错 */ }
       }
       // 仅置 queued；调度器（src/daemon/requirement-scheduler.ts）会监听 status 变化触发创建 task
       try {

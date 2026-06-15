@@ -1,5 +1,6 @@
 import { getDb } from "./db";
 import { emit } from "./event-bus";
+import { log } from "./logger";
 import { resolveComment } from "./requirement-comments";
 import { listWorkspaces, type Workspace } from "./workspaces";
 import { deleteRequirementRuntimeDir } from "./requirement-clone";
@@ -313,8 +314,13 @@ export function setRequirementWorkspaces(reqId: string, wsIds: string[]): void {
         wsIds.length > 0 ? "git" : "none",
         reqId,
       ]);
-    } catch {
-      // input_mode 列不存在（迁移 045 未跑的旧库/选择性迁移测试夹具）：声明态是增强，不阻塞集合写入
+    } catch (e: unknown) {
+      // 仅「列不存在」静默（迁移 045 未跑的旧库/选择性迁移测试夹具）：声明态是增强，不阻塞集合写入。
+      // 其它错误（约束冲突/磁盘）会让集合半提交语义不一致（input_mode 是澄清闸门判据），必须吼出来。
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/no such column|has no column/i.test(msg)) {
+        log.warn("setRequirementWorkspaces: input_mode 写入失败（非列缺失，集合可能半提交）reqId=%s: %s", reqId, msg);
+      }
     }
   })();
 }
@@ -362,20 +368,28 @@ export function setRequirementStatus(
   const ts = nowMs();
   const isTerminal = to === "cancelled" || to === "failed";
   const reason = isTerminal ? opts?.reason ?? null : null;
+  // CAS 乐观锁（与 task 状态机 state-machine.ts:transition 对称）：WHERE 绑定读到的 cur.status，
+  // changes===0 = 读后写前被其它驱动者抢改（pr-poller 判 done × 人工驳回 fix_revision 等并发），
+  // 不静默覆盖、明确抛冲突。需求状态机有 6 个直接写者（scheduler/clarifier/pr-poller/run-outcome/
+  // task-actions/agent-tools），此前无原子保护是历史遗留，非有意设计。
+  let res: { changes: number };
   if (isTerminal) {
     // 终态统一记 status_before_terminal（即便无 reason），步骤条据此定位死亡步
-    db.run(
-      "UPDATE requirements SET status = ?, status_reason = ?, status_reason_source = ?, status_before_terminal = ?, updated_at = ? WHERE id = ?",
-      [to, reason, reason ? opts?.reason_source ?? "system" : null, cur.status, ts, id],
+    res = db.run(
+      "UPDATE requirements SET status = ?, status_reason = ?, status_reason_source = ?, status_before_terminal = ?, updated_at = ? WHERE id = ? AND status = ?",
+      [to, reason, reason ? opts?.reason_source ?? "system" : null, cur.status, ts, id, cur.status],
     );
   } else if (cur.status === "failed") {
     // failed → queued / awaiting_approval 重试：清掉上一轮的失败原因（与 schedule_error 成功清空同理）
-    db.run(
-      "UPDATE requirements SET status = ?, status_reason = NULL, status_reason_source = NULL, status_before_terminal = NULL, updated_at = ? WHERE id = ?",
-      [to, ts, id],
+    res = db.run(
+      "UPDATE requirements SET status = ?, status_reason = NULL, status_reason_source = NULL, status_before_terminal = NULL, updated_at = ? WHERE id = ? AND status = ?",
+      [to, ts, id, cur.status],
     );
   } else {
-    db.run("UPDATE requirements SET status = ?, updated_at = ? WHERE id = ?", [to, ts, id]);
+    res = db.run("UPDATE requirements SET status = ?, updated_at = ? WHERE id = ? AND status = ?", [to, ts, id, cur.status]);
+  }
+  if (res.changes === 0) {
+    throw new Error(`requirement ${id} 并发状态冲突：期望 ${cur.status}（已被其它写入者改变，本次 ${cur.status} → ${to} 未生效）`);
   }
   // 需求级状态转移日志（与 task_logs 对称）：审批/排队时间、终态审计的真理来源
   try {
