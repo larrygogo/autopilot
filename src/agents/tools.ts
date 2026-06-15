@@ -36,9 +36,7 @@ import {
   getRequirementById,
   createRequirement,
   updateRequirement,
-  setRequirementStatus,
-  nextRequirementId,
-} from "../core/requirements";
+  setRequirementStatus,} from "../core/requirements";
 import { createComment, nextCommentId } from "../core/requirement-comments";
 
 type ToolContent = { content: Array<{ type: "text"; text: string }> };
@@ -436,10 +434,8 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
             `"${args.repo_alias}" 是子模块，不能直接提需求。${parentHint}（autopilot 会在执行时自动跨父子操作）`,
           );
         }
-        const id = nextRequirementId();
         try {
           const r = createRequirement({
-            id,
             project_id: repo.project_id,
             workspace_id: repo.id,
             title: args.title.trim(),

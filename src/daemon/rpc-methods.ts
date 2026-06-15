@@ -79,9 +79,7 @@ import {
   getRequirementById,
   createRequirement as coreCreateRequirement,
   updateRequirement as coreUpdateRequirement,
-  setRequirementStatus,
-  nextRequirementId,
-  finishClarification,
+  setRequirementStatus,  finishClarification,
   listRequirementStatusLogs,
   listRequirementWorkspaceIds,
   listRequirementWorkspaces,
@@ -1173,9 +1171,7 @@ function registerRequirementRpc(): void {
       // v2 R5：项目无工作区不再拒建需求（无库需求可走 requires.git 非 true 的工作流闭环）；
       // 未显式指定时自动派生项目默认工作区作预选（无则 workspace_id=NULL，由确认卡 / 闸门把关）。
       if (!workspaceId) workspaceId = getTopWorkspaceForProject(projectId)?.id ?? null;
-      const id = nextRequirementId();
       const created = coreCreateRequirement({
-        id,
         project_id: projectId,
         workspace_id: workspaceId,
         title,

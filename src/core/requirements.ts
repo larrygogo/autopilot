@@ -1,4 +1,4 @@
-import { getDb } from "./db";
+import { getDb, insertWithFreshId } from "./db";
 import { emit } from "./event-bus";
 import { log } from "./logger";
 import { resolveComment } from "./requirement-comments";
@@ -60,7 +60,8 @@ export interface Requirement {
 export type StatusReasonSource = "user" | "task" | "system";
 
 export interface CreateRequirementOpts {
-  id: string;
+  /** 省略则内部原子生成（nextRequirementId + 撞号重试）；显式传入用于测试 / 迁移夹具。 */
+  id?: string;
   project_id: string;
   workspace_id?: string | null;
   title: string;
@@ -147,28 +148,25 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
 
   const db = getDb();
   const ts = nowMs();
-  db.run(
-    "INSERT INTO requirements (id, project_id, workspace_id, title, status, spec_md, chat_session_id, created_at, updated_at) " +
-      "VALUES (?, ?, ?, ?, 'drafting', ?, ?, ?, ?)",
-    [
-      opts.id,
-      opts.project_id,
-      resolvedWorkspaceId,
-      opts.title,
-      opts.spec_md ?? "",
-      opts.chat_session_id ?? null,
-      ts,
-      ts,
-    ],
-  );
+  // 原子 ID：未显式传 id 时内部生成 + INSERT 撞 PK 自动换号重试（消并发撞号窗口，H3）。
+  // 显式 id（测试 / 迁移夹具）按原样插入、不重试。
+  const insertReq = (id: string): string => {
+    db.run(
+      "INSERT INTO requirements (id, project_id, workspace_id, title, status, spec_md, chat_session_id, created_at, updated_at) " +
+        "VALUES (?, ?, ?, ?, 'drafting', ?, ?, ?, ?)",
+      [id, opts.project_id, resolvedWorkspaceId, opts.title, opts.spec_md ?? "", opts.chat_session_id ?? null, ts, ts],
+    );
+    return id;
+  };
+  const newId = opts.id ? insertReq(opts.id) : insertWithFreshId(nextRequirementId, insertReq);
   // 有 workspace_id 时自动写多对多关联（spec §5.1）
   if (resolvedWorkspaceId) {
     db.run(
       "INSERT OR IGNORE INTO requirement_workspaces (requirement_id, workspace_id) VALUES (?, ?)",
-      [opts.id, resolvedWorkspaceId],
+      [newId, resolvedWorkspaceId],
     );
   }
-  return getRequirementById(opts.id) as Requirement;
+  return getRequirementById(newId) as Requirement;
 }
 
 export function getRequirementById(id: string): Requirement | null {

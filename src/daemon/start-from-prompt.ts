@@ -1,8 +1,6 @@
 import {
   createRequirement,
-  getRequirementById,
-  nextRequirementId,
-  setRequirementStatus,
+  getRequirementById,  setRequirementStatus,
   setRequirementWorkspaces,
   updateRequirement,
   type Requirement,
@@ -77,9 +75,8 @@ export async function startTaskFromPrompt(opts: StartFromPromptOpts): Promise<St
     workspace_id: workspaceId,
   });
 
-  // 3. 建需求（status 固定 drafting）
-  const reqId = nextRequirementId();
-  createRequirement({ id: reqId, project_id: projectId, workspace_id: workspaceId, title, spec_md });
+  // 3. 建需求（status 固定 drafting）；id 由 createRequirement 原子生成（撞号重试）
+  const reqId = createRequirement({ project_id: projectId, workspace_id: workspaceId, title, spec_md }).id;
   // 工作流（快捷路径 -w 指定；缺省 dev 由调度器消费 NULL）+ 代码库集合 / input_mode 同步：
   // 有库 → 'git'；无库 → 'none'（确认无库，clarifier/scheduler 走纯文本闭环）
   if (opts.workflow) updateRequirement(reqId, { workflow: opts.workflow });

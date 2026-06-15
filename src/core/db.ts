@@ -159,6 +159,27 @@ export function now(): string {
   return new Date().toISOString();
 }
 
+/**
+ * 原子地「生成 id → INSERT」：撞 UNIQUE / PRIMARY KEY 时自动换号重试。
+ *
+ * 消除 `const id = nextXxxId(); insert(id)` 两步之间的并发撞号窗口（architect 审查 H3：
+ * SELECT MAX+1 与 INSERT 非原子，daemon 与 run-phase 子进程并发写同库时两侧可能拿到同号）。
+ * id 是 `xxx-NNN` 格式字符串（非 autoincrement），故用「乐观插入 + 撞号重试」而非序列表。
+ * 仅对约束冲突重试；其它错误立即抛。
+ */
+export function insertWithFreshId<T>(genId: () => string, insert: (id: string) => T, retries = 8): T {
+  for (let attempt = 0; ; attempt++) {
+    const id = genId();
+    try {
+      return insert(id);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (attempt < retries && /UNIQUE constraint|PRIMARY KEY|constraint failed/i.test(msg)) continue;
+      throw e;
+    }
+  }
+}
+
 // ──────────────────────────────────────────────
 // 内部辅助
 // ──────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "fs";
 import { join, resolve, sep } from "path";
-import { getDb, getTask } from "./db";
+import { getDb, getTask, insertWithFreshId } from "./db";
 import { getRequirementDir } from "./codebase";
 import { log } from "./logger";
 
@@ -113,8 +113,7 @@ export function deliverArtifacts(taskId: string, fromDir: string, summary?: stri
   mkdirSync(dest, { recursive: true });
   cpSync(fromDir, dest, { recursive: true });
 
-  const row: RequirementDelivery = {
-    id: nextDeliveryId(),
+  const base = {
     requirement_id: reqId,
     task_id: taskId,
     round,
@@ -122,10 +121,15 @@ export function deliverArtifacts(taskId: string, fromDir: string, summary?: stri
     summary: summary?.trim() ? summary.trim() : null,
     created_at: Date.now(),
   };
-  getDb().run(
-    "INSERT INTO requirement_deliveries (id, requirement_id, task_id, round, path, summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [row.id, row.requirement_id, row.task_id, row.round, row.path, row.summary, row.created_at],
-  );
+  // 原子 ID：生成 + INSERT 撞 PK 自动换号重试（消并发撞号，H3——驳回重交并发更易撞 dlv 号）
+  const id = insertWithFreshId(nextDeliveryId, (id) => {
+    getDb().run(
+      "INSERT INTO requirement_deliveries (id, requirement_id, task_id, round, path, summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [id, base.requirement_id, base.task_id, base.round, base.path, base.summary, base.created_at],
+    );
+    return id;
+  });
+  const row: RequirementDelivery = { id, ...base };
   log.info("交付物已 promote 到需求目录 [req=%s task=%s round=%s files→%s]", reqId, taskId, round, dest);
   return row;
 }
