@@ -192,7 +192,7 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
                       )}
                     </div>
                     <span className="font-mono text-[10px] text-muted-foreground shrink-0">
-                      {t.phase_count} 阶段 · {t.agent_count} 智能体
+                      {t.phase_count} 阶段
                     </span>
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">{t.description || "（无描述）"}</p>
