@@ -1187,14 +1187,19 @@ export function RequirementDetail() {
   // 审查与修复对话卡（验收步专属）：时间线（审查意见 / GitHub review / Agent 修复回应 +
   // 进行中的修复进度条目）+ 底部发布输入框 —— 每发一条意见，对应的「正在做什么 / 进度 /
   // 结果」都回到同一个时间线里，不再分散在执行页的多个卡片。
+  // residue（上一次失败 run 沉淀的历史评审遗留）不属于当前 PR 的审查线程，整体不在验收卡显示
+  // ——它只服务 scheduler 重跑上下文（后端直接读 comments），跟当前 PR 评审无关。
+  const reviewThread = feedbacks.filter(
+    (fb) => (fb.subtype ?? (fb.from_role === "agent" ? "fix" : "review")) !== "residue",
+  );
   const reviewThreadCard = (
     <Card id="feedback-section">
       {/* 头部 = 验收决策条：标题 + PR 链接在左，「验收通过」主按钮在右（原独立决策条已并入） */}
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
         <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="text-sm font-medium">审查与修复</span>
-        {feedbacks.length > 0 && (
-          <Badge variant="muted">{feedbacks.length}</Badge>
+        {reviewThread.length > 0 && (
+          <Badge variant="muted">{reviewThread.length}</Badge>
         )}
         {req.pr_url && (
           <a
@@ -1220,7 +1225,7 @@ export function RequirementDetail() {
         )}
       </div>
       <div className="p-5">
-        {feedbacks.length === 0 && req.status !== "fix_revision" ? (
+        {reviewThread.length === 0 && req.status !== "fix_revision" ? (
           <p className="font-mono text-xs text-muted-foreground">
             {isArtifactsDelivery
               ? "还没有审查记录。查看上方交付物后：通过点「验收通过」；不满意发布审查意见，Agent 会按意见重做产物并在此回应。"
@@ -1228,45 +1233,30 @@ export function RequirementDetail() {
           </p>
         ) : (
           <ol className="space-y-2.5">
-            {/* 对话双方用底色 + 图标区分：用户/GitHub = 中性卡，Agent 回应 = accent 淡底卡 */}
-            {feedbacks.map((fb) => {
-              // residue = 上一次失败 run 沉淀的历史评审遗留（非本 PR 评审）——必须跟「Agent 修复」
-              // 和当前 PR 评审意见区分开，否则历史驳回原话会被误读成对当前 PR 的结论。
-              const subtype = fb.subtype ?? (fb.from_role === "agent" ? "fix" : "review");
-              const isResidue = subtype === "residue";
-              const isFix = subtype === "fix";
+            {/* 对话双方用底色 + 图标区分：用户/GitHub = 中性卡，Agent 回应 = accent 淡底卡。
+                residue 已在 reviewThread 过滤掉，此处只剩当前 PR 的评审意见 / Agent 修复回应。 */}
+            {reviewThread.map((fb) => {
+              const isFix = (fb.subtype ?? (fb.from_role === "agent" ? "fix" : "review")) === "fix";
               return (
                 <li
                   key={fb.id}
                   className={cn(
                     "rounded-md border p-3",
-                    isResidue
-                      ? "border-border bg-muted/20"
-                      : isFix
-                        ? "border-accent/25 bg-accent/5"
-                        : "border-border bg-muted/30",
+                    isFix ? "border-accent/25 bg-accent/5" : "border-border bg-muted/30",
                   )}
                 >
                   <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                    {isResidue
-                      ? <History className="h-3.5 w-3.5 text-muted-foreground" />
-                      : isFix
-                        ? <Bot className="h-3.5 w-3.5 text-accent" />
-                        : <UserRound className="h-3.5 w-3.5 text-muted-foreground" />}
+                    {isFix
+                      ? <Bot className="h-3.5 w-3.5 text-accent" />
+                      : <UserRound className="h-3.5 w-3.5 text-muted-foreground" />}
                     <span className={cn("text-xs font-medium", isFix ? "text-accent" : "text-muted-foreground")}>
-                      {isResidue ? "上次执行遗留" : isFix ? "Agent 修复" : (SOURCE_LABEL[fb.source] ?? fb.source)}
+                      {isFix ? "Agent 修复" : (SOURCE_LABEL[fb.source] ?? fb.source)}
                     </span>
-                    {isResidue && (
-                      <Badge variant="muted" className="text-[10px]">历史 · 非本 PR 评审</Badge>
-                    )}
                     <span className="font-mono text-[10px] text-muted-foreground">
                       {new Date(fb.created_at).toLocaleString()}
                     </span>
                   </div>
-                  <pre className={cn(
-                    "whitespace-pre-wrap break-words font-mono text-xs leading-relaxed",
-                    isResidue ? "text-muted-foreground" : "text-foreground",
-                  )}>
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
                     {fb.body}
                   </pre>
                 </li>
