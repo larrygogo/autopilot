@@ -19,7 +19,7 @@ import { RunSwitcher } from "@/components/RunSwitcher";
 import { type RunLike } from "@/lib/run-label";
 import { SkeletonRows, ErrorState } from "@/components/pro";
 import { StepBar } from "@/components/StepBar";
-import { stepPosition, resolveCurrentStep, canEditRequirementContent, STEPS, type ReqStep } from "@/lib/requirement-steps";
+import { stepPosition, resolveCurrentStep, canEditRequirementContent, STEPS, STEP_ORDER, type ReqStep } from "@/lib/requirement-steps";
 import { NextStepCTA } from "@/components/NextStepCTA";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -430,7 +430,6 @@ export function RequirementDetail() {
   const [round, setRound] = useState<ClarifierRoundState | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
-  const [selectedStep, setSelectedStep] = useState<ReqStep | null>(null);
   const [statusLogs, setStatusLogs] = useState<RequirementStatusLog[]>([]);
   const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string; requires_git?: boolean | "optional"; delivers?: string }[]>([]);
   const [deliveries, setDeliveries] = useState<RequirementDelivery[]>([]);
@@ -438,15 +437,17 @@ export function RequirementDetail() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const prevStatusRef = useRef<string | undefined>(undefined);
   // v2 R6：需求的全部根 run（execution / fix 轮），按 seq 升序。多 run 时执行记录区出切换器。
   // undefined = 加载中（区分尚未拉取与确实为空），[] = 确实无 run（前置态）。
   const [runs, setRuns] = useState<RunLike[] | undefined>(undefined);
   const [runsError, setRunsError] = useState<string | null>(null);
   // 当前选中查看的 run（多 run 时切换器控制）；默认最新（= req.task_id）或 ?run= 深链。
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [searchParams] = useSearchParams();
+  // 深链：?step=<生命周期阶段> + ?run=<taskId>。两者都是 URL 驱动 —— 每个阶段 / 每个 run 有
+  // 独立可分享链接。缺 step → 当前阶段（跟随最新）；缺 run → 最新 run（见下 selectedRunId 解析）。
+  const [searchParams, setSearchParams] = useSearchParams();
   const runQuery = searchParams.get("run");
+  const stepQuery = searchParams.get("step");
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
@@ -625,21 +626,8 @@ export function RequirementDetail() {
       .catch(() => { /* 拉不到时下拉退化为只显示当前值 */ });
   }, []);
 
-  // 默认选中当前步；status 变化时，若用户没手动切走则跟随到新当前步，否则不打断。
-  useEffect(() => {
-    if (!req) return;
-    const cur = resolveCurrentStep(req.status, req.status_before_terminal);
-    const prev = prevStatusRef.current;
-    prevStatusRef.current = req.status;
-    if (prev === undefined) {
-      setSelectedStep(cur); // 初次加载：默认当前步（终态时为死亡步）
-      return;
-    }
-    if (prev !== req.status) {
-      const prevStep = resolveCurrentStep(prev, null);
-      setSelectedStep((sel) => (sel === null || sel === prevStep ? cur : sel));
-    }
-  }, [req?.status]);
+  // 选中阶段不再用本地 state —— 改由 ?step= 驱动（见下 activeStep）。缺 ?step 时 activeStep 自然
+  // 等于 currentStep（随 status 推进自动跟随），有 ?step 时 pin 在该阶段，行为与旧 effect 等价且可分享。
 
   const repoAlias = useMemo(() => {
     if (!req) return "";
@@ -1001,7 +989,25 @@ export function RequirementDetail() {
   }
 
   const currentStep = resolveCurrentStep(req.status, req.status_before_terminal);
-  const activeStep: ReqStep = selectedStep ?? currentStep;
+  // ?step= 合法则 pin 到该阶段，否则跟随当前阶段（缺省 = 最新生命周期）。
+  const activeStep: ReqStep =
+    stepQuery && (STEP_ORDER as string[]).includes(stepQuery) ? (stepQuery as ReqStep) : currentStep;
+
+  // 阶段 / run 深链写入：选当前阶段 = 清 ?step（回到「跟随最新」默认），其余 pin；run 写 ?run。
+  // replace:true —— 阶段切换不堆历史栈，但 URL 仍实时反映当前视图（可复制分享）。
+  const selectStep = (step: ReqStep) => {
+    const next = new URLSearchParams(searchParams);
+    if (step === currentStep) next.delete("step");
+    else next.set("step", step);
+    setSearchParams(next, { replace: true });
+  };
+  const selectRun = (taskId: string) => {
+    setSelectedRunId(taskId); // 立即反馈，URL 随后同步
+    const next = new URLSearchParams(searchParams);
+    next.set("run", taskId);
+    setSearchParams(next, { replace: true });
+  };
+
   const isTerminal = TERMINAL_STATUSES.has(req.status);
   const isAborted = req.status === "cancelled" || req.status === "failed";
   const openQuestions = questions.filter((q) => q.status === "open");
@@ -1341,7 +1347,7 @@ export function RequirementDetail() {
             <SkeletonRows variant="row" count={1} />
           </div>
         ) : multiRun ? (
-          <RunSwitcher runs={runs} activeTaskId={shownTaskId} onSelect={setSelectedRunId} />
+          <RunSwitcher runs={runs} activeTaskId={shownTaskId} onSelect={selectRun} />
         ) : null}
         <div className="p-5">
           {runsError ? (
@@ -1700,7 +1706,7 @@ export function RequirementDetail() {
 
       {/* 步骤进度条：6 步可点击，默认当前步；窄屏非选中步只显示数字圈 + overflow 兜底 */}
       <div className="mb-5 overflow-x-auto rounded-lg border border-border bg-card/40 px-3 py-3 sm:px-4">
-        <StepBar status={req.status} statusBeforeTerminal={req.status_before_terminal} selected={activeStep} onSelect={setSelectedStep} />
+        <StepBar status={req.status} statusBeforeTerminal={req.status_before_terminal} selected={activeStep} onSelect={selectStep} />
       </div>
 
       {/* 下一步主 CTA banner；审批/入队/重试 = 决定执行方式的时刻，工作流选择内联在按钮旁 */}
@@ -1753,7 +1759,7 @@ export function RequirementDetail() {
           {activeStep !== currentStep && (
             <button
               type="button"
-              onClick={() => setSelectedStep(currentStep)}
+              onClick={() => selectStep(currentStep)}
               className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
             >
               ↩ 回到当前步骤（{STEPS.find((s) => s.key === currentStep)?.label}）
