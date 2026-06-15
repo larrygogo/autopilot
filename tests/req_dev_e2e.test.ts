@@ -17,7 +17,7 @@ import { up as migrate044 } from "../src/migrations/044-task-run-columns";
 import { createWorkspace } from "../src/core/workspaces";
 import { createProject } from "../src/core/projects";
 import { createRequirement } from "../src/core/requirements";
-import { startTaskFromTemplate } from "../src/core/task-factory";
+import { startTaskFromTemplate } from "../src/core/task/factory";
 import { setup_req_dev_task } from "../examples/workflows/req_dev/workflow";
 import type { WorkflowDefinition } from "../src/core/registry";
 

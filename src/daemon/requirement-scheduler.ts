@@ -10,7 +10,7 @@ import {
 import type { Requirement } from "../core/requirements";
 import { listComments } from "../core/requirement-comments";
 import { getTask } from "../core/db";
-import { startTaskFromTemplate, startNewRunForRequirement } from "../core/task-factory";
+import { startTaskFromTemplate, startNewRunForRequirement } from "../core/task/factory";
 import { createLogger } from "../core/logger";
 import { loadSchedulerConfig } from "../core/config";
 

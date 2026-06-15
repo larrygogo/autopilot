@@ -27,7 +27,7 @@ import { listSessions, readManifest as readSessionManifest } from "../core/sessi
 import { VERSION } from "../index";
 import { transition, canTransition } from "../core/state-machine";
 import { buildTransitions } from "../core/registry";
-import { startTaskFromTemplate } from "../core/task-factory";
+import { startTaskFromTemplate } from "../core/task/factory";
 import { randomUUID } from "crypto";
 import { log } from "../core/logger";
 import { listWorkspaces, getWorkspaceById } from "../core/workspaces";
@@ -627,7 +627,7 @@ export const WORKFLOW_TOOL_NAMES = ["ask_user"] as const;
 export async function buildWorkflowAgentTools(): Promise<RegisteredTool[]> {
   const tool = defineTool;
 
-  const { getTaskContext } = await import("../core/task-context");
+  const { getTaskContext } = await import("../core/task/context");
   const { updateTask } = await import("../core/db");
   const { registerPending } = await import("./pending-questions");
   const { emit } = await import("../core/event-bus");

@@ -4,12 +4,12 @@ import {
   unregisterRun,
   abortRun,
   _clearRunsForTest,
-} from "../src/core/task-lifecycle";
+} from "../src/core/task/lifecycle";
 import { cancelTaskAction } from "../src/daemon/task-actions";
 import {
   runWithTaskContext,
   getCurrentAbortSignal,
-} from "../src/core/task-context";
+} from "../src/core/task/context";
 import { Agent } from "../src/agents/agent";
 import { BaseProvider } from "../src/agents/providers/base";
 import type { AgentResult, RunOptions } from "../src/agents/types";

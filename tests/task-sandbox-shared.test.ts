@@ -75,7 +75,7 @@ describe("共用沙盒 · ensureTaskSandbox 建 clone（Task 1）", () => {
 
 describe("共用沙盒 · 跨 phase 直接可见（Task 2）", () => {
   it("phase1 在共用 clone 改文件，phase2 在同一 clone 直接看到（无 patch 中转）", async () => {
-    const { runWithTaskContext, getCurrentSandboxDir } = await import("../src/core/task-context");
+    const { runWithTaskContext, getCurrentSandboxDir } = await import("../src/core/task/context");
     const id = taskId("shr2");
     ensureTaskSandbox(id, "dev", { git: true }, { id: "ws-1", remote_url: srcRepo, default_branch: "main" }, "feat/shr2");
     const ws = getTaskSandbox(id);
@@ -122,7 +122,7 @@ describe("共用沙盒 · 需求级重跑 = 新 run（v2 R2，替代 resetTaskFo
     const { createProject } = await import("../src/core/projects");
     const { createWorkspace } = await import("../src/core/workspaces");
     const { createRequirement, getRequirementById, updateRequirement, nextRequirementId } = await import("../src/core/requirements");
-    const { startNewRunForRequirement } = await import("../src/core/task-factory");
+    const { startNewRunForRequirement } = await import("../src/core/task/factory");
     const { getTaskRoot } = await import("../src/core/sandbox");
     const registry = await import("../src/core/registry");
     registry._clearRegistry();
@@ -197,7 +197,7 @@ describe("共用沙盒 · 需求级重跑 = 新 run（v2 R2，替代 resetTaskFo
     const { createProject } = await import("../src/core/projects");
     const { createWorkspace } = await import("../src/core/workspaces");
     const { createRequirement, updateRequirement, nextRequirementId } = await import("../src/core/requirements");
-    const { startNewRunForRequirement, startTaskFromTemplate } = await import("../src/core/task-factory");
+    const { startNewRunForRequirement, startTaskFromTemplate } = await import("../src/core/task/factory");
     const registry = await import("../src/core/registry");
     registry._clearRegistry();
     registry.register({
@@ -232,7 +232,7 @@ describe("共用沙盒 · 需求级重跑 = 新 run（v2 R2，替代 resetTaskFo
 describe("共用沙盒 · 全流程集成（真 runner → 共用 clone → phase 写 → diff_stat → 自动推进）", () => {
   it("executePhase 注入共用沙盒，phase 经 listTaskRepos 定位仓库写文件且 diff_stat 端到端看到", async () => {
     const { executePhase } = await import("../src/core/runner");
-    const { getCurrentSandboxDir } = await import("../src/core/task-context");
+    const { getCurrentSandboxDir } = await import("../src/core/task/context");
     const { listTaskRepos } = await import("../src/core/sandbox");
     const { computeDiffStat } = await import("../src/daemon/task-outcome");
     const { createTask, updateTask, getTask } = await import("../src/core/db");

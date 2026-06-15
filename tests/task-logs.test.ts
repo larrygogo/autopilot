@@ -7,7 +7,7 @@ import { tmpdir } from "os";
 
 // task-logs 模块路径：用正斜杠避免 Windows 反斜杠在 JS 字符串字面量里被当作转义字符吃掉
 // （相同根因之前在 src/core/registry.ts 已修复）
-const TASK_LOGS_MODULE = join(import.meta.dir, "..", "src", "core", "task-logs").replace(/\\/g, "/");
+const TASK_LOGS_MODULE = join(import.meta.dir, "..", "src", "core", "task", "logs").replace(/\\/g, "/");
 
 let tmpHome: string;
 

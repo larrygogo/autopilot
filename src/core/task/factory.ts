@@ -1,16 +1,16 @@
-import { getTask, createTask, closeOpenPhaseEvents, nextRunSeqForRequirement } from "./db";
-import type { Task } from "./db";
-import { discover, getWorkflow, listWorkflows, isParallelPhase, getTerminalStates } from "./registry";
-import { snapshotWorkflow } from "./manifest";
-import { ensureTaskSandbox, ensureRunCodebaseSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskSandbox, bindTaskRunRoot, removeTaskWorktree, type WorkspaceRef } from "./sandbox";
+import { getTask, createTask, closeOpenPhaseEvents, nextRunSeqForRequirement } from "../db";
+import type { Task } from "../db";
+import { discover, getWorkflow, listWorkflows, isParallelPhase, getTerminalStates } from "../registry";
+import { snapshotWorkflow } from "../manifest";
+import { ensureTaskSandbox, ensureRunCodebaseSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskSandbox, bindTaskRunRoot, removeTaskWorktree, type WorkspaceRef } from "../sandbox";
 import { rmSync } from "fs";
-import { getWorkspaceById } from "./workspaces";
-import { getRequirementById, updateRequirement, listRequirementWorkspaces } from "./requirements";
-import { clearSubPrs } from "./requirement-sub-prs";
-import { isLocked } from "./infra";
-import { forgetTaskRecoveryState } from "./watcher";
-import { executePhase } from "./runner";
-import { closeAgents } from "../agents/registry";
+import { getWorkspaceById } from "../workspaces";
+import { getRequirementById, updateRequirement, listRequirementWorkspaces } from "../requirements";
+import { clearSubPrs } from "../requirement-sub-prs";
+import { isLocked } from "../infra";
+import { forgetTaskRecoveryState } from "../watcher";
+import { executePhase } from "../runner";
+import { closeAgents } from "../../agents/registry";
 
 /** WorkspaceRef + alias（多库沙盒子目录名用） */
 type WorkspaceRefWithAlias = WorkspaceRef & { alias?: string };

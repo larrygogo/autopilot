@@ -4,7 +4,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { expandPromptTemplate, tryMakePromptRunnerForPhase } from "../src/core/prompt-runner";
 import { _clearRegistry, loadYamlWorkflow, register, type PhaseDefinition } from "../src/core/registry";
-import { runWithTaskContext } from "../src/core/task-context";
+import { runWithTaskContext } from "../src/core/task/context";
 
 let tmpHome: string;
 

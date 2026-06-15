@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync, statSync } from "fs";
 import { join } from "path";
-import { log } from "./logger";
-import { getTaskRoot } from "./sandbox";
+import { log } from "../logger";
+import { getTaskRoot } from "../sandbox";
 
 // ──────────────────────────────────────────────
 // 任务日志落盘

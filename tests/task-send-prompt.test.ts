@@ -28,7 +28,7 @@ import {
   sendPromptToTask,
   consumePendingPrompts,
   peekPendingPrompts,
-} from "../src/core/task-send-prompt";
+} from "../src/core/task/send-prompt";
 import { registerPending, answerPending, hasPending } from "../src/agents/pending-questions";
 
 describe("sendPromptToTask 三档分支", () => {

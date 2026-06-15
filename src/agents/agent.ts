@@ -2,9 +2,9 @@ import type { BaseProvider } from "./providers/base";
 import type { AgentConfig, AgentResult, RunOptions, ChatOptions, ChatResult, AgentMode } from "./types";
 import type { ApiAgentLoop } from "./providers/api/loop";
 import { UnsupportedInApiModeError } from "./providers/api/tools";
-import { getTaskContext } from "../core/task-context";
+import { getTaskContext } from "../core/task/context";
 import { getTaskAgentHome } from "../core/sandbox";
-import { appendAgentCall } from "../core/task-logs";
+import { appendAgentCall } from "../core/task/logs";
 import {
   recordProviderSuccess,
   recordProviderFailure,

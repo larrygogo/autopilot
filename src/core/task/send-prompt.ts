@@ -15,9 +15,9 @@
  *   - ts phase 实现者主动调 consumePendingPrompts()；忘了调 runner.ts wrapper 会 warn
  */
 
-import { getTask, appendPendingPrompt, updateTask, type PendingPromptItem } from "./db";
-import { emit } from "./event-bus";
-import { log } from "./logger";
+import { getTask, appendPendingPrompt, updateTask, type PendingPromptItem } from "../db";
+import { emit } from "../event-bus";
+import { log } from "../logger";
 
 export type SendPromptMode = "queued" | "answered" | "rejected";
 export type SendPromptSource = "user" | "schedule" | "github";
@@ -68,7 +68,7 @@ export function sendPromptToTask(
   if (task.status.startsWith("awaiting_")) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pending = require("../agents/pending-questions") as typeof import("../agents/pending-questions");
+      const pending = require("../../agents/pending-questions") as typeof import("../../agents/pending-questions");
       if (pending.hasPending(taskId)) {
         const answered = pending.answerPending(taskId, text);
         if (answered) {

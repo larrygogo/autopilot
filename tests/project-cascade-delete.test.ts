@@ -18,7 +18,7 @@ import {
 import { runPendingMigrations } from "../src/core/migrate";
 import { createProject, deleteProject, getProjectById } from "../src/core/projects";
 import { createRequirement, getRequirementById, updateRequirement } from "../src/core/requirements";
-import { forceDeleteTasksForProject } from "../src/core/task-delete";
+import { forceDeleteTasksForProject } from "../src/core/task/delete";
 
 describe("项目级联删除", () => {
   let db: Database;

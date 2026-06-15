@@ -1,6 +1,6 @@
 import { getDb, getTask, now, closeOpenPhaseEvents, TABLE_COLUMNS, PROTECTED_COLUMNS } from "./db";
 import { emit } from "./event-bus";
-import { appendTaskEvent } from "./task-logs";
+import { appendTaskEvent } from "./task/logs";
 import { appendTransition as appendManifestTransition } from "./manifest";
 
 // ──────────────────────────────────────────────

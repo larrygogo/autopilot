@@ -48,7 +48,7 @@ import {
   type WorkflowDefinition,
   type PhaseDefinition,
 } from "../core/registry";
-import { startTaskFromTemplate, isTaskTerminal, StartTaskError } from "../core/task-factory";
+import { startTaskFromTemplate, isTaskTerminal, StartTaskError } from "../core/task/factory";
 import { agentForPhase } from "../agents/registry";
 import type { InlineAgentConfig } from "../core/agent-defaults";
 import { createLogger } from "../core/logger";

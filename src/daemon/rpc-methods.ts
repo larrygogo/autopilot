@@ -142,7 +142,7 @@ import {
   readPhaseLog,
   listAgentCalls,
   getAgentCall,
-} from "../core/task-logs";
+} from "../core/task/logs";
 import { phaseIndex, parseDecisionCounts, renderDecisionMd } from "./routes";
 import { computeTaskOutcome } from "./task-outcome";
 import {
@@ -155,9 +155,9 @@ import {
   cancelTasksForRequirements,
   TaskActionError,
 } from "./task-actions";
-import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
+import { startTaskFromTemplate, StartTaskError } from "../core/task/factory";
 import { startTaskFromPrompt } from "./start-from-prompt";
-import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "../core/task-delete";
+import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "../core/task/delete";
 import { registerRpcMethod, hasRpcMethod, RpcError } from "./rpc";
 import { wsManager } from "./ws";
 import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
@@ -672,7 +672,7 @@ function registerTaskRpc(): void {
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const prompt = typeof p.prompt === "string" ? p.prompt : "";
       if (!prompt.trim()) throw new RpcError("INVALID_PARAM", "需要 prompt");
-      const { sendPromptToTask } = await import("../core/task-send-prompt");
+      const { sendPromptToTask } = await import("../core/task/send-prompt");
       const result = sendPromptToTask(p.id, prompt, { source: "user" });
       if (!result.accepted) {
         if (result.reason === "TASK_TERMINAL") throw new RpcError("TASK_TERMINAL", "task 已是终态，无法接受新 prompt");

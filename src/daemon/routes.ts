@@ -33,7 +33,7 @@ import { DEFAULT_AGENT } from "../core/agent-defaults";
 import type { ListTasksFilters } from "../core/db";
 import { transition, canTransition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
-import { startTaskFromTemplate, StartTaskError } from "../core/task-factory";
+import { startTaskFromTemplate, StartTaskError } from "../core/task/factory";
 import { releaseTaskSandboxAction, TaskActionError } from "./task-actions";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { listWorkspaces } from "../core/workspaces";
@@ -107,7 +107,7 @@ import {
   spawnSandboxZip,
   sandboxSize,
 } from "../core/sandbox-browse";
-import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task-logs";
+import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task/logs";
 import { emit } from "../core/event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
 
@@ -475,7 +475,7 @@ export function renderDecisionMd(d: { phase: string; decision: string; note: str
 // ──────────────────────────────────────────────
 
 // 字母表去掉容易混淆的字符（0/1/o/i/l）以及 4（团队偏好）
-// task id 生成与任务启动逻辑已迁到 src/core/task-factory.ts
+// task id 生成与任务启动逻辑已迁到 src/core/task/factory.ts
 
 // ──────────────────────────────────────────────
 // 静态文件服务
