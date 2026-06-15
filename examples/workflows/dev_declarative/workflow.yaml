@@ -93,6 +93,10 @@ phases:
       指出真问题而非格式纠错（结论由系统裁判，你只需把评审意见写清楚在回复里）。
     decision:
       mode: judge
+      # 结构化裁判走 API 模式 + 强制 tool_choice，需 provider 有 API key。缺省 anthropic（spec 钦定
+      # 最可靠的 tool_choice）；此处指向 kimi-code 仅为本机 dogfood（用户只配了 kimi-code）。
+      # 通用部署改成你有 key 的 provider，或删掉这行用默认 anthropic。
+      judge_provider: kimi-code
       criteria: |
         通过（pass）标准：改动正确实现了需求与技术方案的核心目标，无明显正确性 / 安全问题，
         关键路径有基本测试或可验证。仅有 minor 风格问题不构成驳回。

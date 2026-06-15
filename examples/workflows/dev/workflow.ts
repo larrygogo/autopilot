@@ -22,9 +22,20 @@ import { appendSubPr } from "@autopilot/core/requirement-sub-prs";
 import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { notify } from "@autopilot/core/notify";
 import { deliverPr } from "@autopilot/core/deliver-pr";
+import { judgeVerdict } from "@autopilot/core/judge";
 
-const REVIEW_RESULT_PASS = "REVIEW_RESULT: PASS";
-const REVIEW_RESULT_REJECT = "REVIEW_RESULT: REJECT";
+// 结构化裁判 provider：dev 的 review agent 走 anthropic CLI（订阅，无 API key），但结构化裁判
+// 需 API 模式 + 强制 tool_choice。这里指向用户已配的 kimi-code（openai-compat，已实测兼容
+// Kimi 思考端点的 tool_choice 强制）。换裁判 provider 改这里一处即可。
+const JUDGE_PROVIDER = "kimi-code";
+
+// 评审裁判标准（拼进结构化裁判 prompt，替代旧的 REVIEW_RESULT 标记约定）。
+const DESIGN_REVIEW_CRITERIA =
+  "通过(pass)：方案完整覆盖需求、技术可行、风险与测试有交代。\n" +
+  "驳回(reject)：关键设计缺失 / 不可行 / 重大风险未处理 / 与需求严重不符。仅 minor 表述问题不驳回。";
+const CODE_REVIEW_CRITERIA =
+  "通过(pass)：改动正确实现了需求与技术方案的核心目标，无明显正确性/安全问题，关键路径可验证。仅 minor 风格问题不驳回。\n" +
+  "驳回(reject)：critical/important 缺陷——功能未实现 / 逻辑错误 / 安全隐患 / 与方案严重不符。";
 
 // ──────────────────────────────────────────────
 // 辅助函数
@@ -194,11 +205,8 @@ export async function run_review(taskId: string): Promise<void> {
     `你是一位技术评审专家。请评审以下技术方案是否满足需求。\n\n` +
     `## 需求\n${requirement}\n\n` +
     `## 技术方案\n${planContent}\n\n` +
-    `请从以下维度评审：完整性、可行性、风险点、测试覆盖。\n\n` +
-    `最后必须输出以下结论之一（独占一行）：\n` +
-    `- ${REVIEW_RESULT_PASS}\n` +
-    `- ${REVIEW_RESULT_REJECT}\n\n` +
-    `如果驳回，请在 ## 驳回理由 下说明具体问题。`;
+    `请从以下维度给出散文评审：完整性、可行性、风险点、测试覆盖。指出真问题、说明是否建议通过。` +
+    `结论由系统裁判，你只需把评审意见写清楚（无需输出固定结论标记）。`;
 
   const agent = agentForPhase(task.workflow, "review");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 900_000 });
@@ -207,50 +215,55 @@ export async function run_review(taskId: string): Promise<void> {
   const reviewPath = join(phaseDir(taskId, task.workflow, "review"), "plan_review.md");
   writeFileSync(reviewPath, `<!-- generated:${new Date().toISOString()} -->\n${text}`, "utf-8");
 
-  const passed = text.includes(REVIEW_RESULT_PASS);
-  const rejected = text.includes(REVIEW_RESULT_REJECT);
+  // 结构化裁判把散文评审收敛成 pass/reject（替代旧的 REVIEW_RESULT 标记匹配；
+  // 模型不守格式 / 散文干扰预判的隐患由框架担保的结构化通道消除）。
+  const verdict = await judgeVerdict({ review: text, criteria: DESIGN_REVIEW_CRITERIA, provider: JUDGE_PROVIDER });
   const transitions = getTransitions(task.workflow);
 
-  if (passed) {
+  if (verdict.verdict === "ambiguous") {
+    // 裁判两次仍未给出明确结论 → 停下报人（与旧「无法解析评审结论」同语义）。
+    throw new Error("结构化裁判无法判定方案评审结论（pass/reject），请检查评审报告");
+  }
+
+  if (verdict.verdict === "pass") {
     transition(taskId, "review_complete", { transitions, note: "方案评审通过" });
     runInBackground(taskId, "develop");
-  } else if (rejected) {
-    const reasonMatch = text.match(/## 驳回理由\n([\s\S]*?)(?=\n## |\s*$)/);
-    const reason = reasonMatch ? reasonMatch[1].trim() : "请查看评审报告";
-    const rejectionCounts = getRejectionCounts(task);
-    const newCount = (rejectionCounts["design"] ?? 0) + 1;
-    rejectionCounts["design"] = newCount;
+    return;
+  }
 
-    const wf = getWorkflow(task.workflow);
-    const reviewPhase = wf?.phases.find(
-      (p) => !("parallel" in p) && (p as { name: string }).name === "review"
-    ) as { max_rejections?: number } | undefined;
-    const maxRejections = reviewPhase?.max_rejections ?? 3;
+  // reject
+  const reason = verdict.reason || "请查看评审报告";
+  const rejectionCounts = getRejectionCounts(task);
+  const newCount = (rejectionCounts["design"] ?? 0) + 1;
+  rejectionCounts["design"] = newCount;
 
-    if (newCount >= maxRejections) {
-      // 触顶 = 停下报人：转 failed（可重试终态，用户补约束后可一键重新入队），
-      // 不再 cancel（cancelled 是死终态，会把「撞墙需要人介入」表达成「用户不想要了」）。
-      try {
-        await notify(
-          task,
-          `方案评审反复驳回 ${newCount} 次（≥ ${maxRejections}），任务已暂停等待人工处理。最近一次理由：${reason.slice(0, 200)}`,
-          "task-failed",
-        );
-      } catch { /* notify 失败不阻塞 */ }
-      // forceTransition 不带 extraUpdates，先落 extra（驳回详情供 bridge 沉淀回需求评论）
-      updateTask(taskId, { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason });
-      forceTransition(taskId, "failed", `方案评审驳回 ${newCount} 次，已暂停等待人工处理`);
-    } else {
-      transition(taskId, "review_reject", {
-        transitions,
-        note: `方案评审驳回（第${newCount}次）`,
-        extraUpdates: { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason },
-      });
-      transition(taskId, "retry_design", { transitions, note: `自动重新设计（第${newCount}次驳回）` });
-      runInBackground(taskId, "design");
-    }
+  const wf = getWorkflow(task.workflow);
+  const reviewPhase = wf?.phases.find(
+    (p) => !("parallel" in p) && (p as { name: string }).name === "review"
+  ) as { max_rejections?: number } | undefined;
+  const maxRejections = reviewPhase?.max_rejections ?? 3;
+
+  if (newCount >= maxRejections) {
+    // 触顶 = 停下报人：转 failed（可重试终态，用户补约束后可一键重新入队），
+    // 不再 cancel（cancelled 是死终态，会把「撞墙需要人介入」表达成「用户不想要了」）。
+    try {
+      await notify(
+        task,
+        `方案评审反复驳回 ${newCount} 次（≥ ${maxRejections}），任务已暂停等待人工处理。最近一次理由：${reason.slice(0, 200)}`,
+        "task-failed",
+      );
+    } catch { /* notify 失败不阻塞 */ }
+    // forceTransition 不带 extraUpdates，先落 extra（驳回详情供 bridge 沉淀回需求评论）
+    updateTask(taskId, { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason });
+    forceTransition(taskId, "failed", `方案评审驳回 ${newCount} 次，已暂停等待人工处理`);
   } else {
-    throw new Error("无法解析评审结论，请检查报告");
+    transition(taskId, "review_reject", {
+      transitions,
+      note: `方案评审驳回（第${newCount}次）`,
+      extraUpdates: { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason },
+    });
+    transition(taskId, "retry_design", { transitions, note: `自动重新设计（第${newCount}次驳回）` });
+    runInBackground(taskId, "design");
   }
 }
 
@@ -352,11 +365,8 @@ export async function run_code_review(taskId: string): Promise<void> {
     (repoLayoutSection(repos) ? `${repoLayoutSection(repos)}\n\n` : "") +
     `## 变更文件全景（git diff --stat 全量）\n${statSections}\n` +
     `## 代码变更\n${diffSections}${truncationNotice}\n\n` +
-    `请从以下维度审查：正确性、代码质量、安全性、测试覆盖。\n\n` +
-    `最后必须输出以下结论之一（独占一行）：\n` +
-    `- ${REVIEW_RESULT_PASS}\n` +
-    `- ${REVIEW_RESULT_REJECT}\n\n` +
-    `如果驳回，请在 ## 不通过理由 下说明具体问题。`;
+    `请从以下维度给出散文审查：正确性、代码质量、安全性、测试覆盖。指出真问题而非格式纠错、` +
+    `说明是否建议通过。结论由系统裁判，你只需把审查意见写清楚（无需输出固定结论标记）。`;
 
   const agent = agentForPhase(task.workflow, "code_review");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_200_000 });
@@ -365,48 +375,51 @@ export async function run_code_review(taskId: string): Promise<void> {
   const reviewPath = join(phaseDir(taskId, task.workflow, "code_review"), "code_review_report.md");
   writeFileSync(reviewPath, `<!-- generated:${new Date().toISOString()} -->\n${text}`, "utf-8");
 
-  const passed = text.includes(REVIEW_RESULT_PASS);
-  const rejected = text.includes(REVIEW_RESULT_REJECT);
+  // 结构化裁判收敛散文审查为 pass/reject（替代旧标记匹配）。
+  const verdict = await judgeVerdict({ review: text, criteria: CODE_REVIEW_CRITERIA, provider: JUDGE_PROVIDER });
   const transitions = getTransitions(task.workflow);
 
-  if (passed) {
+  if (verdict.verdict === "ambiguous") {
+    throw new Error("结构化裁判无法判定代码审查结论（pass/reject），请检查审查报告");
+  }
+
+  if (verdict.verdict === "pass") {
     transition(taskId, "code_review_complete", { transitions, note: "代码审查通过" });
     runInBackground(taskId, "submit_pr");
-  } else if (rejected) {
-    const reasonMatch = text.match(/## 不通过理由\n([\s\S]*?)(?=\n## |\s*$)/);
-    const reason = reasonMatch ? reasonMatch[1].trim() : "请查看审查报告";
-    const rejectionCounts = getRejectionCounts(task);
-    const newCount = (rejectionCounts["code"] ?? 0) + 1;
-    rejectionCounts["code"] = newCount;
+    return;
+  }
 
-    const wf = getWorkflow(task.workflow);
-    const codeReviewPhase = wf?.phases.find(
-      (p) => !("parallel" in p) && (p as { name: string }).name === "code_review"
-    ) as { max_rejections?: number } | undefined;
-    const maxRejections = codeReviewPhase?.max_rejections ?? 3;
+  // reject
+  const reason = verdict.reason || "请查看审查报告";
+  const rejectionCounts = getRejectionCounts(task);
+  const newCount = (rejectionCounts["code"] ?? 0) + 1;
+  rejectionCounts["code"] = newCount;
 
-    if (newCount >= maxRejections) {
-      // 触顶 = 停下报人：转 failed（可重试终态），同 review 触顶分支
-      try {
-        await notify(
-          task,
-          `代码审查反复驳回 ${newCount} 次（≥ ${maxRejections}），任务已暂停等待人工处理。最近一次理由：${reason.slice(0, 200)}`,
-          "task-failed",
-        );
-      } catch { /* notify 失败不阻塞 */ }
-      updateTask(taskId, { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason });
-      forceTransition(taskId, "failed", `代码审查驳回 ${newCount} 次，已暂停等待人工处理`);
-    } else {
-      transition(taskId, "code_review_reject", {
-        transitions,
-        note: `代码审查驳回（第${newCount}次）`,
-        extraUpdates: { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason },
-      });
-      transition(taskId, "retry_develop", { transitions, note: `自动返工（第${newCount}次驳回）` });
-      runInBackground(taskId, "develop");
-    }
+  const wf = getWorkflow(task.workflow);
+  const codeReviewPhase = wf?.phases.find(
+    (p) => !("parallel" in p) && (p as { name: string }).name === "code_review"
+  ) as { max_rejections?: number } | undefined;
+  const maxRejections = codeReviewPhase?.max_rejections ?? 3;
+
+  if (newCount >= maxRejections) {
+    // 触顶 = 停下报人：转 failed（可重试终态），同 review 触顶分支
+    try {
+      await notify(
+        task,
+        `代码审查反复驳回 ${newCount} 次（≥ ${maxRejections}），任务已暂停等待人工处理。最近一次理由：${reason.slice(0, 200)}`,
+        "task-failed",
+      );
+    } catch { /* notify 失败不阻塞 */ }
+    updateTask(taskId, { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason });
+    forceTransition(taskId, "failed", `代码审查驳回 ${newCount} 次，已暂停等待人工处理`);
   } else {
-    throw new Error("无法解析审查结论，请检查报告");
+    transition(taskId, "code_review_reject", {
+      transitions,
+      note: `代码审查驳回（第${newCount}次）`,
+      extraUpdates: { rejection_counts: JSON.stringify(rejectionCounts), rejection_reason: reason },
+    });
+    transition(taskId, "retry_develop", { transitions, note: `自动返工（第${newCount}次驳回）` });
+    runInBackground(taskId, "develop");
   }
 }
 
