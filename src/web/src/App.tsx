@@ -602,7 +602,7 @@ function TaskDetailRoute() {
       alive = false;
     };
   }, [id]);
-  if (!target) return null;
+  if (!target) return <PageLoader />; // 解析 task → 目标路由期间的过渡态（瞬时）
   return <Navigate to={target} replace />;
 }
 
