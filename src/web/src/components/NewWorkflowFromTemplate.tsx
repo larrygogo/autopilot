@@ -123,15 +123,15 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
         <DialogHeader>
           <DialogTitle>新建工作流</DialogTitle>
           <DialogDescription>
-            从内置模板克隆是最快的方式——你能在它上面调整 phases / agents。
+            选一个内置模板最快；也可以用 AI 描述、导入 JSON，或从零开始自定义。
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <div className="space-y-4">
+          {/* 创建方式：AI / 导入 / 从零，与「内置模板」分开（它们不是模板，是创建入口） */}
           <div className="space-y-2">
-            <Label className="bp-label">选择模板</Label>
-            <div className="max-h-72 space-y-1.5 overflow-y-auto">
-              {/* AI 生成入口放最前面，最显眼 */}
+            <Label className="bp-label">创建方式</Label>
+            <div className="space-y-1.5">
               <button
                 type="button"
                 onClick={() => setSelected(FROM_AI)}
@@ -166,6 +166,26 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
                 />
               </label>
 
+              <button
+                type="button"
+                onClick={() => setSelected(FROM_SCRATCH)}
+                className={cn(
+                  "block w-full rounded-md border px-3 py-2 text-left transition-colors",
+                  selected === FROM_SCRATCH
+                    ? "border-accent bg-accent/5"
+                    : "border-border hover:border-foreground/60",
+                )}
+              >
+                <span className="text-sm font-bold">⊕ 从零开始（高级）</span>
+                <p className="mt-0.5 text-xs text-muted-foreground">不基于模板，手工写所有 phases / agents</p>
+              </button>
+            </div>
+          </div>
+
+          {/* 内置模板：选中后在下方填名字创建（= 基于模板新建一份，可在它上面改 phases / agents） */}
+          <div className="space-y-2">
+            <Label className="bp-label">选择内置模板</Label>
+            <div className="max-h-56 space-y-1.5 overflow-y-auto">
               {loading && <p className="text-sm text-muted-foreground">加载中…</p>}
               {!loading && templates.length === 0 && (
                 <p className="text-sm text-muted-foreground">未找到内置模板</p>
@@ -198,20 +218,6 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromScrat
                   <p className="mt-0.5 text-xs text-muted-foreground">{t.description || "（无描述）"}</p>
                 </button>
               ))}
-
-              <button
-                type="button"
-                onClick={() => setSelected(FROM_SCRATCH)}
-                className={cn(
-                  "block w-full rounded-md border px-3 py-2 text-left transition-colors",
-                  selected === FROM_SCRATCH
-                    ? "border-accent bg-accent/5"
-                    : "border-border hover:border-foreground/60",
-                )}
-              >
-                <span className="text-sm font-bold">⊕ 从零开始（高级）</span>
-                <p className="mt-0.5 text-xs text-muted-foreground">不基于模板，手工写所有 phases / agents</p>
-              </button>
             </div>
           </div>
 
