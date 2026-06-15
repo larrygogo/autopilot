@@ -57,7 +57,6 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
   if (loading || !outcome) return null;
 
   const vis = statusVisual(outcome.status);
-  const statusIcon = vis.glyph;
   const statusLabel = vis.label;
   const statusColor = toneToTextClass(vis.tone);
 
@@ -98,7 +97,6 @@ export function TaskOutcomeCard({ taskId, reloadKey, requirementId, workflow, ta
       </header>
       <div className="space-y-3 px-3 py-3 text-sm">
         <div className={"flex items-center gap-2 font-mono " + statusColor}>
-          <span className="text-base">{statusIcon}</span>
           <span className="font-bold">{statusLabel}</span>
           <span className="text-muted-foreground">·</span>
           <span className="text-muted-foreground">总耗时 {formatDuration(outcome.total_duration_ms)}</span>

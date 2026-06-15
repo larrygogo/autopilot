@@ -55,6 +55,22 @@ describe("computeTaskOutcome", () => {
     expect(o!.diff_stat).toBeNull();
   });
 
+  it("PR 取本 run 自己的 pr_url（存 extra），不借兄弟/需求的 PR（多 run 回归）", async () => {
+    // 交付了的 run：自己 extra.pr_url → outcome 显示它（pr_number 从 url 解析）
+    createTask({ id: "run-a", title: "x", workflow: "dev", initialStatus: "running_design" });
+    updateTask("run-a", { status: "done", pr_url: "https://github.com/o/r/pull/96" });
+    const oa = await computeTaskOutcome("run-a");
+    expect(oa!.pr_url).toBe("https://github.com/o/r/pull/96");
+    expect(oa!.pr_number).toBe(96);
+
+    // 失败的 run：自己没 pr_url → outcome.pr_url = null（不借最新 run 的 #96，dogfood req-023 回归）
+    createTask({ id: "run-b", title: "x", workflow: "dev", initialStatus: "running_design" });
+    updateTask("run-b", { status: "failed" });
+    const ob = await computeTaskOutcome("run-b");
+    expect(ob!.pr_url).toBeNull();
+    expect(ob!.pr_number).toBeNull();
+  });
+
 });
 
 // 共用沙盒模型：diff_stat 对任务 clone 工作树跑 git diff（add -A + diff --cached <base>），

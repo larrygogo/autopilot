@@ -58,23 +58,14 @@ export async function computeTaskOutcome(taskId: string): Promise<TaskOutcome | 
     .sort((a, b) => b.duration_ms - a.duration_ms)
     .slice(0, 3);
 
-  // 2) PR 链接（从 requirement 拉）
-  let pr_url: string | null = null;
-  let pr_number: number | null = null;
+  // 2) PR 链接（取**本 run 自己的** pr_url —— 存于 task.extra，deliverPr 在 submit_pr 时回填）。
+  //    刻意不从 requirement 拉：多 run 下 requirement.pr_url 只反映最新 run，否则历史 / 失败 run
+  //    会借显最新 run 的 PR（dogfood req-023：失败的 run#1 误显 run#2 交付的 PR #96）。
+  //    task 无独立 pr_number 列，从 url 解析。
   const reqId = (task as Record<string, unknown>).requirement_id as string | undefined;
-  if (reqId) {
-    try {
-      const row = getDb()
-        .query<{ pr_url: string | null; pr_number: number | null }, [string]>(
-          "SELECT pr_url, pr_number FROM requirements WHERE id = ?"
-        )
-        .get(reqId);
-      pr_url = row?.pr_url ?? null;
-      pr_number = row?.pr_number ?? null;
-    } catch (e: unknown) {
-      log.warn("拉 PR 信息失败 [task=%s req=%s]: %s", taskId, reqId, e instanceof Error ? e.message : String(e));
-    }
-  }
+  const ownPrUrl = (task as Record<string, unknown>).pr_url as string | undefined;
+  const pr_url: string | null = ownPrUrl ?? null;
+  const pr_number: number | null = pr_url ? (Number(pr_url.match(/\/pull\/(\d+)/)?.[1]) || null) : null;
 
   // 3) sandbox + diff_stat
   // 统一 multi-clone 布局：按 .worktree.json 的 repos 逐库统计（add -A + diff --cached

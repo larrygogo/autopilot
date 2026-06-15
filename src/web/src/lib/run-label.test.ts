@@ -58,31 +58,36 @@ test("computeRunLabels: 无 kind 列的历史数据当 execution", () => {
   expect(labels.get("b")).toBe("执行 #2");
 });
 
-test("runOutcome: done + pr_url → ✓ PR #号 + 跳转", () => {
+test("runOutcome: done + pr_url + pr_number → PR #号 + 跳转（无 ✓ 符号）", () => {
   const o = runOutcome(run({ id: "a", status: "done", pr_url: "https://x/pr/9", pr_number: 9 }));
   expect(o.tone).toBe("done");
-  expect(o.text).toBe("✓ PR #9");
+  expect(o.text).toBe("PR #9");
   expect(o.prUrl).toBe("https://x/pr/9");
 });
 
-test("runOutcome: done 无 pr → ✓ 已交付，无 prUrl", () => {
+test("runOutcome: done + pr_url 但 pr_number 缺失 → 从 url 解析号（不出现「PR PR」）", () => {
+  const o = runOutcome(run({ id: "a", status: "done", pr_url: "https://github.com/o/r/pull/96" }));
+  expect(o.text).toBe("PR #96");
+});
+
+test("runOutcome: done 无 pr → 已交付（无符号），无 prUrl", () => {
   const o = runOutcome(run({ id: "a", status: "done" }));
   expect(o.tone).toBe("done");
-  expect(o.text).toBe("✓ 已交付");
+  expect(o.text).toBe("已交付");
   expect(o.prUrl).toBeUndefined();
 });
 
-test("runOutcome: failed → ✗ 失败", () => {
-  expect(runOutcome(run({ id: "a", status: "failed" }))).toMatchObject({ tone: "failed", text: "✗ 失败" });
+test("runOutcome: failed → 失败（无 ✗ 符号）", () => {
+  expect(runOutcome(run({ id: "a", status: "failed" }))).toMatchObject({ tone: "failed", text: "失败" });
 });
 
-test("runOutcome: cancelled / canceled → ⊘ 已取消", () => {
-  expect(runOutcome(run({ id: "a", status: "cancelled" })).text).toBe("⊘ 已取消");
-  expect(runOutcome(run({ id: "a", status: "canceled" })).text).toBe("⊘ 已取消");
+test("runOutcome: cancelled / canceled → 已取消（无符号）", () => {
+  expect(runOutcome(run({ id: "a", status: "cancelled" })).text).toBe("已取消");
+  expect(runOutcome(run({ id: "a", status: "canceled" })).text).toBe("已取消");
 });
 
-test("runOutcome: 非终态按 kind 区分执行中/修复中", () => {
-  expect(runOutcome(run({ id: "a", status: "running_design", kind: "execution" })).text).toBe("◴ 执行中…");
-  expect(runOutcome(run({ id: "b", status: "running_fix", kind: "fix" })).text).toBe("◴ 修复中…");
+test("runOutcome: 非终态按 kind 区分执行中/修复中（无符号）", () => {
+  expect(runOutcome(run({ id: "a", status: "running_design", kind: "execution" })).text).toBe("执行中…");
+  expect(runOutcome(run({ id: "b", status: "running_fix", kind: "fix" })).text).toBe("修复中…");
   expect(runOutcome(run({ id: "c", status: "awaiting_review", kind: "execution" })).tone).toBe("active");
 });

@@ -69,26 +69,27 @@ const TERMINAL_CANCELLED = new Set(["cancelled", "canceled"]);
 
 /**
  * 计算 run 的终态结果（line-2 文案 + 状态点色调）。
- *  - done + 有 pr_url → ✓ PR #号（可点跳转）
- *  - done 无 pr → ✓ 已交付
- *  - failed → ✗ 失败
- *  - cancelled → ⊘ 已取消
- *  - 其余（running/awaiting/pending…）→ ◴ 执行中… / 修复中…（按 kind）
+ * 不带 ✓/✗/⊘/◴ 符号 —— 状态由前面的 tone 色点表达，文案只给业务话结果（避免符号噪音 + 重复）。
+ *  - done + 有 pr_url → PR #号（可点跳转；pr_number 没存时从 url 解析，都没有才退到无号「PR」）
+ *  - done 无 pr → 已交付
+ *  - failed → 失败 / cancelled → 已取消 / 其余 → 执行中… / 修复中…（按 kind）
  */
 export function runOutcome(run: RunLike): RunOutcome {
   const s = run.status;
   if (s === "done") {
     if (run.pr_url) {
-      const num = run.pr_number != null ? `#${run.pr_number}` : "PR";
-      return { tone: "done", text: `✓ PR ${num}`, prUrl: run.pr_url };
+      // pr_number 可能没存（task.extra 只回填了 pr_url）→ 从 url 解析；都没有才用无号「PR」
+      // （历史 bug：pr_number 缺失时拼成「PR PR」）。
+      const n = run.pr_number ?? (Number(run.pr_url.match(/\/pull\/(\d+)/)?.[1]) || null);
+      return { tone: "done", text: n != null ? `PR #${n}` : "PR", prUrl: run.pr_url };
     }
-    return { tone: "done", text: "✓ 已交付" };
+    return { tone: "done", text: "已交付" };
   }
-  if (TERMINAL_FAILED.has(s)) return { tone: "failed", text: "✗ 失败" };
-  if (TERMINAL_CANCELLED.has(s)) return { tone: "cancelled", text: "⊘ 已取消" };
+  if (TERMINAL_FAILED.has(s)) return { tone: "failed", text: "失败" };
+  if (TERMINAL_CANCELLED.has(s)) return { tone: "cancelled", text: "已取消" };
   // 非终态：按 kind 区分「执行中」/「修复中」
   return {
     tone: "active",
-    text: normKind(run.kind) === "fix" ? "◴ 修复中…" : "◴ 执行中…",
+    text: normKind(run.kind) === "fix" ? "修复中…" : "执行中…",
   };
 }

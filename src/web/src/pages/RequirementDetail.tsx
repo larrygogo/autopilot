@@ -1334,7 +1334,6 @@ export function RequirementDetail() {
       <Card id="task-record">
         <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
           <span className="text-sm font-medium">执行记录</span>
-          <span className="font-mono text-[10px] text-muted-foreground">TASK {shownTaskId.slice(0, 8)}…</span>
         </div>
         {/* loading：切换器位用骨架；多 run：切换器 */}
         {runs === undefined ? (
