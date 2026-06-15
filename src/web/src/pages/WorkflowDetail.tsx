@@ -52,6 +52,30 @@ const DELIVERS_TEXT: Record<DeliversCode, string> = {
   artifacts: "文件产物",
 };
 
+/**
+ * 把声明层三件套拼成一句人话总结，让用户读结论而非自己跑因果链。
+ * requires.git=inherit 时按后端口径（缺省派生自 sandbox.git）落到实际语义。
+ */
+function declarationSummary(detail: WorkflowDetailData | null): string {
+  const reqGit = readReqGit(detail);
+  const sandbox = readSandboxGit(detail);
+  const delivers = readDelivers(detail);
+  const libPart =
+    reqGit === "true"
+      ? "必须挂代码库"
+      : reqGit === "optional"
+        ? "代码库可选"
+        : reqGit === "false"
+          ? "不需要代码库"
+          : sandbox === "on"
+            ? "必须挂代码库"
+            : "不需要代码库"; // inherit 派生
+  const clonePart = sandbox === "on" ? "会克隆代码" : "不克隆代码";
+  const deliverPart =
+    delivers === "pr" ? "交付 PR" : delivers === "artifacts" ? "交付文件产物" : "按运行结果定交付";
+  return `${libPart} · ${clonePart} · ${deliverPart}`;
+}
+
 
 interface WorkflowDetailData {
   name: string;
@@ -86,6 +110,7 @@ export function WorkflowDetail() {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [retryingFromTask, setRetryingFromTask] = useState(false);
   const [metaEditOpen, setMetaEditOpen] = useState(false);
+  const [declEditOpen, setDeclEditOpen] = useState(false);
   const [metaLabel, setMetaLabel] = useState("");
   const [metaDesc, setMetaDesc] = useState("");
   const [metaReqGit, setMetaReqGit] = useState<ReqGitCode>("inherit");
@@ -93,6 +118,8 @@ export function WorkflowDetail() {
   const [metaDelivers, setMetaDelivers] = useState<DeliversCode>("auto");
   // 冲突态（1:1 对齐后端 lint）：声明「必须有代码库」却不建 git 沙盒 → 任务在空目录跑
   const declConflict = metaReqGit === "true" && metaSandboxGit === "off";
+  // 「跟随默认」时 requires.git 的派生值（对齐后端 getWorkflowGitRequirement：缺省 = sandbox.git）
+  const inheritedReqGitText = metaSandboxGit === "on" ? "必须有代码库" : "不需要代码库";
 
   const load = async () => {
     try {
@@ -150,10 +177,16 @@ export function WorkflowDetail() {
   const openMetaEdit = () => {
     setMetaLabel(detail?.label ?? "");
     setMetaDesc(detail?.description ?? "");
+    setMetaEditOpen(true);
+  };
+
+  // 声明层编辑独立出「工作流信息」对话框：从 Summary 卡的声明区直接进，
+  // 不再埋在「改显示名」里。三件套是最贴产品定位核心的开关，值得独立入口。
+  const openDeclEdit = () => {
     setMetaReqGit(readReqGit(detail));
     setMetaSandboxGit(readSandboxGit(detail));
     setMetaDelivers(readDelivers(detail));
-    setMetaEditOpen(true);
+    setDeclEditOpen(true);
   };
 
 
@@ -240,12 +273,29 @@ export function WorkflowDetail() {
               <p className="mb-3 text-sm text-muted-foreground">{detail.description}</p>
             )}
 
-            {/* 声明层（v2 R5）：决定这个工作流如何约束需求的输入/产出，只读露出供决策 */}
+            {/* 声明层（v2 R5）：决定这个工作流如何约束需求的输入/产出。
+                顶部一句人话总结让用户读结论；右侧独立编辑入口，不必进「改显示名」对话框 */}
             <div>
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-medium text-muted-foreground">声明 · 这个工作流如何约束需求</div>
+                  <p className="mt-0.5 text-sm text-foreground">{declarationSummary(detail)}</p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={openDeclEdit} title="编辑声明（需要代码库 / 建 git 沙盒 / 产出形态）">
+                  <Pencil className="h-4 w-4" />
+                  编辑
+                </Button>
+              </div>
               <DescList
                 columns={3}
                 items={[
-                  { label: "需要代码库", value: REQ_GIT_TEXT[readReqGit(detail)] },
+                  {
+                    label: "需要代码库",
+                    value:
+                      readReqGit(detail) === "inherit"
+                        ? `默认 → ${readSandboxGit(detail) === "on" ? "必须" : "不需要"}`
+                        : REQ_GIT_TEXT[readReqGit(detail)],
+                  },
                   {
                     label: "建 git 沙盒",
                     value:
@@ -297,19 +347,10 @@ export function WorkflowDetail() {
           </>
         }
         onSubmit={async () => {
+          // 只更新 label/desc；声明三件套（requiresGit/sandboxGit/delivers）传 undefined = 不动
           await api.setWorkflowMeta(name, {
             label: metaLabel.trim() || null,
             description: metaDesc.trim() || null,
-            requiresGit:
-              metaReqGit === "inherit"
-                ? null
-                : metaReqGit === "true"
-                  ? true
-                  : metaReqGit === "false"
-                    ? false
-                    : "optional",
-            sandboxGit: metaSandboxGit === "on" ? true : null,
-            delivers: metaDelivers === "auto" ? null : metaDelivers,
           });
           toast.success("已保存");
           await load();
@@ -333,12 +374,37 @@ export function WorkflowDetail() {
             rows={3}
           />
         </FormField>
+      </FormDialog>
 
-        {/* 声明 · 这个工作流如何约束需求（按需求生命周期因果排序：输入→执行→产出） */}
-        <div className="border-t border-border pt-3 text-xs font-medium text-muted-foreground">
-          声明 · 这个工作流如何约束需求
-        </div>
-
+      {/* 声明层编辑：独立对话框，从 Summary 卡声明区进入（不再埋在「改显示名」里） */}
+      <FormDialog
+        open={declEditOpen}
+        onOpenChange={setDeclEditOpen}
+        title="编辑声明"
+        description={
+          <>
+            决定用此工作流的需求如何约束输入与产出（按需求生命周期：输入 → 执行 → 产出）。
+            当前：<span className="font-medium text-foreground">{declarationSummary(detail)}</span>
+          </>
+        }
+        onSubmit={async () => {
+          // 只更新声明三件套；label/description 传 undefined = 不动
+          await api.setWorkflowMeta(name, {
+            requiresGit:
+              metaReqGit === "inherit"
+                ? null
+                : metaReqGit === "true"
+                  ? true
+                  : metaReqGit === "false"
+                    ? false
+                    : "optional",
+            sandboxGit: metaSandboxGit === "on" ? true : null,
+            delivers: metaDelivers === "auto" ? null : metaDelivers,
+          });
+          toast.success("已保存");
+          await load();
+        }}
+      >
         <FormField
           label="需要代码库"
           hint="决定用此工作流的需求能不能在「没挂代码库」时继续往下走"
@@ -355,6 +421,15 @@ export function WorkflowDetail() {
             </SelectContent>
           </Select>
         </FormField>
+
+        {/* 「跟随默认」派生结果实时回显：直接回答「建沙盒是不是必须要库」 */}
+        {metaReqGit === "inherit" && (
+          <p className="-mt-1 text-xs text-muted-foreground">
+            跟随默认 → 当前派生为{" "}
+            <span className="font-medium text-foreground">{inheritedReqGitText}</span>
+            （因为下方{metaSandboxGit === "on" ? "建" : "不建"} git 沙盒）
+          </p>
+        )}
 
         <FormField
           label="建 git 沙盒"
