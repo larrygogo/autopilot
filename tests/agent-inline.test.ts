@@ -64,4 +64,20 @@ describe("agentForPhase — phase 内联 agent 配置", () => {
     const a2 = agentForPhase(WF, "inline");
     expect(a1).toBe(a2);
   });
+
+  test("改 agent 字段后重注册 → 内容指纹变，返回新实例（不发旧缓存）", () => {
+    const a1 = agentForPhase(WF, "inline");
+    // 不清缓存、不重注册 → 命中
+    expect(agentForPhase(WF, "inline")).toBe(a1);
+    // 改 system_prompt 重注册同名工作流（模拟 workflow.yaml 改内联 agent 但未触发 config:updated）
+    register({
+      name: WF,
+      phases: [
+        { name: "inline", agent: { provider: "anthropic", model: "claude-opus-4-8", system_prompt: "你是评审员（已改）" } },
+      ] as unknown as PhaseDefinition[],
+    } as unknown as WorkflowDefinition);
+    const a2 = agentForPhase(WF, "inline");
+    expect(a2).not.toBe(a1); // 指纹变 → 缓存未命中
+    expect(a2.config.system_prompt).toBe("你是评审员（已改）");
+  });
 });

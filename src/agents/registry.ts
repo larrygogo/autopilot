@@ -35,6 +35,19 @@ const OFFICIAL_CLI_SUBTYPE: Record<string, string> = {
 
 const _cache = new Map<string, Agent>();
 
+/** 影响 agent 行为的字段内容指纹（短哈希）；进 cache key 防字段变更后命中旧实例。 */
+function agentConfigFingerprint(merged: Record<string, unknown>): string {
+  const relevant = {
+    provider: merged["provider"] ?? null,
+    model: merged["model"] ?? null,
+    system_prompt: merged["system_prompt"] ?? null,
+    max_turns: merged["max_turns"] ?? null,
+    permission_mode: merged["permission_mode"] ?? null,
+    tools: merged["tools"] ?? null,
+  };
+  return Bun.hash(JSON.stringify(relevant)).toString(36);
+}
+
 /** 记录已警告过的废弃 string agent，避免每次解析都刷屏 */
 const _warnedLegacyString = new Set<string>();
 
@@ -322,8 +335,11 @@ export function agentForPhase(workflowName: string, phaseName: string): Agent {
     merged["model"] = eff.default_model;
   }
 
-  // 缓存 key 含 mode，避免同一 phase 在 mode 变更后使用旧实例
-  const cacheKey = `${workflowName}:@phase:${phaseName}:${mode}`;
+  // 缓存 key 含 mode + 内容指纹（provider/model/system_prompt/max_turns/permission_mode/tools）：
+  // 任一影响 agent 行为的字段变更 → key 变 → 新实例。防 workflow.yaml 改内联 agent 字段但
+  // 未触发 config:updated 全量清缓存时发旧实例（architect 审查；config:updated 仍兜底全清）。
+  // 指纹放 key 末尾，不破坏 closeAgents/clearAllAgentCache 的 `workflowName:` 前缀清理。
+  const cacheKey = `${workflowName}:@phase:${phaseName}:${mode}:${agentConfigFingerprint(merged)}`;
   const cached = _cache.get(cacheKey);
   if (cached) return cached;
 
