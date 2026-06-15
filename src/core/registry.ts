@@ -186,9 +186,29 @@ const _registry: Map<string, WorkflowDefinition> = new Map();
  */
 const _builtins: Map<string, WorkflowDefinition> = new Map();
 
+/**
+ * 内置 phase 原语注册表（机制在 core，**具体实现由 daemon 注入**）。
+ * core 永不认识任何具体 builtin 名（如 deliver_pr）—— 它只提供"按名查实现"的机制；
+ * daemon 启动时 registerBuiltinPhase("deliver_pr", deliverPrPhase) 把"具体交付机制"注入进来。
+ * 进程生命周期内注册一次（不随 reload 清空——存的是 daemon 注入的函数引用，与磁盘发现无关）。
+ */
+export type BuiltinPhaseFunc = (taskId: string, phaseName: string) => Promise<void>;
+const _builtinPhases = new Map<string, BuiltinPhaseFunc>();
+
+/** 注册内置 phase 原语实现（daemon 启动时调，如 deliver_pr → deliverPrPhase）。 */
+export function registerBuiltinPhase(name: string, fn: BuiltinPhaseFunc): void {
+  _builtinPhases.set(name, fn);
+}
+
+/** 查已注册的内置 phase 原语；未注册返回 undefined（bindPhaseFunc 绑的包装函数执行时查）。 */
+export function getBuiltinPhase(name: string): BuiltinPhaseFunc | undefined {
+  return _builtinPhases.get(name);
+}
+
 export function _clearRegistry(): void {
   _registry.clear();
   _builtins.clear();
+  // _builtinPhases 不清：它是进程级 daemon 注入的实现，与工作流发现无关（测试夹具按需重注册）。
 }
 
 /**
@@ -511,20 +531,17 @@ function bindPhaseFunc(
   if (typeof funcRef === "function") return; // 已经是 callable
 
   // 框架内置 phase 原语（声明式工作流，零 TS）。优先于 ts 函数 / prompt-runner。
-  // 用 dynamic import 绑定，避免 registry → deliver-pr → registry 静态环依赖。
+  // 绑一个**延迟查表**包装：执行时才 getBuiltinPhase(name)——core 不认识任何具体 builtin 名，
+  // 实现由 daemon 启动时 registerBuiltinPhase 注入（绕过 discover 早于注册的时序坑）。
   if (typeof phase.builtin === "string" && phase.builtin.trim() !== "") {
     const builtinName = phase.builtin.trim();
     const phaseName = phase.name;
-    if (builtinName === "deliver_pr") {
-      phase.func = async (taskId: string) => {
-        const { deliverPrPhase } = await import("./deliver-pr");
-        await deliverPrPhase(taskId, phaseName);
-      };
-      return;
-    }
-    log.warn("阶段 %s 声明了未知内置原语 builtin: %s", phaseName, builtinName);
-    phase.func = async (_taskId: string) => {
-      throw new Error(`阶段 "${phaseName}" 声明的内置原语 "${builtinName}" 不存在`);
+    phase.func = async (taskId: string) => {
+      const fn = getBuiltinPhase(builtinName);
+      if (!fn) {
+        throw new Error(`阶段 "${phaseName}" 声明的内置原语 "${builtinName}" 未注册`);
+      }
+      await fn(taskId, phaseName);
     };
     return;
   }

@@ -21,7 +21,7 @@ import { getTaskArtifactsDir, listTaskRepos, type TaskRepoCtx } from "@autopilot
 import { appendSubPr } from "@autopilot/core/requirement-sub-prs";
 import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { notify } from "@autopilot/core/notify";
-import { deliverPr } from "@autopilot/core/deliver-pr";
+import { deliverPr } from "@autopilot/daemon/deliver-pr";
 import { judgeVerdict } from "@autopilot/core/judge";
 
 // 结构化裁判 provider：dev 的 review agent 走 anthropic CLI（订阅，无 API key），但结构化裁判
@@ -432,7 +432,7 @@ export async function run_submit_pr(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  // 交付逻辑（逐库 commit/push/开 PR/落 sub_prs/回填 pr_url）已收进框架 core/deliver-pr。
+  // 交付逻辑（逐库 commit/push/开 PR/落 sub_prs/回填 pr_url）已收进框架 daemon/deliver-pr。
   // dev 专属的只剩「PR body 摘要取 design/plan.md」这个产物约定 —— 作为 prBodyContext 注入。
   const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";

@@ -1,22 +1,23 @@
 /**
- * 声明式 PR 交付（零 TS 工作流的「砖 1」）。
+ * PR 交付能力（框架提供给工作流的"交付机制"）。
  *
- * 把原 dev/workflow.ts 的 run_submit_pr 逐库 commit→push→开 PR→落 sub_prs 的全部逻辑收进框架。
- * 纯框架动作、零业务知识：调用方（dev 薄壳 / 内置 deliver_pr phase）只负责拼 PR body 上下文
- * 与最终 transition；交付动作本身不知道调用它的 phase 叫什么。
+ * 逐库 commit→push→开 GitHub PR→落 sub_prs。是**具体交付机制**（spawn git/gh、GitHub 集成），
+ * 按分层判据归 daemon —— core 是工作流无关的引擎，不 spawn 外部工具。daemon 启动时经
+ * registerBuiltinPhase("deliver_pr", deliverPrPhase) 把它注入 core 的内置 phase 注册表；
+ * dev 工作流（用户填肉）直接 import deliverPr 调用。
  *
  * 自包含 git/gh helper（runGit / ensurePr）—— dev 的同名 helper 仍被 code_review 等 phase 共用，
  * 故暂不下沉它们；待 dev 全声明式化后 dev 侧副本自然消失。
  */
 
-import { getTask, updateTask } from "./db";
-import { updateRequirement } from "./requirements";
-import { appendSubPr } from "./requirement-sub-prs";
-import { getWorkflow } from "./registry";
-import { collectUpstreamHandoffs } from "./prompt-runner";
-import { listTaskRepos, type TaskRepoCtx } from "./sandbox";
-import { getCurrentSandboxDir } from "./task-context";
-import { createLogger } from "./logger";
+import { getTask, updateTask } from "../core/db";
+import { updateRequirement } from "../core/requirements";
+import { appendSubPr } from "../core/requirement-sub-prs";
+import { getWorkflow } from "../core/registry";
+import { collectUpstreamHandoffs } from "../core/prompt-runner";
+import { listTaskRepos, type TaskRepoCtx } from "../core/sandbox";
+import { getCurrentSandboxDir } from "../core/task-context";
+import { createLogger } from "../core/logger";
 
 const log = createLogger("deliver-pr");
 
