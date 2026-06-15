@@ -5,8 +5,7 @@ import { installAutopilotResolver } from "../core/autopilot-resolver";
 import { initDb, closeDb, listTasks, updateTask, closeOpenPhaseEvents } from "../core/db";
 import { forceTransition } from "../core/state-machine";
 import { runPendingMigrations } from "../core/migrate";
-import { discover, registerBuiltinPhase } from "../core/registry";
-import { deliverPrPhase } from "./deliver-pr";
+import { discover } from "../core/registry";
 import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
 import { runInBackground } from "../core/runner";
 import { initDaemonFileLog, log } from "../core/logger";
@@ -176,10 +175,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       }
     }
   }
-
-  // 注入框架内置 phase 原语（具体交付机制由 daemon 提供，core 只持注册表）。
-  // 必须在任何 task 执行 builtin phase 之前；bindPhaseFunc 延迟查表，故先于/后于 discover 均可。
-  registerBuiltinPhase("deliver_pr", deliverPrPhase);
 
   // 发现工作流
   await discover();

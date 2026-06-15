@@ -43,12 +43,6 @@ export interface PhaseDefinition {
   jump_target?: string;
   max_rejections?: number;
   _jump_origin?: string;
-  /**
-   * 框架内置 phase 原语（声明式工作流用，无需 run_ 函数）。
-   * 当前支持：`deliver_pr`（逐库 commit/push/开 PR/落 sub_prs，见 deliver-pr.ts）。
-   * 优先级高于 ts 函数 / prompt-runner —— bindPhaseFunc 识别后绑内置实现。
-   */
-  builtin?: string;
   /** 跑完后挂起到 awaiting_<name>，等 UI 决断（pass/reject）才推进 */
   gate?: boolean;
   /** 等待界面的提示文案；默认 "请审阅产物后决定" */
@@ -121,7 +115,7 @@ export interface WorkflowDefinition {
   delivers?: string;
   /**
    * 声明式安全闸门（spec 2026-06-14 砖 3）。true → 加载期硬拒任何用户 TS 代码：
-   * 工作流不得含 workflow.ts 函数导出，phase 只能来自框架内置原语（prompt / builtin / gate /
+   * 工作流不得含 workflow.ts 函数导出，phase 只能来自框架原语（prompt / gate /
    * parallel）。保证能力上界由框架钉死（tools 授权 + sandbox + 无 spawn）→「沙盒安全」，可安全
    * 跨人运行别人写的工作流。正交于 requires（输入）/ delivers（输出）。
    */
@@ -186,29 +180,9 @@ const _registry: Map<string, WorkflowDefinition> = new Map();
  */
 const _builtins: Map<string, WorkflowDefinition> = new Map();
 
-/**
- * 内置 phase 原语注册表（机制在 core，**具体实现由 daemon 注入**）。
- * core 永不认识任何具体 builtin 名（如 deliver_pr）—— 它只提供"按名查实现"的机制；
- * daemon 启动时 registerBuiltinPhase("deliver_pr", deliverPrPhase) 把"具体交付机制"注入进来。
- * 进程生命周期内注册一次（不随 reload 清空——存的是 daemon 注入的函数引用，与磁盘发现无关）。
- */
-export type BuiltinPhaseFunc = (taskId: string, phaseName: string) => Promise<void>;
-const _builtinPhases = new Map<string, BuiltinPhaseFunc>();
-
-/** 注册内置 phase 原语实现（daemon 启动时调，如 deliver_pr → deliverPrPhase）。 */
-export function registerBuiltinPhase(name: string, fn: BuiltinPhaseFunc): void {
-  _builtinPhases.set(name, fn);
-}
-
-/** 查已注册的内置 phase 原语；未注册返回 undefined（bindPhaseFunc 绑的包装函数执行时查）。 */
-export function getBuiltinPhase(name: string): BuiltinPhaseFunc | undefined {
-  return _builtinPhases.get(name);
-}
-
 export function _clearRegistry(): void {
   _registry.clear();
   _builtins.clear();
-  // _builtinPhases 不清：它是进程级 daemon 注入的实现，与工作流发现无关（测试夹具按需重注册）。
 }
 
 /**
@@ -444,7 +418,7 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
       throw new Error(
         `声明式工作流「${wfDef["name"]}」(declarative: true) 不得包含任何 TS 函数，` +
         `但 workflow.ts 导出了：${fnExports.join(", ")}。` +
-        `声明式工作流的 phase 只能用框架内置原语（prompt / builtin / gate / parallel）。`,
+        `声明式工作流的 phase 只能用框架内置原语（prompt / gate / parallel）。`,
       );
     }
   }
@@ -530,22 +504,6 @@ function bindPhaseFunc(
   const funcRef = phase.func;
   if (typeof funcRef === "function") return; // 已经是 callable
 
-  // 框架内置 phase 原语（声明式工作流，零 TS）。优先于 ts 函数 / prompt-runner。
-  // 绑一个**延迟查表**包装：执行时才 getBuiltinPhase(name)——core 不认识任何具体 builtin 名，
-  // 实现由 daemon 启动时 registerBuiltinPhase 注入（绕过 discover 早于注册的时序坑）。
-  if (typeof phase.builtin === "string" && phase.builtin.trim() !== "") {
-    const builtinName = phase.builtin.trim();
-    const phaseName = phase.name;
-    phase.func = async (taskId: string) => {
-      const fn = getBuiltinPhase(builtinName);
-      if (!fn) {
-        throw new Error(`阶段 "${phaseName}" 声明的内置原语 "${builtinName}" 未注册`);
-      }
-      await fn(taskId, phaseName);
-    };
-    return;
-  }
-
   const funcName = typeof funcRef === "string" ? funcRef : `run_${phase.name}`;
 
   // 声明式工作流：不绑定任何用户 TS 函数，只能 prompt-runner / 纯 gate 关卡。
@@ -553,7 +511,7 @@ function bindPhaseFunc(
     if (tsModule && typeof tsModule[funcName] === "function") {
       throw new Error(
         `声明式工作流的阶段 "${phase.name}" 绑定了 TS 函数 "${funcName}"——` +
-        `declarative: true 工作流不得含任意用户代码（phase 只能用 prompt / builtin / gate / parallel）`,
+        `declarative: true 工作流不得含任意用户代码（phase 只能用 prompt / gate / parallel）`,
       );
     }
     if (workflowName) {
@@ -564,13 +522,13 @@ function bindPhaseFunc(
         return;
       }
     }
-    // 纯人工关卡（gate=true，无 prompt/builtin）：no-op，runner 跑完即挂起到 awaiting_<phase>。
+    // 纯人工关卡（gate=true，无 prompt）：no-op，runner 跑完即挂起到 awaiting_<phase>。
     if (phase.gate === true) {
       phase.func = async (_taskId: string) => {};
       return;
     }
     throw new Error(
-      `声明式工作流的阶段 "${phase.name}" 缺少框架原语——需写 prompt / builtin: / gate（` +
+      `声明式工作流的阶段 "${phase.name}" 缺少框架原语——需写 prompt: / gate（` +
       `declarative: true 工作流不能用 run_ 函数）`,
     );
   }

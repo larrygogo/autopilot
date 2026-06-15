@@ -45,23 +45,7 @@ describe("declarative 安全闸门", () => {
     expect(wf!.declarative).toBe(true);
   });
 
-  it("declarative:true + builtin: deliver_pr → 正常加载", async () => {
-    const dir = makeWf(
-      [
-        "name: decl_deliver",
-        "declarative: true",
-        "phases:",
-        "  - name: build",
-        "    prompt: 实现",
-        "  - name: deliver",
-        "    builtin: deliver_pr",
-      ].join("\n"),
-    );
-    const wf = await loadYamlWorkflow(dir);
-    expect(wf).not.toBeNull();
-  });
-
-  it("declarative:true + phase 既无 prompt 也无 builtin/gate → 报错（缺框架原语）", async () => {
+  it("declarative:true + phase 既无 prompt 也无 gate → 报错（缺框架原语）", async () => {
     const dir = makeWf(
       ["name: decl_empty", "declarative: true", "phases:", "  - name: design", "    timeout: 600"].join("\n"),
     );

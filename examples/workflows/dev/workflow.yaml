@@ -66,4 +66,4 @@ phases:
     label: "提交 PR"
     timeout: 300
     sandbox: { code: read-write, deliver: true }
-    # 纯机械交付（commit/push/开 PR）：PR body 由框架 deliverPr 模板拼接，不调 AI，无需 agent。
+    # 纯机械交付（commit/push/开 PR）：run_submit_pr 直接拼模板 PR body，不调 AI，无需 agent。

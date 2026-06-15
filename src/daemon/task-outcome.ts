@@ -58,7 +58,7 @@ export async function computeTaskOutcome(taskId: string): Promise<TaskOutcome | 
     .sort((a, b) => b.duration_ms - a.duration_ms)
     .slice(0, 3);
 
-  // 2) PR 链接（取**本 run 自己的** pr_url —— 存于 task.extra，deliverPr 在 submit_pr 时回填）。
+  // 2) PR 链接（取**本 run 自己的** pr_url —— 存于 task.extra，submit_pr 交付时回填）。
   //    刻意不从 requirement 拉：多 run 下 requirement.pr_url 只反映最新 run，否则历史 / 失败 run
   //    会借显最新 run 的 PR（dogfood req-023：失败的 run#1 误显 run#2 交付的 PR #96）。
   //    task 无独立 pr_number 列，从 url 解析。

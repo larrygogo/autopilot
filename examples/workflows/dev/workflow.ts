@@ -21,7 +21,6 @@ import { getTaskArtifactsDir, listTaskRepos, type TaskRepoCtx } from "@autopilot
 import { appendSubPr } from "@autopilot/core/requirement-sub-prs";
 import { getCurrentSandboxDir } from "@autopilot/core/task-context";
 import { notify } from "@autopilot/core/notify";
-import { deliverPr } from "@autopilot/daemon/deliver-pr";
 import { judgeVerdict } from "@autopilot/core/judge";
 
 // 结构化裁判 provider：dev 的 review agent 走 anthropic CLI（订阅，无 API key），但结构化裁判
@@ -428,20 +427,97 @@ export async function run_code_review(taskId: string): Promise<void> {
   }
 }
 
+/**
+ * gh pr view 判 OPEN 复用（pr edit）/ 否则 create。失败抛错（调用方按库聚合）。
+ * 「怎么交付 = 开 GitHub PR」是本工作流（dev）的选择（肉）；框架只给沙盒 + git/gh + 追踪原语。
+ */
+function ensurePr(repo: TaskRepoCtx, title: string, prBody: string): string {
+  const existing = Bun.spawnSync(["gh", "pr", "view", "--json", "url,state"], { cwd: repo.path, stderr: "pipe" });
+  const out = new TextDecoder().decode(existing.stdout ?? new Uint8Array()).trim();
+  let parsed: { url?: string; state?: string } | null = null;
+  if (existing.exitCode === 0 && out) {
+    try { parsed = JSON.parse(out) as { url?: string; state?: string }; } catch { parsed = null; }
+  }
+  if (parsed && parsed.state === "OPEN") {
+    Bun.spawnSync(["gh", "pr", "edit", "--body", prBody], { cwd: repo.path });
+    return parsed.url ?? "";
+  }
+  const created = Bun.spawnSync(
+    ["gh", "pr", "create", "--title", title, "--body", prBody, "--base", repo.base, "--head", repo.branch],
+    { cwd: repo.path, stderr: "pipe" },
+  );
+  if (created.exitCode !== 0) {
+    throw new Error(`创建 PR 失败：${new TextDecoder().decode(created.stderr ?? new Uint8Array()).trim()}`);
+  }
+  return new TextDecoder().decode(created.stdout ?? new Uint8Array()).trim();
+}
+
 export async function run_submit_pr(taskId: string): Promise<void> {
   const task = getTask(taskId);
   if (!task) throw new Error(`任务不存在：${taskId}`);
 
-  // 交付逻辑（逐库 commit/push/开 PR/落 sub_prs/回填 pr_url）已收进框架 daemon/deliver-pr。
-  // dev 专属的只剩「PR body 摘要取 design/plan.md」这个产物约定 —— 作为 prBodyContext 注入。
+  // 交付动作（逐库 commit/push/开 GitHub PR）是本工作流的肉——直接在这写。
+  // 框架只提供：沙盒（含 git clone + token）、git/gh、追踪原语 appendSubPr / updateRequirement.pr_url。
   const planPath = join(phasePath(taskId, task.workflow, "design"), "plan.md");
-  const planContent = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
+  const planContext = existsSync(planPath) ? readFileSync(planPath, "utf-8") : "";
 
-  // PR body 由框架模板拼接（plan.md 摘要 + diff stat），不调 AI —— 交付是机械动作。
-  const { prUrls } = await deliverPr(taskId, { prBodyContext: planContent });
+  const repos = taskRepos(taskId, task);
+  const reqId = task["requirement_id"] as string | undefined;
+  const title = task["title"] as string;
+  const results: Array<{ repo: TaskRepoCtx; prUrl: string }> = [];
+  const failures: string[] = [];
+
+  for (const r of repos) {
+    const label = r.alias || "仓库";
+    try {
+      runGit(["add", "-A"], r.path);
+      const staged = runGit(["diff", "--cached", "--quiet", `origin/${r.base}`], r.path, false).exitCode !== 0;
+      const ahead = runGit(["rev-list", "--count", `origin/${r.base}..HEAD`], r.path, false).stdout.trim() !== "0";
+      if (!staged && !ahead) continue; // 该库无改动 → 不开空 PR
+      runGit(["commit", "-m", `feat: ${title}`], r.path, false);
+      runGit(["push", "-u", "origin", r.branch], r.path);
+
+      const diffStat = runGit(["diff", `origin/${r.base}...HEAD`, "--stat"], r.path).stdout.slice(0, 3000);
+      const multiNote =
+        repos.length > 1 ? `\n\n（本需求共 ${repos.length} 个仓库交付，当前 ${label}；全集见需求页）` : "";
+      const prBody =
+        (planContext.trim() ? `## 技术方案摘要\n\n${planContext.slice(0, 8000)}\n\n` : "") +
+        `## 变更统计\n\n\`\`\`\n${diffStat || "（无 diff stat）"}\n\`\`\`` +
+        multiNote;
+
+      const prUrl = ensurePr(r, title, prBody);
+      results.push({ repo: r, prUrl });
+
+      // 框架追踪原语：登记交付的 PR（pr-poller 据此聚合验收）
+      if (r.workspace_id && reqId) {
+        const n = Number(prUrl.match(/\/pull\/(\d+)/)?.[1] ?? 0);
+        try {
+          appendSubPr({ requirement_id: reqId, child_workspace_id: r.workspace_id, pr_url: prUrl, pr_number: n });
+        } catch { /* best-effort */ }
+      }
+    } catch (e: unknown) {
+      failures.push(`[${label}] ${(e as Error).message}`);
+    }
+  }
+
+  if (results.length === 0 && failures.length === 0) {
+    throw new Error("所有仓库均无改动，没有可交付内容");
+  }
+  if (failures.length > 0) {
+    throw new Error(`部分仓库交付失败（已成功 ${results.length} 个，其 PR 已保留）：\n${failures.join("\n")}`);
+  }
+
+  const primaryPr = results.find((x) => x.repo.primary) ?? results[0]!;
+  updateTask(taskId, { pr_url: primaryPr.prUrl });
+  if (reqId) {
+    const m = primaryPr.prUrl.match(/\/pull\/(\d+)/);
+    try {
+      updateRequirement(reqId, { pr_url: primaryPr.prUrl, pr_number: m ? Number(m[1]) : null });
+    } catch { /* best-effort */ }
+  }
 
   transition(taskId, "submit_pr_complete", {
     transitions: getTransitions(task.workflow),
-    note: `PR 已提交：${prUrls.join(" , ")}`,
+    note: `PR 已提交：${results.map((x) => x.prUrl).join(" , ")}`,
   });
 }
