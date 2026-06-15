@@ -425,7 +425,11 @@ function AppInner() {
                 />
                 <Route path="/projects/:id" element={<ProjectDetailRoute />} />
                 <Route path="/projects/:id/:section" element={<ProjectDetailRoute />} />
+                {/* RESTful 深链：/:id（当前阶段）·/:id/:step（生命周期阶段）·/:id/:step/:runId
+                    （执行阶段具体 run）。三条都挂 RequirementDetail，由其按 useParams 取 step/runId。 */}
                 <Route path="/requirements/:id" element={<RequirementDetail />} />
+                <Route path="/requirements/:id/:step" element={<RequirementDetail />} />
+                <Route path="/requirements/:id/:step/:runId" element={<RequirementDetail />} />
                 <Route path="/projects" element={<Navigate to="/library?tab=projects" replace />} />
                 <Route path="/tasks" element={<Tasks />} />
                 <Route path="/workflows/new-with-ai" element={<NewWorkflowWithAI />} />

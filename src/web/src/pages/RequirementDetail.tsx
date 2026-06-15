@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { PAGE_W } from "@/lib/layout";
-import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion, Bot, UserRound, Download, Package } from "lucide-react";
 import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type RequirementDelivery, type DeliveryFileEntry, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
 import { AttachmentUploader } from "@/components/AttachmentUploader";
@@ -389,7 +389,8 @@ function ClarifierProgressCard({
 }
 
 export function RequirementDetail() {
-  const { id } = useParams<{ id: string }>();
+  // RESTful 深链：/requirements/:id/:step/:runId（step/runId 可缺）。
+  const { id, step: stepParam, runId: runParam } = useParams<{ id: string; step?: string; runId?: string }>();
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -443,11 +444,10 @@ export function RequirementDetail() {
   const [runsError, setRunsError] = useState<string | null>(null);
   // 当前选中查看的 run（多 run 时切换器控制）；默认最新（= req.task_id）或 ?run= 深链。
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  // 深链：?step=<生命周期阶段> + ?run=<taskId>。两者都是 URL 驱动 —— 每个阶段 / 每个 run 有
-  // 独立可分享链接。缺 step → 当前阶段（跟随最新）；缺 run → 最新 run（见下 selectedRunId 解析）。
-  const [searchParams, setSearchParams] = useSearchParams();
-  const runQuery = searchParams.get("run");
-  const stepQuery = searchParams.get("step");
+  // 深链（RESTful 路径段）：每个阶段 / 每个 run 有独立可分享 URL。
+  // 缺 step → 当前阶段（跟随最新）；缺 runId → 最新 run（见下 selectedRunId 解析）。
+  const runQuery = runParam ?? null;
+  const stepQuery = stepParam ?? null;
 
   const refresh = useCallback(async function refresh(opts: { silent?: boolean } = {}) {
     if (!id) return;
@@ -993,19 +993,14 @@ export function RequirementDetail() {
   const activeStep: ReqStep =
     stepQuery && (STEP_ORDER as string[]).includes(stepQuery) ? (stepQuery as ReqStep) : currentStep;
 
-  // 阶段 / run 深链写入：选当前阶段 = 清 ?step（回到「跟随最新」默认），其余 pin；run 写 ?run。
-  // replace:true —— 阶段切换不堆历史栈，但 URL 仍实时反映当前视图（可复制分享）。
+  // 阶段 / run 深链写入（RESTful 路径）：选当前阶段 = 回到 /requirements/:id（「跟随最新」默认），
+  // 其余 pin 到 /:id/:step；选 run = /:id/execute/:taskId。replace:true 不堆历史栈，URL 仍实时反映。
   const selectStep = (step: ReqStep) => {
-    const next = new URLSearchParams(searchParams);
-    if (step === currentStep) next.delete("step");
-    else next.set("step", step);
-    setSearchParams(next, { replace: true });
+    navigate(step === currentStep ? `/requirements/${id}` : `/requirements/${id}/${step}`, { replace: true });
   };
   const selectRun = (taskId: string) => {
     setSelectedRunId(taskId); // 立即反馈，URL 随后同步
-    const next = new URLSearchParams(searchParams);
-    next.set("run", taskId);
-    setSearchParams(next, { replace: true });
+    navigate(`/requirements/${id}/execute/${taskId}`, { replace: true });
   };
 
   const isTerminal = TERMINAL_STATUSES.has(req.status);

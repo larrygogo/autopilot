@@ -224,7 +224,7 @@ function ReqCardActionButton({ req, action }: { req: Requirement; action: ReqCar
     if (busy) return;
 
     if (action.key === "answer") { navigate(`/requirements/${req.id}`); return; }
-    if (action.key === "viewTask") { if (req.task_id) navigate(`/tasks/${req.task_id}`); return; }
+    if (action.key === "viewTask") { navigate(`/requirements/${req.id}/execute`); return; }
     if (action.key === "openPr") { if (req.pr_url) window.open(req.pr_url, "_blank", "noopener"); return; }
 
     setBusy(true);
@@ -286,11 +286,12 @@ export function TaskRow({ task, now, maps, req }: {
     task.requirement_id ? `← ${task.requirement_id}` : null,
   ].filter(Boolean).join(" · ");
   const card = req ? reqCardSpec(req) : null;
-  // v2 R6：行点击目标 = 需求页（一件工作的主视图，执行历史内联其中）；
-  // 无关联需求的存量游离任务才直达 /tasks/:id（单 run 深链接）。
+  // v2 R6：行点击目标 = 需求页（一件工作的主视图，执行历史内联其中）。用 requirement_id 判断
+  // （不变式保证非空；不依赖 req 对象是否已 join，避免 req 未加载时误退到 /tasks/:id）。
+  // 仅无关联需求的存量游离任务才直达 /tasks/:id。
   return (
     <RowCard
-      to={req ? `/requirements/${req.id}` : `/tasks/${task.id}`}
+      to={task.requirement_id ? `/requirements/${task.requirement_id}` : `/tasks/${task.id}`}
       Icon={Icon}
       tone={tone}
       spin={spin}
