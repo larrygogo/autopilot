@@ -16,6 +16,7 @@ import { tmpdir } from "os";
 import { up as migrate044 } from "../src/migrations/044-task-run-columns";
 import { _setDbForTest } from "../src/core/db";
 import * as sandbox from "../src/core/sandbox";
+import * as retention from "../src/core/sandbox-retention";
 import * as manifestModule from "../src/core/manifest";
 
 // ──────────────────────────────────────────────
@@ -252,7 +253,7 @@ describe("双根遍历（manifest 扫描 / sandbox 扫描 / retention）", () =>
     seed(legacyRoot);
     seed(newRoot);
 
-    const scanned = sandbox.scanTaskSandboxes();
+    const scanned = retention.scanTaskSandboxes();
     const byId = Object.fromEntries(scanned.map((u) => [u.taskId, u]));
     expect(byId["legtask1"]?.exists).toBe(true);
     expect(byId["legtask1"]?.root).toBe(legacyRoot);
@@ -260,7 +261,7 @@ describe("双根遍历（manifest 扫描 / sandbox 扫描 / retention）", () =>
     expect(byId["runtask1"]?.root).toBe(newRoot);
 
     // retention：days=1，两根下 30 天前的终态任务 workspace 都被清
-    const r = sandbox.applyRetentionPolicy({ days: 1 }, { isTerminal: () => true });
+    const r = retention.applyRetentionPolicy({ days: 1 }, { isTerminal: () => true });
     expect(r.removed.sort()).toEqual(["legtask1", "runtask1"]);
     expect(existsSync(join(legacyRoot, "workspace"))).toBe(false);
     expect(existsSync(join(newRoot, "workspace"))).toBe(false);

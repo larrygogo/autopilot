@@ -6,7 +6,7 @@ import { forceTransition } from "./state-machine";
 import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./registry";
 import type { PhaseDefinition, ParallelDefinition } from "./registry";
 import { emit } from "./event-bus";
-import { applyRetentionPolicy, loadRetentionPolicy } from "./sandbox";
+import { applyRetentionPolicy, loadRetentionPolicy } from "./sandbox-retention";
 
 
 // ──────────────────────────────────────────────

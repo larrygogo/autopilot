@@ -112,7 +112,7 @@ import {
   resolveSandboxPath,
   spawnSandboxZip,
   sandboxSize,
-} from "../core/sandbox";
+} from "../core/sandbox-browse";
 import { listPhaseLogs, readPhaseLog, readTaskEvents, listAgentCalls, getAgentCall } from "../core/task-logs";
 import { emit } from "../core/event-bus";
 import type { DaemonStatus, GraphData, GraphNode, GraphEdge } from "./protocol";
