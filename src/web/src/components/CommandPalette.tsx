@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Workflow, Plug, Sliders, Moon, Sun, Plus, FileText, Folder, MessageCircle, XCircle, RotateCw } from "lucide-react";
+import { Workflow, Plug, Sliders, Moon, Sun, Plus, Folder, MessageCircle, XCircle, RotateCw } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -19,16 +19,22 @@ interface Task {
   title: string;
   workflow: string;
   status: string;
+  created_at?: number;
+  updated_at?: number;
 }
 
 interface Workflow {
   name: string;
+  /** yaml label:（中文显示名）；缺省回落 name */
+  label?: string;
 }
 
 interface Requirement {
   id: string;
   title: string;
   status: string;
+  created_at?: number;
+  updated_at?: number;
 }
 
 interface Project {
@@ -68,6 +74,17 @@ function parseContext(pathname?: string): { kind: "task" | "requirement" | "proj
   const projM = pathname.match(/^\/projects\/([^/]+)/);
   if (projM) return { kind: "project", id: projM[1]! };
   return null;
+}
+
+/** 「最近」排序：updated_at 优先，回落 created_at，再回落 id 倒序（新 id 在前）。 */
+function byRecent(
+  a: { id: string; created_at?: number; updated_at?: number },
+  b: { id: string; created_at?: number; updated_at?: number },
+): number {
+  const ta = a.updated_at ?? a.created_at ?? 0;
+  const tb = b.updated_at ?? b.created_at ?? 0;
+  if (tb !== ta) return tb - ta;
+  return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
 }
 
 export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, pathname }: Props) {
@@ -112,6 +129,10 @@ export function CommandPaletteContent({
     onClose();
     void fn();
   };
+
+  // 「最近需求」按时间倒序（updated_at 优先 → created_at → id 倒序兜底）；
+  // 后端 list 默认按 id 升序，不排序会把最老的排最前
+  const recentRequirements = useMemo(() => [...requirements].sort(byRecent).slice(0, 10), [requirements]);
 
   // 上下文敏感动作 — TaskDetail 页时给"取消 / 重启"快捷动作
   const context = useMemo(() => parseContext(pathname), [pathname]);
@@ -203,31 +224,11 @@ export function CommandPaletteContent({
           ))}
         </CommandGroup>
 
-        {tasks.length > 0 && (
-          <>
-            <CommandSeparator />
-            <CommandGroup heading="最近任务">
-              {tasks.slice(0, 10).map((t) => (
-                <CommandItem
-                  key={t.id}
-                  value={`${t.id} ${t.title}`}
-                  onSelect={run(() => onSelectTask(t.id))}
-                >
-                  <FileText className="h-4 w-4" />
-                  {/* id 仅留在 value 里供搜索，不展示给用户（只关心需求/标题） */}
-                  <span className="truncate min-w-0 flex-1">{t.title}</span>
-                  <CommandShortcut>{t.status}</CommandShortcut>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </>
-        )}
-
         {requirements.length > 0 && (
           <>
             <CommandSeparator />
             <CommandGroup heading="最近需求">
-              {requirements.slice(0, 10).map((r) => (
+              {recentRequirements.map((r) => (
                 <CommandItem
                   key={r.id}
                   value={`${r.id} ${r.title}`}
@@ -267,9 +268,9 @@ export function CommandPaletteContent({
             <CommandSeparator />
             <CommandGroup heading="工作流">
               {workflows.map((w) => (
-                <CommandItem key={w.name} onSelect={run(() => onNavigate("/workflows"))}>
+                <CommandItem key={w.name} value={`${w.name} ${w.label ?? ""}`} onSelect={run(() => onNavigate("/workflows"))}>
                   <Workflow className="h-4 w-4" />
-                  {w.name}
+                  {w.label || w.name}
                 </CommandItem>
               ))}
             </CommandGroup>

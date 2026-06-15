@@ -61,9 +61,6 @@ const NewWorkflowWithAI = lazy(() => import("./pages/NewWorkflowWithAI").then((m
 const Workflows = lazy(() => import("./pages/Workflows").then((m) => ({ default: m.Workflows })));
 const WorkflowDetail = lazy(() => import("./pages/WorkflowDetail").then((m) => ({ default: m.WorkflowDetail })));
 const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
-const TaskDetail = lazy(() =>
-  import("./pages/TaskDetail").then((m) => ({ default: m.TaskDetail })),
-);
 const ProjectDetail = lazy(() =>
   import("./pages/ProjectDetail").then((m) => ({ default: m.ProjectDetail })),
 );
@@ -419,10 +416,7 @@ function AppInner() {
                 <Route path="/library" element={<Library />} />
                 <Route path="/settings" element={<SettingsRoute />} />
                 <Route path="/settings/:section" element={<SettingsRoute />} />
-                <Route
-                  path="/tasks/:id"
-                  element={<TaskDetailRoute subscribe={subscribe} />}
-                />
+                <Route path="/tasks/:id" element={<TaskDetailRoute />} />
                 <Route path="/projects/:id" element={<ProjectDetailRoute />} />
                 <Route path="/projects/:id/:section" element={<ProjectDetailRoute />} />
                 {/* RESTful 深链：/:id（当前阶段）·/:id/:step（生命周期阶段）·/:id/:step/:runId
@@ -583,19 +577,33 @@ function NowRedirect({ onOpen }: { onOpen: () => void }) {
 }
 
 /**
- * /tasks/:id —— v2 R6：单 run 深链接（通知 view_task / 书签可达）。
- * 不再重定向到需求页；直接整页渲染该 run 详情，页头由 TaskDetail 自带面包屑回需求页
- * （有 requirement_id 时「← 需求 <reqId> · 执行 #N」；孤儿任务退回「返回」按钮）。
+ * /tasks/:id —— 专门的 task 详情页已移除（task 详情只在所属需求页内嵌呈现）。
+ * 保留路由仅为兼容旧深链 / 通知 / 书签：解析 task → 重定向到所属需求页；
+ * 无关联需求的存量游离任务退回流水线列表。
  */
-function TaskDetailRoute({
-  subscribe,
-}: {
-  subscribe: (channel: string, handler: (event: any) => void) => () => void;
-}) {
+function TaskDetailRoute() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  if (!id) return <Navigate to="/tasks" replace />;
-  return <TaskDetail key={id} taskId={id} onBack={() => navigate("/tasks")} subscribe={subscribe} />;
+  const [target, setTarget] = useState<string | null>(null);
+  useEffect(() => {
+    if (!id) {
+      setTarget("/tasks");
+      return;
+    }
+    let alive = true;
+    api
+      .getTask(id)
+      .then((t: any) => {
+        if (alive) setTarget(t?.requirement_id ? `/requirements/${t.requirement_id}` : "/tasks");
+      })
+      .catch(() => {
+        if (alive) setTarget("/tasks");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+  if (!target) return null;
+  return <Navigate to={target} replace />;
 }
 
 const SETTINGS_SECTIONS = new Set(["providers", "lifecycle", "scheduler", "network", "daemon"]);
