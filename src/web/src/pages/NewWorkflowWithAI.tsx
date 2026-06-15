@@ -2,14 +2,14 @@ import { useMemo, useRef, useState } from "react";
 import { PageShell } from "@/components/pro";
 import { useNavigate } from "react-router-dom";
 import { Loader2, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
-import { parse as parseYaml, parseDocument } from "yaml";
+import { parse as parseYaml } from "yaml";
 import { api, type AuthoredWorkflow } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { PhaseEditor } from "@/components/PhaseEditor";
+import { PhasePipeline } from "@/components/PhasePipeline";
 
 export function NewWorkflowWithAI() {
   const navigate = useNavigate();
@@ -44,22 +44,6 @@ export function NewWorkflowWithAI() {
     () => !!authored?.warnings?.some((w) => w.startsWith("AI 生成失败") || w.startsWith("缺 yaml") || w.startsWith("AI 返回")),
     [authored?.warnings],
   );
-
-  /**
-   * PhaseEditor 草稿模式回调：把图形化编辑后的 phases 数组写回 authored.yaml。
-   * 用 yaml Document API 局部替换 phases 字段，保留其他顶层字段 + 注释 + 格式。
-   */
-  function applyPhasesToYaml(newPhases: unknown[]) {
-    if (!authored) return;
-    try {
-      const doc = parseDocument(authored.yaml);
-      doc.set("phases", newPhases);
-      setAuthored({ ...authored, yaml: doc.toString() });
-    } catch (e: unknown) {
-      // 极端情况：原 yaml 已不可解析（用户在文本编辑区破坏了）
-      toast.error("应用阶段修改失败", (e as Error)?.message ?? String(e));
-    }
-  }
 
   async function generate(prompt: string, includePrior: boolean) {
     if (!prompt.trim()) {
@@ -98,13 +82,15 @@ export function NewWorkflowWithAI() {
     }
     setSaving(true);
     try {
+      const created = editName.trim();
       await api.saveAuthoredWorkflow({
-        name: editName.trim(),
+        name: created,
         yaml: authored.yaml,
         ts: authored.ts,
       });
-      toast.success(`已创建工作流 ${editName.trim()}`);
-      navigate("/workflows");
+      toast.success(`已创建工作流 ${created}，进入编辑`);
+      // 落地后直接进详情页，用全功能编辑器补 agent / prompt / 驳回 / ts 等字段
+      navigate(`/workflows/${encodeURIComponent(created)}`);
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
     } finally {
@@ -182,18 +168,18 @@ export function NewWorkflowWithAI() {
 
             <div className="space-y-2">
               <Label className="font-mono text-[10px] ">
-                阶段（可直接编辑）
+                阶段预览
               </Label>
               {parsedPhases.length > 0 ? (
-                // 复用 /workflows 的 PhaseEditor，draftMode 关闭所有持久化 API 调用，
-                // 改动通过 onItemsChange 上抛 → applyPhasesToYaml 回写 authored.yaml
-                // （用 yaml Document API 局部替换 phases 字段，保留其他顶层字段 + 注释）
-                <PhaseEditor
-                  workflowName="__draft__"
-                  initialPhases={parsedPhases}
-                  draftMode
-                  onItemsChange={applyPhasesToYaml}
-                />
+                <>
+                  {/* 只读流水线预览。创建期不再内嵌阉割版编辑器——落地后进详情页用全功能
+                      编辑器（点节点配 agent / prompt / 驳回 / ts），消除双实现 drift。 */}
+                  <PhasePipeline phases={parsedPhases} />
+                  <p className="text-xs text-muted-foreground">
+                    阶段结构看着不对就用下方「追问」让 AI 调整；agent、提示词、驳回回路、ts 函数等细节
+                    <span className="text-foreground">在确认创建后进详情页编辑</span>。
+                  </p>
+                </>
               ) : (
                 <p className="border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
                   yaml 解析失败或没有 phases；请检查警告区，或追问让 AI 调整。
@@ -288,7 +274,7 @@ export function NewWorkflowWithAI() {
                   title={isFallback ? "AI 生成失败，请先重新生成或追问让 AI 重出方案" : undefined}
                   className="rounded-md font-mono text-[11px] "
                 >
-                  {saving ? "保存中..." : isFallback ? "✗ AI 失败，请重试" : "✓ 确认创建"}
+                  {saving ? "保存中..." : isFallback ? "✗ AI 失败，请重试" : "✓ 创建并编辑"}
                 </Button>
               </div>
             </div>
