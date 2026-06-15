@@ -11,7 +11,7 @@
 **内核（功能最全、语义最底层、最稳定）**
 
 - `src/core/` 引擎层（状态机、runner、registry、db、watcher）
-- `src/daemon/` 服务层（HTTP+WS server、RPC、event-bus、routes）
+- `src/daemon/` 服务层（HTTP+WS server、RPC、routes、各编排驱动者）
 - `src/agents/` Agent 系统（provider 适配、Agent 基础类）
 - **WS RPC 协议本身**（method 命名空间是内核对外的契约）
 
@@ -38,7 +38,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 ## 架构概要
 
 - **Daemon + 多客户端**：核心引擎作为 daemon 长驻运行，TUI/Web/CLI 通过 HTTP+WebSocket 连接
-- **事件总线**：`src/daemon/event-bus.ts` 懒激活模式，daemon 未运行时 emit 是 no-op
+- **事件总线**：`src/core/event-bus.ts`（事件协议在 `src/core/events.ts`）懒激活模式，daemon 未运行时 emit 是 no-op。**已下沉 core**（core 模块无条件 emit、不判 daemon 在不在；daemon 起来才挂派发器到 ws）
 - **HTTP REST API**：`/api/tasks`、`/api/workflows`、`/api/status` 等 CRUD 端点
 - **WebSocket 实时推送**：频道订阅模式（`task:*`、`log:{taskId}` 等）推送状态变化和日志
 - **TUI**：ink (React for CLI) 终端 UI，WebSocket 连接 daemon
@@ -110,13 +110,14 @@ autopilot/
 │   │   ├── workspaces.ts          # Workspace CRUD（id: ws-NNN，原 codebases.ts→repos.ts）
 │   │   ├── workspace-health.ts    # Workspace 健康检查（原 codebase-health.ts）
 │   │   ├── requirements.ts        # Requirement CRUD（含 project_id + workspace_id）
-│   │   └── requirement-questions.ts # 评论线程 CRUD（id: qst-NNN）
+│   │   ├── requirement-questions.ts # 评论线程 CRUD（id: qst-NNN）
+│   │   ├── event-bus.ts           # 事件总线（enableBus 懒激活；core 无条件 emit）
+│   │   └── events.ts              # 事件协议类型定义
 │   ├── daemon/                    # Daemon 进程
 │   │   ├── index.ts               # Daemon 入口（init→server→watcher→signal）
 │   │   ├── server.ts              # Bun.serve() HTTP+WS 统一服务
 │   │   ├── routes.ts              # REST API 路由
 │   │   ├── ws.ts                  # WebSocket 连接管理 + 订阅分发
-│   │   ├── event-bus.ts           # 事件总线（enableBus 懒激活）
 │   │   ├── protocol.ts            # JSON 协议类型定义
 │   │   └── pid.ts                 # PID 文件管理
 │   ├── client/                    # 薄客户端库（CLI/TUI/Web 共用）

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { detectCategory, buildAttachmentContext } from "../../src/core/requirement-attachments";
-import type { Attachment } from "../../src/core/requirement-attachments";
+import { detectCategory, buildAttachmentContext } from "../src/core/requirement-attachments";
+import type { Attachment } from "../src/core/requirement-attachments";
 
 describe("detectCategory", () => {
   it("识别图片 MIME", () => {

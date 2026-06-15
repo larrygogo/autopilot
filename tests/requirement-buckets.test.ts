@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { projectReqTab, requirementTab } from "../../src/web/src/lib/requirement-buckets";
+import { projectReqTab, requirementTab } from "../src/web/src/lib/requirement-buckets";
 
 // 分桶原则 = 「球在谁手里」，与流水线页（Tasks.tsx）的需求分桶语义对齐。
 // 曾经漂移：本函数把 awaiting_review/drafting/ready 归「运行中」、failed 归「归档」，
