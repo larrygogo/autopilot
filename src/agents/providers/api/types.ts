@@ -73,6 +73,12 @@ export interface AdapterOptions {
   tools?: ToolDefinition[];
   /** 强制模型调用指定工具（结构化输出）。缺省 = 模型自由决定是否调工具。 */
   tool_choice?: ToolChoice;
+  /**
+   * 结构化判据专用：要求模型本次**不思考**直接给结构化结论。部分思考原生端点（如 Kimi Code）
+   * 在思考开启时拒绝强制 tool_choice（400），需关思考。各 adapter 按自家端点翻译（仅必要端点生效，
+   * 其余无操作）。普通 agent 调用不设此项，思考照常。
+   */
+  disable_thinking?: boolean;
   stop_sequences?: string[];
   temperature?: number;
   signal?: AbortSignal;

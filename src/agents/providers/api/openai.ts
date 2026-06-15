@@ -10,6 +10,15 @@ import { ApiError } from "./anthropic";
 
 const DEFAULT_BASE_URL = "https://api.openai.com";
 
+/** 是否 Kimi（Moonshot）系端点——决定是否使用 Kimi 专属的 `thinking:{type:disabled}` 关思考语法。 */
+function isKimiHost(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).hostname.endsWith("kimi.com");
+  } catch {
+    return false;
+  }
+}
+
 export class OpenAIApiAdapter implements ProviderAdapter {
   readonly name = "openai";
 
@@ -47,6 +56,12 @@ export class OpenAIApiAdapter implements ProviderAdapter {
     }
     if (options.tool_choice) {
       body["tool_choice"] = { type: "function", function: { name: options.tool_choice.name } };
+    }
+    // 关思考（结构化判据）：Kimi 思考原生端点在思考开启时拒绝强制 tool_choice（400），
+    // 用 Moonshot/Kimi 的 `thinking:{type:disabled}` 关掉。仅对 kimi host 生效——该参数是
+    // 端点专属，发给真 OpenAI 会 400，故 host-sniff（与下方 userAgent 的 kimi 处理一致）。
+    if (options.disable_thinking && isKimiHost(this.baseUrl)) {
+      body["thinking"] = { type: "disabled" };
     }
     if (options.temperature !== undefined) body["temperature"] = options.temperature;
     if (options.stop_sequences) body["stop"] = options.stop_sequences;

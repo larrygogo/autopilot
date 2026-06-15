@@ -142,3 +142,35 @@ describe("adapter tool_choice 翻译", () => {
     } finally { cap.restore(); }
   });
 });
+
+describe("disable_thinking 翻译（Kimi 思考端点强制 tool_choice 解冲突）", () => {
+  it("kimi host + disable_thinking → body.thinking={type:disabled}", async () => {
+    const cap = captureBody("data: [DONE]\n");
+    try {
+      await new OpenAIApiAdapter("k", "https://api.kimi.com/coding").completeStream(msgs, {
+        ...FORCE,
+        disable_thinking: true,
+      });
+      expect(cap.body()["thinking"]).toEqual({ type: "disabled" });
+    } finally { cap.restore(); }
+  });
+
+  it("非 kimi host + disable_thinking → 不加 thinking（真 OpenAI 会拒未知参数）", async () => {
+    const cap = captureBody("data: [DONE]\n");
+    try {
+      await new OpenAIApiAdapter("k", "https://api.openai.com").completeStream(msgs, {
+        ...FORCE,
+        disable_thinking: true,
+      });
+      expect(cap.body()["thinking"]).toBeUndefined();
+    } finally { cap.restore(); }
+  });
+
+  it("kimi host 但不设 disable_thinking → 不加 thinking（普通 agent 调用思考照常）", async () => {
+    const cap = captureBody("data: [DONE]\n");
+    try {
+      await new OpenAIApiAdapter("k", "https://api.kimi.com/coding").completeStream(msgs, { model: "m" });
+      expect(cap.body()["thinking"]).toBeUndefined();
+    } finally { cap.restore(); }
+  });
+});

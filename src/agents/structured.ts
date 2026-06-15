@@ -42,6 +42,7 @@ export async function completeStructuredWith<T = Record<string, unknown>>(
     max_tokens: opts.maxTokens ?? 1024,
     tools: [opts.tool],
     tool_choice: { type: "force", name: opts.tool.name },
+    disable_thinking: true, // 结构化判据不需思考；思考原生端点（Kimi）开思考时会拒绝强制 tool_choice
     signal: opts.signal,
     // 不传 onDelta：结构化调用不推流
   });
