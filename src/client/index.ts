@@ -66,6 +66,7 @@ export class AutopilotClient {
   get createRequirement() { return this.http.createRequirement.bind(this.http); }
   get updateRequirement() { return this.http.updateRequirement.bind(this.http); }
   get getRequirement() { return this.http.getRequirement.bind(this.http); }
+  get listRequirements() { return this.http.listRequirements.bind(this.http); }
   get getTaskOutcome() { return this.http.getTaskOutcome.bind(this.http); }
   get extractRequirement() { return this.http.extractRequirement.bind(this.http); }
   get listProjects() { return this.http.listProjects.bind(this.http); }
