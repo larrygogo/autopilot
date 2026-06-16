@@ -1,6 +1,6 @@
 import { getTask, touchTaskHeartbeat, updateTask, startTaskPhase, endTaskPhase } from "./db";
 import { acquireLock, releaseLock } from "./infra";
-import { log, setPhase, resetPhase, setTaskId } from "./logger";
+import { log, setPhase, resetPhase, setTaskId, runWithLogContext } from "./logger";
 import { appendTaskEvent } from "./task/logs";
 import { runWithTaskContext } from "./task/context";
 import { registerRun, unregisterRun } from "./task/lifecycle";
@@ -71,6 +71,13 @@ export function runInBackground(taskId: string, phase: string): void {
  * - finally：重置日志标签 + 释放锁
  */
 export async function executePhase(taskId: string, phase: string): Promise<void> {
+  // 每个 phase 执行进独立日志上下文（AsyncLocalStorage）——并发跑多 phase 时日志互不
+  // 串写（phaseName 先填 phase，setPhase 加载 phaseDef 后细化显示标签）。所有 executePhase
+  // 入口（runInBackground / factory / task-actions）都经此壳，自动获得隔离。
+  return runWithLogContext({ taskId, phaseName: phase }, () => executePhaseInner(taskId, phase));
+}
+
+async function executePhaseInner(taskId: string, phase: string): Promise<void> {
   let phaseEventId: number | null = null;
   let controller: AbortController | null = null;
 

@@ -1,11 +1,54 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync, readFileSync } from "fs";
 import { dirname } from "path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { emit } from "./event-bus";
 import { appendPhaseLog } from "./task/logs";
 
-let currentPhaseTag = "SYSTEM";
-let currentPhaseName: string | undefined;  // 原始小写名称（用于文件名）
-let currentTaskId: string | undefined;
+// ──────────────────────────────────────────────
+// 日志上下文（task / phase）= 每次 phase 执行各自隔离
+//
+// 历史上这三个是进程级可变全局；但 daemon 同进程并发跑多个 phase（runInBackground
+// = setImmediate 同进程 async），全局态被并发 phase 互相覆盖 → 日志窜进别的 task 的
+// phase-<name>.log（按 task 排障不可靠）。改用 AsyncLocalStorage：executePhase 用
+// runWithLogContext 包住整个执行，每个 phase 异步链拿到独立 store，跨 await 不串写。
+// 全局变量保留为兜底——非 phase 执行路径（daemon 生命周期 / clarifier 等无 als 上下文）
+// 仍走全局，行为不变。
+// ──────────────────────────────────────────────
+interface LogStore {
+  taskId?: string;
+  phaseName?: string;  // 原始小写名称（用于文件名）
+  phaseTag: string;    // 显示标签（label 或大写 phase 名）
+}
+const als = new AsyncLocalStorage<LogStore>();
+
+let gPhaseTag = "SYSTEM";
+let gPhaseName: string | undefined;
+let gTaskId: string | undefined;
+
+/**
+ * 在独立日志上下文中执行 fn。每个 phase 执行（executePhase）各开一个 store，
+ * 并发互不串写；fn 内的 setPhase/setTaskId/resetPhase 改的是本 store。
+ */
+export function runWithLogContext<T>(
+  ctx: { taskId?: string; phaseName?: string; phaseTag?: string },
+  fn: () => T,
+): T {
+  return als.run(
+    {
+      taskId: ctx.taskId,
+      phaseName: ctx.phaseName,
+      phaseTag: ctx.phaseTag ?? ctx.phaseName?.toUpperCase() ?? "SYSTEM",
+    },
+    fn,
+  );
+}
+
+/** 当前生效的日志上下文（als store 优先，回退全局）。测试与读取用。 */
+export function currentLogContext(): { taskId?: string; phaseName?: string; phaseTag: string } {
+  const s = als.getStore();
+  if (s) return { taskId: s.taskId, phaseName: s.phaseName, phaseTag: s.phaseTag };
+  return { taskId: gTaskId, phaseName: gPhaseName, phaseTag: gPhaseTag };
+}
 
 // ──────────────────────────────────────────────
 // daemon 进程级日志文件 —— 由 daemon 启动时激活
@@ -84,18 +127,33 @@ export function readDaemonFileLog(tail = 1000): string {
 }
 
 export function setPhase(phase: string, label?: string): void {
-  currentPhaseTag = label ?? phase.toUpperCase();
-  currentPhaseName = phase;
+  const s = als.getStore();
+  if (s) {
+    s.phaseTag = label ?? phase.toUpperCase();
+    s.phaseName = phase;
+  } else {
+    gPhaseTag = label ?? phase.toUpperCase();
+    gPhaseName = phase;
+  }
 }
 
 export function resetPhase(): void {
-  currentPhaseTag = "SYSTEM";
-  currentPhaseName = undefined;
-  currentTaskId = undefined;
+  const s = als.getStore();
+  if (s) {
+    s.phaseTag = "SYSTEM";
+    s.phaseName = undefined;
+    s.taskId = undefined;
+  } else {
+    gPhaseTag = "SYSTEM";
+    gPhaseName = undefined;
+    gTaskId = undefined;
+  }
 }
 
 export function setTaskId(taskId: string): void {
-  currentTaskId = taskId;
+  const s = als.getStore();
+  if (s) s.taskId = taskId;
+  else gTaskId = taskId;
 }
 
 function fmt(level: string, name: string, msg: string, args: unknown[]): string {
@@ -108,23 +166,28 @@ function fmt(level: string, name: string, msg: string, args: unknown[]): string 
         return typeof arg === "object" && arg !== null ? JSON.stringify(arg) : String(arg);
       })
     : msg;
-  return `${ts} [${level}] [${currentPhaseTag}] [${name}] ${body}`;
+  const tag = als.getStore()?.phaseTag ?? gPhaseTag;
+  return `${ts} [${level}] [${tag}] [${name}] ${body}`;
 }
 
 function emitLog(level: string, formatted: string): void {
+  const s = als.getStore();
+  const taskId = s?.taskId ?? gTaskId;
+  const phaseName = s?.phaseName ?? gPhaseName;
+  const phaseTag = s?.phaseTag ?? gPhaseTag;
   emit({
     type: "log:entry",
     payload: {
-      taskId: currentTaskId,
-      phase: currentPhaseTag,
+      taskId,
+      phase: phaseTag,
       level,
       message: formatted,
       timestamp: new Date().toISOString(),
     },
   });
   // 任务 + 阶段上下文明确时，追加到对应阶段的磁盘日志
-  if (currentTaskId && currentPhaseName) {
-    appendPhaseLog(currentTaskId, currentPhaseName, formatted);
+  if (taskId && phaseName) {
+    appendPhaseLog(taskId, phaseName, formatted);
   }
   // daemon 进程级日志（所有 daemon 生命周期都记录到同一个文件）
   appendFileLog(formatted);
