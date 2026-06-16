@@ -368,7 +368,8 @@ export async function startNewRunForRequirement(
     try { forgetTaskRecoveryState(oldTask.id); } catch { /* ignore */ }
 
     // 旧 agent session 指向被清的 clone，关掉防 claude --resume 续到陈旧会话
-    void closeAgents(oldTask.workflow).catch(() => { /* best-effort */ });
+    // 传 oldTask.id：清本旧 run 的 API 实例（+ CLI 共享），不误关并发同工作流任务的实例
+    void closeAgents(oldTask.workflow, oldTask.id).catch(() => { /* best-effort */ });
   }
 
   // 上轮 PR 记录清空（旧 PR 已随删分支 close；新 run 的 PR 出来前不该显示旧链接，RERUN-08）

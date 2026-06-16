@@ -351,7 +351,8 @@ async function executePhaseInner(taskId: string, phase: string): Promise<void> {
       terminalStates.add("cancelled");
       terminalStates.add("failed");
       if (terminalStates.has(task.status)) {
-        await closeAgents(task.workflow).catch(() => {});
+        // 传 task.id：只清本 task 的 API agent，不误关并发同工作流兄弟在用的实例
+        await closeAgents(task.workflow, taskId).catch(() => {});
       }
     }
   }

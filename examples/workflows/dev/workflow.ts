@@ -185,8 +185,25 @@ export async function run_design(taskId: string): Promise<void> {
   const agent = agentForPhase(task.workflow, "design");
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 900_000 });
 
+  // 始终先落盘产物（即便半成品，留作排查依据）
   const planPath = join(phaseDir(taskId, task.workflow, "design"), "plan.md");
   writeFileSync(planPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
+
+  // 方案有效性闸门：agentic agent（尤其 API 模式 / 弱模型）若探索预算耗尽，result.text
+  // 会是一句过程叙述而非方案。把这种半成品喂给 review 只会白烧 max_rejections 轮、误标
+  // 「评审驳回」掩盖真因。当场停下报人，给确切病因，胜过反复驳回。
+  const planText = (result.text ?? "").trim();
+  const STRUCTURE_HINTS = ["需求分析", "技术方案", "实现方案", "实现步骤", "影响范围", "测试计划"];
+  const looksLikePlan = planText.length >= 600 && STRUCTURE_HINTS.some((h) => planText.includes(h));
+  if (!looksLikePlan) {
+    // 首行保持稳定（仅含会被 fingerprintError 归一的数字）：让 runner 的确定性失败
+    // 快速止损能识别"同一截断"两轮即 failed，不必熬满 MAX_PHASE_FAILURES。可变的 agent
+    // 输出片段放到第二行（\n 后，不进指纹）。
+    throw new Error(
+      `design 未产出有效方案（输出仅 ${planText.length} 字、缺方案结构）——疑似 agent 探索预算耗尽被截断，请提高 design 的 max_turns 或换更强 model\n` +
+        `agent 末尾输出：${planText.slice(0, 160)}${planText.length > 160 ? "…" : ""}`,
+    );
+  }
 
   transition(taskId, "design_complete", {
     transitions: getTransitions(task.workflow),

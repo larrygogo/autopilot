@@ -8,6 +8,7 @@ import { getPhase } from "../core/workflow/registry";
 import { loadProviders, type ProviderConfig } from "../core/config";
 import { DEFAULT_AGENT, type InlineAgentConfig } from "../core/agent-defaults";
 import { log } from "../core/logger";
+import { getTaskContext } from "../core/task/context";
 import { getCompatPreset, createCompatAdapter } from "./providers/api/compat";
 import { ApiAgentLoop } from "./providers/api/loop";
 import { ToolExecutor } from "./providers/api/tools";
@@ -335,7 +336,16 @@ export function agentForPhase(workflowName: string, phaseName: string): Agent {
   // 任一影响 agent 行为的字段变更 → key 变 → 新实例。防 workflow.yaml 改内联 agent 字段但
   // 未触发 config:updated 全量清缓存时发旧实例（architect 审查；config:updated 仍兜底全清）。
   // 指纹放 key 末尾，不破坏 closeAgents/clearAllAgentCache 的 `workflowName:` 前缀清理。
-  const cacheKey = `${workflowName}:@phase:${phaseName}:${mode}:${agentConfigFingerprint(merged)}`;
+  //
+  // API 模式按 taskId 隔离：API agent 首次 run 把 ToolExecutor.sandboxRoot 冻结到当时 task
+  // 的沙盒（agent.ts 读 getTaskContext().sandboxDir）。若 key 不含 taskId，max_concurrent>1
+  // 时并发同工作流任务复用同一实例 → read/write/bash 全落首个 task 沙盒（数据正确性+隔离双破坏）。
+  // CLI 模式子进程每次 run 拿到正确 per-run cwd，保留跨 task 会话复用，不按 taskId 分裂。
+  // 无 task context 的 API 调用落 ':task:no-task'：实际生产路径（prompt-runner / fix-runner）
+  // 都在 runWithTaskContext 内拿真 taskId；万一真在无上下文调 API agent，agent.ts 的 run 期
+  // sandboxDir 缺失检查会显式报错、clearAllAgentCache 兜底回收，不会静默串到真 task 沙盒。
+  const taskScope = mode === "api" ? `:task:${getTaskContext()?.taskId ?? "no-task"}` : "";
+  const cacheKey = `${workflowName}:@phase:${phaseName}:${mode}${taskScope}:${agentConfigFingerprint(merged)}`;
   const cached = _cache.get(cacheKey);
   if (cached) return cached;
 
@@ -349,17 +359,23 @@ export function agentForPhase(workflowName: string, phaseName: string): Agent {
 }
 
 /**
- * 关闭并清除指定工作流的所有缓存 Agent
+ * 关闭并清除指定工作流的缓存 Agent。
+ *
+ * 传 taskId 时只清「本 task 的 API 实例」（key 含 `:task:<id>:`）+ CLI 共享实例，
+ * **跳过别的 task 的 API 实例**——否则某个 task 终态会 close 掉并发同工作流兄弟正在用的
+ * API agent（use-after-close）。不传 taskId 走旧的全工作流清理（重跑/全清场景）。
  */
-export async function closeAgents(workflowName: string): Promise<void> {
+export async function closeAgents(workflowName: string, taskId?: string): Promise<void> {
   const prefix = `${workflowName}:`;
   const closePromises: Promise<void>[] = [];
 
   for (const [key, agent] of _cache.entries()) {
-    if (key.startsWith(prefix)) {
-      closePromises.push(agent.close());
-      _cache.delete(key);
-    }
+    if (!key.startsWith(prefix)) continue;
+    // taskId 指定时：别的 task 的 API 实例（含 :task: 但不是本 task）跳过；CLI 实例（无
+    // :task:）与本 task 的 API 实例照清。
+    if (taskId && key.includes(":task:") && !key.includes(`:task:${taskId}:`)) continue;
+    closePromises.push(agent.close());
+    _cache.delete(key);
   }
 
   await Promise.all(closePromises);

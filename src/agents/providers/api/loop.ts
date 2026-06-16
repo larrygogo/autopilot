@@ -260,18 +260,15 @@ export class ApiAgentLoop {
       }
       messages.push({ role: "assistant", content: assistantContent });
 
-      // 检查是否有 task_complete 工具调用
+      // 先执行所有"真"工具（非 task_complete），再处理终结。
+      // 模型可能在同一轮并行返回 [write_file, task_complete]：旧实现一命中 task_complete
+      // 即短路 return，导致 write_file 永不执行 → 文件改动静默丢失而 run 仍报成功（最难
+      // 诊断的一类缺陷）。必须先把工具副作用落地，task_complete 只决定"现在终结"。
       const completeCall = response.toolCalls.find((tc) => tc.name === "task_complete");
-      if (completeCall) {
-        return {
-          text: (completeCall.input["summary"] as string) || response.text || "完成",
-          usage,
-        };
-      }
+      const realCalls = response.toolCalls.filter((tc) => tc.name !== "task_complete");
 
-      // 执行工具调用
       const toolResults: ToolResultContent[] = [];
-      for (const tc of response.toolCalls) {
+      for (const tc of realCalls) {
         log.info("[API] 工具调用：%s", tc.name);
         const result = await this.toolExecutor.execute({ name: tc.name, input: tc.input });
         toolResults.push({
@@ -283,8 +280,21 @@ export class ApiAgentLoop {
         });
       }
 
-      // 添加 tool_result 消息
-      messages.push({ role: "tool_result", content: toolResults });
+      // 添加 tool_result 消息（仅当有真工具执行；纯 task_complete 轮无 tool_result）
+      if (toolResults.length > 0) {
+        messages.push({ role: "tool_result", content: toolResults });
+      }
+
+      // 工具副作用已全部落地，此时才处理 task_complete 终结。
+      // ⚠ 契约：命中 completeCall 必须紧跟 return、其间不得再发请求——assistant 消息含
+      // task_complete 的 tool_use 块但 tool_result 只覆盖 realCalls（task_complete 无 result），
+      // 配对不全；靠"立即 return 不再发请求"避免 OpenAI/Anthropic 端 tool_call_id 配对 400。
+      if (completeCall) {
+        return {
+          text: (completeCall.input["summary"] as string) || response.text || "完成",
+          usage,
+        };
+      }
     }
 
     // 超出 max_turns，取最后一轮的文本输出
@@ -293,9 +303,15 @@ export class ApiAgentLoop {
       ? (Array.isArray(lastAssistant.content)
           ? lastAssistant.content.filter((b): b is ContentBlock => typeof b !== "string" && b.type === "text").map((b) => b.text).join("")
           : lastAssistant.content as string)
-      : "(超出最大轮次)";
+      : "";
 
-    return { text: lastText, usage };
+    // 末轮可能是纯工具调用（无 text block）→ lastText='' → 返回空串，下游 prompt-runner
+    // 写空 agent_output.md、parseHandoffSections 全 missing → 下一 phase 拿空上下文（与
+    // 「无输出」同源的静默 handoff 缺口）。给明确兜底文案，让工作流能识别"被截断"而非空方案。
+    return {
+      text: lastText || `(已达最大轮次 ${maxTurns}，最后一轮为工具调用、未产出文本结论；可能需提高 max_turns 或换更强模型)`,
+      usage,
+    };
   }
 
   /**
