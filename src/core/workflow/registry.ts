@@ -5,6 +5,7 @@ import { homedir } from "os";
 import { join, sep } from "path";
 import { parse as parseYaml } from "yaml";
 import { tryMakePromptRunnerForPhase } from "./prompt-runner";
+import { makeArtifactDeliverRunner } from "./builtin-deliver";
 import type { PhaseDecision } from "./phase-decision";
 import { DEFAULT_AGENT, type InlineAgentConfig } from "../agent-defaults";
 import {
@@ -503,6 +504,13 @@ function bindPhaseFunc(
 ): void {
   const funcRef = phase.func;
   if (typeof funcRef === "function") return; // 已经是 callable
+
+  // 框架内置交付：phase 声明 `deliver: artifacts` → 绑框架自带的 artifacts 交付器（无需用户 ts）。
+  // 机械交付（promote 产物落表）收进框架；用户工作流只声明，不写 ts。
+  if ((phase as Record<string, unknown>)["deliver"] === "artifacts") {
+    phase.func = makeArtifactDeliverRunner(phase.name);
+    return;
+  }
 
   const funcName = typeof funcRef === "string" ? funcRef : `run_${phase.name}`;
 

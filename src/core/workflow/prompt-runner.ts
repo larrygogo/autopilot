@@ -19,7 +19,7 @@
  */
 
 import { join } from "path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { agentForPhase } from "../../agents/registry";
 import type { InlineAgentConfig } from "../agent-defaults";
 import { getTask, updateTask } from "../db";
@@ -133,6 +133,9 @@ export function expandPromptTemplate(
     TASK_TITLE: String(ctx.task["title"] ?? ""),
     REQUIREMENT: String(ctx.task["requirement"] ?? ""),
     WORKSPACE: codeRoot,
+    // 沙盒交付子目录绝对路径（delivers:artifacts 时框架在 phase 跑前自动建、跑后校验非空）。
+    // 给 produce 类 phase 把产物写到这——绝对路径避免 agent 幻觉出 ~/deliverables 逃逸沙盒。
+    DELIVERABLES: join(codeRoot, "deliverables"),
     HANDOFF: ctx.workflow ? collectUpstreamHandoffs(ctx.taskId, ctx.workflow, ctx.phase, artifactsRoot) : "",
     REJECTION: String(ctx.task["rejection_reason"] ?? ""),
     REJECTION_COUNT: String(sumRejectionCounts(ctx.task["rejection_counts"])),
@@ -332,6 +335,10 @@ export function makePromptRunner(
     const dir = join(getTaskArtifactsDir(taskId), dirName);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
+    // delivers:artifacts：预建沙盒 deliverables/（${DELIVERABLES} 指向它），减小 agent mkdir 出错面
+    const deliverablesDir = wf.delivers === "artifacts" ? join(resolveCodeRoot(taskId), "deliverables") : null;
+    if (deliverablesDir && !existsSync(deliverablesDir)) mkdirSync(deliverablesDir, { recursive: true });
+
     // 第一轮：用解析后的 phase prompt 跑
     let currentPrompt = promptWithHandoff;
     let turn = 0;
@@ -375,6 +382,15 @@ export function makePromptRunner(
         "prompt-runner 达到 turn 上限 %d，丢弃剩余 pending_prompts [task=%s phase=%s]",
         MAX_PROMPT_TURNS, taskId, phaseName,
       );
+    }
+
+    // delivers:artifacts：跑完校验 deliverables/ 非空（空 = agent 未按约定产出 → 抛错让 runner 在本
+    // phase 内重做，胜过把空目录甩给下游交付器才发现）。
+    if (deliverablesDir) {
+      const produced = existsSync(deliverablesDir) ? readdirSync(deliverablesDir) : [];
+      if (produced.length === 0) {
+        throw new Error(`${phaseName} 完成但 ${deliverablesDir} 为空——agent 未把交付物写到 \${DELIVERABLES} 指向的目录`);
+      }
     }
 
     // Phase 6: handoff 协议（spec §3.10）— 解析最后一轮 agent_output，抽出 4 段写 handoff.md

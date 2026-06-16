@@ -1,12 +1,14 @@
 name: artifact
 label: "产物交付"
 description: "产出文件类交付物（设计图 / 网页 demo / 文档）：制作 → 交付到需求 deliveries/ → 需求级人工验收（通过 = done；驳回 = fix_revision 修复轮重做产物）"
-# v2 R5 正式形态（原「探针」已升级）：
-#   - 交付落点 = runtime/requirements/<reqId>/deliveries/round-<N>/（deliverArtifacts promote 落表，
-#     原 AUTOPILOT_HOME/deliverables/ workaround 已废弃）
-#   - 验收 = 需求级 awaiting_review（Web 验收卡 / CLI req accept|reject），produce 的 gate hack 已移除
-#   - 驳回回路 = fix_revision → __fix run 的 artifacts 模式（重做产物 promote round+1）
-setup_func: setup_artifact_task
+# 纯声明式工作流（零 ts，2026-06-16 P1）：
+#   - produce 阶段 = yaml prompt，agent 把交付物写到 ${DELIVERABLES}（框架预建沙盒 deliverables/、
+#     跑后校验非空）；
+#   - deliver 阶段 = phase 声明 `deliver: artifacts`，绑框架内置交付器（deliverArtifacts promote
+#     到 runtime/requirements/<reqId>/deliveries/round-<N>/ 并落 requirement_deliveries 表），无 ts；
+#   - 验收 = 需求级 awaiting_review（Web 验收卡 / CLI req accept|reject）；
+#     驳回回路 = fix_revision → __fix run artifacts 模式重做产物 promote round+1。
+# 无 setup_func / workflow.ts —— 框架默认补 title/requirement。
 
 # 声明层：代码库可选（有就 clone 作只读参考，没有走纯文本澄清 + 空沙盒）；产出 = artifacts
 requires:
@@ -17,8 +19,6 @@ sandbox:
   git: true   # 需求挂了代码库就 clone 作只读参考；agent 不 push、不开 PR；无库时退化空目录
 
 phases:
-  # produce：agent 产出交付物到沙盒 deliverables/。验收统一走需求级 awaiting_review
-  # （run done → 判定 hasDeliveries → 需求转 awaiting_review 等人工验收），不再 gate 挂起。
   - name: produce
     label: "制作"
     timeout: 1800
@@ -26,9 +26,25 @@ phases:
       label: "制作者"
       provider: anthropic
       permission_mode: bypassPermissions
+    prompt: |
+      你是一位多面手创作者（设计 / 前端 / 文档均可）。请根据需求产出交付物。
 
-  # deliver：无 agent 的机械交付。deliverArtifacts 把 deliverables/ promote 到需求
-  # deliveries/round-<N>/ 并落 requirement_deliveries 一行（沙盒在需求 done 后会被清）。
+      ## 需求
+      ${REQUIREMENT}
+
+      ## 工作目录
+      当前目录下若有代码仓库克隆，仅供阅读参考。**不要修改仓库已有文件，不要 git commit / push。**
+
+      ## 交付规则
+      1. 所有交付物写入此绝对路径目录（框架已预建）：`${DELIVERABLES}`
+         ⚠ 写文件必须用上面的绝对路径前缀，不要写到任何其他位置（尤其不要写到用户主目录）
+      2. 网页 demo = 自包含静态文件（单 html 或 html+css+js），双击可开，不依赖构建工具或服务器
+      3. 设计图 = svg，或可在浏览器直接打开的 html 画布
+      4. 最后写 `${DELIVERABLES}/SUMMARY.md`：交付了什么、每个文件是什么、怎么打开查看
+      5. 完成前自查：SUMMARY.md 列出的每个文件都真实存在且可打开
+
   - name: deliver
     label: "交付"
     timeout: 300
+    # 框架内置 artifacts 交付器（无 agent、无 ts）：promote ${DELIVERABLES} 到需求 deliveries/round-N + 落表。
+    deliver: artifacts
