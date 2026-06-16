@@ -177,7 +177,7 @@ export async function run_design(taskId: string): Promise<void> {
   // 子目录，与该绝对根矛盾会让 agent 按根找代码扑空。代码位置由 repoLayoutSection 单一来源描述
   // （每库子目录），agent.run 的 cwd 仍是 collection 根。
   const prompt =
-    `你是一位资深架构师。请根据以下需求，生成一份完整的技术方案。\n\n` +
+    `请根据以下需求，生成一份完整的技术方案。\n\n` +
     `## 需求\n${requirement}\n\n` +
     `请先在当前工作目录阅读仓库代码了解项目结构，然后输出包含以下内容的技术方案：\n` +
     `1. 需求分析\n2. 技术方案\n3. 实现步骤\n4. 影响范围\n5. 测试计划` +
@@ -234,7 +234,7 @@ export async function run_review(taskId: string): Promise<void> {
   const requirement = ((task["requirement"] as string | undefined) ?? "").trim();
 
   const prompt =
-    `你是一位技术评审专家。请评审以下技术方案是否满足需求。\n\n` +
+    `请评审以下技术方案是否满足需求。\n\n` +
     `## 需求\n${requirement}\n\n` +
     `## 技术方案\n${planContent}\n\n` +
     `请从以下维度给出散文评审：完整性、可行性、风险点、测试覆盖。指出真问题、说明是否建议通过。` +
@@ -324,12 +324,12 @@ export async function run_develop(taskId: string): Promise<void> {
 
   const layoutSection = repoLayoutSection(taskRepos(taskId, task));
   const prompt = hasPriorReview
-    ? `你是一位高级开发工程师。**这是 reject 重做轮** —— 上一轮你的提交被代码审查打回，需要根据 review 反馈修改代码。\n\n` +
+    ? `**这是 reject 重做轮** —— 上一轮你的提交被代码审查打回，需要根据 review 反馈修改代码。\n\n` +
       `## 技术方案\n${planContent}\n\n` +
       `## 上一轮代码审查反馈（必须 address 所有 Critical 问题）\n${priorReviewContent}\n\n` +
       `注意：上一轮你的改动已在工作树里（未提交，共用沙盒会保留）。**不要因为"已经改过"就回答"任务已完成"** — review 明确指出了需要补充/修改的具体内容，你必须在现有改动基础上**继续修改**（修文件、补字段、删冗余等），直接改文件即可、**不要自己 git commit**（提交由 submit_pr 阶段统一做）。代码可编译、可运行。` +
       layoutSection
-    : `你是一位高级开发工程师。请根据以下技术方案进行开发。\n\n` +
+    : `请根据以下技术方案进行开发。\n\n` +
       `## 技术方案\n${planContent}\n\n` +
       `请直接在仓库中创建和修改文件完成开发，确保代码可编译、可运行。` +
       layoutSection;
@@ -399,7 +399,7 @@ export async function run_code_review(taskId: string): Promise<void> {
     : "";
 
   const prompt =
-    `你是一位代码审查专家。请审查以下代码变更是否符合技术方案要求。\n\n` +
+    `请审查以下代码变更是否符合技术方案要求。\n\n` +
     `## 技术方案\n${planContent}\n\n` +
     // repoLayoutSection 自空判断（旧根布局任务返回空串）；统一子目录布局下单库也要告知，
     // 否则 diff 截断时 reviewer 按提示自查会在 workspace 根上跑 git 直接 fatal。

@@ -27,6 +27,7 @@ phases:
       provider: anthropic
       model: claude-sonnet-4-6
       permission_mode: bypassPermissions
+      system_prompt: "你是一位资深架构师，擅长把需求拆解为清晰、可执行、风险可控的技术方案。代码注释与 commit message 用中文，代码本身用英文，遵循项目已有风格。"
   - name: review
     label: "设计评审"
     timeout: 900
@@ -39,7 +40,7 @@ phases:
       model: claude-sonnet-4-6
       permission_mode: bypassPermissions
       max_turns: 5
-      system_prompt: "你是代码审查员。关注正确性、可读性、边界与失败处理。找出真问题而非格式纠错；按 critical / important / minor 分级反馈。"
+      system_prompt: "你是一位技术评审专家，从完整性、可行性、风险点、测试覆盖维度评审技术方案。指出真问题而非格式纠错，结论交由系统裁判。"
   - name: develop
     label: "开发"
     timeout: 1800
@@ -49,6 +50,7 @@ phases:
       provider: anthropic
       model: claude-opus-4-6
       permission_mode: bypassPermissions
+      system_prompt: "你是一位高级开发工程师，按技术方案在仓库中实现代码并自查，确保可编译、可运行。代码注释与 commit message 用中文，代码本身用英文，遵循项目已有风格。"
   - name: code_review
     label: "代码评审"
     timeout: 1200
@@ -61,7 +63,7 @@ phases:
       model: claude-sonnet-4-6
       permission_mode: bypassPermissions
       max_turns: 5
-      system_prompt: "你是代码审查员。关注正确性、可读性、边界与失败处理。找出真问题而非格式纠错；按 critical / important / minor 分级反馈。"
+      system_prompt: "你是一位代码审查专家。关注正确性、可读性、边界与失败处理；找出真问题而非格式纠错，按 critical / important / minor 分级反馈。"
   - name: submit_pr
     label: "提交 PR"
     timeout: 300
