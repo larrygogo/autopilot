@@ -22,6 +22,7 @@ import { parseLlmYamlWrapper } from "../core/llm-yaml";
 import { listAttachments, buildAttachmentContext } from "../core/requirements/attachments";
 import { ensureRequirementClones } from "../core/requirements/clone";
 import { deleteRequirementCodebase } from "../core/sandbox/codebase";
+import { deleteClarifyTaskDir } from "../core/sandbox";
 import {
   getSession,
   upsertSession,
@@ -888,9 +889,10 @@ export function initRequirementClarifier(): void {
     if (event.type !== "requirement:status-changed") return;
     const { id, to } = event.payload;
 
-    // 终态 → 清理 session（done/cancelled/failed）
+    // 终态 → 清理 session（done/cancelled/failed）+ rank27 澄清占位任务目录
     if (to === "done" || to === "cancelled" || to === "failed") {
       deleteSession(id, "clarifying");
+      try { deleteClarifyTaskDir(id); } catch { /* 清理失败不阻塞 */ }
     }
     // codebase 清理（v2 R4，spec B）：done 即清（done-workspace-cleanup 负责）；
     // cancelled 仅清纯澄清浅 clone——含 full clone（可能有未交付改动想救回）时留给

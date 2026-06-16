@@ -52,6 +52,23 @@ export function tasksRootDir(): string {
 }
 
 /**
+ * rank27：删除澄清占位任务目录 runtime/tasks/clarify-<reqId>/。非 Anthropic 澄清路径用伪
+ * taskId=clarify-<reqId> 走 runWithTaskContext，落 agent-calls.jsonl + sandbox 目录，但它不在
+ * runtime/requirements/<reqId>/ 树下，deleteRequirementRuntimeDir / 终态清理都碰不到。需求终态
+ * 或删除时级联调用此 helper 回收，避免每需求残留一小目录。不存在时 no-op。
+ */
+export function deleteClarifyTaskDir(reqId: string): void {
+  // 与同文件兄弟函数（getTaskRoot 等）的 ID 校验防御惯例一致——挡未净化 reqId（路径穿越）。
+  if (!TASK_ID_RE.test(reqId)) return;
+  const dir = join(tasksRootDir(), `clarify-${reqId}`);
+  try {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  } catch (e: unknown) {
+    log.warn("删除澄清任务目录失败 [req=%s]: %s", reqId, e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
  * requirements 根目录（新根遍历入口：runtime/requirements/<reqId>/runs/<taskId>/）。
  * @internal 导出供 sandbox-retention.ts 兄弟模块用。
  */
@@ -445,7 +462,14 @@ export async function ensureRunCodebaseSandbox(
 
 /**
  * clone 单个仓库到 dest：token 注入 → 完整 clone → 去 token 覆盖 origin →
- * 基于 origin/<base> 建交付分支 → 写 .git/info/exclude。单库/多库共用。
+ * 基于 origin/<base> 建交付分支 → 写 .git/info/exclude。
+ *
+ * @deprecated rank25：**生产不可达**。git 任务真实 clone 走异步 `ensureRunCodebaseSandbox`
+ * → `codebase.ts cloneRepo`；`ensureTaskSandbox` 在生产中唯一调用点（factory.ts）固定传
+ * workspace=undefined → `tryCreateMultiClone([])` 直接 return null，本函数永不触达。仅 sandbox
+ * 单测（multi-repo-sandbox / sandbox-worktree / task-sandbox-shared 显式传 workspace）还在跑这条路径。
+ * 本函数用同步 `Bun.spawnSync`（无超时、阻塞事件循环）——该缺陷已被 codebase.ts 的 async 版取代。
+ * **勿新增生产调用方**；若日后删除，须把上述测试改测 `ensureRunCodebaseSandbox`（生产路径）。
  */
 function cloneOneRepo(
   taskId: string,
@@ -503,6 +527,10 @@ function cloneOneRepo(
  * 全库共用同名交付分支。
  * 任一 clone 失败 → 整体清掉退化空目录（半套布局比空目录更危险——agent 会只改一半还以为齐了）。
  * repos[0] = 集合第一个（位置语义，主库概念已废除）；顶层字段镜像 repos[0] 防御历史 reader。
+ *
+ * @deprecated rank25：**生产中 workspaces 恒为空 → 恒 return null**（factory.ts 唯一调用
+ * `ensureTaskSandbox` 时传 workspace=undefined；真实 git clone 走 `ensureRunCodebaseSandbox`）。
+ * 非空分支（连同 {@link cloneOneRepo}）仅 sandbox 单测存活。详见 cloneOneRepo 的 @deprecated。
  */
 function tryCreateMultiClone(
   taskId: string,

@@ -8,6 +8,7 @@ import {
   type CodebaseFidelity,
 } from "../sandbox/codebase";
 import type { Workspace } from "../sandbox/workspaces";
+import { deleteClarifyTaskDir } from "../sandbox";
 
 // ──────────────────────────────────────────────
 // 需求级代码 clone —— 澄清阶段入口（v2 R4 起是 ensureCodebase 的薄壳）
@@ -74,6 +75,9 @@ export function deleteRequirementClone(reqId: string): boolean {
  */
 export function deleteRequirementRuntimeDir(reqId: string): boolean {
   if (!REQ_ID_RE.test(reqId)) return false;
+  // rank27 兜底：澄清占位任务目录 runtime/tasks/clarify-<reqId>/ 不在需求树下，单独清
+  // （终态清理是主路径，此处兜住「未经终态直接删需求」的窗口）。no-op 安全。
+  deleteClarifyTaskDir(reqId);
   const root = getRequirementDir(reqId);
   if (!existsSync(root)) return false;
   try {

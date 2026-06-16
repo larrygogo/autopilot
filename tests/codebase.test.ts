@@ -194,6 +194,31 @@ describe("ensureCodebase · shallow 复用既有 full（failed 重澄清）", ()
   });
 });
 
+describe("ensureCodebase · rank26 孤儿子目录 reconcile", () => {
+  it("wsList 缩减（移除一个库）→ 被移除库的子目录 + 清单条目清掉，保留的不动", async () => {
+    const reqId = nextReq();
+    const repoB = join(tmpdir(), `autopilot-cb-rank26-${Date.now()}-${Math.random().toString(36).slice(2)}-repo-b`);
+    initGitRepo(repoB, "feat/old-run-ab12");
+    const wsB = () => ({ id: "ws-2", alias: "lib", remote_url: fileUrl(repoB), default_branch: "main" });
+    try {
+      // 两库浅 clone
+      await ensureCodebase(reqId, [ws(), wsB()], { fidelity: "shallow" });
+      const root = getRequirementCodebaseRoot(reqId);
+      expect(existsSync(join(root, "app"))).toBe(true);
+      expect(existsSync(join(root, "lib"))).toBe(true);
+      expect(readCodebaseManifest(reqId)?.repos.map((r) => r.ws_id).sort()).toEqual(["ws-1", "ws-2"]);
+
+      // 重选：只保留 app（移除 lib）→ lib 子目录 + 清单条目应被 reconcile 清掉
+      await ensureCodebase(reqId, [ws()], { fidelity: "shallow" });
+      expect(existsSync(join(root, "app"))).toBe(true); // 保留库不动
+      expect(existsSync(join(root, "lib"))).toBe(false); // 孤儿子目录被清
+      expect(readCodebaseManifest(reqId)?.repos.map((r) => r.ws_id)).toEqual(["ws-1"]); // 清单也剔除孤儿
+    } finally {
+      if (existsSync(repoB)) rmSync(repoB, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("deleteRequirementCodebase", () => {
   it("全清：codebase/ + .codebase.json 一并删除", async () => {
     const reqId = nextReq();

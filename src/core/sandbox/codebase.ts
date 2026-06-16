@@ -258,7 +258,28 @@ async function ensureCodebaseInner<W extends CodebaseWorkspaceRef>(
   okRepos.sort((a, b) => (order.get(a.ws.id) ?? 0) - (order.get(b.ws.id) ?? 0));
   failed.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 
-  // 清单写回：本次请求的库替换/新增；wsList 之外的旧条目保留（目录仍在，仍是事实）
+  // rank26：reconcile 孤儿——本次 wsList 之外的库 = 已从需求集合移除（审批前 reject→drafting→重选
+  // 缩减），其子目录（磁盘泄漏）+ 清单条目（陈旧账本）该清。**安全前提**：所有生产调用方都传
+  // 需求的全量库集合（factory.resolveWorkspaceRefs = listRequirementWorkspaces 全集，首跑/重跑/fix
+  // 同一入口；clarifier 传 req 全量 workspaces），故「不在本次集合」只可能是真被移除的库，绝非子集调用。
+  // 判据用本次 entries 的 dir / ws_id 集合；codebase/ 根下只有库子目录（清单 .codebase.json 在需求根，
+  // 不在此），且仅删目录（withFileTypes 守卫），绝不碰其它。
+  const liveDirs = new Set(entries.map((e) => e.dir));
+  const liveWsIds = new Set(entries.map((e) => e.ws.id));
+  for (const wsId of [...byWsId.keys()]) {
+    if (!liveWsIds.has(wsId)) byWsId.delete(wsId); // 剔除被移除库的陈旧清单条目
+  }
+  try {
+    for (const ent of readdirSync(root, { withFileTypes: true })) {
+      if (!ent.isDirectory() || liveDirs.has(ent.name)) continue;
+      log.info("需求 codebase：清理孤儿库子目录 %s（已从需求集合移除）[req=%s]", ent.name, reqId);
+      rmSync(join(root, ent.name), { recursive: true, force: true });
+    }
+  } catch (e: unknown) {
+    log.warn("需求 codebase：孤儿子目录 reconcile 失败（不阻塞主流程）[req=%s]: %s", reqId, e instanceof Error ? e.message : e);
+  }
+
+  // 清单写回：本次请求的库替换/新增 + 上面已剔除的孤儿条目不再写回
   writeCodebaseManifest(reqId, [...byWsId.values()]);
 
   return { root, repos: okRepos, failed };
