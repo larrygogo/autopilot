@@ -215,7 +215,8 @@ export class ApiAgentLoop {
       );
 
       // 本轮完整文本一次性记录（取代逐碎片 onStream 日志，避免几百条碎片行）
-      if (response.text) {
+      // reasoningFallback=true 时 text 是推理内容回退，不记录（避免把长推理文写入运行日志）
+      if (response.text && !response.reasoningFallback) {
         log.info("[API] 本轮输出：%s", response.text);
       }
 

@@ -41,8 +41,13 @@ export interface ToolUseBlock {
 // ── 适配器响应 ──
 
 export interface AdapterResponse {
-  /** 纯文本输出 */
+  /** 纯文本输出（OpenAI 兼容适配器在 content 为空时可能回退为 reasoning_content，此时 reasoningFallback=true） */
   text: string;
+  /**
+   * true = text 字段使用了 reasoning 内容作为回退（非真实 assistant content）。
+   * 消费侧（如日志）据此跳过记录，避免把推理长文写入运行日志。
+   */
+  reasoningFallback?: boolean;
   /** 工具调用列表 */
   toolCalls?: ToolUseBlock[];
   /** 用量统计 */

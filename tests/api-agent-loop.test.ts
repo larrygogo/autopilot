@@ -562,6 +562,9 @@ describe("API 流式日志去重 — 每轮回复仅产生一条完整文本日�
     const outputLogs = logCalls.filter((c) => c.msg.includes("本轮输出"));
     expect(outputLogs.length).toBe(1);
     expect(String(outputLogs[0].args[0])).toContain("Hello world!");
+    // 防回归：无工具调用单轮场景下 log.info 总次数应恰好为 1
+    // 若重新引入逐 delta 的 log.info("%s", delta)，此断言会因调用次数增加而失败
+    expect(logCalls.length).toBe(1);
   });
 
   it("纯工具调用（text=''）→ 无「本轮输出」日志条目", async () => {
@@ -595,16 +598,18 @@ describe("API 流式日志去重 — 每轮回复仅产生一条完整文本日�
     expect(outputLogs.length).toBe(0);
   });
 
-  it("response.text 为 undefined 时 → 无「本轮输出」日志条目", async () => {
+  it("reasoningFallback=true 时 → 无「本轮输出」日志条目（推理内容不进日志）", async () => {
     const adapter: ProviderAdapter = {
-      name: "mock-undefined-text",
+      name: "mock-reasoning-fallback",
       async completeStream(
         _messages: MessageParam[],
         _options: AdapterOptions,
         _onDelta?: (delta: string) => void,
       ): Promise<AdapterResponse> {
+        // 模拟 OpenAI 兼容推理模型：content 为空，text 回退为 reasoning 内容
         return {
-          text: undefined as unknown as string,
+          text: "这是推理过程内容，不应记入日志",
+          reasoningFallback: true,
           toolCalls: [{ id: "call_1", name: "task_complete", input: { summary: "done" } }],
           usage: { input_tokens: 10, output_tokens: 5 },
           stopReason: "tool_use",
@@ -620,7 +625,7 @@ describe("API 流式日志去重 — 每轮回复仅产生一条完整文本日�
       maxTurns: 10,
     });
 
-    await loop.run("Undefined text");
+    await loop.run("Reasoning only turn");
 
     const outputLogs = logCalls.filter((c) => c.msg.includes("本轮输出"));
     expect(outputLogs.length).toBe(0);

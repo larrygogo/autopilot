@@ -189,6 +189,8 @@ export class OpenAIApiAdapter implements ProviderAdapter {
     return {
       // content 为空（推理模型整段都是 reasoning）时回退用 reasoning，避免输出丢成空
       text: text || reasoning,
+      // content 真为空、仅靠 reasoning 回退时标记，避免把推理长文记入运行日志
+      reasoningFallback: !text && !!reasoning,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage,
       stopReason: stopReason ?? "stop",
