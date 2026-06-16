@@ -19,6 +19,7 @@ import { ConfirmDialog } from "@/components/Modal";
 import { cn } from "@/lib/utils";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
 import { getApiToken, setApiToken, clearApiToken, shouldUseToken } from "@/lib/api-token";
+import { getDesktopNotifyEnabled, setDesktopNotifyEnabled } from "@/lib/desktop-notify-pref";
 import { setRestarting } from "@/lib/ws-singleton";
 import { restartDaemonAndWait } from "@/lib/restart-daemon";
 import { LifecycleAgentsCard } from "@/components/LifecycleAgentsCard";
@@ -956,28 +957,48 @@ function formatUptime(s: number): string {
 
 /**
  * 桌面通知开关卡。
- * - 检测 Notification.permission 状态（granted / denied / default）
- * - default 时按钮可点击触发 requestPermission()
- * - denied 时提示用户去浏览器设置改
- * - granted 时显示"已启用"
+ * - granted 态：Switch 控制应用层开关（localStorage），可随时关闭/重开
+ * - default 态：Switch 拨到「开」触发 requestPermission()
+ * - denied 态：Switch 显示但 disabled，引导用户去浏览器设置放行
+ * - unsupported 态：无 Switch，仅提示不支持
  */
 function DesktopNotifyCard(): React.ReactElement {
   const toast = useToast();
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
     typeof Notification !== "undefined" ? Notification.permission : "unsupported",
   );
+  // 从 localStorage 初始化开关状态（无记录视为开）
+  const [enabled, setEnabled] = useState<boolean>(() => getDesktopNotifyEnabled());
 
-  async function enable() {
-    if (typeof Notification === "undefined") return;
-    try {
-      const result = await Notification.requestPermission();
-      setPermission(result);
-      if (result === "granted") toast.success("桌面通知已启用");
-      else if (result === "denied") toast.error("桌面通知被拒绝", "请在浏览器地址栏权限设置中放行");
-    } catch (e: unknown) {
-      toast.error("启用失败", (e as Error)?.message ?? String(e));
+  const handleToggle = async (checked: boolean) => {
+    if (permission === "default") {
+      // 默认未授权：拨到「开」时先触发权限请求
+      if (!checked) return; // default 态只能向「开」拨
+      try {
+        const result = await Notification.requestPermission();
+        setPermission(result);
+        if (result === "granted") {
+          // 用户主动在 default 态拨开关表示「授权并启用」，强制写 true（覆盖旧偏好）
+          setDesktopNotifyEnabled(true);
+          setEnabled(true);
+          toast.success("桌面通知已启用");
+        } else if (result === "denied") {
+          toast.error("桌面通知被拒绝", "请在浏览器地址栏权限设置中放行");
+        } else {
+          // 用户关闭了弹窗但未做选择，权限仍为 default
+          toast.info("请在弹窗中点击「允许」以启用通知");
+        }
+      } catch (e: unknown) {
+        toast.error("启用失败", (e as Error)?.message ?? String(e));
+      }
+      return;
     }
-  }
+    // 非 granted 态不应走到这里（JSX 层已保证），防御性守卫
+    if (permission !== "granted") return;
+    // granted 态：直接写 localStorage
+    setDesktopNotifyEnabled(checked);
+    setEnabled(checked);
+  };
 
   return (
     <Card className="mb-4 p-4">
@@ -987,21 +1008,39 @@ function DesktopNotifyCard(): React.ReactElement {
           切到别的标签页时，有需要你处理的事就弹个桌面通知。只在本机有效。
         </p>
       </div>
+
       {permission === "unsupported" && (
         <p className="text-sm text-muted-foreground">当前浏览器不支持桌面通知。</p>
       )}
-      {permission === "granted" && (
-        <p className="text-xs text-success">✓ 已启用</p>
-      )}
+
       {permission === "denied" && (
-        <p className="text-sm text-muted-foreground">
-          通知已被浏览器拒绝。请在地址栏权限设置中放行，再刷新页面。
-        </p>
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm text-muted-foreground">
+            通知已被浏览器拒绝。请在地址栏权限设置中放行，再刷新页面。
+          </p>
+          <Switch checked={false} disabled />
+        </div>
       )}
-      {permission === "default" && (
-        <Button size="sm" onClick={enable}>
-          启用桌面通知
-        </Button>
+
+      {(permission === "granted" || permission === "default") && (
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm">
+              {permission === "granted"
+                ? (enabled ? "已开启" : "已关闭")
+                : "未授权"}
+            </p>
+            {permission === "default" && (
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                拨到「开」以授权并启用桌面通知
+              </p>
+            )}
+          </div>
+          <Switch
+            checked={permission === "granted" ? enabled : false}
+            onCheckedChange={handleToggle}
+          />
+        </div>
       )}
     </Card>
   );
