@@ -251,8 +251,12 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
     if (s.t.ciFixCount >= CI_FIX_LIMIT) {
       // 触顶：写 SHA 水位（同 SHA 不重复通知）+ 停下报人
       updateSubPrCiState(reqId, s.t.wsId, sha, false);
+      // rank20：文案标明 ci_fix_count 语义 = 本 PR **生命周期累计**（不按 review/fix 轮重置）。
+      // 设计意图 = 防环境性 CI 故障无限空转（迁移 039）；故后续 review 驱动的 fix 后若再 CI 失败、
+      // 累计仍 ≥ 上限，会直接走此触顶分支不再自动修——这是有意行为，文案让用户读得懂。
       const reason =
-        `自动修复已触发 ${s.t.ciFixCount} 次仍未转绿，可能是环境性问题，请人工处置。\n失败项：\n${failedList}`;
+        `本 PR 累计自动修复 CI 已达上限 ${CI_FIX_LIMIT} 次（计数按本 PR 生命周期累计、不按轮重置）仍未转绿，` +
+        `不再自动修复——可能是环境性问题，请人工处置。\n失败项：\n${failedList}`;
       log.warn("requirement %s PR #%s CI 自动修复触顶（%s 次），停下报人", reqId, s.t.prNumber, s.t.ciFixCount);
       emit({ type: "requirement:ci-fix-limit", payload: { id: reqId, pr_number: s.t.prNumber, reason } });
       continue;
@@ -269,10 +273,31 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
 
   if (sections.length === 0 && ciSections.length === 0) return;
 
+  // rank19：line 153 的 awaiting_review 检查在所有 gh await 之前；await 期间他方（人工 reject /
+  // bridge）可能已把需求转走（→ fix_revision/done/cancelled）。此时若照旧写 comment + 前移水位，
+  // 会把这批 CHANGES_REQUESTED/CI 标记为「已消费」，但下面 setRequirementStatus(fix_revision) 撞
+  // cur===to 早返回不抛——水位前移却没真正驱动转换，下一轮不再处理；若抢先的 fix run 未覆盖这批
+  // 反馈则永久丢失。故写回前复核当前状态：不再 awaiting_review → 本轮整体放弃（不写 comment/水位/
+  // 状态），水位不前移，下一轮在新状态重新评估同一批 review（幂等安全）。
+  const fresh = getRequirementById(reqId);
+  if (!fresh || fresh.status !== "awaiting_review") {
+    log.info("requirement %s pollOne 写回前状态已变（%s），本轮放弃注入、留待下周期重评", reqId, fresh?.status ?? "deleted");
+    return;
+  }
+
   log.info(
     "requirement %s：%s 条新 CHANGES_REQUESTED + %s 个 PR 的 CI 失败，注入反馈触发 fix_revision",
     reqId, totalChanges, ciStateUpdates.length,
   );
+
+  // 先转状态（cur 已确认 awaiting_review，到此无 await 不会被并发打断 → 真转换）。转换失败（理论
+  // CAS）则不写 comment/水位、下周期重评，反馈不丢——水位前移与状态转换绑定，二者要么都成要么都不成。
+  try {
+    setRequirementStatus(reqId, "fix_revision");
+  } catch (e: unknown) {
+    log.warn("requirement %s 转 fix_revision 失败：%s，本轮不写反馈/水位（下周期重评）", reqId, (e as Error).message);
+    return;
+  }
 
   createComment({
     id: nextCommentId(),
@@ -285,20 +310,13 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
       : undefined,
   });
 
-  // per-PR 水位去重（review 水位 + CI 水位/计数）
+  // per-PR 水位去重（review 水位 + CI 水位/计数）——状态已成功转换后才前移
   for (const u of watermarkUpdates) {
     if (u.t.scope === "sub") updateSubPrWatermark(reqId, u.t.wsId, u.latest);
     else updateRequirement(reqId, { last_reviewed_event_id: u.latest });
   }
   for (const u of ciStateUpdates) {
     updateSubPrCiState(reqId, u.t.wsId, u.sha, true);
-  }
-
-  // 触发 fix_revision（跟 P3 手动注入路径一致）
-  try {
-    setRequirementStatus(reqId, "fix_revision");
-  } catch (e: unknown) {
-    log.warn("requirement %s 转 fix_revision 失败：%s", reqId, (e as Error).message);
   }
 }
 

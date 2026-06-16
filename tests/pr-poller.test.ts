@@ -336,6 +336,31 @@ describe("pr-poller pollOne", () => {
     expect(getRequirementById(id)?.status).toBe("awaiting_review");
     expect(listFeedbacks(id).length).toBe(0);
   });
+
+  it("rank19：gh await 期间状态被抢先转走 → 本轮放弃注入（不写 comment / 不前移水位）", async () => {
+    const id = setupReqAwaitingReview(42, null); // awaiting_review，无水位
+    // mock gh runner：返回带 CHANGES_REQUESTED 的 PR，但在 await 内把需求抢先转走（模拟人工 reject）
+    _setGhRunnerForTest(async () => {
+      setRequirementStatus(id, "fix_revision");
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          reviews: [{ id: "rev-x1", state: "CHANGES_REQUESTED", body: "改这里", author: { login: "a" } }],
+          mergeCommit: null,
+        }),
+        stderr: "",
+      };
+    });
+
+    await pollOne(id, "gh");
+
+    // 旧实现会 createComment + 前移水位（last_reviewed_event_id=rev-x1）后 setStatus 撞 cur===to 早返回；
+    // 新实现写回前复核状态已变 → 整体放弃。
+    expect(getRequirementById(id)?.status).toBe("fix_revision"); // 保持被抢先转走的状态
+    expect(listFeedbacks(id).length).toBe(0); // 未注入反馈
+    expect(getRequirementById(id)?.last_reviewed_event_id ?? null).toBe(null); // 水位未前移，下轮可重处理 rev-x1
+  });
 });
 
 describe("defaultGhRunner gh 缺失降级（rank24）", () => {
