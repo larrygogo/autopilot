@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Save, Trash2, ArrowUp, ArrowDown, Play, Loader2, Ungroup, ArrowUpFromLine, ArrowDownToLine } from "lucide-react";
+import { Plus, Save, Trash2, ArrowUp, ArrowDown, Play, Loader2, Ungroup, ArrowUpFromLine, ArrowDownToLine, ChevronDown, ChevronRight } from "lucide-react";
 import { api, type InlineAgentConfig } from "@/hooks/useApi";
 import { useToast } from "./Toast";
 import { ConfirmDialog } from "./Modal";
 import { AddStepDialog, type NewPhaseData, type NewParallelData } from "./AddStepDialog";
 import { PhaseAgentEditor } from "./PhaseAgentEditor";
 import { PhasePipeline } from "./PhasePipeline";
+import { CodeEditor } from "./CodeEditor";
+import { PromptEditor } from "./PromptEditor";
+import { useResizableWidth } from "@/hooks/useResizableWidth";
 
 /** phase.agent 规整成内联配置对象；历史里 agent 曾是字符串名 → 视为无配置（走默认）。 */
 function normalizeInlineAgent(raw: unknown): InlineAgentConfig | undefined {
@@ -83,6 +86,54 @@ function rewriteRunFnHeader(code: string, oldName: string, newName: string): str
   return code.replace(re, `$1run_${newName}$2`);
 }
 
+// ──────────────────────────────────────────────
+// 归一化「展开态 → 编写态」：workflows.get 返回的是 registry 展开后的 phases
+// （reject 语法糖已被删、变成 jump_trigger/jump_target + 一堆状态机派生字段，label 兜底成大写）。
+// 编辑器只认编写态字段。若把展开态原样回写 yaml：①旧 jump_target 会盖住新改的 reject（改驳回不生效）
+// ②派生字段污染 yaml。故进编辑器先剥成编写态——jump_target 反推回 reject，剥派生字段与兜底 label。
+// ──────────────────────────────────────────────
+const ALWAYS_STRIP_FIELDS = ["jump_trigger", "_jump_origin", "reject_trigger", "retry_target"];
+
+function normalizeSinglePhase(raw: Record<string, unknown>): Record<string, unknown> {
+  const name = typeof raw.name === "string" ? raw.name : "";
+  const out: Record<string, unknown> = { ...raw };
+  // jump_target → reject（编辑器唯一的驳回机制就是 reject 语法糖）
+  if ((out.reject === undefined || out.reject === null) && typeof out.jump_target === "string") {
+    out.reject = out.jump_target;
+  }
+  delete out.jump_target;
+  for (const k of ALWAYS_STRIP_FIELDS) delete out[k];
+  // 状态机派生字段：仅当等于默认派生值才剥（保留极少见的用户自定义 trigger）
+  const derived: Record<string, string> = {
+    pending_state: `pending_${name}`,
+    running_state: `running_${name}`,
+    trigger: `start_${name}`,
+    complete_trigger: `${name}_complete`,
+    fail_trigger: `${name}_fail`,
+  };
+  for (const [k, v] of Object.entries(derived)) {
+    if (out[k] === v) delete out[k];
+  }
+  // registry 兜底 label = NAME.toUpperCase()，非用户填，剥掉避免烤进 yaml
+  if (typeof out.label === "string" && name && out.label === name.toUpperCase()) {
+    delete out.label;
+  }
+  return out;
+}
+
+function normalizeLoadedPhases(phases: unknown[]): any[] {
+  if (!Array.isArray(phases)) return [];
+  return phases.map((p) => {
+    if (p && typeof p === "object" && (p as Record<string, unknown>).parallel) {
+      const par = (p as { parallel: Record<string, unknown> }).parallel;
+      const subs = Array.isArray(par.phases) ? (par.phases as Record<string, unknown>[]) : [];
+      return { ...(p as object), parallel: { ...par, phases: subs.map((s) => normalizeSinglePhase(s)) } };
+    }
+    if (p && typeof p === "object") return normalizeSinglePhase(p as Record<string, unknown>);
+    return p;
+  });
+}
+
 /** 保存将对 workflow.ts 产生的副作用预览（改名 / 新建 stub / 孤儿）。 */
 interface SaveImpact {
   /** run_old → run_new */
@@ -109,7 +160,7 @@ export function PhasePipelineEditor({
   onSaved,
 }: Props) {
   const toast = useToast();
-  const [phases, setPhases] = useState<any[]>(initialPhases);
+  const [phases, setPhases] = useState<any[]>(() => normalizeLoadedPhases(initialPhases));
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [drawerPhase, setDrawerPhase] = useState<string | null>(null);
@@ -117,6 +168,22 @@ export function PhasePipelineEditor({
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingDeleteParallel, setPendingDeleteParallel] = useState<string | null>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
+
+  // ── 编辑抽屉宽度：受控 + 左缘拖拽调宽（持久化）。仅 sm+ 生效；<sm 回退 w-full（手柄隐藏）──
+  const { width: drawerWidth, startResize } = useResizableWidth({
+    storageKey: "phase.drawer.width.v2",
+    defaultWidth: 720,
+    min: 420,
+  });
+  const [wideEnough, setWideEnough] = useState<boolean>(
+    () => (typeof window !== "undefined" ? window.matchMedia("(min-width: 640px)").matches : true),
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 640px)");
+    const on = () => setWideEnough(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
 
   // ── ts 函数草稿：从「应用代码」即时落盘改为纳入批量保存（与字段改动同一个 dirty / 同一次保存）。
   // key = 当前 phase 名；value = 用户编辑后的完整 run_<phase> 源码。改名时一并迁移 key 并改写函数头。──
@@ -137,7 +204,7 @@ export function PhasePipelineEditor({
 
   // initialPhases 变化（保存成功后父级 reload）时重置内部状态
   useEffect(() => {
-    setPhases(initialPhases);
+    setPhases(normalizeLoadedPhases(initialPhases));
     setDirty(false);
     setTsDrafts({});
     resetDraftTracking();
@@ -233,6 +300,26 @@ export function PhasePipelineEditor({
       }
     }
     return names;
+  }, [phases]);
+
+  // 阶段名 → 中文显示 label（reject 下拉等处把英文标识符翻成中文）
+  const phaseLabelMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const p of phases) {
+      if (!p || typeof p !== "object") continue;
+      const par = (p as PhaseRaw).parallel as PhaseRaw | undefined;
+      if (par && typeof par.name === "string") {
+        m[par.name] = pickPhaseLabel({ name: par.name, label: par.label as string | undefined });
+        const subs = Array.isArray(par.phases) ? (par.phases as PhaseRaw[]) : [];
+        for (const s of subs) {
+          if (typeof s.name === "string") m[s.name] = pickPhaseLabel({ name: s.name, label: s.label as string | undefined });
+        }
+      } else if (typeof (p as PhaseRaw).name === "string") {
+        const n = (p as PhaseRaw).name as string;
+        m[n] = pickPhaseLabel({ name: n, label: (p as PhaseRaw).label as string | undefined });
+      }
+    }
+    return m;
   }, [phases]);
 
   // 当前 drawer 选中阶段的 raw 对象引用 + 在 phases 树中的"路径"。三种情况：
@@ -832,9 +919,21 @@ export function PhasePipelineEditor({
         onPhaseClick={setDrawerPhase}
       />
 
-      {/* 编辑 drawer */}
+      {/* 编辑 drawer — sm+ 受控宽度可拖拽调宽，<sm 回退 w-full */}
       <Sheet open={!!drawerPhase} onOpenChange={(o) => { if (!o) setDrawerPhase(null); }}>
-        <SheetContent side="right" className="w-full max-w-md overflow-y-auto sm:max-w-md">
+        <SheetContent
+          side="right"
+          className="flex w-full flex-col gap-0 p-0 sm:max-w-none"
+          style={wideEnough ? { width: drawerWidth } : undefined}
+        >
+          {/* 左缘拖拽手柄：仅 sm+ 显示 */}
+          <div
+            className="absolute inset-y-0 left-0 z-20 hidden w-1.5 cursor-col-resize transition-colors hover:bg-accent/40 sm:block"
+            role="separator"
+            aria-orientation="vertical"
+            title="拖拽调整宽度"
+            onPointerDown={startResize}
+          />
           {drawerPhaseLocation && (() => {
             const phaseName = String(drawerPhaseLocation.raw.name ?? "");
             const rawLabel = typeof drawerPhaseLocation.raw.label === "string"
@@ -843,7 +942,7 @@ export function PhasePipelineEditor({
             const displayName = pickPhaseLabel({ name: phaseName, label: rawLabel });
             return (
             <>
-              <SheetHeader>
+              <SheetHeader className="shrink-0 px-4 pt-4 sm:px-6 sm:pt-6">
                 <SheetTitle className="flex items-baseline gap-2">
                   <span className="truncate">{displayName}</span>
                   {displayName !== phaseName && (
@@ -855,6 +954,8 @@ export function PhasePipelineEditor({
                 </SheetDescription>
               </SheetHeader>
 
+              {/* 仅中间体滚动，header / footer 固定不动 */}
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6">
               {drawerPhaseLocation.kind === "parallel-block" ? (
                 <ParallelBlockEditForm
                   raw={drawerPhaseLocation.raw}
@@ -872,20 +973,16 @@ export function PhasePipelineEditor({
                     workflowName={workflowName}
                     allPhaseNames={allPhaseNames}
                     rejectTargets={drawerRejectTargets}
+                    phaseLabels={phaseLabelMap}
                     isTopLevel={drawerPhaseLocation.kind === "top"}
                     parallelBlockNames={parallelBlockNames}
                     onChange={(patch) => updatePhaseField(phaseName, patch)}
                     onRename={(oldName, newName) => handleRenamePhase(oldName, newName)}
                     onMoveIntoParallel={(parName) => handleMoveIntoParallel(phaseName, parName)}
                     onMoveOutOfParallel={() => handleMoveOutOfParallel(phaseName)}
-                  />
-
-                  <PhaseTsEditor
-                    phaseName={phaseName}
-                    originalCode={drawerTsCode}
-                    value={tsDrafts[phaseName] ?? drawerTsCode ?? ""}
-                    onChange={(code) => setTsDrafts((prev) => ({ ...prev, [phaseName]: code }))}
-                    hasPrompt={typeof drawerPhaseLocation.raw.prompt === "string" && (drawerPhaseLocation.raw.prompt as string).trim() !== ""}
+                    tsOriginalCode={drawerTsCode}
+                    tsValue={tsDrafts[phaseName] ?? drawerTsCode ?? ""}
+                    onTsChange={(code) => setTsDrafts((prev) => ({ ...prev, [phaseName]: code }))}
                   />
                 </>
               )}
@@ -928,10 +1025,11 @@ export function PhasePipelineEditor({
                   </p>
                 </section>
               )}
-
-              <SheetFooter>
+              {/* 危险操作：放内容区最底部、需滚动才到达，远离常驻保存键，避免误触 */}
+              <section className="mt-6 border-t border-border pt-3">
+                <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">危险操作</div>
                 {drawerPhaseLocation.kind === "parallel-block" ? (
-                  <>
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       variant="outline"
                       size="sm"
@@ -949,7 +1047,7 @@ export function PhasePipelineEditor({
                       <Trash2 className="h-4 w-4" />
                       删除并行块
                     </Button>
-                  </>
+                  </div>
                 ) : (
                   <Button
                     variant="destructive"
@@ -960,6 +1058,10 @@ export function PhasePipelineEditor({
                     删除阶段
                   </Button>
                 )}
+              </section>
+              </div>
+
+              <SheetFooter className="shrink-0 px-4 pb-4 sm:px-6 sm:pb-6">
                 <Button
                   size="sm"
                   onClick={() => {
@@ -1356,7 +1458,7 @@ function PromptDryRunner({
         </Button>
       </div>
       <p className="mt-1 text-[10px] text-muted-foreground">
-        变量占位符（${'$'}{'{REQUIREMENT}'} 等）原样发送给 agent，调试时建议先手动替换成真实测试值
+        变量占位符（{"${REQUIREMENT}"} 等）原样发送给 agent，调试时建议先手动替换成真实测试值
       </p>
       {(output !== null || errorMsg !== null) && (
         <div className="mt-2">
@@ -1419,7 +1521,7 @@ function PhaseTsEditor({
       )}
       {hasPrompt && originalCode !== null && (
         <p className="mb-1 border border-warning/40 bg-warning/5 p-2 text-[11px] text-warning">
-          该阶段同时有 prompt 字段和 ts 函数；框架会优先调用 ts 函数（prompt 字段被忽略）
+          该阶段同时有 prompt 字段和 ts 函数；提示词优先——框架只跑 prompt，<b>这段 ts 函数会被忽略</b>
         </p>
       )}
       {!hasPrompt && originalCode === null && value === "" && (
@@ -1427,15 +1529,14 @@ function PhaseTsEditor({
           未找到 <code className="font-mono">run_{phaseName}</code> 函数；上面填 prompt 即可零代码运行，或在下方编写完整 ts 函数
         </p>
       )}
-      <Textarea
+      <CodeEditor
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
         placeholder={`export async function run_${phaseName}(taskId: string): Promise<void> {\n  // TODO\n}`}
-        className="scrollbar-thin h-56 resize-none border border-border bg-card p-3 font-mono text-[11px] leading-relaxed"
-        spellCheck={false}
+        title={`run_${phaseName}`}
       />
       <p className="mt-1 text-[10px] text-muted-foreground">
-        必须以 <code className="font-mono">export async function run_{phaseName}(</code> 开头；保存时随字段改动一并写回 workflow.ts
+        必须以 <code className="font-mono">export async function run_{phaseName}(</code> 开头；保存时随字段改动一并写回 workflow.ts。右上角可全屏编辑（Esc 退出）
       </p>
     </section>
   );
@@ -1448,18 +1549,24 @@ function PhaseEditForm({
   workflowName,
   allPhaseNames,
   rejectTargets,
+  phaseLabels,
   isTopLevel,
   parallelBlockNames,
   onChange,
   onRename,
   onMoveIntoParallel,
   onMoveOutOfParallel,
+  tsOriginalCode,
+  tsValue,
+  onTsChange,
 }: {
   raw: PhaseRaw;
   workflowName: string;
   allPhaseNames: string[];
   /** 合法的 reject 目标（只能往回跳）——已由父级按当前 phase 的顶层位置过滤 */
   rejectTargets: string[];
+  /** 阶段名 → 中文显示 label（reject 下拉用） */
+  phaseLabels: Record<string, string>;
   /** true 表示当前 phase 在顶层（顶层时可"移入并行块"；并行子项时可"移出"） */
   isTopLevel: boolean;
   /** 现有并行块名列表（顶层 phase 用） */
@@ -1469,6 +1576,11 @@ function PhaseEditForm({
   onRename: (oldName: string, newName: string) => boolean;
   onMoveIntoParallel: (parallelName: string) => void;
   onMoveOutOfParallel: () => void;
+  /** 本阶段 workflow.ts 里现存的 run 函数源码（判断 prompt vs 代码模式 + 脏标记） */
+  tsOriginalCode: string | null;
+  /** ts 编辑草稿当前值 */
+  tsValue: string;
+  onTsChange: (code: string) => void;
 }) {
   // reject 只能往回跳：候选 = 父级按位置过滤后的合法目标（排除自己）。
   // 若当前已存的 reject 值因重排变得不合法，仍并入候选保证它在下拉里可见（否则 Select 渲染不出 label）。
@@ -1504,13 +1616,21 @@ function PhaseEditForm({
     }
   }
 
-  // 声明式判据（decision）草稿读写：支持增量填写（pass/reject 任填一个就留草稿），全空才删。
+  // 声明式判据（decision）草稿读写：支持增量填写，全空才删。
   const decision = (raw.decision ?? {}) as {
+    mode?: string;
     pass?: string;
     reject?: string;
     reason_section?: string;
     match?: string;
+    criteria?: string;
+    judge_provider?: string;
+    judge_model?: string;
+    judge_system_prompt?: string;
   };
+  // 判据模式：judge（结构化裁判，dev 在用）/ marker（grep 标记）。按数据推断，缺省 judge。
+  const decisionMode: "judge" | "marker" =
+    decision.mode === "marker" ? "marker" : decision.pass || decision.reject ? "marker" : "judge";
   function patchDecision(p: Partial<typeof decision>) {
     const next: Record<string, unknown> = { ...decision, ...p };
     const cleaned: Record<string, unknown> = {};
@@ -1518,10 +1638,63 @@ function PhaseEditForm({
     onChange({ decision: Object.keys(cleaned).length ? cleaned : undefined });
   }
   const isPromptMode = typeof raw.prompt === "string" && raw.prompt.trim() !== "";
+  const hasTsFn = (tsOriginalCode ?? "").trim() !== "" || tsValue.trim() !== "";
+  // 任务编辑模式：写提示词（零代码）/ 写执行函数（ts）二选一。初值按数据推断；切 phase 时重置。
+  const [taskMode, setTaskMode] = useState<"prompt" | "code">(hasTsFn && !isPromptMode ? "code" : "prompt");
+  useEffect(() => {
+    setTaskMode(hasTsFn && !isPromptMode ? "code" : "prompt");
+    // 仅 phase 切换时重置（模式内编辑不重置）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phaseName]);
+
+  // 任务区（写提示词 / 写执行函数）：构建好后嵌入智能体卡，紧跟模型之后。
+  const taskGroup = (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="bp-label text-[11px] text-foreground">任务</span>
+        <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
+          <button type="button" onClick={() => setTaskMode("prompt")} className={taskMode === "prompt" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>写提示词</button>
+          <button type="button" onClick={() => setTaskMode("code")} className={taskMode === "code" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>写执行函数</button>
+        </div>
+      </div>
+      {isPromptMode && hasTsFn && (
+        <p className="border border-warning/40 bg-warning/5 p-2 text-[10px] text-warning">
+          同时填了提示词和执行函数，提示词优先——运行时只执行提示词、执行函数被忽略（要改用执行函数请清空提示词）。
+        </p>
+      )}
+      {taskMode === "prompt" ? (
+        <div className="space-y-1">
+          <PromptEditor
+            value={typeof raw.prompt === "string" ? raw.prompt : ""}
+            onChange={(v) => onChange({ prompt: v || undefined })}
+            placeholder={"这一步要 agent 做什么。点上方「变量」插入占位符，运行时框架替换成真实值。\n例：评审 ${HANDOFF_design} 是否满足 ${REQUIREMENT}。"}
+          />
+          {typeof raw.prompt === "string" && raw.prompt.trim() && (
+            <PromptDryRunner
+              workflowName={workflowName}
+              agent={normalizeInlineAgent(raw.agent)}
+              prompt={raw.prompt}
+            />
+          )}
+        </div>
+      ) : (
+        <PhaseTsEditor
+          phaseName={phaseName}
+          originalCode={tsOriginalCode}
+          value={tsValue}
+          onChange={onTsChange}
+          hasPrompt={isPromptMode}
+        />
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-3 pt-3">
-      <div className="grid grid-cols-1 gap-2">
+      {/* 阶段信息（折叠，放最上面）：显示名 / 标识符 / 超时 / 分组 */}
+      <CollapsibleSection title="阶段信息（显示名 · 标识符 · 超时）">
+        {/* sm+ 两列、移动端逐项堆叠——字段不必各占一行 */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormRow label="显示名 (label)">
           <Input
             value={realLabel}
@@ -1570,33 +1743,66 @@ function PhaseEditForm({
             className="h-8 w-32 font-mono text-sm"
           />
         </FormRow>
+        </div>
 
-        <FormRow label="提示词 (prompt)">
-          <Textarea
-            value={typeof raw.prompt === "string" ? raw.prompt : ""}
-            placeholder={`填了 prompt 就不需要写 ts 函数。\n可用变量：\${REQUIREMENT} 需求详情 · \${WORKSPACE} 代码目录 · \${HANDOFF} 上游各阶段交付摘要 · \${HANDOFF_<阶段名>} 指定阶段摘要 · \${REJECTION} 上次驳回理由(重做轮自动带) · \${TASK_TITLE} · \${PHASE} · \${TASK.<字段>}\n例：评审 \${HANDOFF_design} 是否满足 \${REQUIREMENT}。`}
-            onChange={(e) => onChange({ prompt: e.target.value || undefined })}
-            className="min-h-[100px] resize-y font-mono text-[11px] leading-relaxed"
-            spellCheck={false}
-          />
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {"yaml 写 prompt → 框架自动调用 phase 内联 agent（或默认 agent）.run(prompt)，无需写 ts 函数；上游产物用 ${HANDOFF}/${HANDOFF_<阶段>} 读，不用 readFileSync。复杂分支（reject / 解析返回）仍需 ts"}
-          </p>
-          {typeof raw.prompt === "string" && raw.prompt.trim() && (
-            <PromptDryRunner
-              workflowName={workflowName}
-              agent={normalizeInlineAgent(raw.agent)}
-              prompt={raw.prompt}
-            />
-          )}
-        </FormRow>
+        {/* 分组：顶层 phase 移入并行块；并行子项移出 */}
+        {isTopLevel && parallelBlockNames.length > 0 && (
+          <section className="mt-2 border-t border-border pt-3">
+            <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
+              分组
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-[11px] text-muted-foreground">移入并行块：</Label>
+              <Select
+                value="__none__"
+                onValueChange={(v) => { if (v !== "__none__") onMoveIntoParallel(v); }}
+              >
+                <SelectTrigger className="h-7 w-44 text-xs">
+                  <SelectValue placeholder="选择并行块" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">（取消）</SelectItem>
+                  {parallelBlockNames.map((n) => (
+                    <SelectItem key={n} value={n} className="font-mono">{n}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              该阶段会成为并行块的最后一个子节点；移入后 reject 字段被清空（并行块内 reject 语义不适用）
+            </p>
+          </section>
+        )}
+        {!isTopLevel && (
+          <section className="mt-2 border-t border-border pt-3">
+            <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
+              分组
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onMoveOutOfParallel}
+            >
+              <ArrowUpFromLine className="h-4 w-4" />
+              移出并行块
+            </Button>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              该子节点会平铺到顶层，紧接所属并行块之后
+            </p>
+          </section>
+        )}
+      </CollapsibleSection>
 
-        <PhaseAgentEditor
-          phaseName={phaseName}
-          agent={normalizeInlineAgent(raw.agent)}
-          onChange={(next) => onChange({ agent: next })}
-        />
+      {/* 智能体卡：模型 → 角色设定 → 任务 → 高级，合成一张卡 */}
+      <PhaseAgentEditor
+        phaseName={phaseName}
+        agent={normalizeInlineAgent(raw.agent)}
+        onChange={(next) => onChange({ agent: next })}
+        taskSlot={taskGroup}
+      />
 
+      {/* 流程控制（折叠）：驳回 / 判据 / 人工审批 */}
+      <CollapsibleSection title="流程控制（驳回 · 判据 · 人工审批）">
         <FormRow label="驳回到">
           <Select
             value={(raw.reject as string | undefined) || "__none__"}
@@ -1608,12 +1814,18 @@ function PhaseEditForm({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__none__">（不驳回）</SelectItem>
-              {rejectCandidates.map((n) => (
-                <SelectItem key={n} value={n} className="font-mono">
-                  {n}
-                  {n === curReject && rejectValueInvalid ? "（已不在前序，请重选）" : ""}
-                </SelectItem>
-              ))}
+              {rejectCandidates.map((n) => {
+                const label = phaseLabels[n] ?? n;
+                return (
+                  <SelectItem key={n} value={n}>
+                    <span className="flex items-baseline gap-1.5">
+                      <span>{label}</span>
+                      {label !== n && <span className="font-mono text-[10px] text-muted-foreground">{n}</span>}
+                      {n === curReject && rejectValueInvalid ? "（已不在前序，请重选）" : ""}
+                    </span>
+                  </SelectItem>
+                );
+              })}
             </SelectContent>
           </Select>
           {rejectCandidates.length === 0 ? (
@@ -1647,45 +1859,78 @@ function PhaseEditForm({
           </FormRow>
         )}
 
-        {isPromptMode && raw.gate !== true && (
-          <FormRow label="判据 / 分支">
+        {isPromptMode && raw.gate !== true && typeof raw.reject === "string" && raw.reject !== "" && (
+          <FormRow label="判据（这一步如何判通过 / 驳回）">
             <div className="space-y-2">
               <p className="text-[10px] text-muted-foreground">
-                让框架按 agent 输出自动判通过 / 驳回。判什么、用什么标记由你定；驳回会回退到上面「驳回到」的目标重做（次数上限走「最大驳回次数」，触顶暂停报人）。
+                框架按 agent 输出自动判通过 / 驳回；驳回回退到「驳回到」目标重做（上限走「最大驳回次数」，触顶暂停报人）。
               </p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <span className="text-[10px] text-muted-foreground">通过标记</span>
-                  <Input
-                    value={decision.pass ?? ""}
-                    placeholder="如 REVIEW_RESULT: PASS"
-                    onChange={(e) => patchDecision({ pass: e.target.value })}
-                    className="h-8 font-mono text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[10px] text-muted-foreground">驳回标记</span>
-                  <Input
-                    value={decision.reject ?? ""}
-                    placeholder="如 REVIEW_RESULT: REJECT"
-                    onChange={(e) => patchDecision({ reject: e.target.value })}
-                    className="h-8 font-mono text-sm"
-                  />
-                </div>
+              {/* 模式：结构化裁判（judge，另起一次强制结构化裁决）/ 标记匹配（marker，grep agent 输出标记） */}
+              <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
+                <button type="button" onClick={() => patchDecision({ mode: "judge" })} className={decisionMode === "judge" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>结构化裁判</button>
+                <button type="button" onClick={() => patchDecision({ mode: "marker" })} className={decisionMode === "marker" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>标记匹配</button>
               </div>
-              <div className="space-y-1">
-                <span className="text-[10px] text-muted-foreground">驳回理由段（可选）</span>
-                <Input
-                  value={decision.reason_section ?? ""}
-                  placeholder="如 ## 驳回理由（留空取全文）"
-                  onChange={(e) => patchDecision({ reason_section: e.target.value })}
-                  className="h-8 font-mono text-sm"
-                />
-              </div>
-              {(decision.pass || decision.reject) && !(typeof raw.reject === "string" && raw.reject) && (
-                <p className="text-[10px] text-warning">
-                  配了判据但没设「驳回到」目标——请在上面选驳回目标，否则保存会被拒。
-                </p>
+
+              {decisionMode === "judge" ? (
+                <>
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-muted-foreground">评判标准 criteria（喂给裁判，决定它怎么判 —— 这就是你「告诉裁判怎么判」的地方）</span>
+                    <Textarea
+                      value={decision.criteria ?? ""}
+                      placeholder={"如：架构方向正确、核心需求有覆盖即 pass；仅当存在架构性硬伤（技术方向错 / 不可行 / 核心需求遗漏）才 reject。可在开发阶段处理的 gap 不构成驳回。"}
+                      onChange={(e) => patchDecision({ criteria: e.target.value })}
+                      className="min-h-[90px] resize-y text-sm leading-relaxed"
+                      spellCheck={false}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-muted-foreground">裁判 provider（缺省 anthropic）</span>
+                      <Input
+                        value={decision.judge_provider ?? ""}
+                        placeholder="如 kimi-code"
+                        onChange={(e) => patchDecision({ judge_provider: e.target.value })}
+                        className="h-8 font-mono text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-muted-foreground">裁判 model（可选）</span>
+                      <Input
+                        value={decision.judge_model ?? ""}
+                        placeholder="缺省走 provider 默认"
+                        onChange={(e) => patchDecision({ judge_model: e.target.value })}
+                        className="h-8 font-mono text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-muted-foreground">裁判人设 system prompt（可选，留空用框架默认）</span>
+                    <Textarea
+                      value={decision.judge_system_prompt ?? ""}
+                      placeholder={"覆写裁判的人设/取向。留空 = 框架默认（严格裁判，只依客观问题、不被措辞带偏）。"}
+                      onChange={(e) => patchDecision({ judge_system_prompt: e.target.value })}
+                      className="min-h-[60px] resize-y text-sm leading-relaxed"
+                      spellCheck={false}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-muted-foreground">通过标记</span>
+                      <Input value={decision.pass ?? ""} placeholder="如 REVIEW_RESULT: PASS" onChange={(e) => patchDecision({ pass: e.target.value })} className="h-8 font-mono text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-muted-foreground">驳回标记</span>
+                      <Input value={decision.reject ?? ""} placeholder="如 REVIEW_RESULT: REJECT" onChange={(e) => patchDecision({ reject: e.target.value })} className="h-8 font-mono text-sm" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-muted-foreground">驳回理由段（可选）</span>
+                    <Input value={decision.reason_section ?? ""} placeholder="如 ## 驳回理由（留空取全文）" onChange={(e) => patchDecision({ reason_section: e.target.value })} className="h-8 font-mono text-sm" />
+                  </div>
+                </>
               )}
             </div>
           </FormRow>
@@ -1713,54 +1958,7 @@ function PhaseEditForm({
             />
           </FormRow>
         )}
-      </div>
-
-      {/* 分组操作：顶层 phase 可以移入并行块；并行子项可以移出 */}
-      {isTopLevel && parallelBlockNames.length > 0 && (
-        <section className="mt-4 border-t border-border pt-3">
-          <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
-            分组
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-[11px] text-muted-foreground">移入并行块：</Label>
-            <Select
-              value="__none__"
-              onValueChange={(v) => { if (v !== "__none__") onMoveIntoParallel(v); }}
-            >
-              <SelectTrigger className="h-7 w-44 text-xs">
-                <SelectValue placeholder="选择并行块" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">（取消）</SelectItem>
-                {parallelBlockNames.map((n) => (
-                  <SelectItem key={n} value={n} className="font-mono">{n}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            该阶段会成为并行块的最后一个子节点；移入后 reject 字段被清空（并行块内 reject 语义不适用）
-          </p>
-        </section>
-      )}
-      {!isTopLevel && (
-        <section className="mt-4 border-t border-border pt-3">
-          <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
-            分组
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onMoveOutOfParallel}
-          >
-            <ArrowUpFromLine className="h-4 w-4" />
-            移出并行块
-          </Button>
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            该子节点会平铺到顶层，紧接所属并行块之后
-          </p>
-        </section>
-      )}
+      </CollapsibleSection>
     </div>
   );
 }
@@ -1772,6 +1970,33 @@ function FormRow({ label, children }: { label: string; children: React.ReactNode
         {label}
       </Label>
       {children}
+    </div>
+  );
+}
+
+// 折叠区：把智能体卡之外的次要配置（阶段信息 / 流程控制）收起，默认折叠，
+// 让智能体卡（模型 + 任务 + 角色）成为抽屉里的主视觉。
+function CollapsibleSection({
+  title,
+  defaultOpen,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className="rounded-lg border border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 bp-label px-3 py-2 text-[10px] text-muted-foreground hover:text-foreground"
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <span>{title}</span>
+      </button>
+      {open && <div className="space-y-3 border-t border-border p-3">{children}</div>}
     </div>
   );
 }

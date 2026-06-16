@@ -130,7 +130,7 @@ function PreviewBody({
       {hasPrompt && (
         <section>
           <div className="mb-1.5 flex items-center gap-2 bp-label text-muted-foreground">
-            <span>提示词 · prompt</span>
+            <span>任务 · prompt</span>
             <span className="rounded-md border border-accent/40 bg-accent/5 px-1 py-px text-[9px] text-accent">
               零代码
             </span>
@@ -170,7 +170,7 @@ function FieldGrid({ phase }: { phase: DrawerPhaseInfo }) {
     { label: "标识符", value: <code className="font-mono">{phase.name}</code> },
   ];
   if (phase.agent) {
-    items.push({ label: "智能体", value: <code className="font-mono">{phase.agent}</code> });
+    items.push({ label: "角色与模型", value: <code className="font-mono">{phase.agent}</code> });
   }
   if (typeof phase.timeout === "number") {
     items.push({ label: "超时", value: fmtTimeout(phase.timeout) });
