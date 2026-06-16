@@ -7,33 +7,55 @@ setup_func: setup_dev_task
 # requires.git 不写 —— 缺省派生自 sandbox.git=true（必须有代码库）。
 delivers: pr
 
-# 独立 clone 沙盒：把需求绑定的 workspace 仓库 `git clone --local` 到任务运行目录，
-# 一个完全独立的 git 副本。run 阶段全程在副本里跑 git，**用户源码仓库零痕迹**
-# （不在源仓库 .git 留 worktree 注册 / 临时分支；删除纯 rmSync 不碰源仓库）。
-# 交付时 push 规范分支 feat/<需求> + PR。repo_path / default_branch / branch 由框架
-# 按 workspace 注入，无需在此写死路径（旧的 config.repo_path 占位已废弃）。
+# 独立 clone 沙盒：把需求绑定的 workspace 仓库 clone 到任务运行目录，run 阶段全程在副本里
+# 跑 git，用户源码仓库零痕迹；交付时 push 规范分支 feat/<需求> + PR。
 sandbox:
   git: true
 
-# 每个 phase 就地内联 agent 配置（不再引用命名 agent）。
-# 省略 agent: 的 phase 走 DEFAULT_AGENT 兜底。
+# 执行模式（2026-06 起）：agent 阶段全部「纯提示词」——直接在 yaml 写 prompt，
+# 框架内置 prompt-runner 渲染 ${变量} 后调内联 agent.run()，不再需要 workflow.ts 阶段函数。
+#   - 阶段产物自动落 artifacts/<NN-phase>/agent_output.md；
+#   - design 开 handoff:true，把方案摘要交给下游用 ${HANDOFF_design} 读；
+#   - review / code_review 用 decision(judge 结构化裁判) 声明式判 pass/reject，
+#     reject 回退重做、触顶 max_rejections 自动转 failed 停下报人（全在框架，零 ts）。
+# 唯一保留 ts 的是 submit_pr（机械交付：逐库 commit/push + gh 开 PR + appendSubPr 登记，
+# 无 AI，凭证抹除/追踪原语只能从 workflow.ts 调）——它没有 prompt 字段，提示词优先全局下
+# 自然回退到同名 run_submit_pr 函数。
 phases:
   - name: design
     label: "设计"
     timeout: 900
     sandbox: { code: read-only }
+    handoff: true
     agent:
       label: "架构师"
       provider: anthropic
-      model: claude-sonnet-4-6
+      model: claude-opus-4-8
       permission_mode: bypassPermissions
       system_prompt: "你是一位资深架构师，擅长把需求拆解为清晰、可执行、风险可控的技术方案。代码注释与 commit message 用中文，代码本身用英文，遵循项目已有风格。"
+    prompt: |
+      请根据以下需求，生成一份完整、可执行的技术方案。
+
+      ## 需求
+      ${REQUIREMENT}
+
+      先在当前工作目录用 `ls` / 查看子目录了解仓库结构与代码：本任务的代码库各自克隆在当前目录的子目录里（每个仓库一个子目录），**先看清布局，不要在根目录直接跑 git**。这是设计阶段，**只读代码、不要改动任何文件**。
+
+      然后输出包含以下内容的技术方案：
+      1. 需求分析
+      2. 技术方案
+      3. 实现步骤
+      4. 影响范围
+      5. 测试计划
+
+      若下方存在上一轮评审的驳回意见，请针对性修订方案后重新输出（无内容则忽略）：
+      ${REJECTION}
   - name: review
     label: "设计评审"
     timeout: 900
     reject: design
-    sandbox: { code: read-only }
     max_rejections: 3
+    sandbox: { code: read-only }
     agent:
       label: "评审员"
       provider: anthropic
@@ -41,6 +63,24 @@ phases:
       permission_mode: bypassPermissions
       max_turns: 5
       system_prompt: "你是一位技术评审专家，从完整性、可行性、风险点、测试覆盖维度评审技术方案。指出真问题而非格式纠错，结论交由系统裁判。"
+    decision:
+      mode: judge
+      judge_provider: kimi-code
+      criteria: |
+        判定对象是【设计方案】而非最终代码——后面还有完整的开发 + 代码审查环节兜底，无需在设计阶段追求面面俱到。
+        通过(pass)：架构方向正确、技术可行、核心需求有覆盖即可。**可在开发阶段处理的 gap 一律不构成驳回**——包括边界 case 未写全、次要规格未钉死、测试细节、可读性/命名建议、以及评审标注为 Important/minor 但不影响架构成立的问题。
+        驳回(reject)：仅当存在【架构性硬伤】——技术方向错误 / 方案不可行 / 核心需求遗漏 / 重大风险且方案毫无意识。
+        原则：评审即便挑了不少刺，只要架构站得住、能据此往下开发，就判 pass，把细节留给后续环节。
+    prompt: |
+      请评审下面的技术方案是否满足需求。
+
+      ## 需求
+      ${REQUIREMENT}
+
+      ## 待评审的技术方案
+      ${HANDOFF_design}
+
+      请从完整性、可行性、风险点、测试覆盖四个维度给出散文评审，指出真问题、说明是否建议通过。结论由系统裁判，你只需把评审意见写清楚（无需输出固定结论标记）。
   - name: develop
     label: "开发"
     timeout: 1800
@@ -48,15 +88,25 @@ phases:
     agent:
       label: "开发者"
       provider: anthropic
-      model: claude-opus-4-6
+      model: claude-opus-4-8
       permission_mode: bypassPermissions
       system_prompt: "你是一位高级开发工程师，按技术方案在仓库中实现代码并自查，确保可编译、可运行。代码注释与 commit message 用中文，代码本身用英文，遵循项目已有风格。"
+    prompt: |
+      请根据技术方案在仓库中实现代码。
+
+      ## 技术方案
+      ${HANDOFF_design}
+
+      先用 `ls` / 查看子目录了解仓库布局：代码库各自克隆在当前目录的子目录里（每个仓库一个子目录）。直接在对应子目录内创建/修改文件完成开发，确保代码可编译、可运行。**不要自己 git commit / push**（提交与开 PR 由后续 submit_pr 阶段统一做）。跨仓库接口（API 契约 / 类型定义）必须两侧同步修改。
+
+      若下方存在上一轮代码审查的驳回反馈——这是返工轮，你的上一轮改动已在工作树里（未提交、保留着），请在其基础上**继续修改**、针对性解决所有 Critical / Important 问题，**不要因为"已经改过"就当作完成**（无内容则忽略）：
+      ${REJECTION}
   - name: code_review
     label: "代码评审"
     timeout: 1200
     reject: develop
-    sandbox: { code: read-only }
     max_rejections: 3
+    sandbox: { code: read-only }
     agent:
       label: "评审员"
       provider: anthropic
@@ -64,8 +114,25 @@ phases:
       permission_mode: bypassPermissions
       max_turns: 5
       system_prompt: "你是一位代码审查专家。关注正确性、可读性、边界与失败处理；找出真问题而非格式纠错，按 critical / important / minor 分级反馈。"
+    decision:
+      mode: judge
+      judge_provider: kimi-code
+      criteria: |
+        通过(pass)：改动正确实现了需求与技术方案的核心目标，无明显正确性/安全问题，关键路径可验证。仅 minor 风格问题不驳回。
+        驳回(reject)：critical/important 缺陷——功能未实现 / 逻辑错误 / 安全隐患 / 与方案严重不符。
+    prompt: |
+      请审查本次代码改动是否正确实现了技术方案。
+
+      ## 技术方案
+      ${HANDOFF_design}
+
+      你在仓库工作目录、有完整 shell 权限。请**自己采集真实改动再评审**：代码库各自在当前目录的子目录里，对每个子目录进入后运行
+      `git add -A && git diff --cached --no-ext-diff origin/<base 分支>`（base 通常是 main）查看相对基线的全量改动，必要时配合 `git diff --cached --stat` 看文件全景、用 Read 查看具体文件内容。**禁止以"diff 里没看到"为由认定功能缺失**——看不到就主动进仓库目录里查清楚。
+
+      请从正确性、代码质量、安全性、测试覆盖四个维度给出散文审查，指出真问题而非格式纠错、说明是否建议通过。结论由系统裁判（无需输出固定结论标记）。
   - name: submit_pr
     label: "提交 PR"
     timeout: 300
     sandbox: { code: read-write, deliver: true }
-    # 纯机械交付（commit/push/开 PR）：run_submit_pr 直接拼模板 PR body，不调 AI，无需 agent。
+    # 纯机械交付（commit/push/开 PR + appendSubPr 登记）：无 prompt 字段，走 workflow.ts 的
+    # run_submit_pr。提示词优先全局生效后，「无 prompt 的 phase」自然回退到同名 ts 函数。
