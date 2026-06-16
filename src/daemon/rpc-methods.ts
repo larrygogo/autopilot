@@ -114,6 +114,7 @@ import {
   type ProviderName,
 } from "../core/config";
 import { effectiveClarifyConfig } from "./clarifier-agent";
+import { effectiveFixConfig } from "./fix-revision-runner";
 import {
   listApiKeys,
   setApiKey,
@@ -1567,6 +1568,8 @@ function registerProviderAgentRpc(): void {
     handler: () => {
       const c = effectiveClarifyConfig();
       const hasUser = Object.keys(c.userConfig).length > 0;
+      const f = effectiveFixConfig();
+      const fHasUser = Object.keys(f.userConfig).length > 0;
       return {
         agents: [
           {
@@ -1578,6 +1581,15 @@ function registerProviderAgentRpc(): void {
             defaults: c.defaults,
             reqOverridable: true,
           },
+          {
+            name: "fix",
+            display_name: "修复轮",
+            note: "驳回 / CI 失败后的修复回路（__fix）的 agent —— 含修复取向人设，可覆盖",
+            effective: f.effective,
+            userConfig: fHasUser ? f.userConfig : null,
+            defaults: f.defaults,
+            reqOverridable: false,
+          },
         ],
       };
     },
@@ -1585,10 +1597,10 @@ function registerProviderAgentRpc(): void {
 
   registerRpcMethod({
     method: "lifecycle.setAgent",
-    description: "写/删某生命周期 agent 配置（config=null 删段回退默认）。P1 仅支持 name=clarify",
+    description: "写/删某生命周期 agent 配置（config=null 删段回退默认）。支持 name=clarify | fix",
     handler: (params) => {
       const p = asObj(params);
-      if (p.name !== "clarify") throw new RpcError("INVALID_PARAM", "P1 仅支持 name=clarify");
+      if (p.name !== "clarify" && p.name !== "fix") throw new RpcError("INVALID_PARAM", "仅支持 name=clarify | fix");
       let cfg: Record<string, unknown> | null = null;
       if (p.config !== null && p.config !== undefined) {
         const c = asObj(p.config);
@@ -1603,7 +1615,7 @@ function registerProviderAgentRpc(): void {
         if (Object.keys(cfg).length === 0) cfg = null; // 全空 = 回退默认
       }
       try {
-        saveLifecycleAgent("clarify", cfg);
+        saveLifecycleAgent(p.name as string, cfg);
         emitBus({ type: "config:updated", payload: {} });
         return { ok: true };
       } catch (e: unknown) {

@@ -7,6 +7,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { loadLifecycleConfig, saveLifecycleAgent } from "../src/core/config";
 import { effectiveClarifyConfig } from "../src/daemon/clarifier-agent";
+import { effectiveFixConfig } from "../src/daemon/fix-revision-runner";
 
 let tmpFile: string;
 
@@ -68,5 +69,24 @@ describe("effectiveClarifyConfig 字段级 merge", () => {
     expect(effective.system_prompt).toBe("自定义澄清提示");
     expect(effective.max_turns).toBe(8);
     expect(effective.provider).toBe("anthropic");         // 未覆盖 → 默认
+  });
+});
+
+describe("effectiveFixConfig 字段级 merge（修复轮人设可被 lifecycle.fix 覆盖）", () => {
+  it("无配置 → 生效=内置默认（anthropic / 40 / bypassPermissions）", () => {
+    const { effective, userConfig } = effectiveFixConfig();
+    expect(effective.provider).toBe("anthropic");
+    expect(effective.max_turns).toBe(40);
+    expect(effective.permission_mode).toBe("bypassPermissions");
+    expect(typeof effective.system_prompt).toBe("string");
+    expect(Object.keys(userConfig).length).toBe(0);
+  });
+
+  it("配 system_prompt → 覆盖修复取向人设，其余保默认（修小而准 → 可改成允许重构）", () => {
+    saveLifecycleAgent("fix", { system_prompt: "修 bug 时顺手清理技术债，允许重构" });
+    const { effective } = effectiveFixConfig();
+    expect(effective.system_prompt).toBe("修 bug 时顺手清理技术债，允许重构");
+    expect(effective.provider).toBe("anthropic");   // 未覆盖 → 默认
+    expect(effective.max_turns).toBe(40);           // 未覆盖 → 默认
   });
 });

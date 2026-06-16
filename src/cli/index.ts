@@ -1429,23 +1429,29 @@ lifecycle
     initDb();
     await runPendingMigrations();
     const cfg = loadLifecycleConfig();
-    const clarify = cfg.clarify ?? {};
-    console.log("生命周期 agent（P1：clarify —— 澄清 / 抽取 / 建工作流共用）：\n");
-    if (Object.keys(clarify).length === 0) {
-      console.log("  clarify：未配置，走内置默认（anthropic / 15 turns / bypassPermissions）");
-    } else {
-      console.log("  clarify（用户 override）：");
-      for (const [k, v] of Object.entries(clarify)) {
-        const val = typeof v === "string" && v.length > 60 ? v.slice(0, 60) + "…" : v;
-        console.log(`    ${k}: ${val}`);
+    console.log("生命周期 agent（全局默认；未列字段走内置默认）：\n");
+    const labels: Record<string, string> = {
+      clarify: "澄清 / 一句话建需求 / AI 建工作流共用",
+      fix: "驳回 / CI 失败后的修复回路 __fix（含修复取向人设）",
+    };
+    for (const name of ["clarify", "fix"] as const) {
+      const c = cfg[name] ?? {};
+      if (Object.keys(c).length === 0) {
+        console.log(`  ${name}（${labels[name]}）：未配置，走内置默认`);
+      } else {
+        console.log(`  ${name}（${labels[name]}，用户 override）：`);
+        for (const [k, v] of Object.entries(c)) {
+          const val = typeof v === "string" && v.length > 60 ? v.slice(0, 60) + "…" : v;
+          console.log(`    ${k}: ${val}`);
+        }
       }
     }
-    console.log("\n未列字段走内置默认；用 `autopilot lifecycle set clarify --provider …` 配置。");
+    console.log("\n未列字段走内置默认；用 `autopilot lifecycle set <clarify|fix> --system-prompt …` 配置（clarify 实时、fix 需 daemon restart 生效）。");
   });
 
 lifecycle
   .command("set <name>")
-  .description("设置生命周期 agent（P1 仅 clarify）；未给的字段保留")
+  .description("设置生命周期 agent（clarify | fix）；未给的字段保留")
   .option("--provider <name>", "provider（如 kimi-code）")
   .option("--model <model>", "默认模型")
   .option("--max-turns <n>", "最大轮数", (v) => parseInt(v, 10))
@@ -1455,11 +1461,11 @@ lifecycle
   .action(async (name: string, opts: {
     provider?: string; model?: string; maxTurns?: number; permissionMode?: string; systemPrompt?: string; systemPromptFile?: string;
   }) => {
-    if (name !== "clarify") { console.error("P1 仅支持 clarify"); process.exit(1); }
+    if (name !== "clarify" && name !== "fix") { console.error("仅支持 clarify | fix"); process.exit(1); }
     initDb();
     await runPendingMigrations();
     // 在现有 override 上叠加（未给的字段保留）
-    const cur = (loadLifecycleConfig().clarify ?? {}) as Record<string, unknown>;
+    const cur = (loadLifecycleConfig()[name] ?? {}) as Record<string, unknown>;
     const next: Record<string, unknown> = { ...cur };
     if (opts.provider !== undefined) next.provider = opts.provider;
     if (opts.model !== undefined) next.model = opts.model;
@@ -1472,8 +1478,9 @@ lifecycle
       next.system_prompt = opts.systemPrompt;
     }
     try {
-      saveLifecycleAgent("clarify", Object.keys(next).length ? next : null);
-      console.log(`✓ 已保存 lifecycle.clarify（${Object.keys(next).join(", ") || "空=回退默认"}）。daemon 实时读盘，下次澄清生效。`);
+      saveLifecycleAgent(name, Object.keys(next).length ? next : null);
+      const apply = name === "fix" ? "daemon restart 后生效" : "daemon 实时读盘，下次澄清生效";
+      console.log(`✓ 已保存 lifecycle.${name}（${Object.keys(next).join(", ") || "空=回退默认"}）。${apply}。`);
     } catch (e: unknown) {
       console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
       process.exit(1);
@@ -1482,13 +1489,13 @@ lifecycle
 
 lifecycle
   .command("reset <name>")
-  .description("清除生命周期 agent 配置，回退内置默认")
+  .description("清除生命周期 agent 配置（clarify | fix），回退内置默认")
   .action(async (name: string) => {
-    if (name !== "clarify") { console.error("P1 仅支持 clarify"); process.exit(1); }
+    if (name !== "clarify" && name !== "fix") { console.error("仅支持 clarify | fix"); process.exit(1); }
     initDb();
     await runPendingMigrations();
-    saveLifecycleAgent("clarify", null);
-    console.log("✓ 已重置 lifecycle.clarify，回退内置默认。");
+    saveLifecycleAgent(name, null);
+    console.log(`✓ 已重置 lifecycle.${name}，回退内置默认。`);
   });
 
 /**

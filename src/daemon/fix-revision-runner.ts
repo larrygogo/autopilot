@@ -51,6 +51,7 @@ import {
 import { startTaskFromTemplate, isTaskTerminal, StartTaskError } from "../core/task/factory";
 import { agentForPhase } from "../agents/registry";
 import type { InlineAgentConfig } from "../core/agent-defaults";
+import { loadLifecycleConfig } from "../core/config";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("fix-revision-runner");
@@ -65,8 +66,12 @@ const MAX_FEEDBACKS_IN_PROMPT = 5;
 // 内置 __fix 工作流（单 phase fix，走标准 runner 管线）
 // ──────────────────────────────────────────────
 
-/** 修复 agent 的 phase 内联配置（信任级同 dev develop 阶段；模型回退 provider 默认） */
-const FIXER_AGENT: InlineAgentConfig = {
+/**
+ * 修复 agent 的【代码兜底缺省】（信任级同 dev develop 阶段；模型回退 provider 默认）。
+ * system_prompt 里「修小而准，不顺手重构」是一种修复取向——属用户该掌控的领域决策，
+ * 故下面 effectiveFixConfig 让 config.yaml `lifecycle.fix` 字段级覆盖它（与 clarify 同构）。
+ */
+const FIXER_DEFAULTS: InlineAgentConfig = {
   provider: "anthropic",
   // 修复要读日志 / 改多文件 / 跑测试 / git 操作，回合数给足
   max_turns: 40,
@@ -76,12 +81,27 @@ const FIXER_AGENT: InlineAgentConfig = {
     "直接修改并 push 同一分支。修复前先理解反馈与现有实现，修小而准，不顺手重构。",
 };
 
+/**
+ * 修复 agent 的生效配置 = FIXER_DEFAULTS ← config.yaml `lifecycle.fix`（字段级 merge）。
+ * 与 effectiveClarifyConfig 同构（返回 {effective, userConfig, defaults}，供 lifecycle RPC 复用）：
+ * 用户写的字段（含 system_prompt / provider / model / max_turns / permission_mode）覆盖同名缺省，
+ * 未写的走兜底。改 config.yaml 后 daemon 重启生效。
+ */
+export function effectiveFixConfig(): {
+  effective: InlineAgentConfig;
+  userConfig: InlineAgentConfig;
+  defaults: InlineAgentConfig;
+} {
+  const userConfig = (loadLifecycleConfig().fix ?? {}) as InlineAgentConfig;
+  return { effective: { ...FIXER_DEFAULTS, ...userConfig }, userConfig, defaults: FIXER_DEFAULTS };
+}
+
 function buildFixWorkflow(): WorkflowDefinition {
   const phase: PhaseDefinition = expandPhaseDefaults(
     {
       name: "fix",
       timeout: 3600,
-      agent: FIXER_AGENT,
+      agent: effectiveFixConfig().effective,
       func: runFixPhase,
     },
     new Set(["fix"]),
@@ -229,7 +249,7 @@ function buildArtifactFixPrompt(
     fbSection,
     "",
     "## 要求",
-    `1. 当前目录的 \`${FIX_DELIVERABLES_DIR}/\` 里已放着上一轮产物，请针对反馈**增量修改**（除非反馈明确要求推倒重来）。该目录在你完成后会整体作为新一轮交付——上轮未变的文件保留原样即可`,
+    `1. 当前目录的 \`${FIX_DELIVERABLES_DIR}/\` 里已放着上一轮产物，请按反馈修改它（增量改还是推倒重做由你的修复取向决定）。该目录在你完成后会整体作为新一轮交付——保留的文件原样留着即可`,
     `2. 最后更新 \`${FIX_DELIVERABLES_DIR}/SUMMARY.md\`：本轮改了什么、每个文件是什么、怎么打开查看`,
     "3. 禁止：git commit / push、修改参考仓库文件、把产物写到别处",
     "4. 最后用一段话总结：按哪条反馈改了什么",
