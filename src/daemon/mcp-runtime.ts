@@ -13,6 +13,7 @@ import { mkdirSync, writeFileSync, unlinkSync } from "fs";
 import { dirname, join } from "path";
 import { randomBytes } from "crypto";
 import { AUTOPILOT_HOME } from "../index";
+import { clearPerTaskMcpConfigs } from "../agents/mcp-task-config";
 
 let currentToken: string | null = null;
 let currentConfigPath: string | null = null;
@@ -44,6 +45,9 @@ export function initMcpRuntime(host: string, port: number): void {
   const urlHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
   currentServerUrl = `http://${urlHost}:${port}/mcp`;
 
+  // 清掉上次运行残留的 per-task 配置（含旧 token），避免陈旧凭据/标识。
+  clearPerTaskMcpConfigs();
+
   const configPath = join(AUTOPILOT_HOME, "runtime", "mcp-config.json");
   mkdirSync(dirname(configPath), { recursive: true });
 
@@ -72,6 +76,7 @@ export function disposeMcpRuntime(): void {
   if (currentConfigPath) {
     try { unlinkSync(currentConfigPath); } catch { /* 已不存在 */ }
   }
+  clearPerTaskMcpConfigs();
   currentToken = null;
   currentConfigPath = null;
   currentServerUrl = null;

@@ -13,8 +13,11 @@ export interface PhaseDecision {
    * - marker（缺省）：grep agent 散文里的 pass/reject 标记串（自用 / 可信工作流够用）
    * - judge：另起一次强制结构化调用把散文收敛成 {verdict, reason}，绝不 grep（分发场景，
    *   不能信任别人写的评审守格式）。详见 judge.ts。
+   * - tool：做 review 的 agent **自己**出裁决——能用 MCP 工具的 provider（claude CLI）调
+   *   submit_decision(verdict, reason)；其余 provider 降级到等价的「输出 JSON 裁决块」文本契约。
+   *   框架只读 + 驱动状态机，不另起 LLM 替判（比 judge 更彻底，对齐「决策归用户/agent」）。
    */
-  mode?: "marker" | "judge";
+  mode?: "marker" | "judge" | "tool";
   /** marker 模式：判定"通过"的标记串（命中 → 走 complete_trigger，框架自动推进） */
   pass?: string;
   /** marker 模式：判定"驳回"的标记串（命中 → 回退 reject 目标重做） */

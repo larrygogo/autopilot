@@ -20,7 +20,8 @@
 
 import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
-import { agentForPhase } from "../../agents/registry";
+import { agentForPhase, agentSupportsMcpTools } from "../../agents/registry";
+import { takeDecision, clearDecision } from "../../agents/pending-decisions";
 import type { InlineAgentConfig } from "../agent-defaults";
 import { getTask, updateTask } from "../db";
 import { getTaskSandbox, getTaskArtifactsDir } from "../sandbox";
@@ -55,6 +56,67 @@ function resolveCodeRoot(taskId: string, override?: string): string {
 
 /** 同一 phase 内 pending_prompts 消费循环上限（防意外死循环 / 用户疯狂排队） */
 const MAX_PROMPT_TURNS = 10;
+
+/**
+ * decision mode:tool 的「自动追问」独立预算——agent 没交裁决时框架最多追问几轮。
+ * 与 MAX_PROMPT_TURNS（服务用户追加 prompt）分离，避免相互耗尽（追问触顶 → ambiguous 停下报人）。
+ */
+const DECISION_FOLLOWUP_MAX = 2;
+
+/** tool 模式：claude（能用 MCP 工具）的裁决指令尾段，追加到首轮 prompt。 */
+const DECISION_SUFFIX_TOOL = `
+
+## 裁决（必做）
+完成上面的工作后，你必须调用 submit_decision 工具提交本阶段裁决：verdict=pass（通过、进入下一阶段）或 reject（驳回、退回重做，reason 必填，写清问题与改进方向）。不调用此工具本阶段不算完成。`;
+
+/** tool 模式：不支持 MCP 工具的 provider 的文本契约裁决指令尾段。 */
+const DECISION_SUFFIX_TEXT = `
+
+## 裁决（必做）
+完成上面的工作后，在你这次回复正文的末尾输出一个裁决 JSON 块（用 \`\`\`json 围栏包裹），格式：
+\`\`\`json
+{"verdict": "pass", "reason": ""}
+\`\`\`
+verdict 取 pass（通过）或 reject（驳回）；reject 时 reason 必填，写清问题与改进方向。不输出此块本阶段不算完成。`;
+
+/** tool 模式追问话术（agent 没调工具时）。 */
+const DECISION_NUDGE_TOOL = `你还没有调用 submit_decision 工具提交裁决。请根据上面的判据，现在就调用 submit_decision，给出 verdict（pass 或 reject），reject 时必须填 reason。`;
+
+/** tool 模式（文本路径）追问话术（agent 没输出合规 JSON 块时）。 */
+const DECISION_NUDGE_TEXT = `你还没有给出合规的裁决 JSON 块。请在回复末尾用 \`\`\`json 围栏输出 {"verdict":"pass"|"reject","reason":"..."}（reject 时 reason 必填），不要输出其他内容。`;
+
+/** CapturedDecision → DecisionVerdict（工具路径）。无捕获返回 null。 */
+function takeDecisionVerdict(taskId: string): DecisionVerdict | null {
+  const d = takeDecision(taskId);
+  if (!d) return null;
+  return d.verdict === "pass" ? { verdict: "pass" } : { verdict: "reject", reason: d.reason };
+}
+
+/**
+ * 文本路径：从 agent 输出里解析裁决 JSON 块。容忍 ```json 围栏 / 散文包裹 /
+ * 多个候选（取文本中靠后者）。reject 必须带非空 reason 才算有效候选。无有效裁决返回 null。
+ */
+export function parseVerdictBlock(text: string): DecisionVerdict | null {
+  const cands: Array<{ s: string; at: number }> = [];
+  for (const m of text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)) cands.push({ s: m[1], at: m.index ?? 0 });
+  for (const m of text.matchAll(/\{[^{}]*"verdict"[^{}]*\}/g)) cands.push({ s: m[0], at: m.index ?? 0 });
+  cands.sort((a, b) => b.at - a.at); // 文本中靠后的优先
+  for (const c of cands) {
+    let obj: unknown;
+    try {
+      obj = JSON.parse(c.s.trim());
+    } catch {
+      continue;
+    }
+    const v = obj as { verdict?: unknown; reason?: unknown };
+    if (v?.verdict === "pass") return { verdict: "pass" };
+    if (v?.verdict === "reject") {
+      const reason = typeof v.reason === "string" ? v.reason.trim() : "";
+      if (reason) return { verdict: "reject", reason };
+    }
+  }
+  return null;
+}
 
 /** Phase 6: handoff 协议的 4 段标题（spec §3.10） */
 const HANDOFF_SECTIONS = ["Decided", "Files", "Risks", "Remaining"] as const;
@@ -317,16 +379,23 @@ export function makePromptRunner(
       task: task as Record<string, unknown>,
       workflow: wf,
     });
-    // 启用 handoff 时在 prompt 末尾追加 4 段输出指令
-    const promptWithHandoff = options.handoff ? resolved + HANDOFF_PROMPT_SUFFIX : resolved;
-
     // phase 内联配置或默认兜底解析（不再按命名 agent 取用）
     const agent = agentForPhase(workflowName, phaseName);
     const agentName = typeof options.agent === "string" ? options.agent : agent.name;
 
+    // tool 模式：按 provider 能力决定走工具硬契约（claude）还是文本 JSON 块降级（其余）
+    const toolMode = options.decision?.mode === "tool";
+    const supportsTool = toolMode && agentSupportsMcpTools(agent);
+    if (toolMode) clearDecision(taskId); // 清残留（防 retry / 上一轮 aborted run 的陈旧捕获）
+
+    // 启用 handoff 时追加 4 段输出指令；tool 模式追加裁决指令尾段
+    let promptWithHandoff = options.handoff ? resolved + HANDOFF_PROMPT_SUFFIX : resolved;
+    if (toolMode) promptWithHandoff += supportsTool ? DECISION_SUFFIX_TOOL : DECISION_SUFFIX_TEXT;
+
     log.info(
-      "prompt-runner 启动 [task=%s phase=%s agent=%s prompt 长度=%d handoff=%s]",
+      "prompt-runner 启动 [task=%s phase=%s agent=%s prompt 长度=%d handoff=%s decision=%s]",
       taskId, phaseName, agentName, promptWithHandoff.length, String(!!options.handoff),
+      toolMode ? (supportsTool ? "tool" : "tool-text") : (options.decision?.mode ?? "none"),
     );
 
     // 输出目录预备
@@ -437,7 +506,9 @@ export function makePromptRunner(
         maxRejections: phaseDef?.max_rejections,
       };
 
-      // marker：grep 标记同步评估；judge：另起一次强制结构化裁判，把散文收敛成 verdict。
+      // marker：grep 标记同步评估；judge：另起一次强制结构化裁判，把散文收敛成 verdict；
+      // tool：做 review 的 agent 自己出裁决（claude 调 submit_decision 工具 / 其余产出 JSON 块），
+      //       拿不到就追问一轮（独立预算 DECISION_FOLLOWUP_MAX），触顶仍无 → ambiguous 停下报人。
       let action;
       if (options.decision.mode === "judge") {
         const { judgeVerdict } = await import("./judge"); // 动态 import 隔离 agents 依赖
@@ -449,16 +520,39 @@ export function makePromptRunner(
           systemPrompt: options.decision.judge_system_prompt,
         });
         action = planDecisionActionFromVerdict(verdict, phaseName, meta, counts);
+      } else if (options.decision.mode === "tool") {
+        // 闸2 必经锁：先读本轮（agent.run 期间 submit_decision 已捕获 / finalText 含 JSON 块）
+        let verdict = supportsTool ? takeDecisionVerdict(taskId) : parseVerdictBlock(finalText);
+        let nudges = 0;
+        while (!verdict && nudges < DECISION_FOLLOWUP_MAX) {
+          nudges++;
+          const r = await agent.run(supportsTool ? DECISION_NUDGE_TOOL : DECISION_NUDGE_TEXT, {
+            cwd: resolveCodeRoot(taskId),
+            timeout: (options.timeoutSec ?? 900) * 1000,
+          });
+          const nf = join(dir, `decision-nudge-${nudges}.md`);
+          writeFileSync(nf, `<!-- decision-nudge:${nudges} phase:${phaseName} agent:${agentName} -->\n` + r.text, "utf-8");
+          finalText = r.text;
+          verdict = supportsTool ? takeDecisionVerdict(taskId) : parseVerdictBlock(finalText);
+          log.info(
+            "prompt-runner tool 决策追问 nudge=%d [task=%s phase=%s 拿到裁决=%s]",
+            nudges, taskId, phaseName, String(!!verdict),
+          );
+        }
+        // 闸3 轨道锁：拿到 → 复用 planDecisionActionFromVerdict；触顶仍无 → ambiguous
+        action = planDecisionActionFromVerdict(verdict ?? { verdict: "ambiguous" }, phaseName, meta, counts);
       } else {
         action = planDecisionAction(finalText, options.decision, phaseName, meta, counts);
       }
 
       if (action.kind === "ambiguous") {
-        throw new Error(
+        const ambiguousMsg =
           options.decision.mode === "judge"
             ? `phase「${phaseName}」结构化裁判两次仍未给出明确结论（pass/reject），已停下报人`
-            : `phase「${phaseName}」无法解析判据结论：agent 输出既未含 pass 标记「${options.decision.pass}」也未含 reject 标记「${options.decision.reject}」`,
-        );
+            : options.decision.mode === "tool"
+              ? `phase「${phaseName}」追问 ${DECISION_FOLLOWUP_MAX} 轮后 agent 仍未提交合规裁决（${supportsTool ? "submit_decision 工具" : "JSON 裁决块"}），已停下报人`
+              : `phase「${phaseName}」无法解析判据结论：agent 输出既未含 pass 标记「${options.decision.pass}」也未含 reject 标记「${options.decision.reject}」`;
+        throw new Error(ambiguousMsg);
       }
       if (action.kind === "misconfigured") {
         throw new Error(action.reason);

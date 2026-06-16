@@ -25,6 +25,7 @@ export type AutopilotEvent =
   | { type: "phase:error"; payload: { taskId: string; phase: string; error: string } }
   | { type: "task:asking"; payload: { taskId: string; phase: string; question: string } }
   | { type: "task:answered"; payload: { taskId: string; phase: string } }
+  | { type: "task:decision"; payload: { taskId: string; phase: string; verdict: "pass" | "reject" } }
   | { type: "log:entry"; payload: { taskId?: string; phase: string; level: string; message: string; timestamp: string } }
   | { type: "watcher:recovery"; payload: { taskId: string; phase: string; fromStatus: string; toStatus: string } }
   | { type: "daemon:status"; payload: { version: string; uptime: number; pid: number; taskCounts: Record<string, number> } }

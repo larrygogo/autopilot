@@ -61,6 +61,29 @@ describe("decision 配置 lint", () => {
   it("非法 mode → 报错", () => {
     expect(() =>
       expand({ name: "review", reject: "design", prompt: "判", decision: { mode: "vote" } }, ["design", "review"]),
-    ).toThrow(/marker.*judge|mode/);
+    ).toThrow(/marker.*judge.*tool|mode/);
+  });
+
+  it("tool 模式无需 pass/reject 标记 → 不报错", () => {
+    expect(() =>
+      expand(
+        { name: "review", reject: "design", prompt: "判", decision: { mode: "tool", criteria: "需有测试" } },
+        ["design", "review"],
+      ),
+    ).not.toThrow();
+  });
+
+  it("tool 模式仍需 reject 回退目标 → 缺则报错", () => {
+    expect(() => expand({ name: "review", prompt: "判", decision: { mode: "tool" } }))
+      .toThrow(/回退目标|reject: <目标阶段>/);
+  });
+
+  it("tool 模式 × gate 互斥 → 报错", () => {
+    expect(() =>
+      expand(
+        { name: "review", reject: "design", gate: true, prompt: "判", decision: { mode: "tool" } },
+        ["design", "review"],
+      ),
+    ).toThrow(/gate.*decision|互斥/);
   });
 });

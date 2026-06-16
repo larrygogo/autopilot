@@ -622,7 +622,7 @@ export const TOOL_NAMES = [
 // 工作流 agent 不该改 task 元数据，只暴露 ask_user 用于人机交互。
 // ──────────────────────────────────────────────
 
-export const WORKFLOW_TOOL_NAMES = ["ask_user"] as const;
+export const WORKFLOW_TOOL_NAMES = ["ask_user", "submit_decision"] as const;
 
 export async function buildWorkflowAgentTools(): Promise<RegisteredTool[]> {
   const tool = defineTool;
@@ -630,6 +630,7 @@ export async function buildWorkflowAgentTools(): Promise<RegisteredTool[]> {
   const { getTaskContext } = await import("../core/task/context");
   const { updateTask } = await import("../core/db");
   const { registerPending } = await import("./pending-questions");
+  const { captureDecision } = await import("./pending-decisions");
   const { emit } = await import("../core/event-bus");
 
   return [
@@ -684,6 +685,24 @@ export async function buildWorkflowAgentTools(): Promise<RegisteredTool[]> {
         emit({ type: "task:answered", payload: { taskId, phase: ctx.phase } });
 
         return ok({ answer });
+      },
+    ),
+    tool(
+      "submit_decision",
+      "提交本阶段的裁决结论。verdict=pass 表示通过、进入下一阶段；verdict=reject 表示驳回、退回重做（reason 必填，写清为何驳回，让重做的 agent 知道改进方向）。声明了 decision 判据的阶段必须调用此工具恰好一次才算完成——不调用框架会追问，仍不调则停下报人。",
+      {
+        verdict: z.enum(["pass", "reject"]).describe("裁决：pass 通过 / reject 驳回"),
+        reason: z.string().default("").describe("裁决理由；reject 时必填"),
+      },
+      async (args) => {
+        const ctx = getTaskContext();
+        if (!ctx) return err("submit_decision 必须在 phase 上下文中调用");
+        if (args.verdict === "reject" && !args.reason.trim()) {
+          return err("reject 必须提供 reason（说明驳回原因）");
+        }
+        captureDecision(ctx.taskId, { verdict: args.verdict, reason: args.reason.trim() });
+        emit({ type: "task:decision", payload: { taskId: ctx.taskId, phase: ctx.phase, verdict: args.verdict } });
+        return ok({ recorded: true, verdict: args.verdict });
       },
     ),
   ];

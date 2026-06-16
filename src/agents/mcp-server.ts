@@ -26,6 +26,12 @@ export interface McpServerOptions {
   token: string;
   serverName?: string;
   serverVersion?: string;
+  /**
+   * 可选：包裹 tool.handler 调用。daemon 用它在 inbound 侧重建 task 上下文
+   * （地基：ALS 不跨 HTTP 边界，工具 handler 靠 getTaskContext() 拿不到 taskId，
+   * 由 routes 解析 header 后用 runWithTaskContext 重建）。缺省直接调 handler。
+   */
+  wrapCall?: <T>(fn: () => Promise<T>) => Promise<T> | T;
 }
 
 type JsonRpcResponse =
@@ -99,7 +105,8 @@ async function handleRpc(
       return rpcError(id, -32601, `Tool not found: ${toolName}`);
     }
     try {
-      const result = await tool.handler(args);
+      const invoke = () => tool.handler(args);
+      const result = await (opts.wrapCall ? opts.wrapCall(invoke) : invoke());
       return { jsonrpc: "2.0", id, result };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

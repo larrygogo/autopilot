@@ -136,6 +136,23 @@ export function resolveEffectiveProvider(name: string, phaseMode: AgentMode | un
 }
 
 /**
+ * 该 agent 能否使用框架 MCP 工具（submit_decision / ask_user）。
+ *
+ * 只有 CLI claude（anthropic provider）接 daemon 的 /mcp（anthropic.ts 唯一注入 mcp-config）。
+ * codex/gemini CLI 无 MCP 接线；全部 API 模式（含 openai-compat）走硬编码闭集工具、看不到 MCP。
+ * decision mode:tool 据此分叉：true → submit_decision 工具硬契约；false → 文本 JSON 裁决块降级。
+ */
+export function agentSupportsMcpTools(agent: Agent): boolean {
+  if (agent.mode !== "cli") return false;
+  try {
+    const eff = resolveEffectiveProvider(agent.config.provider ?? "anthropic", agent.config.mode);
+    return eff.type === "cli" && eff.subtype === "claude";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 根据配置创建 Agent 实例（不缓存）。
  * 传入的 config 必须已合并完成（包含 provider 等字段）。
  */

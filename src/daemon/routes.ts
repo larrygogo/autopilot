@@ -61,6 +61,7 @@ import { runClarifierRound } from "./requirement-clarifier";
 import { getRound } from "./clarifier-progress";
 import { handleMcpHttp } from "../agents/mcp-server";
 import { getMcpToken } from "./mcp-runtime";
+import { runWithTaskContext } from "../core/task/context";
 import { buildAutopilotTools, buildWorkflowAgentTools } from "../agents/tools";
 import type { RegisteredTool } from "../agents/mcp-tools";
 
@@ -600,11 +601,19 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     // 但万一未来重构破坏顺序，这里也得拒绝请求 —— mcp-server.checkAuth 把空
     // token 当成"不鉴权"，绝不能把 null token 透传过去。
     if (!token) return error("MCP runtime not initialized", 503);
+    // 地基：ALS 不跨 HTTP 边界，工具 handler 拿不到 taskId。per-task mcp-config 把
+    // taskId/phase 经 header 透传进来，这里用 runWithTaskContext 重建上下文，让
+    // ask_user / submit_decision 等工具的 getTaskContext() 正确归位（缺 header 不包）。
+    const mcpTaskId = req.headers.get("x-autopilot-task") ?? undefined;
+    const mcpPhase = req.headers.get("x-autopilot-phase") ?? "";
     return handleMcpHttp(req, {
       token,
       getTools: getAllMcpTools,
       serverName: "autopilot",
       serverVersion: VERSION,
+      wrapCall: mcpTaskId
+        ? (fn) => runWithTaskContext({ taskId: mcpTaskId, phase: mcpPhase }, fn)
+        : undefined,
     });
   }
 

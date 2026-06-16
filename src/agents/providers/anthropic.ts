@@ -5,6 +5,8 @@ import type { AgentResult, RunOptions, ChatOptions, ChatResult } from "../types"
 import { createLogger } from "../../core/logger";
 import { AUTOPILOT_HOME } from "../../index";
 import { claudeDisallowFor, unknownCapabilities } from "../tool-capabilities";
+import { getTaskContext } from "../../core/task/context";
+import { writePerTaskMcpConfig } from "../mcp-task-config";
 
 const agentLog = createLogger("agent.anthropic");
 
@@ -179,8 +181,18 @@ function buildClaudeArgv(p: BuildArgvParams): string[] {
  * 文件不存在视为 daemon 没在跑（或未启用 MCP），调用方应降级到无工具行为。
  */
 function resolveMcpConfigPath(): string | undefined {
-  const path = join(AUTOPILOT_HOME, "runtime", "mcp-config.json");
-  return existsSync(path) ? path : undefined;
+  const base = join(AUTOPILOT_HOME, "runtime", "mcp-config.json");
+  if (!existsSync(base)) return undefined;
+  // 地基：有 task 上下文时派生 per-task config，把 taskId/phase 经 header 透传给 inbound /mcp
+  // （ALS 不跨 HTTP 边界，工具 handler 拿不到 taskId）。无上下文（chat agent）回退全局 config。
+  const ctx = getTaskContext();
+  if (!ctx?.taskId) return base;
+  try {
+    return writePerTaskMcpConfig(base, ctx.taskId, ctx.phase ?? "");
+  } catch (e: unknown) {
+    agentLog.warn("写 per-task mcp-config 失败，回退全局 config：%s", e instanceof Error ? e.message : String(e));
+    return base;
+  }
 }
 
 interface SpawnResult {
