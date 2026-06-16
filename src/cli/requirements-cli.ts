@@ -111,7 +111,7 @@ export function renderRequirementsTable(requirements: Requirement[]): string {
     const dataMax = requirements.reduce(
       (m, r) => Math.max(m, strDisplayWidth(reqCellValue(r, key))), 0,
     );
-    return Math.min(maxWidth, Math.max(header.length, dataMax));
+    return Math.min(maxWidth, Math.max(strDisplayWidth(header), dataMax));
   });
 
   const lines: string[] = [];

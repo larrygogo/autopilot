@@ -27,7 +27,7 @@
 
 **问题根因：** `String.prototype.padEnd(n)` 按 JS 字符数补空格，而 CJK 字符在终端占 2 列。当 title 含中文时，各行显示宽度不一致，表格错位。
 
-**修复方案：** 在 `requirements-cli.ts` 新增两个导出辅助函数 `strDisplayWidth` / `isWideChar`，以及内部的 `truncateToWidth` / `padEndWidth`，供 `renderRequirementsTable` 使用。详见 Task 2 代码。
+**修复方案：** 在 `requirements-cli.ts` 新增导出辅助函数 `strDisplayWidth`（计算终端显示宽度）和 `renderRequirementsTable`（表格渲染），以及内部函数 `isWideChar`（宽字符判断，未导出）、`truncateToWidth`、`padEndWidth`，供 `renderRequirementsTable` 使用。详见 Task 2 代码。
 
 **已知局限（明确记录）：**
 - Emoji（U+1F300 等）多数也是双宽字符，但本实现不覆盖（Emoji 块超出 `isWideChar` 范围）。`id/status/workflow/project_id` 列均为纯 ASCII，`title` 列含 Emoji 极少见；已知此局限不影响核心使用场景。
