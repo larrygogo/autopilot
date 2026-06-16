@@ -173,11 +173,13 @@ export async function run_design(taskId: string): Promise<void> {
     rejectionHistory = `\n\n## 上一次评审的驳回意见（第${designRejections}次驳回）\n${prevReview}`;
   }
 
+  // rank23：不再单列「## 仓库路径 = collection 根」——统一 multi-clone 布局下代码在 codebase/<alias>/
+  // 子目录，与该绝对根矛盾会让 agent 按根找代码扑空。代码位置由 repoLayoutSection 单一来源描述
+  // （每库子目录），agent.run 的 cwd 仍是 collection 根。
   const prompt =
     `你是一位资深架构师。请根据以下需求，生成一份完整的技术方案。\n\n` +
     `## 需求\n${requirement}\n\n` +
-    `## 仓库路径\n${repoPath}\n\n` +
-    `请先阅读仓库代码了解项目结构，然后输出包含以下内容的技术方案：\n` +
+    `请先在当前工作目录阅读仓库代码了解项目结构，然后输出包含以下内容的技术方案：\n` +
     `1. 需求分析\n2. 技术方案\n3. 实现步骤\n4. 影响范围\n5. 测试计划` +
     repoLayoutSection(taskRepos(taskId, task)) +
     rejectionHistory;

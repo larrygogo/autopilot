@@ -176,6 +176,45 @@ describe("tick 全局并发上限 FIFO", () => {
     expect(allActive.length).toBeLessThanOrEqual(2); // 不超量
   });
 
+  it("rank14：scheduleOne await 期间他方转入 fix_revision（占用方向）→ 每迭代重算 live active 不超 cap", async () => {
+    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
+
+    // B 在 awaiting_review（不在 queued），稍后被「外部驱动者」（模拟 pr-poller）转 fix_revision
+    const idB = nextRequirementId();
+    createRequirement({ id: idB, project_id: "proj-global", workspace_id: "ws-g2", title: "B" });
+    for (const s of ["clarifying", "ready", "queued", "running", "awaiting_review"]) setRequirementStatus(idB, s);
+
+    // A、C 两个 queued（A 先于 C）
+    const idA = nextRequirementId();
+    createRequirement({ id: idA, project_id: "proj-global", workspace_id: "ws-g1", title: "A" });
+    pushTo(idA, "queued");
+    const idC = nextRequirementId();
+    createRequirement({ id: idC, project_id: "proj-global", workspace_id: "ws-g3", title: "C" });
+    pushTo(idC, "queued");
+    db.run("UPDATE requirements SET created_at = 1000 WHERE id = ?", [idA]);
+    db.run("UPDATE requirements SET created_at = 2000 WHERE id = ?", [idC]);
+
+    const calls: string[] = [];
+    _setTaskStartersForTest({
+      startTaskFromTemplate: async (opts) => {
+        const reqId = String(opts.requirement_id);
+        calls.push(reqId);
+        // 模拟起 A 的 await 期间，外部驱动者把 B 转入 fix_revision，占住第二个槽
+        if (reqId === idA) setRequirementStatus(idB, "fix_revision");
+        return { id: `tsk-${reqId}` } as unknown as Task;
+      },
+    });
+
+    await tick();
+
+    // A 起跑→running，B 外部转 fix_revision → live active 已达 2=cap，C 不该再被起（旧「快照+started」
+    // 会漏算 B 的占用而误起 C 致超 cap=3）。
+    expect(calls).toEqual([idA]);
+    expect(getRequirementById(idC)?.status).toBe("queued");
+    const active = listRequirements({}).filter((r) => r.status === "running" || r.status === "fix_revision");
+    expect(active.length).toBe(2); // A running + B fix_revision，未超 cap
+  });
+
   // ──────── 全局 FIFO（created_at 序，跨 workspace）────────
 
   it("queued 按 created_at 先进先出调度（与 workspace 无关）", async () => {

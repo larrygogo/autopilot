@@ -384,7 +384,9 @@ export function registerRequirementCommands(program: Command): void {
           fields.push([`终态原因(${src})`, r.status_reason]);
         }
         if (r.schedule_error) fields.push(["调度失败", r.schedule_error]);
-        if (r.clarifier_error) fields.push(["澄清失败", r.clarifier_error]);
+        // rank17 尾：clarifier_error 仅在澄清期有意义。门控 status === 'clarifying'，防止离开澄清
+        // 的需求（如存量未清残留）在 req show 误打印「澄清失败」（与 Web 卡片的 status-gating 对齐）。
+        if (r.clarifier_error && r.status === "clarifying") fields.push(["澄清失败", r.clarifier_error]);
         const labelWidth = Math.max(...fields.map(([k]) => k.length));
         for (const [k, v] of fields) {
           console.log(`  ${k.padEnd(labelWidth)}  ${v}`);

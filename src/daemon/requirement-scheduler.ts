@@ -132,13 +132,20 @@ async function tickBody(): Promise<void> {
     .filter((r) => r.status === "queued")
     .sort((a, b) => a.created_at - b.created_at);
 
-  let started = 0;
   for (const snapshot of queued) {
-    if (active + started >= maxConcurrent) return;
+    // rank14：tick 起始的 active 是单次快照。循环内 scheduleOne 有 await，期间其它驱动者
+    // （pr-poller / tools / rpc，均不持调度锁）可能把别的需求转入 fix_revision（计入占用）。
+    // 用「快照 active + started 计数」判断会漏算这些新增占用方向 → 偶发超 cap。改为每迭代前
+    // 重算 live active（含本轮刚起的 running，scheduleOne 成功即同步置 running），闸门以最新为准。
+    // 非竞态场景下与原「active+started」完全等价（本轮起的任务下迭代被 live 计数）。
+    const liveActive = listRequirements({}).filter(
+      (r) => r.status === "running" || r.status === "fix_revision",
+    ).length;
+    if (liveActive >= maxConcurrent) return;
     // 快照可能过期（循环中有 await，用户可能 cancel / 其他写方改状态），起跑前复核
     const candidate = getRequirementById(snapshot.id);
     if (!candidate || candidate.status !== "queued") continue;
-    if (await scheduleOne(candidate)) started++;
+    await scheduleOne(candidate);
   }
 }
 
