@@ -327,10 +327,12 @@ export function agentForPhase(workflowName: string, phaseName: string): Agent {
   const eff = resolveEffectiveProvider(provider, merged["mode"] as AgentMode | undefined);
   const mode = eff.type;
 
-  // provider 层 fallback：没写 model 时用条目 / config 的 default_model
-  if (!merged["model"] && eff.default_model) {
-    merged["model"] = eff.default_model;
-  }
+  // model 解析优先级：phase 显式 model > 条目/config 的 default_model > DEFAULT_AGENT 硬编码兜底。
+  // ⚠ 不能用 if(!merged["model"])：上面 {...DEFAULT_AGENT, ...inline} 浅合并已把 DEFAULT_AGENT.model
+  // （硬编码 claude-sonnet-4-6）填满 merged["model"]，条件永远 false → config 的 default_model 成
+  // dead fallback、被静默忽略（违反 agent-defaults/CLAUDE.md「没写 model 回退 default_model」的承诺）。
+  // 改显式三级回退：inline.model 是 phase 真实写的值（未写则 undefined，不被 DEFAULT_AGENT 污染）。
+  merged["model"] = inline.model ?? eff.default_model ?? DEFAULT_AGENT.model;
 
   // 缓存 key 含 mode + 内容指纹（provider/model/system_prompt/max_turns/permission_mode/tools）：
   // 任一影响 agent 行为的字段变更 → key 变 → 新实例。防 workflow.yaml 改内联 agent 字段但

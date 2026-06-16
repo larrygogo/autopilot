@@ -8,10 +8,16 @@
  * 以及缓存复用。
  */
 
-import { describe, expect, test, beforeEach } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { register } from "../src/core/workflow/registry";
 import { agentForPhase, _resetForTest } from "../src/agents/registry";
 import { DEFAULT_AGENT } from "../src/core/agent-defaults";
+import { saveProvider } from "../src/core/config";
+import { Database } from "bun:sqlite";
+import { _setDbForTest } from "../src/core/db";
 import type { WorkflowDefinition, PhaseDefinition } from "../src/core/workflow/registry";
 
 const WF = "wf_inline_agent_test";
@@ -79,5 +85,52 @@ describe("agentForPhase — phase 内联 agent 配置", () => {
     const a2 = agentForPhase(WF, "inline");
     expect(a2).not.toBe(a1); // 指纹变 → 缓存未命中
     expect(a2.config.system_prompt).toBe("你是评审员（已改）");
+  });
+});
+
+// config 的 default_model 解析（修复：浅合并把 DEFAULT_AGENT.model 填满导致 default_model 成 dead fallback）
+describe("agentForPhase — config default_model 三级回退", () => {
+  let tmpFile: string;
+
+  beforeEach(() => {
+    _resetForTest();
+    // 空内存 DB（无 provider entry）→ resolveEffectiveProvider 走 config 回退分支（不走 DB entry），
+    // 这样 saveProvider 写的 config default_model 才会被读到。生产里有 entry 时 eff.default_model 来自
+    // entry，本测验证的是「只要 eff.default_model 有值就不被 DEFAULT_AGENT 硬编码屏蔽」这一核心修复。
+    _setDbForTest(new Database(":memory:"));
+    const dir = join(tmpdir(), `autopilot-agentmodel-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+    tmpFile = join(dir, "config.yaml");
+    writeFileSync(tmpFile, "", "utf-8");
+    process.env.DEV_WORKFLOW_CONFIG = tmpFile; // loadProviders 读它，不污染真实 config
+  });
+
+  afterEach(() => {
+    _setDbForTest(null);
+    delete process.env.DEV_WORKFLOW_CONFIG;
+    if (tmpFile && existsSync(tmpFile)) rmSync(join(tmpFile, ".."), { recursive: true, force: true });
+  });
+
+  test("phase 未写 model + config 配了 default_model → 用 default_model（不再被 DEFAULT_AGENT 硬编码屏蔽）", () => {
+    saveProvider("anthropic", { default_model: "claude-from-config-xyz" });
+    register({
+      name: "wf_dm_test",
+      phases: [{ name: "bare" }] as unknown as PhaseDefinition[],
+    } as unknown as WorkflowDefinition);
+
+    const agent = agentForPhase("wf_dm_test", "bare");
+    expect(agent.config.model).toBe("claude-from-config-xyz");
+    expect(agent.config.model).not.toBe(DEFAULT_AGENT.model); // 反向确认不是硬编码兜底
+  });
+
+  test("phase 显式 model 仍优先于 config default_model", () => {
+    saveProvider("anthropic", { default_model: "claude-from-config-xyz" });
+    register({
+      name: "wf_dm_test2",
+      phases: [{ name: "explicit", agent: { provider: "anthropic", model: "claude-opus-4-8" } }] as unknown as PhaseDefinition[],
+    } as unknown as WorkflowDefinition);
+
+    const agent = agentForPhase("wf_dm_test2", "explicit");
+    expect(agent.config.model).toBe("claude-opus-4-8"); // 显式 > default_model
   });
 });
