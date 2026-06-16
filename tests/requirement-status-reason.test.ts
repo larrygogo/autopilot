@@ -18,6 +18,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate008 } from "../src/migrations/008-projects";
 import { up as migrate009 } from "../src/migrations/009-nullable-codebase";
 import { up as migrate010 } from "../src/migrations/010-question-suggestions";
+import { up as migrate015 } from "../src/migrations/015-clarifier-error";
 import { up as migrate018 } from "../src/migrations/018-task-phase-events";
 import { up as migrate019 } from "../src/migrations/019-task-requirement-id";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
@@ -49,7 +50,7 @@ let tmpHome: string;
 
 const ALL_MIGRATIONS = [
   migrate001, migrate002, migrate004, migrate005, migrate006, migrate007,
-  migrate008, migrate009, migrate010, migrate018, migrate019, migrate021,
+  migrate008, migrate009, migrate010, migrate015, migrate018, migrate019, migrate021,
   migrate024, migrate028, migrate029, migrate030, migrate033, migrate044];
 
 beforeEach(() => {
@@ -110,6 +111,67 @@ describe("setRequirementStatus 终态原因写入与清空", () => {
     setRequirementStatus(reqId, "awaiting_review");
     const r = getRequirementById(reqId)!;
     expect(r.status_reason).toBe("残留原因"); // running → awaiting_review 不清不写
+  });
+});
+
+describe("setRequirementStatus 离开 clarifying 清 clarifier_error（#17）", () => {
+  function makeClarifyingWithError(): string {
+    createProject({ id: "proj-ce1", name: "p" });
+    const reqId = nextRequirementId();
+    createRequirement({ id: reqId, project_id: "proj-ce1", title: "T" });
+    setRequirementStatus(reqId, "clarifying");
+    updateRequirement(reqId, { clarifier_error: "YAML 解析失败（多文档 ---）" });
+    expect(getRequirementById(reqId)!.clarifier_error).toBe("YAML 解析失败（多文档 ---）");
+    return reqId;
+  }
+
+  it("clarifying → ready（else 分支）→ clarifier_error 清空", () => {
+    const reqId = makeClarifyingWithError();
+    setRequirementStatus(reqId, "ready");
+    expect(getRequirementById(reqId)!.clarifier_error).toBe(null);
+  });
+
+  it("clarifying → cancelled（终态分支）→ clarifier_error 清空且仍写 status_reason", () => {
+    const reqId = makeClarifyingWithError();
+    setRequirementStatus(reqId, "cancelled", { reason: "用户放弃澄清", reason_source: "user" });
+    const r = getRequirementById(reqId)!;
+    expect(r.clarifier_error).toBe(null);
+    expect(r.status_reason).toBe("用户放弃澄清"); // 终态原因仍正常写入
+    expect(r.status_before_terminal).toBe("clarifying");
+  });
+
+  it("clarifying → drafting（重选库等返回起草）→ clarifier_error 清空", () => {
+    const reqId = makeClarifyingWithError();
+    setRequirementStatus(reqId, "drafting");
+    expect(getRequirementById(reqId)!.clarifier_error).toBe(null);
+  });
+
+  it("非 clarifying 起点的转换不动 clarifier_error（防误清残留诊断）", () => {
+    const { reqId } = makeRunningRequirement({ withTask: false });
+    // running 态人为塞一条 clarifier_error（模拟历史遗留未清的脏值），证明守卫只在「离开澄清」时触发
+    updateRequirement(reqId, { clarifier_error: "上一轮澄清的残留" });
+    setRequirementStatus(reqId, "awaiting_review");
+    expect(getRequirementById(reqId)!.clarifier_error).toBe("上一轮澄清的残留");
+  });
+
+  it("clarifier_error 列不存在（旧库/纯表夹具，无 migration 015）→ 离开 clarifying 不抛（best-effort 容错）", () => {
+    // 用不含 migration 015 的迁移子集建 DB：requirements 表无 clarifier_error 列。
+    // 这条钉死「清理是 best-effort、缺列时静默跳过」的容错语义——正是当初 76 个旧夹具报
+    // "no such column" 的回归源；防止日后有人「简化」掉 try/catch 时只在远处套件报错难定位。
+    const noColDb = new Database(":memory:");
+    for (const m of ALL_MIGRATIONS.filter((mm) => mm !== migrate015)) m(noColDb);
+    _setDbForTest(noColDb);
+    try {
+      createProject({ id: "proj-nocol", name: "p" });
+      const reqId = nextRequirementId();
+      createRequirement({ id: reqId, project_id: "proj-nocol", title: "T" });
+      setRequirementStatus(reqId, "clarifying");
+      expect(() => setRequirementStatus(reqId, "ready")).not.toThrow();
+      expect(getRequirementById(reqId)!.status).toBe("ready");
+    } finally {
+      _setDbForTest(db); // 还原 beforeEach 的 DB，让 afterEach 正常收尾
+      noColDb.close();
+    }
   });
 });
 

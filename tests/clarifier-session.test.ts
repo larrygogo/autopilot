@@ -397,4 +397,81 @@ describe("clarifier session 路径", () => {
     expect(getSession("r1")).toBeNull();
     disposeRequirementClarifier();
   });
+
+  // 增量路径（Anthropic + 有效 session + 已解答 Q&A）的前置夹具
+  function seedIncremental(ref = "sess-valid"): void {
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "初稿" });
+    setRequirementStatus("r1", "clarifying");
+    createComment({ id: "cmt-001", requirement_id: "r1", kind: "question", from_role: "agent", body: "Q1?", status: "resolved" });
+    createComment({ id: "cmt-002", requirement_id: "r1", kind: "question", from_role: "user", body: "A1", parent_id: "cmt-001", status: "resolved" });
+    upsertSession("r1", "clarifying", {
+      agent_session_ref: ref,
+      messages_snapshot: [
+        { role: "user", content: "old prompt" },
+        { role: "assistant", content: "old response" },
+      ],
+    });
+  }
+
+  it("解析失败 → 下一轮 attempt 注入纠错前言（#15）", async () => {
+    seedIncremental();
+
+    const capturedPrompts: string[] = [];
+    let call = 0;
+    _setClarifyFnForTest(async (prompt) => {
+      capturedPrompts.push(prompt);
+      call++;
+      if (call === 1) {
+        // 解析失败：返回非对象纯文本，parseLlmYamlWrapper 抛 /不是对象/（确定性格式错）
+        return { rawText: "这不是 YAML 对象只是一段普通说明文字", newSessionRef: "sess-x" };
+      }
+      return {
+        rawText: JSON.stringify({
+          new_spec_md: "恢复后",
+          summary: "ok",
+          next_question: { agent_text: "Q2?", suggestions: [] },
+          done: false,
+        }),
+        newSessionRef: "sess-new",
+      };
+    });
+
+    await runClarifierRound("r1");
+
+    expect(capturedPrompts.length).toBe(2);
+    // 首轮走增量 prompt（含「用户已回答」），不含纠错前言
+    expect(capturedPrompts[0]).toContain("用户已回答");
+    expect(capturedPrompts[0]).not.toContain("你上一次的输出无法解析");
+    // 次轮 = 纠错前言 + 全量 prompt 主体（fallback 用全量，故含 Q&A 历史段）。断言锁固定的前言
+    // 文案，不依赖被插值进来的下游 llm-yaml 错误文案（否则改 llm-yaml 文案会让本 test 假红）。
+    expect(capturedPrompts[1]).toContain("你上一次的输出无法解析");
+    expect(capturedPrompts[1]).toContain("请严格只输出");
+    expect(capturedPrompts[1]).toContain("已完成的 Q&A 历史");
+  });
+
+  it("两轮均解析失败（确定性格式错）→ 不清 session_ref（#18）", async () => {
+    seedIncremental("sess-valid");
+
+    // 两次都返回可调用但无法解析的输出 → isParseFailure，session 仍有效不该清
+    _setClarifyFnForTest(async () => ({ rawText: "纯文本不是对象", newSessionRef: "sess-x" }));
+
+    await runClarifierRound("r1");
+
+    expect(getSession("r1", "clarifying")!.agent_session_ref).toBe("sess-valid");
+    // 失败仍如实落库 clarifier_error（错误可见性不受影响）
+    expect(getRequirementById("r1")!.clarifier_error).toBeTruthy();
+  });
+
+  it("两轮均调用失败（疑似 session 失效）→ 清空 session_ref（#18 对照）", async () => {
+    seedIncremental("sess-valid");
+
+    // 调用直接抛（attemptRaw 始终空）→ 非解析失败 → 首轮清 session_ref 走全量
+    _setClarifyFnForTest(async () => {
+      throw new Error("session expired");
+    });
+
+    await runClarifierRound("r1");
+
+    expect(getSession("r1", "clarifying")!.agent_session_ref).toBeNull();
+  });
 });

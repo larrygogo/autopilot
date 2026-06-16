@@ -79,11 +79,20 @@ export function parseLlmYamlWrapper(raw: string): Record<string, unknown> {
     if (fromFence) return fromFence;
   }
 
-  // 复现原始报错语义：能 parse 但顶层不是对象 → "不是对象"；parse 不动 → 抛 parse 错误
-  const result = parseYaml(s);
-  if (!result || typeof result !== "object" || Array.isArray(result)) {
-    throw new Error("YAML 顶层不是对象");
+  // 复现原始报错语义：能 parse 但顶层不是对象 → "不是对象"；parse 抛错 → 翻译成中文。
+  // 裸 parseYaml 的报错是英文（多文档 `---` 分隔、缩进/制表符、未闭合引号等），直接冒泡会
+  // 落进 clarifier_error 对用户无意义——翻译成语义化中文（带原始首行作线索）。
+  let result: unknown;
+  try {
+    result = parseYaml(s);
+  } catch (e: unknown) {
+    const firstLine = (e instanceof Error ? e.message : String(e)).split("\n")[0].trim();
+    throw new Error(
+      `YAML 解析失败（${firstLine}）——可能含 \`---\` 多文档分隔、缩进/制表符错误或未闭合引号`,
+    );
   }
-  // 理论不可达（parseAsObject 已覆盖），保险兜底
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("YAML 顶层不是对象（应输出顶层为 key: value 的 YAML 对象，而非纯文本 / 数组 / 标量）");
+  }
   return result as Record<string, unknown>;
 }

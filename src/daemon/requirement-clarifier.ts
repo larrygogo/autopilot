@@ -732,6 +732,12 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
       break;
     } catch (e: unknown) {
       lastError = e instanceof Error ? e : new Error(String(e));
+      // LLM 有响应但 parseClarifyResult 解析失败（attemptRaw 在调用成功后才赋值）vs 调用本身
+      // 失败（attemptRaw 仍空）。两者善后不同：解析失败 = 格式问题（重试要纠错、session 仍有效）；
+      // 调用失败 = 可能 session 失效（清 session 走全量）。
+      // ⚠ 该判别依赖不变式「真实 callClaude 对空输出会先抛错」（见 callClaude 的空串守卫）——
+      // 故调用失败时 attemptRaw 恒空。若日后去掉那道空串守卫，此判别会静默反转，需同步修。
+      const isParseFailure = attemptRaw.trim() !== "";
       log.warn(
         "clarifier: req=%s 第 %d 次（%s）失败: %s%s",
         reqId,
@@ -744,9 +750,23 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
         setPhase(reqId, "parsing", { attempt: 1, last_parse_error: lastError.message });
       }
 
-      // 第一次失败且用了 session → 清除失效 session_ref，下次循环走全量
-      if (i === 0 && attemptRef) {
-        log.info("clarifier: req=%s session %s 疑似失效，清除 agent_session_ref，下次走全量", reqId, attemptRef);
+      // #15：解析失败（确定性格式错）→ 给下一轮 attempt 加纠错前言。否则两次同 prompt 必然
+      // 两连挂（「YAML 顶层不是对象」这类确定性违规，无差异重试无意义）。
+      if (i === 0 && isParseFailure && attempts[1]) {
+        attempts[1] = {
+          ...attempts[1],
+          prompt:
+            `⚠ 你上一次的输出无法解析：${lastError.message}\n` +
+            "请严格只输出**顶层为对象的 YAML**（key: value 形式），不要任何额外解释 / 围栏外文字 / " +
+            "数组 / 标量 / `---` 多文档分隔。\n\n" +
+            attempts[1].prompt,
+        };
+      }
+
+      // #18：仅「会话失效类失败」（调用失败，非解析失败）才清 agent_session_ref——清了下轮被迫
+      // 昂贵全量重放。解析失败说明 LLM 有响应、session 仍有效，保留。
+      if (i === 0 && attemptRef && !isParseFailure) {
+        log.info("clarifier: req=%s session %s 疑似失效（调用失败），清除 agent_session_ref，下次走全量", reqId, attemptRef);
         upsertSession(reqId, "clarifying", { agent_session_ref: null });
       }
     }

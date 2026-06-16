@@ -389,6 +389,20 @@ export function setRequirementStatus(
   if (res.changes === 0) {
     throw new Error(`requirement ${id} 并发状态冲突：期望 ${cur.status}（已被其它写入者改变，本次 ${cur.status} → ${to} 未生效）`);
   }
+  // #17：离开澄清态 → 清残留 clarifier_error（仅在 clarifying 期有意义）。澄清失败后用户改走
+  // 取消 / 重选库 / finish 等任一出口都不再经过 runClarifierRound 的开轮清理，残留错误会污染
+  // 后续卡片（CLI req show 无条件展示「澄清失败」、failed 卡兜底 reason、列表卡 notice）。
+  // 故意做成独立 best-effort 语句而非塞进上面的 CAS UPDATE：① 不让中心状态转换耦合一个 30 个
+  // 迁移前才加的列；② 与下面 status_logs 同范式容忍「迁移未跑的旧库/纯表夹具」无此列。
+  if (cur.status === "clarifying" && to !== "clarifying") {
+    try {
+      db.run("UPDATE requirements SET clarifier_error = NULL WHERE id = ?", [id]);
+    } catch (e: unknown) {
+      // 只容忍「列不存在」（migration 015 未跑的旧库/测试纯表夹具）——清理是增强不阻塞转换；
+      // 其余真错误（SQLITE_BUSY / 磁盘满 / IO）必须冒泡，不空吞掩盖。
+      if (!/no such column/i.test(String(e))) throw e;
+    }
+  }
   // 需求级状态转移日志（与 task_logs 对称）：审批/排队时间、终态审计的真理来源
   try {
     db.run(

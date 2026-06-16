@@ -117,4 +117,19 @@ phases:
   it("顶层是数组 → 抛", () => {
     expect(() => parseLlmYamlWrapper("- a\n- b\n- c")).toThrow(/不是对象/);
   });
+
+  it("多文档 `---` 分隔 → 抛中文化 YAML 解析错（#16，带语义提示而非裸英文）", () => {
+    // yaml.parse 对多文档抛英文 "Source contains multiple documents..."；这条会落进
+    // clarifier_error 给用户看，必须包上中文壳 + 提示（原始英文首行作线索保留在括号内）。
+    const raw = "name: x\n---\nname: y";
+    expect(() => parseLlmYamlWrapper(raw)).toThrow(/YAML 解析失败/);
+    expect(() => parseLlmYamlWrapper(raw)).toThrow(/多文档分隔/);
+  });
+
+  it("制表符缩进 → 抛中文化 YAML 解析错（#16，带语义化提示）", () => {
+    // YAML 不允许 tab 缩进；裸 parse 抛英文，需翻译。
+    const raw = "name:\n\tfoo: bar";
+    expect(() => parseLlmYamlWrapper(raw)).toThrow(/YAML 解析失败/);
+    expect(() => parseLlmYamlWrapper(raw)).toThrow(/缩进|制表符/);
+  });
 });
