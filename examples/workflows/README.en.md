@@ -2,102 +2,83 @@
 
 # Example Workflows
 
-This directory contains example workflow implementations for the autopilot framework, intended as references for developing your own.
+This directory is autopilot's workflow template library (the source `autopilot workflow create` clones from), split into two tiers:
 
-## Installing Workflows
+- **Product templates** — PR-delivery shaped. They plug into the platform's full value-added services: requirement clarification, per-repo scheduling, PR acceptance, the fix_revision repair loop, and automatic CI fixing. The bridge generalizes on "does the task deliver a PR" (not on phase names), so custom variants derived from this tier (extra phases / different phase agents / rejection tuning / parallel blocks) get the whole service suite as long as they end up delivering a PR. **Start your custom workflows from this tier.**
+- **Engine capability demos** — teaching fixtures that showcase state-machine / YAML engine features (hand-written transitions, forward jumps, multiple terminal states, parallelism, hooks, zero-code prompts). They serve as live examples for docs like `docs/state-machine.md`. **They depend only on the engine contract and do not plug into the requirement loop's value-added services**; running them also surfaces no decision affordance on the Web console — use them as syntax references, not for real work.
 
-Use `autopilot init` to copy the example workflows into your user space automatically:
+> See "产品分层定位" in the repo root `CLAUDE.md` for the product positioning: workflow customization is currently scoped to customizing the PR delivery pipeline, not a general-purpose process orchestration platform.
+
+## Installation
+
+`autopilot init` automatically installs the two product workflows **dev** and **ad-hoc**. Clone other templates as needed:
 
 ```bash
-autopilot init
-```
+autopilot workflow create <name>      # derive from a template interactively
 
-Or copy the directories manually into `~/.autopilot/workflows/`:
-
-```bash
-# install dev — full development workflow (YAML format)
-cp -r examples/workflows/dev/ ~/.autopilot/workflows/dev/
-
-# install req_review — requirements review workflow
-cp -r examples/workflows/req_review/ ~/.autopilot/workflows/req_review/
-
-# install doc_gen — document generation and review
+# or copy manually
 cp -r examples/workflows/doc_gen/ ~/.autopilot/workflows/doc_gen/
-
-# install parallel_build — parallel build workflow
-cp -r examples/workflows/parallel_build/ ~/.autopilot/workflows/parallel_build/
-
-# install data_pipeline — data processing pipeline
-cp -r examples/workflows/data_pipeline/ ~/.autopilot/workflows/data_pipeline/
 ```
 
-## Available Examples
+Existing users can pull template bug fixes from the repo: `autopilot workflow sync dev` (dry-run shows the diff, add `--apply` to overwrite).
 
-This directory ships 6 example workflows, in two categories:
+## Product Templates (PR-delivery shaped)
 
-- **AI example workflows**: integrate the Claude CLI and run a full AI-driven flow out of the box
-- **Framework feature examples**: showcase framework capabilities (auto-derivation, parallel, jumps, etc.); phase functions are placeholder implementations
+### dev — full development workflow (installed by init)
 
-### [AI] dev — Full development workflow
+5 phases: design → design review → develop → code review → submit PR
 
-5 phases: plan design → plan review → develop → code review → PR submission
+- `workflow.yaml` — workflow definition (auto-derivation + reject sugar + per-phase inline agents)
+- `workflow.ts` — phase function implementations
+- `config.example.yaml` — configuration template
 
-- `workflow.yaml` — workflow definition (auto-derivation + reject syntactic sugar)
-- `workflow.py` — phase function implementations (inline prompts, calls the Claude CLI)
-- `config.example.yaml` — minimal config template (repo_path + default_branch)
+**Showcases**: the full requirement loop (clarify → execute → submit_pr delivery → pr-poller acceptance → fix_revision repair), the reject mechanism, stop-and-report on rejection cap, multi-repo requirements delivering one PR per repo
 
-**Features showcased**: full 5-phase flow, reject mechanism, Claude CLI integration, standard phase pattern (read task → execute → save artifact → transition → push next phase)
+### ad-hoc — ad-hoc task (installed by init)
 
-### [AI] req_review — Requirements review workflow
+Single-phase zero-code workflow; the default workflow behind `autopilot run "<prompt>"`: skips the project/requirement ceremony and runs an agent prompt directly. With a workspace it builds a sandbox on top of it; without one it degrades to an empty directory (good for writing docs, generating scripts, experiments).
 
-2 phases: requirement analysis → requirement review
+### req_dev — requirement development (a lean variant of dev)
 
-- `workflow.yaml` — workflow definition (auto-derivation + reject syntactic sugar)
-- `workflow.py` — phase function implementations (inline prompts, calls the Claude CLI)
+design → review → develop → code_review → submit_pr, with agents configured inline per phase. A good minimal starting point for deriving custom PR delivery pipelines.
 
-**Features showcased**: minimal 2-phase flow, reject mechanism, requirement source from local requirement.md
+### artifact — artifact delivery (probe, dogfooding)
 
-### doc_gen — Document generation and review
+produce (`gate: true` manual acceptance; rejection notes fed back into the redo round) → deliver (archives to `AUTOPILOT_HOME/deliverables/<reqId>/<taskId>/`). A zero-kernel-change probe for the non-PR delivery shape, collecting real-world pain points for the "deliverable abstraction" P0 (design baseline and feedback checklist: `docs/superpowers/specs/2026-06-12-deliverable-abstraction-design.md`). For single-repo requirements.
 
-2 phases: document generation → document review
+## Engine Capability Demos (teaching fixtures)
 
-- `workflow.yaml` — minimal YAML (zero hand-written transitions, fully auto-derived)
-- `workflow.py` — phase functions
+### prompt_quick — quick prompt writing
 
-**Features showcased**: minimal YAML, reject syntactic sugar, zero hand-written transitions, fully auto-derived states
+2 phases, zero code: write `prompt:` directly in the yaml and the framework's built-in prompt-runner invokes the agent — no ts needed. **Showcases**: zero-code workflows, the handoff protocol (`${HANDOFF}` passed across phases), per-phase inline agents
 
-### parallel_build — Parallel build workflow
+### doc_gen — document generation and review
 
-4 phases: prepare → frontend build + backend build (parallel) → integration test
+A 2-phase minimal structure example. **Showcases**: minimal YAML, reject sugar, zero hand-written transitions, fully auto-derived states
 
-- `workflow.yaml` — parallel phases + hooks definition
-- `workflow.py` — phase functions + hook functions
+### parallel_build — parallel build workflow
 
-**Features showcased**: parallel fork/join, hooks (before_phase/after_phase), auto-transitions, fail_strategy
+prepare → frontend build + backend build (parallel) → integration test. **Showcases**: parallel fork/join, hooks (before_phase/after_phase), fail_strategy
 
-### data_pipeline — Data processing pipeline
+### data_pipeline — data processing pipeline
 
-4 phases: data extract → data validate → data transform → data load
+extract → validate → transform → load. **Showcases**: forward jump (validate_skip → load), multiple terminal states (completed/completed_partial/cancelled), retry_policy, hand-written transitions — the only complete reference for these fields
 
-- `workflow.yaml` — forward jump + multiple terminal states + hand-written transitions
-- `workflow.py` — phase functions
+### req_review — requirement review workflow
 
-**Features showcased**: forward jump (validate_skip → load), multiple terminal states (completed/completed_partial/cancelled), retry_policy, mixed reject and jump
+requirement analysis → requirement review. **Showcases**: a minimal 2-phase flow with reject
 
-### [AI] with_human — Human-in-the-loop example
+### with_human — human-in-the-loop example
 
-2 phases: plan → review, paired with the two built-in human-in-the-loop mechanisms:
+plan (`gate: true` manual approval) → review. **Note**: the gate and ask_user mechanisms themselves are product-grade (available to dev-style workflows too); this workflow is merely their minimal demo.
 
-- `workflow.yaml` — `plan` is configured with `gate: true`, suspends after run waiting for user approval
-- `workflow.ts` — the prompt for the `plan` phase encourages the agent to call the `ask_user` tool when the direction is unclear
+**Showcases**:
+- **Gate** (manual approval): `gate: true` + `gate_message`; the UI shows an approval banner [approve / reject / cancel], and the rejection reason is fed to the next round via `task.last_user_decision`
+- **ask_user** (mid-run agent questions): the framework auto-injects the `mcp__autopilot_workflow__ask_user` tool; when called, the task stays in `running_<phase>` with `pending_question` set; the UI shows a question banner and renders buttons in options mode
+- **Key pitfall**: with a gate, do **not** call `transition('xxx_complete')` + `runInBackground('next')` at the end of the phase function — that bypasses the gate
 
-**Features showcased**:
-- **Gate** (manual approval): `gate: true` + `gate_message`, the UI shows an orange banner [Pass / Reject / Cancel], the rejection note is fed to the next round via `task.last_user_decision`
-- **ask_user** (agent asks mid-run): the framework auto-injects the `mcp__autopilot_workflow__ask_user` tool; after the agent calls it the task stays at `running_<phase>` but `pending_question` is written; the UI shows a blue banner, options mode renders buttons
-- **Key pitfall**: when using gate, **do not** actively call `transition('xxx_complete')` + `runInBackground('next')` at the end of the phase function, otherwise the gate will be bypassed
-
-Full documentation in the "Human-in-the-loop (Gate & ask_user)" section of `docs/en/workflow-development.md`.
+See the "Human interaction (Gate and ask_user)" section in `docs/workflow-development.md` for full documentation.
 
 ## Developing Custom Workflows
 
-Refer to `docs/en/workflow-development.md` for the complete workflow development guide.
+See `docs/workflow-development.md` for the complete workflow development guide.

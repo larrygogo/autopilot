@@ -1,14 +1,14 @@
 /**
  * SEC-6 启动安全门的进程级回归测试。
  *
- * 2026-06-10 事故：config.yaml 配 host 0.0.0.0 且无 token/用户时，daemon exit(2)，
- * 但报错只走 stderr（supervisor 模式下被 ignore 吞掉），daemon.log 无任何痕迹，
- * 用户只看到"无法启动"。另外 `daemon run` CLI 给 host 默认值 127.0.0.1 覆盖了
- * config.yaml，导致"前台正常、后台必崩"的排查假象。
+ * 2026-06-10/11 两次事故后语义升级：暴露 host 且未设防时不再 exit(2) 拒启
+ * （「配置矛盾等重启才引爆 → 启不起来」反复烧伤），而是**自动生成 API token
+ * 写入 runtime/api-token 并继续启动** —— 生成后即设防，安全不降级。
  *
- * 这里用真实子进程 + 临时 AUTOPILOT_HOME 复现：
- * - 裸跑 daemon 脚本被拦截时，退出码 2 且原因写入 daemon.log
- * - `daemon run`（不带 -H）读 config 的 0.0.0.0，同样被安全门拦截
+ * 这里用真实子进程 + 临时 AUTOPILOT_HOME 验证：
+ * - 裸跑 daemon：自动设防（token 文件落地 + daemon.log 记录）并保持运行
+ * - `daemon run`（不带 -H）读 config 的 0.0.0.0：同样自动设防保持运行
+ * - --insecure-no-auth 逃生口仍然有效
  */
 
 import { describe, it, expect, afterAll } from "bun:test";
@@ -17,16 +17,16 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const REPO_ROOT = join(import.meta.dir, "..");
-// 死端口：避免与本机真实 daemon（6180）冲突
-const DEAD_PORT = 16555;
 
 const homes: string[] = [];
 
-function makeExposedHome(): string {
+// 每个用例独立端口：自动设防后 daemon 会真监听，硬杀后 Windows 可能短暂残留
+// zombie LISTEN（见 daemon-port-6181 事故），串行复用同端口会让后续用例 EADDRINUSE
+function makeExposedHome(port: number): string {
   const home = mkdtempSync(join(tmpdir(), "ap-gate-"));
   writeFileSync(
     join(home, "config.yaml"),
-    `daemon:\n  host: 0.0.0.0\n  port: ${DEAD_PORT}\n`,
+    `daemon:\n  host: 0.0.0.0\n  port: ${port}\n`,
     "utf-8",
   );
   homes.push(home);
@@ -66,34 +66,42 @@ afterAll(() => {
 });
 
 describe("SEC-6 启动安全门", () => {
-  it("裸跑 daemon 被拦截：exit 2 且原因写入 daemon.log", async () => {
-    const home = makeExposedHome();
+  it("裸跑 daemon 暴露未设防：自动生成 token 设防并保持运行（不再 exit 2）", async () => {
+    const home = makeExposedHome(16555);
+    // 自动设防后 daemon 常驻 → 超时杀掉返回 -1 即为「没有被拒启」
     const exitCode = await runWithTimeout(
       ["bun", "run", join(REPO_ROOT, "src/daemon/index.ts")],
       home,
-      30_000,
+      20_000,
     );
-    expect(exitCode).toBe(2);
+    expect(exitCode).toBe(-1);
 
+    // token 文件已自动落地
+    expect(existsSync(join(home, "runtime", "api-token"))).toBe(true);
+    const token = readFileSync(join(home, "runtime", "api-token"), "utf-8").trim();
+    expect(token.length).toBeGreaterThan(20);
+
+    // daemon.log 记录了自动设防原因
     const logPath = join(home, "runtime", "logs", "daemon.log");
     expect(existsSync(logPath)).toBe(true);
     const logContent = readFileSync(logPath, "utf-8");
     expect(logContent).toContain("0.0.0.0");
-    expect(logContent).toContain("安全门");
+    expect(logContent).toContain("自动生成");
   }, 40_000);
 
-  it("daemon run（不带 -H）读 config 的 0.0.0.0，同样被拦截 exit 2", async () => {
-    const home = makeExposedHome();
+  it("daemon run（不带 -H）读 config 的 0.0.0.0：同样自动设防保持运行", async () => {
+    const home = makeExposedHome(16556);
     const exitCode = await runWithTimeout(
       ["bun", "run", join(REPO_ROOT, "src/cli/index.ts"), "daemon", "run"],
       home,
-      30_000,
+      20_000,
     );
-    expect(exitCode).toBe(2);
+    expect(exitCode).toBe(-1);
+    expect(existsSync(join(home, "runtime", "api-token"))).toBe(true);
   }, 40_000);
 
   it("daemon run --insecure-no-auth 可跳过安全门（SEC-6 提示给出的逃生口必须真实存在）", async () => {
-    const home = makeExposedHome();
+    const home = makeExposedHome(16557);
     // 跳过安全门后 daemon 会真正启动并常驻 → runWithTimeout 超时杀掉返回 -1 即为成功；
     // 若 commander 不认识该 option 或仍被安全门拦，则会快速退出非 -1
     const exitCode = await runWithTimeout(

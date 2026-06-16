@@ -7,7 +7,7 @@ import { api, type Requirement } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { cn } from "@/lib/utils";
 import { relTime, tsToMs, bucketOf, BUCKET_ORDER, BUCKET_LABEL, type TimeBucket } from "@/lib/pipeline-time";
-import { reqCardSpec, type ReqCardAction } from "@/lib/requirement-card";
+import { reqCardSpec, specPreview, type ReqCardAction, type ReqCardSpec } from "@/lib/requirement-card";
 
 export interface PipelineTask {
   id: string;
@@ -44,11 +44,14 @@ export function taskMeta(status: string): { Icon: typeof Loader2; tone: Tone; la
 }
 
 /** 需求状态 → 卡片视觉。覆盖全生命周期（项目页的需求没有任务行代表后段）。 */
-export function reqMeta(status: string): { Icon: typeof Loader2; tone: Tone; label: string; spin?: boolean } {
+export function reqMeta(status: string, opts?: { hasPr?: boolean }): { Icon: typeof Loader2; tone: Tone; label: string; spin?: boolean } {
   if (status === "queued") return { Icon: Clock, tone: "accent", label: "待执行" };
   if (status === "running") return { Icon: Loader2, tone: "accent", label: "执行中", spin: true };
   if (status === "fix_revision") return { Icon: Loader2, tone: "accent", label: "修复中", spin: true };
-  if (status === "awaiting_review") return { Icon: Hand, tone: "warning", label: "待 PR review" };
+  // artifacts 交付（无 PR，v2 R5）的验收在需求页人工完成 —— 不写「PR review」误导去 GitHub
+  if (status === "awaiting_review") {
+    return { Icon: Hand, tone: "warning", label: opts?.hasPr === false ? "待验收" : "待 PR review" };
+  }
   if (status === "awaiting_approval") return { Icon: Hand, tone: "warning", label: "待审批" };
   if (status === "ready") return { Icon: Hand, tone: "warning", label: "待入队" };
   if (status === "clarifying") return { Icon: Search, tone: "info", label: "调查中" };
@@ -149,8 +152,36 @@ export function RowCard({
   );
 }
 
+/** 状态特化区（提示条 + 行内动作）：RequirementRow 与「代表需求的 TaskRow」共用同一套规则。 */
+function ReqCardExtras({ req, card }: { req: Requirement; card: ReqCardSpec }) {
+  if (!card.notice && card.actions.length === 0) return null;
+  return (
+    <div className="mt-2.5 space-y-2">
+      {card.notice && (
+        <p className={cn(
+          "rounded-lg px-3 py-2 text-[12px] leading-relaxed",
+          card.notice.tone === "error"
+            ? "bg-destructive/8 text-destructive"
+            : "bg-muted/50 text-muted-foreground",
+        )}>
+          {card.notice.text}
+        </p>
+      )}
+      {card.actions.length > 0 && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {card.actions.map((a) => (
+            <ReqCardActionButton key={a.key} req={req} action={a} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RequirementRow({ req, now, maps }: { req: Requirement; now: number; maps?: PipelineNameMaps }) {
-  const { Icon, tone, label, spin } = reqMeta(req.status);
+  // 列表行只有 requirement 自身字段：pr_url/pr_number 是主 PR 缓存（submit_pr 必回填），
+  // 据此区分 PR 验收与 artifacts 人工验收的标签
+  const { Icon, tone, label, spin } = reqMeta(req.status, { hasPr: !!req.pr_url || (req.pr_number ?? 0) > 0 });
   const wfName = req.workflow ?? "dev";
   const secondary = [
     req.id,
@@ -170,27 +201,7 @@ export function RequirementRow({ req, now, maps }: { req: Requirement; now: numb
       statusLabel={label}
       secondary={secondary}
       preview={card.preview}
-      extra={(card.notice || card.actions.length > 0) && (
-        <div className="mt-2.5 space-y-2">
-          {card.notice && (
-            <p className={cn(
-              "rounded-lg px-3 py-2 text-[12px] leading-relaxed",
-              card.notice.tone === "error"
-                ? "bg-destructive/8 text-destructive"
-                : "bg-muted/50 text-muted-foreground",
-            )}>
-              {card.notice.text}
-            </p>
-          )}
-          {card.actions.length > 0 && (
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {card.actions.map((a) => (
-                <ReqCardActionButton key={a.key} req={req} action={a} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      extra={<ReqCardExtras req={req} card={card} />}
     />
   );
 }
@@ -213,7 +224,7 @@ function ReqCardActionButton({ req, action }: { req: Requirement; action: ReqCar
     if (busy) return;
 
     if (action.key === "answer") { navigate(`/requirements/${req.id}`); return; }
-    if (action.key === "viewTask") { if (req.task_id) navigate(`/tasks/${req.task_id}`); return; }
+    if (action.key === "viewTask") { navigate(`/requirements/${req.id}/execute`); return; }
     if (action.key === "openPr") { if (req.pr_url) window.open(req.pr_url, "_blank", "noopener"); return; }
 
     setBusy(true);
@@ -256,25 +267,40 @@ function ReqCardActionButton({ req, action }: { req: Requirement; action: ReqCar
   );
 }
 
-export function TaskRow({ task, now, maps }: { task: PipelineTask; now: number; maps?: PipelineNameMaps }) {
-  const { Icon, tone, label } = taskMeta(task.status);
+export function TaskRow({ task, now, maps, req }: {
+  task: PipelineTask;
+  now: number;
+  maps?: PipelineNameMaps;
+  /** 关联需求（任务行代表整件工作时传入）—— 状态视觉以需求为准（task done 只是执行
+   * 单元跑完，需求可能还在验收/修复），preview/提示/动作与需求卡同走 reqCardSpec
+   * （此前裸糊原始 markdown spec 且无「打开 PR / 去回答」，与项目页需求卡割裂） */
+  req?: Requirement;
+}) {
+  const { Icon, tone, label, spin } = req
+    ? reqMeta(req.status, { hasPr: !!req.pr_url || (req.pr_number ?? 0) > 0 })
+    : { ...taskMeta(task.status), spin: task.status.startsWith("running_") };
   const phase = parsePhase(task.status);
   const secondary = [
     maps?.workflows?.[task.workflow] ?? task.workflow, // 工作流中文 label（无映射退回内核名）
     phase || null,
     task.requirement_id ? `← ${task.requirement_id}` : null,
   ].filter(Boolean).join(" · ");
+  const card = req ? reqCardSpec(req) : null;
+  // v2 R6：行点击目标 = 需求页（一件工作的主视图，执行历史内联其中）。用 requirement_id 判断
+  // （不变式保证非空；不依赖 req 对象是否已 join，避免 req 未加载时误退到 /tasks/:id）。
+  // 仅无关联需求的存量游离任务才直达 /tasks/:id。
   return (
     <RowCard
-      to={`/tasks/${task.id}`}
+      to={task.requirement_id ? `/requirements/${task.requirement_id}` : `/tasks/${task.id}`}
       Icon={Icon}
       tone={tone}
-      spin={task.status.startsWith("running_")}
+      spin={spin}
       title={task.title}
       time={relTime(tsToMs(task.updated_at), now)}
       statusLabel={label}
       secondary={secondary}
-      preview={task.requirement ?? null}
+      preview={card ? card.preview : specPreview(task.requirement ?? "")}
+      extra={req && card ? <ReqCardExtras req={req} card={card} /> : undefined}
     />
   );
 }

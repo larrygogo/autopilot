@@ -14,32 +14,30 @@
 import { defineTool, type RegisteredTool } from "./mcp-tools";
 import { z } from "zod";
 import { listTasks, getTask, getTaskLogs } from "../core/db";
-import { listWorkflows, getWorkflow, isParallelPhase } from "../core/registry";
-import { reload as reloadRegistry } from "../core/registry";
+import { listWorkflows, getWorkflow, isParallelPhase } from "../core/workflow/registry";
+import { reload as reloadRegistry } from "../core/workflow/registry";
 import {
   listWorkflowsInDb,
   createDbWorkflow,
   updateDbWorkflow,
   deleteDbWorkflow,
   getWorkflowFromDb,
-} from "../core/workflows";
+} from "../core/workflow/workflows";
 import { listSessions, readManifest as readSessionManifest } from "../core/sessions";
 import { VERSION } from "../index";
 import { transition, canTransition } from "../core/state-machine";
-import { buildTransitions } from "../core/registry";
-import { startTaskFromTemplate } from "../core/task-factory";
+import { buildTransitions } from "../core/workflow/registry";
+import { startTaskFromTemplate } from "../core/task/factory";
 import { randomUUID } from "crypto";
 import { log } from "../core/logger";
-import { listWorkspaces, getWorkspaceById } from "../core/workspaces";
+import { listWorkspaces, getWorkspaceById } from "../core/sandbox/workspaces";
 import {
   listRequirements,
   getRequirementById,
   createRequirement,
   updateRequirement,
-  setRequirementStatus,
-  nextRequirementId,
-} from "../core/requirements";
-import { createComment, nextCommentId } from "../core/requirement-comments";
+  setRequirementStatus,} from "../core/requirements";
+import { createComment, nextCommentId } from "../core/requirements/comments";
 
 type ToolContent = { content: Array<{ type: "text"; text: string }> };
 
@@ -436,10 +434,8 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
             `"${args.repo_alias}" 是子模块，不能直接提需求。${parentHint}（autopilot 会在执行时自动跨父子操作）`,
           );
         }
-        const id = nextRequirementId();
         try {
           const r = createRequirement({
-            id,
             project_id: repo.project_id,
             workspace_id: repo.id,
             title: args.title.trim(),
@@ -467,7 +463,8 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
           return err(`需求已通过审批（当前状态 ${r.status}），spec 不可再修改；失败（failed）后才可修改重试`);
         }
         updateRequirement(args.req_id, { spec_md: args.spec_md });
-        if (r.status === "drafting") {
+        // 澄清前置：已选代码库才自动转 clarifying（澄清基于代码库 clone 进行）
+        if (r.status === "drafting" && r.workspace_id) {
           try {
             setRequirementStatus(args.req_id, "clarifying");
           } catch (e: unknown) {
@@ -498,7 +495,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
     // ── 需求队列：入队执行 ──
     tool(
       "enqueue_requirement",
-      "把已 ready 的需求推入执行队列（status=queued）。requirement-scheduler 会监听到状态变化并自动创建 req_dev task 开始执行（同仓库严格串行）。",
+      "把已 ready 的需求推入执行队列（status=queued）。requirement-scheduler 会监听到状态变化并自动创建 req_dev task 开始执行（全局并发上限内按入队先后 FIFO 调度）。",
       {
         req_id: z.string(),
       },
@@ -630,7 +627,7 @@ export const WORKFLOW_TOOL_NAMES = ["ask_user"] as const;
 export async function buildWorkflowAgentTools(): Promise<RegisteredTool[]> {
   const tool = defineTool;
 
-  const { getTaskContext } = await import("../core/task-context");
+  const { getTaskContext } = await import("../core/task/context");
   const { updateTask } = await import("../core/db");
   const { registerPending } = await import("./pending-questions");
   const { emit } = await import("../core/event-bus");

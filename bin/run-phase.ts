@@ -3,7 +3,7 @@ import { installAutopilotResolver } from "../src/core/autopilot-resolver";
 // 在任何用户工作流被 dynamic import 前安装别名解析器
 installAutopilotResolver();
 
-import { discover } from "../src/core/registry";
+import { discover } from "../src/core/workflow/registry";
 import { initDb } from "../src/core/db";
 import { executePhase } from "../src/core/runner";
 

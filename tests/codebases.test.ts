@@ -8,7 +8,7 @@ import {
   updateWorkspace,
   deleteWorkspace,
   nextWorkspaceId,
-} from "../src/core/workspaces";
+} from "../src/core/sandbox/workspaces";
 import { createProject } from "../src/core/projects";
 import { createRequirement, getRequirementById } from "../src/core/requirements";
 import { _setDbForTest, initDb } from "../src/core/db";
@@ -24,7 +24,7 @@ import { up as migrate010 } from "../src/migrations/010-question-suggestions";
 import { up as migrate011 } from "../src/migrations/011-now-dismissed-cards";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
-import { checkWorkspaceHealth, parseGithubFromRemote, detectWorkspaceGit, redactRemoteUrl } from "../src/core/workspace-health";
+import { checkWorkspaceHealth, parseGithubFromRemote, detectWorkspaceGit, redactRemoteUrl } from "../src/core/sandbox/workspace-health";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";

@@ -21,7 +21,9 @@ const SCHEMA = [
   "    parent_task_id TEXT DEFAULT NULL,",
   "    parallel_index INTEGER DEFAULT NULL,",
   "    parallel_group TEXT DEFAULT NULL,",
-  "    requirement_id TEXT DEFAULT NULL",
+  "    requirement_id TEXT DEFAULT NULL,",
+  "    kind TEXT NOT NULL DEFAULT 'execution',",
+  "    seq INTEGER NOT NULL DEFAULT 1",
   ");",
   "",
   "CREATE TABLE IF NOT EXISTS task_logs (",
@@ -409,6 +411,75 @@ describe("state-machine 模块", () => {
         expect(task!.branch).toBe("feat/test");
         expect(task!.status).toBe("running_phase1");
       });
+    });
+  });
+});
+
+// ── 终态自动关闭 open phase events（dogfood req-012：workflow 内直接 transition cancel
+//    不走 cancelTaskAction，4 个轮次永远转圈、耗时累计 97h）────────────────
+const PHASE_EVENTS_SCHEMA = [
+  "CREATE TABLE IF NOT EXISTS task_phase_events (",
+  "    id INTEGER PRIMARY KEY AUTOINCREMENT,",
+  "    task_id TEXT NOT NULL,",
+  "    phase TEXT NOT NULL,",
+  "    status TEXT NOT NULL,",
+  "    started_at INTEGER NOT NULL,",
+  "    ended_at INTEGER",
+  ");",
+].join("\n");
+
+describe("终态转换自动关闭 open phase events", () => {
+  it("transition 到终态（cancelled）→ 遗留 running event 标 aborted", async () => {
+    await withTestDb(async (db, sm) => {
+      (db.getDb() as any).exec(PHASE_EVENTS_SCHEMA);
+      db.createTask({ id: "t-term-1", title: "t", workflow: "wf", initialStatus: "pending" });
+      const evId = db.startTaskPhase("t-term-1", "phase1");
+
+      sm.transition("t-term-1", "cancel", { transitions: TRANSITIONS });
+
+      const ev = db.listTaskPhaseEvents("t-term-1").find((e) => e.id === evId);
+      expect(ev?.status).toBe("aborted");
+      expect(ev?.ended_at).not.toBeNull();
+    });
+  });
+
+  it("transition 到非终态（running_phase1）→ open event 不动", async () => {
+    await withTestDb(async (db, sm) => {
+      (db.getDb() as any).exec(PHASE_EVENTS_SCHEMA);
+      db.createTask({ id: "t-term-2", title: "t", workflow: "wf", initialStatus: "pending" });
+      const evId = db.startTaskPhase("t-term-2", "phase1");
+
+      sm.transition("t-term-2", "start", { transitions: TRANSITIONS });
+
+      const ev = db.listTaskPhaseEvents("t-term-2").find((e) => e.id === evId);
+      expect(ev?.status).toBe("running");
+      expect(ev?.ended_at).toBeNull();
+    });
+  });
+
+  it("forceTransition 到 failed → 同样关闭（watcher/触顶路径）", async () => {
+    await withTestDb(async (db, sm) => {
+      (db.getDb() as any).exec(PHASE_EVENTS_SCHEMA);
+      db.createTask({ id: "t-term-3", title: "t", workflow: "wf", initialStatus: "running_phase1" });
+      const evId = db.startTaskPhase("t-term-3", "phase1");
+
+      sm.forceTransition("t-term-3", "failed", "测试触顶");
+
+      const ev = db.listTaskPhaseEvents("t-term-3").find((e) => e.id === evId);
+      expect(ev?.status).toBe("aborted");
+    });
+  });
+
+  it("中间态 <phase>_rejected 不视为终态", async () => {
+    await withTestDb(async (db, sm) => {
+      (db.getDb() as any).exec(PHASE_EVENTS_SCHEMA);
+      db.createTask({ id: "t-term-4", title: "t", workflow: "wf", initialStatus: "running_phase1" });
+      const evId = db.startTaskPhase("t-term-4", "phase1");
+
+      sm.forceTransition("t-term-4", "phase1_rejected", "驳回中间态");
+
+      const ev = db.listTaskPhaseEvents("t-term-4").find((e) => e.id === evId);
+      expect(ev?.status).toBe("running");
     });
   });
 });

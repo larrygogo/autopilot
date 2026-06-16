@@ -3,7 +3,8 @@ import { join } from "path";
 import { homedir } from "os";
 import { atomicWriteSync } from "./atomic-write";
 import { log } from "./logger";
-import { isParallelPhase, type WorkflowDefinition, type PhaseDefinition, type ParallelDefinition, type WorkflowSandboxSpec } from "./registry";
+import { isParallelPhase, type WorkflowDefinition, type PhaseDefinition, type ParallelDefinition, type WorkflowSandboxSpec } from "./workflow/registry";
+import { getTaskRoot, bindTaskRunRoot } from "./sandbox";
 import type { TransitionTable } from "./state-machine";
 
 /** 动态读取 AUTOPILOT_HOME，支持测试中修改 env */
@@ -14,8 +15,9 @@ function getAutopilotHome(): string {
 // ──────────────────────────────────────────────
 // Task manifest —— 每个任务的持久化权威状态
 //
-// 布局：
-//   AUTOPILOT_HOME/runtime/tasks/<task-id>/task-manifest.json
+// 布局（v2 R2 双根，getTaskRoot 解析）：
+//   AUTOPILOT_HOME/runtime/tasks/<task-id>/task-manifest.json                      （legacy 存量）
+//   AUTOPILOT_HOME/runtime/requirements/<req-id>/runs/<task-id>/task-manifest.json （新任务）
 //
 // SQLite 的 tasks / task_logs 表是此文件的索引；丢了可从 manifest 重建。
 // 设计参考 gsd 的 state-manifest.json：权威源在文件，DB 是缓存。
@@ -75,7 +77,7 @@ export function getManifestPath(taskId: string): string {
   if (!TASK_ID_RE.test(taskId)) {
     throw new Error(`非法 task ID：${taskId}`);
   }
-  return join(getAutopilotHome(), "runtime", "tasks", taskId, "task-manifest.json");
+  return join(getTaskRoot(taskId), "task-manifest.json");
 }
 
 /**
@@ -183,15 +185,44 @@ export function appendTransition(
 }
 
 /**
- * 扫描 runtime/tasks/ 下所有含 task-manifest.json 的任务 ID。
+ * 扫描所有含 task-manifest.json 的任务 ID（v2 R2 双根遍历，spec E1）：
+ *   - legacy 根 runtime/tasks/<taskId>/（存量只读）
+ *   - 新根 runtime/requirements/<reqId>/runs/<taskId>/
+ * 新根命中时顺手 bindTaskRunRoot 种子缓存：rebuild-index 场景 DB 行可能尚不存在，
+ * 后续 readManifest → getManifestPath → getTaskRoot 反查不到 requirement_id，
+ * 种子保证仍解析到新根。
  */
 export function listManifestTaskIds(): string[] {
-  const root = join(getAutopilotHome(), "runtime", "tasks");
-  if (!existsSync(root)) return [];
   const out: string[] = [];
-  for (const taskId of readdirSync(root)) {
-    if (!TASK_ID_RE.test(taskId)) continue;
-    if (existsSync(getManifestPath(taskId))) out.push(taskId);
+  const seen = new Set<string>();
+
+  const legacyRoot = join(getAutopilotHome(), "runtime", "tasks");
+  if (existsSync(legacyRoot)) {
+    for (const taskId of readdirSync(legacyRoot)) {
+      if (!TASK_ID_RE.test(taskId)) continue;
+      if (existsSync(join(legacyRoot, taskId, "task-manifest.json"))) {
+        out.push(taskId);
+        seen.add(taskId);
+      }
+    }
   }
+
+  const reqRoot = join(getAutopilotHome(), "runtime", "requirements");
+  if (existsSync(reqRoot)) {
+    for (const reqId of readdirSync(reqRoot)) {
+      if (!TASK_ID_RE.test(reqId)) continue;
+      const runsDir = join(reqRoot, reqId, "runs");
+      if (!existsSync(runsDir)) continue;
+      for (const taskId of readdirSync(runsDir)) {
+        if (!TASK_ID_RE.test(taskId) || seen.has(taskId)) continue;
+        if (existsSync(join(runsDir, taskId, "task-manifest.json"))) {
+          bindTaskRunRoot(taskId, reqId);
+          out.push(taskId);
+          seen.add(taskId);
+        }
+      }
+    }
+  }
+
   return out;
 }

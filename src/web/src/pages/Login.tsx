@@ -61,7 +61,7 @@ export function LoginPage({ onLogin, isSetup = false }: LoginPageProps) {
       <div className="w-full max-w-sm border border-border bg-card rounded-lg">
         {/* Logo header */}
         <div className="flex h-12 items-center gap-2.5 border-b border-border px-4">
-          <div className="bp-num-block h-7 w-7 text-sm">A</div>
+          <img src="/logo.svg" alt="Autopilot" className="h-7 w-7" />
           <div className="flex flex-col leading-none">
             <span className="text-base font-bold">
               Autopilot

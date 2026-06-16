@@ -20,9 +20,15 @@ import { cn } from "@/lib/utils";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
 import { getApiToken, setApiToken, clearApiToken, shouldUseToken } from "@/lib/api-token";
 import { setRestarting } from "@/lib/ws-singleton";
+import { restartDaemonAndWait } from "@/lib/restart-daemon";
+import { LifecycleAgentsCard } from "@/components/LifecycleAgentsCard";
 
 // 保留 embedded 参数签名以兼容旧调用
-export function Settings(_props: { embedded?: boolean } = {}) {
+export function Settings({
+  section = "general",
+}: {
+  section?: "general" | "lifecycle" | "scheduler" | "network" | "daemon";
+}) {
   const toast = useToast();
 
   const [defaultsTz, setDefaultsTz] = useState<string | null>(null);
@@ -32,8 +38,23 @@ export function Settings(_props: { embedded?: boolean } = {}) {
 
   const [status, setStatus] = useState<any>(null);
   const [configPath, setConfigPath] = useState<string | null>(null);
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const [restartingDaemon, setRestartingDaemon] = useState(false);
+
+  const handleRestartDaemon = async () => {
+    setConfirmRestart(false);
+    setRestartingDaemon(true);
+    try {
+      await restartDaemonAndWait(toast);
+      // 重启完拉新 status 刷新「Daemon 信息」卡（版本 / PID / 启动时间）
+      try { setStatus(await api.getStatus()); } catch { /* 容错 */ }
+    } finally {
+      setRestartingDaemon(false);
+    }
+  };
 
   useEffect(() => {
+    if (section !== "general") return;
     api.getDefaults()
       .then((res) => {
         setDefaultsTz(res.timezone);
@@ -41,7 +62,7 @@ export function Settings(_props: { embedded?: boolean } = {}) {
       })
       .catch((e) => toast.error("加载默认偏好失败", (e as Error)?.message ?? String(e)))
       .finally(() => setDefaultsLoading(false));
-  }, []);
+  }, [section]);
 
   const saveDefaults = async (tz: string | null) => {
     setDefaultsSaving(true);
@@ -57,10 +78,12 @@ export function Settings(_props: { embedded?: boolean } = {}) {
   };
 
   useEffect(() => {
+    if (section !== "daemon") return;
     api.getStatus().then(setStatus).catch(() => {});
-  }, []);
+  }, [section]);
 
   useEffect(() => {
+    if (section !== "daemon") return;
     // 用 getConfig 触发后端返回 yaml，间接拿到当前用的 config 路径
     // 实际上 daemon status 已含 config 路径，先用一个简单兜底
     api.getConfig().then((res) => {
@@ -69,16 +92,114 @@ export function Settings(_props: { embedded?: boolean } = {}) {
     }).catch(() => {
       setConfigPath("~/.autopilot/config.yaml");
     });
-  }, []);
+  }, [section]);
 
+  if (section === "lifecycle") {
+    return <LifecycleAgentsCard />;
+  }
+
+  if (section === "scheduler") {
+    return <SchedulerCard />;
+  }
+
+  if (section === "network") {
+    return <NetworkAccessCard />;
+  }
+
+  if (section === "daemon") {
+    return (
+      <div className="w-full">
+        {status && (
+          <Card className="mb-4 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold">Daemon 信息</h3>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setConfirmRestart(true)}
+                disabled={restartingDaemon}
+                title="重启 daemon（拉取最新代码 / 配置生效）"
+              >
+                <RotateCw className={cn("h-4 w-4", restartingDaemon && "animate-spin")} />
+                {restartingDaemon ? "重启中…" : "重启 daemon"}
+              </Button>
+            </div>
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
+              <InfoField
+                label="版本"
+                value={status.git_sha ? `${status.version} · ${status.git_sha}` : status.version}
+                mono
+              />
+              <InfoField label="PID" value={String(status.pid)} mono />
+              <InfoField
+                label="启动于"
+                value={status.started_at_iso ? new Date(status.started_at_iso).toLocaleString() : formatUptime(status.uptime)}
+              />
+              <InfoField label="端口" value={location.port || "80"} mono />
+            </dl>
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              更新代码、或改了监听地址 / 端口后，重启让它生效。重启时这个页面会断开一两秒再自动连上。
+            </p>
+          </Card>
+        )}
+
+        <ConfirmDialog
+          open={confirmRestart}
+          title="重启 daemon"
+          message={
+            <div className="space-y-2 text-sm">
+              <p>现在重启 daemon。</p>
+              <p className="text-muted-foreground">
+                正在跑的任务不受影响，但这个页面会断开一两秒再自动连上。
+                如果 daemon 不是托管启动的，重启会变成停止，需要你手动再启动一次。
+              </p>
+            </div>
+          }
+          confirmText="重启"
+          onConfirm={handleRestartDaemon}
+          onCancel={() => setConfirmRestart(false)}
+        />
+
+        <DaemonLogCard />
+
+        {/* 编辑配置文件提示 */}
+        <Card className="mb-4 p-4">
+          <div className="mb-2">
+            <h3 className="text-sm font-semibold">配置文件位置</h3>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              日常设置用左边的菜单就够了。想直接改原始配置，用编辑器打开下面的路径，存盘后大多即时生效。
+            </p>
+          </div>
+          <dl className="grid grid-cols-1 gap-y-2 font-mono text-xs sm:grid-cols-[auto_1fr] sm:gap-x-4">
+            <dt className="text-muted-foreground">全局配置</dt>
+            <dd>{configPath ?? "~/.autopilot/config.yaml"}</dd>
+            <dt className="text-muted-foreground">工作流目录</dt>
+            <dd>~/.autopilot/workflows/&lt;name&gt;/workflow.yaml</dd>
+            <dt className="text-muted-foreground">CLI 查看</dt>
+            <dd>
+              <code className="bg-muted/40 px-1.5 py-0.5">autopilot config path</code>
+              <span className="mx-1 text-muted-foreground">·</span>
+              <code className="bg-muted/40 px-1.5 py-0.5">autopilot config show</code>
+            </dd>
+            <dt className="text-muted-foreground">检查配置</dt>
+            <dd>
+              <code className="bg-muted/40 px-1.5 py-0.5">autopilot config doctor</code>
+            </dd>
+          </dl>
+        </Card>
+      </div>
+    );
+  }
+
+  // general：常规偏好 + 桌面通知
   return (
-    <div className="mx-auto w-full max-w-4xl px-5 py-6">
+    <div className="w-full">
       {/* 常规偏好 */}
       <Card className="mb-4 p-4">
         <div className="mb-3">
           <h3 className="text-sm font-semibold">常规偏好</h3>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            设置默认时区（目前仅用于保存偏好与界面展示）；已创建的任务不受影响。
+            新建定时任务时的默认值，已有的任务不变。
           </p>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
@@ -106,62 +227,8 @@ export function Settings(_props: { embedded?: boolean } = {}) {
         </div>
       </Card>
 
-      {/* 任务调度 */}
-      <SchedulerCard />
-
       {/* 桌面通知 */}
       <DesktopNotifyCard />
-
-      {/* 网络访问（含 API token + 本浏览器 token 副本） */}
-      <NetworkAccessCard />
-
-      {status && (
-        <Card className="mb-4 p-4">
-          <h3 className="mb-3 text-sm font-semibold">Daemon 信息</h3>
-          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
-            <InfoField
-              label="版本"
-              value={status.git_sha ? `${status.version} · ${status.git_sha}` : status.version}
-              mono
-            />
-            <InfoField label="PID" value={String(status.pid)} mono />
-            <InfoField
-              label="启动于"
-              value={status.started_at_iso ? new Date(status.started_at_iso).toLocaleString() : formatUptime(status.uptime)}
-            />
-            <InfoField label="端口" value={location.port || "80"} mono />
-          </dl>
-        </Card>
-      )}
-
-      <DaemonLogCard />
-
-      {/* 编辑配置文件提示 */}
-      <Card className="mb-4 p-4">
-        <div className="mb-2">
-          <h3 className="text-sm font-semibold">编辑配置文件</h3>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            日常配置请用上方的提供商 / 智能体 / 工作流 Tab；
-            原始 YAML 请用 IDE 直接编辑文件，daemon 即时读到改动（providers / agents 无需重启）。
-          </p>
-        </div>
-        <dl className="grid grid-cols-1 gap-y-2 font-mono text-xs sm:grid-cols-[auto_1fr] sm:gap-x-4">
-          <dt className="text-muted-foreground">全局配置</dt>
-          <dd>{configPath ?? "~/.autopilot/config.yaml"}</dd>
-          <dt className="text-muted-foreground">工作流目录</dt>
-          <dd>~/.autopilot/workflows/&lt;name&gt;/workflow.yaml</dd>
-          <dt className="text-muted-foreground">CLI 查看</dt>
-          <dd>
-            <code className="bg-muted/40 px-1.5 py-0.5">autopilot config path</code>
-            <span className="mx-1 text-muted-foreground">·</span>
-            <code className="bg-muted/40 px-1.5 py-0.5">autopilot config show</code>
-          </dd>
-          <dt className="text-muted-foreground">检查配置</dt>
-          <dd>
-            <code className="bg-muted/40 px-1.5 py-0.5">autopilot config doctor</code>
-          </dd>
-        </dl>
-      </Card>
     </div>
   );
 }
@@ -218,7 +285,7 @@ function SchedulerCard(): React.ReactElement {
       <div className="mb-3">
         <h3 className="text-sm font-semibold">任务调度</h3>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          全局同时运行的任务总数上限（所有工作区合计）。写入 config.yaml 后即时生效，无需重启。
+          最多允许多少个任务同时跑（所有代码库合计）。改完马上生效。
         </p>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr] sm:items-end">
@@ -238,8 +305,8 @@ function SchedulerCard(): React.ReactElement {
           )}
         </div>
         <p className="text-[11px] text-muted-foreground">
-          内核配置：<code className="font-mono bg-muted/40 px-1.5 py-0.5">scheduler.max_concurrent_tasks</code>
-          {configured === null && !loading && <span className="ml-1">（当前未配置，生效默认 1）</span>}
+          对应 <code className="font-mono bg-muted/40 px-1.5 py-0.5">scheduler.max_concurrent_tasks</code>
+          {configured === null && !loading && <span className="ml-1">（没设置时默认 1）</span>}
         </p>
       </div>
     </Card>
@@ -346,55 +413,14 @@ function NetworkAccessCard(): React.ReactElement {
         }
       }
       toast.success("已保存，正在重启 daemon…");
-      // 重启前先记下旧 git_sha，重启完拿新 sha 对比展示「代码切换」可视化
-      let prevSha: string | undefined;
-      try { prevSha = (await api.getStatus()).git_sha; } catch { /* 容错 */ }
-      try {
-        await api.restartDaemon();
-      } catch (e: unknown) {
-        // restart 调用本身失败（如 daemon 已退出未起完）— 提示手动 restart 兜底
-        toast.error("自动重启失败，请手动执行 `autopilot daemon restart`", (e as Error)?.message ?? String(e));
-        await refresh();
-        return res;
+      const fresh = await restartDaemonAndWait(toast);
+      if (fresh) {
+        setInfo(fresh);
+        setPortDraft(String(fresh.port));
+        if (next.host === "0.0.0.0" && fresh.lan_ips.length > 0) {
+          toast.success(`局域网访问：${fresh.lan_ips.map((ip) => `http://${ip}:${fresh.port}`).join(" / ")}`);
+        }
       }
-      // restart RPC 已发出，daemon 150ms 后 exit。锁定 WS RPC 防用户在重启
-      // 窗口期发出的 mutation 卡 5s 才反馈。轮询 getDaemonListen 走 HTTP 不
-      // 受此锁影响。
-      setRestarting(true);
-      // 轮询 getDaemonListen 等 WS 重连 + 新 daemon 起来；超时回退到刷新页面
-      const deadline = Date.now() + 15_000;
-      let recovered = false;
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 600));
-        try {
-          const fresh = await api.getDaemonListen();
-          setInfo(fresh);
-          setPortDraft(String(fresh.port));
-          // 拿新 daemon 的 git_sha，跟旧 sha 对比给一个明确的「切换信号」
-          let shaSuffix = "";
-          try {
-            const newStatus = await api.getStatus();
-            const newSha = newStatus.git_sha;
-            if (newSha && prevSha && newSha !== prevSha) {
-              shaSuffix = ` · git ${prevSha} → ${newSha}`;
-            } else if (newSha) {
-              shaSuffix = ` · git ${newSha}`;
-            }
-          } catch { /* 容错：拿不到 sha 不影响主流程 */ }
-          toast.success(`daemon 已重启，当前监听 ${fresh.host}:${fresh.port}${shaSuffix}`);
-          if (next.host === "0.0.0.0" && fresh.lan_ips.length > 0) {
-            toast.success(`局域网访问：${fresh.lan_ips.map((ip) => `http://${ip}:${fresh.port}`).join(" / ")}`);
-          }
-          recovered = true;
-          break;
-        } catch { /* 还在重启，继续等 */ }
-      }
-      if (!recovered) {
-        toast.error("daemon 重启等待超时，刷新页面尝试…");
-        setTimeout(() => location.reload(), 1000);
-      }
-      // 解锁 mutation：daemon 已稳定（或决定 reload 兜底）
-      setRestarting(false);
       return res;
     } catch (e: unknown) {
       toast.error("保存失败", (e as Error)?.message ?? String(e));
@@ -489,7 +515,7 @@ function NetworkAccessCard(): React.ReactElement {
       <div className="mb-3">
         <h3 className="text-sm font-semibold">网络访问</h3>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          控制 daemon 监听范围。改后需在终端跑 <code className="bg-muted/40 px-1.5">autopilot daemon restart</code> 生效。
+          决定谁能访问这个面板。改完要重启 daemon 生效（「设置 → Daemon」里有按钮）。
         </p>
       </div>
 
@@ -501,8 +527,8 @@ function NetworkAccessCard(): React.ReactElement {
           </div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
             {isExposed
-              ? `监听 ${info.host}:${info.port}，同网段的机器都能访问`
-              : `监听 127.0.0.1:${info.port}，仅本机`}
+              ? `同一网络里的机器都能打开（${info.host}:${info.port}）`
+              : `只有这台机器能打开（127.0.0.1:${info.port}）`}
           </div>
         </div>
         <Switch
@@ -606,7 +632,7 @@ function NetworkAccessCard(): React.ReactElement {
                   </Button>
                 )}
               </div>
-              {!tokenLocked && <div>仅本机来源免 token，外部访问必须带</div>}
+              {!tokenLocked && <div>本机访问免令牌，外部机器访问必须带上</div>}
             </div>
           ) : (
             <span className="text-warning">未设置。切到"局域网开放"时必须设置，否则同网段任何人都能访问 daemon。</span>
@@ -697,7 +723,7 @@ function NetworkAccessCard(): React.ReactElement {
         )}
 
         <p className="mt-2 text-[10px] text-muted-foreground">
-          注：MCP <code className="font-mono">/mcp</code> 路由走独立 token（mcp-config 管理），不受此控制
+          MCP 的 <code className="font-mono">/mcp</code> 接口用另一个令牌（在 mcp-config 里管），不受这里影响。
         </p>
       </div>
 
@@ -717,7 +743,7 @@ function NetworkAccessCard(): React.ReactElement {
               对外暴露前必须先设置 API 安全令牌。生成后会立即切到"局域网开放"。
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-md border-l-4 border-warning bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
+          <div className="rounded-md bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
             <AlertTriangle className="mb-1 inline h-3.5 w-3.5 text-warning" />{" "}
             同网段的所有人将能尝试访问你的 daemon。本机浏览器和 CLI 不需要令牌；
             其他机器访问时必须在 <code className="font-mono">Authorization: Bearer</code> 头里带令牌。
@@ -958,7 +984,7 @@ function DesktopNotifyCard(): React.ReactElement {
       <div className="mb-3">
         <h3 className="text-sm font-semibold">桌面通知</h3>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          tab 切到后台时，有新的"待你处理"事项弹桌面通知。仅本机生效。
+          切到别的标签页时，有需要你处理的事就弹个桌面通知。只在本机有效。
         </p>
       </div>
       {permission === "unsupported" && (

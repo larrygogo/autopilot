@@ -8,7 +8,7 @@ import {
   listWorkflowsInDb,
   createDbWorkflow,
   upsertFileWorkflow,
-} from "../src/core/workflows";
+} from "../src/core/workflow/workflows";
 
 describe("syncFileWorkflowsToDb", () => {
   let db: Database;

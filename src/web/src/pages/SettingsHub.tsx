@@ -1,63 +1,37 @@
 import { lazy, Suspense } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { PageShell } from "@/components/pro";
 import { PageLoader } from "@/components/PageLoader";
 
 const Settings = lazy(() => import("./Settings").then((m) => ({ default: m.Settings })));
-const ApiKeysPage = lazy(() => import("./settings/ApiKeysPage").then((m) => ({ default: m.ApiKeysPage })));
+const Providers = lazy(() => import("./Providers").then((m) => ({ default: m.Providers })));
 
-// 工作流 / 定时任务已提到顶层导航（"编排"分组），不在设置内
-// 需求澄清模型已移除全局命名 clarifier agent，改由 requirement 维度配置（clarifier_provider/model）
-const TABS = [
-  { key: "general", label: "通用" },
-  { key: "api-keys", label: "API 密钥" },
-] as const;
+/** 设置分区（Supabase 式：侧栏设置菜单切换，路由 /settings[/:section]） */
+export type SettingsSection = "general" | "providers" | "lifecycle" | "scheduler" | "network" | "daemon";
 
-type TabKey = (typeof TABS)[number]["key"];
+const SECTION_HEADER: Record<Exclude<SettingsSection, "providers">, { title: string; desc: string }> = {
+  general: { title: "通用", desc: "默认偏好与桌面通知" },
+  lifecycle: { title: "生命周期 agent", desc: "澄清、建需求这些 AI 步骤用哪个模型" },
+  scheduler: { title: "任务调度", desc: "同时能跑多少个任务" },
+  network: { title: "网络访问", desc: "谁能访问这个面板" },
+  daemon: { title: "Daemon", desc: "运行状态、日志与配置文件" },
+};
 
-function isValidTab(s: string | null): s is TabKey {
-  return s !== null && TABS.some((t) => t.key === s);
-}
+export function SettingsHub({ section = "general" }: { section?: SettingsSection }) {
+  // 提供商分区自带页头（含「重新检查」操作 + API 密钥管理，2026-06-13 合并原 API 密钥分区）
+  if (section === "providers") {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <Providers />
+      </Suspense>
+    );
+  }
 
-export function SettingsHub() {
-  const [params, setParams] = useSearchParams();
-
-  const raw = params.get("tab");
-  const active: TabKey = isValidTab(raw) ? raw : "general";
-
-  const handleChange = (next: string) => {
-    const np = new URLSearchParams(params);
-    np.set("tab", next);
-    setParams(np, { replace: true });
-  };
-
+  const header = SECTION_HEADER[section];
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
-      <header className="mb-4 border-b border-border pb-3">
-        <h1 className="font-display text-2xl font-bold">设置 · SETTINGS</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          通用 · API 密钥
-        </p>
-      </header>
-
-      <Tabs value={active} onValueChange={handleChange}>
-        <TabsList>
-          {TABS.map((t) => (
-            <TabsTrigger key={t.key} value={t.key}>
-              {t.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        <Suspense fallback={<PageLoader />}>
-          <TabsContent value="general">
-            <Settings embedded />
-          </TabsContent>
-          <TabsContent value="api-keys">
-            <ApiKeysPage />
-          </TabsContent>
-        </Suspense>
-      </Tabs>
-    </div>
+    <PageShell width="form" hero={{ title: header.title, subtitle: header.desc }}>
+      <Suspense fallback={<PageLoader />}>
+        <Settings section={section} />
+      </Suspense>
+    </PageShell>
   );
 }

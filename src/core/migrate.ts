@@ -47,6 +47,21 @@ export async function runPendingMigrations(): Promise<number> {
     .filter((f) => /^\d{3}-[\w-]+\.ts$/.test(f))
     .sort();
 
+  // 撞号断言：两个并行 PR 取同一迁移号时，字母序先跑的占号、另一个被 `version<=current` 静默跳过
+  // 永不补跑（033 撞号曾烧伤真实 DB）。在启动期就 throw，把账本冲突挡在跑迁移之前。
+  const seenVersions = new Map<number, string>();
+  for (const f of files) {
+    const v = parseInt(f.slice(0, 3), 10);
+    const prev = seenVersions.get(v);
+    if (prev) {
+      throw new Error(
+        `迁移号撞号：v${v} 同时存在 "${prev}" 和 "${f}"。两个迁移取了同一编号，` +
+          `后者会被静默跳过永不应用。请把其中一个重排到下一个空号后再启动。`,
+      );
+    }
+    seenVersions.set(v, f);
+  }
+
   const currentVersion = getCurrentVersion();
   let count = 0;
 

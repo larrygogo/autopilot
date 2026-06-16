@@ -1,7 +1,7 @@
 /**
  * 新建需求自动绑定工作区 —— 项目:工作区 1:1，创建需求时不再要求用户选工作区，
  * 未显式传 workspace_id 时由 daemon 从项目唯一顶层工作区自动派生。
- * 同时验证：项目无工作区 → PRECONDITION_FAILED；显式传入的 workspace_id 优先生效。
+ * 同时验证：项目无工作区 → 仍可创建（v2 R5 无库闭环，workspace_id=NULL）；显式传入的 workspace_id 优先生效。
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
@@ -9,7 +9,7 @@ import { Database } from "bun:sqlite";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { runPendingMigrations } from "../src/core/migrate";
 import { createProject } from "../src/core/projects";
-import { createWorkspace, getTopWorkspaceForProject } from "../src/core/workspaces";
+import { createWorkspace, getTopWorkspaceForProject } from "../src/core/sandbox/workspaces";
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
@@ -52,17 +52,22 @@ describe("新建需求自动绑定工作区（项目:工作区 1:1）", () => {
     if (r.ok) {
       const { requirement } = r.payload as { requirement: { id: string; workspace_id: string | null; status: string } };
       expect(requirement.workspace_id).toBe("ws-2");
-      expect(requirement.status).toBe("clarifying");
+      // 创建后停 drafting：澄清依赖代码库 clone，须用户确认代码库后显式转 clarifying
+      expect(requirement.status).toBe("drafting");
     }
   });
 
-  it("项目无工作区 → PRECONDITION_FAILED，不创建", async () => {
+  it("项目无工作区 → 仍可创建（v2 R5 无库闭环），workspace_id=NULL 由确认卡/闸门把关", async () => {
     createProject({ id: "proj-3", name: "P3" });
 
     const r = await invokeRpcMethod("requirements.create", { project_id: "proj-3", title: "x" });
 
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error.code).toBe("PRECONDITION_FAILED");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const { requirement } = r.payload as { requirement: { workspace_id: string | null; status: string } };
+      expect(requirement.workspace_id).toBe(null);
+      expect(requirement.status).toBe("drafting");
+    }
   });
 
   it("显式传 workspace_id 时优先生效（不被自动派生覆盖）", async () => {

@@ -11,7 +11,7 @@ async function withTempHome<T>(
   fn: (modules: {
     atomic: typeof import("../src/core/atomic-write");
     manifest: typeof import("../src/core/manifest");
-    registry: typeof import("../src/core/registry");
+    registry: typeof import("../src/core/workflow/registry");
   }, home: string) => T | Promise<T>
 ): Promise<T> {
   const home = mkdtempSync(join(tmpdir(), "autopilot-manifest-"));
@@ -21,7 +21,7 @@ async function withTempHome<T>(
     // 强制重新加载 index / manifest / atomic-write 以绑定新的 AUTOPILOT_HOME
     const atomic = await import("../src/core/atomic-write?t=" + Date.now());
     const manifest = await import("../src/core/manifest?t=" + Date.now());
-    const registry = await import("../src/core/registry?t=" + Date.now());
+    const registry = await import("../src/core/workflow/registry?t=" + Date.now());
     return await fn({ atomic, manifest, registry }, home);
   } finally {
     if (prevHome === undefined) delete process.env.AUTOPILOT_HOME;

@@ -14,11 +14,11 @@ import { existsSync, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { getTask, updateTask, closeOpenPhaseEvents, listRootTasksByRequirementIds } from "../core/db";
 import { setRequirementStatus, setRequirementStatusReason, updateRequirement, type Requirement } from "../core/requirements";
-import { forceDeleteTasksForRequirement } from "../core/task-delete";
+import { forceDeleteTasksForRequirement } from "../core/task/delete";
 import { transition } from "../core/state-machine";
 import { executePhase } from "../core/runner";
-import { abortRun } from "../core/task-lifecycle";
-import { getWorkflow, buildTransitions, isParallelPhase } from "../core/registry";
+import { abortRun } from "../core/task/lifecycle";
+import { getWorkflow, buildTransitions, isParallelPhase } from "../core/workflow/registry";
 import { getTaskArtifactsDir, deleteTaskSandbox } from "../core/sandbox";
 import { isLocked } from "../core/infra";
 import { forgetTaskRecoveryState } from "../core/watcher";
@@ -174,7 +174,7 @@ export function restartTaskAction(taskId: string): { ok: true; phase: string; fr
 
   // 仍在运行（持文件锁）时不重启：会把 status 翻到 pending_<phase> 但新 executePhase 抢锁
   // 失败直接 return，原 phase 完成时 status≠running_state 跳过推进 → 永久卡死 pending（SC-2）。
-  // 与 resetTaskForRerun 的并发守卫对齐。
+  // 与 startNewRunForRequirement 的活跃 run 守卫同思路（运行中不动正在写的状态）。
   if (task.status.startsWith("running_") && isLocked(taskId)) {
     throw new TaskActionError(
       "INVALID_STATE",

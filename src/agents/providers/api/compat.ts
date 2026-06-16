@@ -6,6 +6,7 @@
  */
 
 import { OpenAIApiAdapter } from "./openai";
+import { kimiCodingAgentUa } from "./kimi";
 import type { ProviderAdapter } from "./types";
 
 // ── 预置供应商 ──
@@ -30,6 +31,15 @@ export const BUILTIN_COMPAT_PROVIDERS: Record<string, CompatProviderPreset> = {
     default_model: "moonshot-v1-8k",
     display_name: "Kimi (Moonshot)",
   },
+  // Kimi Code（K2.7 Code）：OpenAI 兼容，端点 https://api.kimi.com/coding（适配器补 /v1/chat/completions）。
+  // ⚠ 该端点按 User-Agent 限定只给编码 Agent（claude-cli / RooCode 等）—— createCompatAdapter
+  //    对 kimi.com host 注入被认可的 coding-agent UA，否则 403。模型 id 实测 = kimi-for-coding。
+  "kimi-code": {
+    base_url: "https://api.kimi.com/coding",
+    env_key: "KIMI_CODE_API_KEY",
+    default_model: "kimi-for-coding",
+    display_name: "Kimi Code (K2.7)",
+  },
   minimax: {
     base_url: "https://api.minimax.chat",
     env_key: "MINIMAX_API_KEY",
@@ -44,15 +54,7 @@ export const BUILTIN_COMPAT_PROVIDERS: Record<string, CompatProviderPreset> = {
   //       env_key_name: MIMO_API_KEY
 };
 
-/** 三大官方 provider 名称（支持 CLI 模式） */
-const CLI_PROVIDERS = new Set(["anthropic", "openai", "google"]);
-
-/** 判断是否为仅 API 模式的供应商（无 CLI） */
-export function isCompatOnlyProvider(name: string): boolean {
-  return !CLI_PROVIDERS.has(name);
-}
-
-/** 获取供应商的预置信息（如果有） */
+/** 获取供应商的预置信息（如果有）。provider 条目化后 BUILTIN_COMPAT_PROVIDERS 转「模板目录」用。 */
 export function getCompatPreset(name: string): CompatProviderPreset | undefined {
   return BUILTIN_COMPAT_PROVIDERS[name];
 }
@@ -69,7 +71,8 @@ export function createCompatAdapter(
   baseUrl: string,
   providerName?: string,
 ): ProviderAdapter {
-  const adapter = new OpenAIApiAdapter(apiKey, baseUrl);
+  // 编码专用端点（如 Kimi Code）的 UA 闸门收口在 kimi.ts（非编码 UA 返回 403）
+  const adapter = new OpenAIApiAdapter(apiKey, baseUrl, kimiCodingAgentUa(baseUrl));
   // 用闭包包一层，让 name 能正确反映 compat provider
   return {
     get name() { return providerName || "compat"; },

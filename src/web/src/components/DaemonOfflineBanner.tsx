@@ -15,8 +15,9 @@
  */
 
 import { useEffect, useState } from "react";
-import { RotateCcw, Copy, WifiOff, Check } from "lucide-react";
+import { RotateCcw, Copy, WifiOff, Check, KeyRound } from "lucide-react";
 import type { ConnectionState } from "@/hooks/useWebSocket";
+import { getApiToken, clearApiToken, shouldUseToken } from "../lib/api-token";
 
 /** 进入 disconnected 多久后才显示（毫秒） — 避免页面切换 / 短暂闪断刷红条 */
 const SHOW_AFTER_MS = 5000;
@@ -26,17 +27,34 @@ const DAEMON_START_CMD = "autopilot daemon start";
 export function DaemonOfflineBanner({ wsState }: { wsState: ConnectionState }) {
   const [shouldShow, setShouldShow] = useState(false);
   const [copied, setCopied] = useState(false);
+  // 浏览器 WS API 区分不了「401 被拒」和「网络断」——都表现为连接失败。
+  // 远程访问 token 失效时若只显示「Daemon 失联」，用户毫无线索（实际 daemon 活得好好的）。
+  // banner 出现时探测一次 /api/status：401 → 鉴权问题，引导重输 token。
+  const [authProblem, setAuthProblem] = useState(false);
 
   // wsState 变化时启动 / 取消"5s 后显示"计时
   useEffect(() => {
     if (wsState === "connected") {
       setShouldShow(false);
+      setAuthProblem(false);
       return;
     }
     // connecting 或 disconnected 都启计时，超过门槛仍未 connected 才显示
     const timer = setTimeout(() => setShouldShow(true), SHOW_AFTER_MS);
     return () => clearTimeout(timer);
   }, [wsState]);
+
+  useEffect(() => {
+    if (!shouldShow) return;
+    const headers: Record<string, string> = {};
+    if (shouldUseToken()) {
+      const t = getApiToken();
+      if (t) headers["Authorization"] = `Bearer ${t}`;
+    }
+    fetch("/api/status", { headers })
+      .then((res) => setAuthProblem(res.status === 401))
+      .catch(() => { /* 网络不通 → daemon 真失联，保持默认文案 */ });
+  }, [shouldShow]);
 
   if (!shouldShow || wsState === "connected") return null;
 
@@ -53,6 +71,36 @@ export function DaemonOfflineBanner({ wsState }: { wsState: ConnectionState }) {
       })
       .catch(() => { /* 静默：剪贴板不可用 */ });
   };
+
+  const handleReenterToken = () => {
+    clearApiToken();
+    window.location.reload(); // TokenGate 检测到无 token 重新拦截
+  };
+
+  if (authProblem) {
+    return (
+      <div
+        role="status"
+        className="flex shrink-0 flex-wrap items-center gap-3 border-b border-destructive/60 bg-destructive/10 px-4 py-2 text-destructive"
+      >
+        <KeyRound className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <div className="min-w-0 flex-1 font-mono text-xs">
+          <span className="font-bold">鉴权失败</span>
+          <span className="ml-2 text-destructive/80">
+            · daemon 在线，但当前 API token 无效或已轮换 —— 请在装 daemon 的本机查看最新 token
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={handleReenterToken}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-destructive px-2 py-1 text-[10px] text-destructive-foreground hover:bg-destructive/85"
+        >
+          <KeyRound className="h-3 w-3" />
+          重新输入 token
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div

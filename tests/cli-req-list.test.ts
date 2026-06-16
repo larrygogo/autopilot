@@ -104,6 +104,7 @@ function mkReq(overrides: Partial<Requirement> = {}): Requirement {
     status_reason_source: null,
     status_before_terminal: null,
     workflow: null,
+    input_mode: null,
     created_at: 0,
     updated_at: 0,
     ...overrides,

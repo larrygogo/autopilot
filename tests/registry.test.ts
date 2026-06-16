@@ -15,7 +15,7 @@ import {
   _clearRegistry,
   type WorkflowDefinition,
   type PhaseDefinition,
-} from "../src/core/registry";
+} from "../src/core/workflow/registry";
 
 // 每个测试前清空注册表
 beforeEach(() => {

@@ -6,7 +6,7 @@ import { Database } from "bun:sqlite";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { _setDbForTest } from "../src/core/db";
-import { _clearRegistry, discover } from "../src/core/registry";
+import { _clearRegistry, discover } from "../src/core/workflow/registry";
 import { buildAutopilotTools } from "../src/agents/tools";
 
 function getText(res: { content: Array<{ type: string; text?: string }> }): string {

@@ -21,7 +21,7 @@ import {
 import { runPendingMigrations } from "../src/core/migrate";
 import { createProject } from "../src/core/projects";
 import { createRequirement, getRequirementById, updateRequirement } from "../src/core/requirements";
-import { deleteRequirementWithTasks } from "../src/core/task-delete";
+import { deleteRequirementWithTasks } from "../src/core/task/delete";
 
 describe("删除一件工作（需求 + 任务级联）", () => {
   let db: Database;

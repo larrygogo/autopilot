@@ -12,7 +12,7 @@
 
 import type { Task } from "./db";
 import type { ChatMessage } from "./sessions";
-import type { NowCard } from "./now-types";
+import type { Notification } from "./notify/types";
 
 export type AutopilotEvent =
   | { type: "task:created"; payload: { task: Task } }
@@ -43,19 +43,23 @@ export type AutopilotEvent =
   | { type: "requirement:active-question-changed"; payload: { id: string; question_id: string | null } }
   | { type: "requirement:spec-revised"; payload: { id: string; revision_id: number } }
   | { type: "requirement:clarifier-error"; payload: { id: string; reason: string } }
+  | { type: "requirement:schedule-error"; payload: { id: string; reason: string } }
+  // CI 自动修复触顶（pr-poller）：同一交付 PR 的 CI 失败自动修复达上限，停下报人
+  | { type: "requirement:ci-fix-limit"; payload: { id: string; pr_number: number; reason: string } }
   // Provider 健康度（反应式 + 主动 CLI 探测）
   | { type: "provider:health-changed"; payload: { provider: string; healthy: boolean; reason?: string; ts: number } }
   | { type: "provider:health-snapshot"; payload: { states: import("./provider-health").ProviderHealthState[]; ts: number } }
   // Clarifier 进度反馈（内存态，daemon 重启即清）
   | { type: "requirement:clarifier-round-update"; payload: import("../daemon/clarifier-progress").ClarifierRoundState }
+  // 注：requirement:fix-round-update 已随 fix-progress 退役（v2 R3：fix = 标准 run，进度走 task 事件流）
   // Phase 5 — 运行中 task 追加 prompt（spec §3.8）
   | { type: "task:prompt-queued"; payload: { taskId: string; source: string; queued_at: number } }
   | { type: "task:prompt-answered"; payload: { taskId: string; source: string } }
   | { type: "phase:pending-prompts-unconsumed"; payload: { taskId: string; phase: string; count: number; preview: string[] } }
   // Phase 6 — prompt phase handoff 协议（spec §3.10）
   | { type: "phase:handoff-incomplete"; payload: { taskId: string; phase: string; missing: string[] } }
-  // /now 推送事件
-  | { type: "now:card_added"; payload: { card: NowCard } }
-  | { type: "now:card_updated"; payload: { id: string; patch: Partial<NowCard> } }
-  | { type: "now:card_removed"; payload: { id: string; reason: "resolved" | "dismissed" } }
-  | { type: "now:snapshot"; payload: { cards: NowCard[] } };
+  // 通知（事件型通知流，notifications 表；read/all_read/dismissed 由 RPC handler 写库后广播）
+  | { type: "notification:created"; payload: { notification: Notification } }
+  | { type: "notification:read"; payload: { ids: number[] } }
+  | { type: "notification:all_read"; payload: Record<string, never> }
+  | { type: "notification:dismissed"; payload: { id: number } };

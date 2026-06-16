@@ -26,9 +26,10 @@ import { up as migrate028 } from "../src/migrations/028-requirement-status-reaso
 import { up as migrate029 } from "../src/migrations/029-requirement-status-before-terminal";
 import { up as migrate030 } from "../src/migrations/030-requirement-status-logs";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
+import { up as migrate044 } from "../src/migrations/044-task-run-columns";
 import { _setDbForTest, createTask, getTask, getDb } from "../src/core/db";
 import { createProject } from "../src/core/projects";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import {
   createRequirement,
   getRequirementById,
@@ -49,7 +50,7 @@ let tmpHome: string;
 const ALL_MIGRATIONS = [
   migrate001, migrate002, migrate004, migrate005, migrate006, migrate007,
   migrate008, migrate009, migrate010, migrate018, migrate019, migrate021,
-  migrate024, migrate028, migrate029, migrate030, migrate033];
+  migrate024, migrate028, migrate029, migrate030, migrate033, migrate044];
 
 beforeEach(() => {
   tmpHome = join(tmpdir(), `autopilot-statusreason-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -161,6 +162,37 @@ describe("requirement-task-bridge 终态同步带原因（req-008 链路复现�
     expect(r.status).toBe("failed");
     expect(r.status_reason).toContain(taskId!);
     expect(r.status_reason_source).toBe("task");
+  });
+});
+
+describe("bridge：task done 的需求去向取决于交付 PR（req-018 验收死路回归）", () => {
+  it("task done + 需求有交付 PR → awaiting_review（验收，交 pr-poller 判 merge）", () => {
+    enableBus();
+    initRequirementTaskBridge();
+    const { reqId, taskId } = makeRunningRequirement();
+    updateRequirement(reqId, { pr_number: 93, pr_url: "https://github.com/o/r/pull/93" });
+
+    const { transition } = require("../src/core/state-machine");
+    transition(taskId!, "submit_pr_complete", {
+      transitions: { running_design: [["submit_pr_complete", "done"]] },
+      note: "PR 已提交",
+    });
+
+    // PR 还没 merge，需求必须停在验收而不是直通 done（req-018 事故：CI 红着就「完成」）
+    expect(getRequirementById(reqId)!.status).toBe("awaiting_review");
+  });
+
+  it("task done + 无任何交付 PR → done（纯 adhoc 无交付物）", () => {
+    enableBus();
+    initRequirementTaskBridge();
+    const { reqId, taskId } = makeRunningRequirement();
+
+    const { transition } = require("../src/core/state-machine");
+    transition(taskId!, "submit_pr_complete", {
+      transitions: { running_design: [["submit_pr_complete", "done"]] },
+    });
+
+    expect(getRequirementById(reqId)!.status).toBe("done");
   });
 });
 

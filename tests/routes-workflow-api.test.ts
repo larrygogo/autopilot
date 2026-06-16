@@ -6,8 +6,8 @@ import { Database } from "bun:sqlite";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { _setDbForTest } from "../src/core/db";
-import { _clearRegistry, discover } from "../src/core/registry";
-import { createDbWorkflow } from "../src/core/workflows";
+import { _clearRegistry, discover } from "../src/core/workflow/registry";
+import { createDbWorkflow } from "../src/core/workflow/workflows";
 import { handleRequest } from "../src/daemon/routes";
 
 // 模拟 loopback 来源让 checkAuth 豁免 token（测试场景 daemon 可能已设 token）

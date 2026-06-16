@@ -39,8 +39,8 @@ import {
   getWorkspaceByAlias,
   listWorkspaces,
   nextWorkspaceId,
-} from "../src/core/workspaces";
-import { detectWorkspaceGit } from "../src/core/workspace-health";
+} from "../src/core/sandbox/workspaces";
+import { detectWorkspaceGit } from "../src/core/sandbox/workspace-health";
 
 // ── 迁移辅助 ──
 function runAllMigrations(db: Database): void {

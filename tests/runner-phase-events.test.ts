@@ -81,7 +81,7 @@ function makeGateWorkflow(phaseFn: (taskId: string) => Promise<void>) {
 describe("runner phase events 集成", () => {
   let sqlite: Database;
   let dbModule: typeof import("../src/core/db");
-  let registryModule: typeof import("../src/core/registry");
+  let registryModule: typeof import("../src/core/workflow/registry");
   let runnerModule: typeof import("../src/core/runner");
   let tmpHome: string;
 
@@ -102,7 +102,7 @@ describe("runner phase events 集成", () => {
     dbModule.initDb();
     await runPendingMigrations();
 
-    registryModule = await import("../src/core/registry");
+    registryModule = await import("../src/core/workflow/registry");
     runnerModule = await import("../src/core/runner");
 
     registryModule._clearRegistry();

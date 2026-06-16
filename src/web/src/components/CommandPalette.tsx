@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { MessageSquare, Workflow, Plug, Sliders, Moon, Sun, Plus, FileText, Folder, MessageCircle, XCircle, RotateCw } from "lucide-react";
+import { Workflow, Plug, Sliders, Moon, Sun, Plus, Folder, MessageCircle, XCircle, RotateCw } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -19,16 +19,22 @@ interface Task {
   title: string;
   workflow: string;
   status: string;
+  created_at?: number;
+  updated_at?: number;
 }
 
 interface Workflow {
   name: string;
+  /** yaml label:（中文显示名）；缺省回落 name */
+  label?: string;
 }
 
 interface Requirement {
   id: string;
   title: string;
   status: string;
+  created_at?: number;
+  updated_at?: number;
 }
 
 interface Project {
@@ -42,9 +48,20 @@ interface Props {
   /** 传入目标路径（如 "/library"、"/settings"） */
   onNavigate: (path: string) => void;
   onSelectTask: (id: string) => void;
-  onNewTask: () => void;
   /** 当前页面 pathname — 用来给出上下文敏感动作（如 TaskDetail 时显示"取消此任务"） */
   pathname?: string;
+}
+
+interface ContentProps {
+  /** 内容是否处于激活态（控制数据拉取时机：dialog 打开 / 移动端抽屉切到搜索 tab） */
+  active: boolean;
+  /** 选中任意项后关闭宿主（dialog 或抽屉） */
+  onClose: () => void;
+  onNavigate: (path: string) => void;
+  onSelectTask: (id: string) => void;
+  pathname?: string;
+  /** 覆盖 CommandList 高度（移动端抽屉内撑满） */
+  listClassName?: string;
 }
 
 /** 从 pathname 提取上下文实体 id（/tasks/:id / /requirements/:id / /projects/:id） */
@@ -59,7 +76,40 @@ function parseContext(pathname?: string): { kind: "task" | "requirement" | "proj
   return null;
 }
 
-export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, onNewTask, pathname }: Props) {
+/** 「最近」排序：updated_at 优先，回落 created_at，再回落 id 倒序（新 id 在前）。 */
+function byRecent(
+  a: { id: string; created_at?: number; updated_at?: number },
+  b: { id: string; created_at?: number; updated_at?: number },
+): number {
+  const ta = a.updated_at ?? a.created_at ?? 0;
+  const tb = b.updated_at ?? b.created_at ?? 0;
+  if (tb !== ta) return tb - ta;
+  return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+}
+
+export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, pathname }: Props) {
+  return (
+    <CommandDialog open={open} onOpenChange={onOpenChange}>
+      <CommandPaletteContent
+        active={open}
+        onClose={() => onOpenChange(false)}
+        onNavigate={onNavigate}
+        onSelectTask={onSelectTask}
+        pathname={pathname}
+      />
+    </CommandDialog>
+  );
+}
+
+/** 搜索 / 命令内容体 —— 桌面端套 CommandDialog，移动端内嵌底部抽屉的「搜索」tab */
+export function CommandPaletteContent({
+  active,
+  onClose,
+  onNavigate,
+  onSelectTask,
+  pathname,
+  listClassName,
+}: ContentProps) {
   const { resolved, toggle } = useTheme();
   const toast = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -68,17 +118,21 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
   const [projects, setProjects] = useState<Project[]>([]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!active) return;
     api.listTasks({ limit: "30" }).then((list) => setTasks(list as Task[])).catch(() => {});
     api.listWorkflows().then((list: any) => setWorkflows((list ?? []) as Workflow[])).catch(() => {});
     api.listRequirements().then((list: any) => setRequirements((list ?? []) as Requirement[])).catch(() => {});
     api.listProjects().then((list) => setProjects(list as Project[])).catch(() => {});
-  }, [open]);
+  }, [active]);
 
   const run = (fn: () => void | Promise<void>) => () => {
-    onOpenChange(false);
+    onClose();
     void fn();
   };
+
+  // 「最近需求」按时间倒序（updated_at 优先 → created_at → id 倒序兜底）；
+  // 后端 list 默认按 id 升序，不排序会把最老的排最前
+  const recentRequirements = useMemo(() => [...requirements].sort(byRecent).slice(0, 10), [requirements]);
 
   // 上下文敏感动作 — TaskDetail 页时给"取消 / 重启"快捷动作
   const context = useMemo(() => parseContext(pathname), [pathname]);
@@ -110,18 +164,17 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
 
   const pages = useMemo(
     () => [
-      { path: "/chat", label: "对话", icon: MessageSquare },
       { path: "/workflows", label: "工作流", icon: Workflow },
-      { path: "/providers", label: "提供商", icon: Plug },
+      { path: "/settings/providers", label: "提供商", icon: Plug },
       { path: "/settings", label: "通用设置", icon: Sliders },
     ],
     [],
   );
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange}>
+    <>
       <CommandInput placeholder="跳转、搜索任务 / 需求 / 项目、执行命令…" />
-      <CommandList>
+      <CommandList className={listClassName}>
         <CommandEmpty>没有匹配结果</CommandEmpty>
 
         {/* 上下文敏感动作 — 仅 TaskDetail 页时显示，让键盘流用户不必鼠标点 task 卡 */}
@@ -149,10 +202,10 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
         )}
 
         <CommandGroup heading="操作">
-          <CommandItem onSelect={run(onNewTask)}>
+          {/* 「新建任务」入口已移除（Web=决策台，发起工作走需求闭环；快捷发包归 CLI） */}
+          <CommandItem onSelect={run(() => onNavigate("/start"))}>
             <Plus className="h-4 w-4" />
-            新建任务
-            <CommandShortcut>N</CommandShortcut>
+            新建需求
           </CommandItem>
           <CommandItem onSelect={run(toggle)}>
             {resolved === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -171,31 +224,11 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
           ))}
         </CommandGroup>
 
-        {tasks.length > 0 && (
-          <>
-            <CommandSeparator />
-            <CommandGroup heading="最近任务">
-              {tasks.slice(0, 10).map((t) => (
-                <CommandItem
-                  key={t.id}
-                  value={`${t.id} ${t.title}`}
-                  onSelect={run(() => onSelectTask(t.id))}
-                >
-                  <FileText className="h-4 w-4" />
-                  <span className="font-mono text-xs text-muted-foreground shrink-0 whitespace-nowrap">{t.id}</span>
-                  <span className="truncate min-w-0 flex-1">{t.title}</span>
-                  <CommandShortcut>{t.status}</CommandShortcut>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </>
-        )}
-
         {requirements.length > 0 && (
           <>
             <CommandSeparator />
             <CommandGroup heading="最近需求">
-              {requirements.slice(0, 10).map((r) => (
+              {recentRequirements.map((r) => (
                 <CommandItem
                   key={r.id}
                   value={`${r.id} ${r.title}`}
@@ -235,15 +268,15 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onSelectTask, o
             <CommandSeparator />
             <CommandGroup heading="工作流">
               {workflows.map((w) => (
-                <CommandItem key={w.name} onSelect={run(() => onNavigate("/workflows"))}>
+                <CommandItem key={w.name} value={`${w.name} ${w.label ?? ""}`} onSelect={run(() => onNavigate("/workflows"))}>
                   <Workflow className="h-4 w-4" />
-                  {w.name}
+                  {w.label || w.name}
                 </CommandItem>
               ))}
             </CommandGroup>
           </>
         )}
       </CommandList>
-    </CommandDialog>
+    </>
   );
 }

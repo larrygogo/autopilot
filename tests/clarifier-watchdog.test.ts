@@ -26,7 +26,7 @@ import {
   setActiveQuestionId,
   getRequirementById,
 } from "../src/core/requirements";
-import { createQuestion, resolveQuestion } from "../src/core/requirement-questions";
+import { createQuestion, resolveQuestion } from "../src/core/requirements/questions";
 import { enableBus, disableBus } from "../src/core/event-bus";
 import { _setClarifyFnForTest } from "../src/daemon/requirement-clarifier";
 import { runClarifierWatchdog } from "../src/daemon/clarifier-watchdog";

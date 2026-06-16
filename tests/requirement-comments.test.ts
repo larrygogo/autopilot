@@ -22,7 +22,7 @@ import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
 import { _setDbForTest } from "../src/core/db";
 import { createProject } from "../src/core/projects";
-import { createWorkspace } from "../src/core/workspaces";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createRequirement } from "../src/core/requirements";
 import {
   createComment,
@@ -31,7 +31,7 @@ import {
   latestComment,
   resolveComment,
   nextCommentId,
-} from "../src/core/requirement-comments";
+} from "../src/core/requirements/comments";
 
 describe("requirement_comments CRUD", () => {
   let db: Database;

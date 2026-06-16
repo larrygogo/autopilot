@@ -1,11 +1,16 @@
-import { onEvent, offEvent } from "../core/event-bus";
+import { onEvent, offEvent, emit } from "../core/event-bus";
 import type { AutopilotEvent } from "./protocol";
-import { listRequirements, setRequirementStatus, updateRequirement, getRequirementById } from "../core/requirements";
-import { getWorkspaceById } from "../core/workspaces";
-import { listSubmodules } from "../core/submodules";
-import { listComments } from "../core/requirement-comments";
+import {
+  listRequirements,
+  setRequirementStatus,
+  updateRequirement,
+  getRequirementById,
+  listRequirementWorkspaces,
+} from "../core/requirements";
+import type { Requirement } from "../core/requirements";
+import { listComments } from "../core/requirements/comments";
 import { getTask } from "../core/db";
-import { startTaskFromTemplate, resetTaskForRerun } from "../core/task-factory";
+import { startTaskFromTemplate, startNewRunForRequirement } from "../core/task/factory";
 import { createLogger } from "../core/logger";
 import { loadSchedulerConfig } from "../core/config";
 
@@ -13,124 +18,105 @@ const log = createLogger("requirement-scheduler");
 
 let _handler: ((event: AutopilotEvent) => void) | null = null;
 
-/** 同组串行锁：防并发 tickRepo（同组两个事件）双双越过 active 检测各起一个 task（SC-3 TOCTOU）。 */
-const _inflightGroups = new Set<string>();
+// ──────────────────────────────────────────────
+// 测试 seam（_setDbForTest 同款约定）：让调度行为测试不依赖真实工作流注册 /
+// 远程仓库（真实 startTaskFromTemplate 会 clone + 跑 agent）。生产路径零开销。
+// ──────────────────────────────────────────────
+type TaskStarters = {
+  startTaskFromTemplate: typeof startTaskFromTemplate;
+  startNewRunForRequirement: typeof startNewRunForRequirement;
+};
+let _starters: TaskStarters = { startTaskFromTemplate, startNewRunForRequirement };
 
-/**
- * 全局调度互斥锁：防止跨组并发 tick 出现 TOCTOU。
- *
- * 原理（JS 单线程保证）：
- *   此变量在首个 await 前同步赋值，不会被其他协程打断。
- *   两个并发 tick 中，第一个同步置 true，第二个看到 true 后进入 _pendingTicks。
- *   待第一个 tick 完成，finally 中释放锁并触发 drain，串行处理等待队列。
- *
- * 无论被全局锁还是同组锁挡住，tick 都进 _pendingTicks 等 drain 重试，确保不丢失。
- */
-let _globalSchedulerLock = false;
-/** 等待全局锁释放后重试的 workspace id（Set 自动去重，同一 workspace 不重复入队）。 */
-const _pendingTicks = new Set<string>();
-
-/**
- * 从 _pendingTicks 取一个 workspace 重试调度。
- * 每次只取一个（串行），通过微任务（Promise.resolve().then）触发，
- * 在下一个 I/O 事件（宏任务）前执行，防止宏任务抢先重获锁。
- */
-function _drainPendingTicks(): void {
-  if (_pendingTicks.size === 0) return;
-  const [next] = _pendingTicks;
-  _pendingTicks.delete(next);
-  Promise.resolve().then(() =>
-    tickRepo(next).catch((e: unknown) =>
-      log.error("_drainPendingTicks: 重试失败 workspace=%s: %s", next, (e as Error).message),
-    ),
-  );
+/** 仅测试用：替换起任务 / 重跑实现。传 null 恢复真实实现。 */
+export function _setTaskStartersForTest(s: Partial<TaskStarters> | null): void {
+  _starters = {
+    startTaskFromTemplate: s?.startTaskFromTemplate ?? startTaskFromTemplate,
+    startNewRunForRequirement: s?.startNewRunForRequirement ?? startNewRunForRequirement,
+  };
 }
 
 /**
- * 单组 tick 入口：父 workspace + 所有关联子模块视为一个调度组。
+ * 全局调度互斥锁：防止并发 tick 出现 TOCTOU（两个事件同时触发，双双越过
+ * active 检测、超量起任务）。
  *
- * 算法（spec §4.3 组级扩展，Rev2 全局限速）：
- *   - groupId = workspace.parent_workspace_id ?? workspace.id
- *   - 全局 active = listRequirements({}) 中 workspace_id IS NOT NULL 且 status ∈ {running, fix_revision}
- *   - 若 global_active ≥ max_concurrent_tasks（默认 1）：do nothing
- *   - 否则取主仓库（父 groupId）上最老 queued requirement → startTaskFromTemplate
- *
- * 失败时回滚 status: queued → ready
- *
- * ⚠️ 行为变更（Rev2）：从「组内串行」改为「全局总上限」。
- *   N=1 时，多 workspace 用户从「每组最多 1 个」变为「全局最多 1 个」（更严格）。
- *   这是需求澄清 Q1 答案（全局总上限）的有意调整，非 bug。
+ * 原理（JS 单线程保证）：
+ *   此变量在首个 await 前同步赋值，不会被其他协程打断。
+ *   两个并发 tick 中，第一个同步置 true，第二个看到 true 后置 _pendingTick。
+ *   待第一个 tick 完成，finally 中释放锁并补跑一次，确保不丢事件。
  */
-export async function tickRepo(workspaceId: string): Promise<void> {
-  const workspace = getWorkspaceById(workspaceId);
-  if (!workspace) {
-    log.error("tickRepo: workspace %s 不存在", workspaceId);
-    return;
-  }
-  const groupId = workspace.parent_workspace_id ?? workspace.id;
+let _globalSchedulerLock = false;
+/** tick 被锁挡住时置位；锁释放后补跑一次 tick（调度是全局的，无需记录具体来源）。 */
+let _pendingTick = false;
 
-  // 同组串行守卫（SC-3 TOCTOU）：同组两个事件并发时，本次 tick 也入 _pendingTicks
-  // 等当前 tick 结束后 drain 重试。不能 skip-and-forget——若 in-progress tick 的
-  // listRequirements 快照早于新需求入队、且其候选启动失败回滚 ready（组里无 running），
-  // 之后不会再有事件触发，新 queued 会永久卡死（Copilot review #92）。
-  if (_inflightGroups.has(groupId)) {
-    log.info("tickRepo: group %s 已有调度在执行，入队等待重试（同仓库串行）", groupId);
-    _pendingTicks.add(workspaceId);
-    return;
-  }
-
-  // 全局调度互斥锁（Rev2 TOCTOU 修复）：
-  //   此赋值在首个 await 前同步完成（JS 单线程），其他协程无法在此窗口内插入。
-  //   被阻塞的 tick 进入 _pendingTicks，锁释放后由 _drainPendingTicks 串行触发。
+/**
+ * 调度入口：纯全局上限 FIFO（主库 / 仓库分组概念已废除——每任务独立 clone
+ * 沙盒，仓库不再是冲突域，调度只看全局并发上限）。
+ *
+ * 算法：
+ *   - active = 全部需求中 status ∈ {running, fix_revision} 计数
+ *   - queued 按 created_at 先进先出
+ *   - while 循环起任务直到填满空槽（N>1 时一次事件可起多个）
+ */
+export async function tick(): Promise<void> {
   if (_globalSchedulerLock) {
-    log.info("tickRepo: 全局调度锁占用，入队等待 workspace=%s group=%s", workspaceId, groupId);
-    _pendingTicks.add(workspaceId);
+    log.info("tick: 全局调度锁占用，记 pending 待锁释放后补跑");
+    _pendingTick = true;
     return;
   }
 
   _globalSchedulerLock = true;
-  _inflightGroups.add(groupId);
   try {
-    await tickGroup(groupId);
+    await tickBody();
   } finally {
-    _inflightGroups.delete(groupId);
     _globalSchedulerLock = false;
-    // 锁释放后串行处理等待队列
-    _drainPendingTicks();
+    if (_pendingTick) {
+      _pendingTick = false;
+      // 通过微任务（Promise.resolve().then）触发补跑，在下一个 I/O 事件（宏任务）
+      // 前执行，防止宏任务抢先重获锁。
+      Promise.resolve().then(() =>
+        tick().catch((e: unknown) =>
+          log.error("tick: pending 补跑失败: %s", (e as Error).message),
+        ),
+      );
+    }
   }
 }
 
-/** tickRepo 的实际调度体（调用时已持全局锁 _globalSchedulerLock 和同组锁 _inflightGroups）。 */
-async function tickGroup(groupId: string): Promise<void> {
-  // 保留 submodules 供日志输出（不再用于 active 过滤，active 已改为全局）
-  const submodules = listSubmodules(groupId);
-
-  // 全局 active 检测（不区分 workspace 组）：
-  //   - workspace_id IS NOT NULL：排除高层需求（无工作区绑定），防止其错误占用槽位
-  //   - status ∈ {running, fix_revision}：占用槽位的两种状态
+/** tick 的实际调度体（调用时已持全局锁 _globalSchedulerLock）。 */
+async function tickBody(): Promise<void> {
   const all = listRequirements({});
   const maxConcurrent = loadSchedulerConfig().max_concurrent_tasks ?? 1;
-  const globalActive = all.filter(
-    (r) => r.workspace_id !== null && (r.status === "running" || r.status === "fix_revision"),
-  );
-  if (globalActive.length >= maxConcurrent) return;
+  const active = all.filter(
+    (r) => r.status === "running" || r.status === "fix_revision",
+  ).length;
+  if (active >= maxConcurrent) return;
 
-  // candidate 仅从主仓库拉（用户在 chat 提需求只会选父）
   const queued = all
-    .filter((r) => r.workspace_id === groupId && r.status === "queued")
+    .filter((r) => r.status === "queued")
     .sort((a, b) => a.created_at - b.created_at);
-  if (queued.length === 0) return;
 
-  const candidate = queued[0];
-  if (!candidate.workspace_id) {
-    log.error("tickRepo: candidate %s 缺 workspace_id（不应发生）", candidate.id);
-    return;
+  let started = 0;
+  for (const snapshot of queued) {
+    if (active + started >= maxConcurrent) return;
+    // 快照可能过期（循环中有 await，用户可能 cancel / 其他写方改状态），起跑前复核
+    const candidate = getRequirementById(snapshot.id);
+    if (!candidate || candidate.status !== "queued") continue;
+    if (await scheduleOne(candidate)) started++;
   }
-  const candidateWorkspace = getWorkspaceById(candidate.workspace_id);
-  if (!candidateWorkspace) {
-    log.error("tickRepo: candidate workspace %s 不存在", candidate.workspace_id);
-    return;
-  }
+}
+
+/**
+ * 调度单个 queued 需求 → 起（或重跑）task。返回是否成功占用一个并发槽。
+ *
+ * 失败路径回滚 queued → ready 并写 schedule_error（失败可见，用户在需求页直接看到
+ * 「为什么没开跑」）。无库需求（集合为空）也照常调度：沙盒退化 / phase 失败会可见地
+ * 停下报人，优于在调度层静默跳过造成永久卡死。
+ */
+async function scheduleOne(candidate: Requirement): Promise<boolean> {
+  // 候选代码库走集合（requirement_workspaces 是唯一真相源，主库概念已废除）
+  const reqWorkspaces = listRequirementWorkspaces(candidate.id);
+  const wsAlias = reqWorkspaces[0]?.alias ?? "(无代码库)";
 
   // 将已解决的澄清问答拼入 requirement，让 Agent 知晓用户的补充说明
   const questions = listComments(candidate.id, { kind: "question", status: "resolved", parent_id: null });
@@ -157,59 +143,72 @@ async function tickGroup(groupId: string): Promise<void> {
     requirement += `\n\n## 历史执行评审遗留（前序执行被评审驳回的根因，本轮方案必须规避）\n\n${txt}`;
   }
 
-  // req:task 1:1：需求已有存活 task → 复用它重置重跑，不新建第二个（避免一 req 堆多 task）。
-  // 首次执行 task_id 为 null 走下面新建；failed/重新入队时 task_id 已写 → 复用重跑。
+  // 多代码库需求（审批阶段反写的集合）：所有库均可写、各自交付 PR。
+  // 集合 >1 时任务沙盒会把每个库 clone 到子目录（具体布局由执行阶段的 listTaskRepos 提供）。
+  if (reqWorkspaces.length > 1) {
+    const lines = reqWorkspaces
+      .map((w) => `- ${w.alias}: ${w.remote_url ?? "(无远程地址)"}（默认分支 ${w.default_branch}）`)
+      .join("\n");
+    requirement += `\n\n## 本需求涉及的代码库（均可改动，将分别交付 PR）\n\n${lines}\n\n具体仓库在任务沙盒中的目录布局由执行阶段提供。`;
+  }
+
   // 需求选定的工作流（NULL = 未显式选择，回退默认 dev）
   const reqWorkflow = candidate.workflow ?? "dev";
 
+  // 需求级重跑 = 新 run（v2 R2）：需求已有 task（failed/重新入队时 task_id 已写）→
+  // startNewRunForRequirement 追加新 run（旧 run 历史保留，远程旧分支/旧 clone 由其善后）。
+  // 首次执行 task_id 为 null 走下面新建。
   const existing = candidate.task_id ? getTask(candidate.task_id) : null;
   if (existing) {
     try {
-      resetTaskForRerun(existing.id, {
+      const task = await _starters.startNewRunForRequirement(candidate.id, {
         requirement,
         title: candidate.title,
-        // failed 后用户可换工作流再重试：重跑时把 task 迁到新工作流（reset 本来就重置到
-        // initial_state + 清历史 + 重 clone，换流程是干净的）
-        workflow: reqWorkflow !== existing.workflow ? reqWorkflow : undefined,
+        // failed 后用户可换工作流再重试：新 run 全新 clone + 全新状态机，换流程是干净的
+        workflow: reqWorkflow,
       });
-      updateRequirement(candidate.id, { schedule_error: null });
+      // schedule_error 不在此处盲清：startNewRunForRequirement 内部负责（删远程分支真失败
+      // 时它写入的 RERUN-07 根因要保留，盲清会把刚 surface 的失败原因抹掉）
       setRequirementStatus(candidate.id, "running");
-      log.info("tickRepo: 重跑 requirement %s → 复用 task %s on workspace %s",
-        candidate.id, existing.id, candidateWorkspace.alias);
+      log.info("tick: 重跑 requirement %s → 新 run %s（旧 run %s 历史保留）on workspace %s",
+        candidate.id, task.id, existing.id, wsAlias);
+      return true;
     } catch (e: unknown) {
       const msg = (e as Error).message;
-      log.error("tickRepo: 重跑失败 candidate=%s: %s", candidate.id, msg);
+      log.error("tick: 重跑失败 candidate=%s: %s", candidate.id, msg);
       try {
         updateRequirement(candidate.id, { schedule_error: `重跑失败：${msg}` });
         setRequirementStatus(candidate.id, "ready");
+        emit({ type: "requirement:schedule-error", payload: { id: candidate.id, reason: `重跑失败：${msg}` } });
       } catch (rollbackErr: unknown) {
-        log.error("tickRepo: 重跑回滚失败 %s: %s", candidate.id, (rollbackErr as Error).message);
+        log.error("tick: 重跑回滚失败 %s: %s", candidate.id, (rollbackErr as Error).message);
       }
+      return false;
     }
-    return;
   }
 
   let task;
   try {
-    task = await startTaskFromTemplate({
+    task = await _starters.startTaskFromTemplate({
       workflow: reqWorkflow,
       title: candidate.title,
       requirement,
-      workspace_id: candidateWorkspace.id,
+      workspace_id: reqWorkspaces[0]?.id,
       requirement_id: candidate.id,
     });
   } catch (e: unknown) {
     const msg = (e as Error).message;
-    log.error("tickRepo: 创建 task 失败 candidate=%s: %s", candidate.id, msg);
+    log.error("tick: 创建 task 失败 candidate=%s: %s", candidate.id, msg);
     try {
       // 把失败原因写进需求，让用户在需求页直接看到「为什么退回 ready / 没开跑」，
       // 不必翻 daemon.log（静默回滚是这类问题极难排查的根源）。
       updateRequirement(candidate.id, { schedule_error: `起任务失败：${msg}` });
       setRequirementStatus(candidate.id, "ready");
+      emit({ type: "requirement:schedule-error", payload: { id: candidate.id, reason: `起任务失败：${msg}` } });
     } catch (rollbackErr: unknown) {
-      log.error("tickRepo: 回滚 status 失败 %s: %s", candidate.id, (rollbackErr as Error).message);
+      log.error("tick: 回滚 status 失败 %s: %s", candidate.id, (rollbackErr as Error).message);
     }
-    return;
+    return false;
   }
 
   try {
@@ -217,16 +216,16 @@ async function tickGroup(groupId: string): Promise<void> {
     updateRequirement(candidate.id, { task_id: task.id, schedule_error: null });
     setRequirementStatus(candidate.id, "running");
     log.info(
-      "tickRepo: 启动 requirement %s → task %s on workspace %s (group=%s, submodules=%d)",
+      "tick: 启动 requirement %s → task %s on workspace %s",
       candidate.id,
       task.id,
-      candidateWorkspace.alias,
-      groupId,
-      submodules.length,
+      wsAlias,
     );
   } catch (e: unknown) {
-    log.error("tickRepo: 写回 task_id 或 setStatus running 失败 %s: %s", candidate.id, (e as Error).message);
+    log.error("tick: 写回 task_id 或 setStatus running 失败 %s: %s", candidate.id, (e as Error).message);
   }
+  // task 已实际启动，即使写回失败也占用了一个并发槽
+  return true;
 }
 
 export function initRequirementScheduler(): void {
@@ -234,7 +233,7 @@ export function initRequirementScheduler(): void {
 
   const handler = async (event: AutopilotEvent) => {
     if (event.type !== "requirement:status-changed") return;
-    const { id, from, to } = event.payload;
+    const { from, to } = event.payload;
 
     const enqueued = to === "queued";
     const releasingSlot =
@@ -243,17 +242,10 @@ export function initRequirementScheduler(): void {
 
     if (!enqueued && !releasingSlot) return;
 
-    const req = getRequirementById(id);
-    if (!req) return;
-    if (!req.workspace_id) {
-      // 高层需求（无 workspace 绑定）不参与调度组逻辑
-      return;
-    }
-
     try {
-      await tickRepo(req.workspace_id);
+      await tick();
     } catch (e: unknown) {
-      log.error("requirement-scheduler: tickRepo 异常 workspace=%s: %s", req.workspace_id, (e as Error).message);
+      log.error("requirement-scheduler: tick 异常: %s", (e as Error).message);
     }
   };
 
@@ -261,6 +253,12 @@ export function initRequirementScheduler(): void {
   _handler = handler;
 
   log.info("requirement-scheduler 已启动（订阅 requirement:status-changed）");
+
+  // daemon 启动补 tick：捡起存量 queued（重启前已入队、触发事件已消逝的需求），
+  // 与 fix-revision-runner 的重启扫描对称。调用时序在 initDb/migrations/discover 之后。
+  void tick().catch((e: unknown) =>
+    log.error("requirement-scheduler: 启动补 tick 失败: %s", (e as Error).message),
+  );
 }
 
 export function disposeRequirementScheduler(): void {
@@ -269,5 +267,5 @@ export function disposeRequirementScheduler(): void {
   _handler = null;
   // 清除全局状态，防止 daemon 重启后残留脏状态
   _globalSchedulerLock = false;
-  _pendingTicks.clear();
+  _pendingTick = false;
 }

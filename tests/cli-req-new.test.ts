@@ -44,7 +44,7 @@ describe("autopilot req new", () => {
 });
 
 import { inferWorkspaceFromCwd } from "../src/cli/requirements-cli";
-import type { Workspace } from "../src/core/workspaces";
+import type { Workspace } from "../src/core/sandbox/workspaces";
 
 const mkCb = (id: string, path: string): Workspace => ({
   id, path, remote_url: null, project_id: "p", alias: "a",

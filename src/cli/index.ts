@@ -1,19 +1,32 @@
 import { Command } from "commander";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
+import { join, sep } from "path";
 import { buildConfigTemplate } from "./config-template";
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
-import { intentToLabel } from "../client/now-intent";
+import { notificationIntentToLabel } from "../client/notification-intent";
 import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { rebuildIndexFromManifests, rebuildManifestsFromIndex } from "../core/rebuild-index";
-import { discover } from "../core/registry";
+import { getTaskSandbox } from "../core/sandbox";
+import { discover } from "../core/workflow/registry";
 import { AutopilotClient, DEFAULT_PORT, DEFAULT_HOST } from "../client/index";
 import { loadDaemonConfig } from "../core/config";
 import { registerWorkflowCommands } from "./workflow";
 import { registerConfigCommands, printReport as printDoctorReport } from "./config";
 import { ensureSecretKey, setApiKey as coreSetApiKey, deleteApiKey as coreDeleteApiKey, listApiKeys as coreListApiKeys } from "../core/api-keys";
+import {
+  listProviders as coreListProviders,
+  createProvider as coreCreateProvider,
+  deleteProvider as coreDeleteProvider,
+  getProviderByName as coreGetProviderByName,
+  getProviderById as coreGetProviderById,
+  setProviderCliStatus as coreSetProviderCliStatus,
+  type ProviderType,
+} from "../core/providers";
+import { listWorkflowsUsingProvider } from "../core/workflow/registry";
+import { probeCli } from "../agents/cli-status";
+import { loadLifecycleConfig, saveLifecycleAgent } from "../core/config";
 import { registerRequirementCommands } from "./requirements-cli";
 import { registerProjectCommands } from "./project";
 import { registerWorkspaceCommands } from "./workspace";
@@ -28,6 +41,7 @@ import {
   removeSupervisorPid,
   readListenInfo,
   removeListenInfo,
+  writeRestartFlag,
 } from "../daemon/pid";
 
 // ──────────────────────────────────────────────
@@ -422,6 +436,9 @@ daemon
         process.exit(1);
       }
       console.log("daemon 已停止。");
+      // 主动重启标志：新 daemon 据此对 running_* task 自动 respawn（关旧 phase
+      // event + 立即重跑），而不是标 dangling 等用户 / 等 watcher 卡死判定兜底
+      writeRestartFlag();
     } else {
       console.log("daemon 未在运行，将直接启动。");
     }
@@ -595,7 +612,7 @@ task
           console.log(`  ${k.padEnd(labelWidth)}  ${v}`);
         }
         console.log("");
-        console.log(`Workspace: ${process.env.AUTOPILOT_HOME || "~/.autopilot"}/runtime/tasks/${tt.id}/workspace/`);
+        console.log(`Workspace: ${getTaskSandbox(String(tt.id))}${sep}`);
         console.log(`日志：autopilot task logs ${tt.id}`);
       } catch (e: unknown) {
         console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
@@ -716,10 +733,9 @@ task
     // 末尾给客户指明 agent trace 位置 —— task logs 只显示状态机转换，客户
     // 跑完最想看的"agent 写了啥 / 评审什么意见"在 workspace 里。
     if (!opts.follow) {
-      const home = process.env.AUTOPILOT_HOME || `~/.autopilot`;
-      const wsRoot = `${home}/runtime/tasks/${taskId}/workspace/`;
+      const wsRoot = getTaskSandbox(taskId) + sep;
       console.log("");
-      console.log(`Agent trace + phase 产物：${wsRoot}<NN-phase>/agent-trace.md`);
+      console.log(`Agent trace + phase 产物：${wsRoot}<NN-phase>${sep}agent-trace.md`);
       console.log(`实时跟踪状态：autopilot task logs ${taskId} --follow`);
     }
 
@@ -1036,74 +1052,139 @@ program
   });
 
 // ──────────────────────────────────────────────
-// now — 文本卡片流（替代浏览器查看 /now）
+// notifications — 事件型通知流（list / read / dismiss）
 // ──────────────────────────────────────────────
 
-program
-  .command("now")
-  .description("查看当前需要关注的事（卡片流文本视图）")
+async function runNotificationsList(opts: {
+  port: string;
+  unread?: boolean;
+  json?: boolean;
+  limit?: string;
+}): Promise<void> {
+  const client = getClient(opts);
+  await ensureDaemon(client);
+  try {
+    const limit = opts.limit ? Math.max(1, parseInt(opts.limit, 10) || 50) : 50;
+    const { items } = await client.listNotifications({
+      limit,
+      unread_only: opts.unread === true,
+    });
+    if (opts.json) {
+      console.log(JSON.stringify(items, null, 2));
+      return;
+    }
+    if (items.length === 0) {
+      console.log(opts.unread ? "🎉 没有未读通知。" : "🎉 没有通知。");
+      return;
+    }
+    const ago = (ms: number) => {
+      const s = Math.max(0, Math.floor(ms / 1000));
+      if (s < 60) return `${s}s`;
+      if (s < 3600) return `${Math.floor(s / 60)}min`;
+      if (s < 86400) return `${Math.floor(s / 3600)}h`;
+      return `${Math.floor(s / 86400)}d`;
+    };
+    const nowMs = Date.now();
+    const rows = items.map((n) => ({
+      id: String(n.id),
+      sev: n.severity.toUpperCase(),
+      read: n.read_at === null ? "●" : " ",
+      title: n.context?.requirement_title ? `${n.title} · ${n.context.requirement_title}` : `${n.title}${n.body ? ` · ${n.body}` : ""}`,
+      when: ago(nowMs - n.created_at),
+      actions: n.actions.map((a) => notificationIntentToLabel(a.intent)).join(" / "),
+    }));
+    const wId = Math.max(2, ...rows.map((r) => r.id.length));
+    const wSev = Math.max(6, ...rows.map((r) => r.sev.length));
+    const maxTitle = Math.min(Math.max(8, ...rows.map((r) => r.title.length)), 60);
+    const wWhen = Math.max(4, ...rows.map((r) => r.when.length));
+    console.log(
+      ` ${"ID".padEnd(wId)}  ${"SEV".padEnd(wSev)}  ${"TITLE".padEnd(maxTitle)}  ${"AGE".padEnd(wWhen)}  ACTIONS`,
+    );
+    console.log(
+      `--${"-".repeat(wId)}  ${"-".repeat(wSev)}  ${"-".repeat(maxTitle)}  ${"-".repeat(wWhen)}  -------`,
+    );
+    for (const r of rows) {
+      const title = r.title.length > maxTitle ? r.title.slice(0, maxTitle - 1) + "…" : r.title;
+      console.log(
+        `${r.read}${r.id.padEnd(wId)}  ${r.sev.padEnd(wSev)}  ${title.padEnd(maxTitle)}  ${r.when.padEnd(wWhen)}  ${r.actions}`,
+      );
+    }
+    console.log(`\n共 ${items.length} 条（● = 未读）。`);
+  } catch (e: unknown) {
+    console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  }
+}
+
+const notificationsCmd = program
+  .command("notifications")
+  .description("通知（事件型通知流：任务终态 / 等待决策 / 异常）");
+
+notificationsCmd
+  .command("list", { isDefault: true })
+  .description("列出通知（默认最近 50 条，不含已删除）")
+  .option("--unread", "只看未读")
+  .option("--json", "JSON 输出")
+  .option("--limit <n>", "最多返回条数", "50")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (opts: { port: string }) => {
+  .action(runNotificationsList);
+
+notificationsCmd
+  .command("read [ids...]")
+  .description("标记已读（传通知 id 列表，或 --all 全部已读）")
+  .option("--all", "全部标为已读")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (ids: string[], opts: { port: string; all?: boolean }) => {
     const client = getClient(opts);
     await ensureDaemon(client);
-
     try {
-      const cards = await client.listNowCards();
-      if (cards.length === 0) {
-        console.log("🎉 没有需要关注的事。");
+      if (opts.all) {
+        const { updated } = await client.markAllNotificationsRead();
+        console.log(`已读 ${updated} 条。`);
         return;
       }
-
-      // 按优先级 + created_at 排序（与后端一致）
-      const PRIORITY_ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
-      cards.sort((a, b) => {
-        const dp = (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9);
-        if (dp !== 0) return dp;
-        return a.created_at - b.created_at;
-      });
-
-      // 计算列宽
-      const nowSec = Math.floor(Date.now() / 1000);
-      const rows = cards.map((c) => {
-        const waitedSec = Math.max(0, nowSec - c.created_at);
-        const wait = waitedSec < 60 ? `${waitedSec}s`
-          : waitedSec < 3600 ? `${Math.floor(waitedSec / 60)}min`
-          : `${Math.floor(waitedSec / 3600)}h`;
-        const actionsLine = c.actions.map((a) => intentToLabel(a.intent)).join(" / ");
-        return {
-          prio: c.priority,
-          title: c.title,
-          subtitle: c.subtitle,
-          wait,
-          actions: actionsLine,
-        };
-      });
-
-      const widths = {
-        prio: 4,
-        title: Math.max(8, ...rows.map((r) => r.title.length)),
-        wait: Math.max(6, ...rows.map((r) => r.wait.length)),
-      };
-      // 截断 title 防过宽
-      const maxTitle = Math.min(widths.title, 60);
-
-      console.log(
-        `${"PRIO".padEnd(widths.prio)}  ${"TITLE".padEnd(maxTitle)}  ${"WAIT".padEnd(widths.wait)}  ACTIONS`,
-      );
-      console.log(
-        `${"-".repeat(widths.prio)}  ${"-".repeat(maxTitle)}  ${"-".repeat(widths.wait)}  -------`,
-      );
-      for (const r of rows) {
-        const title = r.title.length > maxTitle ? r.title.slice(0, maxTitle - 1) + "…" : r.title;
-        console.log(
-          `${r.prio.padEnd(widths.prio)}  ${title.padEnd(maxTitle)}  ${r.wait.padEnd(widths.wait)}  ${r.actions}`,
-        );
+      const numeric = ids.map((x) => parseInt(x, 10)).filter((x) => Number.isFinite(x));
+      if (numeric.length === 0) {
+        console.error("用法：autopilot notifications read <id...> 或 --all");
+        process.exit(1);
       }
-      console.log(`\n共 ${cards.length} 项。`);
+      const { updated } = await client.markNotificationsRead(numeric);
+      console.log(`已读 ${updated} 条。`);
     } catch (e: unknown) {
       console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
       process.exit(1);
     }
+  });
+
+notificationsCmd
+  .command("dismiss <id>")
+  .description("删除（隐藏）一条通知")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (id: string, opts: { port: string }) => {
+    const client = getClient(opts);
+    await ensureDaemon(client);
+    try {
+      const numeric = parseInt(id, 10);
+      if (!Number.isFinite(numeric)) {
+        console.error("id 必须是数字");
+        process.exit(1);
+      }
+      await client.dismissNotification(numeric);
+      console.log(`已删除通知 ${numeric}。`);
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+// 旧 `autopilot now` —— 隐藏 deprecated 别名，指向 notifications list --unread（下版删除）
+program
+  .command("now", { hidden: true })
+  .description("[deprecated] 改用 autopilot notifications")
+  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
+  .action(async (opts: { port: string }) => {
+    console.error("提示：`autopilot now` 已废弃，请改用 `autopilot notifications`（本别名下版移除）。\n");
+    await runNotificationsList({ port: opts.port, unread: true });
   });
 
 // ──────────────────────────────────────────────
@@ -1241,6 +1322,175 @@ key
     }
   });
 
+// ── provider 条目管理（条目化重构 P1；CLI 一等公民，core 直连不经 daemon）──
+
+const provider = program.command("provider").description("模型供应商条目管理（CLI / API 单类型实例）");
+
+provider
+  .command("list")
+  .description("列出 provider 条目")
+  .action(async () => {
+    initDb();
+    await runPendingMigrations();
+    const list = coreListProviders();
+    if (list.length === 0) {
+      console.log("暂无 provider 条目。用 `autopilot provider add <name> --type cli|api` 添加。");
+      return;
+    }
+    const nameW = Math.max(...list.map((p) => p.name.length), 4);
+    console.log(`${"NAME".padEnd(nameW)}  TYPE  SUBTYPE         STATUS`);
+    for (const p of list) {
+      const status = p.type === "cli"
+        ? (p.cli_status === "ok" ? "就绪" : p.cli_status === "missing" ? "本地不支持" : "未检测")
+        : (p.default_model ? `model=${p.default_model}` : "—");
+      const en = p.enabled === 0 ? " (禁用)" : "";
+      console.log(`${p.name.padEnd(nameW)}  ${p.type.padEnd(4)}  ${p.subtype.padEnd(14)}  ${status}${en}`);
+    }
+  });
+
+provider
+  .command("add <name>")
+  .description("添加 provider 条目")
+  .requiredOption("--type <type>", "类型：cli | api")
+  .option("--subtype <subtype>", "cli: claude|codex|gemini|custom；api: openai-compat（默认）/anthropic/openai/google")
+  .option("--display <name>", "显示名")
+  .option("--base-url <url>", "API 端点（api 类型）")
+  .option("--model <model>", "默认模型")
+  .option("--cli-bin <bin>", "自定义 CLI 二进制（subtype=custom）")
+  .option("--env-key <NAME>", "API 密钥环境变量名")
+  .action(async (name: string, opts: {
+    type: string; subtype?: string; display?: string; baseUrl?: string; model?: string; cliBin?: string; envKey?: string;
+  }) => {
+    initDb();
+    await runPendingMigrations();
+    const type = opts.type as ProviderType;
+    if (type !== "cli" && type !== "api") {
+      console.error("错误：--type 需为 cli 或 api");
+      process.exit(1);
+    }
+    const subtype = opts.subtype ?? (type === "cli" ? "claude" : "openai-compat");
+    try {
+      const entry = coreCreateProvider({
+        name,
+        display_name: opts.display ?? name,
+        type,
+        subtype,
+        cli_bin: opts.cliBin ?? null,
+        base_url: opts.baseUrl ?? null,
+        env_key_name: opts.envKey ?? null,
+        default_model: opts.model ?? null,
+      });
+      if (type === "cli") {
+        const probe = await probeCli(subtype, entry.cli_bin ?? undefined);
+        coreSetProviderCliStatus(entry.id, probe.status, probe.version ?? null);
+        console.log(`✓ 已添加 ${name}（${entry.id}）；本地 CLI：${probe.status === "ok" ? `就绪 ${probe.version ?? ""}` : probe.status === "missing" ? "本地不支持（未安装）" : "未知"}`);
+      } else {
+        console.log(`✓ 已添加 ${name}（${entry.id}）；API 密钥用 \`autopilot key set ${name}\` 配置`);
+      }
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+provider
+  .command("remove <idOrName>")
+  .description("删除 provider 条目（被工作流引用则拒删，--force 强删）")
+  .option("--force", "忽略工作流引用强制删除")
+  .action(async (idOrName: string, opts: { force?: boolean }) => {
+    initDb();
+    await runPendingMigrations();
+    const entry = idOrName.startsWith("prov-") ? coreGetProviderById(idOrName) : coreGetProviderByName(idOrName);
+    if (!entry) {
+      console.error(`错误：找不到 provider 条目：${idOrName}`);
+      process.exit(1);
+    }
+    // 加载工作流到 registry（core 直连上下文未自动 discover），否则引用守卫看到空 registry
+    await discover();
+    const refs = listWorkflowsUsingProvider(entry.name);
+    if (refs.length > 0 && !opts.force) {
+      console.error(`错误：provider「${entry.name}」被工作流引用，删除会让它们无法使用：`);
+      for (const r of refs) console.error(`  - ${r.workflow}（${r.phases.join(", ")}）`);
+      console.error("先改这些工作流的 provider，或加 --force 强删。");
+      process.exit(1);
+    }
+    coreDeleteProvider(entry.id);
+    console.log(`✓ 已删除 provider 条目：${entry.name}`);
+  });
+
+// ── 生命周期 agent 配置（lifecycle: 段；P1 仅 clarify。core 直连，daemon 实时读盘生效）──
+
+const lifecycle = program.command("lifecycle").description("平台生命周期 agent 配置（澄清等，全局默认）");
+
+lifecycle
+  .command("list")
+  .description("查看生命周期 agent 配置（用户 override，未列字段走内置默认）")
+  .action(async () => {
+    initDb();
+    await runPendingMigrations();
+    const cfg = loadLifecycleConfig();
+    const clarify = cfg.clarify ?? {};
+    console.log("生命周期 agent（P1：clarify —— 澄清 / 抽取 / 建工作流共用）：\n");
+    if (Object.keys(clarify).length === 0) {
+      console.log("  clarify：未配置，走内置默认（anthropic / 15 turns / bypassPermissions）");
+    } else {
+      console.log("  clarify（用户 override）：");
+      for (const [k, v] of Object.entries(clarify)) {
+        const val = typeof v === "string" && v.length > 60 ? v.slice(0, 60) + "…" : v;
+        console.log(`    ${k}: ${val}`);
+      }
+    }
+    console.log("\n未列字段走内置默认；用 `autopilot lifecycle set clarify --provider …` 配置。");
+  });
+
+lifecycle
+  .command("set <name>")
+  .description("设置生命周期 agent（P1 仅 clarify）；未给的字段保留")
+  .option("--provider <name>", "provider（如 kimi-code）")
+  .option("--model <model>", "默认模型")
+  .option("--max-turns <n>", "最大轮数", (v) => parseInt(v, 10))
+  .option("--permission-mode <mode>", "权限模式（default/bypassPermissions/cautious/...）")
+  .option("--system-prompt <text>", "系统提示词")
+  .option("--system-prompt-file <path>", "从文件读系统提示词")
+  .action(async (name: string, opts: {
+    provider?: string; model?: string; maxTurns?: number; permissionMode?: string; systemPrompt?: string; systemPromptFile?: string;
+  }) => {
+    if (name !== "clarify") { console.error("P1 仅支持 clarify"); process.exit(1); }
+    initDb();
+    await runPendingMigrations();
+    // 在现有 override 上叠加（未给的字段保留）
+    const cur = (loadLifecycleConfig().clarify ?? {}) as Record<string, unknown>;
+    const next: Record<string, unknown> = { ...cur };
+    if (opts.provider !== undefined) next.provider = opts.provider;
+    if (opts.model !== undefined) next.model = opts.model;
+    if (opts.maxTurns !== undefined && !Number.isNaN(opts.maxTurns)) next.max_turns = opts.maxTurns;
+    if (opts.permissionMode !== undefined) next.permission_mode = opts.permissionMode;
+    if (opts.systemPromptFile) {
+      const { readFileSync } = await import("fs");
+      next.system_prompt = readFileSync(opts.systemPromptFile, "utf-8");
+    } else if (opts.systemPrompt !== undefined) {
+      next.system_prompt = opts.systemPrompt;
+    }
+    try {
+      saveLifecycleAgent("clarify", Object.keys(next).length ? next : null);
+      console.log(`✓ 已保存 lifecycle.clarify（${Object.keys(next).join(", ") || "空=回退默认"}）。daemon 实时读盘，下次澄清生效。`);
+    } catch (e: unknown) {
+      console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    }
+  });
+
+lifecycle
+  .command("reset <name>")
+  .description("清除生命周期 agent 配置，回退内置默认")
+  .action(async (name: string) => {
+    if (name !== "clarify") { console.error("P1 仅支持 clarify"); process.exit(1); }
+    initDb();
+    await runPendingMigrations();
+    saveLifecycleAgent("clarify", null);
+    console.log("✓ 已重置 lifecycle.clarify，回退内置默认。");
+  });
+
 /**
  * 无回显读取一行输入（用于密码/密钥输入）。
  *
@@ -1332,7 +1582,7 @@ program
     const devWorkflowDir = join(AUTOPILOT_HOME, "workflows", "dev");
     if (!existsSync(devWorkflowDir)) {
       try {
-        const { cloneTemplate } = await import("../core/workflow-templates");
+        const { cloneTemplate } = await import("../core/workflow/templates");
         cloneTemplate("dev", "dev");
         console.log(`已装入默认工作流：${devWorkflowDir}`);
       } catch (e: unknown) {
@@ -1347,7 +1597,7 @@ program
     const adHocWorkflowDir = join(AUTOPILOT_HOME, "workflows", "ad-hoc");
     if (!existsSync(adHocWorkflowDir)) {
       try {
-        const { cloneTemplate } = await import("../core/workflow-templates");
+        const { cloneTemplate } = await import("../core/workflow/templates");
         cloneTemplate("ad-hoc", "ad-hoc");
         console.log(`已装入 ad-hoc 工作流：${adHocWorkflowDir}`);
       } catch (e: unknown) {

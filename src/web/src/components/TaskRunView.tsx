@@ -326,7 +326,9 @@ export function TaskRunView(props: TaskRunViewProps) {
         <div className="min-w-0 flex-1 space-y-2">
           {/* sticky 工具栏：搜索 + level 筛选（作用于已展开 section） */}
           <div className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-2 bg-background/95 px-1 py-2 backdrop-blur">
-            <div className="relative min-w-0 flex-1">
+            {/* min-w 给搜索框保底宽度：低于它时 level 筛选组整体换行（min-w-0 会让输入框
+                被无限压扁、永远不触发 flex-wrap —— 移动端实测） */}
+            <div className="relative min-w-[12rem] flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="search"

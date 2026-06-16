@@ -14,6 +14,7 @@ import { existsSync, realpathSync, lstatSync, readFileSync, writeFileSync, mkdir
 import { join, dirname, basename, resolve, sep } from "path";
 import { spawn } from "child_process";
 import { log } from "../../../core/logger";
+import { expandToApiTools } from "../../tool-capabilities";
 
 // ── 错误类型 ──
 
@@ -245,8 +246,12 @@ export interface ToolDefinition {
   input_schema: Record<string, unknown>;
 }
 
-/** 获取指定 permission_mode 下可用的工具列表 */
-export function getToolDefinitions(mode: PermissionMode): ToolDefinition[] {
+/**
+ * 获取指定 permission_mode 下可用的工具列表。
+ * allowedApiTools 给定时（来自 phase 的 tools 授权），在 permission_mode 过滤之后再取白名单交集
+ * （控制通道工具 task_complete 已被 expandToApiTools 强制保留，不会被滤掉）。
+ */
+export function getToolDefinitions(mode: PermissionMode, allowedApiTools?: Set<string>): ToolDefinition[] {
   const tools: ToolDefinition[] = [
     {
       name: "read_file",
@@ -372,6 +377,10 @@ export function getToolDefinitions(mode: PermissionMode): ToolDefinition[] {
     });
   }
 
+  // phase 工具授权白名单（细粒度）：只保留授权集内的工具
+  if (allowedApiTools) {
+    return tools.filter((t) => allowedApiTools.has(t.name));
+  }
   return tools;
 }
 
@@ -395,15 +404,22 @@ export class ToolExecutor {
   constructor(
     private sandboxRoot: string,
     private mode: PermissionMode,
+    /** phase 工具授权后的允许 API 工具名集合；undefined = 不限（按 permission_mode 全集） */
+    private allowedTools?: Set<string>,
   ) {}
 
-  static fromConfig(sandboxRoot: string, permissionMode?: string): ToolExecutor {
-    return new ToolExecutor(sandboxRoot, normalizePermissionMode(permissionMode));
+  /**
+   * @param toolCaps phase 的 tools 能力白名单（如 ["read","search"]）；省略/undefined = 不限。
+   *   控制通道工具由 expandToApiTools 强制保留。
+   */
+  static fromConfig(sandboxRoot: string, permissionMode?: string, toolCaps?: string[]): ToolExecutor {
+    const allowed = toolCaps ? expandToApiTools(toolCaps) : undefined;
+    return new ToolExecutor(sandboxRoot, normalizePermissionMode(permissionMode), allowed);
   }
 
-  /** 获取当前模式下可用的工具定义列表 */
+  /** 获取当前模式 + 授权下可用的工具定义列表 */
   getToolDefinitions(): ToolDefinition[] {
-    return getToolDefinitions(this.mode);
+    return getToolDefinitions(this.mode, this.allowedTools);
   }
 
   /** 执行单个工具调用 */
@@ -419,6 +435,11 @@ export class ToolExecutor {
 
   private async _dispatch(call: ToolCallInput): Promise<string> {
     const { name, input } = call;
+    // 工具授权双保险：防 LLM 幻觉调用已被 getToolDefinitions 滤掉的工具。
+    // 控制通道工具（task_complete）在 allowedTools 集内，不受影响。
+    if (this.allowedTools && !this.allowedTools.has(name)) {
+      throw new ToolError(`工具未授权：${name}（本阶段 tools 授权未包含该能力）`);
+    }
     switch (name) {
       case "read_file":
         return this._readFile(input);

@@ -7,7 +7,7 @@ import { api, type AgentCallSummary, type AgentCallRecord } from "@/hooks/useApi
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  shouldFollow, extractLevel, filterLinesToWindow, fmtDuration, isNeverRun, localizeLineTs,
+  shouldFollow, extractLevel, filterLinesToWindow, dropLiveOverlap, fmtDuration, isNeverRun, localizeLineTs,
   LEVEL_TEXT, ALL_LEVELS, type Level,
 } from "@/lib/run-view-logic";
 import { PhaseStatusIcon, type PhaseVisualState } from "@/components/RunPhaseNav";
@@ -39,14 +39,27 @@ export interface RunPhaseSectionProps {
 }
 
 /** agent 调用内联：默认一行摘要，点击展开懒加载**完整** prompt / 结果（不截断） */
+/** token 数紧凑显示：≥1 万转 k（312456 → 312.5k） */
+function fmtTok(n: number): string {
+  return n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
 function AgentCallInline({ taskId, call }: { taskId: string; call: AgentCallSummary }) {
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState<AgentCallRecord | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const tokens = call.usage
-    ? `${call.usage.input_tokens ?? 0}→${call.usage.output_tokens ?? 0} tok`
-    : null;
-  const cost = call.usage?.total_cost_usd != null ? `$${call.usage.total_cost_usd.toFixed(4)}` : null;
+  // 输入 = 新输入 + prompt cache 读/写（Anthropic 开缓存时 input_tokens 只是未命中
+  // 缓存的零头，单独显示会严重低估——dogfood 实锤「3→6646」）。历史记录无 cache
+  // 字段时自然回退为旧口径。
+  const u = call.usage;
+  const totalIn = u
+    ? (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+    : 0;
+  const tokens = u ? `${fmtTok(totalIn)}→${fmtTok(u.output_tokens ?? 0)} tok` : null;
+  const tokensTitle = u
+    ? `输入：新 ${u.input_tokens ?? 0} + 缓存读 ${u.cache_read_input_tokens ?? 0} + 缓存写 ${u.cache_creation_input_tokens ?? 0}；输出 ${u.output_tokens ?? 0}`
+    : undefined;
+  const cost = u?.total_cost_usd != null ? `$${u.total_cost_usd.toFixed(4)}` : null;
 
   // 首次展开懒加载完整记录（summary 里的 preview 是 120 字符截断）
   useEffect(() => {
@@ -68,17 +81,19 @@ function AgentCallInline({ taskId, call }: { taskId: string; call: AgentCallSumm
 
   return (
     <div className={cn("rounded-lg border border-border/60 bg-muted/30", call.error && "border-destructive/40")}>
+      {/* flex-wrap + truncate：窄屏（移动端）下左侧 agent/模型名不被右侧 meta 挤成竖排单字列，
+          meta 整组换行到第二行右对齐 */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[11px]"
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 px-2.5 py-1.5 text-left font-mono text-[11px]"
       >
         <Bot className="h-3.5 w-3.5 shrink-0 text-accent" />
-        <span className="text-foreground/85">{call.agent}</span>
-        {call.model && <span className="text-muted-foreground">{call.model}</span>}
+        <span className="min-w-0 max-w-full truncate text-foreground/85">{call.agent}</span>
+        {call.model && <span className="min-w-0 max-w-full truncate text-muted-foreground">{call.model}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground">
           {call.error && <span className="text-destructive">出错</span>}
-          {tokens && <span>{tokens}</span>}
+          {tokens && <span title={tokensTitle}>{tokens}</span>}
           {cost && <span>{cost}</span>}
           {call.elapsed_ms != null && <span>{fmtDuration(call.elapsed_ms)}</span>}
         </span>
@@ -164,7 +179,9 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
     if (windowStartMs !== undefined) {
       base = filterLinesToWindow(base, windowStartMs, windowEndMs ?? null);
     }
-    const all = (isRunning ? [...base, ...liveLines] : base).map(localizeLineTs);
+    // live 缓冲与 4s 全量轮询的内容重叠（缓冲不在轮询后清空，有竞态丢行风险），
+    // 渲染层去重：只保留落在 base 最后时间戳之后的 live 行
+    const all = (isRunning ? [...base, ...dropLiveOverlap(base, liveLines)] : base).map(localizeLineTs);
     const q = filterQuery.trim().toLowerCase();
     return all.filter((line) => {
       if (!line.trim()) return false;
@@ -215,10 +232,7 @@ export function RunPhaseSection(props: RunPhaseSectionProps) {
   const filterActive = !!filterQuery.trim() || filterLevels.size < ALL_LEVELS.length;
 
   return (
-    <div className={cn(
-      "rounded-xl border border-border bg-card",
-      runState === "failed" && "border-l-2 border-l-destructive",
-    )}>
+    <div className="rounded-xl border border-border bg-card">
       {/* header：整行可点折叠 */}
       <button
         type="button"

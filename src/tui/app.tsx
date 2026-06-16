@@ -3,15 +3,15 @@ import { Box, useInput, useApp } from "ink";
 import { useClient } from "./hooks/useClient";
 import { useConnection } from "./hooks/useConnection";
 import { useTasks } from "./hooks/useTasks";
-import { useNowCards } from "./hooks/useNowCards";
+import { useNotifications } from "./hooks/useNotifications";
 import { Header } from "./components/Header";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
 import { TaskDetail } from "./components/TaskDetail";
 import { WorkflowList } from "./components/WorkflowList";
-import { NowList } from "./components/NowList";
+import { NotificationList } from "./components/NotificationList";
 
-const TABS = ["现在", "任务", "工作流"];
+const TABS = ["通知", "任务", "工作流"];
 
 interface AppProps {
   port: number;
@@ -21,7 +21,7 @@ export function App({ port }: AppProps) {
   const client = useClient(port);
   const connection = useConnection(client);
   const { tasks, loading: tasksLoading } = useTasks(client);
-  const { cards, loading: nowLoading } = useNowCards(client);
+  const { items: notifications, loading: notificationsLoading } = useNotifications(client);
   const [activeTab, setActiveTab] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const { exit } = useApp();
@@ -58,7 +58,7 @@ export function App({ port }: AppProps) {
 
       <Box flexDirection="column" flexGrow={1}>
         {activeTab === 0 ? (
-          <NowList cards={cards} loading={nowLoading} />
+          <NotificationList items={notifications} loading={notificationsLoading} />
         ) : activeTab === 1 ? (
           <>
             <TaskList tasks={tasks} selectedIndex={selectedIndex} loading={tasksLoading} />

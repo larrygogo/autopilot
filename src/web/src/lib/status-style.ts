@@ -103,14 +103,3 @@ export function toneToTextClass(tone: StatusTone): string {
     case "muted": return "text-muted-foreground";
   }
 }
-
-/** tailwind border class（左边框用于列表行）— 如 border-l-success */
-export function toneToBorderLeftClass(tone: StatusTone): string {
-  switch (tone) {
-    case "success": return "border-l-success";
-    case "destructive": return "border-l-destructive";
-    case "warning": return "border-l-warning";
-    case "accent": return "border-l-accent";
-    case "muted": return "border-l-foreground/40";
-  }
-}

@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "fs";
 import { createInterface } from "node:readline";
 import { AutopilotClient, DEFAULT_PORT } from "../client/index";
 import { readListenInfo } from "../daemon/pid";
-import type { Workspace } from "../core/workspaces";
+import type { Workspace } from "../core/sandbox/workspaces";
 import type { Requirement } from "../core/requirements";
 
 // ──────────────────────────────────────────────
@@ -292,7 +292,7 @@ export function registerRequirementCommands(program: Command): void {
         }
       }
 
-      // 5) 建 requirement
+      // 5) 建 requirement（停在 drafting；澄清依赖代码库 clone，须先确认代码库）
       try {
         const result = await client.createRequirement({
           project_id: projectId,
@@ -301,9 +301,47 @@ export function registerRequirementCommands(program: Command): void {
           spec_md: specMd,
         });
         const id = result.requirement.id;
-        console.log(`✓ 已创建需求 ${id} (clarifier 调查中)`);
+        if (workspaceId) {
+          // CLI 解析出了代码库（显式 -c / cwd 推断）= 已选择 → 自动开始澄清
+          await client.transitionRequirement(id, "clarifying");
+          console.log(`✓ 已创建需求 ${id}（代码库 ${workspaceId}，clarifier 调查中）`);
+        } else {
+          console.log(`✓ 已创建需求 ${id}（草稿，已预选项目默认代码库）`);
+          console.log(`  确认代码库后开始澄清：autopilot req clarify ${id}`);
+          console.log(`  换代码库：autopilot req set-workspaces ${id} <ws-id...>`);
+        }
       } catch (e: unknown) {
         console.error(`创建需求失败：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("clarify <id>")
+    .description("开始/恢复需求澄清（前置：需求已选代码库）；可换澄清 agent 的 provider/model 后重试")
+    .option("--provider <name>", "覆盖本需求的澄清 provider（如 kimi-code）")
+    .option("--model <model>", "覆盖本需求的澄清模型（省略走 provider 默认）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string; provider?: string; model?: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        // 先设需求级澄清覆盖（换模型重试用），再进澄清
+        if (opts.provider !== undefined || opts.model !== undefined) {
+          await client.updateRequirement(id, {
+            clarifier_provider: opts.provider ?? null,
+            clarifier_model: opts.model ?? null,
+          });
+          console.log(`✓ 已设澄清 agent：${opts.provider ?? "(继承)"}${opts.model ? " / " + opts.model : ""}`);
+        }
+        const { requirement } = await client.transitionRequirement(id, "clarifying");
+        console.log(
+          requirement.workspace_id
+            ? `✓ 需求 ${requirement.id} 已进入澄清（基于代码库 ${requirement.workspace_id}，AI 正在调查）`
+            : `✓ 需求 ${requirement.id} 已进入澄清（无代码库，纯文本模式）`,
+        );
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
         process.exit(3);
       }
     });
@@ -328,7 +366,15 @@ export function registerRequirementCommands(program: Command): void {
           ["标题", r.title],
           ["状态", r.status],
           ["项目", r.project_id],
-          ["工作区", r.workspace_id ?? "(未关联)"],
+          [
+            "代码库",
+            (() => {
+              // 集合平铺（主库概念已废除；workspace_id 只是缓存列，集合为空时兜底展示）
+              const ids = (r as { workspace_ids?: string[] }).workspace_ids ?? [];
+              const all = ids.length > 0 ? ids : r.workspace_id ? [r.workspace_id] : [];
+              return all.length > 0 ? all.join(" · ") : "(未关联)";
+            })(),
+          ],
           ["工作流", r.workflow ?? "dev（默认）"],
           ["关联任务", r.task_id ?? "(无)"],
           ["PR", r.pr_url ?? "(无)"],
@@ -363,6 +409,147 @@ export function registerRequirementCommands(program: Command): void {
       try {
         const { requirement } = await client.updateRequirement(id, { workflow });
         console.log(`✓ 需求 ${requirement.id} 工作流已设为 ${workflow}`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("set-workspaces <id> [workspace-ids...]")
+    .description("设置需求的代码库集合（整体替换；所有库平级、各自交付 PR；审批后冻结，failed 例外）")
+    .option("--none", "清空集合（无库需求：requires.git 为 optional/false 的工作流可走纯文本闭环）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, wsIds: string[], opts: { none?: boolean; port: string }) => {
+      // variadic 可选 + --none 显式空集：「忘了传」与「确认无库」必须是两个动作，防误清
+      if (wsIds.length === 0 && !opts.none) {
+        console.error("错误：未提供代码库 id。确认走无库请加 --none");
+        process.exit(2);
+      }
+      if (wsIds.length > 0 && opts.none) {
+        console.error("错误：--none 与代码库 id 互斥");
+        process.exit(2);
+      }
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement, workspace_ids } = await client.setRequirementWorkspaces(id, opts.none ? [] : wsIds);
+        console.log(
+          workspace_ids.length === 0
+            ? `✓ 需求 ${requirement.id} 已确认无代码库（纯文本闭环）`
+            : `✓ 需求 ${requirement.id} 代码库已设为 [${workspace_ids.join(", ")}]`,
+        );
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("questions <id>")
+    .description("列出需求的未决澄清问题（含建议选项）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { comments } = await client.listRequirementComments(id);
+        const open = comments.filter((c: { kind: string; parent_id: string | null; status: string }) => c.kind === "question" && c.parent_id === null && c.status !== "resolved");
+        if (open.length === 0) { console.log("（无未决问题）"); return; }
+        for (const q of open) {
+          console.log(`\n[${q.id}]\n${q.body}`);
+          if (q.suggestions?.length) console.log(`建议选项：${q.suggestions.join(" / ")}`);
+        }
+        console.log(`\n回答：autopilot req answer ${id} <question-id> "<回答>"`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("answer <id> <question-id> <text>")
+    .description("回答澄清问题（追加回复并标记已解决，AI 继续下一轮）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, questionId: string, text: string, opts: { port: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        await client.answerRequirementQuestion(id, questionId, text);
+        console.log(`✓ 已回答 ${questionId}，AI 继续澄清`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("approve <id>")
+    .description("审批通过：需求入队执行（对 spec 签字，入队后内容冻结）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement } = await client.enqueueRequirement(id);
+        console.log(`✓ 需求 ${requirement.id} 已审批入队（${requirement.status}），调度器将启动执行`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("accept <id>")
+    .description("验收通过（artifacts 交付的需求 → done；PR 交付以 GitHub merge 为准，此处拒绝）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string }) => {
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement: r } = await client.getRequirement(id);
+        if (r.status !== "awaiting_review") {
+          console.error(`错误：需求当前状态 ${r.status}，仅 awaiting_review（待验收）可执行验收`);
+          process.exit(2);
+        }
+        // 签字处唯一：有交付 PR 的需求以 GitHub merge 为验收信号（全部 PR merge 后 poller 自动 done）
+        const { sub_prs } = await client.listRequirementSubPrs(id).catch(() => ({ sub_prs: [] }));
+        const hasPr = (r.pr_number ?? 0) > 0 || !!r.pr_url || sub_prs.some((sp) => sp.pr_number > 0);
+        if (hasPr) {
+          console.error("错误：此需求交付 PR，验收以 GitHub merge 为准（签字处唯一）。");
+          console.error(`请去 merge 交付 PR，全部 merge 后需求自动转 done。${r.pr_url ? `\n  主 PR：${r.pr_url}` : ""}`);
+          process.exit(2);
+        }
+        const { requirement } = await client.transitionRequirement(id, "done");
+        console.log(`✓ 需求 ${requirement.id} 验收通过，已完成`);
+      } catch (e: unknown) {
+        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+        process.exit(3);
+      }
+    });
+
+  req
+    .command("reject <id>")
+    .description("验收驳回：注入反馈并转 fix_revision（修复轮按反馈重做后回到待验收）")
+    .requiredOption("-m, --message <reason>", "驳回理由（会喂给修复 agent）")
+    .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
+    .action(async (id: string, opts: { port: string; message: string }) => {
+      const reason = opts.message.trim();
+      if (!reason) {
+        console.error("错误：驳回理由不能为空");
+        process.exit(1);
+      }
+      const client = getClient(opts.port);
+      await ensureDaemon(client);
+      try {
+        const { requirement: r } = await client.getRequirement(id);
+        if (r.status !== "awaiting_review") {
+          console.error(`错误：需求当前状态 ${r.status}，仅 awaiting_review（待验收）可驳回`);
+          process.exit(2);
+        }
+        // comments.add(kind=feedback)：daemon 在 awaiting_review 自动转 fix_revision（与 Web/PR 驳回同管道）
+        await client.addRequirementFeedback(id, reason);
+        console.log(`✓ 需求 ${id} 已驳回，修复轮将按反馈重做（进度见 autopilot req show ${id}）`);
       } catch (e: unknown) {
         console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
         process.exit(3);

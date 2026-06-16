@@ -4,6 +4,7 @@ import { BaseProvider } from "./base";
 import type { AgentResult, RunOptions, ChatOptions, ChatResult } from "../types";
 import { createLogger } from "../../core/logger";
 import { AUTOPILOT_HOME } from "../../index";
+import { claudeDisallowFor, unknownCapabilities } from "../tool-capabilities";
 
 const agentLog = createLogger("agent.anthropic");
 
@@ -368,12 +369,19 @@ export class AnthropicProvider extends BaseProvider {
           if (m.subtype === "success") {
             text = (m.result as string | undefined) ?? "";
             sessionIdOut = m.session_id as string | undefined;
-            const u = m.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+            const u = m.usage as {
+              input_tokens?: number;
+              output_tokens?: number;
+              cache_creation_input_tokens?: number;
+              cache_read_input_tokens?: number;
+            } | undefined;
             const cost = m.total_cost_usd as number | undefined;
             if (u || typeof cost === "number") {
               usage = {
                 input_tokens: u?.input_tokens,
                 output_tokens: u?.output_tokens,
+                cache_creation_input_tokens: u?.cache_creation_input_tokens,
+                cache_read_input_tokens: u?.cache_read_input_tokens,
                 total_cost_usd: cost,
               };
             }
@@ -396,8 +404,8 @@ export class AnthropicProvider extends BaseProvider {
   async run(prompt: string, options?: RunOptions): Promise<AgentResult> {
     // cwd 变 → 弃旧 session 开新会话，避免 claude --resume 续到已不存在的旧目录报
     // "No conversation found"。共用沙盒模型下同一任务各 phase 的 cwd 是同一个共用 clone、cwd
-    // 稳定，故 session 跨 phase 复用（想要的会话连续性）；重跑虽 cwd 路径不变但底层是新 clone，
-    // 由 resetTaskForRerun 显式 closeAgents 清 session（见 task-factory）。
+    // 稳定，故 session 跨 phase 复用（想要的会话连续性）；需求级重跑 = 新 run（新 taskId 新 cwd），
+    // 且 startNewRunForRequirement 还显式 closeAgents 清旧 session（见 task-factory）。
     if (options?.cwd !== this.lastCwd) {
       this.sessionId = undefined;
       this.lastCwd = options?.cwd;
@@ -414,7 +422,18 @@ export class AnthropicProvider extends BaseProvider {
     // 禁用 Claude 内建 AskUserQuestion：autopilot 用 MCP ask_user 接管人机交互通道。
     const mcpConfigPath = resolveMcpConfigPath();
     const allowedTools = mcpConfigPath ? ["mcp__autopilot__*"] : undefined;
-    const disallowedTools = mcpConfigPath ? ["AskUserQuestion"] : undefined;
+    const disallowedTools: string[] = mcpConfigPath ? ["AskUserQuestion"] : [];
+
+    // 细粒度工具授权（第二刀）：phase 声明 tools 时，拒掉未授权的 claude 内建工具（disallow 补集）。
+    // claude 的 --allowed-tools 是「免确认」非「只留这些」，真限制靠 --disallowed-tools。
+    const toolCaps = Array.isArray(this.config["tools"]) ? (this.config["tools"] as string[]) : undefined;
+    if (toolCaps) {
+      const unknown = unknownCapabilities(toolCaps);
+      if (unknown.length > 0) {
+        agentLog.warn("agent tools 含未知能力名（已忽略）：%s", unknown.join(", "));
+      }
+      disallowedTools.push(...claudeDisallowFor(toolCaps));
+    }
 
     const argv = buildClaudeArgv({
       model,
@@ -423,7 +442,7 @@ export class AnthropicProvider extends BaseProvider {
       resumeSessionId: this.sessionId,
       mcpConfigPath,
       allowedTools,
-      disallowedTools,
+      disallowedTools: disallowedTools.length > 0 ? disallowedTools : undefined,
     });
 
     let text = "";
@@ -447,12 +466,19 @@ export class AnthropicProvider extends BaseProvider {
           if (m.subtype === "success") {
             text = (m.result as string | undefined) ?? "";
             sessionIdOut = m.session_id as string | undefined;
-            const u = m.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+            const u = m.usage as {
+              input_tokens?: number;
+              output_tokens?: number;
+              cache_creation_input_tokens?: number;
+              cache_read_input_tokens?: number;
+            } | undefined;
             const cost = m.total_cost_usd as number | undefined;
             if (u || typeof cost === "number") {
               usage = {
                 input_tokens: u?.input_tokens,
                 output_tokens: u?.output_tokens,
+                cache_creation_input_tokens: u?.cache_creation_input_tokens,
+                cache_read_input_tokens: u?.cache_read_input_tokens,
                 total_cost_usd: cost,
               };
             }

@@ -265,6 +265,32 @@ export function filterLinesToWindow(lines: string[], startMs: number, endMs: num
   return out;
 }
 
+/**
+ * 去掉 live 增量行（WS 缓冲）与轮询全量切片的重叠：live 缓冲不随 4s 全量轮询
+ * 清空（清空有竞态丢行风险），改在渲染层把时间戳 <= base 最后一条时间戳的
+ * live 行丢弃（无时间戳的延续行跟随前一条有时间戳行的去留）。同秒边界的新行
+ * 可能被多丢一次显示，下一轮全量轮询即补齐——优先保证不重复。
+ */
+export function dropLiveOverlap(base: string[], live: string[]): string[] {
+  let lastTs: number | null = null;
+  for (let i = base.length - 1; i >= 0; i--) {
+    const ts = parseLineTs(base[i]);
+    if (ts !== null) {
+      lastTs = ts;
+      break;
+    }
+  }
+  if (lastTs === null) return live;
+  const out: string[] = [];
+  let keep = false;
+  for (const line of live) {
+    const ts = parseLineTs(line);
+    if (ts !== null) keep = ts > lastTs;
+    if (keep) out.push(line);
+  }
+  return out;
+}
+
 export interface AgentCallLike {
   seq: number;
   ts: string;            // ISO（调用完成时刻）

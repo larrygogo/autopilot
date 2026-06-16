@@ -9,8 +9,8 @@ import {
   listWorkflows as registryListWorkflows,
   getWorkflow as registryGetWorkflow,
   getWorkflowYaml as registryGetWorkflowYaml,
-} from "../core/registry";
-import { listWorkflowsInDb } from "../core/workflows";
+} from "../core/workflow/registry";
+import { listWorkflowsInDb } from "../core/workflow/workflows";
 
 export interface WorkflowCmdContext {
   getClient: (opts: { port: string }) => AutopilotClient;
@@ -258,7 +258,7 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
     .description("用 repo 内 examples/workflows/<name>/ 覆盖 ~/.autopilot/workflows/<name>/ (老用户拿 dev workflow bug fix 用)")
     .option("--apply", "真正写入；不带此 flag 时只 dry-run 显示 diff")
     .action(async (name: string, opts: { apply: boolean }) => {
-      const { diffWorkflowTemplate, syncWorkflowTemplate } = await import("../core/workflow-templates");
+      const { diffWorkflowTemplate, syncWorkflowTemplate } = await import("../core/workflow/templates");
       let entries;
       try {
         entries = diffWorkflowTemplate(name);

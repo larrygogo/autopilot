@@ -125,20 +125,30 @@ function renderTokens(tokens: Tok[], highlightFn?: string): React.ReactNode[] {
 
 interface Props {
   code: string;
+  /** 文件名（按扩展名决定是否做 TS/JS 语法高亮与折行策略；不传则默认按代码处理） */
+  filename?: string;
   /** 若提供，代码里 run_<name> 会以主题色高亮 */
   highlightPhase?: string | null;
   /** 自动滚到 run_<name> 所在行 */
   scrollToPhase?: string | null;
 }
 
-export function CodeViewer({ code, highlightPhase, scrollToPhase }: Props) {
+/** 只有 TS/JS 族扩展名才跑内置 tokenizer——对 md/log/yaml 等跑 TS 高亮
+ *  会乱标色（反引号当模板字符串、数字标橙），且 token 切碎影响选中复制 */
+const CODE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
+
+export function CodeViewer({ code, filename, highlightPhase, scrollToPhase }: Props) {
+  const isCode = filename === undefined || CODE_EXT_RE.test(filename);
   const lines = useMemo(() => code.split("\n"), [code]);
-  const tokens = useMemo(() => tokenize(code), [code]);
+  const tokens = useMemo(() => (isCode ? tokenize(code) : []), [code, isCode]);
   const lineCount = lines.length;
   const digitWidth = String(lineCount).length;
 
-  // 把 tokens 按行切开
-  const lineTokens = useMemo(() => splitByLine(tokens), [tokens]);
+  // 把 tokens 按行切开；纯文本不分词，整行作为单 plain token（渲染快、复制干净）
+  const lineTokens = useMemo<Tok[][]>(
+    () => (isCode ? splitByLine(tokens) : lines.map((l) => (l ? [{ type: "plain" as const, value: l }] : []))),
+    [tokens, lines, isCode],
+  );
 
   const ref = React.useRef<HTMLDivElement>(null);
   const lineRefs = React.useRef<Array<HTMLDivElement | null>>([]);
@@ -162,15 +172,18 @@ export function CodeViewer({ code, highlightPhase, scrollToPhase }: Props) {
         <div
           key={i}
           ref={(el) => { lineRefs.current[i] = el; }}
-          className="flex whitespace-pre hover:bg-accent/40"
+          // \u4EE3\u7801\uFF1A\u4E0D\u6298\u884C\uFF08\u6A2A\u5411\u6EDA\u52A8\uFF09\uFF0C\u884C\u53F7 sticky \u56FA\u5B9A\u5728\u5DE6\u7F18\u4E0D\u968F\u6EDA\u52A8\u6D88\u5931\uFF1B
+          // \u6587\u672C\uFF08md/log \u7B49\uFF09\uFF1Apre-wrap \u6298\u884C\uFF0C\u884C\u53F7 self-start \u9489\u5728\u884C\u5757\u9876\u90E8\u2014\u2014
+          // \u6298\u884C\u624D\u662F\u300C\u884C\u53F7\u4E0E\u5185\u5BB9\u9519\u4F4D\u300D\u89C2\u611F\u7684\u6839\u6E90\uFF08\u4E00\u884C\u5185\u5BB9\u5360\u591A\u884C\u9AD8\uFF09
+          className={cn("flex hover:bg-accent/40", isCode ? "whitespace-pre" : "whitespace-pre-wrap")}
         >
           <span
-            className="select-none pr-3 pl-2 text-right text-muted-foreground/70"
+            className="sticky left-0 shrink-0 select-none self-start border-r border-border/60 bg-muted/80 pr-2 pl-2 text-right text-muted-foreground/70 backdrop-blur-sm"
             style={{ width: `${digitWidth + 2}ch` }}
           >
             {i + 1}
           </span>
-          <span className="flex-1 pr-3 text-foreground">
+          <span className={cn("flex-1 pl-2 pr-3 text-foreground", !isCode && "min-w-0 break-words")}>
             {lt.length > 0 ? renderTokens(lt, highlightPhase ?? undefined) : "\u00A0"}
           </span>
         </div>

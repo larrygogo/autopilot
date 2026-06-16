@@ -78,7 +78,7 @@ function estimateTokens(messages: MessageParam[]): number {
   return Math.ceil(total);
 }
 
-function trimMessagesToFitContext(
+export function trimMessagesToFitContext(
   messages: MessageParam[],
   model: string,
   currentInputTokens: number,
@@ -86,16 +86,26 @@ function trimMessagesToFitContext(
   const limit = (CONTEXT_LIMITS[model] ?? DEFAULT_CONTEXT_LIMIT) * 0.8;
   if (currentInputTokens <= limit) return messages;
 
-  // 裁剪策略：保留首条消息（system/user prompt）+ 最近 N 轮工具调用
-  const first = messages.slice(0, 1);
-  const remaining = messages.slice(1);
+  // 保护前缀：system（若有）+ 紧随的首条 user（= 任务 prompt，丢了等于丢任务），永不裁。
+  let prefixLen = 0;
+  if (messages[prefixLen]?.role === "system") prefixLen++;
+  if (messages[prefixLen]?.role === "user") prefixLen++;
+  const prefix = messages.slice(0, prefixLen);
+  const remaining = messages.slice(prefixLen);
 
-  // 从最旧轮次开始丢弃（每轮 = assistant + user/tool_result）
-  while (remaining.length > 2 && estimateTokens(remaining) > limit - 8_000) {
-    remaining.splice(0, 2);
+  // 从最旧逐条丢弃。关键：每丢一条后，把因此变成 orphan 的 tool_result（其对应的
+  // assistant tool_call 已被丢）一并清掉——否则 OpenAI 兼容端（kimi 等）会因 tool 消息
+  // 的 tool_call_id 在前文 tool_calls 里找不到而报 400「tool_call_id is not found」。
+  // 旧实现按固定 2 条成对 splice，被首条 user 错位后会把 tool_result 留成孤儿（实测
+  // dev-kimi design 读大仓库致 input 超限触发裁剪 → 400 → 阶段误失败）。
+  while (remaining.length > 0 && estimateTokens([...prefix, ...remaining]) > limit - 8_000) {
+    remaining.shift();
+    while (remaining.length > 0 && remaining[0]?.role === "tool_result") {
+      remaining.shift();
+    }
   }
 
-  return [...first, ...remaining];
+  return [...prefix, ...remaining];
 }
 
 // ── 重试逻辑 ──
@@ -213,6 +223,12 @@ export class ApiAgentLoop {
         3,
         runOpts?.signal,
       );
+
+      // 本轮完整文本一次性记录（取代逐碎片 onStream 日志，避免几百条碎片行）
+      // reasoningFallback=true 时 text 是推理内容回退，不记录（避免把长推理文写入运行日志）
+      if (response.text && !response.reasoningFallback) {
+        log.info("[API] 本轮输出：%s", response.text);
+      }
 
       // 累计 usage
       usage.input_tokens += response.usage.input_tokens;

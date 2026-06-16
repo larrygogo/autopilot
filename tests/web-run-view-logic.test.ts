@@ -97,7 +97,7 @@ describe("extractLevel（从 PhaseLogsViewer 平移）", () => {
 
 // ── 线性执行时间线 ────────────────────────────────────────────
 
-import { buildTimeline, parseLineTs, filterLinesToWindow, assignAgentCalls } from "../src/web/src/lib/run-view-logic";
+import { buildTimeline, parseLineTs, filterLinesToWindow, assignAgentCalls, dropLiveOverlap } from "../src/web/src/lib/run-view-logic";
 
 it("buildTimeline: 驳回重做按发生顺序铺开，每轮独立 + 未执行 phase 进 pending", () => {
   const T = 1781000000000;
@@ -184,4 +184,31 @@ it("assignAgentCalls: 按 phase + 时间窗分发；窗口对不上时落到该 
   const byRun = assignAgentCalls(calls, runs);
   expect(byRun[runs[0].key]?.map((c) => c.seq)).toEqual([1]);
   expect(byRun[runs[1].key]?.map((c) => c.seq)).toEqual([2, 3]);
+});
+
+it("dropLiveOverlap: live 缓冲与轮询全量重叠的行不重复渲染（dogfood：块内日志成对重复）", () => {
+  const base = [
+    "2026-06-12 13:19:30 [INFO] [开发] tool_result: bun test 13 pass",
+    "2026-06-12 13:19:34 [INFO] [开发] assistant: 全量通过",
+    "多行延续（无时间戳）",
+  ];
+  const live = [
+    "2026-06-12 13:19:30 [INFO] [开发] tool_result: bun test 13 pass", // 已在 base
+    "2026-06-12 13:19:34 [INFO] [开发] assistant: 全量通过",            // 已在 base
+    "多行延续（无时间戳）",                                              // 跟随上一条 → 也丢
+    "2026-06-12 13:19:40 [INFO] [开发] tool: Read",                     // base 之后的新行 → 保留
+    "  新行的延续",                                                      // 跟随保留
+  ];
+  expect(dropLiveOverlap(base, live)).toEqual([
+    "2026-06-12 13:19:40 [INFO] [开发] tool: Read",
+    "  新行的延续",
+  ]);
+});
+
+it("dropLiveOverlap: base 无时间戳行（空文件/加载中）→ live 原样保留", () => {
+  expect(dropLiveOverlap([], ["2026-06-12 13:19:40 [INFO] x", "y"])).toEqual([
+    "2026-06-12 13:19:40 [INFO] x",
+    "y",
+  ]);
+  expect(dropLiveOverlap(["no ts line"], ["a"])).toEqual(["a"]);
 });

@@ -6,8 +6,8 @@
  * 这里复用相同模式）。错误透传由 transport 层负责。
  */
 
-import { getWorkflow as registryGetWorkflow, buildTransitions, getTerminalStates } from "../core/registry";
-import { getWorkflowFromDb } from "../core/workflows";
+import { getWorkflow as registryGetWorkflow, buildTransitions, getTerminalStates } from "../core/workflow/registry";
+import { getWorkflowFromDb } from "../core/workflow/workflows";
 import type { GraphData, GraphNode, GraphEdge } from "./protocol";
 
 export class WorkflowViewError extends Error {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { _setDbForTest, initDb, getTask } from "../src/core/db";
-import { _clearRegistry, register } from "../src/core/registry";
+import { _clearRegistry, register } from "../src/core/workflow/registry";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate002 } from "../src/migrations/002-schedules";
 import { up as migrate004 } from "../src/migrations/004-repos";
@@ -13,12 +13,13 @@ import { up as migrate019 } from "../src/migrations/019-task-requirement-id";
 import { up as migrate021 } from "../src/migrations/021-requirement-comments";
 import { up as migrate024 } from "../src/migrations/024-codebase-to-workspace";
 import { up as migrate033 } from "../src/migrations/033-workspace-remote-url";
-import { createWorkspace } from "../src/core/workspaces";
+import { up as migrate044 } from "../src/migrations/044-task-run-columns";
+import { createWorkspace } from "../src/core/sandbox/workspaces";
 import { createProject } from "../src/core/projects";
 import { createRequirement } from "../src/core/requirements";
-import { startTaskFromTemplate } from "../src/core/task-factory";
+import { startTaskFromTemplate } from "../src/core/task/factory";
 import { setup_req_dev_task } from "../examples/workflows/req_dev/workflow";
-import type { WorkflowDefinition } from "../src/core/registry";
+import type { WorkflowDefinition } from "../src/core/workflow/registry";
 
 describe("req_dev e2e smoke", () => {
   let sqlite: Database;
@@ -39,6 +40,7 @@ describe("req_dev e2e smoke", () => {
     migrate021(sqlite);
     migrate024(sqlite);
     migrate033(sqlite);
+    migrate044(sqlite);
 
     // 创建测试 project + codebase
     createProject({ id: "proj-001", name: "test-proj" });

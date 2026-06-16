@@ -329,6 +329,57 @@ export function saveProvider(name: ProviderName, cfg: ProviderConfig): void {
 }
 
 // ──────────────────────────────────────────────
+// 生命周期 agent 配置（lifecycle: 段）
+//   平台固定生命周期阶段（clarify / extract / fix / author）的 agent override。
+//   不属于任何工作流（数据层/平台），全局生效。字段省略走代码兜底。
+// ──────────────────────────────────────────────
+
+const LIFECYCLE_NAME_RE = /^[a-z][a-z0-9_-]*$/;
+
+/** 读 config.yaml `lifecycle:` 段 → { clarify: {...}, ... }（用户显式写的 override，未写=空）。 */
+export function loadLifecycleConfig(): Record<string, Record<string, unknown>> {
+  return loadSection("lifecycle");
+}
+
+/** 写/删某生命周期 agent 的 override；cfg=null 删整段回退默认。保留 YAML 注释与其他段。 */
+export function saveLifecycleAgent(name: string, cfg: Record<string, unknown> | null): void {
+  if (!LIFECYCLE_NAME_RE.test(name)) {
+    throw new Error(`非法生命周期 agent 名：${name}`);
+  }
+  const doc = loadDocument();
+  if (cfg === null) {
+    doc.deleteIn(["lifecycle", name]);
+    const node = doc.getIn(["lifecycle"]) as { items?: unknown[] } | undefined;
+    if (node && Array.isArray(node.items) && node.items.length === 0) doc.deleteIn(["lifecycle"]);
+  } else {
+    doc.setIn(["lifecycle", name], stripUndefined(cfg));
+  }
+  writeDocument(doc);
+}
+
+const PROVIDER_NAME_RE = /^[a-z0-9_-]+$/i;
+
+/**
+ * 字段级写入某 provider 的 default_model（merge-safe：只动 default_model 单键，
+ * 保留 base_url / env_key_name 等兄弟字段与 YAML 注释）。服务任意已注册 provider
+ * （官方 + compat），故只做格式校验，业务白名单（哪些名合法）由调用方/RPC 层把关。
+ * model 为空 = 删字段回退到预置默认。
+ */
+export function setProviderDefaultModel(name: string, model?: string): void {
+  if (!name || !PROVIDER_NAME_RE.test(name)) {
+    throw new Error(`非法 provider 名：${name}`);
+  }
+  const doc = loadDocument();
+  const trimmed = model?.trim();
+  if (trimmed) {
+    doc.setIn(["providers", name, "default_model"], trimmed);
+  } else {
+    doc.deleteIn(["providers", name, "default_model"]);
+  }
+  writeDocument(doc);
+}
+
+// ──────────────────────────────────────────────
 // git 凭据配置
 // ──────────────────────────────────────────────
 
