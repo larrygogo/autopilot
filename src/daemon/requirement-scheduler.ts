@@ -11,6 +11,7 @@ import type { Requirement } from "../core/requirements";
 import { listComments } from "../core/requirements/comments";
 import { getTask } from "../core/db";
 import { startTaskFromTemplate, startNewRunForRequirement } from "../core/task/factory";
+import { cancelTaskAction } from "./task-actions";
 import { createLogger } from "../core/logger";
 import { loadSchedulerConfig } from "../core/config";
 
@@ -25,15 +26,50 @@ let _handler: ((event: AutopilotEvent) => void) | null = null;
 type TaskStarters = {
   startTaskFromTemplate: typeof startTaskFromTemplate;
   startNewRunForRequirement: typeof startNewRunForRequirement;
+  cancelTaskAction: typeof cancelTaskAction;
 };
-let _starters: TaskStarters = { startTaskFromTemplate, startNewRunForRequirement };
+let _starters: TaskStarters = { startTaskFromTemplate, startNewRunForRequirement, cancelTaskAction };
 
 /** 仅测试用：替换起任务 / 重跑实现。传 null 恢复真实实现。 */
 export function _setTaskStartersForTest(s: Partial<TaskStarters> | null): void {
   _starters = {
     startTaskFromTemplate: s?.startTaskFromTemplate ?? startTaskFromTemplate,
     startNewRunForRequirement: s?.startNewRunForRequirement ?? startNewRunForRequirement,
+    cancelTaskAction: s?.cancelTaskAction ?? cancelTaskAction,
   };
+}
+
+/**
+ * 起 run 成功但「置 running」失败的善后（最常见：clone/起 run 期间用户 cancel，使
+ * queued→running 撞非法转换 / CAS 冲突）。
+ * - 需求已终态（cancelled/failed/done）→ 刚起的 run 是孤儿，cancel 止损 + 清 task_id 指针，
+ *   避免 run/PR 跑在已取消的需求上。
+ * - 仍可调度（queued）→ 回滚 ready + schedule_error（失败可见）。
+ * 返回是否占用并发槽（孤儿止损 / 回滚都=未占用）。
+ */
+function reconcileStartFailure(reqId: string, taskId: string, label: string, cause: string): boolean {
+  const cur = getRequirementById(reqId);
+  // 走到这里 = 起 run 成功但 setRequirementStatus(running) 抛错（CAS 冲突 / 非法转换）。
+  // 唯一无害情形 = 需求仍 queued（本轮调度可正常回滚 ready 重试）。任何「已被推走」的状态
+  // （terminal / ready / awaiting_* …，都不在 queued→running 合法范围）都意味着刚起的 run 是
+  // 孤儿——它跑在与需求状态机脱节的轨道上（如 ready→running/done 全非法、reportRunOutcome 会
+  // 跳过无人收尾，需求卡死且活跃 run 守卫 409 挡住重入队）。必须 cancel 止损 + 清 task_id。
+  if (cur && cur.status !== "queued") {
+    log.warn("tick: %s 起 run 后需求已非 queued(%s)，cancel 孤儿 run %s 止损（%s）", label, cur.status, taskId, cause);
+    try { _starters.cancelTaskAction(taskId); }
+    catch (ce: unknown) { log.error("tick: cancel 孤儿 run %s 失败: %s", taskId, (ce as Error).message); }
+    try { if (cur.task_id === taskId) updateRequirement(reqId, { task_id: null }); } catch { /* best-effort */ }
+    return false;
+  }
+  // 仍 queued（或需求已不存在）：回滚 ready + schedule_error 让用户可见可重试
+  try {
+    updateRequirement(reqId, { schedule_error: `${label}：${cause}` });
+    if (cur?.status === "queued") setRequirementStatus(reqId, "ready");
+    emit({ type: "requirement:schedule-error", payload: { id: reqId, reason: `${label}：${cause}` } });
+  } catch (e: unknown) {
+    log.error("tick: %s 善后回滚失败 %s: %s", label, reqId, (e as Error).message);
+  }
+  return false;
 }
 
 /**
@@ -160,30 +196,39 @@ async function scheduleOne(candidate: Requirement): Promise<boolean> {
   // 首次执行 task_id 为 null 走下面新建。
   const existing = candidate.task_id ? getTask(candidate.task_id) : null;
   if (existing) {
+    let task;
     try {
-      const task = await _starters.startNewRunForRequirement(candidate.id, {
+      task = await _starters.startNewRunForRequirement(candidate.id, {
         requirement,
         title: candidate.title,
         // failed 后用户可换工作流再重试：新 run 全新 clone + 全新状态机，换流程是干净的
         workflow: reqWorkflow,
       });
-      // schedule_error 不在此处盲清：startNewRunForRequirement 内部负责（删远程分支真失败
-      // 时它写入的 RERUN-07 根因要保留，盲清会把刚 surface 的失败原因抹掉）
-      setRequirementStatus(candidate.id, "running");
-      log.info("tick: 重跑 requirement %s → 新 run %s（旧 run %s 历史保留）on workspace %s",
-        candidate.id, task.id, existing.id, wsAlias);
-      return true;
     } catch (e: unknown) {
+      // 起新 run 本身失败（此时无孤儿 run，task_id 仍指旧 run）：回滚 ready + schedule_error
       const msg = (e as Error).message;
       log.error("tick: 重跑失败 candidate=%s: %s", candidate.id, msg);
       try {
         updateRequirement(candidate.id, { schedule_error: `重跑失败：${msg}` });
-        setRequirementStatus(candidate.id, "ready");
+        if (getRequirementById(candidate.id)?.status === "queued") setRequirementStatus(candidate.id, "ready");
         emit({ type: "requirement:schedule-error", payload: { id: candidate.id, reason: `重跑失败：${msg}` } });
       } catch (rollbackErr: unknown) {
         log.error("tick: 重跑回滚失败 %s: %s", candidate.id, (rollbackErr as Error).message);
       }
       return false;
+    }
+    // 新 run 已起（startNewRunForRequirement 内部已写 task_id=新 run）。置 running 可能撞并发
+    // cancel（queued→cancelled 期间）→ 非法/CAS 抛错 → reconcile 止损刚起的孤儿 run。
+    // schedule_error 不在此处盲清：startNewRunForRequirement 内部负责（删远程分支真失败时它写入的
+    // RERUN-07 根因要保留，盲清会把刚 surface 的失败原因抹掉）。
+    try {
+      setRequirementStatus(candidate.id, "running");
+      log.info("tick: 重跑 requirement %s → 新 run %s（旧 run %s 历史保留）on workspace %s",
+        candidate.id, task.id, existing.id, wsAlias);
+      return true;
+    } catch (e: unknown) {
+      log.error("tick: 重跑置 running 失败 %s: %s", candidate.id, (e as Error).message);
+      return reconcileStartFailure(candidate.id, task.id, "重跑", (e as Error).message);
     }
   }
 
@@ -221,11 +266,14 @@ async function scheduleOne(candidate: Requirement): Promise<boolean> {
       task.id,
       wsAlias,
     );
+    return true;
   } catch (e: unknown) {
+    // 置 running 失败：最常见是 clone await 期间用户 cancel（queued→cancelled 非法/CAS 冲突），
+    // 此时 task 已起 + task_id 已写（216 非 CAS 写入）→ 孤儿 run。reconcile 止损：终态则
+    // cancel 孤儿 + 清 task_id；仍 queued 则回滚 ready。不再「只 log 然后 return true」留孤儿。
     log.error("tick: 写回 task_id 或 setStatus running 失败 %s: %s", candidate.id, (e as Error).message);
+    return reconcileStartFailure(candidate.id, task.id, "启动", (e as Error).message);
   }
-  // task 已实际启动，即使写回失败也占用了一个并发槽
-  return true;
 }
 
 export function initRequirementScheduler(): void {

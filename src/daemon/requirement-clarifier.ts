@@ -74,6 +74,21 @@ export function _setBuildAgentFnForTest(fn: BuildAgentFn | null): void {
 /** 测试用：直接调用 callClaude 以验证有 cwd 时的 context 注入逻辑（绕过 _runClarifierRoundInner 的 clone 步骤） */
 export const _callClaudeForTest: ClarifyFn = (...args) => callClaude(...args);
 
+// 单次 LLM 调用 idle（连续无输出）上限：超时 kill 子进程 / abort 流，让调用 reject 而非
+// 永久挂起（否则 runClarifierRound 的 finally 永不跑、_inflightRounds 锁永不释放、所有
+// question-resolved / retry / watchdog 触发都命中"已在跑跳过"成 no-op，澄清彻底死锁）。
+const CLARIFIER_IDLE_TIMEOUT_MS = 120_000;
+// 整轮总时长兜底：覆盖 LLM 之外（clone / 写库等）的挂死，强制释放锁。
+const CLARIFIER_ROUND_TIMEOUT_MS = 360_000;
+// 总超时先 abort 轮级 controller（让 inner 的 LLM 调用 reject、走自己的 !result 收尾路径
+// 单次写 error），再宽限这段时间没收尾（非 LLM 挂死）才硬 reject 兜底释放锁。abort 优先
+// 于 reject 是为了让 inner 自己 settle race、避免 outer catch 与 inner !result 双重 emit。
+const CLARIFIER_ABORT_GRACE_MS = 15_000;
+
+// 轮级取消令牌（reqId → controller）：总超时中止本轮进行中的 LLM 调用。callClaude 按 reqId
+// 取当前轮的 signal 传给 agent.chat/run，无需改 _clarifyFn 签名。
+const _roundAbort = new Map<string, AbortController>();
+
 async function callClaude(
   prompt: string,
   reqId: string,
@@ -98,7 +113,13 @@ async function callClaude(
   if (resolvedProvider === "anthropic") {
     // Anthropic：chat() 已实现，支持 providerSessionId 续 session。
     // cwd = 需求级浅 clone 根（如有，各库在子目录）：agent 可用读类工具自查代码后再提问
-    const result = await agent.chat(prompt, { providerSessionId: sessionRef, cwd });
+    // timeout = idle-kill（每条 stdout 续命，不误杀慢任务）；signal = 轮级总超时硬中止
+    const result = await agent.chat(prompt, {
+      providerSessionId: sessionRef,
+      cwd,
+      timeout: CLARIFIER_IDLE_TIMEOUT_MS,
+      signal: _roundAbort.get(reqId)?.signal,
+    });
     const rawText = result.text.trim();
     if (!rawText) throw new Error("clarifier agent 返回空");
     return { rawText, newSessionRef: result.providerSessionId };
@@ -112,9 +133,13 @@ async function callClaude(
     // cwd 不存在（纯文本模式）时用 tmpdir() 兜底——API loop 仍能初始化，
     // ToolExecutor 的 sandboxRoot 指向系统临时目录（agent 只读 prompt 不需要访问代码）。
     const sandboxDir = cwd ?? tmpdir();
+    // API loop 只认 signal（不读 timeout）：用轮级总超时 signal 中止挂死的 fetch / 流。
+    // 不再用 per-call 120s 硬墙——agentic clarifier（max_turns 自主读仓库）正常探索可能
+    // 超 120s 仍在推进，会被误杀；轮级 360s 总上限足够宽松且仍兜住真挂死。
+    const signal = _roundAbort.get(reqId)?.signal;
     const result = await runWithTaskContext(
-      { taskId: `clarify-${reqId}`, phase: "clarifying", sandboxDir },
-      () => agent.run(prompt, cwd ? { cwd } : undefined),
+      { taskId: `clarify-${reqId}`, phase: "clarifying", sandboxDir, signal },
+      () => agent.run(prompt, { ...(cwd ? { cwd } : {}), signal }),
     );
     const rawText = result.text.trim();
     if (!rawText) throw new Error("clarifier agent 返回空");
@@ -499,9 +524,43 @@ export async function runClarifierRound(reqId: string): Promise<void> {
     return;
   }
   _inflightRounds.add(reqId);
+  const roundController = new AbortController();
+  _roundAbort.set(reqId, roundController);
+  let abortTimer: ReturnType<typeof setTimeout> | undefined;
+  let rejectTimer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await _runClarifierRoundInner(reqId);
+    // 总时长兜底（两段）：到点先 abort 轮级 controller 中止进行中的 LLM 调用——inner 的调用随之
+    // reject、走自己的 !result 路径单次收尾（race 由 inner resolve 赢，outer catch 不触发 →
+    // 不双重 emit）。再宽限 GRACE 仍未 settle（非 LLM 挂死、abort 无效）才硬 reject 兜底，确保
+    // finally 一定释放锁。
+    const total = new Promise<never>((_, reject) => {
+      abortTimer = setTimeout(() => {
+        roundController.abort();
+        rejectTimer = setTimeout(
+          () => reject(new Error(`澄清轮超时（${(CLARIFIER_ROUND_TIMEOUT_MS + CLARIFIER_ABORT_GRACE_MS) / 1000}s 未完成），强制结束以释放锁`)),
+          CLARIFIER_ABORT_GRACE_MS,
+        );
+      }, CLARIFIER_ROUND_TIMEOUT_MS);
+    });
+    await Promise.race([_runClarifierRoundInner(reqId), total]);
+  } catch (e: unknown) {
+    // #6 错误可见化：inner 内部已处理 LLM 失败（写 clarifier_error 后 return，不抛）；走到
+    // 这里的是 done-path 写库异常（setRequirementStatus CAS 冲突 / createComment 等）或总超时
+    // 等未处理异常。写 clarifier_error 让前端从死转圈切到重试卡，而非静默卡在「AI 正在分析」。
+    // 仅当需求仍在 clarifying 才写——已被并发写者推走（CAS 冲突）是 benign race，静默。
+    const reason = e instanceof Error ? e.message : String(e);
+    log.error("clarifier: req=%s 轮异常（未被 inner 处理）: %s", reqId, reason);
+    try {
+      const cur = getRequirementById(reqId);
+      if (cur?.status === "clarifying") {
+        updateRequirement(reqId, { clarifier_error: `澄清轮异常：${reason}` });
+        emit({ type: "requirement:clarifier-error", payload: { id: reqId, reason } });
+      }
+    } catch { /* best-effort：写错误本身失败不再抛，避免遮蔽原因 */ }
   } finally {
+    if (abortTimer) clearTimeout(abortTimer);
+    if (rejectTimer) clearTimeout(rejectTimer);
+    _roundAbort.delete(reqId);
     _inflightRounds.delete(reqId);
     // 兜底：inner 抛错跳过 endRound 时清理。Map 里没 entry 时是 no-op。
     endRound(reqId, "errored");
@@ -695,11 +754,12 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
 
   if (!result) {
     const reason = lastError?.message ?? "unknown error";
-    updateRequirement(reqId, { clarifier_error: reason });
-    emit({
-      type: "requirement:clarifier-error",
-      payload: { id: reqId, reason },
-    });
+    // 仅当需求仍在 clarifying 才写/emit error——若已被并发推走（总超时后 outer catch 已处理 /
+    // 用户 cancel / finish）则静默，避免对已离开澄清的需求写陈旧 error 或与 outer catch 双重 emit。
+    if (getRequirementById(reqId)?.status === "clarifying") {
+      updateRequirement(reqId, { clarifier_error: reason });
+      emit({ type: "requirement:clarifier-error", payload: { id: reqId, reason } });
+    }
     endRound(reqId, "errored");
     return;
   }

@@ -206,4 +206,77 @@ describe("tick 全局并发上限（基础语义）", () => {
     expect(req?.status).toBe("ready");
     expect(req?.schedule_error).toContain("sandbox 建立失败");
   });
+
+  it("起任务期间需求被并发 cancel → 置 running 撞非法转换 → reconcile cancel 孤儿 run + 清 task_id（#7）", async () => {
+    const id = nextRequirementId();
+    createRequirement({ id, project_id: "proj-001", workspace_id: "cb-001", title: "cancel-race" });
+    pushTo(id, "queued");
+
+    const cancelledRuns: string[] = [];
+    _setTaskStartersForTest({
+      startTaskFromTemplate: async (opts) => {
+        // 模拟 clone await 期间用户 cancel：直接落 cancelled（模拟并发已发生）
+        db.run("UPDATE requirements SET status='cancelled' WHERE id=?", [String(opts.requirement_id)]);
+        return { id: `tsk-${opts.requirement_id}` } as unknown as Task;
+      },
+      cancelTaskAction: (taskId: string) => {
+        cancelledRuns.push(taskId);
+        return { from: "running_design", to: "cancelled" };
+      },
+    });
+
+    await tick();
+
+    // 孤儿 run 被 cancel 止损，不留 run/PR 跑在已 cancelled 的需求上
+    expect(cancelledRuns).toEqual([`tsk-${id}`]);
+    const req = getRequirementById(id);
+    expect(req?.status).toBe("cancelled"); // 需求保持 cancelled，未被错误回滚 ready/running
+    expect(req?.task_id ?? null).toBeNull(); // task_id 指针已清，不指向孤儿
+  });
+
+  it("起任务期间需求被推到 ready（非终态）→ 同样止损孤儿 run + 清 task_id，不卡死（#7 放宽）", async () => {
+    const id = nextRequirementId();
+    createRequirement({ id, project_id: "proj-001", workspace_id: "cb-001", title: "ready-race" });
+    pushTo(id, "queued");
+
+    const cancelledRuns: string[] = [];
+    _setTaskStartersForTest({
+      startTaskFromTemplate: async (opts) => {
+        // 模拟 clone await 期间用户 transition 把需求推回 ready（合法 queued→ready）。
+        // ready→running 非法 → reconcile 必须止损孤儿（旧实现只对终态止损，ready 会漏 → 卡死）。
+        db.run("UPDATE requirements SET status='ready' WHERE id=?", [String(opts.requirement_id)]);
+        return { id: `tsk-${opts.requirement_id}` } as unknown as Task;
+      },
+      cancelTaskAction: (taskId: string) => {
+        cancelledRuns.push(taskId);
+        return { from: "running_design", to: "cancelled" };
+      },
+    });
+
+    await tick();
+
+    expect(cancelledRuns).toEqual([`tsk-${id}`]); // ready 态也止损孤儿
+    expect(getRequirementById(id)?.task_id ?? null).toBeNull(); // task_id 不指向孤儿
+  });
+
+  it("孤儿 run 已终态致 cancelTaskAction 抛错 → task_id 仍被清（reconcile 容错）", async () => {
+    const id = nextRequirementId();
+    createRequirement({ id, project_id: "proj-001", workspace_id: "cb-001", title: "cancel-throws" });
+    pushTo(id, "queued");
+
+    _setTaskStartersForTest({
+      startTaskFromTemplate: async (opts) => {
+        db.run("UPDATE requirements SET status='cancelled' WHERE id=?", [String(opts.requirement_id)]);
+        return { id: `tsk-${opts.requirement_id}` } as unknown as Task;
+      },
+      cancelTaskAction: () => {
+        throw new Error("ALREADY_TERMINAL"); // 孤儿 run 可能已被并发收尾
+      },
+    });
+
+    await tick();
+
+    // cancel 抛错被 reconcile try 吞掉，task_id 清理不受影响
+    expect(getRequirementById(id)?.task_id ?? null).toBeNull();
+  });
 });
