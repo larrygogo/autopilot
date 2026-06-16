@@ -134,4 +134,24 @@ describe("github 段读取", () => {
     expect(cfg.cli).toBe("gh");
     expect(cfg.poll_interval_seconds).toBe(300);
   });
+
+  it("ci_fix_limit / ci_fix_conclusions 缺省", () => {
+    const cfg = loadGithubConfig();
+    expect(cfg.ci_fix_limit).toBe(2);
+    expect(cfg.ci_fix_conclusions).toEqual(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"]);
+  });
+
+  it("ci_fix_limit / ci_fix_conclusions 用户可覆盖（含 0=关闭、结论集大写归一）", () => {
+    writeFileSync(tmpFile, "github:\n  ci_fix_limit: 0\n  ci_fix_conclusions:\n    - failure\n    - cancelled\n", "utf-8");
+    const cfg = loadGithubConfig();
+    expect(cfg.ci_fix_limit).toBe(0);
+    expect(cfg.ci_fix_conclusions).toEqual(["FAILURE", "CANCELLED"]);
+  });
+
+  it("非法 ci_fix_limit（负数 / 非整数）走默认 2；空结论集走默认", () => {
+    writeFileSync(tmpFile, "github:\n  ci_fix_limit: -1\n  ci_fix_conclusions: []\n", "utf-8");
+    const cfg = loadGithubConfig();
+    expect(cfg.ci_fix_limit).toBe(2);
+    expect(cfg.ci_fix_conclusions).toEqual(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"]);
+  });
 });

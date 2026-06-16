@@ -14,8 +14,8 @@ import { createLogger } from "../core/logger";
 
 const log = createLogger("pr-poller");
 
-/** 同一交付 PR 的 CI 失败自动修复触发上限；触顶后停下报人（通知），防环境性故障空转 */
-export const CI_FIX_LIMIT = 2;
+// CI 自动修复的触发上限与失败结论集已挪到 config.yaml github 段（loadGithubConfig 提供缺省 2 /
+// FAILURE·TIMED_OUT·STARTUP_FAILURE，用户可覆盖）——框架给「计数+触顶停下报人」机制，阈值归用户。
 
 interface GhReview {
   id: string;
@@ -48,9 +48,6 @@ interface GhPrView {
   statusCheckRollup?: GhCheckItem[] | null;
 }
 
-/** 失败结论集合（CheckRun.conclusion）。CANCELLED/SKIPPED/NEUTRAL/ACTION_REQUIRED 不算 —— 非代码可修信号 */
-const FAILED_CONCLUSIONS = new Set(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"]);
-
 function checkIsPending(c: GhCheckItem): boolean {
   if (c.__typename === "StatusContext" || c.context !== undefined) {
     return c.state === "PENDING" || c.state === "EXPECTED";
@@ -58,11 +55,13 @@ function checkIsPending(c: GhCheckItem): boolean {
   return c.status !== undefined && c.status !== "COMPLETED";
 }
 
-function checkIsFailed(c: GhCheckItem): boolean {
+/** 「算可自动修复的失败」判定。失败结论集（CheckRun.conclusion）由调用方从 config.yaml
+ *  github.ci_fix_conclusions 传入（缺省 FAILURE/TIMED_OUT/STARTUP_FAILURE；用户可覆盖）。 */
+function checkIsFailed(c: GhCheckItem, failedConclusions: Set<string>): boolean {
   if (c.__typename === "StatusContext" || c.context !== undefined) {
     return c.state === "FAILURE" || c.state === "ERROR";
   }
-  return c.conclusion !== undefined && FAILED_CONCLUSIONS.has(c.conclusion);
+  return c.conclusion !== undefined && failedConclusions.has(c.conclusion);
 }
 
 function checkLabel(c: GhCheckItem): string {
@@ -234,28 +233,34 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
   //    旧 main-scope 兼容路径无水位落点，跳过——新需求主 PR 已全集落 sub_prs）。
   //    触发条件：PR OPEN + checks 全部完成 + 有失败 + head SHA ≠ 已处理水位。
   //    护栏：同 PR 自动修复 CI_FIX_LIMIT 次后停下报人（通知），不再自动转 fix_revision。
+  // CI 自动修复的容错策略来自 config.yaml github 段（阈值 ci_fix_limit / 触发结论集
+  // ci_fix_conclusions 用户可覆盖；框架只给「计数 + 触顶停下报人」机制）。ci_fix_limit=0 → 关闭。
+  const gh = loadGithubConfig();
+  const failedConclusions = new Set(gh.ci_fix_conclusions);
+  const ciFixLimit = gh.ci_fix_limit;
   const ciSections: string[] = [];
   const ciStateUpdates: Array<{ t: TrackedPr; sha: string }> = [];
   for (const s of states) {
+    if (ciFixLimit <= 0) break; // CI 自动修复已关闭（config github.ci_fix_limit=0）
     if (s.t.scope !== "sub") continue;
     if (s.data.state !== "OPEN") continue;
     const checks = s.data.statusCheckRollup ?? [];
     if (checks.length === 0) continue;
     if (checks.some(checkIsPending)) continue; // 跑完再判，一次拿到全部失败清单
-    const failed = checks.filter(checkIsFailed);
+    const failed = checks.filter((c) => checkIsFailed(c, failedConclusions));
     if (failed.length === 0) continue;
     const sha = s.data.headRefOid;
     if (!sha || s.t.ciFailedSha === sha) continue; // 该 head SHA 已处理过
 
     const failedList = failed.map((c) => `- ${checkLabel(c)}`).join("\n");
-    if (s.t.ciFixCount >= CI_FIX_LIMIT) {
+    if (s.t.ciFixCount >= ciFixLimit) {
       // 触顶：写 SHA 水位（同 SHA 不重复通知）+ 停下报人
       updateSubPrCiState(reqId, s.t.wsId, sha, false);
       // rank20：文案标明 ci_fix_count 语义 = 本 PR **生命周期累计**（不按 review/fix 轮重置）。
       // 设计意图 = 防环境性 CI 故障无限空转（迁移 039）；故后续 review 驱动的 fix 后若再 CI 失败、
       // 累计仍 ≥ 上限，会直接走此触顶分支不再自动修——这是有意行为，文案让用户读得懂。
       const reason =
-        `本 PR 累计自动修复 CI 已达上限 ${CI_FIX_LIMIT} 次（计数按本 PR 生命周期累计、不按轮重置）仍未转绿，` +
+        `本 PR 累计自动修复 CI 已达上限 ${ciFixLimit} 次（计数按本 PR 生命周期累计、不按轮重置）仍未转绿，` +
         `不再自动修复——可能是环境性问题，请人工处置。\n失败项：\n${failedList}`;
       log.warn("requirement %s PR #%s CI 自动修复触顶（%s 次），停下报人", reqId, s.t.prNumber, s.t.ciFixCount);
       emit({ type: "requirement:ci-fix-limit", payload: { id: reqId, pr_number: s.t.prNumber, reason } });

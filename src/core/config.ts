@@ -153,39 +153,61 @@ export interface GithubConfig {
   cli: string;
   /** PR 轮询间隔（秒），最小 30s */
   poll_interval_seconds: number;
+  /** 同一交付 PR 的 CI 自动修复触发上限（触顶停下报人，不再自动修）；默认 2。设 0 = 关闭 CI 自动修复 */
+  ci_fix_limit: number;
+  /** 哪些 CI 结论算「值得自动起修复轮的失败」；默认 FAILURE / TIMED_OUT / STARTUP_FAILURE */
+  ci_fix_conclusions: string[];
 }
+
+/** CI 自动修复的容错策略缺省（用户可在 config.yaml github 段覆盖）——框架给机制，阈值/触发集归用户。 */
+const DEFAULT_CI_FIX_LIMIT = 2;
+const DEFAULT_CI_FIX_CONCLUSIONS = ["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"];
 
 /**
  * 读取 config.yaml 的 github 段。缺字段或类型不对走默认值。
  *
  * 默认值：
  *   - cli: "gh"
- *   - poll_interval_seconds: 300（5 min）
- *
- * 最小 poll_interval = 30s，保护 GitHub API rate limit。
+ *   - poll_interval_seconds: 300（5 min），最小 30s（保护 GitHub API rate limit）
+ *   - ci_fix_limit: 2（同 PR 自动修 CI 几次后停下报人；0 = 关闭自动修复）
+ *   - ci_fix_conclusions: [FAILURE, TIMED_OUT, STARTUP_FAILURE]
  */
 export function loadGithubConfig(): GithubConfig {
+  const fallback: GithubConfig = {
+    cli: "gh",
+    poll_interval_seconds: 300,
+    ci_fix_limit: DEFAULT_CI_FIX_LIMIT,
+    ci_fix_conclusions: DEFAULT_CI_FIX_CONCLUSIONS,
+  };
   try {
     const raw = loadConfig();
     const section = raw["github"];
     if (!section || typeof section !== "object" || Array.isArray(section)) {
-      return { cli: "gh", poll_interval_seconds: 300 };
+      return fallback;
     }
     const s = section as Record<string, unknown>;
 
     const cliRaw = s["cli"];
-    const cli = typeof cliRaw === "string" && cliRaw.trim()
-      ? cliRaw.trim()
-      : "gh";
+    const cli = typeof cliRaw === "string" && cliRaw.trim() ? cliRaw.trim() : "gh";
 
     const pollRaw = s["poll_interval_seconds"];
     const poll = typeof pollRaw === "number" && Number.isFinite(pollRaw) && pollRaw >= 30
       ? pollRaw
       : 300;
 
-    return { cli, poll_interval_seconds: poll };
+    const limitRaw = s["ci_fix_limit"];
+    const ci_fix_limit = typeof limitRaw === "number" && Number.isInteger(limitRaw) && limitRaw >= 0
+      ? limitRaw
+      : DEFAULT_CI_FIX_LIMIT;
+
+    const conclRaw = s["ci_fix_conclusions"];
+    const ci_fix_conclusions = Array.isArray(conclRaw) && conclRaw.length > 0 && conclRaw.every((x) => typeof x === "string")
+      ? (conclRaw as string[]).map((x) => x.trim().toUpperCase()).filter(Boolean)
+      : DEFAULT_CI_FIX_CONCLUSIONS;
+
+    return { cli, poll_interval_seconds: poll, ci_fix_limit, ci_fix_conclusions };
   } catch {
-    return { cli: "gh", poll_interval_seconds: 300 };
+    return fallback;
   }
 }
 
