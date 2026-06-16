@@ -21,6 +21,26 @@ import {
 } from "../src/agents/providers/api/tools";
 import { ToolExecutor } from "../src/agents/providers/api/tools";
 
+/**
+ * Windows 句柄延迟释放：bash 等子进程刚把目录当 cwd 用过，proc close（已退出）后 OS 仍可能
+ * 短暂持有该目录句柄，紧接着 rmSync 撞 EBUSY/EPERM（force:true 只忽略 ENOENT、对 EBUSY 无效）。
+ * 退避重试，最终仍失败则容错忽略——临时目录留给 OS temp 清理，绝不让 teardown 的清理失败掩盖
+ * 真实测试结果（本文件 bash describe 的 afterAll 在 win32 上曾确定性 EBUSY，被全量误记为 flake）。
+ */
+async function rmrf(dir: string): Promise<void> {
+  for (let i = 0; i < 6; i++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (e: unknown) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") throw e;
+      await new Promise((r) => setTimeout(r, 50 * (i + 1)));
+    }
+  }
+  try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort，留给 OS temp 清理 */ }
+}
+
 // ── assertInSandbox 测试 ──
 
 describe("assertInSandbox", () => {
@@ -34,8 +54,8 @@ describe("assertInSandbox", () => {
     writeFileSync(join(sandbox, "subdir", "file.txt"), "hello");
   });
 
-  afterAll(() => {
-    rmSync(sandbox, { recursive: true, force: true });
+  afterAll(async () => {
+    await rmrf(sandbox);
   });
 
   it("允许沙盒内已存在的文件", () => {
@@ -173,8 +193,8 @@ describe("bash 安全 — ToolExecutor", () => {
     mkdirSync(sandbox, { recursive: true });
   });
 
-  afterAll(() => {
-    rmSync(sandbox, { recursive: true, force: true });
+  afterAll(async () => {
+    await rmrf(sandbox);
   });
 
   it("default 模式：正常命令可执行", async () => {
@@ -245,8 +265,8 @@ describe("write_file 符号链接防护", () => {
     mkdirSync(sandbox, { recursive: true });
   });
 
-  afterAll(() => {
-    rmSync(sandbox, { recursive: true, force: true });
+  afterAll(async () => {
+    await rmrf(sandbox);
   });
 
   it("拒绝写入指向沙盒外的符号链接文件", async () => {
@@ -288,8 +308,8 @@ describe("write_file 新子目录自动创建（I2 验证）", () => {
     mkdirSync(sandbox, { recursive: true });
   });
 
-  afterAll(() => {
-    rmSync(sandbox, { recursive: true, force: true });
+  afterAll(async () => {
+    await rmrf(sandbox);
   });
 
   it("write_file 到不存在的子目录自动创建", async () => {

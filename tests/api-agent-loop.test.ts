@@ -42,6 +42,26 @@ function createMockAdapter(responses: AdapterResponse[]): ProviderAdapter {
   };
 }
 
+/**
+ * Windows 句柄延迟释放：本文件部分测试经 ApiAgentLoop 真执行 bash（spawn cwd=sandbox），proc
+ * close（已退出）后 OS 仍可能短暂持有 sandbox 句柄，afterAll 紧接着 rmSync 撞 EBUSY（force:true
+ * 对 EBUSY 无效）。单独跑时序宽松多不触发，全量并发压力下偶发 → 被记为 `(unnamed)` flake。
+ * 退避重试，最终仍失败容错忽略（临时目录留给 OS temp 清理，不让 teardown 失败掩盖真实结果）。
+ */
+async function rmrf(dir: string): Promise<void> {
+  for (let i = 0; i < 6; i++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (e: unknown) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") throw e;
+      await new Promise((r) => setTimeout(r, 50 * (i + 1)));
+    }
+  }
+  try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+}
+
 // ── ApiAgentLoop 基本流程 ──
 
 describe("ApiAgentLoop", () => {
@@ -52,8 +72,8 @@ describe("ApiAgentLoop", () => {
     mkdirSync(sandbox, { recursive: true });
   });
 
-  afterAll(() => {
-    rmSync(sandbox, { recursive: true, force: true });
+  afterAll(async () => {
+    await rmrf(sandbox);
   });
 
   it("无工具调用 → 直接返回文本", async () => {
@@ -227,8 +247,8 @@ describe("ApiAgentLoop — 重试逻辑", () => {
     mkdirSync(sandbox, { recursive: true });
   });
 
-  afterAll(() => {
-    rmSync(sandbox, { recursive: true, force: true });
+  afterAll(async () => {
+    await rmrf(sandbox);
   });
 
   it("429 错误 → 重试后成功", async () => {
@@ -497,7 +517,7 @@ describe("estimateTokens 统计 tool_use.input（I-2）", () => {
       expect(result.text).toBe("Done");
       expect(callCount).toBe(2);
     } finally {
-      rmSync(sandbox, { recursive: true, force: true });
+      await rmrf(sandbox);
     }
   });
 });
@@ -520,10 +540,10 @@ describe("API 流式日志去重 — 每轮回复仅产生一条完整文本日�
     };
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     // 还原 log.info
     log.info = originalInfo;
-    rmSync(sandbox, { recursive: true, force: true });
+    await rmrf(sandbox);
   });
 
   it("有文本的轮次 → log.info('本轮输出') 被调 1 次，参数含完整文本", async () => {
