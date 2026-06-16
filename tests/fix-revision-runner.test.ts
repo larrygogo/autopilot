@@ -60,10 +60,12 @@ import {
   initFixRevisionRunner,
   disposeFixRevisionRunner,
   startFixRun,
+  buildFixPrompt,
   _setFixFnForTest,
   _setListReposForTest,
   FIX_WORKFLOW_NAME,
 } from "../src/daemon/fix-revision-runner";
+import { createComment, nextCommentId } from "../src/core/requirements/comments";
 
 let db: Database;
 let tmpHome: string;
@@ -496,5 +498,29 @@ describe("启动补跑", () => {
     const r = getRequirementById(fx.reqId)!;
     expect(r.task_id).toBe(activeId);
     expect(r.status).toBe("fix_revision");
+  });
+});
+
+describe("buildFixPrompt 反馈过滤（#9）", () => {
+  it("排除 fixer 自产的 from_role=agent 总结，只喂评审/用户反馈", () => {
+    const reqId = nextRequirementId();
+    createProject({ id: `proj-fb${n}`, name: "fb" });
+    createRequirement({ id: reqId, project_id: `proj-fb${n}`, workspace_id: null, title: "修这个" });
+
+    // 用户反馈（appendFeedback source:manual → from_role:user）
+    appendFeedback({ requirement_id: reqId, source: "manual", body: "用户要求：按钮文案改成保存" });
+    // fixer 上一轮自产的「修复完成」总结（createComment kind=feedback from_role:agent）——不该喂回
+    createComment({
+      id: nextCommentId(),
+      requirement_id: reqId,
+      kind: "feedback",
+      from_role: "agent",
+      body: "修复完成：已改 3 个文件并 push",
+      status: "open",
+    });
+
+    const prompt = buildFixPrompt(reqId, "修这个", [], [], null);
+    expect(prompt).toContain("用户要求：按钮文案改成保存"); // 用户反馈进 prompt
+    expect(prompt).not.toContain("修复完成：已改 3 个文件并 push"); // agent 自产被过滤掉
   });
 });

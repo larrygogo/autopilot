@@ -396,7 +396,6 @@ describe("apiLoopInitPromise 失败后清除锁（I-1）", () => {
       chat: async () => { throw new Error("不应调用"); },
       buildRunOptions: () => ({}),
       resolveModel: () => "m",
-      resolveMaxTurns: () => 10,
       resolveSystemPrompt: () => undefined,
     } as any;
 

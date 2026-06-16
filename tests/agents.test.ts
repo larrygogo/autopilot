@@ -13,7 +13,6 @@ class ResolveProbe extends BaseProvider {
   async run(): Promise<AgentResult> { return { text: "" }; }
   async close(): Promise<void> {}
   model(options?: RunOptions) { return this.resolveModel(options, "fallback-model"); }
-  maxTurns(options?: RunOptions) { return this.resolveMaxTurns(options, 7); }
   system(options?: RunOptions) { return this.resolveSystemPrompt(options); }
 }
 
@@ -101,12 +100,8 @@ describe("BaseProvider — 运行时覆盖", () => {
     expect(empty.model()).toBe("fallback-model");
   });
 
-  test("resolveMaxTurns: RunOptions > config > 默认", () => {
-    const p = new ResolveProbe({ max_turns: 20 });
-    expect(p.maxTurns()).toBe(20);
-    expect(p.maxTurns({ max_turns: 50 })).toBe(50);
-    expect(new ResolveProbe({}).maxTurns()).toBe(7);
-  });
+  // 注：原 resolveMaxTurns 测试已删——该方法是死代码（无生产调用，max_turns 仅 API 模式
+  // ApiAgentLoop 强制，CLI provider 不读），随方法一并移除。
 
   test("resolveSystemPrompt: system_prompt 替换", () => {
     const p = new ResolveProbe({ system_prompt: "base" });

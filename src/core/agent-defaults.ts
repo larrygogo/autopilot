@@ -37,7 +37,11 @@ export interface InlineAgentConfig {
 export const DEFAULT_AGENT: InlineAgentConfig & { provider: "anthropic" | "openai" | "google" } = {
   provider: "anthropic",
   model: "claude-sonnet-4-6",
-  max_turns: 10,
+  // ⚠ max_turns 仅 API 模式（ApiAgentLoop）强制；CLI provider（anthropic/google 官方）忽略它
+  //（claude CLI 无对应 flag）。10 对「读完仓库再综合方案 / 改多文件」的 agentic API 阶段过低
+  // ——读仓库就耗尽预算、末轮返回探索叙述当结论。提到对 agentic 安全的 30（仅是上限，提前收尾
+  // 的 agent 不受影响；省略 agent: 走默认的 API-mode 阶段直接受益）。
+  max_turns: 30,
   permission_mode: "auto",
   system_prompt:
     "你是通用编码助手。读上下文 → 提出方案 → 实施 → 自查。" +

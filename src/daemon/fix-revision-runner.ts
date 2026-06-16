@@ -143,14 +143,20 @@ function repoLayoutSection(repos: TaskRepoCtx[], subPrs: RequirementSubPr[]): st
   return lines.join("\n");
 }
 
-function buildFixPrompt(
+export function buildFixPrompt(
   reqId: string,
   title: string,
   repos: TaskRepoCtx[],
   subPrs: RequirementSubPr[],
   mainPrNumber: number | null,
 ): string {
-  const feedbacks = listFeedbacks(reqId).slice(-MAX_FEEDBACKS_IN_PROMPT);
+  // 排除 from_role=agent 的反馈：fixer 每轮把「改了什么」总结作为 agent feedback 落库
+  // （还有 run-outcome 写的「执行评审遗留」也是 agent），slice(-N) 会把它当反馈喂回下一轮、
+  // 还被误标成「用户」→ 多轮后用 agent 自产噪音污染修复输入。用排除语义（而非白名单 user/
+  // github）直接表意，且对将来新增 from_role 保守——默认进 prompt 而不是被静默丢弃。
+  const feedbacks = listFeedbacks(reqId)
+    .filter((f) => f.from_role !== "agent")
+    .slice(-MAX_FEEDBACKS_IN_PROMPT);
   const fbSection = feedbacks.length > 0
     ? feedbacks
         .map((f) => `### ${f.source === "github_review" ? "GitHub 评审/CI" : "用户"} · ${new Date(f.created_at).toISOString()}\n${f.body}`)
@@ -196,7 +202,10 @@ function buildArtifactFixPrompt(
   repos: TaskRepoCtx[],
   lastRound: number,
 ): string {
-  const feedbacks = listFeedbacks(reqId).slice(-MAX_FEEDBACKS_IN_PROMPT);
+  // 同 buildFixPrompt：排除 fixer 自产 / run-outcome 的 from_role=agent 反馈，只留可操作的
+  const feedbacks = listFeedbacks(reqId)
+    .filter((f) => f.from_role !== "agent")
+    .slice(-MAX_FEEDBACKS_IN_PROMPT);
   const fbSection = feedbacks.length > 0
     ? feedbacks
         .map((f) => `### ${f.source === "github_review" ? "评审" : "用户"} · ${new Date(f.created_at).toISOString()}\n${f.body}`)

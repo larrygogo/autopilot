@@ -25,6 +25,26 @@ export function getCurrentVersion(): number {
   return row?.version ?? 0;
 }
 
+/**
+ * file×ledger 一致性检查（纯函数，可测）：返回「磁盘存在、编号 ≤ currentVersion、但不在
+ * applied 集合」的迁移——它们会被 `version<=current 跳过`逻辑静默略过、永不应用。
+ * 判据以**磁盘实际存在的文件**为基准（不是 1..MAX 连续），故 003 这类合法空号（无文件）不误报。
+ */
+export function findSkippedMigrations(
+  files: string[],
+  currentVersion: number,
+  applied: Set<number>,
+): Array<{ version: number; file: string }> {
+  const out: Array<{ version: number; file: string }> = [];
+  for (const file of files) {
+    const v = parseInt(file.slice(0, 3), 10);
+    if (Number.isFinite(v) && v <= currentVersion && !applied.has(v)) {
+      out.push({ version: v, file });
+    }
+  }
+  return out;
+}
+
 // ──────────────────────────────────────────────
 // 迁移执行
 // ──────────────────────────────────────────────
@@ -63,6 +83,22 @@ export async function runPendingMigrations(): Promise<number> {
   }
 
   const currentVersion = getCurrentVersion();
+
+  // file×ledger 一致性断言（撞号护栏只防 file×file，防不住「补一个 ≤MAX 的新号」）：
+  // 磁盘存在、version ≤ currentVersion、但 schema_version 无记录的迁移 = 会被下方
+  // `version<=current 跳过`逻辑静默略过、永不应用（并行分支合并取了已过号——033 烧伤同源）。
+  const applied = new Set(
+    getDb().query<{ version: number }, []>("SELECT version FROM schema_version").all().map((r) => r.version),
+  );
+  const skipped = findSkippedMigrations(files, currentVersion, applied);
+  if (skipped.length > 0) {
+    throw new Error(
+      `迁移账本漏洞：${skipped.map((s) => s.file).join("、")} 编号 ≤ 当前已应用最高版本 v${currentVersion}，` +
+        `但 schema_version 无其记录——会被「version<=current 跳过」逻辑静默略过、永不应用（多半是并行分支` +
+        `合并取了已过的迁移号）。请把它重排到 > v${currentVersion} 的下一个空号后再启动。`,
+    );
+  }
+
   let count = 0;
 
   for (const file of files) {

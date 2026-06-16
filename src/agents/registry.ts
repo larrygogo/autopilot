@@ -165,7 +165,6 @@ export function createAgent(config: AgentConfig): Agent {
     chat: async () => { throw new Error("API 模式不应调用 provider.chat"); },
     buildRunOptions: () => ({}),
     resolveModel: () => config.model ?? "unknown",
-    resolveMaxTurns: () => config.max_turns ?? 10,
     resolveSystemPrompt: () => config.system_prompt,
   } as unknown as BaseProvider;
 
@@ -214,7 +213,8 @@ async function createApiAgentLoop(config: AgentConfig, sandboxRoot: string): Pro
     toolExecutor,
     model: config.model ?? eff.default_model ?? "unknown",
     systemPrompt: config.system_prompt,
-    maxTurns: config.max_turns ?? 10,
+    // ?? 30 是类型必需（DEFAULT_AGENT.max_turns 类型上为可选 number|undefined，虽运行时恒 30）
+    maxTurns: config.max_turns ?? DEFAULT_AGENT.max_turns ?? 30,
     // onStream 不再传入：完整文本日志改为每轮结束后一次性记录（log-dedup）。
   });
 }

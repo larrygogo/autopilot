@@ -26,10 +26,8 @@ export abstract class BaseProvider {
     return options?.model ?? (this.config["model"] as string | undefined) ?? fallback;
   }
 
-  /** 取最终 max_turns：RunOptions > config > 默认 */
-  protected resolveMaxTurns(options: RunOptions | undefined, fallback: number): number {
-    return options?.max_turns ?? (this.config["max_turns"] as number | undefined) ?? fallback;
-  }
+  // 注：原 resolveMaxTurns 已删——它是死代码（无调用点）。max_turns 仅 API 模式
+  // （ApiAgentLoop）强制；CLI provider 不读它（claude CLI 无对应 flag）。
 
   /**
    * 取最终 system_prompt：
