@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Notification as AppNotification } from "../lib/notification-types";
+import { getDesktopNotifyEnabled } from "../lib/desktop-notify-pref";
 
 /**
  * 在 tab 不可见时，对新到达的 error / action 级通知弹桌面通知。
@@ -33,6 +34,7 @@ export function useDesktopNotify(items: AppNotification[]): void {
     if (typeof Notification === "undefined") return;
     if (Notification.permission !== "granted") return;
     if (typeof document !== "undefined" && !document.hidden) return;
+    if (!getDesktopNotifyEnabled()) return;
 
     try {
       const title = fresh.length === 1
