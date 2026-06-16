@@ -79,7 +79,7 @@ import {
   deleteWorkflowDir,
   type PhaseEntryInput,
 } from "../core/workflow/registry";
-import { setWorkflowPhases } from "../core/workflow/registry-authoring";
+import { setWorkflowPhases, applyPhasesToYaml } from "../core/workflow/registry-authoring";
 import {
   syncWorkflowTs,
   renameRunFunctions,
@@ -1669,6 +1669,11 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       if (!body || typeof body.code !== "string" || !body.code.trim()) {
         return error("code (function source) is required", 400);
       }
+      // db 来源工作流是纯声明式（无 ts 文件）：拒绝 ts 函数编辑，引导用 prompt 字段。
+      const phaseFnRow = getWorkflowFromDb(wfName);
+      if (phaseFnRow && phaseFnRow.source === "db") {
+        return error("db 工作流是纯声明式工作流，没有可编辑的 ts 函数——请改用 phase 的 prompt 字段", 400);
+      }
       try {
         const result = replaceRunFunction(wfName, phaseName, body.code);
         emit({ type: "workflow:reloaded", payload: {} });
@@ -1717,6 +1722,19 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         renames?: Record<string, string>;
       };
       if (!Array.isArray(body.phases)) return error("phases must be array", 400);
+      // db 来源工作流：纯声明式，应用 phases 到 yaml_content 写回 DB；无 ts 同步 / 函数 rename。
+      const phasesRow = getWorkflowFromDb(phasesWriteMatch);
+      if (phasesRow && phasesRow.source === "db") {
+        try {
+          const newYaml = applyPhasesToYaml(phasesRow.yaml_content, body.phases as PhaseEntryInput[]);
+          updateDbWorkflow(phasesWriteMatch, { yaml_content: newYaml });
+          await reload();
+          emit({ type: "workflow:reloaded", payload: {} });
+          return json({ ok: true, ts: null, ts_error: null, renamed: [] });
+        } catch (e: unknown) {
+          return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
+        }
+      }
       try {
         // 1. 先重命名 run_ 函数（保留函数体），避免产生孤儿
         let renamedFns: string[] = [];

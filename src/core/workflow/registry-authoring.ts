@@ -37,12 +37,12 @@ export function collectPhaseNames(phases: PhaseEntryInput[]): string[] {
 }
 
 /**
- * 结构化校验 + 写入工作流 phases 段。保留 YAML 中的其他字段与注释。
- * 不自动调用 reload —— 调用方负责。
+ * 结构化校验 + 把 phases 段写进一段 yaml 文本（保留其他字段与注释），返回新 yaml 文本。
+ * 纯函数、不碰磁盘/DB —— file 来源与 db 来源共用（file 读写文件、db 读写 yaml_content）。
  */
-export function setWorkflowPhases(workflowName: string, phases: PhaseEntryInput[]): void {
+export function applyPhasesToYaml(rawYaml: string, phases: PhaseEntryInput[]): string {
   if (!Array.isArray(phases) || phases.length === 0) {
-    throw new Error(`工作流 "${workflowName}" 的 phases 不能为空数组（至少一个阶段）`);
+    throw new Error(`phases 不能为空数组（至少一个阶段）`);
   }
 
   // 1. 校验
@@ -85,18 +85,23 @@ export function setWorkflowPhases(workflowName: string, phases: PhaseEntryInput[
     orderedNames.push(myName);
   }
 
-  // 3. 读取 + 写入 yaml Document（保留其他段）
-  const yamlPath = getWorkflowYamlPath(workflowName);
-  if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
-
-  const raw = readFileSync(yamlPath, "utf-8");
-  const doc = parseDocument(raw);
-
+  // 3. 写入 yaml Document（保留其他段、注释）
+  const doc = parseDocument(rawYaml);
   // 清洗 undefined / null / 空串 避免脏字段
   const cleaned = phases.map((p) => cleanPhaseEntry(p));
   doc.setIn(["phases"], cleaned);
+  return doc.toString();
+}
 
-  writeFileSync(yamlPath, doc.toString(), "utf-8");
+/**
+ * 结构化校验 + 写入 file 来源工作流的 phases 段。保留 YAML 中的其他字段与注释。
+ * 不自动调用 reload —— 调用方负责。db 来源工作流由调用方用 applyPhasesToYaml + updateDbWorkflow 处理。
+ */
+export function setWorkflowPhases(workflowName: string, phases: PhaseEntryInput[]): void {
+  const yamlPath = getWorkflowYamlPath(workflowName);
+  if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
+  const raw = readFileSync(yamlPath, "utf-8");
+  writeFileSync(yamlPath, applyPhasesToYaml(raw, phases), "utf-8");
 }
 
 /**
