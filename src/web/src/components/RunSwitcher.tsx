@@ -54,7 +54,7 @@ export function RunSwitcher({ runs, activeTaskId, onSelect }: RunSwitcherProps) 
   const labels = computeRunLabels(runs);
 
   return (
-    <div className="flex flex-wrap items-stretch border-b border-border" role="tablist">
+    <div className="scrollbar-thin flex items-stretch overflow-x-auto border-b border-border" role="tablist">
       {runs.map((r) => {
         const active = r.id === activeTaskId;
         const label = labels.get(r.id) ?? "执行";
@@ -72,7 +72,7 @@ export function RunSwitcher({ runs, activeTaskId, onSelect }: RunSwitcherProps) 
             title={kernel}
             onClick={() => onSelect(r.id)}
             className={cn(
-              "flex min-w-[8.5rem] flex-col gap-1 border-r border-border px-3.5 py-2 text-left transition-colors last:border-r-0",
+              "flex min-w-[8.5rem] shrink-0 flex-col gap-1 border-r border-border px-3.5 py-2 text-left transition-colors last:border-r-0",
               active
                 ? "bg-muted text-foreground"
                 : "bg-transparent text-muted-foreground hover:text-foreground",
