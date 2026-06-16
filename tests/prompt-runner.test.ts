@@ -152,7 +152,7 @@ phases:
     await expect(phase.func!("t1")).rejects.toThrow(/未定义且未提供 prompt|未定义/);
   });
 
-  it("ts 有 run_ 函数 + yaml 也有 prompt → 优先用 ts 函数", async () => {
+  it("ts 有 run_ 函数 + yaml 也有 prompt → 提示词优先，用 prompt-runner（忽略 ts）", async () => {
     const wfDir = join(tmpHome, "workflows", "both");
     mkdirSync(wfDir, { recursive: true });
     writeFileSync(
@@ -174,7 +174,7 @@ phases:
 
     const wf = await loadYamlWorkflow(wfDir);
     const phase = wf!.phases[0] as PhaseDefinition;
-    // 用 ts 函数而非 prompt-runner → 错误信息来自 ts
-    await expect(phase.func!("t1")).rejects.toThrow(/从 ts 函数抛出/);
+    // 提示词优先（全局翻转）：phase 绑定 prompt-runner 而非 ts 函数 → 绑定的 func 源码不含 ts 的抛错串
+    expect(phase.func!.toString()).not.toContain("从 ts 函数抛出");
   });
 });

@@ -533,20 +533,21 @@ function bindPhaseFunc(
     );
   }
 
-  if (tsModule && typeof tsModule[funcName] === "function") {
-    phase.func = tsModule[funcName] as (taskId: string) => Promise<void>;
-    return;
-  }
-
-  // ts 函数缺失：如果 phase 声明了 prompt 字段，用框架内置的 prompt-runner 替代。
-  // 这是"零代码工作流"路径——用户只在 yaml 写 prompt，无需写 ts。
+  // 提示词优先（全局）：phase 声明了非空 prompt 字段就用框架内置 prompt-runner，
+  // 忽略同名 run_<phase> 函数。无 prompt 字段时（tryMake 返回 null）才回退到 ts 函数。
+  // —— 这样「同 phase 既有 prompt 又有 ts」时 prompt 赢（与旧的 ts 优先相反）。
   if (workflowName) {
     const promptRunner = tryMakePromptRunnerForPhase(phase, workflowName);
     if (promptRunner) {
       phase.func = promptRunner;
-      log.info("阶段 %s 使用 prompt-runner（无 ts 函数，yaml 里有 prompt 字段）", phase.name);
+      log.info("阶段 %s 使用 prompt-runner（提示词优先：yaml 有 prompt，忽略 ts run_ 函数）", phase.name);
       return;
     }
+  }
+
+  if (tsModule && typeof tsModule[funcName] === "function") {
+    phase.func = tsModule[funcName] as (taskId: string) => Promise<void>;
+    return;
   }
 
   log.warn("找不到阶段函数 %s", funcName);

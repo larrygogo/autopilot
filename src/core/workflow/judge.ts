@@ -53,6 +53,8 @@ export interface JudgeOpts {
    * 模型**时，强制 tool_choice 可能被端点 400，judge 重试一次后 ambiguous 停下报人。请配非思考模型。
    */
   model?: string;
+  /** 裁判人设/system prompt 覆写（缺省用框架默认 SYSTEM_PROMPT）。让「怎么判」也进工作流数据。 */
+  systemPrompt?: string;
   signal?: AbortSignal;
 }
 
@@ -77,7 +79,7 @@ export async function judgeVerdictWith(complete: StructuredFn, opts: JudgeOpts):
         providerName: provider,
         model: opts.model,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: opts.systemPrompt?.trim() || SYSTEM_PROMPT },
           { role: "user", content: userMsg },
         ],
         tool: VERDICT_TOOL,

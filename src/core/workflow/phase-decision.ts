@@ -29,6 +29,8 @@ export interface PhaseDecision {
   judge_model?: string;
   /** judge 模式：评审标准，拼进裁判 prompt（可空）。 */
   criteria?: string;
+  /** judge 模式：裁判人设/system prompt 覆写（可空，缺省用框架默认）。让「怎么判」也进数据、不写死框架。 */
+  judge_system_prompt?: string;
 }
 
 export type DecisionVerdict =

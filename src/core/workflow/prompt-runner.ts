@@ -2,11 +2,13 @@
  * Prompt-driven phase runner — 让用户在 yaml 里写 `prompt:` 字段即可跑一个
  * agent 调用阶段，免去写 ts 函数。
  *
- * 适用场景：纯调用 agent.run(prompt) 的阶段。不适用于需要复杂分支
- * （如 reject/解析返回结论）的阶段——那些仍然要写 ts 函数。
+ * 适用场景：调用 agent.run(prompt) 的阶段，含带 decision(marker/judge) 判据的
+ * 评审/驳回回路（pass/reject/触顶 failed 全在框架做，零 ts）。真正机械的交付
+ * （commit/push/开 PR、deliverArtifacts）仍要写 ts。
  *
- * 触发条件（bindPhaseFunc 中检查）：
- *   phase 有 `prompt: ...` 字段，且 workflow.ts 没导出对应 run_<name> 函数。
+ * 触发条件（bindPhaseFunc 中检查）：phase 有非空 `prompt:` 字段即用本 runner。
+ *   **提示词优先（全局）**：即便同名 run_<name> ts 函数存在，也忽略它、只跑 prompt。
+ *   无 prompt 字段时才回退到 ts 函数。
  *
  * 行为：
  *   1. 把 prompt 里 ${VAR} / $VAR 占位符替换成 task 上下文（title/requirement/workspace/...）
@@ -428,6 +430,7 @@ export function makePromptRunner(
           criteria: options.decision.criteria,
           provider: options.decision.judge_provider,
           model: options.decision.judge_model,
+          systemPrompt: options.decision.judge_system_prompt,
         });
         action = planDecisionActionFromVerdict(verdict, phaseName, meta, counts);
       } else {
