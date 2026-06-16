@@ -269,6 +269,20 @@ export class ApiAgentLoop {
 
       const toolResults: ToolResultContent[] = [];
       for (const tc of realCalls) {
+        // rank22：adapter 在 tool_call args JSON.parse 失败时回退 input={_raw:原始串}。最常见成因
+        // = finish_reason=length（max_tokens 截断）把参数截半。直接 execute 会让工具报含糊「缺
+        // content/command」掩盖真因。拦在执行前，回明确 is_error 让模型识别截断并拆分/精简重试。
+        if (tc.input && typeof tc.input === "object" && "_raw" in tc.input) {
+          log.warn("[API] 工具 %s 参数 JSON 不完整（疑似超 max_tokens 截断），跳过执行回错误", tc.name);
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: tc.id,
+            content: "工具参数 JSON 不完整（很可能因输出超 max_tokens 被截断）。请拆分任务 / 精简单次参数后重试。",
+            is_error: true,
+            name: tc.name,
+          });
+          continue;
+        }
         log.info("[API] 工具调用：%s", tc.name);
         const result = await this.toolExecutor.execute({ name: tc.name, input: tc.input });
         toolResults.push({

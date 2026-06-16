@@ -52,6 +52,10 @@ export class OpenAIApiAdapter implements ProviderAdapter {
     // 关思考（结构化判据）：Kimi 思考原生端点在思考开启时拒绝强制 tool_choice（400），
     // 用 Moonshot/Kimi 的 `thinking:{type:disabled}` 关掉。仅对 kimi host 生效——该参数是
     // 端点专属，发给真 OpenAI 会 400，故 host-sniff（与下方 userAgent 的 kimi 处理一致）。
+    // ⚠ 已知缺口（低危）：其它 compat 思考端点（moonshot api.moonshot.cn / deepseek 等）此处
+    // no-op、思考不被关，用户把这类**思考模型**配成 judge 时强制 tool_choice 可能 400（judge
+    // 重试后 ambiguous 优雅停下报人）。当前以 judge 文档「勿配思考模型」规避；若要真支持，应在此
+    // 扩成已知思考端点 → 各自关思考参数的映射表，或 completeStructuredWith 捕获 thinking 400 降级。
     if (options.disable_thinking && isKimiHost(this.baseUrl)) {
       body["thinking"] = { type: "disabled" };
     }

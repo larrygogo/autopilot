@@ -46,7 +46,12 @@ export interface JudgeOpts {
   criteria?: string;
   /** 裁判 provider（缺省 anthropic）。 */
   provider?: string;
-  /** 裁判 model（缺省走 provider.default_model）。 */
+  /**
+   * 裁判 model（缺省走 provider.default_model）。
+   * ⚠ OpenAI-compat provider 注意：裁判走结构化强制 tool_choice，而「关思考」目前仅对 kimi host
+   * 翻译（见 openai.ts disable_thinking）。给 compat 端点（moonshot/deepseek 等）配**带思考模式的
+   * 模型**时，强制 tool_choice 可能被端点 400，judge 重试一次后 ambiguous 停下报人。请配非思考模型。
+   */
   model?: string;
   signal?: AbortSignal;
 }

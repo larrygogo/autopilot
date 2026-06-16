@@ -61,6 +61,33 @@ describe("ApiAgentLoop #1：task_complete 与其它工具同轮返回时不丢�
   });
 });
 
+describe("ApiAgentLoop #22：tool_call args 被截断（_raw）时拦在执行前回 is_error", () => {
+  it("同轮 [write_file(_raw 截断), list_directory(正常)] → 只执行正常工具，截断的不进 execute", async () => {
+    const executed: string[] = [];
+    const adapter = mockAdapter([
+      {
+        text: "",
+        toolCalls: [
+          // adapter 对 JSON.parse 失败的 args 回退成 {_raw:原始串}（典型成因 finish_reason=length 截断）
+          { id: "c1", name: "write_file", input: { _raw: '{"path":"a.txt","content":"被截断的超长内容' } },
+          { id: "c2", name: "list_directory", input: { path: "." } },
+        ],
+        usage: { input_tokens: 10, output_tokens: 5 },
+        stopReason: "tool_use",
+      },
+      { text: "", toolCalls: [{ id: "c3", name: "task_complete", input: { summary: "done" } }], usage: { input_tokens: 1, output_tokens: 1 }, stopReason: "tool_use" },
+    ]);
+    const loop = new ApiAgentLoop({ adapter, toolExecutor: fakeExecutor(executed), model: "m", maxTurns: 5 });
+    const r = await loop.run("写文件并列目录");
+
+    // _raw 截断工具拦在执行前、不进 execute；同批正常工具照常执行（选择性拦截，不误伤）
+    expect(executed).not.toContain("write_file");
+    expect(executed).toContain("list_directory");
+    // 截断工具回了 is_error 反馈，循环继续到 task_complete
+    expect(r.text).toBe("done");
+  });
+});
+
 describe("ApiAgentLoop #3：maxTurns 耗尽且末轮纯工具调用时不返回空 text", () => {
   it("每轮 {text:'', toolCalls:[bash]} 撞 maxTurns → result.text 非空兜底", async () => {
     const executed: string[] = [];
