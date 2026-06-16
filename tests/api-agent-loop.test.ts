@@ -12,12 +12,13 @@
  *   - resolveMode 路由逻辑
  */
 
-import { describe, it, expect, mock, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, mock, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { ApiAgentLoop } from "../src/agents/providers/api/loop";
 import { ToolExecutor, UnsupportedInApiModeError } from "../src/agents/providers/api/tools";
 import type { ProviderAdapter, AdapterResponse, MessageParam, AdapterOptions } from "../src/agents/providers/api/types";
 import { ApiError } from "../src/agents/providers/api/anthropic";
 import { resolveMode, createAgent, _resetForTest } from "../src/agents/registry";
+import { log } from "../src/core/logger";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -499,5 +500,176 @@ describe("estimateTokens 统计 tool_use.input（I-2）", () => {
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
+  });
+});
+
+// ── 流式日志去重验证 ──
+
+describe("API 流式日志去重 — 每轮回复仅产生一条完整文本日志", () => {
+  let sandbox: string;
+  let originalInfo: typeof log.info;
+  let logCalls: { msg: string; args: unknown[] }[];
+
+  beforeEach(() => {
+    sandbox = join(tmpdir(), `autopilot-log-dedup-test-${Date.now()}`);
+    mkdirSync(sandbox, { recursive: true });
+    // 猴子补丁 log.info，收集调用记录
+    originalInfo = log.info;
+    logCalls = [];
+    log.info = (msg: string, ...args: unknown[]) => {
+      logCalls.push({ msg, args });
+    };
+  });
+
+  afterEach(() => {
+    // 还原 log.info
+    log.info = originalInfo;
+    rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  it("有文本的轮次 → log.info('本轮输出') 被调 1 次，参数含完整文本", async () => {
+    const adapter: ProviderAdapter = {
+      name: "mock-log",
+      async completeStream(
+        _messages: MessageParam[],
+        _options: AdapterOptions,
+        onDelta?: (delta: string) => void,
+      ): Promise<AdapterResponse> {
+        // 模拟逐碎片流式回调
+        if (onDelta) {
+          onDelta("Hello ");
+          onDelta("world!");
+        }
+        return {
+          text: "Hello world!",
+          usage: { input_tokens: 10, output_tokens: 5 },
+          stopReason: "end_turn",
+        };
+      },
+    };
+    const executor = ToolExecutor.fromConfig(sandbox, "default");
+
+    const loop = new ApiAgentLoop({
+      adapter,
+      toolExecutor: executor,
+      model: "test-model",
+      maxTurns: 10,
+    });
+
+    await loop.run("Say hello");
+
+    // 过滤出包含「本轮输出」的日志条目
+    const outputLogs = logCalls.filter((c) => c.msg.includes("本轮输出"));
+    expect(outputLogs.length).toBe(1);
+    expect(String(outputLogs[0].args[0])).toContain("Hello world!");
+  });
+
+  it("纯工具调用（text=''）→ 无「本轮输出」日志条目", async () => {
+    const adapter: ProviderAdapter = {
+      name: "mock-tool-only",
+      async completeStream(
+        _messages: MessageParam[],
+        _options: AdapterOptions,
+        _onDelta?: (delta: string) => void,
+      ): Promise<AdapterResponse> {
+        return {
+          text: "",
+          toolCalls: [{ id: "call_1", name: "task_complete", input: { summary: "done" } }],
+          usage: { input_tokens: 10, output_tokens: 5 },
+          stopReason: "tool_use",
+        };
+      },
+    };
+    const executor = ToolExecutor.fromConfig(sandbox, "default");
+
+    const loop = new ApiAgentLoop({
+      adapter,
+      toolExecutor: executor,
+      model: "test-model",
+      maxTurns: 10,
+    });
+
+    await loop.run("Just use tools");
+
+    const outputLogs = logCalls.filter((c) => c.msg.includes("本轮输出"));
+    expect(outputLogs.length).toBe(0);
+  });
+
+  it("response.text 为 undefined 时 → 无「本轮输出」日志条目", async () => {
+    const adapter: ProviderAdapter = {
+      name: "mock-undefined-text",
+      async completeStream(
+        _messages: MessageParam[],
+        _options: AdapterOptions,
+        _onDelta?: (delta: string) => void,
+      ): Promise<AdapterResponse> {
+        return {
+          text: undefined as unknown as string,
+          toolCalls: [{ id: "call_1", name: "task_complete", input: { summary: "done" } }],
+          usage: { input_tokens: 10, output_tokens: 5 },
+          stopReason: "tool_use",
+        };
+      },
+    };
+    const executor = ToolExecutor.fromConfig(sandbox, "default");
+
+    const loop = new ApiAgentLoop({
+      adapter,
+      toolExecutor: executor,
+      model: "test-model",
+      maxTurns: 10,
+    });
+
+    await loop.run("Undefined text");
+
+    const outputLogs = logCalls.filter((c) => c.msg.includes("本轮输出"));
+    expect(outputLogs.length).toBe(0);
+  });
+
+  it("多轮对话 → 「本轮输出」条目恰好 2 条，各含对应轮文本", async () => {
+    writeFileSync(join(sandbox, "test.txt"), "test content");
+    let callIdx = 0;
+    const adapter: ProviderAdapter = {
+      name: "mock-multi-turn",
+      async completeStream(
+        _messages: MessageParam[],
+        _options: AdapterOptions,
+        onDelta?: (delta: string) => void,
+      ): Promise<AdapterResponse> {
+        callIdx++;
+        if (callIdx === 1) {
+          // 第一轮：有文本 + 工具调用 → 继续
+          if (onDelta) onDelta("第一轮回复");
+          return {
+            text: "第一轮回复",
+            toolCalls: [{ id: "call_1", name: "read_file", input: { path: "test.txt" } }],
+            usage: { input_tokens: 10, output_tokens: 5 },
+            stopReason: "tool_use",
+          };
+        }
+        // 第二轮：纯文本结束
+        if (onDelta) onDelta("第二轮回复");
+        return {
+          text: "第二轮回复",
+          usage: { input_tokens: 20, output_tokens: 10 },
+          stopReason: "end_turn",
+        };
+      },
+    };
+    const executor = ToolExecutor.fromConfig(sandbox, "bypassPermissions");
+
+    const loop = new ApiAgentLoop({
+      adapter,
+      toolExecutor: executor,
+      model: "test-model",
+      maxTurns: 10,
+    });
+
+    await loop.run("Multi turn test");
+
+    const outputLogs = logCalls.filter((c) => c.msg.includes("本轮输出"));
+    expect(outputLogs.length).toBe(2);
+    expect(String(outputLogs[0].args[0])).toContain("第一轮回复");
+    expect(String(outputLogs[1].args[0])).toContain("第二轮回复");
   });
 });

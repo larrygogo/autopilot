@@ -214,11 +214,7 @@ async function createApiAgentLoop(config: AgentConfig, sandboxRoot: string): Pro
     model: config.model ?? eff.default_model ?? "unknown",
     systemPrompt: config.system_prompt,
     maxTurns: config.max_turns ?? 10,
-    onStream: (delta) => {
-      // 推送到 logger（由 event-bus 分发到 WS）
-      // 使用 %s 占位符防止 LLM 输出中的 %s/%d 等被当作 printf 格式串解析
-      log.info("%s", delta);
-    },
+    // onStream 不再传入：完整文本日志改为每轮结束后一次性记录（log-dedup）。
   });
 }
 

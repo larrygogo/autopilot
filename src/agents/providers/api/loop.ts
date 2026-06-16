@@ -214,6 +214,11 @@ export class ApiAgentLoop {
         runOpts?.signal,
       );
 
+      // 本轮完整文本一次性记录（取代逐碎片 onStream 日志，避免几百条碎片行）
+      if (response.text) {
+        log.info("[API] 本轮输出：%s", response.text);
+      }
+
       // 累计 usage
       usage.input_tokens += response.usage.input_tokens;
       usage.output_tokens += response.usage.output_tokens;
