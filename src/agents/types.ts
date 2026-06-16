@@ -28,6 +28,12 @@ export interface AgentConfig {
   /** 工具能力白名单（细粒度授权，见 tool-capabilities.ts）。缺省=全集；与 permission_mode 正交。第一刀仅 API agent 生效。 */
   tools?: string[];
   max_turns?: number;
+  /**
+   * ⚠ reserved（未接线）：声明存在但无任何读取/比较/中断逻辑——ApiAgentLoop 只累计 token、不算
+   * cost、不对照此值。供未来「预算护栏 / 烧钱止损」用（见 docs/superpowers/specs/
+   * 2026-06-14-fine-grained-tool-capabilities.md）。当前 API agent 唯一硬上限是 max_turns + idle
+   * timeout。勿在 UI 上把它当生效护栏宣传；真接入须按正式 spec 走（按价目表累计 cost + 优雅中断）。
+   */
   max_budget_usd?: number;
   system_prompt?: string;
   [key: string]: unknown;

@@ -1766,7 +1766,7 @@ function registerSandboxSetupRpc(): void {
 
   registerRpcMethod({
     method: "scheduler.get",
-    description: "调度器配置（max_concurrent_tasks，未配置时为 null → 生效默认 1）",
+    description: "调度器配置（max_concurrent_tasks，未配置时为 null → 生效默认 1；仅约束 execution run，fix 修复回路例外可瞬时超额）",
     handler: () => {
       const cfg = loadSchedulerConfig();
       return {

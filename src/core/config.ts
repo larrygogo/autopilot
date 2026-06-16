@@ -436,6 +436,13 @@ export interface SchedulerConfig {
    * ⚠️ 行为说明（N=1 时）：原实现是「组内串行，不同组可并行」；
    * 改为全局计数后，N=1 对多 workspace 用户是更严格的全局串行。
    * 这是有意为之的行为统一（需求澄清 Q1 答案：全局总上限）。
+   *
+   * ⚠️ 约束范围 = 仅 execution run（scheduler 起的常规任务）。**fix 修复回路例外**：
+   * 需求转 fix_revision 时 fix-revision-runner 直接起 kind=fix run（续作），不经 scheduler 闸门、
+   * 不读此值。fix_revision 计入 active 只阻止再调度新 queued，不阻止 fix-runner 自己起 fix run，
+   * 故 awaiting_review 释放槽后又被 fix run 占回时 active 可瞬时 +1 超 N（有界、短暂）——这是有意
+   * 设计：修复回路是「已接活的需求把活干完」，不该被并发上限二次排队卡住。要严格限流需另立 fix
+   * 专属上限，非本字段语义。
    */
   max_concurrent_tasks?: number;
 }

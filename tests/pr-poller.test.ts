@@ -21,7 +21,7 @@ import {
   nextRequirementId,
 } from "../src/core/requirements";
 import { listFeedbacks } from "../src/core/requirements/feedbacks";
-import { pollOne, _setGhRunnerForTest, type GhRunner } from "../src/daemon/pr-poller";
+import { pollOne, _setGhRunnerForTest, defaultGhRunner, type GhRunner } from "../src/daemon/pr-poller";
 
 describe("pr-poller pollOne", () => {
   let db: Database;
@@ -335,5 +335,15 @@ describe("pr-poller pollOne", () => {
     await pollOne(id, "gh");
     expect(getRequirementById(id)?.status).toBe("awaiting_review");
     expect(listFeedbacks(id).length).toBe(0);
+  });
+});
+
+describe("defaultGhRunner gh 缺失降级（rank24）", () => {
+  it("gh 二进制不存在 → 返回结构化 exit 127 而非抛 ENOENT（走 ghPrView null 降级）", async () => {
+    // 用一个绝不存在的二进制名触发 Bun.spawn 同步 ENOENT；不应冒泡，应降级成 {exitCode:127}
+    const res = await defaultGhRunner(["autopilot-no-such-binary-xyz-9f3", "--version"]);
+    expect(res.exitCode).toBe(127);
+    expect(res.stdout).toBe("");
+    expect(res.stderr.length).toBeGreaterThan(0); // 携带原始错误信息供诊断
   });
 });

@@ -359,13 +359,19 @@ export async function startNewRunForRequirement(
     //    legacy worktree 任务例外：必须先 git worktree remove 清源仓库注册（零痕迹红线）。
     const oldMeta = getTaskWorktreeMeta(oldTask.id);
     if (oldMeta && oldMeta.mode !== "clone" && oldMeta.mode !== "multi-clone") {
-      try { removeTaskWorktree(oldTask.id); } catch { /* ignore */ }
+      // 失败可见化（与上面删远程分支对齐）：legacy worktree 未清 = 源仓库残留注册（零痕迹红线），
+      // 不能静默；self-heal 不覆盖此路径，至少留一条 warn 供诊断。
+      try { removeTaskWorktree(oldTask.id); }
+      catch (e: unknown) { console.warn(`startNewRunForRequirement: 清旧 worktree ${oldTask.id} 失败（容错继续）：`, e instanceof Error ? e.message : e); }
     }
-    try { rmSync(getTaskSandbox(oldTask.id), { recursive: true, force: true }); } catch { /* ignore */ }
+    // rmSync 失败最坏 = 重跑退化空沙盒（ensureCodebase 自愈），但失败本身要可见、不静默吞。
+    try { rmSync(getTaskSandbox(oldTask.id), { recursive: true, force: true }); }
+    catch (e: unknown) { console.warn(`startNewRunForRequirement: 清旧 run 沙盒 ${oldTask.id} 失败（容错继续）：`, e instanceof Error ? e.message : e); }
 
     // 3. 关旧 run 残留 open phase events（幂等）+ 清 watcher 内存恢复计数（防泄漏）
-    try { closeOpenPhaseEvents(oldTask.id); } catch { /* ignore */ }
-    try { forgetTaskRecoveryState(oldTask.id); } catch { /* ignore */ }
+    try { closeOpenPhaseEvents(oldTask.id); }
+    catch (e: unknown) { console.warn(`startNewRunForRequirement: 关旧 run ${oldTask.id} 残留 phase events 失败（容错继续）：`, e instanceof Error ? e.message : e); }
+    try { forgetTaskRecoveryState(oldTask.id); } catch { /* 纯内存 Map 删除，失败无害，保持静默 */ }
 
     // 旧 agent session 指向被清的 clone，关掉防 claude --resume 续到陈旧会话
     // 传 oldTask.id：清本旧 run 的 API 实例（+ CLI 共享），不误关并发同工作流任务的实例

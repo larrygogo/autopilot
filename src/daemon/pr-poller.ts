@@ -80,14 +80,21 @@ export type GhRunner = (args: string[]) => Promise<{
   stderr: string;
 }>;
 
-const defaultGhRunner: GhRunner = async (args) => {
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
-  const exitCode = await proc.exited;
-  return {
-    exitCode,
-    stdout: await new Response(proc.stdout).text(),
-    stderr: await new Response(proc.stderr).text(),
-  };
+export const defaultGhRunner: GhRunner = async (args) => {
+  // gh 二进制缺失（daemon PATH 与交互 shell 不同，常见于 Windows 服务化启动）时 Bun.spawn
+  // 同步抛 ENOENT。捕获成结构化「exit 127」结果，复用 ghPrView 的 exit≠0 → null 优雅降级，
+  // 避免裸异常冒泡到 pollAllPRs 兜底 catch 刷含糊「pollOne 失败」warn、丢失真因。
+  try {
+    const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+    const exitCode = await proc.exited;
+    return {
+      exitCode,
+      stdout: await new Response(proc.stdout).text(),
+      stderr: await new Response(proc.stderr).text(),
+    };
+  } catch (e: unknown) {
+    return { exitCode: 127, stdout: "", stderr: e instanceof Error ? e.message : String(e) };
+  }
 };
 
 let _ghRunner: GhRunner = defaultGhRunner;
