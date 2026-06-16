@@ -19,7 +19,7 @@ import { ConfirmDialog } from "@/components/Modal";
 import { cn } from "@/lib/utils";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
 import { getApiToken, setApiToken, clearApiToken, shouldUseToken } from "@/lib/api-token";
-import { getDesktopNotifyEnabled, setDesktopNotifyEnabled, ensureDesktopNotifyDefault } from "@/lib/desktop-notify-pref";
+import { getDesktopNotifyEnabled, setDesktopNotifyEnabled } from "@/lib/desktop-notify-pref";
 import { setRestarting } from "@/lib/ws-singleton";
 import { restartDaemonAndWait } from "@/lib/restart-daemon";
 import { LifecycleAgentsCard } from "@/components/LifecycleAgentsCard";
@@ -978,14 +978,10 @@ function DesktopNotifyCard(): React.ReactElement {
         const result = await Notification.requestPermission();
         setPermission(result);
         if (result === "granted") {
-          // 单次读取：无记录回填 true，有记录尊重已有偏好
-          const isEnabled = ensureDesktopNotifyDefault();
-          setEnabled(isEnabled);
-          if (isEnabled) {
-            toast.success("桌面通知已启用");
-          } else {
-            toast.info("已获得浏览器授权，通知开关当前为关闭状态");
-          }
+          // 用户主动在 default 态拨开关表示「授权并启用」，强制写 true（覆盖旧偏好）
+          setDesktopNotifyEnabled(true);
+          setEnabled(true);
+          toast.success("桌面通知已启用");
         } else if (result === "denied") {
           toast.error("桌面通知被拒绝", "请在浏览器地址栏权限设置中放行");
         } else {
