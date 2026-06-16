@@ -8,7 +8,7 @@
 
 定义阶段，写每步逻辑，框架负责按顺序跑、失败重试、驳回回退、并行执行、卡死恢复。
 
-附带 Web UI（专业 SaaS 风格 · 亮暗双模 · 图形化工作流编辑器 · ⌘K 命令面板 · 实时日志 · 人机交互 banner）、TUI、CLI 三种客户端。
+附带 Web UI（claude.ai 质感 · 亮暗双模 · 图形化工作流编辑器 · ⌘K 命令面板 · 实时日志 · 人机交互 banner）、TUI、CLI 三种客户端。
 
 [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1.svg)](https://bun.sh/)
 [![TypeScript](https://img.shields.io/badge/language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
@@ -123,7 +123,7 @@ agent 收到答案继续
 | **📝** | **YAML 声明式工作流** | `workflow.yaml` 定义结构，`workflow.ts` 只写阶段函数，状态自动推导 |
 | **🎨** | **Web UI 图形化编辑** | 阶段 / 并行块 / 驳回 / 智能体覆盖全可视化，`workflow.ts` 自动同步 |
 | **🔌** | **插件化发现** | 放入 `~/.autopilot/workflows/` 即自动注册，零配置 |
-| **🤖** | **多 Agent 三层配置** | 全局 → 工作流 → 运行时 RunOptions，支持 Claude / Codex / Gemini |
+| **🤖** | **Phase 内联 Agent** | 省略则走内置 DEFAULT_AGENT；支持 Claude / Codex / Gemini |
 | **🙋** | **人机交互内建** | `gate: true` 让阶段挂起等人工审批；agent 中途可调 `ask_user` 工具向用户提问 |
 | **📦** | **Workspace 自动归档** | 每阶段产物（`agent-trace.md` + `phase.log`）框架自动写到 `workspace/<NN>-<phase>/` |
 | **⚡** | **并行阶段** | `parallel:` 语法 fork/join + 失败策略 |
@@ -131,6 +131,7 @@ agent 收到答案继续
 | **🚀** | **Push 模型** | 阶段完成后非阻塞启动下一阶段，无需轮询 |
 | **🛡️** | **Supervisor 守护** | daemon 崩溃自动重启，指数退避 + 快速崩溃保护 |
 | **📜** | **三层日志落盘** | 进程日志 / 任务事件流 / Agent 调用 transcript 全部可追溯 |
+| **🔔** | **通知系统** | 替代旧 `autopilot now` 的 append-only 事件流通知；三端覆盖（Web/CLI/TUI） |
 
 ## 架构
 
@@ -146,7 +147,7 @@ graph TB
     Supervisor["Supervisor<br/>(auto-restart)"] -.watches.-> Daemon
 
     subgraph Runtime
-      Workspaces["runtime/tasks/&lt;id&gt;/<br/>workspace/&lt;NN-phase&gt;/<br/>logs/<br/>agent-calls.jsonl"]
+      Workspaces["runtime/requirements/&lt;req-id&gt;/runs/&lt;id&gt;/<br/>├ workspace/&lt;NN-phase&gt;/<br/>├ logs/<br/>└ agent-calls.jsonl"]
       DB[("SQLite")]
       DaemonLog["daemon.log"]
     end
@@ -166,7 +167,7 @@ graph TB
 ```bash
 git clone https://github.com/larrygogo/autopilot && cd autopilot
 bun install
-autopilot init                    # 创建 ~/.autopilot/、跑数据库迁移、装默认 dev workflow
+autopilot init                    # 创建 ~/.autopilot/、跑数据库迁移、装 dev + ad-hoc 两个产品工作流
 ```
 
 老用户拉新代码后跑：`autopilot upgrade`（增量执行新迁移）。
@@ -209,17 +210,12 @@ phases:
 
 ```typescript
 // workflow.ts
-import { homedir } from "os";
 import { join } from "path";
 import { writeFileSync } from "fs";
-
-function taskWorkspace(taskId: string): string {
-  const home = process.env.AUTOPILOT_HOME ?? join(homedir(), ".autopilot");
-  return join(home, "runtime", "tasks", taskId, "workspace");
-}
+import { getTaskSandbox } from "@autopilot/core/sandbox";
 
 export async function run_greet(taskId: string): Promise<void> {
-  const ws = taskWorkspace(taskId);
+  const ws = getTaskSandbox(taskId);
   writeFileSync(join(ws, "hello.txt"), "hello world\n");
 }
 ```
@@ -233,7 +229,7 @@ Web UI 点 **任务 → 新建任务**，选 `hello` 工作流，**填标题（�
 ## Web UI
 
 **视觉与基础设施**
-- Tailwind v4 + shadcn/ui 专业 SaaS 风（克制灰阶 + 灰蓝 accent）
+- Tailwind v4 + shadcn/ui claude.ai 质感（暖象牙奶油底 + 珊瑚橘强调）
 - 亮 / 暗 / 跟随系统三种主题，`localStorage` 持久化
 - 左侧持久导航栏 + 顶部条 + 移动端 Sheet 抽屉
 - ⌘K 命令面板：跳转 / 搜索任务 / 新建任务 / 切主题
@@ -279,6 +275,11 @@ autopilot task status [<task-id>]
 autopilot task cancel <task-id>
 autopilot task logs <task-id> [--follow]
 
+# 通知（事件型通知流：任务终态 / 等待决策 / 异常）
+autopilot notifications list [--unread] [--json] [--limit <n>]
+autopilot notifications read <id...> 或 --all
+autopilot notifications dismiss <id>
+
 # 工作流
 autopilot workflow list
 
@@ -305,7 +306,7 @@ autopilot/
 │   ├── web/                        # React 19 + Vite + Tailwind v4 + shadcn/ui SPA
 │   └── agents/                     # Agent 系统（providers + tools + pending-questions）
 ├── ~/.autopilot/                   # 用户空间（AUTOPILOT_HOME）
-│   ├── config.yaml                 # providers / agents / daemon / workspace_retention
+│   ├── config.yaml                 # providers / daemon / defaults / notify / github / sandbox_retention
 │   ├── workflows/<name>/
 │   │   ├── workflow.yaml
 │   │   ├── workflow.ts
@@ -314,7 +315,11 @@ autopilot/
 │       ├── workflow.db             # SQLite
 │       ├── daemon.pid · supervisor.pid
 │       ├── logs/daemon.log         # daemon 主日志（含旋转备份 .1）
-│       └── tasks/<id>/
+│       ├── requirements/
+│       │   └── <reqId>/
+│       │       ├── runs/<taskId>/        # 任务 workspace / logs / events
+│       │       └── codebase/<alias>/      # 需求级多库 clone
+│       └── tasks/<id>/              # [legacy] 存量任务，只读
 │           ├── workspace/<NN-phase>/   # 每阶段产出归档 agent-trace.md + phase.log
 │           ├── agent-calls.jsonl       # 全任务 agent 调用 raw transcript
 │           └── logs/
@@ -336,19 +341,14 @@ providers:                # LLM 提供商（凭证由对应 CLI 自身管理）
   google:
     default_model: gemini-2.5-pro
 
-agents:                   # 命名 agent，工作流可同名覆盖或 extends
-  coder:
-    provider: anthropic
-    model: claude-sonnet-4-6
-    max_turns: 10
-    permission_mode: auto
-    system_prompt: "你是通用编码助手。"
+# 可选：为某个 phase 内联配置 agent（省略则走内置 DEFAULT_AGENT）
+# 详见 workflow.yaml 的 phase 级 agent 字段
 
 daemon:                   # 可选：daemon 监听配置（改后 autopilot daemon restart 生效）
   host: 127.0.0.1         # 设 0.0.0.0 暴露到局域网
   port: 6180
 
-workspace_retention:      # 可选：自动清理终态任务 workspace
+sandbox_retention:        # 可选：自动清理终态任务 sandbox（旧名 workspace_retention 已弃用）
   days: 30
   max_total_mb: 5120
 ```
@@ -357,7 +357,7 @@ workspace_retention:      # 可选：自动清理终态任务 workspace
 
 ```bash
 bun install
-bun test                  # 174 tests
+bun test                  # 178 tests
 bun run typecheck
 bun run build:web
 ```

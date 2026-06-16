@@ -8,7 +8,7 @@
 
 Define phases, write the logic for each step, and let the framework handle sequential execution, failure retries, rejection rollback, parallel execution, and stall recovery.
 
-Ships with a Web UI (professional SaaS look · light & dark themes · graphical workflow editor · ⌘K command palette · live logs · human-in-the-loop banners), a TUI, and a CLI.
+Ships with a Web UI (claude.ai aesthetic · light & dark themes · graphical workflow editor · ⌘K command palette · live logs · human-in-the-loop banners), a TUI, and a CLI.
 
 [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1.svg)](https://bun.sh/)
 [![TypeScript](https://img.shields.io/badge/language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
@@ -121,7 +121,7 @@ agent receives your answer and continues
 | **📝** | **YAML Declarative Workflow** | `workflow.yaml` defines the structure, `workflow.ts` only contains phase functions, states are auto-derived |
 | **🎨** | **Graphical Web UI Editor** | Phases / parallel blocks / reject / agent overrides — all visual, `workflow.ts` auto-synced |
 | **🔌** | **Plugin-style Discovery** | Drop into `~/.autopilot/workflows/` for automatic registration, zero configuration |
-| **🤖** | **Multi-Agent Three-Layer Config** | Global → workflow → runtime `RunOptions`, supports Claude / Codex / Gemini |
+| **🤖** | **Phase Inline Agent** | Falls back to built-in DEFAULT_AGENT when omitted; supports Claude / Codex / Gemini |
 | **🙋** | **Built-in Human-in-the-loop** | `gate: true` suspends a phase for manual approval; agents can call the `ask_user` tool mid-run |
 | **📦** | **Workspace Auto-Archive** | Per-phase artifacts (`agent-trace.md` + `phase.log`) automatically written to `workspace/<NN>-<phase>/` |
 | **⚡** | **Parallel Phases** | `parallel:` syntax for fork/join + failure strategies |
@@ -129,6 +129,7 @@ agent receives your answer and continues
 | **🚀** | **Push Model** | Non-blocking launch of the next phase upon completion, no polling required |
 | **🛡️** | **Supervisor Watchdog** | Daemon auto-restarts on crash, exponential backoff + fast-crash protection |
 | **📜** | **Three-Layer Log Persistence** | Process logs / task event stream / agent transcript — all traceable |
+| **🔔** | **Notification System** | Append-only event stream replacing the old `autopilot now`; covered across Web/CLI/TUI |
 
 ## Architecture
 
@@ -144,7 +145,7 @@ graph TB
     Supervisor["Supervisor<br/>(auto-restart)"] -.watches.-> Daemon
 
     subgraph Runtime
-      Workspaces["runtime/tasks/&lt;id&gt;/<br/>workspace/&lt;NN-phase&gt;/<br/>logs/<br/>agent-calls.jsonl"]
+      Workspaces["runtime/requirements/&lt;req-id&gt;/runs/&lt;id&gt;/<br/>├ workspace/&lt;NN-phase&gt;/<br/>├ logs/<br/>└ agent-calls.jsonl"]
       DB[("SQLite")]
       DaemonLog["daemon.log"]
     end
@@ -164,7 +165,7 @@ graph TB
 ```bash
 git clone https://github.com/larrygogo/autopilot && cd autopilot
 bun install
-autopilot init                    # create ~/.autopilot/, run migrations, install default dev workflow
+autopilot init                    # create ~/.autopilot/, run migrations, install dev + ad-hoc product workflows
 ```
 
 For existing users after `git pull`: run `autopilot upgrade` to apply new migrations.
@@ -207,17 +208,12 @@ phases:
 
 ```typescript
 // workflow.ts
-import { homedir } from "os";
 import { join } from "path";
 import { writeFileSync } from "fs";
-
-function taskWorkspace(taskId: string): string {
-  const home = process.env.AUTOPILOT_HOME ?? join(homedir(), ".autopilot");
-  return join(home, "runtime", "tasks", taskId, "workspace");
-}
+import { getTaskSandbox } from "@autopilot/core/sandbox";
 
 export async function run_greet(taskId: string): Promise<void> {
-  const ws = taskWorkspace(taskId);
+  const ws = getTaskSandbox(taskId);
   writeFileSync(join(ws, "hello.txt"), "hello world\n");
 }
 ```
@@ -231,7 +227,7 @@ In the Web UI click **Tasks → New Task**, pick the `hello` workflow, **fill in
 ## Web UI
 
 **Visuals & Infrastructure**
-- Tailwind v4 + shadcn/ui professional SaaS look (restrained grayscale + slate-blue accent)
+- Tailwind v4 + shadcn/ui claude.ai aesthetic (warm ivory cream base + coral-orange accent)
 - Light / dark / follow-system themes, persisted in `localStorage`
 - Persistent left navigation + top bar + mobile Sheet drawer
 - ⌘K command palette: navigate / search tasks / new task / switch theme
@@ -277,6 +273,11 @@ autopilot task status [<task-id>]
 autopilot task cancel <task-id>
 autopilot task logs <task-id> [--follow]
 
+# notifications (event stream: task terminal states / pending decisions / anomalies)
+autopilot notifications list [--unread] [--json] [--limit <n>]
+autopilot notifications read <id...> or --all
+autopilot notifications dismiss <id>
+
 # workflows
 autopilot workflow list
 
@@ -303,7 +304,7 @@ autopilot/
 │   ├── web/                        # React 19 + Vite + Tailwind v4 + shadcn/ui SPA
 │   └── agents/                     # agent system (providers + tools + pending-questions)
 ├── ~/.autopilot/                   # user space (AUTOPILOT_HOME)
-│   ├── config.yaml                 # providers / agents / daemon / workspace_retention
+│   ├── config.yaml                 # providers / daemon / defaults / notify / github / sandbox_retention
 │   ├── workflows/<name>/
 │   │   ├── workflow.yaml
 │   │   ├── workflow.ts
@@ -312,7 +313,11 @@ autopilot/
 │       ├── workflow.db             # SQLite
 │       ├── daemon.pid · supervisor.pid
 │       ├── logs/daemon.log         # daemon main log (with rotated backup .1)
-│       └── tasks/<id>/
+│       ├── requirements/
+│       │   └── <reqId>/
+│       │       ├── runs/<taskId>/        # task workspace / logs / events
+│       │       └── codebase/<alias>/      # requirement-level multi-repo clones
+│       └── tasks/<id>/              # [legacy] existing tasks, read-only
 │           ├── workspace/<NN-phase>/   # per-phase artifacts: agent-trace.md + phase.log
 │           ├── agent-calls.jsonl       # whole-task agent call raw transcript
 │           └── logs/
@@ -334,19 +339,14 @@ providers:                # LLM providers (credentials managed by each CLI itsel
   google:
     default_model: gemini-2.5-pro
 
-agents:                   # named agents, can be overridden by same name or via extends in workflows
-  coder:
-    provider: anthropic
-    model: claude-sonnet-4-6
-    max_turns: 10
-    permission_mode: auto
-    system_prompt: "You are a general-purpose coding assistant."
+# Optional: inline agent config per phase (falls back to built-in DEFAULT_AGENT when omitted)
+# See the phase-level agent field in workflow.yaml
 
 daemon:                   # optional: daemon listen config (run autopilot daemon restart after editing)
   host: 127.0.0.1         # set 0.0.0.0 to expose on the LAN
   port: 6180
 
-workspace_retention:      # optional: auto cleanup of terminal-state task workspaces
+sandbox_retention:        # optional: auto cleanup of terminal-state task sandboxes (workspace_retention is deprecated)
   days: 30
   max_total_mb: 5120
 ```
@@ -355,7 +355,7 @@ workspace_retention:      # optional: auto cleanup of terminal-state task worksp
 
 ```bash
 bun install
-bun test                  # 174 tests
+bun test                  # 178 tests
 bun run typecheck
 bun run build:web
 ```
