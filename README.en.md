@@ -145,7 +145,7 @@ graph TB
     Supervisor["Supervisor<br/>(auto-restart)"] -.watches.-> Daemon
 
     subgraph Runtime
-      Workspaces["runtime/requirements/&lt;req-id&gt;/runs/&lt;id&gt;/<br/>workspace/&lt;NN-phase&gt;/<br/>logs/<br/>agent-calls.jsonl"]
+      Workspaces["runtime/requirements/&lt;req-id&gt;/runs/&lt;id&gt;/<br/>├ workspace/&lt;NN-phase&gt;/<br/>├ logs/<br/>└ agent-calls.jsonl"]
       DB[("SQLite")]
       DaemonLog["daemon.log"]
     end
@@ -208,17 +208,12 @@ phases:
 
 ```typescript
 // workflow.ts
-import { homedir } from "os";
 import { join } from "path";
 import { writeFileSync } from "fs";
-
-function taskWorkspace(taskId: string): string {
-  const home = process.env.AUTOPILOT_HOME ?? join(homedir(), ".autopilot");
-  return join(home, "runtime", "tasks", taskId, "workspace");
-}
+import { getTaskSandbox } from "@autopilot/core/sandbox";
 
 export async function run_greet(taskId: string): Promise<void> {
-  const ws = taskWorkspace(taskId);
+  const ws = getTaskSandbox(taskId);
   writeFileSync(join(ws, "hello.txt"), "hello world\n");
 }
 ```
@@ -309,7 +304,7 @@ autopilot/
 │   ├── web/                        # React 19 + Vite + Tailwind v4 + shadcn/ui SPA
 │   └── agents/                     # agent system (providers + tools + pending-questions)
 ├── ~/.autopilot/                   # user space (AUTOPILOT_HOME)
-│   ├── config.yaml                 # providers / daemon / workspace_retention
+│   ├── config.yaml                 # providers / daemon / defaults / notify / github / sandbox_retention
 │   ├── workflows/<name>/
 │   │   ├── workflow.yaml
 │   │   ├── workflow.ts
@@ -351,7 +346,7 @@ daemon:                   # optional: daemon listen config (run autopilot daemon
   host: 127.0.0.1         # set 0.0.0.0 to expose on the LAN
   port: 6180
 
-workspace_retention:      # optional: auto cleanup of terminal-state task workspaces
+sandbox_retention:        # optional: auto cleanup of terminal-state task sandboxes (workspace_retention is deprecated)
   days: 30
   max_total_mb: 5120
 ```

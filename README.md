@@ -147,7 +147,7 @@ graph TB
     Supervisor["Supervisor<br/>(auto-restart)"] -.watches.-> Daemon
 
     subgraph Runtime
-      Workspaces["runtime/requirements/&lt;req-id&gt;/runs/&lt;id&gt;/<br/>workspace/&lt;NN-phase&gt;/<br/>logs/<br/>agent-calls.jsonl"]
+      Workspaces["runtime/requirements/&lt;req-id&gt;/runs/&lt;id&gt;/<br/>├ workspace/&lt;NN-phase&gt;/<br/>├ logs/<br/>└ agent-calls.jsonl"]
       DB[("SQLite")]
       DaemonLog["daemon.log"]
     end
@@ -210,17 +210,12 @@ phases:
 
 ```typescript
 // workflow.ts
-import { homedir } from "os";
 import { join } from "path";
 import { writeFileSync } from "fs";
-
-function taskWorkspace(taskId: string): string {
-  const home = process.env.AUTOPILOT_HOME ?? join(homedir(), ".autopilot");
-  return join(home, "runtime", "tasks", taskId, "workspace");
-}
+import { getTaskSandbox } from "@autopilot/core/sandbox";
 
 export async function run_greet(taskId: string): Promise<void> {
-  const ws = taskWorkspace(taskId);
+  const ws = getTaskSandbox(taskId);
   writeFileSync(join(ws, "hello.txt"), "hello world\n");
 }
 ```
@@ -311,7 +306,7 @@ autopilot/
 │   ├── web/                        # React 19 + Vite + Tailwind v4 + shadcn/ui SPA
 │   └── agents/                     # Agent 系统（providers + tools + pending-questions）
 ├── ~/.autopilot/                   # 用户空间（AUTOPILOT_HOME）
-│   ├── config.yaml                 # providers / daemon / workspace_retention
+│   ├── config.yaml                 # providers / daemon / defaults / notify / github / sandbox_retention
 │   ├── workflows/<name>/
 │   │   ├── workflow.yaml
 │   │   ├── workflow.ts
@@ -353,7 +348,7 @@ daemon:                   # 可选：daemon 监听配置（改后 autopilot daem
   host: 127.0.0.1         # 设 0.0.0.0 暴露到局域网
   port: 6180
 
-workspace_retention:      # 可选：自动清理终态任务 workspace
+sandbox_retention:        # 可选：自动清理终态任务 sandbox（旧名 workspace_retention 已弃用）
   days: 30
   max_total_mb: 5120
 ```
