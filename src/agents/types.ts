@@ -41,6 +41,12 @@ export interface AgentConfig {
 
 export interface AgentResult {
   text: string;
+  /**
+   * rank4：本次 agent 跑是否因撞 max_turns 被截断（产出可能是半成品 / 探索叙述而非完整结论）。
+   * 仅 API 模式（ApiAgentLoop）置位——CLI provider 不强制 max_turns，恒 undefined。工作流可据此
+   * 在喂下游（review）前识别「预算耗尽」而非白烧评审轮（结构化信号，替代各工作流自写字数启发式）。
+   */
+  truncated?: boolean;
   usage?: {
     /** 未走缓存的新输入 token（Anthropic 开 prompt cache 时只是零头，真实输入看 cache 两项） */
     input_tokens?: number;

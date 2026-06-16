@@ -195,6 +195,15 @@ export async function run_design(taskId: string): Promise<void> {
   // 会是一句过程叙述而非方案。把这种半成品喂给 review 只会白烧 max_rejections 轮、误标
   // 「评审驳回」掩盖真因。当场停下报人，给确切病因，胜过反复驳回。
   const planText = (result.text ?? "").trim();
+  // rank4：API 模式撞 max_turns 截断 → result.truncated 是框架给的确定性标记，优先于下面的字数
+  // 启发式（堵"截断但碰巧 ≥600 字且含结构词"的漏判）。CLI provider 不强制 max_turns、无此标记，
+  // 回退 looksLikePlan 兜底。首行稳定（无可变内容）让 runner 确定性失败快速止损。
+  if (result.truncated) {
+    throw new Error(
+      `design agent 撞 max_turns 被截断、未产出完整方案（已落盘 plan.md 供排查）——请提高 design 的 max_turns 或换更强 model\n` +
+        `agent 末尾输出：${planText.slice(0, 160)}${planText.length > 160 ? "…" : ""}`,
+    );
+  }
   const STRUCTURE_HINTS = ["需求分析", "技术方案", "实现方案", "实现步骤", "影响范围", "测试计划"];
   const looksLikePlan = planText.length >= 600 && STRUCTURE_HINTS.some((h) => planText.includes(h));
   if (!looksLikePlan) {
@@ -329,6 +338,15 @@ export async function run_develop(taskId: string): Promise<void> {
   const result = await agent.run(prompt, { cwd: repoPath, timeout: 1_800_000 });
   const reportPath = join(phaseDir(taskId, task.workflow, "develop"), "dev_report.md");
   writeFileSync(reportPath, `<!-- generated:${new Date().toISOString()} -->\n${result.text}`, "utf-8");
+
+  // rank4：develop 撞 max_turns 截断 → 代码可能只改了一半 + 总结被截。直接推进 code_review 会
+  // 评审半成品、白烧驳回轮，当场停下报人（已落盘 dev_report.md 供排查）。首行稳定便于止损。
+  if (result.truncated) {
+    throw new Error(
+      `develop agent 撞 max_turns 被截断、代码改动可能不完整（已落盘 dev_report.md 供排查）——请提高 develop 的 max_turns 或换更强 model\n` +
+        `agent 末尾输出：${(result.text ?? "").trim().slice(0, 160)}`,
+    );
+  }
 
   // 共用沙盒模型：改动直接留在共用 clone 的工作树（不 commit），下游 phase 共用同一 clone
   // 直接看到；submit_pr 才 git add -A && commit && push。

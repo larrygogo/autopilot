@@ -47,6 +47,8 @@ describe("ApiAgentLoop #1：task_complete 与其它工具同轮返回时不丢�
     expect(executed).not.toContain("task_complete");
     // summary 作为最终文本返回
     expect(r.text).toBe("已完成：文件已写");
+    // rank4：正常完成（task_complete）不带截断标记
+    expect(r.truncated).toBeFalsy();
   });
 
   it("纯 task_complete 一轮 → 不执行任何工具，直接返回 summary（行为不回归）", async () => {
@@ -99,5 +101,6 @@ describe("ApiAgentLoop #3：maxTurns 耗尽且末轮纯工具调用时不返回�
 
     expect(r.text.trim().length).toBeGreaterThan(0); // 不再是空串
     expect(r.text).toContain("最大轮次"); // 明确的截断兜底文案
+    expect(r.truncated).toBe(true); // rank4：撞 max_turns → 确定性截断标记
   });
 });

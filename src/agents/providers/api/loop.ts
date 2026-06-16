@@ -321,9 +321,11 @@ export class ApiAgentLoop {
 
     // 末轮可能是纯工具调用（无 text block）→ lastText='' → 返回空串，下游 prompt-runner
     // 写空 agent_output.md、parseHandoffSections 全 missing → 下一 phase 拿空上下文（与
-    // 「无输出」同源的静默 handoff 缺口）。给明确兜底文案，让工作流能识别"被截断"而非空方案。
+    // 「无输出」同源的静默 handoff 缺口）。给明确兜底文案 + rank4 truncated 标记，让工作流能
+    // 结构化识别"被截断"而非把半成品 / 探索叙述当完整方案推进 review。
     return {
       text: lastText || `(已达最大轮次 ${maxTurns}，最后一轮为工具调用、未产出文本结论；可能需提高 max_turns 或换更强模型)`,
+      truncated: true,
       usage,
     };
   }
