@@ -1628,14 +1628,26 @@ function PhaseEditForm({
     judge_model?: string;
     judge_system_prompt?: string;
   };
-  // 判据模式：judge（结构化裁判，dev 在用）/ marker（grep 标记）。按数据推断，缺省 judge。
-  const decisionMode: "judge" | "marker" =
-    decision.mode === "marker" ? "marker" : decision.pass || decision.reject ? "marker" : "judge";
+  // 判据模式：tool（评审 agent 自己调 submit_decision，dev 在用，推荐）/ judge（另起裁判 LLM）/
+  // marker（grep 标记）。按数据推断，缺省 tool。
+  const decisionMode: "tool" | "judge" | "marker" =
+    decision.mode === "tool" ? "tool"
+      : decision.mode === "marker" ? "marker"
+      : decision.mode === "judge" ? "judge"
+      : decision.pass || decision.reject ? "marker"
+      : "tool";
   function patchDecision(p: Partial<typeof decision>) {
     const next: Record<string, unknown> = { ...decision, ...p };
     const cleaned: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(next)) if (typeof v === "string" && v.trim()) cleaned[k] = v;
     onChange({ decision: Object.keys(cleaned).length ? cleaned : undefined });
+  }
+  // 切模式：清掉其他模式专属字段，避免残留脏数据（criteria 在 tool/judge 间共享，保留）。
+  function setDecisionMode(mode: "tool" | "judge" | "marker") {
+    const p: Partial<typeof decision> = { mode };
+    if (mode !== "marker") { p.pass = ""; p.reject = ""; p.reason_section = ""; p.match = ""; }
+    if (mode !== "judge") { p.judge_provider = ""; p.judge_model = ""; p.judge_system_prompt = ""; }
+    patchDecision(p);
   }
   const isPromptMode = typeof raw.prompt === "string" && raw.prompt.trim() !== "";
   const hasTsFn = (tsOriginalCode ?? "").trim() !== "" || tsValue.trim() !== "";
@@ -1865,13 +1877,28 @@ function PhaseEditForm({
               <p className="text-[10px] text-muted-foreground">
                 框架按 agent 输出自动判通过 / 驳回；驳回回退到「驳回到」目标重做（上限走「最大驳回次数」，触顶暂停报人）。
               </p>
-              {/* 模式：结构化裁判（judge，另起一次强制结构化裁决）/ 标记匹配（marker，grep agent 输出标记） */}
+              {/* 模式：工具裁决（tool，评审 agent 自己调 submit_decision）/ 结构化裁判（judge，另起裁判 LLM）/
+                  标记匹配（marker，grep agent 输出标记） */}
               <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
-                <button type="button" onClick={() => patchDecision({ mode: "judge" })} className={decisionMode === "judge" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>结构化裁判</button>
-                <button type="button" onClick={() => patchDecision({ mode: "marker" })} className={decisionMode === "marker" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>标记匹配</button>
+                <button type="button" onClick={() => setDecisionMode("tool")} className={decisionMode === "tool" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>工具裁决</button>
+                <button type="button" onClick={() => setDecisionMode("judge")} className={decisionMode === "judge" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>结构化裁判</button>
+                <button type="button" onClick={() => setDecisionMode("marker")} className={decisionMode === "marker" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>标记匹配</button>
               </div>
 
-              {decisionMode === "judge" ? (
+              {decisionMode === "tool" ? (
+                <div className="space-y-1">
+                  <span className="text-[10px] text-muted-foreground">
+                    评判标准 criteria —— 做评审的 agent 据此<strong className="font-medium text-foreground">自己调用 submit_decision 出裁决</strong>（pass/reject），框架自动把它注入到该 agent 的提示词。裁决者的 provider / 模型 / 人设在上方「智能体」卡里配（不用在这里另设裁判）。
+                  </span>
+                  <Textarea
+                    value={decision.criteria ?? ""}
+                    placeholder={"如：架构方向正确、核心需求有覆盖即 pass；仅当存在架构性硬伤（技术方向错 / 不可行 / 核心需求遗漏）才 reject。可在开发阶段处理的 gap 不构成驳回。"}
+                    onChange={(e) => patchDecision({ criteria: e.target.value })}
+                    className="min-h-[90px] resize-y text-sm leading-relaxed"
+                    spellCheck={false}
+                  />
+                </div>
+              ) : decisionMode === "judge" ? (
                 <>
                   <div className="space-y-1">
                     <span className="text-[10px] text-muted-foreground">评判标准 criteria（喂给裁判，决定它怎么判 —— 这就是你「告诉裁判怎么判」的地方）</span>
