@@ -362,7 +362,6 @@ function CliCard({
   onDelete: (e: ProviderExtendedInfo) => void;
 }) {
   const [model, setModel] = useState(e.default_model ?? "");
-  const login = CLI_SUBTYPES.find((s) => s.value === e.subtype)?.login;
   return (
     <Card className="p-5">
       <CardHeader entry={e} onToggle={onToggle} onDelete={onDelete}
@@ -371,8 +370,12 @@ function CliCard({
         {e.cli_status === "missing" && (
           <p className="text-warning">本机没装 <code className="bg-muted px-1 font-mono">{e.subtype}</code> 命令行，装好后就能用；也可以先留着。</p>
         )}
-        {e.cli_version && <div><span className="text-muted-foreground">版本：</span><code className="bg-muted px-1 font-mono text-foreground">{e.cli_version}</code></div>}
-        {login && <div><span className="text-muted-foreground">登录：</span><code className="bg-muted px-1 font-mono text-foreground">{login}</code></div>}
+        {e.cli_version && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span><span className="text-muted-foreground">版本：</span><code className="bg-muted px-1 font-mono text-foreground">{e.cli_version}</code></span>
+            <span><span className="text-muted-foreground">当前登录状态：</span><span className="text-foreground">{cliStatusText(e.cli_status)}</span></span>
+          </div>
+        )}
       </div>
       <ModelRow value={model} onChange={setModel} onSave={() => onSaveModel(e, model)} dirty={model !== (e.default_model ?? "")} options={modelOptions} />
     </Card>
@@ -493,6 +496,13 @@ function ModelRow({ value, onChange, onSave, dirty, options }: { value: string; 
       {dirty && <Button size="sm" className="h-7 text-xs" onClick={onSave}>保存</Button>}
     </div>
   );
+}
+
+// CLI 探测只跑 `--version`（验可用性，非真验登录态）；"ok" = CLI 可用 = 就绪。
+function cliStatusText(status?: string | null): string {
+  if (status === "ok") return "已就绪";
+  if (status === "missing") return "未安装";
+  return "未检测";
 }
 
 function CliStatusBadge({ status, enabled }: { status?: string | null; enabled: boolean }) {
