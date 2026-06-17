@@ -56,6 +56,7 @@ claude --version     # or: codex --version / gemini --version
 git clone https://github.com/larrygogo/autopilot
 cd autopilot
 bun install
+bun run build:web   # Build the Web UI (web-dist is a gitignored artifact; without it the panel won't open)
 ```
 
 Expected output (last lines):
@@ -64,6 +65,8 @@ Expected output (last lines):
 bun install v1.x.x
 [xxx packages] installed
 ```
+
+> **Don't skip `bun run build:web`**: the Web UI static assets (`web-dist/`) are not in git and must be built once locally. If you skip it and open the dashboard, you'll see a "Web UI not built" guidance page (the CLI still works).
 
 > **Global command**: after install, `autopilot` is invoked via `bun run`. For a globally available binary, run `bun link`.
 
@@ -89,7 +92,7 @@ autopilot init
 
 This creates `~/.autopilot/` — your user data directory for config, workflows, and runtime state, fully isolated from the framework source.
 
-After `git pull` for new releases, run `autopilot upgrade` to apply new migrations (no-op when nothing pending).
+After `git pull` for new releases, run `autopilot upgrade` to apply new migrations (no-op when nothing pending), then `bun run build:web` to rebuild the Web UI (the frontend artifact isn't in git; skipping it leaves the panel on a stale bundle).
 
 ---
 

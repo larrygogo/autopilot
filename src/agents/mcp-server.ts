@@ -16,6 +16,7 @@
 
 import type { RegisteredTool } from "./mcp-tools";
 import { createLogger } from "../core/logger";
+import { VERSION } from "../index";
 
 const log = createLogger("mcp-server");
 
@@ -80,7 +81,7 @@ async function handleRpc(
         capabilities: { tools: {} },
         serverInfo: {
           name: opts.serverName ?? "autopilot",
-          version: opts.serverVersion ?? "1.0.0",
+          version: opts.serverVersion ?? VERSION,
         },
       },
     };

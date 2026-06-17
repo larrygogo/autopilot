@@ -239,7 +239,7 @@ sequenceDiagram
     └── tasks/<task-id>/workspace/  # 任务工作区（templated）
 ```
 
-**升级流程**：`git pull` 框架代码 → `bun run dev upgrade` 跑新迁移；用户数据原地保留。
+**升级流程**：`git pull` 框架代码 → `bun install` 更新依赖 → `bun run dev upgrade` 跑新迁移 → `bun run build:web` 重建 Web UI（前端产物 `web-dist/` 不在 git 里，不重建会跑旧 bundle）；用户数据原地保留。
 
 ## 设计决策
 

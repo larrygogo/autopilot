@@ -56,6 +56,7 @@ claude --version     # 或 codex --version / gemini --version
 git clone https://github.com/larrygogo/autopilot
 cd autopilot
 bun install
+bun run build:web   # 构建 Web UI（web-dist 是 gitignore 产物，不构建则面板打不开）
 ```
 
 预期输出（最后几行）：
@@ -64,6 +65,8 @@ bun install
 bun install v1.x.x
 [xxx packages] installed
 ```
+
+> **别漏 `bun run build:web`**：Web UI 的静态资源（`web-dist/`）不在 git 里，需本地构建一次。没构建就启动 daemon、打开面板，会看到一张「Web UI 未构建」的指引页（CLI 仍可正常用）。
 
 > **全局命令**：安装完成后 `autopilot` 命令通过 `bun run` 调用。如需全局可用，运行：
 > ```bash
@@ -92,7 +95,7 @@ autopilot init
 
 这会在 `~/.autopilot/` 创建你的用户数据目录——配置文件、工作流、运行时数据都放在这里，与框架代码完全隔离。
 
-后续 `git pull` 拉新代码后再跑 `autopilot upgrade` 增量执行新迁移（init 已跑全部时 no-op）。
+后续 `git pull` 拉新代码后，跑 `autopilot upgrade` 增量执行新迁移（init 已跑全部时 no-op），再 `bun run build:web` 重新构建 Web UI（前端产物不在 git 里，不重建会跑旧 bundle）。
 
 ---
 
@@ -293,7 +296,9 @@ autopilot chat                  # 与 agent 对话（REPL）
 
 # 维护
 autopilot init                  # 初始化工作空间（首次）
+git pull && bun install         # 拉新代码 + 更新依赖
 autopilot upgrade               # 运行数据库迁移（升级后）
+bun run build:web               # 重新构建 Web UI（pull 后必跑，否则面板跑旧 bundle）
 ```
 
 ---

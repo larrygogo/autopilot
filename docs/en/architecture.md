@@ -239,7 +239,7 @@ Framework code and user data are strictly separated:
     └── tasks/<task-id>/workspace/  # task workspace (templated)
 ```
 
-**Upgrade flow**: `git pull` the framework code → `bun run dev upgrade` runs new migrations; user data is preserved in place.
+**Upgrade flow**: `git pull` the framework code → `bun install` updates dependencies → `bun run dev upgrade` runs new migrations → `bun run build:web` rebuilds the Web UI (the `web-dist/` frontend artifact isn't in git; skipping it leaves the panel on a stale bundle); user data is preserved in place.
 
 ## Design decisions
 

@@ -298,9 +298,13 @@ bun run dev init                 # 初始化 ~/.autopilot/ + 跑全部迁移 + �
 
 # 日常升级
 git pull                         # 更新框架代码（不影响用户数据）
+bun install                      # 依赖如有变动则更新
 bun run dev upgrade              # 执行新迁移（如有；init 已跑全部时 no-op）
+bun run build:web                # 重新构建 Web UI（web-dist 是 gitignore 产物，pull 后不重建会跑旧 bundle）
 bun run dev workflow sync dev --apply   # 同步 dev workflow 副本（2026-06-12 统一子目录布局后必跑，老副本会在新布局下 git fatal）
 ```
+
+> ⚠️ `bun run build:web` 容易漏：`web-dist/` 是 gitignore 的构建产物，`git pull` 只更新 `src/web` 源码、不会重建 bundle。漏了这步 daemon 会 serve 旧前端（后端新代码 + 前端旧 UI，静默不一致）。daemon 在 `web-dist` 缺失时会返回「Web UI 未构建」指引页而非空白 404。
 
 ## 启动和使用
 

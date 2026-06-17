@@ -1,8 +1,11 @@
 import { homedir } from "os";
 import { join, dirname } from "path";
 import { execFileSync } from "child_process";
+import pkg from "../package.json";
 
-export const VERSION = "1.0.0";
+// 版本号单一真相源 = package.json。CLI --version / daemon status / MCP serverInfo / WS 握手
+// 等全部经此常量取值，发版只改 package.json 一处，杜绝多处硬编码漂移。
+export const VERSION: string = pkg.version;
 export const AUTOPILOT_HOME = process.env.AUTOPILOT_HOME || join(homedir(), ".autopilot");
 
 /**

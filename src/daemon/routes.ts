@@ -562,9 +562,38 @@ function serveStatic(urlPath: string): Response | null {
         headers: { "Content-Type": "text/html", "Cache-Control": "no-cache" },
       });
     }
+    // web-dist 不存在（git clone 后未跑 build:web）：给个明确指引页，
+    // 别让用户对着 404 / 空白页猜。CLI 不受影响。
+    return notBuiltPage();
   }
 
   return null;
+}
+
+/** Web UI 未构建时的导航占位页 —— 明确告诉用户跑 `bun run build:web`。 */
+function notBuiltPage(): Response {
+  const html = `<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>autopilot — Web UI 未构建</title>
+<style>
+:root{color-scheme:dark light}
+body{font-family:ui-sans-serif,system-ui,"Segoe UI",sans-serif;background:#1c1b1a;color:#e8e6e3;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem}
+.card{max-width:34rem;background:#26241f;border:1px solid #3a372f;border-radius:14px;padding:2rem 2.25rem;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+h1{margin:0 0 .75rem;font-size:1.25rem}
+p{margin:.5rem 0;line-height:1.65;color:#bdb9b1}
+pre{background:#1c1b1a;border:1px solid #3a372f;border-radius:8px;padding:.85rem 1rem;overflow:auto;margin:1rem 0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#e8e6e3}
+.accent{color:#d97757}
+</style></head><body><div class="card">
+<h1>Web UI 还没构建</h1>
+<p>daemon 正在正常运行，但前端静态资源（<code>web-dist/</code>）还不存在——通常是 <code>git clone</code> 后没跑过构建。在项目目录执行一次即可：</p>
+<pre><code class="accent">bun run build:web</code></pre>
+<p>构建完成后刷新本页。命令行不受影响，可继续用 <code>autopilot</code> 各命令。</p>
+</div></body></html>`;
+  return new Response(html, {
+    status: 503,
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
+  });
 }
 
 // ──────────────────────────────────────────────

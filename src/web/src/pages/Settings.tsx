@@ -107,7 +107,7 @@ export function Settings({
                 size="sm"
                 onClick={() => setConfirmRestart(true)}
                 disabled={restartingDaemon}
-                title="重启 daemon（拉取最新代码 / 配置生效）"
+                title="重启 daemon（应用磁盘上已有的最新代码 / 配置；升级代码需先在终端 git pull）"
               >
                 <RotateCw className={cn("h-4 w-4", restartingDaemon && "animate-spin")} />
                 {restartingDaemon ? "重启中…" : "重启 daemon"}
@@ -130,6 +130,7 @@ export function Settings({
             <div className="space-y-2 text-sm">
               <p>现在重启 daemon。</p>
               <p className="text-muted-foreground">
+                重启只会应用本地磁盘上已有的代码——要升级到新版本，得先在终端 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">git pull</code>（必要时 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">bun run build:web</code>）再重启。
                 正在跑的任务不受影响，但这个页面会断开一两秒再自动连上。
                 如果 daemon 不是托管启动的，重启会变成停止，需要你手动再启动一次。
               </p>
