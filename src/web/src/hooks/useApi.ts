@@ -889,6 +889,10 @@ export const api = {
     requestRpc<Array<{ provider: string; healthy: boolean; last_reason?: string }>>(
       "providers.health",
     ),
+
+  // [WS-RPC] providers.usableCount（无可用供应商横幅用）
+  providersUsableCount: () =>
+    requestRpc<{ usable: number; total: number }>("providers.usableCount"),
 };
 
 export interface Attachment {

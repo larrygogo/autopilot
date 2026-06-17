@@ -16,13 +16,17 @@ interface HealthState {
  */
 export function ProviderHealthBanner() {
   const [unhealthy, setUnhealthy] = useState<HealthState[]>([]);
+  const [usable, setUsable] = useState<{ usable: number; total: number } | null>(null);
   const { state: wsState, subscribe } = useWebSocket();
+
+  const refetchUsable = () => api.providersUsableCount().then(setUsable).catch(() => {});
 
   useEffect(() => {
     if (wsState !== "connected") return;
     api.providersHealth()
       .then((list) => setUnhealthy(list.filter((s) => !s.healthy)))
       .catch(() => {});
+    refetchUsable();
   }, [wsState]);
 
   useEffect(() => {
@@ -40,9 +44,29 @@ export function ProviderHealthBanner() {
       } else if (event.type === "provider:health-snapshot" && event.payload.states) {
         setUnhealthy(event.payload.states.filter((s) => !s.healthy));
       }
+      refetchUsable(); // provider 状态变（cli 登录 / 健康）→ 重算可用数
     });
     return unsub;
   }, [subscribe]);
+
+  // 无可用 provider —— 最严重，优先显示（红），引导去配置。
+  if (usable && usable.usable === 0) {
+    return (
+      <div className="mb-3 rounded-md bg-destructive/8 px-3 py-2.5 text-sm">
+        <div className="flex items-center gap-2 font-medium text-destructive">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>尚未配置可用的 AI 供应商</span>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          autopilot 需要至少一个可用供应商才能执行任务（澄清 / 入队 / 起任务会被拒）。
+          {usable.total > 0 ? "已有供应商条目，但都未登录 / 未配 API key。" : ""}
+        </p>
+        <Link to="/settings/providers" className="mt-1 inline-block text-xs underline hover:text-foreground">
+          去配置提供商 ▸
+        </Link>
+      </div>
+    );
+  }
 
   if (unhealthy.length === 0) return null;
 

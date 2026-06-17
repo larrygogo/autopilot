@@ -1614,6 +1614,13 @@ program
       console.log(`ad-hoc workflow 已存在，保留：${adHocWorkflowDir}`);
     }
 
+    // Phase 5：provider 就绪提醒（静态引导——脚手架与运行前置分开，不在 init 里探测/拒绝）。
+    // 运行时（澄清 / 入队 / 起任务）会校验「有可用 provider」，无则提前拒并指引；第一个配好的自动设默认。
+    console.log("\n⚠ autopilot 需要至少一个可用 AI 供应商（CLI 登录 或 填 API key）才能执行任务：");
+    console.log("    » CLI 登录（推荐）：claude login / codex login / gemini auth login");
+    console.log("    » 填 API key：     autopilot key set <provider>");
+    console.log("    » Web 配置：       autopilot dashboard → 设置 → 提供商");
+
     console.log("\n初始化完成。下一步（三选一）：");
     console.log("  » bun run dev config doctor       检查配置");
     console.log("  » bun run dev config doctor --fix 交互式配置");

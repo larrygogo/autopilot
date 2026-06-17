@@ -115,7 +115,7 @@ import {
 } from "../core/config";
 import { effectiveClarifyConfig } from "./clarifier-agent";
 import { effectiveFixConfig } from "./fix-revision-runner";
-import { hasUsableProvider, ensureDefaultProviderSet } from "../core/default-provider";
+import { hasUsableProvider, ensureDefaultProviderSet, listUsableProviders } from "../core/default-provider";
 
 const NO_USABLE_PROVIDER_MSG =
   "尚无可用的 AI 供应商 —— 请在「设置 → 提供商」配置（CLI 登录或填 API key）后重试。autopilot 需要至少一个可用供应商才能执行任务。";
@@ -453,6 +453,17 @@ function registerCoreQueryRpc(): void {
     method: "providers.health",
     description: "当前不健康的 provider 列表（轻量内存态，给通知面板 banner 初始拉取）",
     handler: () => listUnhealthy(),
+  });
+
+  registerRpcMethod({
+    method: "providers.usableCount",
+    description: "可用 provider 数 + 条目总数（给「无可用供应商」横幅）。可用 = cli 已登录 ok / api 有 key。",
+    handler: async () => {
+      const usable = await listUsableProviders();
+      let total = 0;
+      try { total = listProviderEntries().length; } catch { /* DB 未就绪 */ }
+      return { usable: usable.length, total };
+    },
   });
 
   registerRpcMethod({
