@@ -172,11 +172,6 @@ export function Settings({
                 disabled={defaultsSaving}
               />
             )}
-            <p className="text-[11px] text-muted-foreground">
-              当前生效：
-              <span className="font-mono">{defaultsTz || systemTz || "—"}</span>
-              {!defaultsTz && systemTz && <span className="ml-1">（跟随系统）</span>}
-            </p>
           </div>
         </div>
       </Card>
