@@ -603,10 +603,6 @@ function NetworkAccessCard(): React.ReactElement {
             </div>
           </div>
         )}
-
-        <p className="mt-2 text-[10px] text-muted-foreground">
-          MCP 的 <code className="font-mono">/mcp</code> 接口用另一个令牌（在 mcp-config 里管），不受这里影响。
-        </p>
       </div>
 
       {/* 弹：切局域网前强制生成 token */}
