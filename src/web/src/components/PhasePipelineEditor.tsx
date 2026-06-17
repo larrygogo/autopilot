@@ -1658,6 +1658,24 @@ function PhaseEditForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phaseName]);
 
+  // 出口判定：这一步跑完怎么走。三选一（互斥），由数据派生——
+  //   直接通过 = 无驳回目标且未开人工审批；自动判据 = 有驳回目标（agent 自判）；人工审批 = gate=true（停下等人）。
+  const rejectSet = typeof raw.reject === "string" && raw.reject !== "";
+  const exitMode: "through" | "auto" | "manual" =
+    raw.gate === true ? "manual" : rejectSet ? "auto" : "through";
+  function chooseExitMode(mode: "through" | "auto" | "manual") {
+    if (mode === "through") {
+      onChange({ reject: undefined, max_rejections: undefined, gate: undefined, decision: undefined, gate_message: undefined });
+    } else if (mode === "auto") {
+      // 自动判据需要一个驳回目标——还没选就默认挑最近的前序阶段，省一步手动选。
+      const patch: Record<string, unknown> = { gate: undefined, gate_message: undefined };
+      if (!rejectSet && rejectCandidates.length > 0) patch.reject = rejectCandidates[rejectCandidates.length - 1];
+      onChange(patch);
+    } else {
+      onChange({ gate: true, decision: undefined });
+    }
+  }
+
   // 任务区（写提示词 / 写执行函数）：构建好后嵌入智能体卡，紧跟模型之后。
   const taskGroup = (
     <div className="space-y-2">
@@ -1812,70 +1830,114 @@ function PhaseEditForm({
         taskSlot={taskGroup}
       />
 
-      {/* 流程控制（折叠）：驳回 / 判据 / 人工审批 */}
-      <CollapsibleSection title="流程控制（驳回 · 判据 · 人工审批）">
-        <FormRow label="驳回到">
-          <Select
-            value={(raw.reject as string | undefined) || "__none__"}
-            onValueChange={(v) => onChange({ reject: v === "__none__" ? undefined : v })}
-            disabled={rejectCandidates.length === 0}
-          >
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue placeholder="（不驳回）" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">（不驳回）</SelectItem>
-              {rejectCandidates.map((n) => {
-                const label = phaseLabels[n] ?? n;
+      {/* 流程控制（折叠）：这一步跑完怎么走 —— 直接通过 / 自动判据 / 人工审批 三选一 */}
+      <CollapsibleSection title="流程控制（这一步跑完怎么走）">
+        <FormRow label="这一步跑完怎么走">
+          <div className="space-y-2">
+            <div className="inline-flex flex-wrap rounded-md border border-border bg-muted/30 p-0.5">
+              {([
+                ["through", "直接通过"],
+                ["auto", "自动判据"],
+                ["manual", "人工审批"],
+              ] as const).map(([m, label]) => {
+                // 第一个阶段没有可驳回的前序，自动判据无意义 → 禁用
+                const disabled = m === "auto" && rejectCandidates.length === 0;
+                const active = exitMode === m;
                 return (
-                  <SelectItem key={n} value={n}>
-                    <span className="flex items-baseline gap-1.5">
-                      <span>{label}</span>
-                      {label !== n && <span className="font-mono text-[10px] text-muted-foreground">{n}</span>}
-                      {n === curReject && rejectValueInvalid ? "（已不在前序，请重选）" : ""}
-                    </span>
-                  </SelectItem>
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => chooseExitMode(m)}
+                    title={disabled ? "当前已是第一个阶段，没有可回退的前序，无法自动判据" : undefined}
+                    className={
+                      active
+                        ? "rounded-[5px] bg-card px-2.5 py-1 text-[11px] text-foreground shadow-sm"
+                        : "rounded-[5px] px-2.5 py-1 text-[11px] text-muted-foreground enabled:hover:text-foreground disabled:opacity-40"
+                    }
+                  >
+                    {label}
+                  </button>
                 );
               })}
-            </SelectContent>
-          </Select>
-          {rejectCandidates.length === 0 ? (
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              没有可驳回的目标——驳回只能回退到本阶段之前的阶段，当前阶段已是第一个。
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              {exitMode === "through" && "跑完直接进下一步，不卡。"}
+              {exitMode === "auto" && "做评审的 agent 按你写的标准自己判通过 / 驳回，驳回自动回退重做（上限走「最大驳回次数」，触顶暂停报人）。"}
+              {exitMode === "manual" && "跑完停下来等你，点「通过」进下一步，点「驳回」回退重做。"}
             </p>
-          ) : rejectValueInvalid ? (
-            <p className="mt-1 text-[10px] text-warning">
-              当前「{curReject}」已排到本阶段之后，驳回只能往回跳；请改选前序阶段，否则保存会被拒。
-            </p>
-          ) : (
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              只列出本阶段之前的阶段（驳回只能往回跳）。
-            </p>
-          )}
+          </div>
         </FormRow>
 
-        {typeof raw.reject === "string" && raw.reject !== "" && (
-          <FormRow label="最大驳回次数">
-            <Input
-              type="number"
-              min={1}
-              value={typeof raw.max_rejections === "number" ? raw.max_rejections : ""}
-              placeholder="10"
-              onChange={(e) => {
-                const v = e.target.value;
-                onChange({ max_rejections: v === "" ? undefined : Number(v) });
-              }}
-              className="h-8 w-32 font-mono text-sm"
-            />
-          </FormRow>
+        {/* 驳回到 + 最大驳回次数：自动判据 / 人工审批 共用（人工审批留空＝只能通过） */}
+        {(exitMode === "auto" || exitMode === "manual") && (
+          <>
+            <FormRow label="驳回到">
+              <Select
+                value={(raw.reject as string | undefined) || "__none__"}
+                onValueChange={(v) => onChange({ reject: v === "__none__" ? undefined : v })}
+                disabled={rejectCandidates.length === 0}
+              >
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue placeholder="（不驳回）" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">（不驳回）</SelectItem>
+                  {rejectCandidates.map((n) => {
+                    const label = phaseLabels[n] ?? n;
+                    return (
+                      <SelectItem key={n} value={n}>
+                        <span className="flex items-baseline gap-1.5">
+                          <span>{label}</span>
+                          {label !== n && <span className="font-mono text-[10px] text-muted-foreground">{n}</span>}
+                          {n === curReject && rejectValueInvalid ? "（已不在前序，请重选）" : ""}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+              {rejectValueInvalid ? (
+                <p className="mt-1 text-[10px] text-warning">
+                  当前「{curReject}」已排到本阶段之后，驳回只能往回跳；请改选前序阶段，否则保存会被拒。
+                </p>
+              ) : exitMode === "auto" && !rejectSet ? (
+                <p className="mt-1 text-[10px] text-warning">
+                  自动判据需要一个回退目标，请在上面选一个前序阶段。
+                </p>
+              ) : exitMode === "manual" ? (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  你点「驳回」时回退到这里重做；留空（不驳回）＝这一步只能通过。
+                </p>
+              ) : (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  只列出本阶段之前的阶段（驳回只能往回跳）。
+                </p>
+              )}
+            </FormRow>
+
+            {rejectSet && (
+              <FormRow label="最大驳回次数">
+                <Input
+                  type="number"
+                  min={1}
+                  value={typeof raw.max_rejections === "number" ? raw.max_rejections : ""}
+                  placeholder="10"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    onChange({ max_rejections: v === "" ? undefined : Number(v) });
+                  }}
+                  className="h-8 w-32 font-mono text-sm"
+                />
+              </FormRow>
+            )}
+          </>
         )}
 
-        {isPromptMode && raw.gate !== true && typeof raw.reject === "string" && raw.reject !== "" && (
+        {/* 自动判据配置 —— 仅提示词模式可视化配；ts 模式由代码判 */}
+        {exitMode === "auto" && rejectSet && isPromptMode && (
           <FormRow label="判据（这一步如何判通过 / 驳回）">
             <div className="space-y-2">
-              <p className="text-[10px] text-muted-foreground">
-                框架按 agent 输出自动判通过 / 驳回；驳回回退到「驳回到」目标重做（上限走「最大驳回次数」，触顶暂停报人）。
-              </p>
               {/* 模式：工具裁决（tool，评审 agent 自己调 submit_decision）/ 标记匹配（marker，grep agent 输出标记） */}
               <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
                 <button type="button" onClick={() => setDecisionMode("tool")} className={decisionMode === "tool" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>工具裁决</button>
@@ -1917,19 +1979,14 @@ function PhaseEditForm({
           </FormRow>
         )}
 
-        <FormRow label="人工审批 (gate)">
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={raw.gate === true}
-              onCheckedChange={(v) => onChange(v ? { gate: true, decision: undefined } : { gate: undefined })}
-            />
-            <span className="text-xs text-muted-foreground">
-              开启后这一步跑完会停下来等你，点「通过」或「驳回」才继续（和上面的判据二选一）
-            </span>
-          </div>
-        </FormRow>
+        {exitMode === "auto" && rejectSet && !isPromptMode && (
+          <p className="text-[10px] text-muted-foreground">
+            这一步用执行函数（ts）实现，通过 / 驳回由代码里的逻辑决定，这里不用另配判据。
+          </p>
+        )}
 
-        {raw.gate === true && (
+        {/* 人工审批配置 */}
+        {exitMode === "manual" && (
           <FormRow label="审批提示语">
             <Input
               value={(raw.gate_message as string | undefined) ?? ""}
