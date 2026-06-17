@@ -54,6 +54,11 @@ export function ModelCombobox({
   }, [open]);
 
   const trimmed = query.trim();
+  const valueInOptions = !!value && options.includes(value);
+  // 当前值若不在 catalog 里（compat 供应商的自定义 id），也要在列表里显示成「已选」——
+  // 否则打开下拉只看到「无匹配模型」、看不到自己设的那个模型。
+  const showCurrentValue =
+    !!value && !valueInOptions && (!trimmed || value!.toLowerCase().includes(trimmed.toLowerCase()));
   const customAvailable =
     trimmed.length > 0 && !options.includes(trimmed) && trimmed !== value;
 
@@ -117,12 +122,24 @@ export function ModelCombobox({
             placeholder="搜索或输入自定义 id…"
           />
           <CommandList>
-            {filtered.length === 0 && !customAvailable && (
+            {filtered.length === 0 && !customAvailable && !showCurrentValue && (
               <CommandEmpty className="px-3 py-4 text-center text-xs leading-relaxed text-muted-foreground">
                 {options.length === 0
                   ? "该供应商无预置模型列表 —— 直接在上方输入模型 id 即可使用"
                   : "无匹配 —— 输入完整模型 id 可直接使用"}
               </CommandEmpty>
+            )}
+            {showCurrentValue && (
+              <CommandGroup heading="当前">
+                <CommandItem
+                  value={`__current__:${value}`}
+                  onSelect={() => commit(value)}
+                  className="font-mono"
+                >
+                  <Check className="h-3.5 w-3.5 opacity-100 text-accent" />
+                  <span>{value}</span>
+                </CommandItem>
+              </CommandGroup>
             )}
             {filtered.length > 0 && (
               <CommandGroup heading="可选模型">
@@ -146,7 +163,7 @@ export function ModelCombobox({
             )}
             {customAvailable && (
               <>
-                {filtered.length > 0 && <CommandSeparator />}
+                {(filtered.length > 0 || showCurrentValue) && <CommandSeparator />}
                 <CommandGroup heading="自定义">
                   <CommandItem
                     value={`__custom__:${trimmed}`}
