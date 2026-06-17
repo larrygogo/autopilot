@@ -365,6 +365,7 @@ function CliCard({
   return (
     <Card className="p-5">
       <CardHeader entry={e} onToggle={onToggle} onDelete={onDelete}
+        title={CLI_DISPLAY_NAMES[e.subtype ?? ""] ?? e.display_name}
         statusBadge={<CliStatusBadge status={e.cli_status} enabled={e.enabled !== false} />} />
       <div className="mt-2 space-y-1 text-xs">
         {e.cli_status === "missing" && (
@@ -456,16 +457,18 @@ function CardHeader({
   onToggle,
   onDelete,
   statusBadge,
+  title,
 }: {
   entry: ProviderExtendedInfo;
   onToggle: (e: ProviderExtendedInfo, v: boolean) => void;
   onDelete: (e: ProviderExtendedInfo) => void;
   statusBadge: React.ReactNode;
+  title?: string;
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-base font-semibold">{e.display_name}</h3>
+        <h3 className="text-base font-semibold">{title ?? e.display_name}</h3>
         <Badge variant="outline" className="font-normal text-muted-foreground">{e.type === "cli" ? "CLI" : "API"}</Badge>
         <code className="font-mono text-[10px] text-muted-foreground">{e.name}</code>
         {statusBadge}
@@ -497,6 +500,13 @@ function ModelRow({ value, onChange, onSave, dirty, options }: { value: string; 
     </div>
   );
 }
+
+// CLI 卡用各自工具的产品名（而非 provider 厂商名），更贴近用户认知。
+const CLI_DISPLAY_NAMES: Record<string, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  gemini: "Gemini",
+};
 
 // CLI 探测只跑 `--version`（验可用性，非真验登录态）；"ok" = CLI 可用 = 就绪。
 function cliStatusText(status?: string | null): string {
