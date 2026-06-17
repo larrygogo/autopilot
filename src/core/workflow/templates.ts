@@ -308,6 +308,65 @@ export function syncWorkflowTemplate(name: string): { copied: string[] } {
   return { copied };
 }
 
+/**
+ * 从 workflow.yaml 文本取顶层 `template_revision`（缺失 / 无匹配 → 0）。纯函数，可测。
+ * 用 targeted 正则而非全量 YAML 解析：只取一个顶层整数，鲁棒、零依赖、容忍行尾注释。
+ * 老副本（本字段引入前的拷贝）没有此字段 → 0，天然落后于带 revision 的新模板。
+ */
+export function parseTemplateRevision(yamlContent: string): number {
+  const m = yamlContent.match(/^template_revision:\s*(\d+)\s*(?:#.*)?$/m);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+/** 读 workflow.yaml 顶层 `template_revision`（文件不存在 / 读失败 → 0）。 */
+function readTemplateRevision(yamlPath: string): number {
+  try {
+    return parseTemplateRevision(readFileSync(yamlPath, "utf-8"));
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 单个工作流的本地副本是否落后于内置模板（按 template_revision 比对）。
+ * 区别于字节 diff：revision 比对能区分「用户合法定制」和「上游有新修复」——只有 examples
+ * 的 revision 更高才算落后。examples 或本地副本不存在 → false（无从比较）。
+ */
+export function isWorkflowCopyOutdated(name: string): boolean {
+  const root = findExamplesRoot();
+  if (!root) return false;
+  const tplYaml = join(root, name, "workflow.yaml");
+  const localYaml = join(autopilotHome(), "workflows", name, "workflow.yaml");
+  if (!existsSync(tplYaml) || !existsSync(localYaml)) return false;
+  return readTemplateRevision(tplYaml) > readTemplateRevision(localYaml);
+}
+
+/**
+ * 列出所有「本地副本落后内置模板」的工作流（template_revision 比对）。
+ * daemon 启动时跑一次，把「副本该同步了」从「每个 git 任务无条件 warn」（狼来了）
+ * 收敛成「真落后才提示一次」。
+ */
+export function listOutdatedWorkflowCopies(): Array<{ name: string; local: number; template: number }> {
+  const root = findExamplesRoot();
+  if (!root) return [];
+  const home = autopilotHome();
+  const out: Array<{ name: string; local: number; template: number }> = [];
+  let names: string[];
+  try {
+    names = readdirSync(root).filter((n) => existsSync(join(root, n, "workflow.yaml")));
+  } catch {
+    return [];
+  }
+  for (const name of names) {
+    const localYaml = join(home, "workflows", name, "workflow.yaml");
+    if (!existsSync(localYaml)) continue;
+    const template = readTemplateRevision(join(root, name, "workflow.yaml"));
+    const local = readTemplateRevision(localYaml);
+    if (template > local) out.push({ name, local, template });
+  }
+  return out;
+}
+
 function listFilesRecursive(root: string, prefix = ""): Set<string> {
   const out = new Set<string>();
   for (const entry of readdirSync(root)) {

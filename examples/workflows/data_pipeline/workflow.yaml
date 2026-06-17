@@ -1,4 +1,5 @@
 name: data_pipeline
+template_revision: 1   # 模板修订号；examples 改了 bug fix 就 +1，老副本据此被提示同步
 label: "数据流水线"
 description: "数据处理流水线 / Data processing pipeline"
 

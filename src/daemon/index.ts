@@ -6,6 +6,7 @@ import { initDb, closeDb, listTasks, updateTask, closeOpenPhaseEvents } from "..
 import { forceTransition } from "../core/state-machine";
 import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/workflow/registry";
+import { listOutdatedWorkflowCopies } from "../core/workflow/templates";
 import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
 import { runInBackground } from "../core/runner";
 import { initDaemonFileLog, log } from "../core/logger";
@@ -267,6 +268,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   initFixRevisionRunner();
   // 需求完成即清任务 workspace（交付已在远程 PR，本地 clone 占空间无保留价值）
   initDoneWorkspaceCleanup();
+  // 工作流副本落后检查：仅当本地副本 template_revision 落后内置模板才提示一次（替掉 factory 的无条件 warn）
+  try {
+    const outdated = listOutdatedWorkflowCopies();
+    if (outdated.length > 0) {
+      log.warn(
+        "以下工作流副本落后于内置模板，建议同步（autopilot workflow sync <name> --apply）：%s",
+        outdated.map((o) => `${o.name}（本地 r${o.local} < 模板 r${o.template}）`).join("、"),
+      );
+    }
+  } catch { /* best-effort，不阻塞启动 */ }
 
   // 桥接：事件总线 → WebSocket 广播
   bus.on("*", (event: AutopilotEvent) => {

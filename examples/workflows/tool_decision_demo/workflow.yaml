@@ -1,4 +1,5 @@
 name: tool_decision_demo
+template_revision: 1   # 模板修订号；examples 改了 bug fix 就 +1，老副本据此被提示同步
 label: 工具裁决示例（decision mode:tool）
 description: "演示 decision mode:tool：评审 agent 自己调 submit_decision 出裁决，框架只读+驱动状态机。设计 → 评审 → 通过即完成 / 驳回回设计重做。全 prompt、零 ts，可克隆改造。"
 requires: { git: false }

@@ -1,4 +1,5 @@
 name: artifact
+template_revision: 1   # 模板修订号；examples 改了 bug fix 就 +1，老副本据此被提示同步
 label: "产物交付"
 description: "产出文件类交付物（设计图 / 网页 demo / 文档）：制作 → 交付到需求 deliveries/ → 需求级人工验收（通过 = done；驳回 = fix_revision 修复轮重做产物）"
 # 纯声明式工作流（零 ts，2026-06-16 P1）：
