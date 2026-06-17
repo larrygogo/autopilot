@@ -1924,7 +1924,7 @@ function PhaseEditForm({
               onCheckedChange={(v) => onChange(v ? { gate: true, decision: undefined } : { gate: undefined })}
             />
             <span className="text-xs text-muted-foreground">
-              开启后此阶段执行完会挂起到 awaiting_，需人工点击通过/驳回（与上面的判据互斥）
+              开启后这一步跑完会停下来等你，点「通过」或「驳回」才继续（和上面的判据二选一）
             </span>
           </div>
         </FormRow>
