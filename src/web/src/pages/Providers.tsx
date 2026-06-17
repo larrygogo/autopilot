@@ -365,8 +365,7 @@ function CliCard({
   return (
     <Card className="p-5">
       <CardHeader entry={e} onToggle={onToggle} onDelete={onDelete}
-        title={CLI_DISPLAY_NAMES[e.subtype ?? ""] ?? e.display_name}
-        statusBadge={<CliStatusBadge status={e.cli_status} enabled={e.enabled !== false} />} />
+        title={CLI_DISPLAY_NAMES[e.subtype ?? ""] ?? e.display_name} />
       <div className="mt-2 space-y-1 text-xs">
         {e.cli_status === "missing" && (
           <p className="text-warning">本机没装 <code className="bg-muted px-1 font-mono">{e.subtype}</code> 命令行，装好后就能用；也可以先留着。</p>
@@ -462,7 +461,7 @@ function CardHeader({
   entry: ProviderExtendedInfo;
   onToggle: (e: ProviderExtendedInfo, v: boolean) => void;
   onDelete: (e: ProviderExtendedInfo) => void;
-  statusBadge: React.ReactNode;
+  statusBadge?: React.ReactNode;
   title?: string;
 }) {
   return (
@@ -515,13 +514,6 @@ function cliStatusText(status?: string | null): string {
   if (status === "ok") return "已就绪";
   if (status === "missing") return "未安装";
   return "未检测";
-}
-
-function CliStatusBadge({ status, enabled }: { status?: string | null; enabled: boolean }) {
-  if (!enabled) return <Badge variant="secondary" className="font-normal text-muted-foreground">已禁用</Badge>;
-  if (status === "ok") return <Badge variant="success" className="gap-1"><CheckCircle2 className="h-3 w-3" />就绪</Badge>;
-  if (status === "missing") return <Badge variant="warning" className="gap-1"><AlertTriangle className="h-3 w-3" />本地不支持</Badge>;
-  return <Badge variant="secondary" className="font-normal text-muted-foreground">未检测</Badge>;
 }
 
 function ApiStatusBadge({ hasKey, enabled }: { hasKey: boolean; enabled: boolean }) {
