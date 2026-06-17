@@ -18,7 +18,7 @@ import { startServerWithRetry } from "./server";
 import { setWebDistDir, reloadApiToken, getApiTokenState, extendAllowedOrigins, detectLanIPv4, isExposedHost, startupAuthBlocked } from "./routes";
 import { generateApiToken, saveApiToken } from "../core/api-token";
 import { hasAnyUser } from "../core/auth";
-import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo, writeRestartFlag, consumeRestartFlag } from "./pid";
+import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo, writeRestartFlag, consumeRestartFlag, isSupervisorRunning } from "./pid";
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
 import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
 import { initProviderCliMonitor, disposeProviderCliMonitor } from "./provider-cli-monitor";
@@ -50,10 +50,13 @@ let _activeShutdown: ((exitCode: number) => void) | null = null;
  *
  * delayMs 默认 100ms 给客户端 RPC 响应留出回流窗口。
  *
- * 注：必须在 supervisor 模式下使用；裸跑 daemon（无 supervisor）调用此函数等同于 stop。
+ * 裸跑 daemon（无 supervisor）：没人 respawn，重启 = 自杀且不回来。此时**拒绝重启、不退出**，
+ * 返回 false 让客户端明确提示「请手动 stop+start」——而不是静默把 daemon 杀掉、让 Web
+ * 轮询 15s 后 reload 到一个已死的 daemon（旧实现 _activeShutdown 无条件赋值，bare 模式也返 true 的假信号）。
  */
 export function requestRestart(delayMs = 100): boolean {
   if (!_activeShutdown) return false;
+  if (!isSupervisorRunning()) return false;
   writeRestartFlag();
   const fn = _activeShutdown;
   setTimeout(() => fn(RESTART_SENTINEL_CODE), delayMs);

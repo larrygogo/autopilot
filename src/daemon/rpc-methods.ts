@@ -263,8 +263,10 @@ function registerCoreQueryRpc(): void {
 
   registerRpcMethod({
     method: "daemon.restart",
-    description: "请求 supervisor 重启 daemon（exit code 75 触发 respawn）；裸跑模式下退化为 stop",
+    description: "请求 supervisor 重启 daemon（exit code 75 触发 respawn）；裸跑（无 supervisor）模式返回 ok:false 不重启",
     handler: () => {
+      // ok=false 表示「没有 supervisor、无法重启」（不会自杀）；客户端据此提示手动 stop+start，
+      // 不要盲目轮询等重连。
       const ok = requestRestart(150);
       return { ok, scheduled_in_ms: 150 };
     },

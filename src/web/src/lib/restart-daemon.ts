@@ -19,7 +19,16 @@ export async function restartDaemonAndWait(toast: ToastApi): Promise<DaemonListe
   try { prevSha = (await api.getStatus()).git_sha; } catch { /* 容错 */ }
 
   try {
-    await api.restartDaemon();
+    const res = await api.restartDaemon();
+    // ok:false = daemon 没在 supervisor 下托管，没人 respawn，重启请求被拒（daemon 仍在跑）。
+    // 别进 15s 轮询然后 reload 到一个不会回来的 daemon——直接提示手动 stop+start。
+    if (res && res.ok === false) {
+      toast.error(
+        "当前 daemon 未托管启动，无法从这里重启",
+        "请在终端执行 `autopilot daemon restart`（或 stop 再 start）。",
+      );
+      return null;
+    }
   } catch (e: unknown) {
     // restart 调用本身失败（如 daemon 已退出未起完）— 提示手动 restart 兜底
     toast.error("自动重启失败，请手动执行 `autopilot daemon restart`", (e as Error)?.message ?? String(e));
