@@ -4,9 +4,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * Claude 风 Switch：
- * - 圆角 pill track 和圆形 thumb
- * - track 用淡描边色，启用时填充 accent
- * - thumb 是实色圆形滑块
+ * - 圆角 pill track：开 = accent 实填，关 = input 淡填（两态都是实色填充，读感更清晰）
+ * - thumb 始终白色圆滑块 + 柔阴影，两态一致；尺寸与 track 贴合（size-4 in h-5）
  */
 export const Switch = React.forwardRef<
   React.ElementRef<typeof SwitchPrimitive.Root>,
@@ -15,14 +14,14 @@ export const Switch = React.forwardRef<
   <SwitchPrimitive.Root
     ref={ref}
     className={cn(
-      "peer inline-flex h-5 w-10 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-accent data-[state=checked]:border-accent data-[state=unchecked]:bg-transparent",
+      "peer inline-flex h-5 w-10 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-accent data-[state=unchecked]:bg-input",
       className,
     )}
     {...props}
   >
     <SwitchPrimitive.Thumb
       className={cn(
-        "pointer-events-none block h-3 w-3 rounded-full transition-transform data-[state=checked]:translate-x-[19px] data-[state=checked]:bg-background data-[state=unchecked]:translate-x-0.5 data-[state=unchecked]:bg-foreground/60",
+        "pointer-events-none block size-4 rounded-full bg-white shadow-sm transition-transform data-[state=checked]:translate-x-5 data-[state=unchecked]:translate-x-0.5",
       )}
     />
   </SwitchPrimitive.Root>
