@@ -1,7 +1,10 @@
-import { readdirSync, existsSync } from "fs";
+import { readdirSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getDb } from "./db";
 import { log } from "./logger";
+
+export const MIGRATIONS_DIR = join(import.meta.dir, "../migrations");
+const MIGRATION_FILE_RE = /^\d{3}-[\w-]+\.ts$/;
 
 // ──────────────────────────────────────────────
 // Schema 版本管理
@@ -46,6 +49,62 @@ export function findSkippedMigrations(
 }
 
 // ──────────────────────────────────────────────
+// 迁移脚手架（`autopilot migrate new <slug>`）——自动取号，从源头防撞号
+// ──────────────────────────────────────────────
+
+/** 从迁移文件名列表算下一个可用编号 = MAX(现有号)+1。空目录 → 1。 */
+export function nextMigrationVersion(files: string[]): number {
+  let max = 0;
+  for (const f of files) {
+    const m = f.match(/^(\d{3})-[\w-]+\.ts$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return max + 1;
+}
+
+/** slug 规范化：小写、空格/下划线→连字符、剔除非法字符；必须以字母数字开头。 */
+export function normalizeMigrationSlug(raw: string): string {
+  const slug = raw.trim().toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+    throw new Error(`非法迁移名 "${raw}"：规范化后为空或不合法，只能用小写字母 / 数字 / 连字符。`);
+  }
+  return slug;
+}
+
+function migrationTemplate(slug: string): string {
+  return `import type { Database } from "bun:sqlite";
+
+/**
+ * TODO: 描述这条迁移做什么。
+ *
+ * 幂等：用 IF NOT EXISTS / 防御性写法，保证重复跑安全。
+ * 涉及 DROP TABLE / 表重建时 migrate.ts 已自动在事务外切 PRAGMA foreign_keys=OFF，无需在此处理。
+ */
+export function up(db: Database): void {
+  // TODO: 实现迁移，例如 db.run(\`CREATE TABLE IF NOT EXISTS ${slug.replace(/-/g, "_")} (...)\`);
+  void db;
+}
+`;
+}
+
+/**
+ * 在 MIGRATIONS_DIR 生成下一个编号的迁移骨架文件。编号 = 现有最大号 +1（自动取号，
+ * 把「挑号」从人工挪到工具，避免单分支内手挑撞号；跨分支撞号由 CI lint 在合并前拦截）。
+ */
+export function scaffoldMigration(rawSlug: string): { path: string; file: string; version: number } {
+  const slug = normalizeMigrationSlug(rawSlug);
+  const files = existsSync(MIGRATIONS_DIR)
+    ? readdirSync(MIGRATIONS_DIR).filter((f) => MIGRATION_FILE_RE.test(f))
+    : [];
+  const version = nextMigrationVersion(files);
+  const file = `${String(version).padStart(3, "0")}-${slug}.ts`;
+  const path = join(MIGRATIONS_DIR, file);
+  if (existsSync(path)) throw new Error(`迁移文件已存在：${file}`);
+  writeFileSync(path, migrationTemplate(slug), "utf-8");
+  return { path, file, version };
+}
+
+// ──────────────────────────────────────────────
 // 迁移执行
 // ──────────────────────────────────────────────
 
@@ -56,7 +115,7 @@ export function findSkippedMigrations(
 export async function runPendingMigrations(): Promise<number> {
   ensureSchemaVersionTable();
 
-  const migrationsDir = join(import.meta.dir, "../migrations");
+  const migrationsDir = MIGRATIONS_DIR;
   if (!existsSync(migrationsDir)) {
     log.warn("迁移目录不存在：%s", migrationsDir);
     return 0;
@@ -64,7 +123,7 @@ export async function runPendingMigrations(): Promise<number> {
 
   // 扫描并排序迁移文件
   const files = readdirSync(migrationsDir)
-    .filter((f) => /^\d{3}-[\w-]+\.ts$/.test(f))
+    .filter((f) => MIGRATION_FILE_RE.test(f))
     .sort();
 
   // 撞号断言：两个并行 PR 取同一迁移号时，字母序先跑的占号、另一个被 `version<=current` 静默跳过

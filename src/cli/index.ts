@@ -7,7 +7,7 @@ import { VERSION, AUTOPILOT_HOME } from "../index";
 import { notificationIntentToLabel } from "../client/notification-intent";
 import { localizeLogLine } from "../core/logger";
 import { initDb, closeDb } from "../core/db";
-import { runPendingMigrations } from "../core/migrate";
+import { runPendingMigrations, scaffoldMigration } from "../core/migrate";
 import { rebuildIndexFromManifests, rebuildManifestsFromIndex } from "../core/rebuild-index";
 import { getTaskSandbox } from "../core/sandbox";
 import { discover } from "../core/workflow/registry";
@@ -1644,6 +1644,26 @@ program
       console.log("数据库已是最新版本，无需迁移。");
     } else {
       console.log(`数据库升级完成，共执行 ${count} 条迁移。`);
+    }
+  });
+
+// ──────────────────────────────────────────────
+// migrate — 迁移工具（new = 自动取号生成骨架，防撞号）
+// ──────────────────────────────────────────────
+
+const migrateCmd = program.command("migrate").description("数据库迁移工具");
+migrateCmd
+  .command("new <slug>")
+  .description("生成下一个编号的迁移骨架文件（自动取号，避免单分支手挑撞号）")
+  .action((slug: string) => {
+    try {
+      const { file, version, path } = scaffoldMigration(slug);
+      console.log(`已创建迁移 v${version}：${file}`);
+      console.log(`  ${path}`);
+      console.log(`填好 up(db) 后跑 \`autopilot upgrade\` 应用。`);
+    } catch (e: unknown) {
+      console.error((e as Error)?.message ?? String(e));
+      process.exit(1);
     }
   });
 

@@ -27,6 +27,18 @@ jobs:
       - run: bun install
       - run: bun test
 
+  migrations:
+    name: 迁移撞号 / 命名检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # 纯文件扫描，无需 bun install。把并行 PR 的迁移撞号挡在合并前。
+      - name: 检查迁移编号
+        run: bun run scripts/check-migrations.ts
+
   docs-translation:
     name: 文档中英对照检查
     runs-on: ubuntu-latest
