@@ -119,11 +119,15 @@ export function PhasePipeline({ phases, highlight, onHoverPhase, currentState, o
     return "idle";
   };
 
-  const rejects = entries.flatMap((e, i) =>
-    e.kind === "phase" && e.phase.reject
-      ? [{ from: e.phase.name, fromIdx: i, to: e.phase.reject }]
-      : [],
-  );
+  // 阶段名 → 展示标签：节点内联「驳回到 X」时把目标 phase 名解析成中文标签。
+  const labelMap = React.useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const e of entries) {
+      if (e.kind === "phase") m[e.phase.name] = pickPhaseLabel(e.phase);
+      else for (const p of e.phases) m[p.name] = pickPhaseLabel(p);
+    }
+    return m;
+  }, [entries]);
 
   if (entries.length === 0) {
     return <p className="text-sm text-muted-foreground">尚无阶段，添加一个阶段以查看流水线</p>;
@@ -146,6 +150,7 @@ export function PhasePipeline({ phases, highlight, onHoverPhase, currentState, o
                 highlight={highlight === entry.phase.name}
                 current={currentPhase === entry.phase.name}
                 runStatus={statusFor(entry.phase.name)}
+                rejectToLabel={entry.phase.reject ? (labelMap[entry.phase.reject] ?? entry.phase.reject) : undefined}
                 onHover={onHoverPhase}
                 onClick={onPhaseClick}
               />
@@ -165,33 +170,19 @@ export function PhasePipeline({ phases, highlight, onHoverPhase, currentState, o
           </React.Fragment>
         ))}
       </div>
-
-      {rejects.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border pt-3">
-          <span className="bp-label">驳回规则 · REJECT</span>
-          {rejects.map((r, i) => (
-            <span
-              key={i}
-              className="inline-flex items-center gap-1.5 rounded-md border border-warning bg-warning/10 px-2 py-0.5 font-mono text-[11px]"
-            >
-              <code className="font-mono text-foreground">{r.from}</code>
-              <RotateCcw className="h-3 w-3 text-warning" aria-hidden="true" />
-              <code className="font-mono text-foreground">{r.to}</code>
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
 function PhaseNode({
-  phase, highlight, current, runStatus, onHover, onClick,
+  phase, highlight, current, runStatus, rejectToLabel, onHover, onClick,
 }: {
   phase: PhaseItem;
   highlight?: boolean;
   current?: boolean;
   runStatus?: PhasePipelineRunStatus;
+  /** 该阶段驳回目标的展示标签（已解析）；有值时节点内显示「↻ 驳回到 X」 */
+  rejectToLabel?: string;
   onHover?: (name: string | null) => void;
   onClick?: (name: string) => void;
 }) {
@@ -243,8 +234,8 @@ function PhaseNode({
         )}
         {phase.timeout && <span>· {fmtTimeout(phase.timeout)}</span>}
       </div>
-      {(phase.agent || phase.gate) && (
-        <div className="flex items-center gap-1 pt-0.5">
+      {(phase.agent || phase.gate || rejectToLabel) && (
+        <div className="flex flex-wrap items-center justify-center gap-1 pt-0.5">
           {phase.agent && (
             <span
               title={`智能体：${phase.agent}`}
@@ -260,6 +251,15 @@ function PhaseNode({
               className="inline-flex items-center rounded-md border border-warning/40 bg-warning/10 px-1 font-mono text-[9px] text-warning"
             >
               <Hand className="h-2.5 w-2.5" />
+            </span>
+          )}
+          {rejectToLabel && (
+            <span
+              title={`不通过时驳回到「${rejectToLabel}」重做`}
+              className="inline-flex items-center gap-0.5 rounded-md border border-warning/40 bg-warning/10 px-1 text-[9px] text-warning"
+            >
+              <RotateCcw className="h-2.5 w-2.5" aria-hidden="true" />
+              驳回到 {rejectToLabel}
             </span>
           )}
         </div>
