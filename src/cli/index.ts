@@ -488,6 +488,10 @@ daemon
       console.log(`  版本: ${status.version}${sha ? ` · ${sha}` : ""}`);
       if (startedAt) console.log(`  启动于: ${new Date(startedAt).toLocaleString()}`);
       console.log(`  运行时间: ${status.uptime}s`);
+      const update = (status as { update?: { status?: string } }).update;
+      if (update?.status === "behind") {
+        console.log(`  ⚠ 有更新可用：本地落后远端，跑 \`git pull\` 升级（必要时 bun run build:web）`);
+      }
       const counts = Object.entries(status.taskCounts);
       if (counts.length > 0) {
         console.log(`  任务统计:`);

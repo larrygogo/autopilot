@@ -17,6 +17,7 @@ import {
 } from "../core/auth";
 import { getPhaseIndex } from "../core/artifacts";
 import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
+import { getUpdateInfo } from "../core/update-check";
 import { initDb, getDb, getTask, createTask, listTasks, getTaskLogs, getSubTasks, updateTask } from "../core/db";
 import { log } from "../core/logger";
 import { snapshotWorkflow } from "../core/manifest";
@@ -682,6 +683,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         uptime: Math.floor((Date.now() - startedAt) / 1000),
         pid: process.pid,
         taskCounts,
+        update: getUpdateInfo(),
       };
       return json(status);
     }

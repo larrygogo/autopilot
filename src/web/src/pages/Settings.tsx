@@ -120,6 +120,11 @@ export function Settings({
                 value={status.started_at_iso ? new Date(status.started_at_iso).toLocaleString() : formatUptime(status.uptime)}
               />
             </dl>
+            {status.update?.status === "behind" && (
+              <div className="mt-3 rounded-md bg-warning/10 px-3 py-2 text-[11px] text-warning">
+                有更新可用：本地代码落后远端。在项目目录跑 <code className="rounded bg-warning/15 px-1 py-0.5 font-mono">git pull</code>（必要时 <code className="rounded bg-warning/15 px-1 py-0.5 font-mono">bun run build:web</code>）后再重启 daemon。
+              </div>
+            )}
           </Card>
         )}
 

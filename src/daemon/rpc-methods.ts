@@ -166,6 +166,7 @@ import { cascadeDeleteTask, deleteRequirementWithTasks, DeleteTaskError } from "
 import { registerRpcMethod, hasRpcMethod, RpcError } from "./rpc";
 import { wsManager } from "./ws";
 import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
+import { getUpdateInfo } from "../core/update-check";
 
 /** 业务错误 → RpcError 透传（保留 code）；其他错误让 invokeRpcMethod 包成 INTERNAL */
 function rethrowAsRpc(e: unknown): never {
@@ -213,6 +214,7 @@ function registerCoreQueryRpc(): void {
       uptime: Math.floor(process.uptime()),
       // taskCounts 由 daemon 启动时维护；此处直接现算一次（小数据量 OK）
       taskCounts: countTasksByStatus(),
+      update: getUpdateInfo(),
     }),
   });
 

@@ -45,6 +45,18 @@ export type ServerMessage =
 // API Response Types
 // ──────────────────────────────────────────────
 
+export type UpdateStatus = "current" | "behind" | "unknown";
+
+/** 只读更新检查结果（本地 vs 远端）。current=最新，behind=有更新可用，unknown=离线/非 git。 */
+export interface UpdateInfo {
+  status: UpdateStatus;
+  branch: string | null;
+  local_sha: string | null;
+  remote_sha: string | null;
+  /** 上次检查时间 (ISO 8601)；从未检查为 null */
+  checked_at: string | null;
+}
+
 export interface DaemonStatus {
   version: string;
   /** 当前代码的 git 短 SHA；非 git 仓库或 git 不可用时为 "dev" */
@@ -54,6 +66,8 @@ export interface DaemonStatus {
   uptime: number;
   pid: number;
   taskCounts: Record<string, number>;
+  /** 更新检查（本地是否落后远端）；daemon 启动后异步填充，未就绪时 status:"unknown" */
+  update: UpdateInfo;
 }
 
 export interface GraphNode {

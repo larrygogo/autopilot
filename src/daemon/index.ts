@@ -21,6 +21,7 @@ import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo
 import { initRequirementScheduler, disposeRequirementScheduler } from "./requirement-scheduler";
 import { initRequirementClarifier, disposeRequirementClarifier } from "./requirement-clarifier";
 import { initProviderCliMonitor, disposeProviderCliMonitor } from "./provider-cli-monitor";
+import { initUpdateMonitor, disposeUpdateMonitor } from "../core/update-check";
 import { runClarifierWatchdog } from "./clarifier-watchdog";
 import { initRequirementTaskBridge, disposeRequirementTaskBridge } from "./requirement-task-bridge";
 import { initFixRevisionRunner, disposeFixRevisionRunner } from "./fix-revision-runner";
@@ -257,6 +258,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   initRequirementClarifier();
   // 启动 provider CLI 主动探测（5 分钟周期）
   initProviderCliMonitor();
+  // 更新检查：本地是否落后远端（启动跑一次，之后每 6h；只读 git ls-remote）
+  initUpdateMonitor();
   // 桥接 task 状态变化 → 同步 requirement 状态
   initRequirementTaskBridge();
   // fix_revision 修复执行器（v2 R3：注册内置 __fix 工作流 + fix_revision → 创建 kind=fix
@@ -349,6 +352,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     disposeRequirementScheduler();
     disposeRequirementClarifier();
     disposeProviderCliMonitor();
+    disposeUpdateMonitor();
     disposeRequirementTaskBridge();
     disposeFixRevisionRunner();
     disposeDoneWorkspaceCleanup();
