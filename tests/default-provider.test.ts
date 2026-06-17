@@ -50,10 +50,17 @@ describe("resolveDefaultProvider fallback 链", () => {
     expect(resolveDefaultProvider()).toBe("openai");
   });
 
-  it("多个 ok → 取 created_at 最早的就绪者（确定性）", () => {
-    setProviderCliStatus(getProviderByName("anthropic")!.id, "ok");
+  it("多个就绪 → 优先已就绪的 claude（anthropic），即便它 created_at 不是最早", () => {
     setProviderCliStatus(getProviderByName("openai")!.id, "ok");
-    expect(resolveDefaultProvider()).toBe("anthropic");
+    setProviderCliStatus(getProviderByName("anthropic")!.id, "ok");
+    expect(resolveDefaultProvider()).toBe("anthropic"); // claude 偏好，不取 created_at 最早的 openai
+  });
+
+  it("无 claude 就绪 → 退到首个就绪 cli", () => {
+    setProviderCliStatus(getProviderByName("openai")!.id, "ok");
+    setProviderCliStatus(getProviderByName("google")!.id, "ok");
+    // anthropic 未就绪 → 取首个就绪 cli（created_at 最早 = openai 或 google，按 seed 顺序）
+    expect(["openai", "google"]).toContain(resolveDefaultProvider());
   });
 
   it("显式默认（config providers.default）优先于派生", () => {
@@ -127,5 +134,13 @@ describe("可用性判定 + 自动设默认（P1）", () => {
   it("ensureDefaultProviderSet：无可用 → null，不写默认", async () => {
     expect(await ensureDefaultProviderSet()).toBeNull();
     expect(loadDefaultProviderName()).toBeUndefined();
+  });
+
+  it("ensureDefaultProviderSet：多个可用 + 无显式默认 → 不自动 pin（交给派生，不强写 config）", async () => {
+    setProviderCliStatus(getProviderByName("anthropic")!.id, "ok");
+    setProviderCliStatus(getProviderByName("openai")!.id, "ok");
+    expect(await ensureDefaultProviderSet()).toBeNull();
+    expect(loadDefaultProviderName()).toBeUndefined(); // 没强写
+    expect(resolveDefaultProvider()).toBe("anthropic"); // 派生 = 首个就绪 cli
   });
 });

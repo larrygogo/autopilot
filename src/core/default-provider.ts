@@ -37,10 +37,15 @@ export function resolveDefaultProvider(): string {
     if (entries.length === 0) return FALLBACK_PROVIDER;
     // 2. 唯一已配
     if (entries.length === 1) return entries[0].name;
-    // 3. 首个 CLI 已就绪（cli_status==='ok'，同步可得、最可能真可用）
+    // 3. 首选「已就绪的 claude（anthropic）CLI」——claude 是 autopilot agentic 工作流的最强默认
+    //    （DEFAULT_AGENT / dev 各 phase 都按 claude 调）。这是框架级偏好（同 FALLBACK_PROVIDER 性质），
+    //    仍是动态的：无可用 claude 才退到其它 provider，用户也可用显式 providers.default 覆盖。
+    const readyClaude = entries.find((p) => p.type === "cli" && p.cli_status === "ok" && p.subtype === "claude");
+    if (readyClaude) return readyClaude.name;
+    // 4. 否则首个就绪 cli（cli_status==='ok'，同步可得、最可能真可用）
     const ready = entries.find((p) => p.type === "cli" && p.cli_status === "ok");
     if (ready) return ready.name;
-    // 4. 首个 enabled（健康态未知也尊重用户已配的，不退回 literal）
+    // 5. 首个 enabled（健康态未知也尊重用户已配的，不退回 literal）
     return entries[0].name;
   } catch {
     // DB 未就绪 / 任何异常 → 占位兜底（热路径同步调用，绝不抛）
@@ -98,6 +103,12 @@ export async function ensureDefaultProviderSet(): Promise<string | null> {
   if (explicit) return explicit; // 已显式设 → 尊重，不动
   const usable = await listUsableProviders();
   if (usable.length === 0) return null;
-  setDefaultProviderName(usable[0].name);
-  return usable[0].name;
+  // ⚠ 只在「恰好一个可用」时自动 pin（真·首个 provider 场景）。多个可用 + 无显式默认 →
+  // 不自动 pin：交给 resolveDefaultProvider 派生（首个就绪 cli，通常 anthropic），用户想固定/换
+  // 别的在 Web 显式选。否则会把「碰巧排第一的可用 provider」强写进 config、悄悄改掉用户的有效默认。
+  if (usable.length === 1) {
+    setDefaultProviderName(usable[0].name);
+    return usable[0].name;
+  }
+  return null;
 }

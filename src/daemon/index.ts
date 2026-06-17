@@ -26,7 +26,7 @@ import { initRequirementTaskBridge, disposeRequirementTaskBridge } from "./requi
 import { initFixRevisionRunner, disposeFixRevisionRunner } from "./fix-revision-runner";
 import { initDoneWorkspaceCleanup, disposeDoneWorkspaceCleanup } from "./done-workspace-cleanup";
 import { initMcpRuntime, disposeMcpRuntime } from "./mcp-runtime";
-import { listUsableProviders, ensureDefaultProviderSet } from "../core/default-provider";
+import { listUsableProviders, ensureDefaultProviderSet, resolveDefaultProvider } from "../core/default-provider";
 import type { AutopilotEvent } from "./protocol";
 import { RESTART_SENTINEL_CODE, FATAL_CONFIG_CODE } from "./supervisor";
 import { writeFileSync, existsSync, unlinkSync, watch as fsWatch } from "fs";
@@ -190,8 +190,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
         "在「设置 → 提供商」配置后即可恢复，无需重启。",
       );
     } else {
-      const def = await ensureDefaultProviderSet();
-      if (def) log.info("默认 AI 供应商：%s（可用 %d 个）", def, usable.length);
+      await ensureDefaultProviderSet(); // 仅「恰好一个可用」时自动 pin；多个交给派生
+      log.info("默认 AI 供应商：%s（可用 %d 个）", resolveDefaultProvider(), usable.length);
     }
   } catch (e: unknown) {
     log.warn("provider 就绪门检查异常（忽略，不阻塞启动）：%s", e instanceof Error ? e.message : String(e));
