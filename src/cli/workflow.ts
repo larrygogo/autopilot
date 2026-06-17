@@ -238,14 +238,19 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
 
   // ── export ──
   wf.command("export <name>")
-    .description("把工作流的 yaml 输出到 stdout（用于备份 / 重定向到文件）")
+    .description("把工作流输出到 stdout（用于备份 / 重定向到文件）。--format json 输出结构原生 json")
+    .option("--format <fmt>", "导出格式：yaml（默认，保注释）| json", "yaml")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
-    .action(async (name: string, opts: { port: string }) => {
+    .action(async (name: string, opts: { format: string; port: string }) => {
+      if (opts.format !== "yaml" && opts.format !== "json") {
+        console.error(`--format 只能是 yaml 或 json，得到 "${opts.format}"`);
+        process.exit(2);
+      }
       const client = ctx.getClient(opts);
       await ctx.ensureDaemon(client);
       try {
-        const yaml = await client.exportWorkflow(name);
-        process.stdout.write(yaml);
+        const content = await client.exportWorkflow(name, opts.format);
+        process.stdout.write(content);
       } catch (e: unknown) {
         console.error(`导出失败：${e instanceof Error ? e.message : String(e)}`);
         process.exit(1);

@@ -176,12 +176,12 @@ export class HttpClient {
   }
 
   /**
-   * 导出工作流——拿 yaml 字段。原 HTTP 版本返回 text/yaml 纯文本，
-   * WS RPC 走 workflows.exportBundle 返回结构化 JSON，这里只取 yaml 字段保签名。
+   * 导出工作流文本。format=yaml（默认，原样保注释）/ json（结构原生 json）。
+   * 走 workflows.export RPC，返回序列化后的 content 字符串。
    */
-  async exportWorkflow(name: string): Promise<string> {
-    const bundle = await this.call<{ yaml: string }>("workflows.exportBundle", { name });
-    return bundle.yaml;
+  async exportWorkflow(name: string, format: "yaml" | "json" = "yaml"): Promise<string> {
+    const res = await this.call<{ format: string; content: string }>("workflows.export", { name, format });
+    return res.content;
   }
 
   // ── Projects ── (CLI 历史 wrap 风格 { projects } 保留)

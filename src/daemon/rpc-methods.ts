@@ -31,6 +31,7 @@ import {
 } from "../core/workflow/registry";
 import { setWorkflowMeta, patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
 import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb } from "../core/workflow/workflows";
+import { exportWorkflowContent, type WorkflowFormat } from "../core/workflow/serialize";
 import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow/templates";
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
 import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig, loadSchedulerConfig, saveSchedulerConfig, systemTimezone, isValidTimezone } from "../core/config";
@@ -867,6 +868,21 @@ function registerWorkflowRpc(): void {
     method: "workflows.scanHealth",
     description: "扫描 yaml.name 跟目录名不一致 / 重名碰撞",
     handler: () => scanWorkflowHealth(),
+  });
+
+  registerRpcMethod({
+    method: "workflows.export",
+    description: "导出工作流文本：format=yaml 原样（保注释）/ format=json 结构原生 json",
+    handler: (params) => {
+      const p = asObj(params);
+      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      const format: WorkflowFormat = p.format === "json" ? "json" : "yaml";
+      // db 源直接读 yaml_content；file 源读磁盘 yaml（与 getYaml 同源）
+      const row = getWorkflowFromDb(p.name);
+      const yaml = row && row.source === "db" ? row.yaml_content : registryGetWorkflowYaml(p.name);
+      if (yaml == null) throw new RpcError("NOT_FOUND", "Workflow not found");
+      return { format, content: exportWorkflowContent(yaml, format) };
+    },
   });
 
   registerRpcMethod({
