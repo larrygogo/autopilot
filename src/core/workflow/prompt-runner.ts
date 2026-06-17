@@ -452,6 +452,13 @@ export function makePromptRunner(
       // 注意：follow-up 轮不再追加 handoff 指令；最终 handoff 解析从最后一轮 agent_output 拿
       const joined = pending.join("\n\n---\n\n");
       currentPrompt = `用户追加了以下指令，请在上一轮输出基础上继续处理：\n\n${joined}`;
+      // tool 模式：用户追加指令可能让 agent 改主意——清掉上一轮的陈旧裁决捕获，并把裁决指令
+      // 重新挂到 follow-up prompt 上，确保最终读到的裁决出自最后一轮（否则上一轮已交的裁决会
+      // 赢过本轮改后的结论；文本路径读 finalText 天然免疫，工具路径靠这里对齐「最后一轮为准」）。
+      if (toolMode) {
+        clearDecision(taskId);
+        currentPrompt += buildToolDecisionSuffix(supportsTool, options.decision?.criteria);
+      }
       log.info(
         "prompt-runner 检测到 %d 条 pending_prompts，启动 turn=%d [task=%s phase=%s]",
         pending.length, turn + 1, taskId, phaseName,
