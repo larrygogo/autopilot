@@ -5,6 +5,7 @@ import { buildConfigTemplate } from "./config-template";
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
 import { notificationIntentToLabel } from "../client/notification-intent";
+import { localizeLogLine } from "../core/logger";
 import { initDb, closeDb } from "../core/db";
 import { runPendingMigrations } from "../core/migrate";
 import { rebuildIndexFromManifests, rebuildManifestsFromIndex } from "../core/rebuild-index";
@@ -727,7 +728,8 @@ task
     // 先获取历史日志
     const logs = await client.getTaskLogs(taskId, parseInt(opts.limit, 10));
     for (const log of logs.reverse()) {
-      console.log(`${log.created_at}  ${log.from_status ?? "-"} → ${log.to_status}  [${log.trigger_name ?? "-"}]  ${log.note ?? ""}`);
+      // created_at 是 DB 落的 UTC（datetime('now')）→ 行首转本地显示
+      console.log(localizeLogLine(`${log.created_at}  ${log.from_status ?? "-"} → ${log.to_status}  [${log.trigger_name ?? "-"}]  ${log.note ?? ""}`));
     }
 
     // 末尾给客户指明 agent trace 位置 —— task logs 只显示状态机转换，客户
@@ -752,7 +754,8 @@ task
       });
       client.subscribe(`log:${taskId}`, (event) => {
         if (event.type === "log:entry") {
-          console.log(event.payload.message);
+          // log:entry.message 是 UTC 格式行（Web 自己转本地）；CLI 跟踪时行首转本地
+          console.log(localizeLogLine(event.payload.message));
         }
       });
       client.subscribe(`task:${taskId}`, (event) => {

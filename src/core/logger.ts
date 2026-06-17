@@ -170,6 +170,24 @@ function fmt(level: string, name: string, msg: string, args: unknown[]): string 
   return `${ts} [${level}] [${tag}] [${name}] ${body}`;
 }
 
+/**
+ * 把行首的 UTC 时间戳改写成「服务器本地时区」同格式（仅给人看的输出用：console + daemon.log）。
+ *
+ * 设计：fmt() 始终落 UTC（phase.log 给 Web 解析、跨时区/夏令时稳定，CLAUDE.md 红线——
+ * 不能动）；但人直接读的 console 和 daemon.log 该显示本地时间，否则 UTC+8 用户看到的时间
+ * 比墙上钟慢 8 小时。Web 执行视图自己有 localizeLineTs 转本地，故 WS 与 phase.log 保持 UTC。
+ */
+export function localizeLogLine(line: string): string {
+  const m = line.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})/);
+  if (!m) return line;
+  const t = new Date(`${m[1]}T${m[2]}Z`); // 按 UTC 解析
+  if (Number.isNaN(t.getTime())) return line;
+  const p = (n: number) => String(n).padStart(2, "0");
+  const local = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ` +
+    `${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`; // getHours 等取服务器本地
+  return local + line.slice(m[0].length);
+}
+
 function emitLog(level: string, formatted: string): void {
   const s = als.getStore();
   const taskId = s?.taskId ?? gTaskId;
@@ -185,12 +203,13 @@ function emitLog(level: string, formatted: string): void {
       timestamp: new Date().toISOString(),
     },
   });
-  // 任务 + 阶段上下文明确时，追加到对应阶段的磁盘日志
+  // 任务 + 阶段上下文明确时，追加到对应阶段的磁盘日志（phase.log 保持 UTC —— Web 执行视图
+  // 用 localizeLineTs 自行转本地、按 UTC 切窗，CLAUDE.md 红线不能动）。
   if (taskId && phaseName) {
     appendPhaseLog(taskId, phaseName, formatted);
   }
-  // daemon 进程级日志（所有 daemon 生命周期都记录到同一个文件）
-  appendFileLog(formatted);
+  // daemon 进程级日志（人直接 cat / daemon.log RPC 看，无机器解析方）→ 落本地时间，跟 console 一致。
+  appendFileLog(localizeLogLine(formatted));
 }
 
 export interface Logger {
@@ -204,23 +223,23 @@ export function createLogger(name: string): Logger {
   return {
     info: (msg, ...args) => {
       const s = fmt("INFO", name, msg, args);
-      console.error(s);
+      console.error(localizeLogLine(s));
       emitLog("INFO", s);
     },
     warn: (msg, ...args) => {
       const s = fmt("WARN", name, msg, args);
-      console.error(s);
+      console.error(localizeLogLine(s));
       emitLog("WARN", s);
     },
     error: (msg, ...args) => {
       const s = fmt("ERROR", name, msg, args);
-      console.error(s);
+      console.error(localizeLogLine(s));
       emitLog("ERROR", s);
     },
     debug: (msg, ...args) => {
       if (process.env.DEBUG) {
         const s = fmt("DEBUG", name, msg, args);
-        console.error(s);
+        console.error(localizeLogLine(s));
         emitLog("DEBUG", s);
       }
     },
