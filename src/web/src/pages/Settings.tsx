@@ -114,19 +114,12 @@ export function Settings({
               </Button>
             </div>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-              <InfoField
-                label="版本"
-                value={status.git_sha ? `${status.version} · ${status.git_sha}` : status.version}
-                mono
-              />
+              <InfoField label="版本" value={status.version} mono />
               <InfoField
                 label="启动于"
                 value={status.started_at_iso ? new Date(status.started_at_iso).toLocaleString() : formatUptime(status.uptime)}
               />
             </dl>
-            <p className="mt-3 text-[11px] text-muted-foreground">
-              更新代码、或改了监听地址 / 端口后，重启让它生效。重启时这个页面会断开一两秒再自动连上。
-            </p>
           </Card>
         )}
 
