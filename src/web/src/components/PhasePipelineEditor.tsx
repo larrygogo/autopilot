@@ -1947,7 +1947,7 @@ function PhaseEditForm({
               {decisionMode === "tool" ? (
                 <div className="space-y-1">
                   <span className="text-[10px] text-muted-foreground">
-                    评判标准 criteria —— 做评审的 agent 据此<strong className="font-medium text-foreground">自己调用 submit_decision 出裁决</strong>（pass/reject），框架自动把它注入到该 agent 的提示词。裁决者的 provider / 模型 / 人设在上方「智能体」卡里配（不用在这里另设裁判）。
+                    评判标准：这一步怎样算通过 / 驳回。
                   </span>
                   <Textarea
                     value={decision.criteria ?? ""}
