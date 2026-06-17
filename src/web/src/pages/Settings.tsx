@@ -282,10 +282,6 @@ function NetworkAccessCard(): React.ReactElement {
   const [pendingExpose, setPendingExpose] = useState(false);
   // 点「显示明文」后从 daemon.revealToken 拿到的真实 token，再点收起
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
-  // 「扫码上 token」Dialog 状态 + 渲染好的 dataURL
-  const [showQrCode, setShowQrCode] = useState(false);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [qrTargetUrl, setQrTargetUrl] = useState<string>("");
   // 本浏览器 localStorage 里给局域网访问用的 token 副本
   const [clientStored, setClientStored] = useState<string>(() => getApiToken());
   const [clientDraft, setClientDraft] = useState<string>("");
@@ -302,36 +298,6 @@ function NetworkAccessCard(): React.ReactElement {
   }, [toast]);
 
   useEffect(() => { refresh(); }, [refresh]);
-
-  // 「扫码上 token」对话框：打开时拉明文 token + 拼 url + 生成 qrcode
-  useEffect(() => {
-    if (!showQrCode || !info) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const { token } = await api.revealApiToken();
-        if (cancelled || !token) return;
-        const ip = info.lan_ips[0];
-        if (!ip) {
-          toast.error("没有可用的局域网 IP");
-          setShowQrCode(false);
-          return;
-        }
-        const target = `http://${ip}:${info.port}/?token=${encodeURIComponent(token)}`;
-        const QRCode = (await import("qrcode")).default;
-        const dataUrl = await QRCode.toDataURL(target, { width: 240, margin: 1 });
-        if (cancelled) return;
-        setQrTargetUrl(target);
-        setQrDataUrl(dataUrl);
-      } catch (e: unknown) {
-        if (!cancelled) {
-          toast.error("生成二维码失败", (e as Error)?.message ?? String(e));
-          setShowQrCode(false);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [showQrCode, info, toast]);
 
   if (!info) {
     return (
@@ -463,10 +429,6 @@ function NetworkAccessCard(): React.ReactElement {
 
   return (
     <Card className="mb-4 p-4">
-      <p className="mb-3 text-[11px] text-muted-foreground">
-        决定谁能访问这个面板。改完要重启 daemon 生效（「设置 → Daemon」里有按钮）。
-      </p>
-
       {/* Toggle: 仅本机 / 局域网 */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-md border border-border bg-card px-3 py-2.5">
         <div className="flex-1 min-w-0">
@@ -486,45 +448,17 @@ function NetworkAccessCard(): React.ReactElement {
         />
       </div>
 
-      {/* Port + LAN IP */}
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-[8rem_1fr] sm:items-end">
-        <div className="space-y-1.5">
-          <Label>端口</Label>
-          <Input
-            value={portDraft}
-            onChange={(e) => setPortDraft(e.target.value)}
-            onBlur={handlePortBlur}
-            inputMode="numeric"
-            className="font-mono"
-            disabled={saving}
-          />
-        </div>
-        {isExposed && info.lan_ips.length > 0 && (
-          <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">同网段访问地址</Label>
-            <div className="flex flex-wrap items-center gap-2">
-              {info.lan_ips.map((ip) => (
-                <code
-                  key={ip}
-                  className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-xs"
-                >
-                  http://{ip}:{info.port}
-                </code>
-              ))}
-              {info.token.is_set && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-[11px]"
-                  onClick={() => setShowQrCode(true)}
-                  title="本机生成二维码，手机扫一下自动落 token + reload"
-                >
-                  扫码上 token
-                </Button>
-              )}
-            </div>
-          </div>
-        )}
+      {/* Port */}
+      <div className="mb-4 max-w-[8rem] space-y-1.5">
+        <Label>端口</Label>
+        <Input
+          value={portDraft}
+          onChange={(e) => setPortDraft(e.target.value)}
+          onBlur={handlePortBlur}
+          inputMode="numeric"
+          className="font-mono"
+          disabled={saving}
+        />
       </div>
 
       {/* Token 区：服务端 token + 本浏览器副本 */}
@@ -749,45 +683,6 @@ function NetworkAccessCard(): React.ReactElement {
         onConfirm={handleDeleteToken}
         onCancel={() => setConfirmDelete(false)}
       />
-
-      {/* 扫码上 token：手机/平板首次访问，扫一下省去手贴 */}
-      <Dialog
-        open={showQrCode}
-        onOpenChange={(open) => {
-          if (!open) {
-            setShowQrCode(false);
-            setQrDataUrl(null);
-            setQrTargetUrl("");
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>扫码上 token</DialogTitle>
-            <DialogDescription>
-              在手机/平板上扫这个码：自动落 token 到该设备的浏览器 localStorage，然后跳进 web 主页。
-              每台设备各扫一次。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col items-center gap-3 py-2">
-            {qrDataUrl ? (
-              <img src={qrDataUrl} alt="qrcode" className="rounded-md border border-border bg-white p-2" />
-            ) : (
-              <div className="flex h-[240px] w-[240px] items-center justify-center text-xs text-muted-foreground">
-                生成中…
-              </div>
-            )}
-            {qrTargetUrl && (
-              <code className="break-all rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-[10px]">
-                {qrTargetUrl}
-              </code>
-            )}
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              ⚠ 二维码内含明文 token，请只在可信局域网展示，扫完关闭。
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
     </Card>
   );
 }
