@@ -10,6 +10,12 @@
 
 `1.0` 发布后将严格遵守语义化版本：patch = bugfix，minor = 向后兼容的新功能，major = 破坏性变更。
 
+## [0.1.0] - 2026-06-17
+
+版本号体系重置：此前代码内的 `1.0.0` 是从未随发布变动的占位符，与实际发布节奏脱节。现把版本号收敛为**单一真相源** `package.json`（`src/index.ts` 的 `VERSION`、daemon status、CLI `--version`、MCP serverInfo、WS 握手全部从此取值），并从 `0.1.0` 重新计数。
+
+> 历史标签 `v0.2.0`（Python 版）、`v0.3.0`（TypeScript + Bun 重写）保留为历史快照；下方 `[0.3.0]` 条目记录的是当时的重写内容，非当前版本。
+
 ## [0.3.0] - 2026-04-17
 
 完整重写为 TypeScript + Bun，新增 daemon 架构、Web UI 和图形化工作流编辑器。Python 版本保留在 `v0.2.0` 标签。
