@@ -12,8 +12,9 @@
  * 真实可用性（CLI 登录 / API key）由 onboarding 保证（P1）；本函数只保证「返回一个非空 provider 名」，
  * 被 agentForPhase 等同步热路径调用，故全程同步 + try-catch 兜底（DB 未就绪也不抛）。
  */
-import { loadDefaultProviderName } from "./config";
-import { listProviders, getProviderByName } from "./providers";
+import { loadDefaultProviderName, setDefaultProviderName } from "./config";
+import { listProviders, getProviderByName, type ProviderEntry } from "./providers";
+import { resolveApiKey } from "./api-keys";
 
 /**
  * 终极兜底 provider 名：一条 enabled 条目都没有 / DB 未就绪时的占位。
@@ -45,4 +46,58 @@ export function resolveDefaultProvider(): string {
     // DB 未就绪 / 任何异常 → 占位兜底（热路径同步调用，绝不抛）
     return FALLBACK_PROVIDER;
   }
+}
+
+// ──────────────────────────────────────────────
+// 可用性判定（P1：onboarding gate / 关键操作守卫 / 自动设默认 共用）
+//   「有条目」≠「能用」：cli 要 cli_status=ok（已登录），api 要有 key。
+//   异步（resolveApiKey），与 resolveDefaultProvider 的同步派生分开用。
+// ──────────────────────────────────────────────
+
+/** 某 provider 条目是否真正可用（enabled + cli 已就绪 / api 有 key）。 */
+export async function isProviderUsable(entry: ProviderEntry): Promise<boolean> {
+  if (entry.enabled !== 1) return false;
+  if (entry.type === "cli") return entry.cli_status === "ok";
+  // api：需要 key（DB 加密存储 / 环境变量回落）
+  try {
+    const key = await resolveApiKey(entry.name, entry.env_key_name ?? undefined);
+    return !!key;
+  } catch {
+    return false;
+  }
+}
+
+/** 列出当前真正可用的 provider 条目（按 created_at ASC）。 */
+export async function listUsableProviders(): Promise<ProviderEntry[]> {
+  let entries: ProviderEntry[];
+  try {
+    entries = listProviders();
+  } catch {
+    return []; // DB 未就绪
+  }
+  const out: ProviderEntry[] = [];
+  for (const e of entries) {
+    if (await isProviderUsable(e)) out.push(e);
+  }
+  return out;
+}
+
+/** 是否存在至少一个可用 provider。 */
+export async function hasUsableProvider(): Promise<boolean> {
+  return (await listUsableProviders()).length > 0;
+}
+
+/**
+ * 「第一个配好的 provider 自动设为默认」——onboarding 兜底。
+ * 仅在 `providers.default` **未显式设置**时生效（不覆盖用户的显式选择；显式默认指向不可用时
+ * 由 resolveDefaultProvider 派生兜底，待用户重新登录即恢复，不在这里强改）。
+ * 返回最终默认名，或 null（无可用 provider）。
+ */
+export async function ensureDefaultProviderSet(): Promise<string | null> {
+  const explicit = loadDefaultProviderName();
+  if (explicit) return explicit; // 已显式设 → 尊重，不动
+  const usable = await listUsableProviders();
+  if (usable.length === 0) return null;
+  setDefaultProviderName(usable[0].name);
+  return usable[0].name;
 }

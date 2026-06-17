@@ -11,7 +11,14 @@ import { _setDbForTest, initDb } from "../src/core/db";
 import { up as migrate041 } from "../src/migrations/041-api-keys";
 import { up as migrate047 } from "../src/migrations/047-providers-table";
 import { getProviderByName, updateProvider, setProviderCliStatus } from "../src/core/providers";
-import { resolveDefaultProvider, FALLBACK_PROVIDER } from "../src/core/default-provider";
+import {
+  resolveDefaultProvider,
+  FALLBACK_PROVIDER,
+  isProviderUsable,
+  listUsableProviders,
+  hasUsableProvider,
+  ensureDefaultProviderSet,
+} from "../src/core/default-provider";
 import { loadDefaultProviderName, setDefaultProviderName } from "../src/core/config";
 
 let sqlite: Database;
@@ -84,6 +91,41 @@ describe("resolveDefaultProvider fallback 链", () => {
     setDefaultProviderName("google");
     expect(loadDefaultProviderName()).toBe("google");
     setDefaultProviderName(undefined);
+    expect(loadDefaultProviderName()).toBeUndefined();
+  });
+});
+
+describe("可用性判定 + 自动设默认（P1）", () => {
+  it("isProviderUsable：cli cli_status=ok → true；未就绪 / disabled → false", async () => {
+    const a = getProviderByName("anthropic")!;
+    expect(await isProviderUsable(a)).toBe(false); // 无 cli_status
+    setProviderCliStatus(a.id, "ok");
+    expect(await isProviderUsable(getProviderByName("anthropic")!)).toBe(true);
+    updateProvider(a.id, { enabled: false });
+    expect(await isProviderUsable(getProviderByName("anthropic")!)).toBe(false); // disabled
+  });
+
+  it("hasUsableProvider / listUsableProviders 只数 cli 已就绪", async () => {
+    expect(await hasUsableProvider()).toBe(false); // 三家 cli 都无 status
+    setProviderCliStatus(getProviderByName("openai")!.id, "ok");
+    expect((await listUsableProviders()).map((p) => p.name)).toEqual(["openai"]);
+    expect(await hasUsableProvider()).toBe(true);
+  });
+
+  it("ensureDefaultProviderSet：无显式默认 + 有可用 → 设第一个可用", async () => {
+    setProviderCliStatus(getProviderByName("google")!.id, "ok");
+    expect(await ensureDefaultProviderSet()).toBe("google");
+    expect(loadDefaultProviderName()).toBe("google");
+  });
+
+  it("ensureDefaultProviderSet：已显式默认 → 不覆盖用户选择", async () => {
+    setDefaultProviderName("openai");
+    setProviderCliStatus(getProviderByName("google")!.id, "ok");
+    expect(await ensureDefaultProviderSet()).toBe("openai");
+  });
+
+  it("ensureDefaultProviderSet：无可用 → null，不写默认", async () => {
+    expect(await ensureDefaultProviderSet()).toBeNull();
     expect(loadDefaultProviderName()).toBeUndefined();
   });
 });

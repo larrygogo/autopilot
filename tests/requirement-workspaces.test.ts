@@ -27,9 +27,12 @@ import { up as m030 } from "../src/migrations/030-requirement-status-logs";
 import { up as m031 } from "../src/migrations/031-requirement-workflow";
 import { up as m033 } from "../src/migrations/033-workspace-remote-url";
 import { up as m037 } from "../src/migrations/037-multi-workspace-per-project";
+import { up as m041 } from "../src/migrations/041-api-keys";
 import { up as m043 } from "../src/migrations/043-workspace-id-demote-backfill";
 import { up as m045 } from "../src/migrations/045-requirement-input-mode";
+import { up as m047 } from "../src/migrations/047-providers-table";
 import { _setDbForTest } from "../src/core/db";
+import { getProviderByName, setProviderCliStatus } from "../src/core/providers";
 import { createProject } from "../src/core/projects";
 import { createWorkspace } from "../src/core/sandbox/workspaces";
 import {
@@ -47,7 +50,7 @@ import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
 function setup(): Database {
   const db = new Database(":memory:");
-  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m012, m013, m014, m015, m019, m021, m024, m025, m028, m029, m030, m031, m033, m037, m045].forEach((fn) => fn(db));
+  [m001, m002, m004, m005, m006, m007, m008, m009, m010, m012, m013, m014, m015, m019, m021, m024, m025, m028, m029, m030, m031, m033, m037, m041, m045, m047].forEach((fn) => fn(db));
   _setDbForTest(db);
   createProject({ id: "p1", name: "项目一" });
   return db;
@@ -150,6 +153,9 @@ describe("RPC requirements.setWorkspaces", () => {
   beforeEach(() => {
     setup();
     registerCoreRpcMethods();
+    // 给个可用 provider：transition→clarifying / enqueue 现在前置校验「有可用 provider」，
+    // 否则会先抛 NO_USABLE_PROVIDER，挡住本组要验的「代码库集合」闸门。
+    setProviderCliStatus(getProviderByName("anthropic")!.id, "ok");
     mkWs("ws-001", "a");
     mkWs("ws-002", "b");
     createRequirement({ id: "req-001", project_id: "p1", workspace_id: "ws-001", title: "t", spec_md: "" });

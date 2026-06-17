@@ -115,6 +115,10 @@ import {
 } from "../core/config";
 import { effectiveClarifyConfig } from "./clarifier-agent";
 import { effectiveFixConfig } from "./fix-revision-runner";
+import { hasUsableProvider, ensureDefaultProviderSet } from "../core/default-provider";
+
+const NO_USABLE_PROVIDER_MSG =
+  "尚无可用的 AI 供应商 —— 请在「设置 → 提供商」配置（CLI 登录或填 API key）后重试。autopilot 需要至少一个可用供应商才能执行任务。";
 import {
   listApiKeys,
   setApiKey,
@@ -1253,7 +1257,7 @@ function registerRequirementRpc(): void {
   registerRpcMethod({
     method: "requirements.transition",
     description: "手动转移需求状态（仍走状态机校验，非法转换会被拒）",
-    handler: (params) => {
+    handler: async (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       if (typeof p.to !== "string" || !p.to.trim()) throw new RpcError("INVALID_PARAM", "to 必填");
@@ -1263,6 +1267,8 @@ function registerRequirementRpc(): void {
       //   requires.git=true → 卡集合非空（澄清 agent 在已选代码库的浅 clone 中工作；真相在集合表）
       //   "optional"/false  → 集合空也放行（确认 input_mode='none'，clarifier 走纯文本模式）
       if (p.to.trim() === "clarifying") {
+        // 澄清要起 clarifier agent —— 无可用 provider 提前拒，停下报人不撞墙
+        if (!(await hasUsableProvider())) throw new RpcError("NO_USABLE_PROVIDER", NO_USABLE_PROVIDER_MSG);
         const hasWs = listRequirementWorkspaces(p.id).length > 0;
         const reason = validateWorkflowInput(cur.workflow, hasWs);
         if (reason) throw new RpcError("PRECONDITION_FAILED", `${reason}（澄清基于代码库的克隆进行）`);
@@ -1277,11 +1283,13 @@ function registerRequirementRpc(): void {
   registerRpcMethod({
     method: "requirements.enqueue",
     description: "入队执行（spec_md 非空；代码库要求按所选工作流的 requires.git 动态校验，集合空 × delivers:pr 交叉拒）",
-    handler: (params) => {
+    handler: async (params) => {
       const p = asObj(params);
       if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
       const r = getRequirementById(p.id);
       if (!r) throw new RpcError("NOT_FOUND", "requirement not found");
+      // 入队后调度器会起执行 run（agent）—— 无可用 provider 提前拒，停下报人不撞墙
+      if (!(await hasUsableProvider())) throw new RpcError("NO_USABLE_PROVIDER", NO_USABLE_PROVIDER_MSG);
       // v2 R5：按所选工作流动态校验（requires.git=true 卡集合非空；optional/false 放行；
       // 交叉校验 = 集合空 × delivers:pr 拒——PR 无处可开）
       const hasWs = listRequirementWorkspaces(p.id).length > 0 || !!r.workspace_id;

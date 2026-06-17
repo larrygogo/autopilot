@@ -9,6 +9,7 @@ import { ensureDefaultProject } from "../core/projects";
 import { getWorkspaceById, listWorkspaces } from "../core/sandbox/workspaces";
 import { validateWorkflowInput } from "./workflow-declarations";
 import { runClarifierExtract } from "./requirement-extract";
+import { hasUsableProvider } from "../core/default-provider";
 
 export { ensureDefaultProject };
 
@@ -40,6 +41,13 @@ export interface StartFromPromptResult {
 export async function startTaskFromPrompt(opts: StartFromPromptOpts): Promise<StartFromPromptResult> {
   const rawText = opts.rawText?.trim();
   if (!rawText) throw new Error("startTaskFromPrompt: 缺 rawText");
+
+  // 0. 无可用 provider 提前拒（下面 runClarifierExtract 要起 agent）：停下报人不撞墙
+  if (!(await hasUsableProvider())) {
+    const e = new Error("尚无可用的 AI 供应商 —— 请先在「设置 → 提供商」配置（CLI 登录或填 API key）。");
+    (e as { code?: string }).code = "NO_USABLE_PROVIDER";
+    throw e;
+  }
 
   // 1. 解析 project + workspace（workspace 现为可选，由工作流声明决定是否必需）
   let projectId: string;
