@@ -474,7 +474,9 @@ function CardHeader({
         {statusBadge}
       </div>
       <div className="flex items-center gap-2">
-        <Switch checked={e.enabled !== false} onCheckedChange={(v) => onToggle(e, v)} />
+        {e.type !== "cli" && (
+          <Switch checked={e.enabled !== false} onCheckedChange={(v) => onToggle(e, v)} />
+        )}
         <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" onClick={() => onDelete(e)}>
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
