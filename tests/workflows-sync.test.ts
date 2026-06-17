@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test"
 import { Database } from "bun:sqlite";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { _setDbForTest } from "../src/core/db";
 import {
   syncFileWorkflowsToDb,
@@ -17,6 +18,7 @@ describe("syncFileWorkflowsToDb", () => {
     db = new Database(":memory:");
     migrate001(db);
     migrate007(db);
+    migrate048(db);
     _setDbForTest(db);
   });
 

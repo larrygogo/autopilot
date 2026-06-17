@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { _setDbForTest } from "../src/core/db";
 import { _clearRegistry, discover } from "../src/core/workflow/registry";
 import { buildAutopilotTools } from "../src/agents/tools";
@@ -34,6 +35,7 @@ describe("chat tools 工作流管理（W3）", () => {
     db = new Database(":memory:");
     migrate001(db);
     migrate007(db);
+    migrate048(db);
     _setDbForTest(db);
     _clearRegistry();
     await discover();

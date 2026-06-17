@@ -4,11 +4,16 @@ import { getDb } from "../db";
 // 类型
 // ──────────────────────────────────────────────
 
+export type WorkflowKind = "file" | "derived" | "native" | "template";
+
 export interface WorkflowRow {
   name: string;
   description: string;
   yaml_content: string;
+  /** 结构原生 json 真相（kind=native/template）；file/derived 为 null（真相是 yaml_content/磁盘） */
+  spec_json: string | null;
   source: "db" | "file";
+  kind: WorkflowKind;
   derives_from: string | null;
   file_path: string | null;
   created_at: number;
@@ -80,7 +85,7 @@ export function upsertFileWorkflow(opts: UpsertFileWorkflowOpts): WorkflowRow {
     );
   } else {
     db.run(
-      "INSERT INTO workflows (name, description, yaml_content, source, file_path, created_at, updated_at) VALUES (?, ?, ?, 'file', ?, ?, ?)",
+      "INSERT INTO workflows (name, description, yaml_content, source, kind, file_path, created_at, updated_at) VALUES (?, ?, ?, 'file', 'file', ?, ?, ?)",
       [opts.name, opts.description, opts.yaml_content, opts.file_path, ts, ts]
     );
   }
@@ -129,7 +134,7 @@ export function createDbWorkflow(opts: CreateDbWorkflowOpts): WorkflowRow {
   const db = getDb();
   const ts = Date.now();
   db.run(
-    "INSERT INTO workflows (name, description, yaml_content, source, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', ?, ?, ?)",
+    "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
     [opts.name, opts.description, opts.yaml_content, opts.derives_from, ts, ts]
   );
   return getWorkflowFromDb(opts.name) as WorkflowRow;
