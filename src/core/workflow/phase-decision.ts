@@ -11,13 +11,14 @@ export interface PhaseDecision {
   /**
    * 判定方式：
    * - marker（缺省）：grep agent 散文里的 pass/reject 标记串（自用 / 可信工作流够用）
-   * - judge：另起一次强制结构化调用把散文收敛成 {verdict, reason}，绝不 grep（分发场景，
-   *   不能信任别人写的评审守格式）。详见 judge.ts。
    * - tool：做 review 的 agent **自己**出裁决——能用 MCP 工具的 provider（claude CLI）调
    *   submit_decision(verdict, reason)；其余 provider 降级到等价的「输出 JSON 裁决块」文本契约。
-   *   框架只读 + 驱动状态机，不另起 LLM 替判（比 judge 更彻底，对齐「决策归用户/agent」）。
+   *   框架只读 + 驱动状态机，不另起 LLM 替判（对齐「决策归用户/agent」）。
+   *
+   * 注：早期的 judge 模式（框架另起一次结构化裁判 LLM 替判）已于 2026-06 移除——tool 模式的
+   * 文本路径是它更省、更对齐原则的等价物。
    */
-  mode?: "marker" | "judge" | "tool";
+  mode?: "marker" | "tool";
   /** marker 模式：判定"通过"的标记串（命中 → 走 complete_trigger，框架自动推进） */
   pass?: string;
   /** marker 模式：判定"驳回"的标记串（命中 → 回退 reject 目标重做） */
@@ -26,14 +27,8 @@ export interface PhaseDecision {
   reason_section?: string;
   /** marker 模式：标记匹配方式：contains（默认，子串包含）/ regex（正则） */
   match?: "contains" | "regex";
-  /** judge 模式：裁判 provider（缺省 anthropic——已知最可靠的 tool_choice）。 */
-  judge_provider?: string;
-  /** judge 模式：裁判 model（缺省走 provider.default_model）。 */
-  judge_model?: string;
-  /** judge 模式：评审标准，拼进裁判 prompt（可空）。 */
+  /** tool 模式：评判标准，由框架注入到做评审的 agent 的 prompt（${CRITERIA}），决定它怎么判（可空）。 */
   criteria?: string;
-  /** judge 模式：裁判人设/system prompt 覆写（可空，缺省用框架默认）。让「怎么判」也进数据、不写死框架。 */
-  judge_system_prompt?: string;
 }
 
 export type DecisionVerdict =
@@ -117,8 +112,8 @@ export type DecisionAction =
   | { kind: "misconfigured"; reason: string };
 
 /**
- * 把一个已得到的判定结论（marker 评估 / judge 裁判都收敛成 DecisionVerdict）翻成
- * 可执行动作（纯）。marker 模式与 judge 模式共用此后半段——计数 / 触顶 / 回退 / 配置校验
+ * 把一个已得到的判定结论（marker 评估 / tool 裁决都收敛成 DecisionVerdict）翻成
+ * 可执行动作（纯）。marker 模式与 tool 模式共用此后半段——计数 / 触顶 / 回退 / 配置校验
  * 与"结论怎么来的"解耦。
  *
  * @param phaseName 做判定的 phase 名（计数键 = 它自己的名，自包含）
@@ -160,8 +155,8 @@ export function planDecisionActionFromVerdict(
 
 /**
  * marker 模式：评估 agent 输出标记 → 翻成可执行动作（纯）。prompt-runner 据此做 I/O。
- * judge 模式由 prompt-runner 先 await judgeVerdict 拿 DecisionVerdict，再直接调
- * planDecisionActionFromVerdict（保持本模块纯同步、无 async 依赖）。
+ * tool 模式由 prompt-runner 拿 agent 自交的裁决（submit_decision 工具捕获 / 输出 JSON 块解析）
+ * 收敛成 DecisionVerdict，再直接调 planDecisionActionFromVerdict（保持本模块纯同步、无 async 依赖）。
  */
 export function planDecisionAction(
   output: string,

@@ -2,7 +2,7 @@
  * Prompt-driven phase runner — 让用户在 yaml 里写 `prompt:` 字段即可跑一个
  * agent 调用阶段，免去写 ts 函数。
  *
- * 适用场景：调用 agent.run(prompt) 的阶段，含带 decision(marker/judge) 判据的
+ * 适用场景：调用 agent.run(prompt) 的阶段，含带 decision(marker/tool) 判据的
  * 评审/驳回回路（pass/reject/触顶 failed 全在框架做，零 ts）。真正机械的交付
  * （commit/push/开 PR、deliverArtifacts）仍要写 ts。
  *
@@ -525,21 +525,11 @@ export function makePromptRunner(
         maxRejections: phaseDef?.max_rejections,
       };
 
-      // marker：grep 标记同步评估；judge：另起一次强制结构化裁判，把散文收敛成 verdict；
+      // marker：grep 标记同步评估；
       // tool：做 review 的 agent 自己出裁决（claude 调 submit_decision 工具 / 其余产出 JSON 块），
       //       拿不到就追问一轮（独立预算 DECISION_FOLLOWUP_MAX），触顶仍无 → ambiguous 停下报人。
       let action;
-      if (options.decision.mode === "judge") {
-        const { judgeVerdict } = await import("./judge"); // 动态 import 隔离 agents 依赖
-        const verdict: DecisionVerdict = await judgeVerdict({
-          review: finalText,
-          criteria: options.decision.criteria,
-          provider: options.decision.judge_provider,
-          model: options.decision.judge_model,
-          systemPrompt: options.decision.judge_system_prompt,
-        });
-        action = planDecisionActionFromVerdict(verdict, phaseName, meta, counts);
-      } else if (options.decision.mode === "tool") {
+      if (options.decision.mode === "tool") {
         // 闸2 必经锁：先读本轮（agent.run 期间 submit_decision 已捕获 / finalText 含 JSON 块）
         let verdict = supportsTool ? takeDecisionVerdict(taskId) : parseVerdictBlock(finalText);
         let nudges = 0;
@@ -580,10 +570,8 @@ export function makePromptRunner(
 
       if (action.kind === "ambiguous") {
         const ambiguousMsg =
-          options.decision.mode === "judge"
-            ? `phase「${phaseName}」结构化裁判两次仍未给出明确结论（pass/reject），已停下报人`
-            : options.decision.mode === "tool"
-              ? `phase「${phaseName}」追问 ${DECISION_FOLLOWUP_MAX} 轮后 agent 仍未提交合规裁决（${supportsTool ? "submit_decision 工具" : "JSON 裁决块"}），已停下报人`
+          options.decision.mode === "tool"
+            ? `phase「${phaseName}」追问 ${DECISION_FOLLOWUP_MAX} 轮后 agent 仍未提交合规裁决（${supportsTool ? "submit_decision 工具" : "JSON 裁决块"}），已停下报人`
               : `phase「${phaseName}」无法解析判据结论：agent 输出既未含 pass 标记「${options.decision.pass}」也未含 reject 标记「${options.decision.reject}」`;
         throw new Error(ambiguousMsg);
       }

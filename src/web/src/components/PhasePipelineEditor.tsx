@@ -1628,12 +1628,11 @@ function PhaseEditForm({
     judge_model?: string;
     judge_system_prompt?: string;
   };
-  // 判据模式：tool（评审 agent 自己调 submit_decision，dev 在用，推荐）/ judge（另起裁判 LLM）/
-  // marker（grep 标记）。按数据推断，缺省 tool。
-  const decisionMode: "tool" | "judge" | "marker" =
-    decision.mode === "tool" ? "tool"
-      : decision.mode === "marker" ? "marker"
-      : decision.mode === "judge" ? "judge"
+  // 判据模式：tool（评审 agent 自己调 submit_decision，dev 在用，推荐）/ marker（grep 标记）。
+  // 按数据推断，缺省 tool。（早期 judge 模式已移除——tool 文本路径是其更省等价物。）
+  const decisionMode: "tool" | "marker" =
+    decision.mode === "marker" ? "marker"
+      : decision.mode === "tool" ? "tool"
       : decision.pass || decision.reject ? "marker"
       : "tool";
   function patchDecision(p: Partial<typeof decision>) {
@@ -1642,11 +1641,11 @@ function PhaseEditForm({
     for (const [k, v] of Object.entries(next)) if (typeof v === "string" && v.trim()) cleaned[k] = v;
     onChange({ decision: Object.keys(cleaned).length ? cleaned : undefined });
   }
-  // 切模式：清掉其他模式专属字段，避免残留脏数据（criteria 在 tool/judge 间共享，保留）。
-  function setDecisionMode(mode: "tool" | "judge" | "marker") {
+  // 切模式：清掉其他模式专属字段，避免残留脏数据；judge_* 是已移除的 judge 模式遗留，一并清。
+  function setDecisionMode(mode: "tool" | "marker") {
     const p: Partial<typeof decision> = { mode };
     if (mode !== "marker") { p.pass = ""; p.reject = ""; p.reason_section = ""; p.match = ""; }
-    if (mode !== "judge") { p.judge_provider = ""; p.judge_model = ""; p.judge_system_prompt = ""; }
+    p.judge_provider = ""; p.judge_model = ""; p.judge_system_prompt = "";
     patchDecision(p);
   }
   const isPromptMode = typeof raw.prompt === "string" && raw.prompt.trim() !== "";
@@ -1877,11 +1876,9 @@ function PhaseEditForm({
               <p className="text-[10px] text-muted-foreground">
                 框架按 agent 输出自动判通过 / 驳回；驳回回退到「驳回到」目标重做（上限走「最大驳回次数」，触顶暂停报人）。
               </p>
-              {/* 模式：工具裁决（tool，评审 agent 自己调 submit_decision）/ 结构化裁判（judge，另起裁判 LLM）/
-                  标记匹配（marker，grep agent 输出标记） */}
+              {/* 模式：工具裁决（tool，评审 agent 自己调 submit_decision）/ 标记匹配（marker，grep agent 输出标记） */}
               <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">
                 <button type="button" onClick={() => setDecisionMode("tool")} className={decisionMode === "tool" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>工具裁决</button>
-                <button type="button" onClick={() => setDecisionMode("judge")} className={decisionMode === "judge" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>结构化裁判</button>
                 <button type="button" onClick={() => setDecisionMode("marker")} className={decisionMode === "marker" ? "rounded-[5px] bg-card px-2 py-0.5 text-[10px] text-foreground shadow-sm" : "rounded-[5px] px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"}>标记匹配</button>
               </div>
 
@@ -1898,49 +1895,6 @@ function PhaseEditForm({
                     spellCheck={false}
                   />
                 </div>
-              ) : decisionMode === "judge" ? (
-                <>
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-muted-foreground">评判标准 criteria（喂给裁判，决定它怎么判 —— 这就是你「告诉裁判怎么判」的地方）</span>
-                    <Textarea
-                      value={decision.criteria ?? ""}
-                      placeholder={"如：架构方向正确、核心需求有覆盖即 pass；仅当存在架构性硬伤（技术方向错 / 不可行 / 核心需求遗漏）才 reject。可在开发阶段处理的 gap 不构成驳回。"}
-                      onChange={(e) => patchDecision({ criteria: e.target.value })}
-                      className="min-h-[90px] resize-y text-sm leading-relaxed"
-                      spellCheck={false}
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-muted-foreground">裁判 provider（缺省 anthropic）</span>
-                      <Input
-                        value={decision.judge_provider ?? ""}
-                        placeholder="如 kimi-code"
-                        onChange={(e) => patchDecision({ judge_provider: e.target.value })}
-                        className="h-8 font-mono text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-muted-foreground">裁判 model（可选）</span>
-                      <Input
-                        value={decision.judge_model ?? ""}
-                        placeholder="缺省走 provider 默认"
-                        onChange={(e) => patchDecision({ judge_model: e.target.value })}
-                        className="h-8 font-mono text-sm"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-muted-foreground">裁判人设 system prompt（可选，留空用框架默认）</span>
-                    <Textarea
-                      value={decision.judge_system_prompt ?? ""}
-                      placeholder={"覆写裁判的人设/取向。留空 = 框架默认（严格裁判，只依客观问题、不被措辞带偏）。"}
-                      onChange={(e) => patchDecision({ judge_system_prompt: e.target.value })}
-                      className="min-h-[60px] resize-y text-sm leading-relaxed"
-                      spellCheck={false}
-                    />
-                  </div>
-                </>
               ) : (
                 <>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

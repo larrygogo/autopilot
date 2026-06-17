@@ -44,24 +44,19 @@ describe("decision 配置 lint", () => {
     expect(() => expand({ name: "design", prompt: "做" })).not.toThrow();
   });
 
-  it("judge 模式无需 pass/reject 标记 → 不报错", () => {
+  it("judge 模式已移除 → 报错并提示改用 tool", () => {
     expect(() =>
       expand(
         { name: "review", reject: "design", prompt: "判", decision: { mode: "judge", criteria: "需有测试" } },
         ["design", "review"],
       ),
-    ).not.toThrow();
-  });
-
-  it("judge 模式仍需 reject 回退目标 → 缺则报错", () => {
-    expect(() => expand({ name: "review", prompt: "判", decision: { mode: "judge" } }))
-      .toThrow(/回退目标|reject: <目标阶段>/);
+    ).toThrow(/judge.*已移除|改用 "tool"|改用 tool/);
   });
 
   it("非法 mode → 报错", () => {
     expect(() =>
       expand({ name: "review", reject: "design", prompt: "判", decision: { mode: "vote" } }, ["design", "review"]),
-    ).toThrow(/marker.*judge.*tool|mode/);
+    ).toThrow(/marker.*tool|mode/);
   });
 
   it("tool 模式无需 pass/reject 标记 → 不报错", () => {

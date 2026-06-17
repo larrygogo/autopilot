@@ -68,7 +68,7 @@ describe("planDecisionAction", () => {
   });
 });
 
-describe("planDecisionActionFromVerdict（marker / judge 共用后半段）", () => {
+describe("planDecisionActionFromVerdict（marker / tool 共用后半段）", () => {
   const meta = { jumpTrigger: "review_reject", jumpTarget: "design", maxRejections: 3 };
   it("pass verdict → kind pass", () => {
     expect(planDecisionActionFromVerdict({ verdict: "pass" }, "review", meta, {})).toEqual({ kind: "pass" });

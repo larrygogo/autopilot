@@ -281,11 +281,14 @@ function lintPhaseDecision(phase: Record<string, unknown>, phaseName: string): v
   }
   const d = decision as Record<string, unknown>;
   const mode = d["mode"];
-  if (mode !== undefined && mode !== "marker" && mode !== "judge" && mode !== "tool") {
-    throw new Error(`阶段 ${phaseName} 的 decision.mode 只能是 "marker"、"judge" 或 "tool"`);
+  if (mode === "judge") {
+    throw new Error(`阶段 ${phaseName} 的 decision.mode "judge" 已移除——请改用 "tool"（评审 agent 自己调 submit_decision 出裁决），criteria 保留即可，去掉 judge_provider/judge_model/judge_system_prompt`);
   }
-  // 仅 marker 模式（缺省）需要 pass/reject 标记串；judge 靠结构化裁判、tool 靠 agent 调
-  // submit_decision 工具/产出 JSON 裁决块，都不写标记。
+  if (mode !== undefined && mode !== "marker" && mode !== "tool") {
+    throw new Error(`阶段 ${phaseName} 的 decision.mode 只能是 "marker" 或 "tool"`);
+  }
+  // 仅 marker 模式（缺省）需要 pass/reject 标记串；tool 靠 agent 调 submit_decision 工具/
+  // 产出 JSON 裁决块，不写标记。
   if (mode === undefined || mode === "marker") {
     if (typeof d["pass"] !== "string" || typeof d["reject"] !== "string") {
       throw new Error(`阶段 ${phaseName} 的 decision（marker 模式）必须同时含 pass 与 reject 字段（标记串）`);
