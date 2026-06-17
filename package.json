@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "description": "轻量级多阶段任务编排引擎",
+  "engines": {
+    "bun": ">=1.1.0"
+  },
   "bin": {
     "autopilot": "bin/autopilot.ts"
   },
