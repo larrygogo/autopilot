@@ -1,12 +1,15 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { join } from "path";
 import { parse as parseYaml } from "yaml";
 import { getConfigPath } from "./config";
 import { initDb, getDb } from "./db";
 import { listProviders } from "./providers";
 import { listUsableProviders } from "./default-provider";
+import { getCurrentVersion, latestMigrationVersion } from "./migrate";
+import { listOutdatedWorkflowCopies } from "./workflow/templates";
 
 export type CheckStatus = "ok" | "warning" | "error" | "skipped";
-export type CheckCategory = "config" | "provider" | "project" | "workspace";
+export type CheckCategory = "config" | "provider" | "project" | "workspace" | "upgrade";
 
 export type FixId =
   | "init.providers"
@@ -140,6 +143,57 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
     // DB 不可用时跳过 C7，不影响整体检查流程
   }
 
+  // ── C8：升级完整性自检 —— 抓「git pull 后忘了某一步」的半升级中间态。
+  // 全是 warning（引导补步骤，不阻塞）；升级是「pull + install + upgrade + build:web + sync」
+  // 几步散落手动操作，漏一步就静默不一致，这里一次性扫出来。
+  //
+  // C8a：未应用迁移（pull 了新迁移但没 autopilot upgrade / 没重启 daemon）
+  try {
+    initDb();
+    const current = getCurrentVersion();
+    const latest = latestMigrationVersion();
+    // current>0 守卫：current===0 = 从未迁移过（全新未 init / 测试夹具 DB），不是「落后」——
+    // 那条路由 config.exists / init 覆盖，doctor 不在此误报。
+    if (latest > 0 && current > 0 && current < latest) {
+      checks.push({
+        id: "upgrade.migrations", category: "upgrade", status: "warning",
+        title: `有 ${latest - current} 条未应用迁移（当前 v${current} → 最新 v${latest}）`,
+        detail: "git pull 后忘了升级？跑 autopilot upgrade 应用新迁移。",
+        fix: { cli: "autopilot upgrade" },
+      });
+    }
+  } catch { /* DB 不可用 → 跳过 */ }
+
+  // C8b：工作流副本落后内置模板（examples 有上游修复未 sync）
+  try {
+    const outdated = listOutdatedWorkflowCopies();
+    if (outdated.length > 0) {
+      checks.push({
+        id: "upgrade.workflows", category: "upgrade", status: "warning",
+        title: `${outdated.length} 个工作流副本落后于内置模板：${outdated.map((o) => o.name).join("、")}`,
+        detail: "examples 有上游修复未同步到你的副本（统一布局下旧副本的 git 任务可能 fatal）。",
+        fix: { cli: `autopilot workflow sync ${outdated[0].name} --apply` },
+      });
+    }
+  } catch { /* ignore */ }
+
+  // C8c：Web UI bundle 是否比 src/web 源码旧（git pull 后忘了 bun run build:web）。
+  // 仅在「src/web 与 web-dist 都存在」时检查 stale；web-dist 缺失不在此报（那条由
+  // serveStatic 的「未构建」指引页覆盖，且测试/CI 不构建 web-dist——只查 stale 才 test-safe）。
+  try {
+    const repoRoot = join(import.meta.dir, "..", "..");
+    const srcWebDir = join(repoRoot, "src", "web", "src");
+    const webDistIndex = join(repoRoot, "web-dist", "index.html");
+    if (existsSync(srcWebDir) && existsSync(webDistIndex) && newestMtime(srcWebDir) > statSync(webDistIndex).mtimeMs) {
+      checks.push({
+        id: "upgrade.webdist", category: "upgrade", status: "warning",
+        title: "Web UI bundle 可能过期（src/web 比上次构建新）",
+        detail: "git pull 更新了前端源码但没重建；跑 bun run build:web 后刷新页面。",
+        fix: { cli: "bun run build:web" },
+      });
+    }
+  } catch { /* ignore */ }
+
   // L2 / L3
   if (opts.level >= 2) {
     const providerCliMap: Record<string, string> = {
@@ -200,6 +254,27 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
   }
 
   return finalize(opts, checks, startedAt);
+}
+
+/** 递归取目录下所有文件的最新 mtime（ms）。读失败的条目跳过。给「web-dist 是否过期」用。 */
+function newestMtime(dir: string): number {
+  let newest = 0;
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  for (const name of entries) {
+    const full = join(dir, name);
+    try {
+      const st = statSync(full);
+      newest = st.isDirectory() ? Math.max(newest, newestMtime(full)) : Math.max(newest, st.mtimeMs);
+    } catch {
+      /* 跳过读不到的条目 */
+    }
+  }
+  return newest;
 }
 
 function finalize(opts: RunChecksOptions, checks: CheckResult[], startedAt: number): DoctorReport {

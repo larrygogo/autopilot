@@ -175,6 +175,19 @@ describe("hasTaskStartBlocker（强制落在 task-start 守卫，而非 doctor �
     expect(report.checks.find((c) => c.id.startsWith("agents."))).toBeUndefined();
     expect(report.status).toBe("ok");
   });
+
+  it("C8 工作流副本落后内置模板 → upgrade.workflows warning", async () => {
+    writeFileSync(tmpFile, "\n", "utf-8");
+    seedUsableProvider();
+    // 在 tmp home 造一个落后的 dev 副本（无 template_revision = r0 < examples 的 r≥1）
+    const wfDir = join(tmpDir, "workflows", "dev");
+    mkdirSync(wfDir, { recursive: true });
+    writeFileSync(join(wfDir, "workflow.yaml"), "name: dev\nlabel: x\nphases:\n  - name: a\n    timeout: 1\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    const c = report.checks.find((c) => c.id === "upgrade.workflows");
+    expect(c?.status).toBe("warning");
+    expect(c?.title).toContain("dev");
+  });
 });
 
 describe("L2 provider CLI 探测", () => {

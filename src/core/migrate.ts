@@ -62,6 +62,13 @@ export function nextMigrationVersion(files: string[]): number {
   return max + 1;
 }
 
+/** 磁盘上最高的迁移文件编号（= 该跑到的目标版本）。无迁移目录 / 空 → 0。doctor 据此判有无未应用迁移。 */
+export function latestMigrationVersion(): number {
+  if (!existsSync(MIGRATIONS_DIR)) return 0;
+  const files = readdirSync(MIGRATIONS_DIR).filter((f) => MIGRATION_FILE_RE.test(f));
+  return nextMigrationVersion(files) - 1;
+}
+
 /** slug 规范化：小写、空格/下划线→连字符、剔除非法字符；必须以字母数字开头。 */
 export function normalizeMigrationSlug(raw: string): string {
   const slug = raw.trim().toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
