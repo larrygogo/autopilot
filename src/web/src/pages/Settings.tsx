@@ -38,7 +38,6 @@ export function Settings({
   const [defaultsSaving, setDefaultsSaving] = useState(false);
 
   const [status, setStatus] = useState<any>(null);
-  const [configPath, setConfigPath] = useState<string | null>(null);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [restartingDaemon, setRestartingDaemon] = useState(false);
 
@@ -83,17 +82,6 @@ export function Settings({
     api.getStatus().then(setStatus).catch(() => {});
   }, [section]);
 
-  useEffect(() => {
-    if (section !== "daemon") return;
-    // 用 getConfig 触发后端返回 yaml，间接拿到当前用的 config 路径
-    // 实际上 daemon status 已含 config 路径，先用一个简单兜底
-    api.getConfig().then((res) => {
-      // getConfig 不返路径，但能确认 daemon 拿到了 config；显示固定提示
-      setConfigPath("~/.autopilot/config.yaml");
-    }).catch(() => {
-      setConfigPath("~/.autopilot/config.yaml");
-    });
-  }, [section]);
 
   if (section === "lifecycle") {
     return <LifecycleAgentsCard />;
@@ -125,18 +113,16 @@ export function Settings({
                 {restartingDaemon ? "重启中…" : "重启 daemon"}
               </Button>
             </div>
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 md:grid-cols-4">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
               <InfoField
                 label="版本"
                 value={status.git_sha ? `${status.version} · ${status.git_sha}` : status.version}
                 mono
               />
-              <InfoField label="PID" value={String(status.pid)} mono />
               <InfoField
                 label="启动于"
                 value={status.started_at_iso ? new Date(status.started_at_iso).toLocaleString() : formatUptime(status.uptime)}
               />
-              <InfoField label="端口" value={location.port || "80"} mono />
             </dl>
             <p className="mt-3 text-[11px] text-muted-foreground">
               更新代码、或改了监听地址 / 端口后，重启让它生效。重启时这个页面会断开一两秒再自动连上。
@@ -162,32 +148,6 @@ export function Settings({
         />
 
         <DaemonLogCard />
-
-        {/* 编辑配置文件提示 */}
-        <Card className="mb-4 p-4">
-          <div className="mb-2">
-            <h3 className="text-sm font-semibold">配置文件位置</h3>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              日常设置用左边的菜单就够了。想直接改原始配置，用编辑器打开下面的路径，存盘后大多即时生效。
-            </p>
-          </div>
-          <dl className="grid grid-cols-1 gap-y-2 font-mono text-xs sm:grid-cols-[auto_1fr] sm:gap-x-4">
-            <dt className="text-muted-foreground">全局配置</dt>
-            <dd>{configPath ?? "~/.autopilot/config.yaml"}</dd>
-            <dt className="text-muted-foreground">工作流目录</dt>
-            <dd>~/.autopilot/workflows/&lt;name&gt;/workflow.yaml</dd>
-            <dt className="text-muted-foreground">CLI 查看</dt>
-            <dd>
-              <code className="bg-muted/40 px-1.5 py-0.5">autopilot config path</code>
-              <span className="mx-1 text-muted-foreground">·</span>
-              <code className="bg-muted/40 px-1.5 py-0.5">autopilot config show</code>
-            </dd>
-            <dt className="text-muted-foreground">检查配置</dt>
-            <dd>
-              <code className="bg-muted/40 px-1.5 py-0.5">autopilot config doctor</code>
-            </dd>
-          </dl>
-        </Card>
       </div>
     );
   }
@@ -283,12 +243,9 @@ function SchedulerCard(): React.ReactElement {
 
   return (
     <Card className="mb-4 p-4">
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold">任务调度</h3>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          最多允许多少个任务同时跑（所有代码库合计）。改完马上生效。
-        </p>
-      </div>
+      <p className="mb-3 text-[11px] text-muted-foreground">
+        最多允许多少个任务同时跑（所有代码库合计）。改完马上生效。
+      </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr] sm:items-end">
         <div className="space-y-1.5">
           <Label>最大并发任务数</Label>
@@ -513,12 +470,9 @@ function NetworkAccessCard(): React.ReactElement {
 
   return (
     <Card className="mb-4 p-4">
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold">网络访问</h3>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          决定谁能访问这个面板。改完要重启 daemon 生效（「设置 → Daemon」里有按钮）。
-        </p>
-      </div>
+      <p className="mb-3 text-[11px] text-muted-foreground">
+        决定谁能访问这个面板。改完要重启 daemon 生效（「设置 → Daemon」里有按钮）。
+      </p>
 
       {/* Toggle: 仅本机 / 局域网 */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-md border border-border bg-card px-3 py-2.5">
