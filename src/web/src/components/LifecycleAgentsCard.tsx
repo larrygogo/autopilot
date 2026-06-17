@@ -53,15 +53,6 @@ export function LifecycleAgentsCard() {
       {agents.map((a) => (
         <LifecycleAgentEditor key={a.name} agent={a} providers={providers} onSaved={load} />
       ))}
-
-      <Card className="bg-muted/30 p-4">
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          这里管的是平台自带的几个 AI 步骤的 agent 全局默认（澄清/建需求/生成工作流共用一套；修复回路 __fix 单独一套）。
-          工作流里的执行阶段（设计、开发……）在「工作流」页按阶段单独配。单个需求也能在它自己的页面临时换个模型。
-          <br />
-          命令行：<code className="rounded bg-muted px-1 py-0.5 font-mono">autopilot lifecycle set &lt;clarify|fix&gt; --provider … --system-prompt …</code>
-        </p>
-      </Card>
     </div>
   );
 }
