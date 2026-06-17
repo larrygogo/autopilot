@@ -10,7 +10,7 @@ const REPO = process.cwd();
 /**
  * 把 init 后 tmp DB 里的 anthropic 条目 cli_status 设 ok —— doctor 的 has-enabled 以「可用性」为准
  * （读条目表 cli_status，不 spawn CLI）。spawn 的 config doctor 读同一 DB 文件，于是判「有可用」。
- * 不调用则 cli_status=null → 无可用 → error（用于「缺 provider」用例）。
+ * 不调用则 cli_status=null → 无可用 → warning（doctor 不阻塞 exit；强制在 task-start 守卫）。
  */
 function makeAnthropicUsable(home: string): void {
   const db = new Database(join(home, "runtime", "workflow.db"));
@@ -44,13 +44,13 @@ describe("config doctor 退出码", () => {
     expect(r.exitCode).toBe(0);
   });
 
-  it("缺 provider → 1（error）", () => {
+  it("缺 provider → 0（warning，不阻塞 exit；强制在 task-start 守卫）", () => {
     runCli("init");
     writeFileSync(join(tmpHome, "config.yaml"), "providers: {}\nagents: {}\n", "utf-8");
     const r = runCli("config", "doctor");
-    // dogfood-bug17：之前 error → 2 / warning → 1，CI 不友好。改为
-    // POSIX 标准约定：error → 1 / warning → 0。
-    expect(r.exitCode).toBe(1);
+    // 「无可用 provider」是 onboarding 正常态，doctor 只引导不阻塞 exit（恢复 bug16/17 契约 +
+    // 「warn 不拒启」）。真正的强制在 hasTaskStartBlocker（起任务时拦），不在诊断退出码。
+    expect(r.exitCode).toBe(0);
   });
 
   it("warning 不阻塞 exit (= 0)", () => {
