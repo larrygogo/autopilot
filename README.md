@@ -10,6 +10,8 @@
 
 附带 Web UI（claude.ai 质感 · 亮暗双模 · 图形化工作流编辑器 · ⌘K 命令面板 · 实时日志 · 人机交互 banner）、TUI、CLI 三种客户端。
 
+评审阶段采用 decision mode:tool，由评审 agent 自己调用 submit_decision 工具出裁决，而非框架自动推断或外部判定。
+
 [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1.svg)](https://bun.sh/)
 [![TypeScript](https://img.shields.io/badge/language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
 [![CI](https://github.com/larrygogo/autopilot/actions/workflows/ci.yml/badge.svg)](https://github.com/larrygogo/autopilot/actions/workflows/ci.yml)
