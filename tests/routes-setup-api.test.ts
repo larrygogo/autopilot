@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { _setDbForTest, initDb } from "../src/core/db";
 import { runPendingMigrations } from "../src/core/migrate";
+import { getProviderByName, setProviderCliStatus } from "../src/core/providers";
 import { invokeRpcMethod } from "../src/daemon/rpc";
 import { registerCoreRpcMethods } from "../src/daemon/rpc-methods";
 
@@ -44,6 +45,9 @@ beforeEach(async () => {
   _setDbForTest(new Database(":memory:"));
   initDb();
   await runPendingMigrations();
+  // doctor has-enabled 以「可用性」为准（cli_status=ok / api key）：给 anthropic 设 ok 作可用基线，
+  // 否则 seed 的条目 cli_status=null → 无可用 → has-enabled error，挡住 setup 流程用例。
+  setProviderCliStatus(getProviderByName("anthropic")!.id, "ok");
   registerCoreRpcMethods();
 });
 

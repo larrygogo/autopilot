@@ -2,9 +2,21 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { Database } from "bun:sqlite";
 
 let tmpHome: string;
 const REPO = process.cwd();
+
+/**
+ * 把 init 后 tmp DB 里的 anthropic 条目 cli_status 设 ok —— doctor 的 has-enabled 以「可用性」为准
+ * （读条目表 cli_status，不 spawn CLI）。spawn 的 config doctor 读同一 DB 文件，于是判「有可用」。
+ * 不调用则 cli_status=null → 无可用 → error（用于「缺 provider」用例）。
+ */
+function makeAnthropicUsable(home: string): void {
+  const db = new Database(join(home, "runtime", "workflow.db"));
+  db.run("UPDATE providers SET cli_status = 'ok' WHERE name = 'anthropic'");
+  db.close();
+}
 
 beforeEach(() => {
   tmpHome = join(tmpdir(), `autopilot-cli-config-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -25,15 +37,9 @@ function runCli(...args: string[]) {
 }
 
 describe("config doctor 退出码", () => {
-  it("配置完整 → 0", () => {
+  it("配置完整（有可用 provider）→ 0", () => {
     runCli("init");
-    // 零配置模板下 providers 段缺失，C4 底线仍要求至少一个 enabled provider。
-    // 这里手写完整 yaml 以满足 L1 全部检查。
-    writeFileSync(
-      join(tmpHome, "config.yaml"),
-      "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n",
-      "utf-8",
-    );
+    makeAnthropicUsable(tmpHome); // has-enabled 以可用性为准（cli_status=ok）
     const r = runCli("config", "doctor");
     expect(r.exitCode).toBe(0);
   });
@@ -49,24 +55,15 @@ describe("config doctor 退出码", () => {
 
   it("warning 不阻塞 exit (= 0)", () => {
     runCli("init");
-    writeFileSync(
-      join(tmpHome, "config.yaml"),
-      "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n",
-      "utf-8",
-    );
-    // L1 ok，但若有警告 status 会是 "warning"；我们不强造场景，
-    // 这里主要断言 "ok" 仍 0。warning → 0 由 exitCodeFor 单元逻辑覆盖。
+    makeAnthropicUsable(tmpHome);
+    // has-enabled ok（有可用 provider）；projects 0 行等 warning 不阻塞 → exit 0。
     const r = runCli("config", "doctor");
     expect(r.exitCode).toBe(0);
   });
 
   it("--json 可解析", () => {
     runCli("init");
-    writeFileSync(
-      join(tmpHome, "config.yaml"),
-      "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n",
-      "utf-8",
-    );
+    makeAnthropicUsable(tmpHome);
     const r = runCli("config", "doctor", "--json");
     const parsed = JSON.parse(r.stdout);
     expect(parsed.level).toBe(1);

@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "fs";
 import { parse as parseYaml } from "yaml";
 import { getConfigPath } from "./config";
 import { initDb, getDb } from "./db";
+import { listProviders } from "./providers";
+import { listUsableProviders } from "./default-provider";
 
 export type CheckStatus = "ok" | "warning" | "error" | "skipped";
 export type CheckCategory = "config" | "provider" | "project" | "workspace";
@@ -63,44 +65,44 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
   }
   checks.push({ id: "config.parses", category: "config", status: "ok", title: "config.yaml 解析正常" });
 
-  // C3：providers 结构 + 收集 enabled
-  //
-  // 注：provider 条目化重构后运行时解析以 providers 表为准；但 doctor / setup 的
-  // has-enabled 诊断暂仍读 config.yaml（P1 务实保留，避免诊断契约大改）。doctor 与
-  // 条目表的一致性（含 Web/CLI provider add 反映到诊断）作为 P2 跟进。
-  const hasProvidersSection = raw["providers"] !== undefined;
+  // C3：providers 段结构校验（仅查 config.yaml 形状，真相源是 providers 条目表）
   const providersSection = (raw["providers"] ?? {}) as Record<string, unknown>;
-  const enabledProviders: Array<{ name: string; cfg: Record<string, unknown> }> = [];
   for (const [name, cfg] of Object.entries(providersSection)) {
+    if (name === "default") continue; // providers.default 是字符串保留键，非条目
     if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) {
       checks.push({ id: `providers.${name}.structure`, category: "provider", status: "error", title: `providers.${name} 必须是对象` });
-      continue;
     }
-    const c = cfg as Record<string, unknown>;
-    if (c.enabled === true) enabledProviders.push({ name, cfg: c });
   }
 
-  // C4：底线
-  const validEnabled = enabledProviders.filter(
-    (p) => typeof p.cfg.default_model === "string" && (p.cfg.default_model as string).trim() !== "",
-  );
-  if (validEnabled.length === 0 && !hasProvidersSection) {
+  // C4：底线——是否有「真正可用」的 provider（条目表 + 可用性：cli 已登录 ok / api 有 key）。
+  // 「有条目」≠「能用」：providers 表总被 seed，关键是有没有一个登录好 / 配了 key 的。
+  // 注：可用性读条目表的 cli_status（DB 落库值，不在此 spawn CLI），故 env-independent。
+  let entryCount = 0;
+  let usableNames: string[] = [];
+  try {
+    initDb();
+    entryCount = listProviders().length;
+    usableNames = (await listUsableProviders()).map((p) => p.name);
+  } catch { /* DB 未就绪 → 按 0 处理（下面给 error 引导） */ }
+
+  if (usableNames.length > 0) {
     checks.push({
       id: "providers.has-enabled", category: "provider", status: "ok",
-      title: "零配置模式（providers 段未写，依赖 CLI 凭证自管理）",
-      detail: "如需切 model / 自建代理，参考 config.yaml 注释里的 providers 段示例；用 --probe 跑 L2 探测验证 CLI 装没装",
+      title: `已有 ${usableNames.length} 个可用 AI 供应商：${usableNames.join(", ")}`,
     });
-  } else if (validEnabled.length === 0) {
+  } else if (entryCount > 0) {
     checks.push({
       id: "providers.has-enabled", category: "provider", status: "error",
-      title: "至少需要启用一个 provider 并填写 default_model",
-      detail: enabledProviders.length === 0 ? "没有 enabled: true 的 provider" : `enabled 但缺 default_model: ${enabledProviders.map((p) => p.name).join(", ")}`,
-      fix: { cli: "bun run dev config doctor --fix", url: "/setup", auto: "init.providers" },
+      title: "有 provider 条目，但没有一个可用",
+      detail: "CLI 未登录 或 API key 未配 —— autopilot 需要至少一个可用供应商才能执行任务（澄清 / 入队 / 起任务会被拒）。",
+      fix: { cli: "autopilot provider list  # 看状态，再 CLI 登录 或 autopilot key set <provider>", url: "/settings/providers", auto: "init.providers" },
     });
   } else {
     checks.push({
-      id: "providers.has-enabled", category: "provider", status: "ok",
-      title: `已启用 ${validEnabled.length} 个 provider：${validEnabled.map((p) => p.name).join(", ")}`,
+      id: "providers.has-enabled", category: "provider", status: "error",
+      title: "未配置任何 AI 供应商",
+      detail: "在「设置 → 提供商」添加并登录 / 填 API key。",
+      fix: { url: "/settings/providers", auto: "init.providers" },
     });
   }
 
@@ -129,13 +131,9 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
       google: "gemini",
     };
 
-    // 探测范围（dogfood-bug16）：
-    // - 用户显式 enabled providers → 只探测这些（精准对应配置）
-    // - 零配置模式（validEnabled 空） → 探测全部三家内置 CLI，让客户看到
-    //   "哪个 CLI 装了 / 哪个没装"，否则 --probe 输出空白看不到效果
-    const targetForCli = validEnabled.length > 0
-      ? validEnabled.map((p) => p.name)
-      : Object.keys(providerCliMap);
+    // 探测范围：全部三家内置 CLI（条目化后无「config 显式 enabled 子集」概念；
+    // 让客户看到「哪个 CLI 装了 / 哪个没装」，否则 --probe 输出空白看不到效果）。
+    const targetForCli: string[] = Object.keys(providerCliMap);
 
     await Promise.all(
       targetForCli
@@ -146,12 +144,12 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
           if (result.ok) {
             checks.push({ id: `providers.${name}.cli`, category: "provider", status: "ok", title: `${name} CLI: ${cli} ${result.version ?? ""} ✓` });
           } else {
-            // 零配置场景 CLI 未装不是 error，是 warning（客户可能只用其中一家）
-            const isZeroConfig = validEnabled.length === 0;
+            // 单个 CLI 未装/未登录是 warning（客户可能只用其中一家）；
+            // 「一个可用的都没有」的 error 由上面 providers.has-enabled 底线统一报。
             checks.push({
               id: `providers.${name}.cli`,
               category: "provider",
-              status: isZeroConfig ? "warning" : "error",
+              status: "warning",
               title: `${name} CLI 探测失败`,
               detail: result.detail,
               fix: { cli: result.installHint },
@@ -161,9 +159,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
     );
 
     if (opts.level >= 3) {
-      const targetNames = opts.providers ?? (validEnabled.length > 0
-        ? validEnabled.map((p) => p.name)
-        : Object.keys(providerCliMap));
+      const targetNames = opts.providers ?? (usableNames.length > 0 ? usableNames : Object.keys(providerCliMap));
       // 串行避免凭证 race
       for (const name of targetNames) {
         const cli = providerCliMap[name];
@@ -172,12 +168,11 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
         if (result.ok) {
           checks.push({ id: `providers.${name}.ping`, category: "provider", status: "ok", title: `${name} 凭证验证通过` });
         } else {
-          // 零配置场景下 ping 失败也降级为 warning
-          const isZeroConfig = validEnabled.length === 0;
+          // 单家凭证验证失败 = warning（其它家可能可用）；「全无可用」的 error 由底线统一报。
           checks.push({
             id: `providers.${name}.ping`,
             category: "provider",
-            status: isZeroConfig ? "warning" : "error",
+            status: "warning",
             title: `${name} 凭证验证失败`,
             detail: result.detail,
             fix: { cli: result.loginHint },

@@ -4,10 +4,22 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { runChecks } from "../src/core/doctor";
-import { _setDbForTest } from "../src/core/db";
+import { _setDbForTest, getDb } from "../src/core/db";
+import { up as m041 } from "../src/migrations/041-api-keys";
+import { up as m047 } from "../src/migrations/047-providers-table";
+import { getProviderByName, setProviderCliStatus } from "../src/core/providers";
 
 let tmpFile: string;
 let tmpDir: string;
+
+/** 让当前测试 DB 有一个「可用」provider（doctor has-enabled 以可用性为准，读条目表的 cli_status）：
+ *  seed 三家条目 + 把 anthropic cli_status 设 ok。 */
+function seedUsableProvider(): void {
+  const db = getDb();
+  m041(db);
+  m047(db);
+  setProviderCliStatus(getProviderByName("anthropic")!.id, "ok");
+}
 
 beforeEach(() => {
   tmpDir = join(tmpdir(), `autopilot-doctor-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -73,21 +85,32 @@ describe("L1 C3-C7", () => {
     expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("error");
   });
 
-  it("零配置（providers 段完全没写）→ ok（依赖 CLI 凭证）", async () => {
-    // 这是 CLAUDE.md 文档化的"零配置"路径：不写 providers 段，让 CLI 凭证
-    // 自管理。doctor L1 不能报 error，否则 init 完客户看到一片红色误以为
-    // 装坏了（dogfood 实跑暴露的问题）。
+  it("无 provider 条目 → error（P1：系统必须有一个可用供应商）", async () => {
+    // 条目化 + 可用性重构后：零 provider → 明确 error（澄清/入队/起任务会被拒）+ 引导。
     writeFileSync(tmpFile, "agents: {}\n", "utf-8");
     const report = await runChecks({ level: 1 });
     const c = report.checks.find((c) => c.id === "providers.has-enabled");
-    expect(c?.status).toBe("ok");
-    expect(c?.title).toContain("零配置模式");
+    expect(c?.status).toBe("error");
+    expect(c?.fix?.url).toBe("/settings/providers");
   });
 
-  it("零配置（完全空 yaml）→ ok", async () => {
+  it("有 seed 条目但都未就绪（无 cli_status / 无 key）→ error", async () => {
     writeFileSync(tmpFile, "\n", "utf-8");
+    m041(getDb());
+    m047(getDb()); // seed 三家但不设 cli_status → 都不可用
     const report = await runChecks({ level: 1 });
-    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("ok");
+    const c = report.checks.find((c) => c.id === "providers.has-enabled");
+    expect(c?.status).toBe("error");
+    expect(c?.title).toContain("没有一个可用");
+  });
+
+  it("有可用 provider（cli 已就绪）→ ok", async () => {
+    writeFileSync(tmpFile, "\n", "utf-8");
+    seedUsableProvider();
+    const report = await runChecks({ level: 1 });
+    const c = report.checks.find((c) => c.id === "providers.has-enabled");
+    expect(c?.status).toBe("ok");
+    expect(c?.title).toContain("可用");
   });
 
   it("用户显式写 providers: {} 空对象 → error（明确没启用）", async () => {
@@ -108,6 +131,7 @@ describe("L1 C3-C7", () => {
     // Phase 3：删除命名 agent 机制。即便用户在 agents 段引用了未启用 provider，
     // doctor 也不再对其报错（该段已不被框架读取）。
     writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n  openai:\n    enabled: false\nagents:\n  coder:\n    provider: openai\n", "utf-8");
+    seedUsableProvider();
     const report = await runChecks({ level: 1 });
     expect(report.checks.find((c) => c.id.startsWith("agents."))).toBeUndefined();
     // provider 校验仍正常
@@ -116,6 +140,7 @@ describe("L1 C3-C7", () => {
 
   it("全部合规 → ok", async () => {
     writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n", "utf-8");
+    seedUsableProvider();
     const report = await runChecks({ level: 1 });
     // 注：beforeEach 注入了 in-memory DB，C7 (projects.has-any) 查询会抛错被 catch 吞掉
     // 不产生 check，所以这里可以安全地断言 status === "ok"
@@ -136,16 +161,19 @@ describe("L2 provider CLI 探测", () => {
     expect(report.checks.find((c) => c.id === "config.exists")).toBeDefined();
   });
 
-  it("L2 对未启用 provider 跳过 CLI 探测", async () => {
-    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n  openai:\n    enabled: false\nagents:\n  coder:\n    provider: anthropic\n", "utf-8");
+  it("L2 探测全部三家内置 CLI（条目化后无「config 显式 enabled 子集」概念）", async () => {
+    writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n", "utf-8");
     const report = await runChecks({ level: 2 });
-    expect(report.checks.find((c) => c.id === "providers.openai.cli")).toBeUndefined();
+    expect(report.checks.find((c) => c.id === "providers.openai.cli")).toBeDefined();
+    expect(report.checks.find((c) => c.id === "providers.anthropic.cli")).toBeDefined();
+    expect(report.checks.find((c) => c.id === "providers.google.cli")).toBeDefined();
   });
 });
 
 describe("L3 凭证 ping", () => {
   it("L3 模式 level 字段为 3", async () => {
     writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n", "utf-8");
+    seedUsableProvider(); // 限定 L3 ping 范围为可用的 anthropic（否则按全三家 ping，易超时）
     const report = await runChecks({ level: 3 });
     expect(report.level).toBe(3);
   }, 15000);

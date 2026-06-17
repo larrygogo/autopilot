@@ -2,9 +2,17 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { Database } from "bun:sqlite";
 
 let tmpHome: string;
 const REPO = process.cwd();
+
+/** init 后把 anthropic cli_status 设 ok（doctor has-enabled 以可用性为准，读 DB cli_status，不 spawn CLI）。 */
+function makeAnthropicUsable(home: string): void {
+  const db = new Database(join(home, "runtime", "workflow.db"));
+  db.run("UPDATE providers SET cli_status = 'ok' WHERE name = 'anthropic'");
+  db.close();
+}
 
 beforeEach(() => {
   tmpHome = join(tmpdir(), `autopilot-task-gate-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -35,12 +43,7 @@ describe("task start 前置 doctor", () => {
 
   it("顶层 doctor 别名等同 config doctor", () => {
     runCli("init");
-    // 零配置模板下 providers 段缺失；写入完整 yaml 让 L1 全过
-    writeFileSync(
-      join(tmpHome, "config.yaml"),
-      "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n",
-      "utf-8",
-    );
+    makeAnthropicUsable(tmpHome); // 有可用 provider → doctor 全过 → exit 0
     const r = runCli("doctor");
     expect(r.exitCode).toBe(0);
   });
