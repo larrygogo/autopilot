@@ -1,10 +1,6 @@
 name: tool_decision_demo
 label: 工具裁决示例（decision mode:tool）
-description: |
-  展示 decision mode:tool——做 review 的 agent **自己**出裁决：能用 MCP 工具的 provider
-  （claude CLI）调 submit_decision(verdict, reason)；其余 provider 自动降级到等价的「输出 JSON
-  裁决块」文本契约。框架只读 + 驱动状态机，不另起裁判 LLM（比 judge 更彻底，决策归 agent/用户）。
-  设计 → 评审（tool 判）→ 通过即完成 / 驳回回设计重做。全 prompt 模式、零 ts，可克隆改造。
+description: "演示 decision mode:tool：评审 agent 自己调 submit_decision 出裁决，框架只读+驱动状态机。设计 → 评审 → 通过即完成 / 驳回回设计重做。全 prompt、零 ts，可克隆改造。"
 requires: { git: false }
 phases:
   - name: design
