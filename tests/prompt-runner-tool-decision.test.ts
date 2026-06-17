@@ -7,7 +7,7 @@
  * 不在此跑完整 runner+agent（与 review-loop-decision 测试同哲学）。
  */
 import { describe, it, expect } from "bun:test";
-import { parseVerdictBlock } from "../src/core/workflow/prompt-runner";
+import { parseVerdictBlock, buildToolDecisionSuffix } from "../src/core/workflow/prompt-runner";
 import { agentSupportsMcpTools, createAgent } from "../src/agents/registry";
 
 describe("parseVerdictBlock 文本路径解析", () => {
@@ -46,6 +46,32 @@ describe("parseVerdictBlock 文本路径解析", () => {
 
   it("坏 JSON → 不抛错，返回 null", () => {
     expect(parseVerdictBlock('```json\n{verdict: pass,,,}\n```')).toBeNull();
+  });
+});
+
+describe("buildToolDecisionSuffix（${CRITERIA} 注入 + 裁决指令）", () => {
+  it("supportsTool=true → 含「submit_decision」工具指令", () => {
+    const s = buildToolDecisionSuffix(true);
+    expect(s).toContain("submit_decision");
+    expect(s).not.toContain("裁决判据"); // 无 criteria 不注入判据段
+  });
+
+  it("supportsTool=false → 含 JSON 裁决块文本指令", () => {
+    const s = buildToolDecisionSuffix(false);
+    expect(s).toContain("json");
+    expect(s).toContain("verdict");
+    expect(s).not.toContain("submit_decision");
+  });
+
+  it("有 criteria → 注入「## 裁决判据」+ 判据正文（判据从 judge 私有搬回 agent 可见）", () => {
+    const s = buildToolDecisionSuffix(true, "  覆盖需求即通过  ");
+    expect(s).toContain("## 裁决判据");
+    expect(s).toContain("覆盖需求即通过");
+    expect(s).toContain("submit_decision");
+  });
+
+  it("空白 criteria → 不注入判据段", () => {
+    expect(buildToolDecisionSuffix(true, "   ")).not.toContain("裁决判据");
   });
 });
 

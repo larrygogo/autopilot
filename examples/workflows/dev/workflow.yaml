@@ -16,8 +16,9 @@ sandbox:
 # 框架内置 prompt-runner 渲染 ${变量} 后调内联 agent.run()，不再需要 workflow.ts 阶段函数。
 #   - 阶段产物自动落 artifacts/<NN-phase>/agent_output.md；
 #   - design 开 handoff:true，把方案摘要交给下游用 ${HANDOFF_design} 读；
-#   - review / code_review 用 decision(judge 结构化裁判) 声明式判 pass/reject，
-#     reject 回退重做、触顶 max_rejections 自动转 failed 停下报人（全在框架，零 ts）。
+#   - review / code_review 用 decision(mode:tool) 声明式判 pass/reject——做评审的 agent
+#     自己调 submit_decision 工具提交裁决（不另起裁判 LLM，判据经 ${CRITERIA} 注入到评审
+#     agent 可见的 prompt 尾段），reject 回退重做、触顶 max_rejections 自动转 failed（全在框架，零 ts）。
 # 唯一保留 ts 的是 submit_pr（机械交付：逐库 commit/push + gh 开 PR + appendSubPr 登记，
 # 无 AI，凭证抹除/追踪原语只能从 workflow.ts 调）——它没有 prompt 字段，提示词优先全局下
 # 自然回退到同名 run_submit_pr 函数。
@@ -62,10 +63,9 @@ phases:
       model: claude-sonnet-4-6
       permission_mode: bypassPermissions
       max_turns: 5
-      system_prompt: "你是一位技术评审专家，从完整性、可行性、风险点、测试覆盖维度评审技术方案。指出真问题而非格式纠错，结论交由系统裁判。"
+      system_prompt: "你是一位技术评审专家，从完整性、可行性、风险点、测试覆盖维度评审技术方案。指出真问题而非格式纠错，最后按判据自行裁决并提交。"
     decision:
-      mode: judge
-      judge_provider: kimi-code
+      mode: tool
       criteria: |
         判定对象是【设计方案】而非最终代码——后面还有完整的开发 + 代码审查环节兜底，无需在设计阶段追求面面俱到。
         通过(pass)：架构方向正确、技术可行、核心需求有覆盖即可。**可在开发阶段处理的 gap 一律不构成驳回**——包括边界 case 未写全、次要规格未钉死、测试细节、可读性/命名建议、以及评审标注为 Important/minor 但不影响架构成立的问题。
@@ -80,7 +80,7 @@ phases:
       ## 待评审的技术方案
       ${HANDOFF_design}
 
-      请从完整性、可行性、风险点、测试覆盖四个维度给出散文评审，指出真问题、说明是否建议通过。结论由系统裁判，你只需把评审意见写清楚（无需输出固定结论标记）。
+      请从完整性、可行性、风险点、测试覆盖四个维度给出散文评审，指出真问题而非格式纠错，说明是否建议通过；然后依据下面的判据自行裁决（通过 / 驳回，驳回必须说明问题与改进方向）。
   - name: develop
     label: "开发"
     timeout: 1800
@@ -113,10 +113,9 @@ phases:
       model: claude-sonnet-4-6
       permission_mode: bypassPermissions
       max_turns: 5
-      system_prompt: "你是一位代码审查专家。关注正确性、可读性、边界与失败处理；找出真问题而非格式纠错，按 critical / important / minor 分级反馈。"
+      system_prompt: "你是一位代码审查专家。关注正确性、可读性、边界与失败处理；找出真问题而非格式纠错，按 critical / important / minor 分级反馈，最后按判据自行裁决并提交。"
     decision:
-      mode: judge
-      judge_provider: kimi-code
+      mode: tool
       criteria: |
         通过(pass)：改动正确实现了需求与技术方案的核心目标，无明显正确性/安全问题，关键路径可验证。仅 minor 风格问题不驳回。
         驳回(reject)：critical/important 缺陷——功能未实现 / 逻辑错误 / 安全隐患 / 与方案严重不符。
@@ -129,7 +128,7 @@ phases:
       你在仓库工作目录、有完整 shell 权限。请**自己采集真实改动再评审**：代码库各自在当前目录的子目录里，对每个子目录进入后运行
       `git add -A && git diff --cached --no-ext-diff origin/<base 分支>`（base 通常是 main）查看相对基线的全量改动，必要时配合 `git diff --cached --stat` 看文件全景、用 Read 查看具体文件内容。**禁止以"diff 里没看到"为由认定功能缺失**——看不到就主动进仓库目录里查清楚。
 
-      请从正确性、代码质量、安全性、测试覆盖四个维度给出散文审查，指出真问题而非格式纠错、说明是否建议通过。结论由系统裁判（无需输出固定结论标记）。
+      请从正确性、代码质量、安全性、测试覆盖四个维度给出散文审查，指出真问题而非格式纠错、说明是否建议通过；然后依据下面的判据自行裁决（通过 / 驳回，驳回必须说明问题与改进方向）。
   - name: submit_pr
     label: "提交 PR"
     timeout: 300

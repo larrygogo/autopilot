@@ -85,6 +85,18 @@ const DECISION_NUDGE_TOOL = `你还没有调用 submit_decision 工具提交裁�
 /** tool 模式（文本路径）追问话术（agent 没输出合规 JSON 块时）。 */
 const DECISION_NUDGE_TEXT = `你还没有给出合规的裁决 JSON 块。请在回复末尾用 \`\`\`json 围栏输出 {"verdict":"pass"|"reject","reason":"..."}（reject 时 reason 必填），不要输出其他内容。`;
 
+/**
+ * tool 模式：拼追加到 prompt 末尾的尾段（纯）。= ${CRITERIA} 判据注入（把判据从
+ * 「judge 私有」搬回「做裁决的 agent 可见的 prompt」）+ 按 provider 能力选裁决指令。
+ */
+export function buildToolDecisionSuffix(supportsTool: boolean, criteria?: string): string {
+  let s = "";
+  const c = criteria?.trim();
+  if (c) s += `\n\n## 裁决判据\n${c}`;
+  s += supportsTool ? DECISION_SUFFIX_TOOL : DECISION_SUFFIX_TEXT;
+  return s;
+}
+
 /** CapturedDecision → DecisionVerdict（工具路径）。无捕获返回 null。 */
 function takeDecisionVerdict(taskId: string): DecisionVerdict | null {
   const d = takeDecision(taskId);
@@ -388,9 +400,9 @@ export function makePromptRunner(
     const supportsTool = toolMode && agentSupportsMcpTools(agent);
     if (toolMode) clearDecision(taskId); // 清残留（防 retry / 上一轮 aborted run 的陈旧捕获）
 
-    // 启用 handoff 时追加 4 段输出指令；tool 模式追加裁决指令尾段
+    // 启用 handoff 时追加 4 段输出指令；tool 模式追加判据尾段（${CRITERIA} 注入）+ 裁决指令尾段
     let promptWithHandoff = options.handoff ? resolved + HANDOFF_PROMPT_SUFFIX : resolved;
-    if (toolMode) promptWithHandoff += supportsTool ? DECISION_SUFFIX_TOOL : DECISION_SUFFIX_TEXT;
+    if (toolMode) promptWithHandoff += buildToolDecisionSuffix(supportsTool, options.decision?.criteria);
 
     log.info(
       "prompt-runner 启动 [task=%s phase=%s agent=%s prompt 长度=%d handoff=%s decision=%s]",
@@ -538,6 +550,20 @@ export function makePromptRunner(
             "prompt-runner tool 决策追问 nudge=%d [task=%s phase=%s 拿到裁决=%s]",
             nudges, taskId, phaseName, String(!!verdict),
           );
+        }
+        // 决策落执行视图：把 agent 自己的裁决记进 task 事件日志（决策时刻可审计、可见）
+        if (verdict && verdict.verdict !== "ambiguous") {
+          try {
+            appendTaskEvent(taskId, {
+              type: "decision",
+              phase: phaseName,
+              level: "info",
+              message:
+                verdict.verdict === "pass"
+                  ? `agent 裁决：通过（${supportsTool ? "submit_decision 工具" : "JSON 裁决块"}）`
+                  : `agent 裁决：驳回 — ${verdict.reason.slice(0, 300)}`,
+            });
+          } catch { /* best-effort */ }
         }
         // 闸3 轨道锁：拿到 → 复用 planDecisionActionFromVerdict；触顶仍无 → ambiguous
         action = planDecisionActionFromVerdict(verdict ?? { verdict: "ambiguous" }, phaseName, meta, counts);

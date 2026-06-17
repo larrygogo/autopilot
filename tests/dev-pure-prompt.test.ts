@@ -4,7 +4,7 @@ import { loadYamlWorkflow, type PhaseDefinition } from "../src/core/workflow/reg
 
 // 验证 dev 工作流「agent 阶段纯提示词 + 提示词优先 + submit_pr 保留 ts」转换正确：
 // - design/review/develop/code_review 绑定 prompt-runner（不是 stub、不是 ts run_）；
-// - review/code_review 的 decision(judge) + reject 语法糖展开成 jump_target；
+// - review/code_review 的 decision(mode:tool) + reject 语法糖展开成 jump_target；
 // - submit_pr 无 prompt → 回退绑定 ts run_submit_pr。
 describe("dev 工作流：agent 阶段纯提示词 + submit_pr 机械 ts", () => {
   const devDir = join(import.meta.dir, "..", "examples", "workflows", "dev");
@@ -28,8 +28,16 @@ describe("dev 工作流：agent 阶段纯提示词 + submit_pr 机械 ts", () =>
     // review / code_review：reject 语法糖展开成 jump_target + decision 透传
     expect((byName["review"] as Record<string, unknown>)["jump_target"]).toBe("design");
     expect((byName["code_review"] as Record<string, unknown>)["jump_target"]).toBe("develop");
-    expect((byName["review"] as Record<string, unknown>)["decision"]).toBeDefined();
-    expect((byName["code_review"] as Record<string, unknown>)["decision"]).toBeDefined();
+    // decision 已从 judge 迁到 tool（做评审的 agent 自己调 submit_decision，不另起裁判 LLM）
+    const reviewDec = (byName["review"] as Record<string, unknown>)["decision"] as Record<string, unknown>;
+    const codeReviewDec = (byName["code_review"] as Record<string, unknown>)["decision"] as Record<string, unknown>;
+    expect(reviewDec).toBeDefined();
+    expect(reviewDec["mode"]).toBe("tool");
+    expect(reviewDec["judge_provider"]).toBeUndefined(); // judge 字段已移除
+    expect(typeof reviewDec["criteria"]).toBe("string");   // 判据保留（${CRITERIA} 注入到评审 prompt）
+    expect(codeReviewDec).toBeDefined();
+    expect(codeReviewDec["mode"]).toBe("tool");
+    expect(codeReviewDec["judge_provider"]).toBeUndefined();
 
     // design 开了 handoff
     expect((byName["design"] as Record<string, unknown>)["handoff"]).toBe(true);

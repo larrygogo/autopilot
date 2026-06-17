@@ -86,4 +86,13 @@ describe("decision 配置 lint", () => {
       ),
     ).toThrow(/gate.*decision|互斥/);
   });
+
+  it("tool 模式带 criteria（${CRITERIA} 注入用）→ 不报错", () => {
+    expect(() =>
+      expand(
+        { name: "review", reject: "design", prompt: "判", decision: { mode: "tool", criteria: "覆盖需求即通过" } },
+        ["design", "review"],
+      ),
+    ).not.toThrow();
+  });
 });
