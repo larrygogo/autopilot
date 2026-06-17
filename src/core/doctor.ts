@@ -34,6 +34,20 @@ export interface RunChecksOptions {
   providers?: string[];
 }
 
+/**
+ * task-start 守卫判据：是否存在「会让任务跑不起来」的阻塞问题。
+ * = 任何 error，**或**没有可用 provider（providers.has-enabled 非 ok）。
+ *
+ * 「无可用 provider」在 doctor 里是 warning（onboarding 正常态，诊断不该 exit 1，见
+ * has-enabled 注释）——但起任务是关键操作，必须有可用 provider 才放行，故这里单独把它
+ * 升格为阻塞条件。「warn 不拒启」的强制落在这个 task-start 守卫上，而非诊断命令的退出码。
+ */
+export function hasTaskStartBlocker(report: DoctorReport): boolean {
+  if (report.status === "error") return true;
+  const prov = report.checks.find((c) => c.id === "providers.has-enabled");
+  return !!prov && prov.status !== "ok";
+}
+
 export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
   const startedAt = Date.now();
   const checks: CheckResult[] = [];
@@ -91,15 +105,18 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
       title: `已有 ${usableNames.length} 个可用 AI 供应商：${usableNames.join(", ")}`,
     });
   } else if (entryCount > 0) {
+    // warning 而非 error：未配置 provider 是 onboarding 的正常初始态，doctor 只引导不阻塞
+    // exit（bug 16/17「warning 不阻塞 exit」契约 + 「warn 不拒启」哲学）。真正的强制由
+    // task-start 关键操作守卫 + Web 横幅承担，那才是 gate，不该让诊断工具 exit 1。
     checks.push({
-      id: "providers.has-enabled", category: "provider", status: "error",
+      id: "providers.has-enabled", category: "provider", status: "warning",
       title: "有 provider 条目，但没有一个可用",
       detail: "CLI 未登录 或 API key 未配 —— autopilot 需要至少一个可用供应商才能执行任务（澄清 / 入队 / 起任务会被拒）。",
       fix: { cli: "autopilot provider list  # 看状态，再 CLI 登录 或 autopilot key set <provider>", url: "/settings/providers", auto: "init.providers" },
     });
   } else {
     checks.push({
-      id: "providers.has-enabled", category: "provider", status: "error",
+      id: "providers.has-enabled", category: "provider", status: "warning",
       title: "未配置任何 AI 供应商",
       detail: "在「设置 → 提供商」添加并登录 / 填 API key。",
       fix: { url: "/settings/providers", auto: "init.providers" },

@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
-import { runChecks } from "../src/core/doctor";
+import { runChecks, hasTaskStartBlocker } from "../src/core/doctor";
 import { _setDbForTest, getDb } from "../src/core/db";
 import { up as m041 } from "../src/migrations/041-api-keys";
 import { up as m047 } from "../src/migrations/047-providers-table";
@@ -79,28 +79,29 @@ describe("L1 C1/C2", () => {
 });
 
 describe("L1 C3-C7", () => {
-  it("C4 没有 enabled provider → error", async () => {
+  it("C4 没有 enabled provider → warning（诊断不阻塞 exit，强制由 task-start 守卫承担）", async () => {
     writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: false\nagents: {}\n", "utf-8");
     const report = await runChecks({ level: 1 });
-    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("error");
+    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("warning");
   });
 
-  it("无 provider 条目 → error（P1：系统必须有一个可用供应商）", async () => {
-    // 条目化 + 可用性重构后：零 provider → 明确 error（澄清/入队/起任务会被拒）+ 引导。
+  it("无 provider 条目 → warning（onboarding 正常态，doctor 只引导不阻塞 exit）", async () => {
+    // 条目化 + 可用性重构后：零 provider → warning + 引导（不让诊断 exit 1）；
+    // 真正的「澄清/入队/起任务会被拒」由 task-start 守卫（hasTaskStartBlocker）强制。
     writeFileSync(tmpFile, "agents: {}\n", "utf-8");
     const report = await runChecks({ level: 1 });
     const c = report.checks.find((c) => c.id === "providers.has-enabled");
-    expect(c?.status).toBe("error");
+    expect(c?.status).toBe("warning");
     expect(c?.fix?.url).toBe("/settings/providers");
   });
 
-  it("有 seed 条目但都未就绪（无 cli_status / 无 key）→ error", async () => {
+  it("有 seed 条目但都未就绪（无 cli_status / 无 key）→ warning", async () => {
     writeFileSync(tmpFile, "\n", "utf-8");
     m041(getDb());
     m047(getDb()); // seed 三家但不设 cli_status → 都不可用
     const report = await runChecks({ level: 1 });
     const c = report.checks.find((c) => c.id === "providers.has-enabled");
-    expect(c?.status).toBe("error");
+    expect(c?.status).toBe("warning");
     expect(c?.title).toContain("没有一个可用");
   });
 
@@ -113,18 +114,41 @@ describe("L1 C3-C7", () => {
     expect(c?.title).toContain("可用");
   });
 
-  it("用户显式写 providers: {} 空对象 → error（明确没启用）", async () => {
+  it("用户显式写 providers: {} 空对象 → warning（明确没启用，仍只引导不阻塞）", async () => {
     // 跟"零配置"不同：用户显式写了 providers 段但为空，是明确"我没启用"。
-    // 保留 error 提示去 /setup 配置。
+    // 仍走 warning 提示去 /settings/providers 配置（强制在 task-start 守卫）。
     writeFileSync(tmpFile, "providers: {}\nagents: {}\n", "utf-8");
     const report = await runChecks({ level: 1 });
-    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("error");
+    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("warning");
   });
 
-  it("C4 enabled 但无 default_model → error", async () => {
+  it("C4 enabled 但无 default_model → warning", async () => {
     writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\nagents: {}\n", "utf-8");
     const report = await runChecks({ level: 1 });
-    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("error");
+    expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("warning");
+  });
+});
+
+describe("hasTaskStartBlocker（强制落在 task-start 守卫，而非 doctor 退出码）", () => {
+  it("无可用 provider（doctor 仅 warning）→ 仍阻塞起任务", async () => {
+    writeFileSync(tmpFile, "agents: {}\n", "utf-8");
+    const report = await runChecks({ level: 1 });
+    expect(report.status).not.toBe("error"); // doctor 整体不是 error（不阻塞 exit）
+    expect(hasTaskStartBlocker(report)).toBe(true); // 但起任务被拦
+  });
+
+  it("有可用 provider → 不阻塞起任务", async () => {
+    writeFileSync(tmpFile, "\n", "utf-8");
+    seedUsableProvider();
+    const report = await runChecks({ level: 1 });
+    expect(hasTaskStartBlocker(report)).toBe(false);
+  });
+
+  it("config.yaml 缺失（真 error）→ 阻塞起任务", async () => {
+    rmSync(tmpFile, { force: true });
+    const report = await runChecks({ level: 1 });
+    expect(report.status).toBe("error");
+    expect(hasTaskStartBlocker(report)).toBe(true);
   });
 
   it("命名复用 agent 移除后：config.yaml 的 agents 段不再产生健康检查", async () => {

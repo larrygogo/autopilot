@@ -31,7 +31,7 @@ import { loadLifecycleConfig, saveLifecycleAgent } from "../core/config";
 import { registerRequirementCommands } from "./requirements-cli";
 import { registerProjectCommands } from "./project";
 import { registerWorkspaceCommands } from "./workspace";
-import { runChecks as runDoctorChecks } from "../core/doctor";
+import { runChecks as runDoctorChecks, hasTaskStartBlocker } from "../core/doctor";
 import {
   readPid,
   isProcessAlive,
@@ -522,7 +522,7 @@ task
   .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
     try {
       const preflight = await runDoctorChecks({ level: 2 });
-      if (preflight.status === "error") {
+      if (hasTaskStartBlocker(preflight)) {
         console.error("配置不就绪，请先修复：");
         printDoctorReport(preflight);
         console.error("\n或运行：bun run dev config doctor --fix");
@@ -1208,7 +1208,7 @@ program
   .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
     try {
       const preflight = await runDoctorChecks({ level: 2 });
-      if (preflight.status === "error") {
+      if (hasTaskStartBlocker(preflight)) {
         console.error("配置不就绪，请先修复：");
         printDoctorReport(preflight);
         console.error("\n或运行：bun run dev config doctor --fix");
