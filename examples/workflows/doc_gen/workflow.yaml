@@ -1,19 +1,44 @@
 name: doc_gen
 label: "文档生成"
-description: "文档生成与评审 / Document generation and review"
+description: "文档生成 → 评审（tool 裁决）→ 通过即完成 / 驳回回生成重做。全 prompt 模式、零 ts，可克隆改造。"
+requires: { git: false }
 
 phases:
   # 文档生成阶段 / Document generation phase
   - name: generate
     label: "生成文档"
-    # 超时时间（秒）/ Timeout in seconds
     timeout: 600
+    handoff: true
+    prompt: |
+      你是一位技术文档作者。根据下面的需求，写一份结构清晰、完整的文档。
+
+      ## 需求
+      ${REQUIREMENT}
+
+      ${REJECTION}
+
+      直接把文档正文写在你的回复里（系统会自动保存，无需写文件）。
+      不要读取、诊断或修改任何文件——只输出文档内容本身。
 
   # 文档评审阶段 / Document review phase
   - name: review_doc
     label: "文档评审"
-    # 超时时间（秒）/ Timeout in seconds
     timeout: 600
     reject: generate
-    # 最大驳回次数 / Maximum rejection count
     max_rejections: 5
+    prompt: |
+      你是文档评审。只依据下面「待评审文档」的文本判断它是否满足需求，不要读任何文件。
+
+      ## 需求
+      ${REQUIREMENT}
+
+      ## 待评审文档
+      ${HANDOFF_generate}
+
+      ## 判据
+      文档覆盖了需求要点、结构清晰、表述准确即可通过；明显缺漏 / 跑题 / 严重错误才驳回。
+
+      判完后提交你的裁决（pass 通过 / reject 驳回，reject 必须说明问题与改进方向）。
+    decision:
+      mode: tool
+      criteria: 文档覆盖需求要点、结构清晰、无重大错误即通过；明显缺漏或跑题则驳回。

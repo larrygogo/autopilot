@@ -40,7 +40,7 @@ phases:
       model: claude-sonnet-4-6
       max_turns: 5
       permission_mode: default
-      system_prompt: "你是代码审查员。关注正确性、可读性、边界与失败处理。找出真问题而非格式纠错；按 critical / important / minor 分级反馈。"
+      system_prompt: "你是一位资深审稿编辑。关注逻辑连贯、语言流畅、结构清晰；指出真问题并直接改进，不做无谓改写。"
     prompt: |
       你是一位审稿员。请阅读 ${WORKSPACE}/draft.md，对它进行修改改进。
 

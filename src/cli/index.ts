@@ -512,7 +512,7 @@ task
   .description("创建并启动任务（task ID 自动生成）")
   .option("-w, --workflow <name>", "工作流名称")
   .option("-r, --requirement <text>", "需求详情；以 @ 开头则从文件读，例如 -r @./req.md")
-  .option("--repo <alias>", "绑定 workspace 别名（用于 req_dev 等需要 workspace 的工作流）")
+  .option("--repo <alias>", "绑定 workspace 别名（用于 dev 等需要 workspace 的工作流）")
   .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
   .action(async (title: string, opts: { workflow?: string; requirement?: string; repo?: string; port: string }) => {
     try {

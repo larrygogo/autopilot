@@ -1,17 +1,24 @@
 name: parallel_build
 label: "并行构建"
-description: "并行构建流程 / Parallel build workflow"
+description: "演示 parallel: 块（fork/join 并行 + fail_strategy）：准备 → 前端/后端并行 → 集成测试。全 prompt 模式、零 ts，可克隆改造。"
+requires: { git: false }
 
-# 钩子函数 / Hook functions
-hooks:
-  before_phase: on_before_phase
-  after_phase: on_after_phase
+# 并行子阶段在共用沙盒下不隔离工作树，故本示例各 agent 只输出文本（不写文件），避免并行写冲突。
 
 phases:
   # 准备阶段 / Prepare phase
   - name: prepare
     label: "准备"
     timeout: 300
+    handoff: true
+    prompt: |
+      你是构建协调者。根据下面的需求，制定一份「前端 / 后端并行构建」的任务拆解：
+      各自要做什么、接口契约、集成测试点。
+
+      ## 需求
+      ${REQUIREMENT}
+
+      直接把拆解方案写在回复里（系统自动保存，无需写文件）。
 
   # 并行构建阶段 / Parallel build phase
   - parallel:
@@ -23,12 +30,33 @@ phases:
         - name: build_frontend
           label: "前端构建"
           timeout: 1200
+          prompt: |
+            你是前端工程师。依据下面的构建拆解，描述前端部分的实现方案与产物（组件 / 页面 / 接口调用）。
+
+            ## 构建拆解
+            ${HANDOFF_prepare}
+
+            直接把方案写在回复里，不要读取或修改任何文件。
         # 后端构建 / Backend build
         - name: build_backend
           label: "后端构建"
           timeout: 1200
+          prompt: |
+            你是后端工程师。依据下面的构建拆解，描述后端部分的实现方案与产物（接口 / 数据模型 / 服务）。
+
+            ## 构建拆解
+            ${HANDOFF_prepare}
+
+            直接把方案写在回复里，不要读取或修改任何文件。
 
   # 集成测试阶段 / Integration test phase
   - name: integration_test
     label: "集成测试"
     timeout: 900
+    prompt: |
+      你是集成测试工程师。依据下面的构建拆解，列出前后端集成的测试用例与验证点。
+
+      ## 构建拆解
+      ${HANDOFF_prepare}
+
+      直接把测试方案写在回复里，不要读取或修改任何文件。

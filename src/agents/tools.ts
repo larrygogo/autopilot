@@ -162,7 +162,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
     tool(
       "list_phase_functions",
       "列出某个 file 工作流的可复用 phase 函数名集合。chat 创建 DB 工作流时只能挑这里面的 phase。",
-      { workflow_name: z.string().describe("file workflow 名（如 req_dev）") },
+      { workflow_name: z.string().describe("file workflow 名（如 dev）") },
       async (args) => {
         const wf = getWorkflow(args.workflow_name);
         if (!wf) return err(`工作流不存在：${args.workflow_name}`);
@@ -187,7 +187,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
       "创建 DB 工作流（必须 derives_from 一个 file workflow）。yaml 里 phase name 必须 ⊆ derives_from 的 phase 集合（先用 list_phase_functions 看）。",
       {
         name: z.string().describe("新工作流名（不能跟现有工作流冲突）"),
-        derives_from: z.string().describe("派生自的 file 工作流名（如 req_dev）"),
+        derives_from: z.string().describe("派生自的 file 工作流名（如 dev）"),
         yaml_content: z.string().describe("完整 yaml（含 name / phases 等）"),
         description: z.string().optional().describe("可选描述"),
       },
@@ -495,7 +495,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
     // ── 需求队列：入队执行 ──
     tool(
       "enqueue_requirement",
-      "把已 ready 的需求推入执行队列（status=queued）。requirement-scheduler 会监听到状态变化并自动创建 req_dev task 开始执行（全局并发上限内按入队先后 FIFO 调度）。",
+      "把已 ready 的需求推入执行队列（status=queued）。requirement-scheduler 会监听到状态变化并自动创建 task 开始执行（全局并发上限内按入队先后 FIFO 调度）。",
       {
         req_id: z.string(),
       },
@@ -543,7 +543,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
     // ── 需求队列：反馈 ──
     tool(
       "inject_feedback",
-      "为正在 awaiting_review 的需求注入反馈（如 PR review 意见）。如果当前 status=awaiting_review，会自动触发 fix_revision 阶段：req_dev task 切到 fix_revision 阶段，agent 读最新反馈修改代码并 push 同 PR 分支。其他状态下仅记录反馈，不触发。",
+      "为正在 awaiting_review 的需求注入反馈（如 PR review 意见）。如果当前 status=awaiting_review，会自动触发 fix_revision 阶段：task 切到 fix_revision 阶段，agent 读最新反馈修改代码并 push 同 PR 分支。其他状态下仅记录反馈，不触发。",
       {
         req_id: z.string(),
         body: z.string().describe("反馈正文（用户希望对 PR 做哪些修改）"),

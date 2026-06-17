@@ -157,7 +157,7 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
   // ── create ──
   wf.command("create <name>")
     .description("创建 DB 工作流（必须 --derives-from 一个 file 工作流）")
-    .requiredOption("--derives-from <base>", "派生自的 file 工作流名（如 req_dev）")
+    .requiredOption("--derives-from <base>", "派生自的 file 工作流名（如 dev）")
     .option("--from <yaml-file>", "初始 yaml 文件路径；不传则用 base 的 yaml 进 EDITOR 编辑")
     .option("-d, --description <desc>", "工作流描述", "")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))

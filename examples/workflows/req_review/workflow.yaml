@@ -1,17 +1,44 @@
 name: req_review
 label: "需求评审"
-description: "[AI] 需求评审流程（需求分析 → 需求评审） / Requirement review workflow (Requirement Analysis → Requirement Review)"
+description: "需求分析 → 需求评审（tool 裁决）→ 通过即完成 / 驳回回分析重做。全 prompt 模式、零 ts，可克隆改造。"
+requires: { git: false }
 
 phases:
   # 需求分析阶段 / Requirement analysis phase
   - name: req_analysis
     label: "需求分析"
     timeout: 900
+    handoff: true
+    prompt: |
+      你是需求分析师。把下面这条原始需求拆解成一份清晰、可执行的需求规格：
+      目标 / 范围 / 关键功能点 / 边界与约束 / 验收标准。
+
+      ## 原始需求
+      ${REQUIREMENT}
+
+      ${REJECTION}
+
+      直接把规格正文写在你的回复里（系统会自动保存，无需写文件）。
 
   # 需求评审阶段 / Requirement review phase
   - name: req_review
     label: "需求评审"
     timeout: 900
     reject: req_analysis
-    # 最大驳回次数 / Maximum rejection count
     max_rejections: 5
+    prompt: |
+      你是需求评审。只依据下面「待评审需求规格」的文本判断它是否清晰、完整、可执行，不要读任何文件。
+
+      ## 原始需求
+      ${REQUIREMENT}
+
+      ## 待评审需求规格
+      ${HANDOFF_req_analysis}
+
+      ## 判据
+      规格目标明确、范围清晰、关键功能点与验收标准齐全即可通过；有重大歧义 / 遗漏 / 不可执行才驳回。
+
+      判完后提交你的裁决（pass 通过 / reject 驳回，reject 必须说明问题与改进方向）。
+    decision:
+      mode: tool
+      criteria: 规格目标明确、范围清晰、关键点与验收标准齐全即通过；重大歧义/遗漏/不可执行则驳回。

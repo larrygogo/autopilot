@@ -2,14 +2,9 @@ name: data_pipeline
 label: "数据流水线"
 description: "数据处理流水线 / Data processing pipeline"
 
-# 重试策略 / Retry policy
-retry_policy:
-  # 最大重试次数 / Maximum retries
-  max_retries: 5
-  # 退避策略 / Backoff strategy
-  backoff: exponential
-  # 初始延迟（秒）/ Initial delay in seconds
-  delay: 30
+# 教学 fixture：演示「手写 transitions 转换表」——多终态、前向跳转（validate_skip）、自定义驳回回退。
+# 各 phase 不配 prompt/ts，是结构骨架（克隆后按需填 agent prompt 或 ts 函数）。
+# 注：旧的 retry_policy 字段已移除（框架不解析）；卡死自动恢复由 watcher + 状态机负责。
 
 # 终态列表 / Terminal states
 terminal_states: [completed, completed_partial, cancelled]

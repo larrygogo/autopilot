@@ -12,7 +12,7 @@ import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
 
 export interface WorkflowTemplate {
-  /** 模板名（目录名，如 "dev" / "req_dev"） */
+  /** 模板名（目录名，如 "dev"） */
   name: string;
   /** 来自 workflow.yaml 的 label（显示名），未填则前端回退到 name */
   label?: string;
