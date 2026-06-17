@@ -350,6 +350,30 @@ export function saveProvider(name: ProviderName, cfg: ProviderConfig): void {
   writeDocument(doc);
 }
 
+/**
+ * 读 config.yaml `providers.default` —— 系统默认 provider 名（用户偏好指针）。
+ * `default` 是 providers 段下的保留键（字符串值，非 provider 条目）；loadProviders/loadSection
+ * 只收对象值，天然不会把它误当条目。未设/空返回 undefined（由 resolveDefaultProvider 派生兜底）。
+ */
+export function loadDefaultProviderName(): string | undefined {
+  const raw = loadConfig() as Record<string, unknown>;
+  const providers = raw["providers"];
+  if (providers && typeof providers === "object" && !Array.isArray(providers)) {
+    const d = (providers as Record<string, unknown>)["default"];
+    if (typeof d === "string" && d.trim()) return d.trim();
+  }
+  return undefined;
+}
+
+/** 写/删 `providers.default`（merge-safe，保留 YAML 注释与其他段）。空 = 删键回退派生。 */
+export function setDefaultProviderName(name: string | undefined): void {
+  const doc = loadDocument();
+  const trimmed = name?.trim();
+  if (trimmed) doc.setIn(["providers", "default"], trimmed);
+  else doc.deleteIn(["providers", "default"]);
+  writeDocument(doc);
+}
+
 // ──────────────────────────────────────────────
 // 生命周期 agent 配置（lifecycle: 段）
 //   平台固定生命周期阶段（clarify / extract / fix / author）的 agent override。

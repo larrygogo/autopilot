@@ -33,8 +33,13 @@ export interface InlineAgentConfig {
  * 取代旧的「命名 AGENT_DEFAULTS + 三层合并」：现在没有"按名取用"，
  * 只有「phase 内联覆盖 DEFAULT_AGENT」两层。model 缺失时再走
  * providers.<provider>.default_model（见 agentForPhase）。
+ *
+ * ⚠ provider / model 这里的值是「最终字面量兜底」，**不是系统默认 provider**：phase 没写
+ * provider 时，agentForPhase 走 resolveDefaultProvider()（按用户实际配置派生），不读这里的
+ * provider；model 同理走解析到的 provider 的 default_model。这里的 anthropic/claude-sonnet 仅在
+ * 解析链全失败（无任何 provider 条目）时才会真正生效。
  */
-export const DEFAULT_AGENT: InlineAgentConfig & { provider: "anthropic" | "openai" | "google" } = {
+export const DEFAULT_AGENT: InlineAgentConfig & { provider: string } = {
   provider: "anthropic",
   model: "claude-sonnet-4-6",
   // ⚠ max_turns 仅 API 模式（ApiAgentLoop）强制；CLI provider（anthropic/google 官方）忽略它

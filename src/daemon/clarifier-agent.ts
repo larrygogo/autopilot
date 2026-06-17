@@ -1,5 +1,7 @@
 import { createAgent } from "../agents/registry";
 import { loadProviders, loadLifecycleConfig } from "../core/config";
+import { resolveDefaultProvider } from "../core/default-provider";
+import { getProviderByName } from "../core/providers";
 import type { Agent } from "../agents/agent";
 import type { ProviderName } from "../core/config";
 import type { InlineAgentConfig } from "../core/agent-defaults";
@@ -18,7 +20,7 @@ export interface ClarifierAgentOverride {
  * /max_turns/permission_mode（各自 system_prompt 在 run() 时覆盖）。
  */
 const CLARIFIER_DEFAULTS: InlineAgentConfig = {
-  provider: "anthropic",
+  // provider 不写死：缺省走 resolveDefaultProvider()（按用户实际配置派生），见 effectiveClarifyConfig
   // 15 turns：需求级浅 clone 就绪时 agent 自主探索（读文件/搜索/git 命令/加深克隆）需足够回合
   max_turns: 15,
   // bypassPermissions：headless default 下 Bash 被自动拒，agent 无法跑 git —— 探索自主权要求放开
@@ -41,6 +43,8 @@ export function effectiveClarifyConfig(): {
 } {
   const userConfig = (loadLifecycleConfig().clarify ?? {}) as InlineAgentConfig;
   const effective: InlineAgentConfig = { ...CLARIFIER_DEFAULTS, ...userConfig };
+  // 用户没显式写 provider → 填解析到的系统默认（让生效配置 + Web 卡片回显真实默认，而非写死 anthropic）
+  if (!effective.provider) effective.provider = resolveDefaultProvider();
   return { effective, userConfig, defaults: CLARIFIER_DEFAULTS };
 }
 
@@ -51,10 +55,12 @@ export function effectiveClarifyConfig(): {
  */
 export function buildClarifierAgent(override: ClarifierAgentOverride = {}): Agent {
   const { effective } = effectiveClarifyConfig();
-  const provider = (override.provider ?? effective.provider ?? "anthropic") as string;
+  // effective.provider 已在 effectiveClarifyConfig 里解析过（用户写了则尊重，没写则系统默认）
+  const provider = (override.provider ?? effective.provider ?? resolveDefaultProvider()) as string;
   let model = override.model ?? effective.model;
   if (!model) {
-    model = loadProviders()[provider as ProviderName]?.default_model;
+    // 条目 default_model（compat provider 的 model 在 DB 条目里）优先，再退 config providers 段
+    model = getProviderByName(provider)?.default_model ?? loadProviders()[provider as ProviderName]?.default_model ?? undefined;
   }
   return createAgent({
     name: "clarifier",

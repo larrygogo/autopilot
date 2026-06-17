@@ -99,6 +99,8 @@ import {
   loadProviders,
   type ProviderName,
 } from "../core/config";
+import { resolveDefaultProvider } from "../core/default-provider";
+import { getProviderByName } from "../core/providers";
 import type { Agent } from "../agents/agent";
 import { loadApiToken, previewApiToken, saveApiToken, deleteApiToken, generateApiToken } from "../core/api-token";
 import {
@@ -1987,11 +1989,11 @@ const DEFAULT_CHAT_AGENT_NAME = "assistant";
  */
 function buildChatAgent(): Agent {
   const providers = loadProviders();
-  const provider: ProviderName = "anthropic";
+  const provider = resolveDefaultProvider() as ProviderName;
   return createAgent({
     name: DEFAULT_CHAT_AGENT_NAME,
     provider,
-    model: providers[provider]?.default_model,
+    model: getProviderByName(provider)?.default_model ?? providers[provider]?.default_model,
     max_turns: 20,
     permission_mode: "default",
     system_prompt:

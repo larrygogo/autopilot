@@ -7,6 +7,7 @@ import { GoogleProvider } from "./providers/google";
 import { getPhase } from "../core/workflow/registry";
 import { loadProviders, type ProviderConfig } from "../core/config";
 import { DEFAULT_AGENT, type InlineAgentConfig } from "../core/agent-defaults";
+import { resolveDefaultProvider } from "../core/default-provider";
 import { log } from "../core/logger";
 import { getTaskContext } from "../core/task/context";
 import { getCompatPreset, createCompatAdapter } from "./providers/api/compat";
@@ -145,7 +146,7 @@ export function resolveEffectiveProvider(name: string, phaseMode: AgentMode | un
 export function agentSupportsMcpTools(agent: Agent): boolean {
   if (agent.mode !== "cli") return false;
   try {
-    const eff = resolveEffectiveProvider(agent.config.provider ?? "anthropic", agent.config.mode);
+    const eff = resolveEffectiveProvider(agent.config.provider ?? resolveDefaultProvider(), agent.config.mode);
     return eff.type === "cli" && eff.subtype === "claude";
   } catch {
     return false;
@@ -157,7 +158,7 @@ export function agentSupportsMcpTools(agent: Agent): boolean {
  * 传入的 config 必须已合并完成（包含 provider 等字段）。
  */
 export function createAgent(config: AgentConfig): Agent {
-  const providerName = config.provider ?? "anthropic";
+  const providerName = config.provider ?? resolveDefaultProvider();
   const eff = resolveEffectiveProvider(providerName, config.mode);
 
   if (eff.type === "cli") {
@@ -199,7 +200,7 @@ export function createAgent(config: AgentConfig): Agent {
  * 返回 ApiAgentLoop，由 Agent 内部自行持有。
  */
 async function createApiAgentLoop(config: AgentConfig, sandboxRoot: string): Promise<ApiAgentLoop> {
-  const providerName = config.provider ?? "anthropic";
+  const providerName = config.provider ?? resolveDefaultProvider();
   const eff = resolveEffectiveProvider(providerName, config.mode);
 
   const apiKey = await resolveApiKey(providerName, eff.env_key_name);
@@ -337,7 +338,11 @@ export function agentForPhase(workflowName: string, phaseName: string): Agent {
 
   const merged: Record<string, unknown> = { ...DEFAULT_AGENT, ...inline };
 
-  const provider = (merged["provider"] as string | undefined) ?? DEFAULT_AGENT.provider;
+  // provider 解析：phase 显式写的 inline.provider 优先；没写 → 解析系统默认 provider
+  // （按用户实际配置派生，不再写死 anthropic）。⚠ 必须用 inline.provider 而非 merged["provider"]：
+  // 上面 {...DEFAULT_AGENT,...inline} 已把 DEFAULT_AGENT.provider 填进 merged，用 merged 会让
+  // resolveDefaultProvider 成死分支（与下方 model 解析同一个坑）。
+  const provider = (inline.provider as string | undefined) ?? resolveDefaultProvider();
   merged["provider"] = provider;
 
   // 解析有效 provider（条目优先，无条目回退）：拿 type（mode）+ default_model

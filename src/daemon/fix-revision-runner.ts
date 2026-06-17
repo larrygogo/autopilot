@@ -52,6 +52,7 @@ import { startTaskFromTemplate, isTaskTerminal, StartTaskError } from "../core/t
 import { agentForPhase } from "../agents/registry";
 import type { InlineAgentConfig } from "../core/agent-defaults";
 import { loadLifecycleConfig } from "../core/config";
+import { resolveDefaultProvider } from "../core/default-provider";
 import { createLogger } from "../core/logger";
 
 const log = createLogger("fix-revision-runner");
@@ -72,7 +73,7 @@ const MAX_FEEDBACKS_IN_PROMPT = 5;
  * 故下面 effectiveFixConfig 让 config.yaml `lifecycle.fix` 字段级覆盖它（与 clarify 同构）。
  */
 const FIXER_DEFAULTS: InlineAgentConfig = {
-  provider: "anthropic",
+  // provider 不写死：缺省走 resolveDefaultProvider()（按用户实际配置派生），见 effectiveFixConfig
   // 修复要读日志 / 改多文件 / 跑测试 / git 操作，回合数给足
   max_turns: 40,
   permission_mode: "bypassPermissions",
@@ -93,7 +94,10 @@ export function effectiveFixConfig(): {
   defaults: InlineAgentConfig;
 } {
   const userConfig = (loadLifecycleConfig().fix ?? {}) as InlineAgentConfig;
-  return { effective: { ...FIXER_DEFAULTS, ...userConfig }, userConfig, defaults: FIXER_DEFAULTS };
+  const effective: InlineAgentConfig = { ...FIXER_DEFAULTS, ...userConfig };
+  // 用户没显式写 provider → 填解析到的系统默认（让生效配置 + Web 卡片回显真实默认，而非写死 anthropic）
+  if (!effective.provider) effective.provider = resolveDefaultProvider();
+  return { effective, userConfig, defaults: FIXER_DEFAULTS };
 }
 
 function buildFixWorkflow(): WorkflowDefinition {

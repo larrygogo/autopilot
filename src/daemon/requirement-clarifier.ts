@@ -18,6 +18,7 @@ import {
   endRound,
 } from "./clarifier-progress";
 import { buildClarifierAgent } from "./clarifier-agent";
+import { resolveDefaultProvider } from "../core/default-provider";
 import { parseLlmYamlWrapper } from "../core/llm-yaml";
 import { listAttachments, buildAttachmentContext } from "../core/requirements/attachments";
 import { ensureRequirementClones } from "../core/requirements/clone";
@@ -106,7 +107,7 @@ async function callClaude(
     if (req?.clarifier_model) override.model = req.clarifier_model;
     agent = _buildAgentFn(override);
     // N-2 修复：从 agent 实例读取实际 provider，避免与 buildClarifierAgent() 内部推导逻辑 desync
-    resolvedProvider = (agent.config.provider ?? "anthropic") as ProviderName;
+    resolvedProvider = (agent.config.provider ?? resolveDefaultProvider()) as ProviderName;
   } catch (e: unknown) {
     throw new Error(`无法初始化 clarifier agent：${e instanceof Error ? e.message : String(e)}`);
   }
@@ -637,9 +638,10 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   const activeSessionRef = session?.agent_session_ref ?? undefined;
 
   // N-1 修复：预计算 isAnthropicProvider，用于守卫 replay 触发条件
-  // 与 callClaude 内的 resolvedProvider 推导逻辑保持一致：req 级覆盖 > 默认 "anthropic"
+  // 与 callClaude 内的 resolvedProvider 推导逻辑保持一致：req 级覆盖 > 系统默认 provider
+  // （⚠ 不能写死 "anthropic"：默认若是非 anthropic，写死会误判 → 在非 anthropic 上走 Anthropic 增量 replay 路径）
   const isAnthropicProvider =
-    ((req.clarifier_provider as ProviderName | undefined) ?? "anthropic") === "anthropic";
+    ((req.clarifier_provider as ProviderName | undefined) ?? resolveDefaultProvider()) === "anthropic";
 
   // hasPriorQA：本轮前有已解答的问题（= session 里已有先验 Q&A，可走增量路径）
   // 设计前提：每轮最多一个 active question（_inflightRounds 进程内锁 + setActiveQuestionId 保证）

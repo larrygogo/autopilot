@@ -17,10 +17,13 @@ import { agentForPhase, _resetForTest } from "../src/agents/registry";
 import { DEFAULT_AGENT } from "../src/core/agent-defaults";
 import { saveProvider } from "../src/core/config";
 import { Database } from "bun:sqlite";
-import { _setDbForTest } from "../src/core/db";
+import { _setDbForTest, initDb } from "../src/core/db";
+import { up as migrate041 } from "../src/migrations/041-api-keys";
+import { up as migrate047 } from "../src/migrations/047-providers-table";
 import type { WorkflowDefinition, PhaseDefinition } from "../src/core/workflow/registry";
 
 const WF = "wf_inline_agent_test";
+let isoDir: string;
 
 /** 注册一个最小工作流：getPhase 只读 .name/.agent，其余字段不影响本测 */
 function registerTestWorkflow(): void {
@@ -35,7 +38,26 @@ function registerTestWorkflow(): void {
 describe("agentForPhase — phase 内联 agent 配置", () => {
   beforeEach(() => {
     _resetForTest();
+    // 隔离 config + DB：agentForPhase 无 inline.provider 时走 resolveDefaultProvider()（读 providers
+    // 条目表）。①空 config（DEV_WORKFLOW_CONFIG 指向空文件）——否则 migrate047 种子会从真实 config 读
+    // anthropic.default_model（如 opus）种进条目、污染本测的 DEFAULT_AGENT.model 断言。②seed 三家 cli
+    // 条目（无 cli_status、default_model=null）→ 解析确定性返回 anthropic=DEFAULT_AGENT.provider，
+    // 且条目 default_model=null → eff.default_model=undefined → model 落 DEFAULT_AGENT.model。
+    isoDir = join(tmpdir(), `autopilot-agentinline-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(isoDir, { recursive: true });
+    writeFileSync(join(isoDir, "config.yaml"), "", "utf-8");
+    process.env.DEV_WORKFLOW_CONFIG = join(isoDir, "config.yaml");
+    const sqlite = new Database(":memory:");
+    _setDbForTest(sqlite);
+    initDb();
+    migrate041(sqlite);
+    migrate047(sqlite);
     registerTestWorkflow();
+  });
+  afterEach(() => {
+    _setDbForTest(null);
+    delete process.env.DEV_WORKFLOW_CONFIG;
+    if (isoDir && existsSync(isoDir)) rmSync(isoDir, { recursive: true, force: true });
   });
 
   test("内联对象覆盖 DEFAULT_AGENT", () => {

@@ -5,11 +5,16 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { Database } from "bun:sqlite";
 import { loadLifecycleConfig, saveLifecycleAgent } from "../src/core/config";
 import { effectiveClarifyConfig } from "../src/daemon/clarifier-agent";
 import { effectiveFixConfig } from "../src/daemon/fix-revision-runner";
+import { _setDbForTest, initDb } from "../src/core/db";
+import { up as migrate041 } from "../src/migrations/041-api-keys";
+import { up as migrate047 } from "../src/migrations/047-providers-table";
 
 let tmpFile: string;
+let sqlite: Database;
 
 beforeEach(() => {
   const dir = join(tmpdir(), `autopilot-lifecycle-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -17,6 +22,14 @@ beforeEach(() => {
   tmpFile = join(dir, "config.yaml");
   writeFileSync(tmpFile, "", "utf-8");
   process.env.DEV_WORKFLOW_CONFIG = tmpFile;
+  // effective.provider 现在走 resolveDefaultProvider()（读 providers 条目表）。
+  // 给一个 seed 三家、无 cli_status 的 DB → 解析确定性返回 anthropic（首个 enabled），
+  // 让下面「无配置 → 默认 anthropic」的断言可复现。
+  sqlite = new Database(":memory:");
+  _setDbForTest(sqlite);
+  initDb();
+  migrate041(sqlite);
+  migrate047(sqlite);
 });
 afterEach(() => {
   delete process.env.DEV_WORKFLOW_CONFIG;
