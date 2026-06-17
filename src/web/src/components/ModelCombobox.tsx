@@ -118,7 +118,11 @@ export function ModelCombobox({
           />
           <CommandList>
             {filtered.length === 0 && !customAvailable && (
-              <CommandEmpty>无匹配模型</CommandEmpty>
+              <CommandEmpty className="px-3 py-4 text-center text-xs leading-relaxed text-muted-foreground">
+                {options.length === 0
+                  ? "该供应商无预置模型列表 —— 直接在上方输入模型 id 即可使用"
+                  : "无匹配 —— 输入完整模型 id 可直接使用"}
+              </CommandEmpty>
             )}
             {filtered.length > 0 && (
               <CommandGroup heading="可选模型">
