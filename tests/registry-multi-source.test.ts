@@ -313,6 +313,22 @@ phases:
     expect(JSON.parse(row!.spec_json!).name).toBe("my_dev"); // 内层 name 归一
   });
 
+  it("H2：克隆 DB-only derived（无磁盘目录）→ 回退 DB 克隆出 derived 且能注册", async () => {
+    // base = file 工作流
+    writeFileWorkflow("base_wf", "name: base_wf\nphases:\n  - name: design\n    prompt: d\n  - name: develop\n    prompt: v\n");
+    await discover();
+    // derived = DB 行寄生 base（无磁盘目录）
+    createDbWorkflow({ name: "der_src", description: "", derives_from: "base_wf", yaml_content: "name: der_src\nphases:\n  - name: design\n    prompt: d2\n" });
+    const { cloneWorkflow } = await import("../src/core/workflow/templates");
+    cloneWorkflow("der_src", "der_clone"); // 磁盘无 der_src → 回退 DB 克隆
+    const row = getWorkflowFromDb("der_clone");
+    expect(row).not.toBeNull();
+    expect(row!.kind).toBe("derived");
+    expect(row!.derives_from).toBe("base_wf");
+    await discover();
+    expect(getWorkflow("der_clone")).not.toBeNull(); // 能注册（base 仍在）
+  });
+
   it("M1：import 畸形 spec（空 phases / 阶段名非法 / 重名）→ 拒绝，不写脏行", async () => {
     expect(() => createNativeDbWorkflow({ name: "bad1", description: "", spec_json: JSON.stringify({ phases: [] }) })).toThrow();
     expect(() => createNativeDbWorkflow({ name: "bad2", description: "", spec_json: JSON.stringify({ phases: [{ name: "Bad-Name" }] }) })).toThrow();
