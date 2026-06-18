@@ -7,7 +7,7 @@ import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { _setDbForTest } from "../src/core/db";
-import { _clearRegistry, discover } from "../src/core/workflow/registry";
+import { _clearRegistry, discover, getWorkflow } from "../src/core/workflow/registry";
 import { createDbWorkflow } from "../src/core/workflow/workflows";
 import { handleRequest } from "../src/daemon/routes";
 
@@ -56,6 +56,55 @@ describe("workflows API（W2 扩展）", () => {
     db.run("DELETE FROM workflows");
     _clearRegistry();
     await discover();
+  });
+
+  it("workflows.import json 无 derives_from → 独立 native 落 DB + 注册", async () => {
+    const r = await invokeRpcMethod("workflows.import", {
+      name: "imp_native",
+      format: "json",
+      content: JSON.stringify({ name: "imp_native", phases: [{ name: "a", timeout: 60, prompt: "做 a" }] }),
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect((r.payload as { kind: string }).kind).toBe("native");
+    const row = db.query<{ kind: string; spec_json: string | null }, []>(
+      "SELECT kind, spec_json FROM workflows WHERE name='imp_native'"
+    ).get();
+    expect(row?.kind).toBe("native");
+    expect(JSON.parse(row!.spec_json!).phases[0].name).toBe("a");
+    expect(getWorkflow("imp_native")).not.toBeNull(); // import 内 reloadRegistry
+  });
+
+  it("workflows.import yaml 有 derives_from → 派生(derived)", async () => {
+    const r = await invokeRpcMethod("workflows.import", {
+      name: "imp_derived",
+      format: "yaml",
+      derives_from: "req_dev",
+      content: "name: imp_derived\nphases:\n  - name: design\n    timeout: 30\n",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect((r.payload as { kind: string }).kind).toBe("derived");
+  });
+
+  it("export json → import json 往返：native spec 等价（除 name）", async () => {
+    await invokeRpcMethod("workflows.import", {
+      name: "rt_src", format: "json",
+      content: JSON.stringify({ name: "rt_src", label: "往返", phases: [{ name: "a", timeout: 60, prompt: "x" }, { name: "b", timeout: 60, prompt: "y", reject: "a" }] }),
+    });
+    const exp = await invokeRpcMethod("workflows.export", { name: "rt_src", format: "json" });
+    expect(exp.ok).toBe(true);
+    if (!exp.ok) return;
+    const json = (exp.payload as { content: string }).content;
+    const reimport = await invokeRpcMethod("workflows.import", { name: "rt_dst", format: "json", content: json });
+    expect(reimport.ok).toBe(true);
+    const a = JSON.parse(db.query<{ spec_json: string }, []>("SELECT spec_json FROM workflows WHERE name='rt_src'").get()!.spec_json);
+    const b = JSON.parse(db.query<{ spec_json: string }, []>("SELECT spec_json FROM workflows WHERE name='rt_dst'").get()!.spec_json);
+    delete a.name; delete b.name;
+    expect(b).toEqual(a);
+  });
+
+  it("workflows.import 缺 phases → INVALID_PARAM 拒绝", async () => {
+    const r = await invokeRpcMethod("workflows.import", { name: "imp_bad", format: "json", content: '{"name":"imp_bad"}' });
+    expect(r.ok).toBe(false);
   });
 
   it("workflows.list 响应包含 source / derives_from", async () => {

@@ -1,8 +1,9 @@
 import { Command } from "commander";
 import { spawnSync } from "child_process";
 import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "fs";
-import { join } from "path";
+import { join, extname } from "path";
 import { tmpdir } from "os";
+import { detectFormat } from "../core/workflow/serialize";
 import type { AutopilotClient } from "../client";
 import {
   discover,
@@ -185,13 +186,14 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
       }
 
       try {
-        const result = (await client.createWorkflow({
+        const result = await client.importWorkflow({
           name,
-          description: opts.description,
+          content: yaml,
+          format: "yaml",
           derives_from: opts.derivesFrom,
-          yaml_content: yaml,
-        })) as { name: string; source: string };
-        console.log(`✓ 已创建 ${result.source} 工作流 ${result.name}`);
+          description: opts.description,
+        });
+        console.log(`✓ 已创建 ${result.kind} 工作流 ${result.name}（派生自 ${opts.derivesFrom}）`);
       } catch (e: unknown) {
         console.error(`创建失败：${e instanceof Error ? e.message : String(e)}`);
         process.exit(1);
@@ -300,34 +302,43 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
     });
 
   wf.command("import <name>")
-    .description("从 yaml 文件创建 DB 工作流")
-    .requiredOption("--derives-from <base>", "派生自的 file 工作流名")
-    .requiredOption("--from <yaml-file>", "yaml 文件路径")
+    .description("从 yaml/json 文件导入工作流到 DB（无 --derives-from = 独立 native；有 = 派生）")
+    .requiredOption("--from <file>", "yaml 或 json 文件路径（按扩展名/内容自动判格式）")
+    .option("--derives-from <base>", "派生自的 file 工作流名（省略 = 独立 native 工作流）")
+    .option("--format <fmt>", "强制格式 yaml|json（默认按 --from 扩展名/内容嗅探）")
     .option("-d, --description <desc>", "工作流描述", "")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
     .action(async (name: string, opts: {
-      derivesFrom: string;
       from: string;
+      derivesFrom?: string;
+      format?: string;
       description: string;
       port: string;
     }) => {
-      const client = ctx.getClient(opts);
-      await ctx.ensureDaemon(client);
-      let yaml: string;
+      let content: string;
       try {
-        yaml = readFileSync(opts.from, "utf8");
+        content = readFileSync(opts.from, "utf8");
       } catch (e: unknown) {
         console.error(`读 ${opts.from} 失败：${e instanceof Error ? e.message : String(e)}`);
         process.exit(1);
       }
+      const format =
+        opts.format === "json" || opts.format === "yaml"
+          ? opts.format
+          : detectFormat(content, extname(opts.from));
+      const client = ctx.getClient(opts);
+      await ctx.ensureDaemon(client);
       try {
-        await client.createWorkflow({
+        const res = await client.importWorkflow({
           name,
-          description: opts.description,
+          content,
+          format,
           derives_from: opts.derivesFrom,
-          yaml_content: yaml,
+          description: opts.description,
         });
-        console.log(`✓ 已导入 ${name}（派生自 ${opts.derivesFrom}）`);
+        console.log(
+          `✓ 已导入 ${name}（${res.kind}${opts.derivesFrom ? `，派生自 ${opts.derivesFrom}` : "，独立 DB 工作流"}，格式 ${format}）`,
+        );
       } catch (e: unknown) {
         console.error(`导入失败：${e instanceof Error ? e.message : String(e)}`);
         process.exit(1);

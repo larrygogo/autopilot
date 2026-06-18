@@ -160,15 +160,24 @@ export class HttpClient {
     return this.call("workflows.saveYaml", { name, yaml });
   }
 
-  async createWorkflow(_body: {
+  /**
+   * 从 yaml/json 文本导入工作流落 DB（不写磁盘）。
+   * 有 derives_from → 派生(derived，寄生 file base)；无 → 独立(native，DB 真相源)。
+   */
+  async importWorkflow(opts: {
     name: string;
-    description?: string;
-    firstPhase?: string;
+    content: string;
+    format?: "yaml" | "json";
     derives_from?: string;
-    yaml_content?: string;
-  }): Promise<{ ok: boolean; name: string; source?: string; dir?: string }> {
-    // workflows.create 还没注册 RPC（复杂 mutation 留到后续）
-    throw new Error("createWorkflow 暂未迁到 WS RPC，请用 workflows.saveAuthored / importBundle 路径");
+    description?: string;
+  }): Promise<{ name: string; kind: string; source: string }> {
+    return this.call("workflows.import", {
+      name: opts.name,
+      content: opts.content,
+      format: opts.format ?? "yaml",
+      derives_from: opts.derives_from,
+      description: opts.description ?? "",
+    });
   }
 
   async deleteWorkflow(name: string): Promise<{ ok: boolean }> {
