@@ -1,5 +1,5 @@
 import { getDb } from "../db";
-import { stringifyWorkflowDoc } from "./serialize";
+import { stringifyWorkflowDoc, parseWorkflowText } from "./serialize";
 
 // ──────────────────────────────────────────────
 // 类型
@@ -203,6 +203,13 @@ export function updateDbWorkflow(
   if (opts.yaml_content !== undefined) {
     fields.push("yaml_content = ?");
     vals.push(opts.yaml_content);
+    // native/template 的真相是 spec_json（compose 读它）。编辑器改的是 yaml_content（投影 +
+    // 人类编辑面），若不同步 spec_json，编辑会在 reload/compose 时静默丢失。这里从新 yaml 重派生
+    // spec_json，保持「spec_json === parse(yaml_content)」不变式。derived/file 的 spec_json 恒 null，不动。
+    if (existing.kind === "native" || existing.kind === "template") {
+      fields.push("spec_json = ?");
+      vals.push(stringifyWorkflowDoc(parseWorkflowText(opts.yaml_content, "yaml"), "json"));
+    }
   }
   if (fields.length === 0) return existing;
 

@@ -8,7 +8,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { _setDbForTest } from "../src/core/db";
 import { _clearRegistry, discover, listWorkflows, getWorkflow } from "../src/core/workflow/registry";
-import { createDbWorkflow, createNativeDbWorkflow } from "../src/core/workflow/workflows";
+import { createDbWorkflow, createNativeDbWorkflow, updateDbWorkflow, getWorkflowFromDb } from "../src/core/workflow/workflows";
 
 describe("registry 多源加载", () => {
   let tmpHome: string;
@@ -258,6 +258,28 @@ phases:
     expect(byName["submit_pr"]["deliver"]).toBe("pr");
     expect(typeof byName["submit_pr"]["func"]).toBe("function"); // 框架内置 PR 交付器
     expect(wf!.initial_state).toBe("pending_design");
+  });
+
+  it("编辑 native 工作流 yaml → spec_json 同步重派生 → compose 反映改动（不静默丢失）", async () => {
+    createNativeDbWorkflow({
+      name: "edit_native",
+      description: "",
+      spec_json: JSON.stringify({ name: "edit_native", phases: [{ name: "a", timeout: 60, prompt: "原始" }] }),
+    });
+    // 模拟 Web 编辑器保存：改 yaml_content（加一个 phase）
+    updateDbWorkflow("edit_native", {
+      yaml_content: "name: edit_native\nphases:\n  - name: a\n    timeout: 60\n    prompt: 改后\n  - name: b\n    timeout: 60\n    prompt: 新增\n",
+    });
+    // spec_json（真相）必须同步更新
+    const row = getWorkflowFromDb("edit_native")!;
+    const spec = JSON.parse(row.spec_json!);
+    expect(spec.phases.length).toBe(2);
+    expect(spec.phases[0].prompt).toBe("改后");
+    // compose 读 spec_json → 改动生效（不是静默丢失）
+    await discover();
+    const wf = getWorkflow("edit_native");
+    const names = wf!.phases.filter((p) => !("parallel" in p)).map((p) => (p as { name: string }).name);
+    expect(names).toEqual(["a", "b"]);
   });
 
   it("Step5b：seedTemplateWorkflow 幂等——磁盘已有 file 副本 → skip（不撞名）", async () => {
