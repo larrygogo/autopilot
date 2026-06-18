@@ -1600,6 +1600,7 @@ program
         const r = seedTemplateWorkflow(name);
         if (r === "seeded") console.log(`已装入默认工作流（DB 模板）：${name}`);
         else if (r === "exists") console.log(`${name} 工作流已存在，保留`);
+        else if (r === "has-ts") console.warn(`${name} 模板含 workflow.ts，不能种成 DB 模板，跳过`);
         else console.warn(`找不到 ${name} 模板，跳过（可稍后手动导入）`);
       }
     } catch (e: unknown) {

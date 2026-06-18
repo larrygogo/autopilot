@@ -118,14 +118,17 @@ function availableTemplates(root: string): string[] {
  *   - 磁盘已有 file 副本（~/.autopilot/workflows/<name>/）→ skip（双轨：存量 file 优先，不撞名）；
  *   - DB 已有同名 → skip。
  * 仅适用于零 ts 的声明式模板（dev/ad-hoc）——含 ts 的模板没法当 native/template（declarative 强制）。
- * 返回 'seeded' | 'exists' | 'no-template'。
+ * 返回 'seeded' | 'exists' | 'no-template' | 'has-ts'（含 workflow.ts，拒种避免死行）。
  */
-export function seedTemplateWorkflow(name: string): "seeded" | "exists" | "no-template" {
+export function seedTemplateWorkflow(name: string): "seeded" | "exists" | "no-template" | "has-ts" {
   // 磁盘 file 副本在 → 不种（存量用户双轨，避免同名冲突）
   if (existsSync(join(autopilotHome(), "workflows", name))) return "exists";
   if (getWorkflowFromDb(name)) return "exists";
   const root = findExamplesRoot();
   if (!root) return "no-template";
+  // L6 守卫：含 workflow.ts 的模板不是声明式，种成 native/template 会被 declarative 闸门拒、组装失败
+  // → 幽灵死行（init 报「已装入」但列表找不到）。把约束钉死在种子入口，而非依赖手维护 seed 列表。
+  if (existsSync(join(root, name, "workflow.ts"))) return "has-ts";
   const yamlPath = join(root, name, "workflow.yaml");
   if (!existsSync(yamlPath)) return "no-template";
   const doc = parseWorkflowText(readFileSync(yamlPath, "utf-8"), "yaml") as Record<string, unknown> | null;

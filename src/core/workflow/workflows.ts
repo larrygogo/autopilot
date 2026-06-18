@@ -280,6 +280,11 @@ export function deleteDbWorkflow(name: string): void {
   if (existing.source !== "db") {
     throw new Error(`工作流 "${name}" 是 file 来源、只读；删除请操作源文件目录`);
   }
+  // L4：kind=template 是框架内置默认（dev/ad-hoc，init 种子），核心流程（autopilot run / task start）
+  // 依赖它们存在——禁删，避免误删后 reload 不自愈、核心流程坏掉。要换默认请 import 自己的工作流。
+  if (existing.kind === "template") {
+    throw new Error(`工作流 "${name}" 是框架内置模板，不可删除（核心流程依赖它）；如需自定义请 import 新工作流`);
+  }
   const db = getDb();
   db.run("DELETE FROM workflows WHERE name = ? AND source = 'db'", [name]);
 }

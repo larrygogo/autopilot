@@ -8,7 +8,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { _setDbForTest } from "../src/core/db";
 import { _clearRegistry, discover, listWorkflows, getWorkflow } from "../src/core/workflow/registry";
-import { createDbWorkflow, createNativeDbWorkflow, updateDbWorkflow, getWorkflowFromDb } from "../src/core/workflow/workflows";
+import { createDbWorkflow, createNativeDbWorkflow, updateDbWorkflow, getWorkflowFromDb, deleteDbWorkflow, createTemplateDbWorkflow } from "../src/core/workflow/workflows";
 
 describe("registry 多源加载", () => {
   let tmpHome: string;
@@ -348,6 +348,23 @@ phases:
     expect(spec.name).toBe("norm_demo");   // 内层 name 归一为行 name
     expect(spec.notify_func).toBeUndefined(); // 危险函数字段被 strip
     expect(spec.setup_func).toBeUndefined();
+  });
+
+  it("L4：kind=template 内置模板禁删（核心流程依赖）；native 可删", async () => {
+    createTemplateDbWorkflow({ name: "tmpl_x", description: "", spec_json: JSON.stringify({ name: "tmpl_x", phases: [{ name: "a", prompt: "x" }] }) });
+    expect(() => deleteDbWorkflow("tmpl_x")).toThrow(/内置模板/);
+    expect(getWorkflowFromDb("tmpl_x")).not.toBeNull(); // 没删掉
+    // native 仍可删
+    createNativeDbWorkflow({ name: "nat_x", description: "", spec_json: JSON.stringify({ name: "nat_x", phases: [{ name: "a", prompt: "x" }] }) });
+    deleteDbWorkflow("nat_x");
+    expect(getWorkflowFromDb("nat_x")).toBeNull();
+  });
+
+  it("L6：含 workflow.ts 的模板 → seedTemplateWorkflow 拒种（has-ts，避免幽灵死行）", async () => {
+    const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");
+    // with_human 含 setup_with_human_task（workflow.ts）
+    expect(seedTemplateWorkflow("with_human")).toBe("has-ts");
+    expect(getWorkflowFromDb("with_human")).toBeNull(); // 没种进 DB
   });
 
   it("Step5b：seedTemplateWorkflow 幂等——磁盘已有 file 副本 → skip（不撞名）", async () => {
