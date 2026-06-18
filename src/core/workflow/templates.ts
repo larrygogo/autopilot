@@ -10,7 +10,7 @@ import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSyn
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
-import { getWorkflowFromDb, createTemplateDbWorkflow } from "./workflows";
+import { getWorkflowFromDb, createTemplateDbWorkflow, createNativeDbWorkflow, createDbWorkflow } from "./workflows";
 import { parseWorkflowText, stringifyWorkflowDoc } from "./serialize";
 
 export interface WorkflowTemplate {
@@ -178,12 +178,32 @@ export function cloneWorkflow(sourceName: string, targetName: string): void {
   if (!/^[\w.\-]+$/.test(targetName)) {
     throw new Error("target name 只允许字母 / 数字 / . _ -");
   }
+  if (getWorkflowFromDb(targetName)) {
+    throw new Error("target workflow already exists");
+  }
   const home = autopilotHome();
   const srcDir = join(home, "workflows", sourceName);
   const dstDir = join(home, "workflows", targetName);
 
+  // 磁盘无源目录 → 回退 DB：克隆 DB 工作流（native/template/derived）。新装机 dev/ad-hoc 是
+  // DB 模板无磁盘目录，旧逻辑直接「source not found」404；这里据 DB 行克隆出一份可编辑的 native。
   if (!existsSync(srcDir) || !statSync(srcDir).isDirectory()) {
-    throw new Error("source workflow not found");
+    const row = getWorkflowFromDb(sourceName);
+    if (!row) throw new Error("source workflow not found");
+    if (existsSync(dstDir)) throw new Error("target workflow already exists");
+    if ((row.kind === "native" || row.kind === "template") && row.spec_json) {
+      // 克隆出 native（可编辑）；内层 name 归一为 targetName
+      const doc = JSON.parse(row.spec_json) as Record<string, unknown>;
+      doc["name"] = targetName;
+      createNativeDbWorkflow({ name: targetName, description: row.description, spec_json: stringifyWorkflowDoc(doc, "json") });
+    } else if (row.kind === "derived" && row.derives_from) {
+      const doc = parseWorkflowText(row.yaml_content, "yaml") as Record<string, unknown>;
+      doc["name"] = targetName;
+      createDbWorkflow({ name: targetName, description: row.description, derives_from: row.derives_from, yaml_content: stringifyWorkflowDoc(doc, "yaml") });
+    } else {
+      throw new Error("source workflow not found");
+    }
+    return;
   }
   if (!existsSync(join(srcDir, "workflow.yaml"))) {
     throw new Error("source workflow has no workflow.yaml");
@@ -311,6 +331,12 @@ export function diffWorkflowTemplate(name: string): TemplateDiffEntry[] {
  * 调用方负责先 diff + 让用户确认。
  */
 export function syncWorkflowTemplate(name: string): { copied: string[] } {
+  // 同名已是 DB 工作流（native/template）→ sync（文件覆盖语义）不适用：写盘只会造一个被 discover
+  // 忽略的孤儿目录。明确拒绝、指引正路，避免用户对着「sync 了却没生效」困惑。
+  const dbRow = getWorkflowFromDb(name);
+  if (dbRow && dbRow.source === "db") {
+    throw new Error(`工作流 "${name}" 是 DB 工作流（${dbRow.kind}），文件 sync 不适用；要更新请用 autopilot workflow import 或重新 init`);
+  }
   const root = findExamplesRoot();
   if (!root) throw new Error("templates root not found");
   const tplDir = join(root, name);

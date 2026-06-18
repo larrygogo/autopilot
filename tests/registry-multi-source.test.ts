@@ -282,6 +282,58 @@ phases:
     expect(names).toEqual(["a", "b"]);
   });
 
+  it("H1：file×db 同名碰撞不株连——磁盘同名副本被忽略，DB 工作流仍注册（不蒸发）", async () => {
+    // 造一个 native DB 工作流 myflow
+    createNativeDbWorkflow({
+      name: "myflow", description: "",
+      spec_json: JSON.stringify({ name: "myflow", phases: [{ name: "a", timeout: 60, prompt: "x" }] }),
+    });
+    // 再造一个磁盘同名 file 副本（模拟 sync/手建撞名）
+    writeFileWorkflow("myflow", "name: myflow\nphases:\n  - name: b\n    prompt: y\n");
+    // 另造一个无关 native，确认它不被株连
+    createNativeDbWorkflow({
+      name: "other", description: "",
+      spec_json: JSON.stringify({ name: "other", phases: [{ name: "c", timeout: 60, prompt: "z" }] }),
+    });
+    await discover(); // 旧逻辑：撞名 throw → fallback 只注册 file → myflow/other 蒸发
+    // 两个 DB 工作流都还在注册表（不蒸发）
+    expect(getWorkflow("other")).not.toBeNull();
+    expect(getWorkflow("myflow")).not.toBeNull();
+    // myflow 仍是 DB 工作流（磁盘副本被忽略，DB 优先）
+    expect(getWorkflowFromDb("myflow")!.source).toBe("db");
+  });
+
+  it("H2：克隆 DB 模板（无磁盘目录）→ 回退 DB 克隆出 native，不 404", async () => {
+    const { seedTemplateWorkflow, cloneWorkflow } = await import("../src/core/workflow/templates");
+    seedTemplateWorkflow("dev"); // dev 成 DB 模板（无磁盘目录）
+    cloneWorkflow("dev", "my_dev"); // 旧逻辑：磁盘无 dev → "source workflow not found"
+    const row = getWorkflowFromDb("my_dev");
+    expect(row).not.toBeNull();
+    expect(row!.kind).toBe("native"); // 克隆出可编辑的 native
+    expect(JSON.parse(row!.spec_json!).name).toBe("my_dev"); // 内层 name 归一
+  });
+
+  it("M1：import 畸形 spec（空 phases / 阶段名非法 / 重名）→ 拒绝，不写脏行", async () => {
+    expect(() => createNativeDbWorkflow({ name: "bad1", description: "", spec_json: JSON.stringify({ phases: [] }) })).toThrow();
+    expect(() => createNativeDbWorkflow({ name: "bad2", description: "", spec_json: JSON.stringify({ phases: [{ name: "Bad-Name" }] }) })).toThrow();
+    expect(() => createNativeDbWorkflow({ name: "bad3", description: "", spec_json: JSON.stringify({ phases: [{ name: "a", prompt: "x" }, { name: "a", prompt: "y" }] }) })).toThrow();
+    // 都没写进 DB
+    expect(getWorkflowFromDb("bad1")).toBeNull();
+    expect(getWorkflowFromDb("bad2")).toBeNull();
+  });
+
+  it("L1/L2：import 归一内层 name + strip notify_func 等函数字段", async () => {
+    createNativeDbWorkflow({
+      name: "norm_demo", description: "归一",
+      // 内层 name 故意写错 + 塞 notify_func 字符串
+      spec_json: JSON.stringify({ name: "WRONG", notify_func: "evil", setup_func: "x", phases: [{ name: "a", timeout: 60, prompt: "x" }] }),
+    });
+    const spec = JSON.parse(getWorkflowFromDb("norm_demo")!.spec_json!);
+    expect(spec.name).toBe("norm_demo");   // 内层 name 归一为行 name
+    expect(spec.notify_func).toBeUndefined(); // 危险函数字段被 strip
+    expect(spec.setup_func).toBeUndefined();
+  });
+
   it("Step5b：seedTemplateWorkflow 幂等——磁盘已有 file 副本 → skip（不撞名）", async () => {
     writeFileWorkflow("dev", "name: dev\nphases:\n  - name: x\n    prompt: y\n");
     const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");

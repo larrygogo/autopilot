@@ -19,8 +19,10 @@ export async function notify(
   event: NotifyEvent = "info",
 ): Promise<void> {
   // 1. workflow notify_func（保留原路径）
+  // typeof function 守卫（与 setup_func 对齐）：native/template spec 里若残留 notify_func 字符串，
+  // truthy 但非函数，调用会抛 TypeError。写库已 strip，这里再守一道（纵深防御）。
   const workflow = getWorkflow(task.workflow);
-  if (workflow?.notify_func) {
+  if (typeof workflow?.notify_func === "function") {
     try {
       await Promise.resolve(workflow.notify_func(task, message));
     } catch (e: unknown) {

@@ -1066,23 +1066,24 @@ export async function discover(): Promise<void> {
     );
   }
 
-  // (3) 从 DB 读所有行注册；DB 不可用时回退为仅注册文件
+  // (3) 从 DB 读所有行注册。**始终尝试读 DB 行**（即便 (2) 的文件同步失败）——存量 DB 工作流
+  // （native/derived/template）的行就在表里，文件同步出错不该连累它们不被注册。旧逻辑用
+  // `if (syncOk)` 把读行也跳过，一旦同步抛错就只注册文件 → 所有 DB 工作流静默蒸发（高危）。
+  void syncOk; // 仅作日志信息，不再门控读行
   let rows: ReturnType<typeof listWorkflowsInDb> = [];
-  if (syncOk) {
-    try {
-      rows = listWorkflowsInDb();
-    } catch (e: unknown) {
-      log.error(
-        "读取 workflows 表失败：%s",
-        e instanceof Error ? e.message : String(e)
-      );
-    }
+  try {
+    rows = listWorkflowsInDb();
+  } catch (e: unknown) {
+    log.error(
+      "读取 workflows 表失败：%s",
+      e instanceof Error ? e.message : String(e)
+    );
   }
   if (rows.length === 0 && fileDefs.size > 0) {
-    // DB 不可用 / 表不存在 / 同步失败 — 至少把文件工作流注册进去
+    // DB 真不可用 / 表不存在 — 至少把文件工作流注册进去（此时表里读不到任何行）
     for (const def of fileDefs.values()) {
       register(def);
-      log.debug("注册 file 工作流（仅文件，DB 同步未就绪）：%s", def.name);
+      log.debug("注册 file 工作流（仅文件，DB 不可用）：%s", def.name);
     }
     return;
   }
@@ -1320,7 +1321,7 @@ export function saveWorkflowYaml(workflowName: string, yamlContent: string): voi
 // 工作流创建 / 删除
 // ──────────────────────────────────────────────
 
-const WORKFLOW_NAME_RE = /^[a-z][a-z0-9_\-]{0,39}$/;
+export const WORKFLOW_NAME_RE = /^[a-z][a-z0-9_\-]{0,39}$/;
 
 export interface CreateWorkflowInput {
   name: string;

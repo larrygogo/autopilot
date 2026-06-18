@@ -41,7 +41,7 @@ import { listTaskRepos } from "../core/sandbox";
 import { listSandboxDir, readSandboxFile } from "../core/sandbox/browse";
 import { scanTaskSandboxes } from "../core/sandbox/retention";
 import { setKv, getDb } from "../core/db";
-import { discover as registryDiscover, getWorkflow as registryGetWorkflow, listWorkflowsUsingProvider } from "../core/workflow/registry";
+import { discover as registryDiscover, getWorkflow as registryGetWorkflow, listWorkflowsUsingProvider, WORKFLOW_NAME_RE } from "../core/workflow/registry";
 import { getWorkflowView, computeWorkflowGraph, WorkflowViewError } from "./workflow-views";
 import { emit as emitBus } from "../core/event-bus";
 import {
@@ -876,6 +876,7 @@ function registerWorkflowRpc(): void {
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
+      if (!WORKFLOW_NAME_RE.test(p.name)) throw new RpcError("INVALID_PARAM", "name 只能用小写字母开头 + 小写字母/数字/_/-（≤40 字符）");
       if (typeof p.content !== "string") throw new RpcError("INVALID_PARAM", "需要 content");
       const description = typeof p.description === "string" ? p.description : "";
       const derivesFrom = typeof p.derives_from === "string" && p.derives_from.trim() ? p.derives_from.trim() : null;
