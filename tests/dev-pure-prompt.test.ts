@@ -2,11 +2,11 @@ import { describe, it, expect } from "bun:test";
 import { join } from "path";
 import { loadYamlWorkflow, type PhaseDefinition } from "../src/core/workflow/registry";
 
-// 验证 dev 工作流「agent 阶段纯提示词 + 提示词优先 + submit_pr 保留 ts」转换正确：
+// 验证 dev 工作流「agent 阶段纯提示词 + 提示词优先 + submit_pr 框架内置 PR 交付」转换正确：
 // - design/review/develop/code_review 绑定 prompt-runner（不是 stub、不是 ts run_）；
 // - review/code_review 的 decision(mode:tool) + reject 语法糖展开成 jump_target；
-// - submit_pr 无 prompt → 回退绑定 ts run_submit_pr。
-describe("dev 工作流：agent 阶段纯提示词 + submit_pr 机械 ts", () => {
+// - submit_pr 声明 deliver:pr → 绑框架内置 PR 交付器（Step4 收编，零 ts，不再有 run_submit_pr）。
+describe("dev 工作流：agent 阶段纯提示词 + submit_pr 框架内置 PR 交付", () => {
   const devDir = join(import.meta.dir, "..", "examples", "workflows", "dev");
 
   it("加载成功且各 phase 绑定符合预期", async () => {
@@ -41,5 +41,9 @@ describe("dev 工作流：agent 阶段纯提示词 + submit_pr 机械 ts", () =>
 
     // design 开了 handoff
     expect((byName["design"] as Record<string, unknown>)["handoff"]).toBe(true);
+
+    // submit_pr 声明 deliver:pr（Step4：spawn 交付收编进框架，dev 不再带 run_submit_pr ts）
+    expect((byName["submit_pr"] as Record<string, unknown>)["deliver"]).toBe("pr");
+    expect((byName["submit_pr"] as Record<string, unknown>)["pr_body_from"]).toBe("design");
   });
 });

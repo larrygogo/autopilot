@@ -1,5 +1,5 @@
 name: dev
-template_revision: 1   # 模板修订号；examples 改了 bug fix 就 +1，老副本据此被提示同步
+template_revision: 2   # 模板修订号；examples 改了 bug fix 就 +1，老副本据此被提示同步
 label: "完整开发"
 description: "完整开发流程（设计 → 评审 → 开发 → 代码审查 → PR）"
 setup_func: setup_dev_task
@@ -20,9 +20,9 @@ sandbox:
 #   - review / code_review 用 decision(mode:tool) 声明式判 pass/reject——做评审的 agent
 #     自己调 submit_decision 工具提交裁决（不另起裁判 LLM，判据经 ${CRITERIA} 注入到评审
 #     agent 可见的 prompt 尾段），reject 回退重做、触顶 max_rejections 自动转 failed（全在框架，零 ts）。
-# 唯一保留 ts 的是 submit_pr（机械交付：逐库 commit/push + gh 开 PR + appendSubPr 登记，
-# 无 AI，凭证抹除/追踪原语只能从 workflow.ts 调）——它没有 prompt 字段，提示词优先全局下
-# 自然回退到同名 run_submit_pr 函数。
+# submit_pr 的机械交付（逐库 commit/push + gh 开 PR + appendSubPr 登记，无 AI）已收编成
+# 框架内置 PR 交付器：phase 声明 `deliver: pr`（+ `pr_body_from: design` 取方案摘要）即可，
+# 零 ts（见 src/core/workflow/builtin-deliver-pr.ts）。workflow.ts 只剩 setup_dev_task。
 phases:
   - name: design
     label: "设计"
@@ -133,6 +133,6 @@ phases:
   - name: submit_pr
     label: "提交 PR"
     timeout: 300
+    deliver: pr            # 框架内置 PR 交付器（逐库 commit/push + gh 开 PR + appendSubPr）——零 ts
+    pr_body_from: design   # 取 design 阶段 agent 产物作 PR body 方案摘要
     sandbox: { code: read-write, deliver: true }
-    # 纯机械交付（commit/push/开 PR + appendSubPr 登记）：无 prompt 字段，走 workflow.ts 的
-    # run_submit_pr。提示词优先全局生效后，「无 prompt 的 phase」自然回退到同名 ts 函数。

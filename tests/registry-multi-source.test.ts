@@ -198,4 +198,42 @@ phases:
     await discover();
     expect(getWorkflow("native_bad")).toBeNull(); // compose 抛错被捕获、跳过注册
   });
+
+  it("phase 声明 deliver:pr → 绑框架内置 PR 交付器（零 ts，submit_pr 不再需要用户函数）", async () => {
+    writeFileWorkflow(
+      "pr_demo",
+      `name: pr_demo
+phases:
+  - name: develop
+    timeout: 60
+    prompt: 开发
+  - name: submit_pr
+    timeout: 60
+    deliver: pr
+    pr_body_from: develop
+`
+    );
+    await discover();
+    const wf = getWorkflow("pr_demo");
+    expect(wf).not.toBeNull();
+    const ph = wf!.phases.find((p) => !("parallel" in p) && (p as { name: string }).name === "submit_pr") as { func?: unknown } | undefined;
+    expect(typeof ph?.func).toBe("function"); // 绑了内置 PR 交付器（无 workflow.ts 也能跑交付）
+  });
+
+  it("compat：phase 无 deliver:pr 但有同名 run_ ts → 回退 ts（老 dev 副本未 sync 不破）", async () => {
+    writeFileWorkflow(
+      "pr_legacy",
+      `name: pr_legacy
+phases:
+  - name: submit_pr
+    timeout: 60
+`,
+      `export async function run_submit_pr() {}\n`
+    );
+    await discover();
+    const wf = getWorkflow("pr_legacy");
+    expect(wf).not.toBeNull();
+    const ph = wf!.phases.find((p) => !("parallel" in p) && (p as { name: string }).name === "submit_pr") as { func?: unknown } | undefined;
+    expect(typeof ph?.func).toBe("function"); // 回退到 run_submit_pr ts
+  });
 });

@@ -6,6 +6,7 @@ import { join, sep } from "path";
 import { parse as parseYaml } from "yaml";
 import { tryMakePromptRunnerForPhase } from "./prompt-runner";
 import { makeArtifactDeliverRunner } from "./builtin-deliver";
+import { makePrDeliverRunner } from "./builtin-deliver-pr";
 import type { PhaseDecision } from "./phase-decision";
 import { DEFAULT_AGENT, type InlineAgentConfig } from "../agent-defaults";
 import {
@@ -526,6 +527,13 @@ function bindPhaseFunc(
   // 机械交付（promote 产物落表）收进框架；用户工作流只声明，不写 ts。
   if ((phase as Record<string, unknown>)["deliver"] === "artifacts") {
     phase.func = makeArtifactDeliverRunner(phase.name);
+    return;
+  }
+  // 框架内置交付：phase 声明 `deliver: pr` → 绑框架自带的 PR 交付器（逐库 commit/push + gh 开 PR）。
+  // 唯一含 spawn 的内置交付器，框架受信任代码；用户只声明（可选 pr_body_from 取某阶段产物作 PR body）。
+  if ((phase as Record<string, unknown>)["deliver"] === "pr") {
+    const bodyFrom = (phase as Record<string, unknown>)["pr_body_from"];
+    phase.func = makePrDeliverRunner(phase.name, { bodyFromPhase: typeof bodyFrom === "string" ? bodyFrom : undefined });
     return;
   }
 
