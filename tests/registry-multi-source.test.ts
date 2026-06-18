@@ -8,7 +8,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { _setDbForTest } from "../src/core/db";
 import { _clearRegistry, discover, listWorkflows, getWorkflow } from "../src/core/workflow/registry";
-import { createDbWorkflow } from "../src/core/workflow/workflows";
+import { createDbWorkflow, createNativeDbWorkflow } from "../src/core/workflow/workflows";
 
 describe("registry 多源加载", () => {
   let tmpHome: string;
@@ -155,5 +155,47 @@ phases:
       "SELECT name FROM workflows"
     ).all();
     expect(rows.length).toBe(0);
+  });
+
+  it("native DB 工作流：从 spec_json 独立组装注册（无寄生 base、无 file）", async () => {
+    createNativeDbWorkflow({
+      name: "native_demo",
+      description: "纯声明式 native 工作流",
+      spec_json: JSON.stringify({
+        name: "native_demo",
+        label: "演示",
+        phases: [
+          { name: "design", timeout: 60, prompt: "做设计" },
+          { name: "review", timeout: 60, prompt: "评审", reject: "design" },
+        ],
+      }),
+    });
+    await discover();
+    const wf = getWorkflow("native_demo");
+    expect(wf).not.toBeNull();
+    expect(wf!.phases.length).toBe(2);
+    // 状态机自动推导：initial_state = 第一个 phase 的 pending_state
+    expect(wf!.initial_state).toBe("pending_design");
+    expect(wf!.terminal_states).toContain("done");
+    // 行 kind=native、spec_json 落库、yaml_content 是投影
+    const row = db.query<{ kind: string; spec_json: string | null; yaml_content: string }, []>(
+      "SELECT kind, spec_json, yaml_content FROM workflows WHERE name = 'native_demo'"
+    ).get()!;
+    expect(row.kind).toBe("native");
+    expect(JSON.parse(row.spec_json!).name).toBe("native_demo");
+    expect(row.yaml_content).toContain("design"); // yaml 投影非空
+  });
+
+  it("native 工作流声明式强制：phase 既无 prompt 又无 gate（需 ts）→ 组装失败、不注册", async () => {
+    createNativeDbWorkflow({
+      name: "native_bad",
+      description: "",
+      spec_json: JSON.stringify({
+        name: "native_bad",
+        phases: [{ name: "design", timeout: 60 }], // 无 prompt / gate / deliver → 声明式下缺框架原语
+      }),
+    });
+    await discover();
+    expect(getWorkflow("native_bad")).toBeNull(); // compose 抛错被捕获、跳过注册
   });
 });

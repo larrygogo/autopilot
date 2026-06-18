@@ -398,6 +398,19 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
     }
   }
 
+  return buildWorkflowDefinition(wfDef, tsModule);
+}
+
+/**
+ * 从「已解析 + 归一化的 wfDef 对象」构建完整 WorkflowDefinition：收集 phase 名、声明式安全闸门、
+ * 展开默认值 + 绑定函数、推导 initial/terminal_state、绑定 workflow 级函数、归一化 transitions。
+ * file 工作流（loadYamlWorkflow 解析 yaml + import ts 后）与 native DB 工作流（解析 spec_json、
+ * tsModule=null）共用此构建路径——统一入口，消除 yaml-only 假设。
+ */
+export function buildWorkflowDefinition(
+  wfDef: Record<string, unknown>,
+  tsModule: Record<string, unknown> | null,
+): WorkflowDefinition {
   // 收集所有阶段名（用于 reject 目标校验）
   const allPhaseNames = new Set<string>();
   const rawPhases = (wfDef["phases"] as Record<string, unknown>[]) ?? [];
@@ -931,6 +944,32 @@ function composeDbWorkflow(
   return composed;
 }
 
+/**
+ * 独立 DB 工作流（kind=native）：从 spec_json 自包含组装完整 WorkflowDefinition，**不寄生 base**。
+ * 复用 buildWorkflowDefinition（与 file 工作流同一构建路径）；强制 declarative（tsModule=null +
+ * declarative:true）——无任意用户 ts，能力上界由框架原语 + 内置交付器钉死，DB 不存可 eval 代码。
+ */
+function composeNativeDbWorkflow(
+  name: string,
+  description: string,
+  specJson: string,
+): WorkflowDefinition {
+  let doc: Record<string, unknown>;
+  try {
+    doc = JSON.parse(specJson) as Record<string, unknown>;
+  } catch (e: unknown) {
+    throw new Error(`native 工作流 ${name} spec_json 解析失败：${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (!doc || typeof doc !== "object" || !Array.isArray(doc["phases"])) {
+    throw new Error(`native 工作流 ${name} spec_json 缺 phases 字段`);
+  }
+  // 名字 / 描述以 DB 行为准；强制 declarative（无 ts）
+  doc["name"] = name;
+  doc["description"] = description;
+  doc["declarative"] = true;
+  return buildWorkflowDefinition(doc, null);
+}
+
 /** 在 base 的 phases 里扁平查找指定 name，含 parallel 子项 */
 function findFlatPhase(
   base: WorkflowDefinition,
@@ -1048,7 +1087,21 @@ export async function discover(): Promise<void> {
       }
       register(def);
       log.debug("注册 file 工作流：%s（来自 %s）", row.name, row.file_path);
+    } else if (row.kind === "native" || row.kind === "template") {
+      // 独立 DB 工作流：从 spec_json 自包含组装，不依赖 file base
+      try {
+        if (!row.spec_json) {
+          log.error("native 工作流 %s 缺 spec_json，跳过", row.name);
+          continue;
+        }
+        const wf = composeNativeDbWorkflow(row.name, row.description, row.spec_json);
+        register(wf);
+        log.debug("注册 native 工作流：%s（kind=%s）", row.name, row.kind);
+      } catch (e: unknown) {
+        log.error("加载 native 工作流 %s 失败：%s", row.name, e instanceof Error ? e.message : String(e));
+      }
     } else {
+      // 派生 DB 工作流（kind=derived）：寄生 file base
       const base = fileDefs.get(row.derives_from!);
       if (!base) {
         log.error(

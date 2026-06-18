@@ -1,4 +1,5 @@
 import { getDb } from "../db";
+import { stringifyWorkflowDoc } from "./serialize";
 
 // ──────────────────────────────────────────────
 // 类型
@@ -32,6 +33,13 @@ export interface CreateDbWorkflowOpts {
   description: string;
   derives_from: string;
   yaml_content: string;
+}
+
+export interface CreateNativeDbWorkflowOpts {
+  name: string;
+  description: string;
+  /** 结构原生 json（真相）。yaml_content 由它派生投影，spec_json 是唯一真相 */
+  spec_json: string;
 }
 
 export interface UpdateDbWorkflowOpts {
@@ -136,6 +144,30 @@ export function createDbWorkflow(opts: CreateDbWorkflowOpts): WorkflowRow {
   db.run(
     "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
     [opts.name, opts.description, opts.yaml_content, opts.derives_from, ts, ts]
+  );
+  return getWorkflowFromDb(opts.name) as WorkflowRow;
+}
+
+/**
+ * 创建独立 DB 工作流（kind=native：DB 是真相源，无寄生 base）。
+ * spec_json 是唯一真相；yaml_content 存 spec_json 的 yaml 投影（兼容 getYaml / 编辑器读路径）。
+ */
+export function createNativeDbWorkflow(opts: CreateNativeDbWorkflowOpts): WorkflowRow {
+  if (getWorkflowFromDb(opts.name)) {
+    throw new Error(`工作流 "${opts.name}" 已存在`);
+  }
+  // 解析校验 + 派生 yaml 投影（spec_json 非法在此抛错，挡在写库前）
+  const doc = JSON.parse(opts.spec_json) as unknown;
+  if (!doc || typeof doc !== "object" || !Array.isArray((doc as Record<string, unknown>)["phases"])) {
+    throw new Error(`spec_json 缺 phases 字段`);
+  }
+  const yaml_content = stringifyWorkflowDoc(doc, "yaml");
+
+  const db = getDb();
+  const ts = Date.now();
+  db.run(
+    "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'native', ?, ?)",
+    [opts.name, opts.description, yaml_content, opts.spec_json, ts, ts]
   );
   return getWorkflowFromDb(opts.name) as WorkflowRow;
 }
