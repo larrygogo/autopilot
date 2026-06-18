@@ -331,18 +331,12 @@ export const api = {
       `/api/workflows/${sourceName}/clone`,
       { method: "POST", body: JSON.stringify({ name: targetName }) },
     ),
-  // [WS-RPC] workflows.exportBundle
-  exportWorkflowBundle: (name: string) =>
-    requestRpc<{
-      version: number;
-      name: string;
-      yaml: string;
-      ts: string | null;
-      exported_at: string;
-    }>("workflows.exportBundle", { name }),
-  // [WS-RPC] workflows.importBundle
-  importWorkflowBundle: (body: { name: string; yaml: string; ts: string | null }) =>
-    requestRpc<{ ok: boolean; name: string }>("workflows.importBundle", body),
+  // [WS-RPC] workflows.export —— 导出为结构原生 JSON（与 CLI / 内部 spec_json 一致）
+  exportWorkflow: (name: string) =>
+    requestRpc<{ content: string }>("workflows.export", { name }),
+  // [WS-RPC] workflows.import —— 从 JSON 文本导入落 DB（不写磁盘；无 derives_from = native）
+  importWorkflow: (body: { name: string; content: string; derives_from?: string; description?: string }) =>
+    requestRpc<{ name: string; kind: string; source: string }>("workflows.import", body),
   // [WS-RPC] workflows.scanHealth
   scanWorkflowHealth: () =>
     requestRpc<WorkflowHealthReport>("workflows.scanHealth"),

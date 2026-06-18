@@ -919,25 +919,6 @@ function registerWorkflowRpc(): void {
   });
 
   registerRpcMethod({
-    method: "workflows.exportBundle",
-    description: "导出为 JSON bundle（yaml + ts）便于分享",
-    handler: (params) => {
-      const p = asObj(params);
-      if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      const yaml = registryGetWorkflowYaml(p.name);
-      if (yaml === null) throw new RpcError("NOT_FOUND", "Workflow not found");
-      const ts = registryGetWorkflowTs(p.name);
-      return {
-        version: 1,
-        name: p.name,
-        yaml,
-        ts: ts ?? null,
-        exported_at: new Date().toISOString(),
-      };
-    },
-  });
-
-  registerRpcMethod({
     method: "workflows.author",
     description: "AI 生成 workflow.yaml + ts（不落盘，返回预览）",
     handler: async (params) => {
@@ -971,30 +952,6 @@ function registerWorkflowRpc(): void {
         const code = msg.includes("already exists") ? "ALREADY_EXISTS"
           : msg.includes("只允许") ? "INVALID_NAME"
           : "SAVE_FAILED";
-        throw new RpcError(code, msg);
-      }
-    },
-  });
-
-  registerRpcMethod({
-    method: "workflows.importBundle",
-    description: "从 JSON bundle 创建新工作流（复用 saveAuthored 的落盘逻辑）",
-    handler: async (params) => {
-      const p = asObj(params);
-      if (typeof p.name !== "string" || typeof p.yaml !== "string") {
-        throw new RpcError("INVALID_PARAM", "需要 name + yaml");
-      }
-      if (!/^[\w.\-]+$/.test(p.name)) {
-        throw new RpcError("INVALID_NAME", "name 只允许字母 / 数字 / . _ -");
-      }
-      try {
-        saveAuthoredWf(p.name, p.yaml, typeof p.ts === "string" ? p.ts : "");
-        await reloadRegistry();
-        emitBus({ type: "workflow:reloaded", payload: {} });
-        return { ok: true, name: p.name };
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const code = msg.includes("already exists") ? "ALREADY_EXISTS" : "SAVE_FAILED";
         throw new RpcError(code, msg);
       }
     },

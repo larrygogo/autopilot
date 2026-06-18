@@ -16,8 +16,8 @@ const NAME_RE = /^[\w.\-]+$/;
 
 interface ParsedImport {
   fileName: string;
-  yaml: string;
-  ts: string | null;
+  /** 原始 JSON 文本（结构原生 json，直接转发给 workflows.import） */
+  content: string;
 }
 
 interface Props {
@@ -95,16 +95,19 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromAI }:
     if (!file) return;
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text) as { name?: string; yaml?: string; ts?: string | null };
-      if (typeof parsed.name !== "string" || typeof parsed.yaml !== "string") {
+      // 结构原生 JSON（autopilot workflow export 的格式）：顶层就是工作流对象，需含 phases
+      const parsed = JSON.parse(text) as { name?: unknown; phases?: unknown };
+      if (!Array.isArray(parsed.phases)) {
         setImportFile(null);
-        setImportError("文件需含 name + yaml 字段");
+        setImportError("不是有效的工作流 JSON（缺 phases 字段）");
         return;
       }
-      setImportFile({ fileName: file.name, yaml: parsed.yaml, ts: parsed.ts ?? null });
+      setImportFile({ fileName: file.name, content: text });
       // 预填文件里的名字，可改
-      setName(parsed.name);
-      setNameDirty(false);
+      if (typeof parsed.name === "string") {
+        setName(parsed.name);
+        setNameDirty(false);
+      }
     } catch {
       setImportFile(null);
       setImportError("不是有效的 JSON 文件");
@@ -141,7 +144,8 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromAI }:
       toast.success(`已创建空白工作流 ${finalName}`);
     } else {
       if (!importFile) throw new Error("请先选择 .json 文件");
-      await api.importWorkflowBundle({ name: finalName, yaml: importFile.yaml, ts: importFile.ts });
+      // 落 DB（不写磁盘）：无 derives_from = 独立 native 工作流，与 CLI workflow import 一致
+      await api.importWorkflow({ name: finalName, content: importFile.content });
       toast.success(`已导入工作流 ${finalName}`);
     }
     onCreated(finalName);
@@ -273,7 +277,7 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromAI }:
           {importError ? (
             <p className="text-xs text-destructive">{importError}</p>
           ) : (
-            <p className="text-xs text-muted-foreground">导入别人导出的 .workflow.json（含 yaml + ts）</p>
+            <p className="text-xs text-muted-foreground">导入 workflow export 的 .json（结构原生 JSON，落 DB）</p>
           )}
         </div>
       )}

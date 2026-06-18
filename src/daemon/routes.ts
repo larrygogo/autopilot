@@ -1637,30 +1637,8 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       });
     }
 
-    // GET /api/workflows/:name/export-bundle — 导出为 JSON bundle（yaml + ts）便于分享
-    const exportBundleMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/export-bundle$/);
-    if (method === "GET" && exportBundleMatch) {
-      const wfName = exportBundleMatch;
-      // yaml 来源：db 工作流读 DB 行，file 工作流读磁盘
-      const row = getWorkflowFromDb(wfName);
-      let yaml: string | null = null;
-      if (row && row.source === "db") {
-        yaml = row.yaml_content;
-      } else {
-        yaml = getWorkflowYaml(wfName);
-      }
-      if (yaml === null) return error("Workflow not found", 404);
-      const ts = getWorkflowTs(wfName); // 可能为 null（prompt-only / db 工作流没磁盘 ts）
-      return json({
-        version: 1,
-        name: wfName,
-        yaml,
-        ts: ts ?? null,
-        exported_at: new Date().toISOString(),
-      });
-    }
-
-    // POST /api/workflows/import-bundle 已迁到 WS RPC: workflows.importBundle
+    // 工作流导入导出已统一为 WS RPC workflows.export/import（结构原生 JSON，落 DB）。
+    // 旧的 export-bundle / import-bundle（yaml 串 + ts）已随 json-only 收口移除。
 
     // GET /api/workflows/:name/ts — 读 workflow.ts 源码
     const tsReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/ts$/);

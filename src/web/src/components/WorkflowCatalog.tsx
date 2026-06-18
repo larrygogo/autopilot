@@ -69,8 +69,9 @@ export function WorkflowCatalog({ workflows, onSelect, onClone, onNew }: Props) 
 
   async function exportBundle(name: string) {
     try {
-      const bundle = await api.exportWorkflowBundle(name);
-      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      // 结构原生 JSON（与 CLI workflow export 一致，可 autopilot workflow import 回去）
+      const { content } = await api.exportWorkflow(name);
+      const blob = new Blob([content], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
