@@ -1591,34 +1591,20 @@ program
       console.log(`配置文件已存在，保留：${cfgPath}`);
     }
 
-    // dogfood-bug8 修复：自动装 dev workflow，让新用户 init 完就能跑通第一个
-    // task。之前 init 只创空目录，跑任何 dev task 都报"找不到工作流"。
-    const devWorkflowDir = join(AUTOPILOT_HOME, "workflows", "dev");
-    if (!existsSync(devWorkflowDir)) {
-      try {
-        const { cloneTemplate } = await import("../core/workflow/templates");
-        cloneTemplate("dev", "dev");
-        console.log(`已装入默认工作流：${devWorkflowDir}`);
-      } catch (e: unknown) {
-        console.warn(`装 dev workflow 失败（不阻塞 init）：${e instanceof Error ? e.message : String(e)}`);
-        console.warn("可稍后用 web UI 或 CLI 手动克隆 dev 模板");
+    // 自动装默认工作流 dev + ad-hoc，让新用户 init 完就能跑通第一个 task。
+    // Step5b：种成 **DB 模板行**（kind=template，spec_json 真相），不再拷文件——DB 是默认安装形态。
+    // 幂等：磁盘已有 file 副本 / DB 已有同名 → skip（存量用户双轨不动，新装走 DB 模板）。
+    try {
+      const { seedTemplateWorkflow } = await import("../core/workflow/templates");
+      for (const name of ["dev", "ad-hoc"]) {
+        const r = seedTemplateWorkflow(name);
+        if (r === "seeded") console.log(`已装入默认工作流（DB 模板）：${name}`);
+        else if (r === "exists") console.log(`${name} 工作流已存在，保留`);
+        else console.warn(`找不到 ${name} 模板，跳过（可稍后手动导入）`);
       }
-    } else {
-      console.log(`dev workflow 已存在，保留：${devWorkflowDir}`);
-    }
-
-    // Phase 4：装 ad-hoc workflow，让 `autopilot run "<prompt>"` 开箱即用
-    const adHocWorkflowDir = join(AUTOPILOT_HOME, "workflows", "ad-hoc");
-    if (!existsSync(adHocWorkflowDir)) {
-      try {
-        const { cloneTemplate } = await import("../core/workflow/templates");
-        cloneTemplate("ad-hoc", "ad-hoc");
-        console.log(`已装入 ad-hoc 工作流：${adHocWorkflowDir}`);
-      } catch (e: unknown) {
-        console.warn(`装 ad-hoc workflow 失败（不阻塞 init）：${e instanceof Error ? e.message : String(e)}`);
-      }
-    } else {
-      console.log(`ad-hoc workflow 已存在，保留：${adHocWorkflowDir}`);
+    } catch (e: unknown) {
+      console.warn(`装默认工作流失败（不阻塞 init）：${e instanceof Error ? e.message : String(e)}`);
+      console.warn("可稍后用 web UI 或 CLI 手动导入 dev / ad-hoc 模板");
     }
 
     // Phase 5：provider 就绪提醒（静态引导——脚手架与运行前置分开，不在 init 里探测/拒绝）。

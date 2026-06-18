@@ -236,4 +236,36 @@ phases:
     const ph = wf!.phases.find((p) => !("parallel" in p) && (p as { name: string }).name === "submit_pr") as { func?: unknown } | undefined;
     expect(typeof ph?.func).toBe("function"); // 回退到 run_submit_pr ts
   });
+
+  it("Step5b：seedTemplateWorkflow 把 dev 种成 DB 模板 → 组装注册等价 file 版（零 ts）", async () => {
+    const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");
+    expect(seedTemplateWorkflow("dev")).toBe("seeded");
+    const row = db.query<{ kind: string; spec_json: string | null }, []>(
+      "SELECT kind, spec_json FROM workflows WHERE name='dev'"
+    ).get();
+    expect(row?.kind).toBe("template");
+    await discover();
+    const wf = getWorkflow("dev");
+    expect(wf).not.toBeNull();
+    // 阶段齐全、顺序对
+    const names = wf!.phases.filter((p) => !("parallel" in p)).map((p) => (p as { name: string }).name);
+    expect(names).toEqual(["design", "review", "develop", "code_review", "submit_pr"]);
+    const byName: Record<string, Record<string, unknown>> = {};
+    for (const p of wf!.phases) if (!("parallel" in p)) byName[(p as { name: string }).name] = p as Record<string, unknown>;
+    // 复杂声明都活过 native compose：reject 语法糖→jump_target、decision、submit_pr 绑 PR 交付器
+    expect(byName["review"]["jump_target"]).toBe("design");
+    expect((byName["review"]["decision"] as Record<string, unknown>)["mode"]).toBe("tool");
+    expect(byName["submit_pr"]["deliver"]).toBe("pr");
+    expect(typeof byName["submit_pr"]["func"]).toBe("function"); // 框架内置 PR 交付器
+    expect(wf!.initial_state).toBe("pending_design");
+  });
+
+  it("Step5b：seedTemplateWorkflow 幂等——磁盘已有 file 副本 → skip（不撞名）", async () => {
+    writeFileWorkflow("dev", "name: dev\nphases:\n  - name: x\n    prompt: y\n");
+    const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");
+    expect(seedTemplateWorkflow("dev")).toBe("exists");
+    // 没往 DB 种 template 行
+    const row = db.query<{ kind: string }, []>("SELECT kind FROM workflows WHERE name='dev' AND kind='template'").get();
+    expect(row).toBeNull();
+  });
 });

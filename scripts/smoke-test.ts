@@ -212,21 +212,28 @@ async function main(): Promise<void> {
   assertContains(wfListR.stdout, "ad-hoc", "workflow list 含 ad-hoc（离线读 tmpHome 生效）");
 
   // ────────────────────────────────────────────────
-  step("init 装入 ad-hoc workflow 模板（Phase 4 spec §3.7）");
+  step("init 把 ad-hoc 装成 DB 模板（Step5b：DB 是默认安装形态，不再拷文件）");
   // ────────────────────────────────────────────────
-  // 直接检查 tmpHome 目录，确认 init 把 ad-hoc 模板文件（workflow.yaml）落了盘。
-  const adHocDir = join(tmpHome, "workflows", "ad-hoc");
-  if (!existsSync(adHocDir)) {
-    console.error(`  ✗ tmpHome 下缺 ad-hoc workflow：${adHocDir}`);
-    cleanup();
-    process.exit(1);
+  // Step5b：init 把 dev/ad-hoc 种成 DB 模板行（kind=template），不再往磁盘拷 file 副本。
+  // 查 DB 确认 ad-hoc 是 source=db / kind=template（而非磁盘 workflow.yaml）。
+  {
+    const sdb = new Database(join(tmpHome, "runtime", "workflow.db"), { readonly: true });
+    const adHocRow = sdb
+      .query("SELECT kind, source FROM workflows WHERE name = 'ad-hoc'")
+      .get() as { kind?: string; source?: string } | null;
+    sdb.close();
+    if (!adHocRow) {
+      console.error("  ✗ DB 里没有 ad-hoc 工作流行（init 未种 DB 模板）");
+      cleanup();
+      process.exit(1);
+    }
+    if (adHocRow.kind !== "template" || adHocRow.source !== "db") {
+      console.error(`  ✗ ad-hoc 应为 DB 模板（kind=template, source=db），实为 kind=${adHocRow.kind} source=${adHocRow.source}`);
+      cleanup();
+      process.exit(1);
+    }
+    console.log(`  ✓ ad-hoc 装成 DB 模板（kind=template, source=db）`);
   }
-  if (!existsSync(join(adHocDir, "workflow.yaml"))) {
-    console.error(`  ✗ ad-hoc 工作流缺 workflow.yaml`);
-    cleanup();
-    process.exit(1);
-  }
-  console.log(`  ✓ ad-hoc workflow 装入 ${adHocDir}`);
 
   // ────────────────────────────────────────────────
   step("autopilot run --help —— ad-hoc 命令完整（Phase 4 spec §3.7）");

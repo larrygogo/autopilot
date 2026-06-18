@@ -10,6 +10,8 @@ import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSyn
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
+import { getWorkflowFromDb, createTemplateDbWorkflow } from "./workflows";
+import { parseWorkflowText, stringifyWorkflowDoc } from "./serialize";
 
 export interface WorkflowTemplate {
   /** 模板名（目录名，如 "dev"） */
@@ -108,6 +110,29 @@ function availableTemplates(root: string): string[] {
         return statSync(dir).isDirectory() && existsSync(join(dir, "workflow.yaml"));
       });
   } catch { return []; }
+}
+
+/**
+ * 把内置模板 examples/workflows/<name>/ 种成 DB 模板行（kind=template，spec_json 真相），
+ * **不拷文件**（DB 是默认安装形态，方案 C / Step 5b）。**幂等**：
+ *   - 磁盘已有 file 副本（~/.autopilot/workflows/<name>/）→ skip（双轨：存量 file 优先，不撞名）；
+ *   - DB 已有同名 → skip。
+ * 仅适用于零 ts 的声明式模板（dev/ad-hoc）——含 ts 的模板没法当 native/template（declarative 强制）。
+ * 返回 'seeded' | 'exists' | 'no-template'。
+ */
+export function seedTemplateWorkflow(name: string): "seeded" | "exists" | "no-template" {
+  // 磁盘 file 副本在 → 不种（存量用户双轨，避免同名冲突）
+  if (existsSync(join(autopilotHome(), "workflows", name))) return "exists";
+  if (getWorkflowFromDb(name)) return "exists";
+  const root = findExamplesRoot();
+  if (!root) return "no-template";
+  const yamlPath = join(root, name, "workflow.yaml");
+  if (!existsSync(yamlPath)) return "no-template";
+  const doc = parseWorkflowText(readFileSync(yamlPath, "utf-8"), "yaml") as Record<string, unknown> | null;
+  if (!doc || !Array.isArray(doc["phases"])) return "no-template";
+  const description = typeof doc["description"] === "string" ? doc["description"] : "";
+  createTemplateDbWorkflow({ name, description, spec_json: stringifyWorkflowDoc(doc, "json") });
+  return "seeded";
 }
 
 export function cloneTemplate(template: string, targetName: string): void {

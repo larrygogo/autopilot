@@ -149,10 +149,11 @@ export function createDbWorkflow(opts: CreateDbWorkflowOpts): WorkflowRow {
 }
 
 /**
- * 创建独立 DB 工作流（kind=native：DB 是真相源，无寄生 base）。
+ * 创建「spec_json 真相」的 DB 工作流（native 或 template）。
  * spec_json 是唯一真相；yaml_content 存 spec_json 的 yaml 投影（兼容 getYaml / 编辑器读路径）。
+ * native = 用户导入/创建；template = 框架 init 种子（语义区分，组装路径同）。
  */
-export function createNativeDbWorkflow(opts: CreateNativeDbWorkflowOpts): WorkflowRow {
+function insertSpecDbWorkflow(opts: CreateNativeDbWorkflowOpts, kind: "native" | "template"): WorkflowRow {
   if (getWorkflowFromDb(opts.name)) {
     throw new Error(`工作流 "${opts.name}" 已存在`);
   }
@@ -166,10 +167,20 @@ export function createNativeDbWorkflow(opts: CreateNativeDbWorkflowOpts): Workfl
   const db = getDb();
   const ts = Date.now();
   db.run(
-    "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'native', ?, ?)",
-    [opts.name, opts.description, yaml_content, opts.spec_json, ts, ts]
+    "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', ?, ?, ?)",
+    [opts.name, opts.description, yaml_content, opts.spec_json, kind, ts, ts]
   );
   return getWorkflowFromDb(opts.name) as WorkflowRow;
+}
+
+/** 创建独立 DB 工作流（kind=native：DB 是真相源，无寄生 base）。用户导入/创建走这条。 */
+export function createNativeDbWorkflow(opts: CreateNativeDbWorkflowOpts): WorkflowRow {
+  return insertSpecDbWorkflow(opts, "native");
+}
+
+/** 创建框架内置模板 DB 工作流（kind=template：init 种子，可被模板同步更新）。 */
+export function createTemplateDbWorkflow(opts: CreateNativeDbWorkflowOpts): WorkflowRow {
+  return insertSpecDbWorkflow(opts, "template");
 }
 
 export function updateDbWorkflow(
