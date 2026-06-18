@@ -58,10 +58,9 @@ describe("workflows API（W2 扩展）", () => {
     await discover();
   });
 
-  it("workflows.import json 无 derives_from → 独立 native 落 DB + 注册", async () => {
+  it("workflows.import（JSON）无 derives_from → 独立 native 落 DB + 注册", async () => {
     const r = await invokeRpcMethod("workflows.import", {
       name: "imp_native",
-      format: "json",
       content: JSON.stringify({ name: "imp_native", phases: [{ name: "a", timeout: 60, prompt: "做 a" }] }),
     });
     expect(r.ok).toBe(true);
@@ -74,27 +73,33 @@ describe("workflows API（W2 扩展）", () => {
     expect(getWorkflow("imp_native")).not.toBeNull(); // import 内 reloadRegistry
   });
 
-  it("workflows.import yaml 有 derives_from → 派生(derived)", async () => {
+  it("workflows.import（JSON）有 derives_from → 派生(derived)", async () => {
     const r = await invokeRpcMethod("workflows.import", {
       name: "imp_derived",
-      format: "yaml",
       derives_from: "req_dev",
-      content: "name: imp_derived\nphases:\n  - name: design\n    timeout: 30\n",
+      content: JSON.stringify({ name: "imp_derived", phases: [{ name: "design", timeout: 30 }] }),
     });
     expect(r.ok).toBe(true);
     if (r.ok) expect((r.payload as { kind: string }).kind).toBe("derived");
   });
 
-  it("export json → import json 往返：native spec 等价（除 name）", async () => {
+  it("workflows.import 拒非 JSON（yaml 文本）→ INVALID_PARAM", async () => {
+    const r = await invokeRpcMethod("workflows.import", {
+      name: "imp_yaml", content: "name: x\nphases:\n  - name: a\n",
+    });
+    expect(r.ok).toBe(false); // 用户面统一 JSON，yaml 文本不再接受
+  });
+
+  it("export → import json 往返：native spec 等价（除 name）", async () => {
     await invokeRpcMethod("workflows.import", {
-      name: "rt_src", format: "json",
+      name: "rt_src",
       content: JSON.stringify({ name: "rt_src", label: "往返", phases: [{ name: "a", timeout: 60, prompt: "x" }, { name: "b", timeout: 60, prompt: "y", reject: "a" }] }),
     });
-    const exp = await invokeRpcMethod("workflows.export", { name: "rt_src", format: "json" });
+    const exp = await invokeRpcMethod("workflows.export", { name: "rt_src" });
     expect(exp.ok).toBe(true);
     if (!exp.ok) return;
     const json = (exp.payload as { content: string }).content;
-    const reimport = await invokeRpcMethod("workflows.import", { name: "rt_dst", format: "json", content: json });
+    const reimport = await invokeRpcMethod("workflows.import", { name: "rt_dst", content: json });
     expect(reimport.ok).toBe(true);
     const a = JSON.parse(db.query<{ spec_json: string }, []>("SELECT spec_json FROM workflows WHERE name='rt_src'").get()!.spec_json);
     const b = JSON.parse(db.query<{ spec_json: string }, []>("SELECT spec_json FROM workflows WHERE name='rt_dst'").get()!.spec_json);
@@ -103,7 +108,7 @@ describe("workflows API（W2 扩展）", () => {
   });
 
   it("workflows.import 缺 phases → INVALID_PARAM 拒绝", async () => {
-    const r = await invokeRpcMethod("workflows.import", { name: "imp_bad", format: "json", content: '{"name":"imp_bad"}' });
+    const r = await invokeRpcMethod("workflows.import", { name: "imp_bad", content: '{"name":"imp_bad"}' });
     expect(r.ok).toBe(false);
   });
 

@@ -1,9 +1,9 @@
 import { Command } from "commander";
 import { spawnSync } from "child_process";
 import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "fs";
-import { join, extname } from "path";
+import { join } from "path";
 import { tmpdir } from "os";
-import { detectFormat } from "../core/workflow/serialize";
+import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
 import type { AutopilotClient } from "../client";
 import {
   discover,
@@ -186,10 +186,11 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
       }
 
       try {
+        // create 编辑的是 base 的 yaml（人类友好），但用户面入库统一 JSON：转成 json 再 import
+        const doc = parseWorkflowText(yaml, "yaml");
         const result = await client.importWorkflow({
           name,
-          content: yaml,
-          format: "yaml",
+          content: stringifyWorkflowDoc(doc, "json"),
           derives_from: opts.derivesFrom,
           description: opts.description,
         });
@@ -240,18 +241,13 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
 
   // ── export ──
   wf.command("export <name>")
-    .description("把工作流输出到 stdout（用于备份 / 重定向到文件）。--format json 输出结构原生 json")
-    .option("--format <fmt>", "导出格式：yaml（默认，保注释）| json", "yaml")
+    .description("把工作流导出为 JSON 到 stdout（用于备份 / 重定向到文件 / autopilot workflow import）")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
-    .action(async (name: string, opts: { format: string; port: string }) => {
-      if (opts.format !== "yaml" && opts.format !== "json") {
-        console.error(`--format 只能是 yaml 或 json，得到 "${opts.format}"`);
-        process.exit(2);
-      }
+    .action(async (name: string, opts: { port: string }) => {
       const client = ctx.getClient(opts);
       await ctx.ensureDaemon(client);
       try {
-        const content = await client.exportWorkflow(name, opts.format);
+        const content = await client.exportWorkflow(name);
         process.stdout.write(content);
       } catch (e: unknown) {
         console.error(`导出失败：${e instanceof Error ? e.message : String(e)}`);
@@ -302,16 +298,14 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
     });
 
   wf.command("import <name>")
-    .description("从 yaml/json 文件导入工作流到 DB（无 --derives-from = 独立 native；有 = 派生）")
-    .requiredOption("--from <file>", "yaml 或 json 文件路径（按扩展名/内容自动判格式）")
+    .description("从 JSON 文件导入工作流到 DB（无 --derives-from = 独立 native；有 = 派生）")
+    .requiredOption("--from <json-file>", "JSON 文件路径")
     .option("--derives-from <base>", "派生自的 file 工作流名（省略 = 独立 native 工作流）")
-    .option("--format <fmt>", "强制格式 yaml|json（默认按 --from 扩展名/内容嗅探）")
     .option("-d, --description <desc>", "工作流描述", "")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
     .action(async (name: string, opts: {
       from: string;
       derivesFrom?: string;
-      format?: string;
       description: string;
       port: string;
     }) => {
@@ -322,22 +316,17 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
         console.error(`读 ${opts.from} 失败：${e instanceof Error ? e.message : String(e)}`);
         process.exit(1);
       }
-      const format =
-        opts.format === "json" || opts.format === "yaml"
-          ? opts.format
-          : detectFormat(content, extname(opts.from));
       const client = ctx.getClient(opts);
       await ctx.ensureDaemon(client);
       try {
         const res = await client.importWorkflow({
           name,
           content,
-          format,
           derives_from: opts.derivesFrom,
           description: opts.description,
         });
         console.log(
-          `✓ 已导入 ${name}（${res.kind}${opts.derivesFrom ? `，派生自 ${opts.derivesFrom}` : "，独立 DB 工作流"}，格式 ${format}）`,
+          `✓ 已导入 ${name}（${res.kind}${opts.derivesFrom ? `，派生自 ${opts.derivesFrom}` : "，独立 DB 工作流"}）`,
         );
       } catch (e: unknown) {
         console.error(`导入失败：${e instanceof Error ? e.message : String(e)}`);

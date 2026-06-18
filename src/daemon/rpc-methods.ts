@@ -31,7 +31,7 @@ import {
 } from "../core/workflow/registry";
 import { setWorkflowMeta, patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
 import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb, createDbWorkflow, createNativeDbWorkflow } from "../core/workflow/workflows";
-import { exportWorkflowContent, parseWorkflowText, stringifyWorkflowDoc, type WorkflowFormat } from "../core/workflow/serialize";
+import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
 import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow/templates";
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
 import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig, loadSchedulerConfig, saveSchedulerConfig, systemTimezone, isValidTimezone } from "../core/config";
@@ -872,19 +872,18 @@ function registerWorkflowRpc(): void {
 
   registerRpcMethod({
     method: "workflows.import",
-    description: "从 yaml/json 文本导入工作流落 DB（不写磁盘）：有 derives_from → 派生(derived) / 无 → 独立(native)",
+    description: "从 JSON 文本导入工作流落 DB（不写磁盘）：有 derives_from → 派生(derived) / 无 → 独立(native)",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
       if (typeof p.content !== "string") throw new RpcError("INVALID_PARAM", "需要 content");
-      const format: WorkflowFormat = p.format === "json" ? "json" : "yaml";
       const description = typeof p.description === "string" ? p.description : "";
       const derivesFrom = typeof p.derives_from === "string" && p.derives_from.trim() ? p.derives_from.trim() : null;
       let doc: unknown;
       try {
-        doc = parseWorkflowText(p.content, format);
+        doc = parseWorkflowText(p.content, "json"); // 用户面统一 JSON
       } catch (e: unknown) {
-        throw new RpcError("INVALID_PARAM", `${format} 解析失败：${e instanceof Error ? e.message : String(e)}`);
+        throw new RpcError("INVALID_PARAM", `JSON 解析失败：${e instanceof Error ? e.message : String(e)}`);
       }
       if (!doc || typeof doc !== "object" || !Array.isArray((doc as Record<string, unknown>)["phases"])) {
         throw new RpcError("INVALID_PARAM", "工作流缺 phases 字段");
@@ -903,20 +902,19 @@ function registerWorkflowRpc(): void {
 
   registerRpcMethod({
     method: "workflows.export",
-    description: "导出工作流文本：format=yaml 原样（保注释）/ format=json 结构原生 json",
+    description: "导出工作流为 JSON（结构原生 json，跟内部 spec_json 真相一致）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      const format: WorkflowFormat = p.format === "json" ? "json" : "yaml";
       const row = getWorkflowFromDb(p.name);
-      // native/template 真相 = spec_json：json 直接吐 spec_json（不绕 yaml 投影），yaml 吐投影
+      // native/template 真相 = spec_json：直接吐
       if (row && (row.kind === "native" || row.kind === "template") && row.spec_json) {
-        return { format, content: format === "json" ? row.spec_json : row.yaml_content };
+        return { content: row.spec_json };
       }
-      // file / derived：真相是 yaml（db 源读 yaml_content / file 源读磁盘，与 getYaml 同源）
+      // file / derived：真相存 yaml（db 源读 yaml_content / file 源读磁盘）→ parse 成原生 json
       const yaml = row && row.source === "db" ? row.yaml_content : registryGetWorkflowYaml(p.name);
       if (yaml == null) throw new RpcError("NOT_FOUND", "Workflow not found");
-      return { format, content: exportWorkflowContent(yaml, format) };
+      return { content: stringifyWorkflowDoc(parseWorkflowText(yaml, "yaml"), "json") };
     },
   });
 

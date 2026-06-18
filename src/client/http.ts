@@ -161,20 +161,18 @@ export class HttpClient {
   }
 
   /**
-   * 从 yaml/json 文本导入工作流落 DB（不写磁盘）。
+   * 从 JSON 文本导入工作流落 DB（不写磁盘）。
    * 有 derives_from → 派生(derived，寄生 file base)；无 → 独立(native，DB 真相源)。
    */
   async importWorkflow(opts: {
     name: string;
     content: string;
-    format?: "yaml" | "json";
     derives_from?: string;
     description?: string;
   }): Promise<{ name: string; kind: string; source: string }> {
     return this.call("workflows.import", {
       name: opts.name,
       content: opts.content,
-      format: opts.format ?? "yaml",
       derives_from: opts.derives_from,
       description: opts.description ?? "",
     });
@@ -184,12 +182,9 @@ export class HttpClient {
     return this.call("workflows.delete", { name });
   }
 
-  /**
-   * 导出工作流文本。format=yaml（默认，原样保注释）/ json（结构原生 json）。
-   * 走 workflows.export RPC，返回序列化后的 content 字符串。
-   */
-  async exportWorkflow(name: string, format: "yaml" | "json" = "yaml"): Promise<string> {
-    const res = await this.call<{ format: string; content: string }>("workflows.export", { name, format });
+  /** 导出工作流为 JSON（结构原生 json）。走 workflows.export RPC，返回 content 字符串。 */
+  async exportWorkflow(name: string): Promise<string> {
+    const res = await this.call<{ content: string }>("workflows.export", { name });
     return res.content;
   }
 
