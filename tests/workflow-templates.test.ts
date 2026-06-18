@@ -120,15 +120,16 @@ describe("diffWorkflowTemplate", () => {
   });
 
   it("本地改过文件 → 该文件 identical=false 且 localLines 跟 templateLines 可能不同", () => {
+    // dev 现已零 ts（无 workflow.ts），用 workflow.yaml 验证「改本地跟踪文件 → 不一致」
     cloneTemplate("dev", "dev");
-    const tsPath = join(tmpHome, "workflows", "dev", "workflow.ts");
-    writeFileSync(tsPath, "// 本地手动改\n", "utf-8");
+    const yamlPath = join(tmpHome, "workflows", "dev", "workflow.yaml");
+    writeFileSync(yamlPath, "# 本地手动改\n", "utf-8");
     const entries = diffWorkflowTemplate("dev");
-    const tsEntry = entries.find((e) => e.path === "workflow.ts");
-    expect(tsEntry).toBeDefined();
-    expect(tsEntry!.identical).toBe(false);
-    expect(tsEntry!.localLines).toBe(2); // "// 本地手动改\n" 是 2 行（含尾空行）
-    expect(tsEntry!.templateLines).toBeGreaterThan(2);
+    const yamlEntry = entries.find((e) => e.path === "workflow.yaml");
+    expect(yamlEntry).toBeDefined();
+    expect(yamlEntry!.identical).toBe(false);
+    expect(yamlEntry!.localLines).toBe(2); // "# 本地手动改\n" 是 2 行（含尾空行）
+    expect(yamlEntry!.templateLines).toBeGreaterThan(2);
   });
 
   it("本地多出文件 → 该文件 hasTemplate=false hasLocal=true", () => {
@@ -150,15 +151,15 @@ describe("diffWorkflowTemplate", () => {
 describe("syncWorkflowTemplate", () => {
   it("修改本地 → sync → 再 diff 应全 identical", () => {
     cloneTemplate("dev", "dev");
-    const tsPath = join(tmpHome, "workflows", "dev", "workflow.ts");
-    writeFileSync(tsPath, "// 我手改的\n", "utf-8");
-    // 同步前：workflow.ts 不一致
+    const yamlPath = join(tmpHome, "workflows", "dev", "workflow.yaml");
+    writeFileSync(yamlPath, "# 我手改的\n", "utf-8");
+    // 同步前：workflow.yaml 不一致
     let entries = diffWorkflowTemplate("dev");
-    expect(entries.find((e) => e.path === "workflow.ts")!.identical).toBe(false);
+    expect(entries.find((e) => e.path === "workflow.yaml")!.identical).toBe(false);
     // 同步
     const r = syncWorkflowTemplate("dev");
     expect(r.copied.length).toBeGreaterThan(0);
-    expect(r.copied).toContain("workflow.ts");
+    expect(r.copied).toContain("workflow.yaml");
     // 同步后：所有都 identical
     entries = diffWorkflowTemplate("dev");
     for (const e of entries) {
