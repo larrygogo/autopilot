@@ -115,7 +115,6 @@ export function WorkflowDetail() {
   const [metaDesc, setMetaDesc] = useState("");
   const [metaReqGit, setMetaReqGit] = useState<ReqGitCode>("inherit");
   const [metaSandboxGit, setMetaSandboxGit] = useState<SandboxGitCode>("off");
-  const [metaDelivers, setMetaDelivers] = useState<DeliversCode>("auto");
   // 冲突态（1:1 对齐后端 lint）：声明「必须有代码库」却不建 git 沙盒 → 任务在空目录跑
   const declConflict = metaReqGit === "true" && metaSandboxGit === "off";
   // 「跟随默认」时 requires.git 的派生值（对齐后端 getWorkflowGitRequirement：缺省 = sandbox.git）
@@ -185,7 +184,6 @@ export function WorkflowDetail() {
   const openDeclEdit = () => {
     setMetaReqGit(readReqGit(detail));
     setMetaSandboxGit(readSandboxGit(detail));
-    setMetaDelivers(readDelivers(detail));
     setDeclEditOpen(true);
   };
 
@@ -388,7 +386,8 @@ export function WorkflowDetail() {
           </>
         }
         onSubmit={async () => {
-          // 只更新声明三件套；label/description 传 undefined = 不动
+          // 只更新声明两件套（requires.git / sandbox.git）；产出形态 delivers 已改为从工作流的
+          // phase 自动派生（有 deliver:pr/artifacts 阶段 → 对应形态），不再是用户输入。
           await api.setWorkflowMeta(name, {
             requiresGit:
               metaReqGit === "inherit"
@@ -399,7 +398,6 @@ export function WorkflowDetail() {
                     ? false
                     : "optional",
             sandboxGit: metaSandboxGit === "on" ? true : null,
-            delivers: metaDelivers === "auto" ? null : metaDelivers,
           });
           toast.success("已保存");
           await load();
@@ -460,27 +458,12 @@ export function WorkflowDetail() {
           </div>
         )}
 
-        <FormField
-          label="此工作流交付"
-          hint={
-            metaDelivers === "pr"
-              ? "声明此工作流交付 PR：用它的需求必须挂代码库（否则入队时「PR 无处可开」会被拦）。这是工作流的属性，不是你在某次需求上的选择；run 终结仍以事实为准。"
-              : metaDelivers === "artifacts"
-                ? "声明此工作流交付文件产物：agent 阶段把产物写到 ${DELIVERABLES} 目录、框架据此预建+校验。这是工作流的属性；run 终结仍以事实为准。"
-                : "声明此工作流交付什么——用于入队闸门 / 验收路由 / 展示，不决定终结（终结以事实为准：有 PR 走 PR、有文件走文件、都没就完成）。「自动推断」= 不显式声明。"
-          }
-        >
-          <Select value={metaDelivers} onValueChange={(v) => setMetaDelivers(v as DeliversCode)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">自动推断（按运行结果定）</SelectItem>
-              <SelectItem value="pr">交付 PR</SelectItem>
-              <SelectItem value="artifacts">交付文件产物</SelectItem>
-            </SelectContent>
-          </Select>
-        </FormField>
+        {/* 产出形态 delivers 不再让用户选——它从工作流的 phase 自动派生（有 deliver:pr/artifacts 阶段
+            → 对应形态）。当前派生值在「工作流信息」只读展示（此工作流交付）。 */}
+        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">此工作流交付：{DELIVERS_TEXT[readDelivers(detail)]}</span>
+          <span className="ml-1">——从交付阶段自动判定（有 deliver:pr / deliver:artifacts 阶段），不用手选；run 终结以事实为准。</span>
+        </div>
       </FormDialog>
 
       <ConfirmDialog

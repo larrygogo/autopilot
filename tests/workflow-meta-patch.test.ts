@@ -52,15 +52,11 @@ phases:
     expect(out).not.toMatch(/git:\s*true/);
   });
 
-  it("delivers：写顶层键，null/空串删键", () => {
-    const pr = patchWorkflowMetaYaml(BASE, { delivers: "pr" });
-    expect(pr).toMatch(/delivers:\s*pr/);
-    expect(patchWorkflowMetaYaml(pr, { delivers: null })).not.toContain("delivers:");
-    expect(patchWorkflowMetaYaml(pr, { delivers: "" })).not.toContain("delivers:");
-  });
+  // 注：delivers 已不再是 meta 字段（产出形态从 phase 自动派生，见 registry deriveDelivers），
+  // patchWorkflowMetaYaml 不再写 delivers，故移除原 delivers 写键测试。
 
   it("保留注释与无关段（phases / 注释不动）", () => {
-    const out = patchWorkflowMetaYaml(BASE, { requiresGit: true, delivers: "pr" });
+    const out = patchWorkflowMetaYaml(BASE, { requiresGit: true });
     expect(out).toContain("# 这是阶段段的注释，应被保留");
     expect(out).toMatch(/phases:/);
     expect(out).toMatch(/step1/);
@@ -91,9 +87,8 @@ phases:
     }
     // ③ sandbox 同理（sandboxGit=false/null 删键）
     expect(() => patchWorkflowMetaYaml("name: d\nsandbox: weird\nphases:\n  - name: a\n", { sandboxGit: false })).not.toThrow();
-    // ④ 用户的完整表单组合（跟随默认 + 建沙盒 + 文件产出）一次过
-    const full = patchWorkflowMetaYaml(noReq, { requiresGit: null, sandboxGit: true, delivers: "artifacts" });
-    expect(full).toMatch(/delivers:\s*artifacts/);
+    // ④ 用户的完整表单组合（跟随默认 + 建沙盒）一次过
+    const full = patchWorkflowMetaYaml(noReq, { requiresGit: null, sandboxGit: true });
     expect(full).toMatch(/git:\s*true/);
   });
 

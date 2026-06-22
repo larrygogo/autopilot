@@ -352,23 +352,25 @@ phases:
     expect(spec.setup_func).toBeUndefined();
   });
 
-  it("交付一致性：顶层 delivers 与 phase deliver 不一致 → 拒加载（用户改了 delivers 没改 phase）", async () => {
-    // 用户场景：把 dev 的 delivers:pr 改成 artifacts 但 submit_pr 还是 deliver:pr
+  // delivers 已改为从 phases 派生（2026-06-22 deriveDelivers，取代 validateDeliveryConsistency）：
+  // 顶层不再是用户输入，整类「顶层 vs phase 不一致」的拒绝规则退役，改测派生语义。
+  it("派生：顶层旧 delivers 与 phase deliver 不一致 → 以 phase 为准覆盖（不再冲突报错）", async () => {
+    // yaml 还留着旧的 delivers:artifacts 但 submit_pr 是 deliver:pr —— 派生取 phase 值
     writeFileWorkflow("inconsistent", "name: inconsistent\ndelivers: artifacts\nsandbox: { git: true }\nphases:\n  - name: develop\n    prompt: 写\n  - name: submit_pr\n    deliver: pr\n");
     await discover();
-    expect(getWorkflow("inconsistent")).toBeNull(); // 形态冲突 → 跳过注册
+    expect(getWorkflow("inconsistent")?.delivers).toBe("pr");
   });
 
-  it("交付一致性：有 deliver 阶段但顶层未声明 delivers → 拒", async () => {
+  it("派生：有 deliver 阶段但顶层未写 delivers → 自动派生注入", async () => {
     writeFileWorkflow("no_top", "name: no_top\nsandbox: { git: true }\nphases:\n  - name: x\n    prompt: 写\n  - name: d\n    deliver: pr\n");
     await discover();
-    expect(getWorkflow("no_top")).toBeNull();
+    expect(getWorkflow("no_top")?.delivers).toBe("pr");
   });
 
-  it("交付一致性：declarative + delivers:artifacts 但无交付阶段 → 拒", async () => {
+  it("派生：无 deliver 阶段但 spec 显式 delivers:artifacts → 回退保留显式（加载成功）", async () => {
     createNativeDbWorkflow({ name: "decl_nodeliver", description: "", spec_json: JSON.stringify({ name: "decl_nodeliver", delivers: "artifacts", phases: [{ name: "produce", prompt: "写" }] }) });
     await discover();
-    expect(getWorkflow("decl_nodeliver")).toBeNull(); // 声明式无 ts 兜底 → 必须有 deliver 阶段
+    expect(getWorkflow("decl_nodeliver")?.delivers).toBe("artifacts"); // 派生 null → 回退 yaml/spec 显式值
   });
 
   it("交付一致性：非声明式(有 ts) + delivers:pr 无 deliver 阶段 → 放行（ts 可能在交付，如老 dev run_submit_pr）", async () => {

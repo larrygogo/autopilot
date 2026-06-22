@@ -153,11 +153,8 @@ export interface WorkflowMetaInput {
    * 「不建」≡ 缺省，删键保持 yaml 干净、老副本零感知）。undefined = 不动。
    */
   sandboxGit?: boolean | null;
-  /**
-   * 声明层产出形态 delivers："pr" / "artifacts" 显式写；null / 空串 = 删键
-   * （回退运行时事实推断）。undefined = 不动。
-   */
-  delivers?: string | null;
+  // 注：产出形态 delivers 不再由 meta 编辑——它从工作流的 phase 自动派生（registry deriveDelivers：
+  // 有 deliver:pr/artifacts 阶段 → 对应形态），不是用户输入，故 WorkflowMetaInput 不含 delivers。
 }
 
 /**
@@ -201,12 +198,7 @@ export function patchWorkflowMetaYaml(raw: string, meta: WorkflowMetaInput): str
       pruneEmptyMap(doc, "sandbox");
     }
   }
-  // delivers：顶层字段
-  if (meta.delivers !== undefined) {
-    const d = typeof meta.delivers === "string" ? meta.delivers.trim() : meta.delivers;
-    if (d === null || d === "") doc.deleteIn(["delivers"]);
-    else doc.setIn(["delivers"], d);
-  }
+  // 注：delivers 不再写——产出形态从 phase 自动派生（见 registry deriveDelivers），不是 meta 字段。
   return doc.toString();
 }
 

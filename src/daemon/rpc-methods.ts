@@ -982,7 +982,7 @@ function registerWorkflowRpc(): void {
 
   registerRpcMethod({
     method: "workflows.setMeta",
-    description: "修改工作流显示名 / 描述 + 声明层（requiresGit / sandboxGit / delivers）；name 是标识符与引用键，不可改",
+    description: "修改工作流显示名 / 描述 + 声明层（requiresGit / sandboxGit）；产出形态 delivers 从 phase 自动派生不接受输入；name 是标识符与引用键，不可改",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
@@ -1014,18 +1014,13 @@ function registerWorkflowRpc(): void {
         }
         meta.sandboxGit = v as boolean | null;
       }
-      if ("delivers" in p) {
-        const v = p.delivers;
-        if (v !== null && v !== "pr" && v !== "artifacts" && v !== "") {
-          throw new RpcError("INVALID_PARAM", "delivers 需为 \"pr\" / \"artifacts\" / null");
-        }
-        meta.delivers = v as string | null;
-      }
+      // 注：产出形态 delivers 已不再由用户输入——它从工作流的 phase 自动派生（registry
+      // deriveDelivers：有 deliver:pr/artifacts 阶段 → 对应形态）。setMeta 不再接受 delivers 入参。
       if (
         meta.label === undefined && meta.description === undefined &&
-        meta.requiresGit === undefined && meta.sandboxGit === undefined && meta.delivers === undefined
+        meta.requiresGit === undefined && meta.sandboxGit === undefined
       ) {
-        throw new RpcError("INVALID_PARAM", "至少提供 label / description / requiresGit / sandboxGit / delivers 之一");
+        throw new RpcError("INVALID_PARAM", "至少提供 label / description / requiresGit / sandboxGit 之一");
       }
       if (!registryGetWorkflow(p.name)) throw new RpcError("NOT_FOUND", "Workflow not found");
       const row = getWorkflowFromDb(p.name);

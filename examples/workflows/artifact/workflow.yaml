@@ -11,10 +11,10 @@ description: "产出文件类交付物（设计图 / 网页 demo / 文档）：�
 #     驳回回路 = fix_revision → __fix run artifacts 模式重做产物 promote round+1。
 # 无 setup_func / workflow.ts —— 框架默认补 title/requirement。
 
-# 声明层：代码库可选（有就 clone 作只读参考，没有走纯文本澄清 + 空沙盒）；产出 = artifacts
+# 声明层：代码库可选（有就 clone 作只读参考，没有走纯文本澄清 + 空沙盒）。
+# 产出形态 delivers **不用写** —— 框架从下方 deliver 阶段的 `deliver: artifacts` 自动派生成 "artifacts"。
 requires:
   git: "optional"
-delivers: artifacts
 
 sandbox:
   git: true   # 需求挂了代码库就 clone 作只读参考；agent 不 push、不开 PR；无库时退化空目录

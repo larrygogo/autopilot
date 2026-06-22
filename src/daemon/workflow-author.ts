@@ -60,36 +60,36 @@ phases:
          架构方向正确、核心需求有覆盖即 pass；仅架构性硬伤才 reject。
    \`\`\`
 
-4. **交付 PR（deliver: pr）**：要把代码改动 commit/push 并开 GitHub PR，**顶层声明 \`delivers: pr\` +
-   开 \`sandbox.git: true\`**，再写一个交付 phase：
+4. **交付 PR（deliver: pr）**：要把代码改动 commit/push 并开 GitHub PR，开 \`sandbox.git: true\`，
+   加一个 \`deliver: pr\` 阶段即可——**不用写顶层 delivers，框架从这个阶段自动派生**：
    \`\`\`yaml
-   delivers: pr              # ⭐ 顶层声明：管验收路由 / 闸门 / 展示；交付动作由下方 deliver:pr 阶段驱动
    sandbox:
      git: true              # 产 PR 必须有 git 沙盒
    phases:
      # ...开发阶段...
      - name: submit_pr
        label: 提交 PR
-       deliver: pr           # 框架内置 PR 交付器（逐库 commit/push + 开 PR），零代码
+       deliver: pr           # 框架内置 PR 交付器（逐库 commit/push + 开 PR），零代码；
+                             # 顶层 delivers 由它自动派生成 "pr"（管闸门 / 验收路由 / 展示）
        pr_body_from: design  # 可选：取某阶段 agent 产物作 PR body 方案摘要
    \`\`\`
 
 5. **交付文件产物（deliver: artifacts）**：要产出文件类交付物（文档 / 设计图 / 网页 demo）让用户验收，
-   **顶层声明 \`delivers: artifacts\`**，agent 阶段把产物写到 \${DELIVERABLES} 目录，再加一个
-   \`deliver: artifacts\` phase 收口验收：
+   agent 阶段把产物写到 \${DELIVERABLES} 目录，再加一个 \`deliver: artifacts\` phase 收口验收
+   ——**同样不用写顶层 delivers，框架从交付阶段自动派生**：
    \`\`\`yaml
-   delivers: artifacts       # ⭐ 顶层声明：管验收路由 / 闸门 / 展示；产出由 produce 阶段引用 \${DELIVERABLES} 驱动
    phases:
      - name: produce
        prompt: |
          ...把所有交付文件写到 \${DELIVERABLES} 目录...   # ← 引用它，框架才预建该目录 + 跑后校验非空
      - name: deliver
-       deliver: artifacts    # 框架内置文件交付器，零代码
+       deliver: artifacts    # 框架内置文件交付器，零代码；顶层 delivers 由它自动派生成 "artifacts"
    \`\`\`
 
-⚠ **产出形态一致性**：顶层 \`delivers\` 与交付阶段的 \`deliver\` **必须一致**（都 pr 或都 artifacts）；
-有交付阶段就必须声明顶层 \`delivers\`；一个工作流只能产一种形态。不一致会被拒绝加载。
-**纯流程演示（只评审不交付）的工作流不要声明 delivers，也不要 deliver 阶段。**
+⚠ **产出形态自动派生**：顶层 \`delivers\` **不是你写的，由框架从「哪个阶段有 \`deliver:\`」自动派生**
+（有 deliver:pr → pr、deliver:artifacts → artifacts），所以不存在「顶层和阶段不一致」的问题。一个工作流
+只能产一种形态（多个 \`deliver:\` 阶段值不一致会被拒绝加载）。**纯流程演示（只评审不交付）的工作流不要任何
+\`deliver:\` 阶段**——派生为「不交付」，run 终结按事实推断。
 
 并行：用 \`parallel:\` 块让多个子阶段并行（如前端 / 后端同时开发）。
 

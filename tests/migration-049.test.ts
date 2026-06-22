@@ -72,10 +72,11 @@ describe("migration 049：file dev/ad-hoc → native", () => {
     expect(row.kind).toBe("template");
     expect(row.spec_json).toBeTruthy();
     expect(row.file_path).toBeNull();
-    // spec_json = examples 的最新版（声明式 deliver:pr、非旧 file 副本的 "x" 占位阶段）
-    const spec = JSON.parse(row.spec_json!) as { phases: unknown[]; delivers?: string };
+    // spec_json = examples 的最新版（含 submit_pr 的 deliver:pr 阶段，非旧 file 副本的 "x" 占位阶段）。
+    // 注：delivers 不再存 spec_json——它从 deliver:pr 阶段运行时派生（deriveDelivers），故断言派生源而非顶层值。
+    const spec = JSON.parse(row.spec_json!) as { phases: Array<{ name?: string; deliver?: string }> };
     expect(Array.isArray(spec.phases)).toBe(true);
-    expect(spec.delivers).toBe("pr");
+    expect(spec.phases.some((p) => p.name === "submit_pr" && p.deliver === "pr")).toBe(true);
     // 物理目录已删 + 备份到 _migrated-049/
     expect(existsSync(devDir)).toBe(false);
     expect(existsSync(join(tmpHome, "workflows", "_migrated-049", "dev", "workflow.yaml"))).toBe(true);

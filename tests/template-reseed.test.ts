@@ -68,10 +68,10 @@ describe("native 模板 reseed（拉 repo fix）", () => {
 
     const row = getWorkflowFromDb("dev")!;
     expect(parseSpecRevision(row.spec_json!)).toBe(before.template); // revision 已刷到 examples 版
-    const spec = JSON.parse(row.spec_json!) as { phases: Array<{ name?: string }>; delivers?: string };
-    // 拉来的是真实 dev（含 design/submit_pr、delivers:pr），不是占位 "x"
-    expect(spec.phases.some((p) => p.name === "submit_pr")).toBe(true);
-    expect(spec.delivers).toBe("pr");
+    const spec = JSON.parse(row.spec_json!) as { phases: Array<{ name?: string; deliver?: string }> };
+    // 拉来的是真实 dev（含 design/submit_pr 的 deliver:pr 阶段），不是占位 "x"。
+    // 注：delivers 不再存 spec_json——从 deliver:pr 阶段运行时派生，故断言派生源。
+    expect(spec.phases.some((p) => p.name === "submit_pr" && p.deliver === "pr")).toBe(true);
   });
 
   it("reseed 幂等：已是最新 → up-to-date，不再改", () => {
