@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Package, Download, ExternalLink, ChevronDown, ChevronRight,
-  FileText, Image as ImageIcon, Globe, FileArchive, AlertTriangle,
+  FileText, Image as ImageIcon, Globe, FileArchive, AlertTriangle, Folder, FolderOpen,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -131,22 +131,99 @@ function RoundRow({
             <p className="text-xs text-muted-foreground">
               交付目录暂无可列出的文件——可能已被自动清理（超过保留期）。交付说明仍可查看。
             </p>
-          ) : files.length === 0 ? (
-            <p className="text-xs text-muted-foreground">本轮无文件。</p>
-          ) : (
-            <ul className="divide-y divide-border rounded-md border border-border">
-              {files.map((f) => (
-                <FileRow key={f.path} reqId={reqId} round={delivery.round} file={f} />
-              ))}
-            </ul>
-          )}
+          ) : (() => {
+            // SUMMARY.md 已作「交付说明」导读，不在文件树里重复
+            const shown = files.filter((f) => f.path.toLowerCase() !== "summary.md");
+            if (shown.length === 0) return <p className="text-xs text-muted-foreground">本轮无文件。</p>;
+            return (
+              <div className="rounded-md border border-border">
+                <div className="border-b border-border px-3 py-1.5 text-[10px] text-muted-foreground">
+                  {shown.length} 个文件
+                </div>
+                <FileTree files={shown} reqId={reqId} round={delivery.round} />
+              </div>
+            );
+          })()}
         </div>
       )}
     </li>
   );
 }
 
-function FileRow({ reqId, round, file }: { reqId: string; round: number; file: DeliveryFileEntry }) {
+// ── 文件树（按文件夹分组、可折叠）：产物多 / 带嵌套目录时不再一行行平铺 ──
+interface TreeNode { name: string; path: string; children: TreeNode[]; file?: DeliveryFileEntry }
+
+function buildTree(files: DeliveryFileEntry[]): TreeNode {
+  const root: TreeNode = { name: "", path: "", children: [] };
+  for (const f of files) {
+    const parts = f.path.split("/");
+    let node = root;
+    for (let i = 0; i < parts.length; i++) {
+      const isLeaf = i === parts.length - 1;
+      if (isLeaf) {
+        node.children.push({ name: parts[i], path: f.path, children: [], file: f });
+      } else {
+        let child = node.children.find((c) => c.name === parts[i] && !c.file);
+        if (!child) { child = { name: parts[i], path: parts.slice(0, i + 1).join("/"), children: [] }; node.children.push(child); }
+        node = child;
+      }
+    }
+  }
+  const sort = (n: TreeNode) => {
+    n.children.sort((a, b) => (a.file ? 1 : 0) - (b.file ? 1 : 0) || a.name.localeCompare(b.name)); // 文件夹在前
+    n.children.forEach(sort);
+  };
+  sort(root);
+  return root;
+}
+
+function countLeaves(n: TreeNode): number {
+  return n.file ? 1 : n.children.reduce((s, c) => s + countLeaves(c), 0);
+}
+
+function FileTree({ files, reqId, round }: { files: DeliveryFileEntry[]; reqId: string; round: number }) {
+  const tree = buildTree(files);
+  // 顶层文件夹始终展开；嵌套子文件夹仅在文件 ≤30 时自动展开（多则折叠，避免一屏铺满）
+  const expandDeep = files.length <= 30;
+  return (
+    <ul className="py-1">
+      {tree.children.map((n) => (
+        <TreeRow key={n.path} node={n} depth={0} reqId={reqId} round={round} defaultOpen={true} expandDeep={expandDeep} />
+      ))}
+    </ul>
+  );
+}
+
+function TreeRow({
+  node, depth, reqId, round, defaultOpen, expandDeep,
+}: {
+  node: TreeNode; depth: number; reqId: string; round: number; defaultOpen: boolean; expandDeep: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const pad = { paddingLeft: `${depth * 14 + 12}px` };
+  if (node.file) {
+    return <FileRow reqId={reqId} round={round} file={node.file} name={node.name} indentStyle={pad} />;
+  }
+  // 文件夹
+  return (
+    <>
+      <li>
+        <button type="button" onClick={() => setOpen((v) => !v)} style={pad}
+          className="flex w-full items-center gap-1.5 py-1.5 pr-3 text-left text-xs hover:bg-muted/30">
+          {open ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />}
+          {open ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+          <span className="font-mono">{node.name}/</span>
+          <span className="ml-1 text-muted-foreground">{countLeaves(node)}</span>
+        </button>
+      </li>
+      {open && node.children.map((c) => (
+        <TreeRow key={c.path} node={c} depth={depth + 1} reqId={reqId} round={round} defaultOpen={expandDeep} expandDeep={expandDeep} />
+      ))}
+    </>
+  );
+}
+
+function FileRow({ reqId, round, file, name, indentStyle }: { reqId: string; round: number; file: DeliveryFileEntry; name?: string; indentStyle?: React.CSSProperties }) {
   const kind = fileKind(file.path);
   const downloadUrl = api.deliveryDownloadUrl(reqId, round, file.path);
   const previewUrl = api.deliveryPreviewUrl(reqId, round, file.path);
@@ -165,13 +242,13 @@ function FileRow({ reqId, round, file }: { reqId: string; round: number; file: D
 
   return (
     <li className="text-xs">
-      <div className="flex items-center gap-3 px-3 py-2">
+      <div className="flex items-center gap-2 py-1.5 pr-3" style={indentStyle ?? { paddingLeft: "12px" }}>
         {kind === "image" ? (
-          <img src={previewUrl} alt="" className="h-8 w-8 shrink-0 rounded border border-border bg-[repeating-conic-gradient(#0001_0_25%,transparent_0_50%)_50%/8px_8px] object-contain" />
+          <img src={previewUrl} alt="" className="h-7 w-7 shrink-0 rounded border border-border bg-[repeating-conic-gradient(#0001_0_25%,transparent_0_50%)_50%/8px_8px] object-contain" />
         ) : (
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>{file.path}</span>
+        <span className="min-w-0 flex-1 truncate font-mono" title={file.path}>{name ?? file.path}</span>
         {kind === "html" && (
           <span className="inline-flex shrink-0 items-center gap-0.5 rounded border border-warning/40 bg-warning/10 px-1 text-[9px] text-warning" title="agent 生成的不可信内容，在隔离环境打开">
             <AlertTriangle className="h-2.5 w-2.5" />不可信
