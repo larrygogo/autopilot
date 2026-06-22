@@ -58,6 +58,8 @@ describe("registry 声明层透传与派生", () => {
       "phases:",
       "  - name: a",
       "    prompt: hi",
+      "  - name: deliver",       // delivers:artifacts 需配交付阶段（一致性校验）
+      "    deliver: artifacts",
     ].join("\n"));
     expect(wf).not.toBeNull();
     expect(wf!.requires?.git).toBe("optional");

@@ -60,16 +60,36 @@ phases:
          架构方向正确、核心需求有覆盖即 pass；仅架构性硬伤才 reject。
    \`\`\`
 
-4. **交付 PR（deliver: pr）**：要把代码改动 commit/push 并开 GitHub PR，写一个交付 phase：
+4. **交付 PR（deliver: pr）**：要把代码改动 commit/push 并开 GitHub PR，**顶层声明 \`delivers: pr\` +
+   开 \`sandbox.git: true\`**，再写一个交付 phase：
    \`\`\`yaml
-   - name: submit_pr
-     label: 提交 PR
-     deliver: pr             # 框架内置 PR 交付器（逐库 commit/push + 开 PR），零代码
-     pr_body_from: design    # 可选：取某阶段 agent 产物作 PR body 方案摘要
+   delivers: pr              # ⭐ 顶层产出形态声明（与下方 deliver phase 必须一致）
+   sandbox:
+     git: true              # 产 PR 必须有 git 沙盒
+   phases:
+     # ...开发阶段...
+     - name: submit_pr
+       label: 提交 PR
+       deliver: pr           # 框架内置 PR 交付器（逐库 commit/push + 开 PR），零代码
+       pr_body_from: design  # 可选：取某阶段 agent 产物作 PR body 方案摘要
    \`\`\`
 
 5. **交付文件产物（deliver: artifacts）**：要产出文件类交付物（文档 / 设计图 / 网页 demo）让用户验收，
-   agent 阶段把产物写到 \${DELIVERABLES} 目录，再加一个 \`deliver: artifacts\` phase 收口验收。
+   **顶层声明 \`delivers: artifacts\`**，agent 阶段把产物写到 \${DELIVERABLES} 目录，再加一个
+   \`deliver: artifacts\` phase 收口验收：
+   \`\`\`yaml
+   delivers: artifacts       # ⭐ 顶层产出形态声明（与下方 deliver phase 必须一致）
+   phases:
+     - name: produce
+       prompt: |
+         ...把所有交付文件写到 \${DELIVERABLES} 目录...
+     - name: deliver
+       deliver: artifacts    # 框架内置文件交付器，零代码
+   \`\`\`
+
+⚠ **产出形态一致性**：顶层 \`delivers\` 与交付阶段的 \`deliver\` **必须一致**（都 pr 或都 artifacts）；
+有交付阶段就必须声明顶层 \`delivers\`；一个工作流只能产一种形态。不一致会被拒绝加载。
+**纯流程演示（只评审不交付）的工作流不要声明 delivers，也不要 deliver 阶段。**
 
 并行：用 \`parallel:\` 块让多个子阶段并行（如前端 / 后端同时开发）。
 

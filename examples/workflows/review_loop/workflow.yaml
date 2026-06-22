@@ -1,9 +1,10 @@
 name: review_loop
-template_revision: 1   # 模板修订号；examples 改了 bug fix 就 +1，老副本据此被提示同步
+template_revision: 2   # 模板修订号；examples 改了 bug fix 就 +1，老副本据此被提示同步
 label: 评审回路示例
-description: 最小声明式判据示例——设计 → 评审（agent 判 PASS/REJECT）→ 通过则交付、驳回则回设计重做。全 prompt 模式、零 ts。展示 decision / ${HANDOFF} / ${REJECTION} 三件套，可克隆改造，也可忽略。
+description: 最小声明式判据示例——设计 → 评审（agent 判 PASS/REJECT）→ 通过即完成、驳回则回设计重做。全 prompt 模式、零 ts。展示 decision / ${HANDOFF} / ${REJECTION} 三件套，可克隆改造，也可忽略。
 requires: { git: false }
-delivers: artifacts
+# 不声明 delivers：本流是纯决策回路演示，方案以 handoff 文本产出，不交付文件产物（若要产文件，
+# 加 produce 阶段写 ${DELIVERABLES} + deliver: artifacts 收口，并声明顶层 delivers: artifacts）。
 phases:
   - name: design
     timeout: 600

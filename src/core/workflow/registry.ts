@@ -431,6 +431,11 @@ export function buildWorkflowDefinition(
   // 声明式安全闸门（spec 2026-06-14 砖 3）：declarative:true → 硬拒任何用户 TS 代码。
   // 保证工作流没有任意 spawn / 文件 IO，能力上界由框架原语 + tools 授权钉死，可安全跨人运行。
   const declarative = wfDef["declarative"] === true;
+
+  // 交付形态一致性校验（顶层 delivers 权威 + phase deliver 强一致）——把「改了 delivers 没改全 →
+  // 跑到中途才崩」收口成「加载即拒 + 人话报错」。结构对称校验，零业务知识（不需懂 'pr'/'artifacts' 含义）。
+  // 传 hasTs：非声明式工作流的交付可能在 ts 函数里（老 dev 的 run_submit_pr），「无 deliver 阶段」≠「不交付」。
+  validateDeliveryConsistency(wfDef, declarative || !tsModule);
   if (declarative && tsModule) {
     const fnExports = Object.keys(tsModule).filter((k) => typeof tsModule![k] === "function");
     if (fnExports.length > 0) {
@@ -495,6 +500,52 @@ export function buildWorkflowDefinition(
   }
 
   return wfDef as unknown as WorkflowDefinition;
+}
+
+/**
+ * 交付形态一致性校验（v2 R5 收紧）：顶层 `delivers` 是产出形态的单一权威，phase 级 `deliver` 强一致。
+ * 结构对称校验，**零业务知识**（只比字符串相等 / 数组对称，不需懂 'pr'/'artifacts' 的含义，守 core 红线）。
+ * 违反即抛错——经 discover 捕获 → 跳过该工作流 + log.error，不拖垮整批扫描。
+ *
+ * 规则：
+ *   ① 多个交付阶段的 deliver 值必须一致（一个工作流只产一种形态）—— 总是校验
+ *   ② 有交付阶段但顶层未声明 delivers → 拒 —— 总是校验
+ *   ③ 顶层 delivers 与交付阶段的 deliver 不一致 → 拒（用户改了 delivers 没改 phase 的典型错配）—— 总是校验
+ *   ④ 顶层声明 delivers 但无任何交付阶段 → 拒（产物不会被交付）—— **仅 noTsDelivery=true 时**
+ *      （非声明式工作流的交付可能在 ts 函数里，如老 dev 的 run_submit_pr，「无 deliver 阶段」≠「不交付」）
+ */
+function validateDeliveryConsistency(wfDef: Record<string, unknown>, noTsDelivery: boolean): void {
+  const name = String(wfDef["name"] ?? "?");
+  const top = typeof wfDef["delivers"] === "string" ? (wfDef["delivers"] as string).trim() : "";
+  const phaseDelivers: string[] = [];
+  for (const p of (wfDef["phases"] as Record<string, unknown>[]) ?? []) {
+    if (!p || typeof p !== "object") continue;
+    if ("parallel" in p) {
+      const subs = ((p["parallel"] as Record<string, unknown>)?.["phases"] as Record<string, unknown>[]) ?? [];
+      for (const s of subs) if (s && typeof s["deliver"] === "string") phaseDelivers.push((s["deliver"] as string).trim());
+    } else if (typeof p["deliver"] === "string") {
+      phaseDelivers.push((p["deliver"] as string).trim());
+    }
+  }
+
+  if (phaseDelivers.length > 0) {
+    const distinct = [...new Set(phaseDelivers)];
+    if (distinct.length > 1) {
+      throw new Error(`工作流「${name}」声明了多种交付形态的阶段（${distinct.join(", ")}）——一个工作流只能产出一种形态。`);
+    }
+    const form = distinct[0];
+    if (!top) {
+      throw new Error(`工作流「${name}」有 deliver="${form}" 的交付阶段，但顶层未声明 delivers——请补 \`delivers: ${form}\`。`);
+    }
+    if (top !== form) {
+      throw new Error(
+        `工作流「${name}」产出形态冲突：顶层 delivers="${top}" 但交付阶段声明 deliver="${form}"。` +
+        `请改成一致（产 PR 全用 pr + sandbox.git，产文件全用 artifacts + 写 \${DELIVERABLES}；可参考 examples/workflows/${top === "pr" ? "dev" : "artifact"}）。`,
+      );
+    }
+  } else if (noTsDelivery && (top === "pr" || top === "artifacts")) {
+    throw new Error(`工作流「${name}」声明 delivers="${top}" 但没有任何阶段 deliver="${top}"——产物不会被交付。请给收尾阶段加 \`deliver: ${top}\`。`);
+  }
 }
 
 function normalizeTransitions(

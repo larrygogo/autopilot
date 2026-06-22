@@ -203,6 +203,8 @@ phases:
     writeFileWorkflow(
       "pr_demo",
       `name: pr_demo
+delivers: pr
+sandbox: { git: true }
 phases:
   - name: develop
     timeout: 60
@@ -348,6 +350,37 @@ phases:
     expect(spec.name).toBe("norm_demo");   // 内层 name 归一为行 name
     expect(spec.notify_func).toBeUndefined(); // 危险函数字段被 strip
     expect(spec.setup_func).toBeUndefined();
+  });
+
+  it("交付一致性：顶层 delivers 与 phase deliver 不一致 → 拒加载（用户改了 delivers 没改 phase）", async () => {
+    // 用户场景：把 dev 的 delivers:pr 改成 artifacts 但 submit_pr 还是 deliver:pr
+    writeFileWorkflow("inconsistent", "name: inconsistent\ndelivers: artifacts\nsandbox: { git: true }\nphases:\n  - name: develop\n    prompt: 写\n  - name: submit_pr\n    deliver: pr\n");
+    await discover();
+    expect(getWorkflow("inconsistent")).toBeNull(); // 形态冲突 → 跳过注册
+  });
+
+  it("交付一致性：有 deliver 阶段但顶层未声明 delivers → 拒", async () => {
+    writeFileWorkflow("no_top", "name: no_top\nsandbox: { git: true }\nphases:\n  - name: x\n    prompt: 写\n  - name: d\n    deliver: pr\n");
+    await discover();
+    expect(getWorkflow("no_top")).toBeNull();
+  });
+
+  it("交付一致性：declarative + delivers:artifacts 但无交付阶段 → 拒", async () => {
+    createNativeDbWorkflow({ name: "decl_nodeliver", description: "", spec_json: JSON.stringify({ name: "decl_nodeliver", delivers: "artifacts", phases: [{ name: "produce", prompt: "写" }] }) });
+    await discover();
+    expect(getWorkflow("decl_nodeliver")).toBeNull(); // 声明式无 ts 兜底 → 必须有 deliver 阶段
+  });
+
+  it("交付一致性：非声明式(有 ts) + delivers:pr 无 deliver 阶段 → 放行（ts 可能在交付，如老 dev run_submit_pr）", async () => {
+    writeFileWorkflow("ts_deliver", "name: ts_deliver\ndelivers: pr\nsandbox: { git: true }\nphases:\n  - name: develop\n    prompt: 写\n  - name: submit_pr\n", "export async function run_submit_pr() {}\n");
+    await discover();
+    expect(getWorkflow("ts_deliver")).not.toBeNull(); // 规则④ 对有 ts 的工作流不生效
+  });
+
+  it("交付一致性：dev 式（delivers:pr + deliver:pr 一致）→ 正常加载", async () => {
+    writeFileWorkflow("ok_pr", "name: ok_pr\ndelivers: pr\nsandbox: { git: true }\nphases:\n  - name: develop\n    prompt: 写\n  - name: submit_pr\n    deliver: pr\n");
+    await discover();
+    expect(getWorkflow("ok_pr")).not.toBeNull();
   });
 
   it("L4：kind=template 内置模板禁删（核心流程依赖）；native 可删", async () => {
