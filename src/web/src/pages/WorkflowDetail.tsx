@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { DescList, DetailHeader, EmptyState, FormDialog, FormField, PageShell } from "@/components/pro";
-import { AlertTriangle, Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/hooks/useApi";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -19,21 +19,19 @@ import {
 } from "@/components/ui/select";
 
 // ── 声明层（v2 R5）UI 代码 ↔ yaml 值映射 ──────────────────────────
-// requires.git / sandbox.git / delivers 在表单里用稳定的 string 代码，
-// 读 detail 时派生、提交时映射回 setWorkflowMeta 入参。
-type ReqGitCode = "inherit" | "true" | "optional" | "false";
-type SandboxGitCode = "on" | "off";
+// requires.git 在表单里用稳定的 string 代码（二态：需要 / 不需要），读 detail 时派生、提交时映射回 setMeta。
+// sandbox.git（建 git 沙盒）与 delivers（产出形态）不再是用户输入——前者从 requires.git 派生（需要就一定 clone）、
+// 后者从 phase 派生，编辑器只读展示。
+type ReqGitCode = "true" | "false";
 type DeliversCode = "auto" | "pr" | "artifacts";
 
+// requires.git 二态：true=需要、false=不需要。requires.git 显式优先；未显式则派生自 sandbox.git
+// （老工作流只写了 sandbox.git 的兼容路径，与后端 getWorkflowGitRequirement 一致）。
 function readReqGit(detail: WorkflowDetailData | null): ReqGitCode {
   const g = (detail?.requires as { git?: unknown } | undefined)?.git;
   if (g === true) return "true";
   if (g === false) return "false";
-  if (g === "optional") return "optional";
-  return "inherit";
-}
-function readSandboxGit(detail: WorkflowDetailData | null): SandboxGitCode {
-  return (detail?.sandbox as { git?: unknown } | undefined)?.git === true ? "on" : "off";
+  return (detail?.sandbox as { git?: unknown } | undefined)?.git === true ? "true" : "false";
 }
 function readDelivers(detail: WorkflowDetailData | null): DeliversCode {
   const d = detail?.delivers;
@@ -41,9 +39,7 @@ function readDelivers(detail: WorkflowDetailData | null): DeliversCode {
 }
 // 只读展示用人话短标签
 const REQ_GIT_TEXT: Record<ReqGitCode, string> = {
-  inherit: "默认（自动判断）",
-  true: "必须",
-  optional: "可选",
+  true: "需要",
   false: "不需要",
 };
 const DELIVERS_TEXT: Record<DeliversCode, string> = {
@@ -53,27 +49,15 @@ const DELIVERS_TEXT: Record<DeliversCode, string> = {
 };
 
 /**
- * 把声明层三件套拼成一句人话总结，让用户读结论而非自己跑因果链。
- * requires.git=inherit 时按后端口径（缺省派生自 sandbox.git）落到实际语义。
+ * 把声明层拼成一句人话总结。需要代码库（二态）→ 一定克隆；产出形态从 phase 派生。
  */
 function declarationSummary(detail: WorkflowDetailData | null): string {
   const reqGit = readReqGit(detail);
-  const sandbox = readSandboxGit(detail);
   const delivers = readDelivers(detail);
-  const libPart =
-    reqGit === "true"
-      ? "必须挂代码库"
-      : reqGit === "optional"
-        ? "代码库可选"
-        : reqGit === "false"
-          ? "不需要代码库"
-          : sandbox === "on"
-            ? "必须挂代码库"
-            : "不需要代码库"; // inherit 派生
-  const clonePart = sandbox === "on" ? "会克隆代码" : "不克隆代码";
+  const libPart = reqGit === "true" ? "需要代码库（会克隆下来）" : "不需要代码库";
   const deliverPart =
     delivers === "pr" ? "交付 PR" : delivers === "artifacts" ? "交付文件产物" : "按运行结果定交付";
-  return `${libPart} · ${clonePart} · ${deliverPart}`;
+  return `${libPart} · ${deliverPart}`;
 }
 
 
@@ -113,12 +97,8 @@ export function WorkflowDetail() {
   const [declEditOpen, setDeclEditOpen] = useState(false);
   const [metaLabel, setMetaLabel] = useState("");
   const [metaDesc, setMetaDesc] = useState("");
-  const [metaReqGit, setMetaReqGit] = useState<ReqGitCode>("inherit");
-  const [metaSandboxGit, setMetaSandboxGit] = useState<SandboxGitCode>("off");
-  // 冲突态（1:1 对齐后端 lint）：声明「必须有代码库」却不建 git 沙盒 → 任务在空目录跑
-  const declConflict = metaReqGit === "true" && metaSandboxGit === "off";
-  // 「跟随默认」时 requires.git 的派生值（对齐后端 getWorkflowGitRequirement：缺省 = sandbox.git）
-  const inheritedReqGitText = metaSandboxGit === "on" ? "必须有代码库" : "不需要代码库";
+  const [metaReqGit, setMetaReqGit] = useState<ReqGitCode>("false");
+  // 注：sandbox.git（建 git 沙盒）不再是开关——需要代码库就一定 clone，由 requires.git 派生。
 
   const load = async () => {
     try {
@@ -183,7 +163,6 @@ export function WorkflowDetail() {
   // 不再埋在「改显示名」里。三件套是最贴产品定位核心的开关，值得独立入口。
   const openDeclEdit = () => {
     setMetaReqGit(readReqGit(detail));
-    setMetaSandboxGit(readSandboxGit(detail));
     setDeclEditOpen(true);
   };
 
@@ -279,40 +258,15 @@ export function WorkflowDetail() {
                   <div className="text-xs font-medium text-muted-foreground">声明 · 这个工作流如何约束需求</div>
                   <p className="mt-0.5 text-sm text-foreground">{declarationSummary(detail)}</p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={openDeclEdit} title="编辑声明（需要代码库 / 建 git 沙盒 / 交付形态）">
+                <Button variant="ghost" size="sm" onClick={openDeclEdit} title="编辑声明（需要代码库 / 交付形态）">
                   <Pencil className="h-4 w-4" />
                   编辑
                 </Button>
               </div>
               <DescList
-                columns={3}
+                columns={2}
                 items={[
-                  {
-                    label: "需要代码库",
-                    value:
-                      readReqGit(detail) === "inherit"
-                        ? `默认 → ${readSandboxGit(detail) === "on" ? "必须" : "不需要"}`
-                        : REQ_GIT_TEXT[readReqGit(detail)],
-                  },
-                  {
-                    label: "建 git 沙盒",
-                    value:
-                      readReqGit(detail) === "true" && readSandboxGit(detail) === "off" ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <span>否</span>
-                          <span
-                            className="inline-flex items-center text-warning"
-                            title="与「需要代码库=必须」冲突：任务会在空目录里跑"
-                          >
-                            <AlertTriangle className="h-3.5 w-3.5" />
-                          </span>
-                        </span>
-                      ) : readSandboxGit(detail) === "on" ? (
-                        "是"
-                      ) : (
-                        "否"
-                      ),
-                  },
+                  { label: "需要代码库", value: REQ_GIT_TEXT[readReqGit(detail)] },
                   { label: "此工作流交付", value: DELIVERS_TEXT[readDelivers(detail)] },
                 ]}
               />
@@ -345,7 +299,7 @@ export function WorkflowDetail() {
           </>
         }
         onSubmit={async () => {
-          // 只更新 label/desc；声明三件套（requiresGit/sandboxGit/delivers）传 undefined = 不动
+          // 只更新 label/desc；requiresGit 传 undefined = 不动（sandbox.git / delivers 已不是 meta 字段）
           await api.setWorkflowMeta(name, {
             label: metaLabel.trim() || null,
             description: metaDesc.trim() || null,
@@ -386,18 +340,10 @@ export function WorkflowDetail() {
           </>
         }
         onSubmit={async () => {
-          // 只更新声明两件套（requires.git / sandbox.git）；产出形态 delivers 已改为从工作流的
-          // phase 自动派生（有 deliver:pr/artifacts 阶段 → 对应形态），不再是用户输入。
+          // 只更新「需要代码库」（二态）。sandbox.git（建 git 沙盒）从 requires.git 派生、delivers 从 phase
+          // 派生，均不再是用户输入。
           await api.setWorkflowMeta(name, {
-            requiresGit:
-              metaReqGit === "inherit"
-                ? null
-                : metaReqGit === "true"
-                  ? true
-                  : metaReqGit === "false"
-                    ? false
-                    : "optional",
-            sandboxGit: metaSandboxGit === "on" ? true : null,
+            requiresGit: metaReqGit === "true",
           });
           toast.success("已保存");
           await load();
@@ -405,58 +351,18 @@ export function WorkflowDetail() {
       >
         <FormField
           label="需要代码库"
-          hint="决定用此工作流的需求能不能在「没挂代码库」时继续往下走"
+          hint="需要 → 任务运行时一定把代码库克隆下来供各阶段改文件；不需要 → 不克隆、在空目录跑（纯文本 / 产物类）。run 终结仍以事实为准。"
         >
           <Select value={metaReqGit} onValueChange={(v) => setMetaReqGit(v as ReqGitCode)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="inherit">跟随默认（看是否建 git 沙盒）</SelectItem>
-              <SelectItem value="true">必须有代码库</SelectItem>
-              <SelectItem value="optional">可选</SelectItem>
-              <SelectItem value="false">不需要代码库</SelectItem>
+              <SelectItem value="true">需要</SelectItem>
+              <SelectItem value="false">不需要</SelectItem>
             </SelectContent>
           </Select>
         </FormField>
-
-        {/* 「跟随默认」派生结果实时回显：直接回答「建沙盒是不是必须要库」 */}
-        {metaReqGit === "inherit" && (
-          <p className="-mt-1 text-xs text-muted-foreground">
-            跟随默认 → 当前派生为{" "}
-            <span className="font-medium text-foreground">{inheritedReqGitText}</span>
-            （因为下方{metaSandboxGit === "on" ? "建" : "不建"} git 沙盒）
-          </p>
-        )}
-
-        <FormField
-          label="建 git 沙盒"
-          hint="任务运行时把代码库克隆下来，让各阶段在里面改文件"
-        >
-          <Select value={metaSandboxGit} onValueChange={(v) => setMetaSandboxGit(v as SandboxGitCode)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="off">不建（默认，纯文本 / 产物类）</SelectItem>
-              <SelectItem value="on">建（把代码库克隆到任务目录）</SelectItem>
-            </SelectContent>
-          </Select>
-        </FormField>
-
-        {/* 冲突提示：requires.git=true × sandbox.git=不建（warn 不阻断，对齐后端 lint） */}
-        {declConflict && (
-          <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2.5 text-xs">
-            <div className="flex items-center gap-1.5 font-medium text-warning">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              声明「必须有代码库」却不建 git 沙盒
-            </div>
-            <p className="mt-1 text-muted-foreground">
-              任务会拿到空目录、没有代码可改。要么把「建 git 沙盒」改为「建」，
-              要么把「需要代码库」降为「可选 / 不需要」。
-            </p>
-          </div>
-        )}
 
         {/* 产出形态 delivers 不再让用户选——它从工作流的 phase 自动派生（有 deliver:pr/artifacts 阶段
             → 对应形态）。当前派生值在「工作流信息」只读展示（此工作流交付）。 */}

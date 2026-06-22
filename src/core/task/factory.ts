@@ -1,6 +1,6 @@
 import { getTask, createTask, closeOpenPhaseEvents, nextRunSeqForRequirement } from "../db";
 import type { Task } from "../db";
-import { discover, getWorkflow, listWorkflows, isParallelPhase, getTerminalStates } from "../workflow/registry";
+import { discover, getWorkflow, getWorkflowGitSandbox, listWorkflows, isParallelPhase, getTerminalStates } from "../workflow/registry";
 import { isWorkflowCopyOutdated } from "../workflow/templates";
 import { snapshotWorkflow } from "../manifest";
 import { ensureTaskSandbox, ensureRunCodebaseSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskSandbox, bindTaskRunRoot, removeTaskWorktree, type WorkspaceRef } from "../sandbox";
@@ -210,10 +210,15 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
     extra["requirement"] = requirement ?? "";
   }
 
-  // sandbox.git=true 时反查需求的代码库集合起多库 clone。必须在 createTask 之前，
+  // 是否建 git 沙盒（clone 代码）从 requires.git **派生**（getWorkflowGitSandbox，2026-06-22）——需要代码库
+  // 就一定 clone，不再读单独的 sandbox.git 旋钮。sandboxSpec 保留 wf.sandbox 其它字段（code/template）+
+  // git 用派生值，供下游 ensureRun/ensureTask（内部读 sandboxConfig.git）。
+  const wantsGit = getWorkflowGitSandbox(wf);
+  const sandboxSpec = { ...(wf.sandbox ?? {}), git: wantsGit };
+  // git 沙盒时反查需求的代码库集合起多库 clone。必须在 createTask 之前，
   // 这样能把 clone 的真实路径/分支注入 extra（写进 manifest），供 run 阶段使用。
   let workspaceRefs: WorkspaceRefWithAlias[] = [];
-  if (wf.sandbox?.git) {
+  if (wantsGit) {
     // 单库 fallback id：原始入参 opts（scheduler / routes 传的真值）优先；setup_func 返回的 extra
     // 不一定回传 workspace_id，不能依赖它（这是 worktree 之前从未建成的根因）。
     // 集合（requirement_workspaces）≥1 时以集合为准，fallback 只在集合为空时生效。
@@ -245,14 +250,14 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
       typeof opts.deliver_branch === "string" && opts.deliver_branch.trim()
         ? opts.deliver_branch.trim()
         : deliverBranchName(title, taskId);
-    if (wf.sandbox?.git && workspaceRefs.length > 0) {
+    if (wantsGit && workspaceRefs.length > 0) {
       await ensureRunCodebaseSandbox(
-        taskId, reqLink, wf.sandbox, workspaceRefs, deliverBranch,
+        taskId, reqLink, sandboxSpec, workspaceRefs, deliverBranch,
         { checkoutExisting: opts.checkout_existing_branch === true },
       );
     } else {
       // 非 git 工作流（template / 空目录）或 git 但无 workspace（退化空目录）：legacy 路径
-      ensureTaskSandbox(taskId, workflowName, wf.sandbox, undefined, deliverBranch);
+      ensureTaskSandbox(taskId, workflowName, sandboxSpec, undefined, deliverBranch);
     }
   } catch (e: unknown) {
     console.warn("任务沙盒供给失败：", e instanceof Error ? e.message : e);

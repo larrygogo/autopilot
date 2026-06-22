@@ -420,7 +420,7 @@ export function registerRequirementCommands(program: Command): void {
   req
     .command("set-workspaces <id> [workspace-ids...]")
     .description("设置需求的代码库集合（整体替换；所有库平级、各自交付 PR；审批后冻结，failed 例外）")
-    .option("--none", "清空集合（无库需求：requires.git 为 optional/false 的工作流可走纯文本闭环）")
+    .option("--none", "清空集合（无库需求：requires.git=false 的工作流可走纯文本闭环）")
     .option("--port <port>", "daemon 端口", String(DEFAULT_PORT))
     .action(async (id: string, wsIds: string[], opts: { none?: boolean; port: string }) => {
       // variadic 可选 + --none 显式空集：「忘了传」与「确认无库」必须是两个动作，防误清

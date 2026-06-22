@@ -290,8 +290,8 @@ export const api = {
         description: string;
         source?: "db" | "file";
         derives_from?: string | null;
-        /** 声明层（v2 R5）：git 输入要求（含 sandbox.git 缺省派生） */
-        requires_git?: boolean | "optional";
+        /** 声明层（v2 R5）：git 输入要求（二态，含缺省派生） */
+        requires_git?: boolean;
         /** 声明层（v2 R5）：产出形态（"pr"/"artifacts"…，缺省 = 事实推断） */
         delivers?: string;
       }>
@@ -421,12 +421,9 @@ export const api = {
     meta: {
       label?: string | null;
       description?: string | null;
-      /** 声明层 requires.git：true/false/"optional" 显式；null = 删键回退派生 */
-      requiresGit?: boolean | "optional" | null;
-      /** 声明层 sandbox.git：true 建沙盒；false/null 删键（不建≡缺省） */
-      sandboxGit?: boolean | null;
-      /** 声明层 delivers："pr"/"artifacts"；null = 删键回退事实推断 */
-      delivers?: string | null;
+      /** 声明层 requires.git：true（需要代码库）/ false（不需要）显式；null = 删键回退派生。二态。 */
+      requiresGit?: boolean | null;
+      // 注：sandbox.git（建 git 沙盒）从 requires.git 派生、delivers 从 phase 派生，均不再是 setMeta 输入。
     },
   ) => requestRpc<{ ok: boolean }>("workflows.setMeta", { name, ...meta }),
   reloadWorkflows: () =>

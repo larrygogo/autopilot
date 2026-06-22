@@ -1002,25 +1002,17 @@ function registerWorkflowRpc(): void {
       // 声明层（v2 R5）：requiresGit / sandboxGit / delivers
       if ("requiresGit" in p) {
         const v = p.requiresGit;
-        if (v !== null && v !== true && v !== false && v !== "optional") {
-          throw new RpcError("INVALID_PARAM", "requiresGit 需为 true / false / \"optional\" / null");
+        if (v !== null && v !== true && v !== false) {
+          throw new RpcError("INVALID_PARAM", "requiresGit 需为 true / false / null（optional 已废弃）");
         }
-        meta.requiresGit = v as boolean | "optional" | null;
+        meta.requiresGit = v as boolean | null;
       }
-      if ("sandboxGit" in p) {
-        const v = p.sandboxGit;
-        if (v !== null && typeof v !== "boolean") {
-          throw new RpcError("INVALID_PARAM", "sandboxGit 需为 boolean 或 null");
-        }
-        meta.sandboxGit = v as boolean | null;
-      }
-      // 注：产出形态 delivers 已不再由用户输入——它从工作流的 phase 自动派生（registry
-      // deriveDelivers：有 deliver:pr/artifacts 阶段 → 对应形态）。setMeta 不再接受 delivers 入参。
+      // 注：sandbox.git（建 git 沙盒）从 requires.git 派生、delivers 从 phase 派生，均不再由 setMeta 输入。
       if (
         meta.label === undefined && meta.description === undefined &&
-        meta.requiresGit === undefined && meta.sandboxGit === undefined
+        meta.requiresGit === undefined
       ) {
-        throw new RpcError("INVALID_PARAM", "至少提供 label / description / requiresGit / sandboxGit 之一");
+        throw new RpcError("INVALID_PARAM", "至少提供 label / description / requiresGit 之一");
       }
       if (!registryGetWorkflow(p.name)) throw new RpcError("NOT_FOUND", "Workflow not found");
       const row = getWorkflowFromDb(p.name);

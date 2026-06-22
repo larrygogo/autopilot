@@ -32,7 +32,7 @@ export interface StartFromPromptResult {
  *   - 显式 workspace_id → 用它（其 project）
  *   - 否则取 project（opts.project_id 或兜底 proj-default）的顶层工作区（有就用）
  *   - 无工作区时按 validateWorkflowInput 判定：requires.git=true / delivers:pr 才拒，
- *     requires.git=false/"optional" 的工作流（如 review_loop）无库照样跑
+ *     requires.git=false 的工作流（如 review_loop）无库照样跑（2026-06-22：requires.git 二态，optional 废弃）
  * 拿到（可能为空的）工作区后建需求 → 设 workflow + input_mode → drafting→ready→queued，
  * 由 scheduler 异步起任务（同工作区串行）。
  *
@@ -66,7 +66,7 @@ export async function startTaskFromPrompt(opts: StartFromPromptOpts): Promise<St
   }
 
   // 工作流声明校验：requires.git=true 但无库、或 delivers:pr 但无库 → 拒（人话理由）。
-  // requires.git=false/"optional" 的工作流无库放行。
+  // requires.git=false 的工作流无库放行（二态）。
   const reason = validateWorkflowInput(opts.workflow, workspaceId !== null, {
     crossCheckDelivers: true,
   });

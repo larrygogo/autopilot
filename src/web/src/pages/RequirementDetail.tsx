@@ -433,7 +433,7 @@ export function RequirementDetail() {
   const [traceOpen, setTraceOpen] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [statusLogs, setStatusLogs] = useState<RequirementStatusLog[]>([]);
-  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string; requires_git?: boolean | "optional"; delivers?: string }[]>([]);
+  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string; requires_git?: boolean; delivers?: string }[]>([]);
   const [deliveries, setDeliveries] = useState<RequirementDelivery[]>([]);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
@@ -1770,10 +1770,10 @@ export function RequirementDetail() {
               // drafting = 澄清未开始：先确认工作流 + 代码库（澄清 agent 在其浅 clone 中调查），再显式开始
               if (req.status === "drafting" && !readonly) {
                 // 守卫与 RPC 同口径：代码库集合非空（workspace_id 只是缓存列）；
-                // 所选工作流 requires.git 非 true（"optional"/false）时允许空集确认（v2 R5 无库闭环）
+                // 所选工作流 requires.git 非 true（即 false——二态，optional 已废弃）时允许空集确认（v2 R5 无库闭环）
                 const hasWorkspaces = (req.workspace_ids?.length ?? 0) > 0 || !!req.workspace_id;
                 const wfDecl = workflowOptions.find((w) => w.name === (req.workflow ?? "dev"));
-                const gitOptional = !!wfDecl && wfDecl.requires_git !== undefined && wfDecl.requires_git !== true;
+                const gitNotRequired = !!wfDecl && wfDecl.requires_git !== undefined && wfDecl.requires_git !== true;
                 return (
                   <>
                     {/* 工作流先于代码库确认：requires.git 由所选工作流决定（业务标签 + 内核名叠加） */}
@@ -1800,7 +1800,7 @@ export function RequirementDetail() {
                           </SelectContent>
                         </Select>
                         <span className="font-mono text-[10px] text-muted-foreground">
-                          {gitOptional ? "此工作流不要求代码库" : "此工作流需要代码库"}
+                          {gitNotRequired ? "此工作流不要求代码库" : "此工作流需要代码库"}
                           {wfDecl?.delivers ? ` · 交付 ${wfDecl.delivers === "pr" ? "PR" : wfDecl.delivers}` : ""}
                         </span>
                       </div>
@@ -1809,21 +1809,21 @@ export function RequirementDetail() {
                       requirement={req}
                       workspaces={projectCodebases}
                       disabled={actionBusy}
-                      allowEmpty={gitOptional}
+                      allowEmpty={gitNotRequired}
                       emptyHint={`工作流「${wfDecl?.label ?? wfDecl?.name ?? req.workflow ?? "dev"}」不要求代码库`}
                       onChanged={reloadWorkspaces}
                     />
                     <Button
                       className="w-full"
                       onClick={startClarify}
-                      disabled={actionBusy || (!hasWorkspaces && !gitOptional)}
-                      title={!hasWorkspaces && !gitOptional ? "请先选一个代码库，AI 澄清时要读它" : undefined}
+                      disabled={actionBusy || (!hasWorkspaces && !gitNotRequired)}
+                      title={!hasWorkspaces && !gitNotRequired ? "请先选一个代码库，AI 澄清时要读它" : undefined}
                     >
                       {actionBusy
                         ? "处理中…"
                         : hasWorkspaces
                           ? "确认代码库，开始 AI 澄清 →"
-                          : gitOptional
+                          : gitNotRequired
                             ? "确认无代码库，开始 AI 澄清 →"
                             : "确认代码库，开始 AI 澄清 →"}
                     </Button>

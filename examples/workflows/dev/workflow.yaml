@@ -5,13 +5,12 @@ description: "完整开发流程（设计 → 评审 → 开发 → 代码审查
 # 无 setup_func / workflow.ts —— 框架默认补 title/requirement（factory 已自算，setup_dev_task 纯冗余已删）。
 # dev 现已完全零 ts：四个 agent 阶段纯提示词、submit_pr 走框架内置 PR 交付器。
 
-# 声明层（v2 R5）：产出形态 delivers **不用写** —— 框架从下方 submit_pr 阶段的 `deliver: pr` 自动派生成 "pr"
-#（enqueue 预检「无库 × delivers:pr」交叉拒；运行时仍以事实为准）。
-# requires.git 不写 —— 缺省派生自 sandbox.git=true（必须有代码库）。
-
-# 独立 clone 沙盒：把需求绑定的 workspace 仓库 clone 到任务运行目录，run 阶段全程在副本里
-# 跑 git，用户源码仓库零痕迹；交付时 push 规范分支 feat/<需求> + PR。
-sandbox:
+# 声明层（v2 R5）：
+# - requires.git: true = 需要代码库（一定 clone 到任务目录，run 阶段在副本里跑 git、交付 feat/ 分支 + PR；
+#   用户源码仓库零痕迹）。是否建 git 沙盒从这个二态派生（2026-06-22），不再单独写 sandbox.git。
+# - 产出形态 delivers **不用写** —— 框架从下方 submit_pr 阶段的 `deliver: pr` 自动派生成 "pr"
+#   （enqueue 预检「无库 × delivers:pr」交叉拒；运行时仍以事实为准）。
+requires:
   git: true
 
 # 执行模式（2026-06 起）：agent 阶段全部「纯提示词」——直接在 yaml 写 prompt，

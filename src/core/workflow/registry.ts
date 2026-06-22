@@ -100,8 +100,8 @@ export interface PhaseSandboxSpec {
  * 枚举值的业务语义（'pr'/'artifacts'、闸门拦截）全在 daemon，core 零业务知识。
  */
 export interface WorkflowRequiresSpec {
-  /** true=必须有代码库；false=不要求；"optional"=可有可无（有就 clone 作参考） */
-  git?: boolean | "optional";
+  /** true=需要代码库（一定 clone）；false=不需要（不 clone）。2026-06-22：optional 第三态废弃，只剩二态。 */
+  git?: boolean;
 }
 
 export interface WorkflowDefinition {
@@ -1016,6 +1016,10 @@ function composeNativeDbWorkflow(
   doc["name"] = name;
   doc["description"] = description;
   doc["declarative"] = true;
+  // 声明层归一（与 file-load 路径一致，2026-06-22 补——此前 DB native 跳过这步）：requires.git 二态归一
+  // ——删废弃的 "optional" 等非 true/false 值 → 回退派生自 sandbox.git；delivers 形状同理。否则改造前
+  // import 的含 requires.git:"optional" 的 spec_json 会原样幸存、运行时静默翻成「必须有库」拒掉无库需求。
+  normalizeDeclarations(doc, `<native:${name}>`);
   return buildWorkflowDefinition(doc, null);
 }
 
@@ -1205,8 +1209,8 @@ export function listWorkflows(): {
   name: string;
   label?: string;
   description: string;
-  /** 声明层（v2 R5）：git 输入要求（含缺省派生），客户端据此调整代码库确认 UI */
-  requires_git: boolean | "optional";
+  /** 声明层（v2 R5）：git 输入要求（二态，含缺省派生），客户端据此调整代码库确认 UI */
+  requires_git: boolean;
   /** 声明层（v2 R5）：产出形态字符串透传（"pr"/"artifacts"…），缺省 undefined = 事实推断 */
   delivers?: string;
 }[] {
@@ -1490,8 +1494,9 @@ function normalizeDeclarations(wfDef: Record<string, unknown>, yamlPath: string)
       delete wfDef.requires;
     } else {
       const r = wfDef.requires as Record<string, unknown>;
-      if ("git" in r && r.git !== undefined && r.git !== true && r.git !== false && r.git !== "optional") {
-        log.warn("workflow.yaml %s：`requires.git` 应为 true/false/\"optional\"，当前 %o 已忽略（回退派生自 sandbox.git）",
+      // requires.git 二态（2026-06-22：optional 废弃）。非 true/false 删除回退派生自 sandbox.git。
+      if ("git" in r && r.git !== undefined && r.git !== true && r.git !== false) {
+        log.warn("workflow.yaml %s：`requires.git` 应为 true/false（optional 已废弃），当前 %o 已忽略（回退派生自 sandbox.git）",
           yamlPath, r.git);
         delete r.git;
       }
@@ -1501,22 +1506,31 @@ function normalizeDeclarations(wfDef: Record<string, unknown>, yamlPath: string)
     log.warn("workflow.yaml %s：`delivers:` 应为字符串，当前 %o 已忽略（回退事实推断）", yamlPath, wfDef.delivers);
     delete wfDef.delivers;
   }
-  const requiresGit = (wfDef.requires as WorkflowRequiresSpec | undefined)?.git;
-  const sandboxGit = (wfDef.sandbox as WorkflowSandboxSpec | undefined)?.git;
-  if (requiresGit === true && sandboxGit !== true) {
-    log.warn("workflow.yaml %s：requires.git=true 但 sandbox.git 缺失——任务不会建代码沙盒，请补 `sandbox: {git: true}`",
-      yamlPath);
-  }
+  // 注：原「requires.git=true 但 sandbox.git 缺失 → warn」的 lint 已删——sandbox.git 现在从 requires.git
+  // 派生（getWorkflowGitSandbox），需要代码库就一定建 git 沙盒，不存在「声明要 git 却没沙盒」的漏写。
 }
 
 /**
- * 工作流的 git 输入要求（声明层缺省派生，纯形状推导无业务语义）：
- * requires.git 显式声明优先；缺省派生 = sandbox.git ?? false（老工作流零感知）。
+ * 工作流的 git 输入要求（声明层缺省派生，纯形状推导无业务语义）：「需要代码库」**二态**（需要 / 不需要）。
+ * requires.git 显式（true/false）优先；缺省回退派生自 sandbox.git（兼容只写 sandbox.git 的老工作流）。
+ * （2026-06-22：optional 第三态废弃——只剩 需要 / 不需要。）
  */
-export function getWorkflowGitRequirement(wf: WorkflowDefinition): boolean | "optional" {
+export function getWorkflowGitRequirement(wf: WorkflowDefinition): boolean {
   const g = wf.requires?.git;
-  if (g === true || g === false || g === "optional") return g;
+  if (g === true || g === false) return g;
   return wf.sandbox?.git === true;
+}
+
+/**
+ * 工作流是否建 git 沙盒（clone 代码到任务目录）——**从 requires.git 派生，不再是单独旋钮**
+ * （2026-06-22：与 delivers 从 phase 派生同构——「建 git 沙盒」是「需要代码库」的实现，只要需要代码库
+ * 就一定 clone）。显式 sandbox.git（true/false）优先（兼容只写 sandbox.git 的老工作流）；
+ * 缺省 = getWorkflowGitRequirement（需要 → clone、不需要 → 不 clone）。task-factory 读它决定建不建 git 沙盒。
+ */
+export function getWorkflowGitSandbox(wf: WorkflowDefinition): boolean {
+  const explicit = wf.sandbox?.git;
+  if (typeof explicit === "boolean") return explicit;
+  return getWorkflowGitRequirement(wf);
 }
 
 function renderWorkflowYamlTemplate(name: string, description: string | undefined, firstPhase: string): string {

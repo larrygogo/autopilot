@@ -144,17 +144,13 @@ export interface WorkflowMetaInput {
   /** 描述；null / 空串 = 删除该字段 */
   description?: string | null;
   /**
-   * 声明层（v2 R5）输入闸门 requires.git：true（必须）/ "optional"（可选）/ false（不需要）
-   * 显式写键；null = 删键（回退缺省派生自 sandbox.git）。undefined = 不动。
+   * 声明层输入闸门 requires.git：true（需要代码库）/ false（不需要）显式写键；null = 删键
+   * （回退缺省派生自 sandbox.git）。undefined = 不动。（2026-06-22：optional 第三态废弃，二态。）
    */
-  requiresGit?: boolean | "optional" | null;
-  /**
-   * 声明层执行机制 sandbox.git：true = 建 git 沙盒（写键）；false / null = 不建（删键，
-   * 「不建」≡ 缺省，删键保持 yaml 干净、老副本零感知）。undefined = 不动。
-   */
-  sandboxGit?: boolean | null;
-  // 注：产出形态 delivers 不再由 meta 编辑——它从工作流的 phase 自动派生（registry deriveDelivers：
-  // 有 deliver:pr/artifacts 阶段 → 对应形态），不是用户输入，故 WorkflowMetaInput 不含 delivers。
+  requiresGit?: boolean | null;
+  // 注：① sandbox.git（建 git 沙盒）不再由 meta 编辑——它从 requires.git 派生（registry
+  //   getWorkflowGitSandbox：需要代码库 → 一定 clone）。② 产出形态 delivers 从 phase 派生
+  //   （deriveDelivers）。两者都不是用户输入，故 WorkflowMetaInput 只剩 label/description/requiresGit。
 }
 
 /**
@@ -189,16 +185,8 @@ export function patchWorkflowMetaYaml(raw: string, meta: WorkflowMetaInput): str
       setNestedSafe(doc, "requires", "git", meta.requiresGit);
     }
   }
-  // sandbox.git：仅 true 写键；false / null 删键（不建 ≡ 缺省）
-  if (meta.sandboxGit !== undefined) {
-    if (meta.sandboxGit === true) {
-      setNestedSafe(doc, "sandbox", "git", true);
-    } else {
-      deleteNestedSafe(doc, "sandbox", "git");
-      pruneEmptyMap(doc, "sandbox");
-    }
-  }
-  // 注：delivers 不再写——产出形态从 phase 自动派生（见 registry deriveDelivers），不是 meta 字段。
+  // 注：① sandbox.git 不再写——建 git 沙盒从 requires.git 派生（getWorkflowGitSandbox），不是 meta 字段；
+  //   ② delivers 不再写——产出形态从 phase 派生（deriveDelivers）。patchWorkflowMetaYaml 只改 requires.git。
   return doc.toString();
 }
 

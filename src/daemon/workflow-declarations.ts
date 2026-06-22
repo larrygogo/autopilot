@@ -7,7 +7,8 @@
  *
  * 闸门按 `req.workflow ?? "dev"` 的**当前所选工作流**动态校验：
  *   - requires.git === true       → 必须有代码库（集合非空）
- *   - "optional" / false          → 放行（集合空时确认 input_mode='none'，走 clarifier 纯文本模式）
+ *   - false                       → 放行（集合空时确认 input_mode='none'，走 clarifier 纯文本模式）
+ *   （2026-06-22：「需要代码库」二态，optional 第三态废弃）
  *   - 交叉校验（enqueue）         → 集合空 × delivers==='pr' = 拒（PR 无处可开）
  * 工作流未注册（老 dev 副本缺失等）→ 保守按 requires.git=true（与改造前行为一致）。
  */
@@ -18,8 +19,8 @@ export type DeliveryKind = "pr" | "artifacts" | "auto";
 
 export interface WorkflowDecl {
   name: string;
-  /** git 输入要求（含 sandbox.git 缺省派生）；工作流未注册时保守 true */
-  requiresGit: boolean | "optional";
+  /** git 输入要求（二态，含缺省派生）；工作流未注册时保守 true */
+  requiresGit: boolean;
   /** 产出形态；非法/缺省一律 "auto"（事实推断，运行时以 hasPr/hasDeliveries 为准） */
   delivers: DeliveryKind;
   /** 工作流是否真实注册（未注册时上面两项是保守缺省） */

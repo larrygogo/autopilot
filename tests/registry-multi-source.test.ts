@@ -7,7 +7,7 @@ import { up as migrate001 } from "../src/migrations/001-baseline";
 import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { _setDbForTest } from "../src/core/db";
-import { _clearRegistry, discover, listWorkflows, getWorkflow } from "../src/core/workflow/registry";
+import { _clearRegistry, discover, listWorkflows, getWorkflow, getWorkflowGitRequirement } from "../src/core/workflow/registry";
 import { createDbWorkflow, createNativeDbWorkflow, updateDbWorkflow, getWorkflowFromDb, deleteDbWorkflow, createTemplateDbWorkflow } from "../src/core/workflow/workflows";
 
 describe("registry 多源加载", () => {
@@ -393,6 +393,22 @@ phases:
     createNativeDbWorkflow({ name: "nat_x", description: "", spec_json: JSON.stringify({ name: "nat_x", phases: [{ name: "a", prompt: "x" }] }) });
     deleteDbWorkflow("nat_x");
     expect(getWorkflowFromDb("nat_x")).toBeNull();
+  });
+
+  it("DB native 加载也归一 requires.git（删废弃 optional，与 file-load 路径一致）", async () => {
+    // 改造前 import 的含 optional 的 spec_json（normalizeSpecDoc 不碰 requires，optional 幸存到 DB 行）；
+    // composeNativeDbWorkflow 现在跑 normalizeDeclarations 归一（2026-06-22 二态化补口，对抗审查发现的缺口）。
+    createNativeDbWorkflow({
+      name: "nat_opt",
+      description: "",
+      spec_json: JSON.stringify({ name: "nat_opt", requires: { git: "optional" }, sandbox: { git: false }, phases: [{ name: "a", prompt: "x" }] }),
+    });
+    _clearRegistry();
+    await discover();
+    const wf = getWorkflow("nat_opt")!;
+    expect(wf).not.toBeNull();
+    expect(wf.requires?.git).toBeUndefined(); // optional 被 normalizeDeclarations 删（二态化）
+    expect(getWorkflowGitRequirement(wf)).toBe(false); // 回退派生自 sandbox.git=false
   });
 
   it("L6：含 workflow.ts 的模板 → seedTemplateWorkflow 拒种（has-ts，避免幽灵死行）", async () => {

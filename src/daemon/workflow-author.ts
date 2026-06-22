@@ -60,11 +60,12 @@ phases:
          架构方向正确、核心需求有覆盖即 pass；仅架构性硬伤才 reject。
    \`\`\`
 
-4. **交付 PR（deliver: pr）**：要把代码改动 commit/push 并开 GitHub PR，开 \`sandbox.git: true\`，
-   加一个 \`deliver: pr\` 阶段即可——**不用写顶层 delivers，框架从这个阶段自动派生**：
+4. **交付 PR（deliver: pr）**：要把代码改动 commit/push 并开 GitHub PR，写 \`requires.git: true\`（需要代码库），
+   加一个 \`deliver: pr\` 阶段即可——**不用写顶层 delivers（框架从这个阶段派生），也不用写 sandbox.git
+   （是否建 git 沙盒从 requires.git 派生——需要代码库就一定 clone）**：
    \`\`\`yaml
-   sandbox:
-     git: true              # 产 PR 必须有 git 沙盒
+   requires:
+     git: true              # 需要代码库（一定 clone 到任务目录供改代码）；产 PR 必备
    phases:
      # ...开发阶段...
      - name: submit_pr
