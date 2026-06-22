@@ -433,7 +433,7 @@ export function RequirementDetail() {
   const [traceOpen, setTraceOpen] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [statusLogs, setStatusLogs] = useState<RequirementStatusLog[]>([]);
-  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string; requires_git?: boolean; delivers?: string }[]>([]);
+  const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string; requires_git?: boolean }[]>([]);
   const [deliveries, setDeliveries] = useState<RequirementDelivery[]>([]);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
@@ -617,7 +617,7 @@ export function RequirementDetail() {
   // 工作流选项（编辑期下拉用），一次性拉取
   useEffect(() => {
     api.listWorkflows()
-      .then((ws) => setWorkflowOptions(ws.map((w) => ({ name: w.name, label: w.label, description: w.description ?? "", requires_git: w.requires_git, delivers: w.delivers }))))
+      .then((ws) => setWorkflowOptions(ws.map((w) => ({ name: w.name, label: w.label, description: w.description ?? "", requires_git: w.requires_git }))))
       .catch(() => { /* 拉不到时下拉退化为只显示当前值 */ });
   }, []);
 
@@ -1801,7 +1801,6 @@ export function RequirementDetail() {
                         </Select>
                         <span className="font-mono text-[10px] text-muted-foreground">
                           {gitNotRequired ? "此工作流不要求代码库" : "此工作流需要代码库"}
-                          {wfDecl?.delivers ? ` · 交付 ${wfDecl.delivers === "pr" ? "PR" : wfDecl.delivers}` : ""}
                         </span>
                       </div>
                     </Card>

@@ -20,10 +20,9 @@ import {
 
 // ── 声明层（v2 R5）UI 代码 ↔ yaml 值映射 ──────────────────────────
 // requires.git 在表单里用稳定的 string 代码（二态：需要 / 不需要），读 detail 时派生、提交时映射回 setMeta。
-// sandbox.git（建 git 沙盒）与 delivers（产出形态）不再是用户输入——前者从 requires.git 派生（需要就一定 clone）、
-// 后者从 phase 派生，编辑器只读展示。
+// 注：sandbox.git（建 git 沙盒）从 requires.git 派生；**产出形态 delivers 不在工作流编辑/展示 UI 露出**
+// ——它是 phase 结构（deliver:pr/artifacts 阶段）的隐含结果 + workflow-author 给 AI 的声明式接口，不是用户概念。
 type ReqGitCode = "true" | "false";
-type DeliversCode = "auto" | "pr" | "artifacts";
 
 // requires.git 二态：true=需要、false=不需要。requires.git 显式优先；未显式则派生自 sandbox.git
 // （老工作流只写了 sandbox.git 的兼容路径，与后端 getWorkflowGitRequirement 一致）。
@@ -33,31 +32,15 @@ function readReqGit(detail: WorkflowDetailData | null): ReqGitCode {
   if (g === false) return "false";
   return (detail?.sandbox as { git?: unknown } | undefined)?.git === true ? "true" : "false";
 }
-function readDelivers(detail: WorkflowDetailData | null): DeliversCode {
-  const d = detail?.delivers;
-  return d === "pr" ? "pr" : d === "artifacts" ? "artifacts" : "auto";
-}
 // 只读展示用人话短标签
 const REQ_GIT_TEXT: Record<ReqGitCode, string> = {
   true: "需要",
   false: "不需要",
 };
-const DELIVERS_TEXT: Record<DeliversCode, string> = {
-  auto: "自动推断",
-  pr: "交付 PR",
-  artifacts: "文件产物",
-};
 
-/**
- * 把声明层拼成一句人话总结。需要代码库（二态）→ 一定克隆；产出形态从 phase 派生。
- */
+/** 把声明层拼成一句人话总结。只讲「需要代码库」（二态）——产出形态不在工作流声明 UI 展示。 */
 function declarationSummary(detail: WorkflowDetailData | null): string {
-  const reqGit = readReqGit(detail);
-  const delivers = readDelivers(detail);
-  const libPart = reqGit === "true" ? "需要代码库（会克隆下来）" : "不需要代码库";
-  const deliverPart =
-    delivers === "pr" ? "交付 PR" : delivers === "artifacts" ? "交付文件产物" : "按运行结果定交付";
-  return `${libPart} · ${deliverPart}`;
+  return readReqGit(detail) === "true" ? "需要代码库（会克隆下来）" : "不需要代码库";
 }
 
 
@@ -264,10 +247,9 @@ export function WorkflowDetail() {
                 </Button>
               </div>
               <DescList
-                columns={2}
+                columns={1}
                 items={[
                   { label: "需要代码库", value: REQ_GIT_TEXT[readReqGit(detail)] },
-                  { label: "此工作流交付", value: DELIVERS_TEXT[readDelivers(detail)] },
                 ]}
               />
             </div>
@@ -363,13 +345,8 @@ export function WorkflowDetail() {
             </SelectContent>
           </Select>
         </FormField>
-
-        {/* 产出形态 delivers 不再让用户选——它从工作流的 phase 自动派生（有 deliver:pr/artifacts 阶段
-            → 对应形态）。当前派生值在「工作流信息」只读展示（此工作流交付）。 */}
-        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">此工作流交付：{DELIVERS_TEXT[readDelivers(detail)]}</span>
-          <span className="ml-1">——从交付阶段自动判定（有 deliver:pr / deliver:artifacts 阶段），不用手选；run 终结以事实为准。</span>
-        </div>
+        {/* 注：产出形态（交付方式）不在此编辑——它是 phase 结构（deliver:pr/artifacts 阶段）的隐含结果 +
+            workflow-author 给 AI 生成工作流的声明式接口，不是用户在「编辑声明」时的概念。 */}
       </FormDialog>
 
       <ConfirmDialog
