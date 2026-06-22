@@ -15,6 +15,21 @@ function setNestedSafe(doc: ReturnType<typeof parseDocument>, parentKey: string,
   }
   doc.setIn([parentKey, childKey], value);
 }
+
+/**
+ * 删嵌套键 doc[parentKey][childKey]，容错 parent 不是 map 或**根本不存在**：
+ * yaml 的 `deleteIn([parentKey, childKey])` 在 parentKey 缺失 / 非 collection 时也抛
+ * 「Expected YAML collection at parentKey」（不是无声 no-op）。这是用户「跟随默认（requiresGit=null）」
+ * 保存崩的真凶——dev 根本没 requires 键，删它的 git 子键就炸。
+ * 这里：parent 是 map → 删子键；否则（缺失 / 非 map）→ 删整个 parent 键（缺失则无声 no-op）。
+ */
+function deleteNestedSafe(doc: ReturnType<typeof parseDocument>, parentKey: string, childKey: string): void {
+  if (isMap(doc.getIn([parentKey], true))) {
+    doc.deleteIn([parentKey, childKey]);
+  } else {
+    doc.deleteIn([parentKey]); // 缺失 → no-op（返回 false 不抛）；非 map 坏状态 → 整删
+  }
+}
 import {
   getWorkflowYamlPath,
   isParallelInput,
@@ -171,7 +186,7 @@ export function patchWorkflowMetaYaml(raw: string, meta: WorkflowMetaInput): str
   // requires.git：显式值写键；null 删键 + 清空壳
   if (meta.requiresGit !== undefined) {
     if (meta.requiresGit === null) {
-      doc.deleteIn(["requires", "git"]);
+      deleteNestedSafe(doc, "requires", "git");
       pruneEmptyMap(doc, "requires");
     } else {
       setNestedSafe(doc, "requires", "git", meta.requiresGit);
@@ -182,7 +197,7 @@ export function patchWorkflowMetaYaml(raw: string, meta: WorkflowMetaInput): str
     if (meta.sandboxGit === true) {
       setNestedSafe(doc, "sandbox", "git", true);
     } else {
-      doc.deleteIn(["sandbox", "git"]);
+      deleteNestedSafe(doc, "sandbox", "git");
       pruneEmptyMap(doc, "sandbox");
     }
   }

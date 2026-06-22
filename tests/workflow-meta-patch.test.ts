@@ -77,6 +77,26 @@ phases:
     expect(out).toMatch(/sandbox:\s*\n\s+git:\s*true/);
   });
 
+  it("容错：删 requires.git（requiresGit=null）时 requires 缺失 / 非 map 也不抛", () => {
+    // 真实根因：表单「跟随默认」发 requiresGit=null → 走 deleteIn 分支。
+    // dev 根本没有 requires 键，deleteIn(['requires','git']) 同样抛「Expected YAML collection」。
+    // ① requires 完全缺失（dev 的真实形态）
+    const noReq = "name: d\nsandbox:\n  git: true\nphases:\n  - name: a\n";
+    expect(() => patchWorkflowMetaYaml(noReq, { requiresGit: null })).not.toThrow();
+    expect(patchWorkflowMetaYaml(noReq, { requiresGit: null })).not.toContain("requires:");
+    // ② requires 是 null 标量 / 字符串坏状态 → 删键不抛、整段清掉
+    for (const bad of ["name: d\nrequires:\nphases:\n  - name: a\n", "name: d\nrequires: optional\nphases:\n  - name: a\n"]) {
+      expect(() => patchWorkflowMetaYaml(bad, { requiresGit: null })).not.toThrow();
+      expect(patchWorkflowMetaYaml(bad, { requiresGit: null })).not.toContain("requires:");
+    }
+    // ③ sandbox 同理（sandboxGit=false/null 删键）
+    expect(() => patchWorkflowMetaYaml("name: d\nsandbox: weird\nphases:\n  - name: a\n", { sandboxGit: false })).not.toThrow();
+    // ④ 用户的完整表单组合（跟随默认 + 建沙盒 + 文件产出）一次过
+    const full = patchWorkflowMetaYaml(noReq, { requiresGit: null, sandboxGit: true, delivers: "artifacts" });
+    expect(full).toMatch(/delivers:\s*artifacts/);
+    expect(full).toMatch(/git:\s*true/);
+  });
+
   it("undefined 字段完全不动 yaml", () => {
     const out = patchWorkflowMetaYaml(BASE, { label: "新名" });
     expect(out).not.toContain("requires:");
