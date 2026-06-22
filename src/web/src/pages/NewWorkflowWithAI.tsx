@@ -55,7 +55,6 @@ export function NewWorkflowWithAI() {
       const result = await api.authorWorkflow({
         description: prompt.trim(),
         prior_yaml: includePrior ? authored?.yaml : undefined,
-        prior_ts: includePrior ? authored?.ts : undefined,
       });
       setAuthored(result);
       if (!editName) setEditName(result.name);
@@ -86,7 +85,6 @@ export function NewWorkflowWithAI() {
       await api.saveAuthoredWorkflow({
         name: created,
         yaml: authored.yaml,
-        ts: authored.ts,
       });
       toast.success(`已创建工作流 ${created}，进入编辑`);
       // 落地后直接进详情页，用全功能编辑器补 agent / prompt / 驳回 / ts 等字段
@@ -99,7 +97,7 @@ export function NewWorkflowWithAI() {
   }
 
   return (
-    <PageShell width="form" hero={{ title: "AI 生成工作流", subtitle: "描述你想要的流程，AI 生成 yaml + ts；可继续追问调整" }}>
+    <PageShell width="form" hero={{ title: "AI 生成工作流", subtitle: "描述你想要的流程，AI 生成声明式工作流（零代码）；可继续追问调整" }}>
 
       {/* 描述区 */}
       <Card className="mb-4 p-4">
@@ -188,8 +186,8 @@ export function NewWorkflowWithAI() {
             </div>
           </Card>
 
-          {/* YAML/TS 直接编辑（高级）— 给"我要精确改一个字段，不想 AI 再跑一轮"的用户出口；
-              改完 PhasePipeline 会从 authored.yaml 实时 re-parse */}
+          {/* YAML 直接编辑（高级）— 给"我要精确改一个字段，不想 AI 再跑一轮"的用户出口；
+              改完 PhasePipeline 会从 authored.yaml 实时 re-parse。工作流是纯声明式，无 ts。 */}
           <Card className="mb-4" ref={editorAnchorRef as unknown as React.RefObject<HTMLDivElement>}>
             <button
               type="button"
@@ -199,7 +197,7 @@ export function NewWorkflowWithAI() {
             >
               {editorOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
               <span className="font-mono text-[10px] text-muted-foreground">
-                直接编辑 YAML / TS · 高级
+                直接编辑 YAML · 高级
               </span>
               <span className="ml-2 font-mono text-[10px] text-muted-foreground/70">
                 改完实时刷新上方预览
@@ -216,19 +214,6 @@ export function NewWorkflowWithAI() {
                     value={authored.yaml}
                     onChange={(e) => setAuthored({ ...authored, yaml: e.target.value })}
                     rows={Math.min(20, Math.max(8, authored.yaml.split("\n").length + 1))}
-                    className="font-mono text-xs"
-                    disabled={saving || generating}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="edit-ts" className="font-mono text-[10px] ">
-                    workflow.ts <span className="ml-1 text-muted-foreground">（零代码模式留空）</span>
-                  </Label>
-                  <Textarea
-                    id="edit-ts"
-                    value={authored.ts}
-                    onChange={(e) => setAuthored({ ...authored, ts: e.target.value })}
-                    rows={Math.min(20, Math.max(4, authored.ts.split("\n").length + 1))}
                     className="font-mono text-xs"
                     disabled={saving || generating}
                   />

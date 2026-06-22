@@ -346,10 +346,10 @@ export const api = {
       { method: "POST", body: JSON.stringify({ dir }) },
     ),
   // [WS-RPC] workflows.author（AI 长任务，给 5min 超时）
-  authorWorkflow: (body: { description: string; prior_yaml?: string; prior_ts?: string }) =>
+  authorWorkflow: (body: { description: string; prior_yaml?: string }) =>
     requestRpc<AuthoredWorkflow>("workflows.author", body, { timeoutMs: 300_000 }),
-  // [WS-RPC] workflows.saveAuthored
-  saveAuthoredWorkflow: (body: { name: string; yaml: string; ts: string }) =>
+  // [WS-RPC] workflows.saveAuthored（落 native DB，零 ts）
+  saveAuthoredWorkflow: (body: { name: string; yaml: string }) =>
     requestRpc<{ ok: boolean; name: string }>("workflows.saveAuthored", body),
   // [WS-RPC] workflows.delete
   deleteWorkflow: (name: string) =>
@@ -930,7 +930,6 @@ export interface AuthoredWorkflow {
   name: string;
   description: string;
   yaml: string;
-  ts: string;
   warnings: string[];
 }
 

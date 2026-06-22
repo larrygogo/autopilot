@@ -921,7 +921,7 @@ function registerWorkflowRpc(): void {
 
   registerRpcMethod({
     method: "workflows.author",
-    description: "AI 生成 workflow.yaml + ts（不落盘，返回预览）",
+    description: "AI 生成声明式 workflow.yaml（零 ts，不落盘，返回预览）",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.description !== "string" || !p.description.trim()) {
@@ -930,28 +930,27 @@ function registerWorkflowRpc(): void {
       return await runWorkflowAuthor({
         description: p.description,
         prior_yaml: typeof p.prior_yaml === "string" ? p.prior_yaml : undefined,
-        prior_ts: typeof p.prior_ts === "string" ? p.prior_ts : undefined,
       });
     },
   });
 
   registerRpcMethod({
     method: "workflows.saveAuthored",
-    description: "把 AI 生成的 workflow 落盘 + reload + emit",
+    description: "把 AI 生成的声明式 workflow 落 DB（native）+ reload + emit",
     handler: async (params) => {
       const p = asObj(params);
-      if (typeof p.name !== "string" || !p.name || typeof p.yaml !== "string" || typeof p.ts !== "string") {
-        throw new RpcError("INVALID_PARAM", "需要 name + yaml + ts");
+      if (typeof p.name !== "string" || !p.name || typeof p.yaml !== "string") {
+        throw new RpcError("INVALID_PARAM", "需要 name + yaml");
       }
       try {
-        saveAuthoredWf(p.name, p.yaml, p.ts);
+        saveAuthoredWf(p.name, p.yaml);
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
         return { ok: true, name: p.name };
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        const code = msg.includes("already exists") ? "ALREADY_EXISTS"
-          : msg.includes("只允许") ? "INVALID_NAME"
+        const code = msg.includes("已存在") || msg.includes("already exists") ? "ALREADY_EXISTS"
+          : msg.includes("只允许") || msg.includes("name") ? "INVALID_NAME"
           : "SAVE_FAILED";
         throw new RpcError(code, msg);
       }
