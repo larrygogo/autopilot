@@ -230,9 +230,9 @@ function FileRow({ reqId, round, file, name, indentStyle }: { reqId: string; rou
   const [open, setOpen] = useState(false);
   const [text, setText] = useState<string | null>(null);
 
-  // md / text 展开时 fetch 文本（download 通道，attachment 不影响 fetch 读 body）
+  // md / text / html 源码 展开时 fetch 文本（download 通道，attachment 不影响 fetch 读 body）
   useEffect(() => {
-    if (!open || (kind !== "markdown" && kind !== "text") || text !== null) return;
+    if (!open || (kind !== "markdown" && kind !== "text" && kind !== "html") || text !== null) return;
     let cancelled = false;
     fetch(downloadUrl).then((r) => r.text()).then((t) => { if (!cancelled) setText(t); }).catch(() => { if (!cancelled) setText("（读取失败）"); });
     return () => { cancelled = true; };
@@ -255,14 +255,14 @@ function FileRow({ reqId, round, file, name, indentStyle }: { reqId: string; rou
           </span>
         )}
         <span className="shrink-0 text-muted-foreground">{fmtSize(file.size)}</span>
-        {/* 动作 */}
-        {(kind === "image" || kind === "markdown" || kind === "text") && (
+        {/* 动作：html 既能看源码（内联）又能打开渲染（隔离标签） */}
+        {(kind === "image" || kind === "markdown" || kind === "text" || kind === "html") && (
           <button type="button" onClick={() => setOpen((v) => !v)} className="shrink-0 text-accent hover:underline">
-            {open ? "收起" : "预览"}
+            {open ? "收起" : kind === "html" ? "源码" : "预览"}
           </button>
         )}
         {(kind === "image" || kind === "html") && (
-          <a href={previewUrl} target="_blank" rel="noreferrer noopener" className="inline-flex shrink-0 items-center gap-0.5 text-accent hover:underline" title={kind === "html" ? "在隔离新标签打开 demo" : "新标签看原图"}>
+          <a href={previewUrl} target="_blank" rel="noreferrer noopener" className="inline-flex shrink-0 items-center gap-0.5 text-accent hover:underline" title={kind === "html" ? "在隔离新标签打开渲染后的 demo" : "新标签看原图"}>
             <ExternalLink className="h-3 w-3" />{kind === "html" ? "打开" : "原图"}
           </a>
         )}
@@ -278,7 +278,7 @@ function FileRow({ reqId, round, file, name, indentStyle }: { reqId: string; rou
             </div>
           )}
           {kind === "markdown" && (text === null ? <SkeletonRows count={3} /> : <MarkdownView content={text} />)}
-          {kind === "text" && (text === null ? <SkeletonRows count={3} /> : <CodeViewer code={text} filename={file.path} />)}
+          {(kind === "text" || kind === "html") && (text === null ? <SkeletonRows count={3} /> : <CodeViewer code={text} filename={file.path} />)}
         </div>
       )}
     </li>
