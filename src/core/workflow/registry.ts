@@ -1138,6 +1138,12 @@ export async function discover(): Promise<void> {
     }
     return;
   }
+  // 两遍：先注册自包含工作流（file / native / template），再处理寄生 base 的 derived 行。
+  // 单遍时若 derived 行字母序排在其 base 之前，base 尚未 register → 解析失败；两遍消除这个顺序依赖。
+  // 更关键：derived 的 base 既可能是 file（fileDefs），也可能是「049 把内置模板转 native 后」的 native 行
+  //（在 _registry 而非 fileDefs）——第一遍把 native base 注册进 _registry，第二遍据此回退解析，
+  // 避免 dev/ad-hoc 转 native 后派生自它们的存量 derived 工作流静默掉出注册表。
+  const derivedRows: typeof rows = [];
   for (const row of rows) {
     if (row.source === "file") {
       const def = fileDefs.get(row.name);
@@ -1161,27 +1167,31 @@ export async function discover(): Promise<void> {
         log.error("加载 native 工作流 %s 失败：%s", row.name, e instanceof Error ? e.message : String(e));
       }
     } else {
-      // 派生 DB 工作流（kind=derived）：寄生 file base
-      const base = fileDefs.get(row.derives_from!);
-      if (!base) {
-        log.error(
-          "DB 工作流 %s derives_from %s 不存在或未加载成功，跳过",
-          row.name,
-          row.derives_from
-        );
-        continue;
-      }
-      try {
-        const wf = composeDbWorkflow(row.name, row.description, row.yaml_content, base);
-        register(wf);
-        log.debug("注册 db 工作流：%s（派生自 %s）", row.name, row.derives_from);
-      } catch (e: unknown) {
-        log.error(
-          "加载 DB 工作流 %s 失败：%s",
-          row.name,
-          e instanceof Error ? e.message : String(e)
-        );
-      }
+      derivedRows.push(row); // 推迟到第二遍，确保 base（file 或 native）已注册
+    }
+  }
+  for (const row of derivedRows) {
+    // 派生 DB 工作流（kind=derived）：base 优先 file（fileDefs），回退已注册的 native/file（_registry）。
+    // 049 把 dev/ad-hoc 转 native 后，派生自它们的 derived 行靠这条回退继续解析，不再静默丢失。
+    const base = fileDefs.get(row.derives_from!) ?? _registry.get(row.derives_from!);
+    if (!base) {
+      log.error(
+        "DB 工作流 %s derives_from %s 不存在或未加载成功，跳过",
+        row.name,
+        row.derives_from
+      );
+      continue;
+    }
+    try {
+      const wf = composeDbWorkflow(row.name, row.description, row.yaml_content, base);
+      register(wf);
+      log.debug("注册 db 工作流：%s（派生自 %s）", row.name, row.derives_from);
+    } catch (e: unknown) {
+      log.error(
+        "加载 DB 工作流 %s 失败：%s",
+        row.name,
+        e instanceof Error ? e.message : String(e)
+      );
     }
   }
 }

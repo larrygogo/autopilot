@@ -261,7 +261,32 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
     .description("用 repo 内 examples/workflows/<name>/ 覆盖 ~/.autopilot/workflows/<name>/ (老用户拿 dev workflow bug fix 用)")
     .option("--apply", "真正写入；不带此 flag 时只 dry-run 显示 diff")
     .action(async (name: string, opts: { apply: boolean }) => {
-      const { diffWorkflowTemplate, syncWorkflowTemplate } = await import("../core/workflow/templates");
+      const { diffWorkflowTemplate, syncWorkflowTemplate, templateRevisionStatus, reseedTemplateWorkflow } =
+        await import("../core/workflow/templates");
+
+      // native/template DB 工作流（049 迁移后 / 新装机）：无磁盘目录可覆盖，文件 sync 失效。
+      // 改走 template_revision 比对 + reseed（命令名 / 体验不变，底层从「覆盖文件」变「刷新 DB 行」）。
+      const status = templateRevisionStatus(name);
+      if (status) {
+        if (status.template <= status.local) {
+          console.log(`✓ ${name} 已是最新（DB 内置模板 revision ${status.local}），无需同步`);
+          return;
+        }
+        console.log(`${name} 是 DB 内置模板，examples 修订 ${status.template} > 本地 ${status.local}，可刷新。`);
+        if (!opts.apply) {
+          console.log(`\n(dry-run) 加 --apply 后用 examples 最新版覆盖该 DB 工作流。`);
+          return;
+        }
+        const r = reseedTemplateWorkflow(name);
+        if (r === "reseeded") {
+          console.log(`\n✓ 已刷新 ${name} 到 revision ${status.template}`);
+          console.log(`  daemon 需重启才能加载：autopilot daemon restart`);
+        } else {
+          console.log(`\n${name}：${r}`);
+        }
+        return;
+      }
+
       let entries;
       try {
         entries = diffWorkflowTemplate(name);

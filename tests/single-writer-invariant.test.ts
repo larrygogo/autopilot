@@ -50,6 +50,7 @@ const ALLOWLIST = new Set([
   "src/core/providers.ts",         // providers 表：SQLite 即权威源，provider 条目 CRUD（条目化重构 P1）
   "src/migrations/047-providers-table.ts", // provider 条目化：建表 + 种子官方三家 + 导入 config compat（一次性数据迁移，幂等）
   "src/migrations/048-workflow-kind-spec-json.ts", // workflows 加 kind/spec_json + 放开 derives_from 强制：表重建 INSERT...SELECT 数据 copy（一次性）
+  "src/migrations/049-seed-native-products.ts", // 产品工作流 dev/ad-hoc：file 副本就地转 native（DELETE 旧行 + createTemplateDbWorkflow 重插，一次性，幂等）
 ]);
 
 // 注：`\s` 已含换行，故整文件扫描（而非逐行）即可抓住跨行写法

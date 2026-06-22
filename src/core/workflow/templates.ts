@@ -10,7 +10,7 @@ import { existsSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSyn
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
-import { getWorkflowFromDb, createTemplateDbWorkflow, createNativeDbWorkflow, createDbWorkflow } from "./workflows";
+import { getWorkflowFromDb, createTemplateDbWorkflow, createNativeDbWorkflow, createDbWorkflow, updateDbWorkflow } from "./workflows";
 import { parseWorkflowText, stringifyWorkflowDoc } from "./serialize";
 
 export interface WorkflowTemplate {
@@ -120,6 +120,28 @@ function availableTemplates(root: string): string[] {
  * 仅适用于零 ts 的声明式模板（dev/ad-hoc）——含 ts 的模板没法当 native/template（declarative 强制）。
  * 返回 'seeded' | 'exists' | 'no-template' | 'has-ts'（含 workflow.ts，拒种避免死行）。
  */
+/**
+ * 读 examples/<name>/workflow.yaml 转成「native 模板 spec」（待写的 spec_json + 描述 + revision）。
+ * **纯转换**：不写库、不碰家目录——供 seedTemplateWorkflow（init 种子）/ migration 049（存量 file
+ * 副本转 native）/ reseedTemplateWorkflow（拉 repo fix 刷新）三处共用，杜绝各处重复 yaml 解析。
+ * 归一化（去 func 字段 / 结构校验）在 createTemplateDbWorkflow 写库时统一做，这里只产原始 spec_json。
+ * 返回 null：examples 根不存在 / 缺 workflow.yaml / 含 workflow.ts（含 ts 非声明式，不能当 native）/ phases 畸形。
+ */
+export function buildTemplateSpecFromExamples(
+  name: string,
+): { description: string; specJson: string; revision: number } | null {
+  const root = findExamplesRoot();
+  if (!root) return null;
+  if (existsSync(join(root, name, "workflow.ts"))) return null;
+  const yamlPath = join(root, name, "workflow.yaml");
+  if (!existsSync(yamlPath)) return null;
+  const raw = readFileSync(yamlPath, "utf-8");
+  const doc = parseWorkflowText(raw, "yaml") as Record<string, unknown> | null;
+  if (!doc || !Array.isArray(doc["phases"])) return null;
+  const description = typeof doc["description"] === "string" ? doc["description"] : "";
+  return { description, specJson: stringifyWorkflowDoc(doc, "json"), revision: parseTemplateRevision(raw) };
+}
+
 export function seedTemplateWorkflow(name: string): "seeded" | "exists" | "no-template" | "has-ts" {
   // 磁盘 file 副本在 → 不种（存量用户双轨，避免同名冲突）
   if (existsSync(join(autopilotHome(), "workflows", name))) return "exists";
@@ -129,12 +151,9 @@ export function seedTemplateWorkflow(name: string): "seeded" | "exists" | "no-te
   // L6 守卫：含 workflow.ts 的模板不是声明式，种成 native/template 会被 declarative 闸门拒、组装失败
   // → 幽灵死行（init 报「已装入」但列表找不到）。把约束钉死在种子入口，而非依赖手维护 seed 列表。
   if (existsSync(join(root, name, "workflow.ts"))) return "has-ts";
-  const yamlPath = join(root, name, "workflow.yaml");
-  if (!existsSync(yamlPath)) return "no-template";
-  const doc = parseWorkflowText(readFileSync(yamlPath, "utf-8"), "yaml") as Record<string, unknown> | null;
-  if (!doc || !Array.isArray(doc["phases"])) return "no-template";
-  const description = typeof doc["description"] === "string" ? doc["description"] : "";
-  createTemplateDbWorkflow({ name, description, spec_json: stringifyWorkflowDoc(doc, "json") });
+  const spec = buildTemplateSpecFromExamples(name);
+  if (!spec) return "no-template";
+  createTemplateDbWorkflow({ name, description: spec.description, spec_json: spec.specJson });
   return "seeded";
 }
 
@@ -400,6 +419,57 @@ export function isWorkflowCopyOutdated(name: string): boolean {
  * daemon 启动时跑一次，把「副本该同步了」从「每个 git 任务无条件 warn」（狼来了）
  * 收敛成「真落后才提示一次」。
  */
+/** 从 spec_json（DB native/template 行的真相）取顶层 template_revision（缺失 / 解析失败 → 0）。 */
+export function parseSpecRevision(specJson: string): number {
+  try {
+    const o = JSON.parse(specJson) as { template_revision?: unknown };
+    return typeof o.template_revision === "number" ? o.template_revision : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 内置模板的 revision 现状：DB native/template 行的 spec_json revision（local）vs examples revision（template）。
+ * 非 DB 模板（file 副本 / 不存在）→ null（走旧的文件 sync 路径）。给 CLI sync 展示「旧→新」+ 判是否需刷新。
+ */
+export function templateRevisionStatus(name: string): { local: number; template: number } | null {
+  const row = getWorkflowFromDb(name);
+  if (!row || row.source !== "db" || (row.kind !== "template" && row.kind !== "native")) return null;
+  const root = findExamplesRoot();
+  if (!root) return null;
+  const template = readTemplateRevision(join(root, name, "workflow.yaml"));
+  const local = row.spec_json ? parseSpecRevision(row.spec_json) : 0;
+  return { local, template };
+}
+
+/**
+ * native 化后「拉 repo 最新 fix」的等价替身（file 覆盖语义对 DB 工作流失效）：按 template_revision
+ * 比对，examples 更高才用其最新 spec 覆盖 DB 行（updateDbWorkflow 归一化 + 重派生 spec_json）。
+ * 只对 DB native/template 行生效；用户克隆体是别的 name、不受波及。
+ * 返回：'reseeded'（已更新）| 'up-to-date'（DB ≥ examples）| 'not-template'（非 DB 模板）| 'no-template'（examples 无）。
+ */
+export function reseedTemplateWorkflow(name: string): "reseeded" | "up-to-date" | "not-template" | "no-template" {
+  const row = getWorkflowFromDb(name);
+  if (!row || row.source !== "db" || (row.kind !== "template" && row.kind !== "native")) return "not-template";
+  const spec = buildTemplateSpecFromExamples(name);
+  if (!spec) return "no-template";
+  const local = row.spec_json ? parseSpecRevision(row.spec_json) : 0;
+  if (spec.revision <= local) return "up-to-date";
+  // examples 更新 → 覆盖。updateDbWorkflow 接 yaml_content，内部对 native/template 归一化 + 重派生 spec_json。
+  updateDbWorkflow(name, {
+    description: spec.description,
+    yaml_content: stringifyWorkflowDoc(JSON.parse(spec.specJson) as Record<string, unknown>, "yaml"),
+  });
+  return "reseeded";
+}
+
+/**
+ * 列出所有「本地副本落后内置模板」的工作流（template_revision 比对）。两种本地形态：
+ *   ① 磁盘 file 副本（老用户）：读家目录 workflow.yaml 的 revision；
+ *   ② DB native/template 行（049 迁移后 / 新装机）：读 spec_json 的 revision。
+ * daemon 启动 / doctor 跑一次，把「副本该同步了」从「每个 git 任务无条件 warn」收敛成「真落后才提示」。
+ */
 export function listOutdatedWorkflowCopies(): Array<{ name: string; local: number; template: number }> {
   const root = findExamplesRoot();
   if (!root) return [];
@@ -412,11 +482,26 @@ export function listOutdatedWorkflowCopies(): Array<{ name: string; local: numbe
     return [];
   }
   for (const name of names) {
-    const localYaml = join(home, "workflows", name, "workflow.yaml");
-    if (!existsSync(localYaml)) continue;
     const template = readTemplateRevision(join(root, name, "workflow.yaml"));
-    const local = readTemplateRevision(localYaml);
-    if (template > local) out.push({ name, local, template });
+    // ① 磁盘 file 副本优先（老形态）
+    const localYaml = join(home, "workflows", name, "workflow.yaml");
+    if (existsSync(localYaml)) {
+      const local = readTemplateRevision(localYaml);
+      if (template > local) out.push({ name, local, template });
+      continue;
+    }
+    // ② 无磁盘副本 → 查 DB native/template 行（049 后的新形态）。
+    //    db 未初始化 / 无 workflows 表（如 doctor 早期检查的空 db）时容错跳过，
+    //    不让「列出落后副本」这种尽力而为的诊断函数因 db 不可用而崩。
+    try {
+      const row = getWorkflowFromDb(name);
+      if (row && row.source === "db" && (row.kind === "template" || row.kind === "native") && row.spec_json) {
+        const local = parseSpecRevision(row.spec_json);
+        if (template > local) out.push({ name, local, template });
+      }
+    } catch {
+      /* db 不可用 → 仅按磁盘副本判断 */
+    }
   }
   return out;
 }
