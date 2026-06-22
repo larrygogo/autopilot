@@ -239,6 +239,16 @@ export function expandPromptTemplate(
   return out;
 }
 
+/**
+ * 本 phase 的 prompt 是否引用 ${DELIVERABLES} / $DELIVERABLES——决定框架是否为它预建沙盒
+ * deliverables/ 目录 + 跑后校验非空（B²，2026-06-22）。触发信号下沉到 phase 级（看本 phase 自己
+ * 要不要产出物），**不读顶层 wf.delivers**，使顶层 delivers 退成纯声明、与 PR 砖看 phase.deliver 同构；
+ * 多产物阶段下各 phase 独立判断，只对真正引用 ${DELIVERABLES} 的那个建目录+校验。纯函数、可测。
+ */
+export function phaseUsesDeliverables(prompt: string): boolean {
+  return /\$\{DELIVERABLES\}/.test(prompt) || /\$DELIVERABLES\b/.test(prompt);
+}
+
 // ──────────────────────────────────────────────
 // Phase 6: handoff 协议（spec §3.10）
 // ──────────────────────────────────────────────
@@ -416,8 +426,11 @@ export function makePromptRunner(
     const dir = join(getTaskArtifactsDir(taskId), dirName);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-    // delivers:artifacts：预建沙盒 deliverables/（${DELIVERABLES} 指向它），减小 agent mkdir 出错面
-    const deliverablesDir = wf.delivers === "artifacts" ? join(resolveCodeRoot(taskId), "deliverables") : null;
+    // 本 phase 引用 ${DELIVERABLES} 才预建沙盒 deliverables/（指向它）+ 跑后校验非空。触发信号下沉到
+    // phase 级（看本 phase 自己是否声明要产出物），不读顶层 wf.delivers——顶层 delivers 退成纯声明
+    // （闸门 / 验收路由 / 展示），运行时机制由 phase 自驱，与 PR 砖看 phase.deliver 同构。
+    // 副益：多产物阶段下只对真正引用 ${DELIVERABLES} 的那个 phase 预建+校验，不再误强制每个产物阶段都非空。
+    const deliverablesDir = phaseUsesDeliverables(prompt) ? join(resolveCodeRoot(taskId), "deliverables") : null;
     if (deliverablesDir && !existsSync(deliverablesDir)) mkdirSync(deliverablesDir, { recursive: true });
 
     // 第一轮：用解析后的 phase prompt 跑
@@ -472,8 +485,8 @@ export function makePromptRunner(
       );
     }
 
-    // delivers:artifacts：跑完校验 deliverables/ 非空（空 = agent 未按约定产出 → 抛错让 runner 在本
-    // phase 内重做，胜过把空目录甩给下游交付器才发现）。
+    // 引用 ${DELIVERABLES} 的 phase：跑完校验 deliverables/ 非空（空 = agent 未按约定产出 → 抛错让
+    // runner 在本 phase 内重做，胜过把空目录甩给下游交付器才发现）。
     if (deliverablesDir) {
       const produced = existsSync(deliverablesDir) ? readdirSync(deliverablesDir) : [];
       if (produced.length === 0) {

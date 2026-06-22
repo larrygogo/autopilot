@@ -281,7 +281,7 @@ export function WorkflowDetail() {
                   <div className="text-xs font-medium text-muted-foreground">声明 · 这个工作流如何约束需求</div>
                   <p className="mt-0.5 text-sm text-foreground">{declarationSummary(detail)}</p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={openDeclEdit} title="编辑声明（需要代码库 / 建 git 沙盒 / 产出形态）">
+                <Button variant="ghost" size="sm" onClick={openDeclEdit} title="编辑声明（需要代码库 / 建 git 沙盒 / 交付形态）">
                   <Pencil className="h-4 w-4" />
                   编辑
                 </Button>
@@ -315,7 +315,7 @@ export function WorkflowDetail() {
                         "否"
                       ),
                   },
-                  { label: "产出形态", value: DELIVERS_TEXT[readDelivers(detail)] },
+                  { label: "此工作流交付", value: DELIVERS_TEXT[readDelivers(detail)] },
                 ]}
               />
             </div>
@@ -461,11 +461,13 @@ export function WorkflowDetail() {
         )}
 
         <FormField
-          label="产出形态"
+          label="此工作流交付"
           hint={
             metaDelivers === "pr"
-              ? "选「交付 PR」意味着：用此工作流的需求必须挂代码库（否则入队时「PR 无处可开」会被拦）"
-              : "这个工作流最终交付什么；选「交付 PR」则需求必须挂代码库"
+              ? "声明此工作流交付 PR：用它的需求必须挂代码库（否则入队时「PR 无处可开」会被拦）。这是工作流的属性，不是你在某次需求上的选择；run 终结仍以事实为准。"
+              : metaDelivers === "artifacts"
+                ? "声明此工作流交付文件产物：agent 阶段把产物写到 ${DELIVERABLES} 目录、框架据此预建+校验。这是工作流的属性；run 终结仍以事实为准。"
+                : "声明此工作流交付什么——用于入队闸门 / 验收路由 / 展示，不决定终结（终结以事实为准：有 PR 走 PR、有文件走文件、都没就完成）。「自动推断」= 不显式声明。"
           }
         >
           <Select value={metaDelivers} onValueChange={(v) => setMetaDelivers(v as DeliversCode)}>

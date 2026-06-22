@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { expandPromptTemplate, tryMakePromptRunnerForPhase } from "../src/core/workflow/prompt-runner";
+import { expandPromptTemplate, tryMakePromptRunnerForPhase, phaseUsesDeliverables } from "../src/core/workflow/prompt-runner";
 import { _clearRegistry, loadYamlWorkflow, register, type PhaseDefinition } from "../src/core/workflow/registry";
 import { runWithTaskContext } from "../src/core/task/context";
 
@@ -176,5 +176,36 @@ phases:
     const phase = wf!.phases[0] as PhaseDefinition;
     // 提示词优先（全局翻转）：phase 绑定 prompt-runner 而非 ts 函数 → 绑定的 func 源码不含 ts 的抛错串
     expect(phase.func!.toString()).not.toContain("从 ts 函数抛出");
+  });
+});
+
+describe("phaseUsesDeliverables（B²：建 deliverables 目录由 phase 引用 ${DELIVERABLES} 驱动，不读顶层 delivers）", () => {
+  it("引用 ${DELIVERABLES}（花括号）→ true", () => {
+    expect(phaseUsesDeliverables("把产物写到 ${DELIVERABLES} 目录")).toBe(true);
+  });
+
+  it("引用 $DELIVERABLES（简写）→ true", () => {
+    expect(phaseUsesDeliverables("产物落到 $DELIVERABLES 下")).toBe(true);
+  });
+
+  it("不引用 → false（如 PR 工作流的开发阶段，只用 ${WORKSPACE}）", () => {
+    expect(phaseUsesDeliverables("在 ${WORKSPACE} 改代码，别碰 git")).toBe(false);
+  });
+
+  it("$DELIVERABLESX 等前缀粘连 → false（单词边界，不误判）", () => {
+    expect(phaseUsesDeliverables("$DELIVERABLESX 不是它")).toBe(false);
+  });
+
+  it("空 prompt → false", () => {
+    expect(phaseUsesDeliverables("")).toBe(false);
+  });
+
+  it("多产物场景：每个 phase 的 prompt 独立判断——只有引用的那个为 true", () => {
+    // 这是修「多产物阶段误校验」bug 的核心：现状读顶层 wf.delivers 会给所有产出阶段都强制非空，
+    // 改后按各 phase 自己是否引用 ${DELIVERABLES} 判定，互不牵连。
+    const producePrompt = "第一阶段产出，写到 ${DELIVERABLES}";
+    const reviewPrompt = "第二阶段只评审 ${HANDOFF_produce}，不产文件";
+    expect(phaseUsesDeliverables(producePrompt)).toBe(true);
+    expect(phaseUsesDeliverables(reviewPrompt)).toBe(false);
   });
 });

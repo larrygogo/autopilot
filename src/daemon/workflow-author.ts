@@ -63,7 +63,7 @@ phases:
 4. **交付 PR（deliver: pr）**：要把代码改动 commit/push 并开 GitHub PR，**顶层声明 \`delivers: pr\` +
    开 \`sandbox.git: true\`**，再写一个交付 phase：
    \`\`\`yaml
-   delivers: pr              # ⭐ 顶层产出形态声明（与下方 deliver phase 必须一致）
+   delivers: pr              # ⭐ 顶层声明：管验收路由 / 闸门 / 展示；交付动作由下方 deliver:pr 阶段驱动
    sandbox:
      git: true              # 产 PR 必须有 git 沙盒
    phases:
@@ -78,11 +78,11 @@ phases:
    **顶层声明 \`delivers: artifacts\`**，agent 阶段把产物写到 \${DELIVERABLES} 目录，再加一个
    \`deliver: artifacts\` phase 收口验收：
    \`\`\`yaml
-   delivers: artifacts       # ⭐ 顶层产出形态声明（与下方 deliver phase 必须一致）
+   delivers: artifacts       # ⭐ 顶层声明：管验收路由 / 闸门 / 展示；产出由 produce 阶段引用 \${DELIVERABLES} 驱动
    phases:
      - name: produce
        prompt: |
-         ...把所有交付文件写到 \${DELIVERABLES} 目录...
+         ...把所有交付文件写到 \${DELIVERABLES} 目录...   # ← 引用它，框架才预建该目录 + 跑后校验非空
      - name: deliver
        deliver: artifacts    # 框架内置文件交付器，零代码
    \`\`\`
