@@ -66,6 +66,17 @@ phases:
     expect(out).toMatch(/step1/);
   });
 
+  it("容错：requires 为 null 标量 / 字符串（被写坏状态）→ setIn 不抛，整体替换成 map", () => {
+    // 复现用户报的 SAVE_FAILED「Expected YAML collection at requires. Remaining path: git」
+    for (const bad of ["name: d\nrequires:\nphases:\n  - name: a\n", "name: d\nrequires: optional\nphases:\n  - name: a\n"]) {
+      const out = patchWorkflowMetaYaml(bad, { requiresGit: true });
+      expect(out).toMatch(/requires:\s*\n\s+git:\s*true/);
+    }
+    // sandbox 同理
+    const out = patchWorkflowMetaYaml("name: d\nsandbox:\nphases:\n  - name: a\n", { sandboxGit: true });
+    expect(out).toMatch(/sandbox:\s*\n\s+git:\s*true/);
+  });
+
   it("undefined 字段完全不动 yaml", () => {
     const out = patchWorkflowMetaYaml(BASE, { label: "新名" });
     expect(out).not.toContain("requires:");

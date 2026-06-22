@@ -1,5 +1,20 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { parseDocument } from "yaml";
+import { parseDocument, isMap } from "yaml";
+
+/**
+ * 在 yaml 文档里写嵌套键 doc[parentKey][childKey]=value，但**容错 parent 不是 map** 的情况：
+ * 若 parentKey 已存在却是 null 标量 / 字符串（如 `requires:` 空、`requires: optional` 等被写坏的状态），
+ * 直接 `setIn([parentKey, childKey])` 会抛「Expected YAML collection at parentKey」。这里先整体替换成
+ * 只含该子键的 map（workflow 级 requires/sandbox 只含 git，替换无损），杜绝保存声明时崩。
+ */
+function setNestedSafe(doc: ReturnType<typeof parseDocument>, parentKey: string, childKey: string, value: unknown): void {
+  const parent = doc.getIn([parentKey], true); // keepScalar：拿到 Node（含 null/字符串标量）
+  if (parent != null && !isMap(parent)) {
+    doc.setIn([parentKey], { [childKey]: value });
+    return;
+  }
+  doc.setIn([parentKey, childKey], value);
+}
 import {
   getWorkflowYamlPath,
   isParallelInput,
@@ -159,13 +174,13 @@ export function patchWorkflowMetaYaml(raw: string, meta: WorkflowMetaInput): str
       doc.deleteIn(["requires", "git"]);
       pruneEmptyMap(doc, "requires");
     } else {
-      doc.setIn(["requires", "git"], meta.requiresGit);
+      setNestedSafe(doc, "requires", "git", meta.requiresGit);
     }
   }
   // sandbox.git：仅 true 写键；false / null 删键（不建 ≡ 缺省）
   if (meta.sandboxGit !== undefined) {
     if (meta.sandboxGit === true) {
-      doc.setIn(["sandbox", "git"], true);
+      setNestedSafe(doc, "sandbox", "git", true);
     } else {
       doc.deleteIn(["sandbox", "git"]);
       pruneEmptyMap(doc, "sandbox");
