@@ -182,7 +182,11 @@ export async function runPendingMigrations(): Promise<number> {
     log.info("执行迁移 v%s：%s", version, file);
 
     try {
-      const mod = await import(migrationPath) as { up: (db: ReturnType<typeof getDb>) => void };
+      // up 可选返回一个「事务后副作用」闭包：用于不可逆且非事务性的清理（如删磁盘文件）。
+      // 放事务外执行，保证「DB 改动回滚 → 副作用绝不发生」，杜绝 DB↔磁盘不一致（049 的教训）。
+      const mod = await import(migrationPath) as {
+        up: (db: ReturnType<typeof getDb>) => unknown;
+      };
       if (typeof mod.up !== "function") {
         log.warn("迁移 %s 未导出 up() 函数，跳过", file);
         continue;
@@ -192,9 +196,11 @@ export async function runPendingMigrations(): Promise<number> {
       // SQLite 不允许在事务内修改 foreign_keys PRAGMA，表重建（DROP+RENAME）
       // 模式必须在 FK 关闭时执行，迁移结束后立即恢复。
       db.run("PRAGMA foreign_keys=OFF");
+      let afterCommit: (() => void) | undefined = undefined;
       try {
         db.transaction(() => {
-          mod.up(db);
+          const result = mod.up(db);
+          if (typeof result === "function") afterCommit = result as () => void;
           db.run(
             "INSERT INTO schema_version (version, name) VALUES (?, ?)",
             [version, file.replace(/\.ts$/, "")]
@@ -202,6 +208,21 @@ export async function runPendingMigrations(): Promise<number> {
         })();
       } finally {
         db.run("PRAGMA foreign_keys=ON");
+      }
+
+      // 事务已 commit（回滚会在 transaction() 内 throw、根本到不了这里）：执行事务后副作用。
+      // 失败只 warn——DB 改动已生效、不该因清理失败回退；幂等迁移下次启动可重试。
+      if (afterCommit) {
+        const runAfter = afterCommit as () => void; // 闭包捕获的 let 不被 TS narrow，显式断言
+        try {
+          runAfter();
+        } catch (e: unknown) {
+          log.warn(
+            "迁移 v%s 事务后副作用执行失败（DB 改动已生效，不影响迁移成功）：%s",
+            version,
+            e instanceof Error ? e.message : String(e),
+          );
+        }
       }
 
       log.info("迁移 v%s 应用成功：%s", version, file);

@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { Database } from "bun:sqlite";
+import { up as migrate001 } from "../src/migrations/001-baseline";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
+import { _setDbForTest } from "../src/core/db";
 import {
   listWorkflowTemplates,
   cloneTemplate,
@@ -10,15 +15,26 @@ import {
 } from "../src/core/workflow/templates";
 
 let tmpHome: string;
+let db: Database;
 
 beforeEach(() => {
   tmpHome = join(tmpdir(), `autopilot-wf-templates-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(join(tmpHome, "workflows"), { recursive: true });
   process.env.AUTOPILOT_HOME = tmpHome;
+  // 隔离 db（空 workflows 表）：syncWorkflowTemplate 查 getWorkflowFromDb 判 file/db 形态，
+  // 不隔离会查全局真实 db——dev/ad-hoc 经 049 已转 native，syncWorkflowTemplate("dev") 会抛
+  //「DB 工作流文件 sync 不适用」。隔离到空 db，这些 file 模板的文件 sync 语义测试才稳定。
+  db = new Database(":memory:");
+  migrate001(db);
+  migrate007(db);
+  migrate048(db);
+  _setDbForTest(db);
 });
 
 afterEach(() => {
   delete process.env.AUTOPILOT_HOME;
+  _setDbForTest(null);
+  db.close();
   if (existsSync(tmpHome)) rmSync(tmpHome, { recursive: true, force: true });
 });
 

@@ -14,12 +14,14 @@ import { createTemplateDbWorkflow } from "../core/workflow/workflows";
  * 背景：新装机 init 走 seedTemplateWorkflow 已直接种 native；但**老用户**家目录有 file 副本，
  * seedTemplateWorkflow 检测到磁盘副本即 skip，故一直停留 file 形态、看得到 yaml。本迁移补这一跳。
  *
- * 顺序铁律（必须「先转 DB 行、再删文件」）：
- *   ① 事务内删旧行 + 插 native(template)（source=db）——此后 deleteOrphanFileWorkflows 只删
- *      source='file' 的行、不会误删这俩；syncFileWorkflowsToDb 遇磁盘同名副本（DB 已 source=db）
- *      log.warn 忽略不抛错。双保险，删文件绝不会反噬。
- *   ② best-effort 备份家目录副本到 _migrated-049/（下划线前缀，discover 自动跳过、不成幽灵 file 行），
- *      再删原目录。失败只 warn 不阻塞启动（残留副本被 ① 的双保险忽略，功能不受影响）。
+ * 顺序铁律 + 事务安全（关键教训）：
+ *   ① **事务内只做纯 DB 转换**（删旧行 + 插 native(template)，source=db）——回滚安全、无副作用。
+ *      此后 deleteOrphanFileWorkflows 只删 source='file' 不误删这俩；syncFileWorkflowsToDb 遇磁盘
+ *      同名副本（DB 已 source=db）log.warn 忽略不抛错。双保险，删文件不会被 discover 反噬。
+ *   ② **删文件放 afterCommit 闭包（事务外）**：up 返回它，migrate.ts 在事务 commit 成功后才执行。
+ *      若事务回滚（如与 daemon 锁冲突），闭包根本不被调用 → 文件绝不会在 DB 未转时被删，杜绝
+ *      「DB 还是 file 行但磁盘已删」的不一致（早期把 fs 放事务内，回滚后留下坏状态、dev 从 registry
+ *      消失——本迁移就是这条教训的来源）。清理本身 best-effort（失败只 warn，残留被 ① 的双保险忽略）。
  *
  * 边界：只动 repo examples 真有的 dev / ad-hoc；用户自建 file 工作流（dev-kimi 等）完全不碰。
  * 幂等：重跑按 examples 覆盖这俩 native 行，无害。
@@ -31,9 +33,9 @@ function autopilotHome(): string {
   return process.env.AUTOPILOT_HOME || join(homedir(), ".autopilot");
 }
 
-export function up(db: Database): void {
+export function up(db: Database): () => void {
   const home = autopilotHome();
-  const backupRoot = join(home, "workflows", "_migrated-049");
+  const toClean: string[] = [];
 
   for (const name of PRODUCT_TEMPLATES) {
     const spec = buildTemplateSpecFromExamples(name);
@@ -43,15 +45,21 @@ export function up(db: Database): void {
       continue;
     }
 
-    // ① 先转 DB 行（事务内、必成）：删任意旧同名行 → 插 native(template)。
-    //    createTemplateDbWorkflow 内部对已存在同名抛错，故先 DELETE。归一化在其内统一做，
-    //    与 init seedTemplateWorkflow 字节一致（reseed 的 revision 比对才可靠）。
+    // ① 事务内：纯 DB 转换。删任意旧同名行 → 插 native(template)。createTemplateDbWorkflow 内部对
+    //    已存在同名抛错，故先 DELETE。归一化在其内统一做，与 init seedTemplateWorkflow 字节一致
+    //    （reseed 的 revision 比对才可靠）。
     db.run("DELETE FROM workflows WHERE name = ?", [name]);
     createTemplateDbWorkflow({ name, description: spec.description, spec_json: spec.specJson });
 
-    // ② 再 best-effort 备份 + 删家目录物理副本（铁律：DB 已 source=db，删文件不会被 discover 反噬）。
-    const localDir = join(home, "workflows", name);
-    if (existsSync(localDir)) {
+    if (existsSync(join(home, "workflows", name))) toClean.push(name);
+  }
+
+  // ② 事务后副作用：备份 + 删家目录物理副本。事务 commit 成功后由 migrate.ts 调用；回滚则不执行。
+  return () => {
+    const backupRoot = join(home, "workflows", "_migrated-049");
+    for (const name of toClean) {
+      const localDir = join(home, "workflows", name);
+      if (!existsSync(localDir)) continue; // 已删（重跑）→ 跳过
       try {
         mkdirSync(backupRoot, { recursive: true });
         cpSync(localDir, join(backupRoot, name), { recursive: true });
@@ -65,5 +73,5 @@ export function up(db: Database): void {
         );
       }
     }
-  }
+  };
 }

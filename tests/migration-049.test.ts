@@ -55,11 +55,17 @@ describe("migration 049：file dev/ad-hoc → native", () => {
     return dir;
   }
 
+  /** 跑迁移 049：up（事务内 DB 转换）+ afterCommit（事务后 fs 清理）。模拟 migrate.ts 的两段执行。 */
+  function runMig(): void {
+    const after = migrate049(db);
+    if (typeof after === "function") after();
+  }
+
   it("老用户场景：file dev 行就地转 native(template) + 物理目录删 + 备份", () => {
     const devDir = seedFileRow("dev");
     expect(getWorkflowFromDb("dev")!.source).toBe("file");
 
-    migrate049(db);
+    runMig();
 
     const row = getWorkflowFromDb("dev")!;
     expect(row.source).toBe("db");
@@ -77,7 +83,7 @@ describe("migration 049：file dev/ad-hoc → native", () => {
 
   it("ad-hoc 同样转 native（无 delivers 字段也不报错）", () => {
     seedFileRow("ad-hoc");
-    migrate049(db);
+    runMig();
     const row = getWorkflowFromDb("ad-hoc")!;
     expect(row.source).toBe("db");
     expect(row.kind).toBe("template");
@@ -86,7 +92,7 @@ describe("migration 049：file dev/ad-hoc → native", () => {
 
   it("顺序铁律：转 native 后 discover 的孤儿清理不会误删（只删 source=file）", () => {
     seedFileRow("dev");
-    migrate049(db);
+    runMig();
     // 模拟 discover 的 file→db 同步：空磁盘扫描（dev 已无物理目录）。
     // deleteOrphanFileWorkflows 只删 source='file'；dev 已 source=db → 不受影响。
     syncFileWorkflowsToDb([]);
@@ -95,7 +101,7 @@ describe("migration 049：file dev/ad-hoc → native", () => {
 
   it("白名单外的用户自建 file 工作流（dev-kimi）完全不碰", () => {
     seedFileRow("dev-kimi");
-    migrate049(db);
+    runMig();
     const row = getWorkflowFromDb("dev-kimi")!;
     expect(row.source).toBe("file");
     expect(row.kind).toBe("file");
@@ -104,7 +110,7 @@ describe("migration 049：file dev/ad-hoc → native", () => {
 
   it("新装无副本场景：DB 无 dev 行 → 直接插 native(template)", () => {
     // 不 seedFileRow，DB 里没有 dev 行
-    migrate049(db);
+    runMig();
     const row = getWorkflowFromDb("dev")!;
     expect(row.source).toBe("db");
     expect(row.kind).toBe("template");
@@ -112,8 +118,8 @@ describe("migration 049：file dev/ad-hoc → native", () => {
 
   it("幂等：重跑不抛错、结果稳定", () => {
     seedFileRow("dev");
-    migrate049(db);
-    expect(() => migrate049(db)).not.toThrow();
+    runMig();
+    expect(() => runMig()).not.toThrow();
     expect(getWorkflowFromDb("dev")!.kind).toBe("template");
   });
 
@@ -129,7 +135,7 @@ describe("migration 049：file dev/ad-hoc → native", () => {
     });
 
     // 049：dev 转 native + 删磁盘目录（base 从 file 形态变 native 形态）
-    migrate049(db);
+    runMig();
     expect(getWorkflowFromDb("dev")!.source).toBe("db");
 
     // discover：派生工作流必须仍能注册——两遍处理 + base 回退 native dev，不静默掉出注册表
@@ -137,5 +143,16 @@ describe("migration 049：file dev/ad-hoc → native", () => {
     await discover();
     expect(getWorkflow("my-dev-fast")).not.toBeNull();
     expect(getWorkflow("dev")).not.toBeNull();
+  });
+
+  it("事务后副作用解耦：up 返回 afterCommit，未调用则文件不删（杜绝事务回滚后 DB↔磁盘不一致）", () => {
+    const devDir = seedFileRow("dev");
+    // 只跑 up（事务内 DB 转换），拿到 afterCommit 但不调用——模拟事务因锁冲突回滚、到不了 commit
+    const after = migrate049(db);
+    expect(typeof after).toBe("function");
+    expect(existsSync(devDir)).toBe(true); // 文件还在：fs 清理在 afterCommit 里、尚未执行
+    // 事务 commit 后才会调 afterCommit → 此时才删
+    (after as () => void)();
+    expect(existsSync(devDir)).toBe(false);
   });
 });
