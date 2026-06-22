@@ -227,18 +227,25 @@ function FileRow({ reqId, round, file, name, indentStyle }: { reqId: string; rou
   const kind = fileKind(file.path);
   const downloadUrl = api.deliveryDownloadUrl(reqId, round, file.path);
   const previewUrl = api.deliveryPreviewUrl(reqId, round, file.path);
-  const [open, setOpen] = useState(false);
+  // 统一两个动作（含义到处一致）：
+  //   「源码」= 内联看原始文本（CodeViewer）—— 所有文本类（md/txt/json/css/html…）
+  //   「预览」= 看渲染后样子 —— 图片(内联图) / md(内联渲染) / html(↗隔离标签，不可内联渲染)
+  const hasSource = kind === "markdown" || kind === "text" || kind === "html";
+  const hasInlineRender = kind === "image" || kind === "markdown";
+  const [view, setView] = useState<"" | "source" | "rendered">("");
   const [text, setText] = useState<string | null>(null);
 
-  // md / text / html 源码 展开时 fetch 文本（download 通道，attachment 不影响 fetch 读 body）
+  // 需要文本时（看源码，或 md 渲染）fetch（download 通道，attachment 不影响 fetch 读 body）
+  const needText = (view === "source" && hasSource) || (view === "rendered" && kind === "markdown");
   useEffect(() => {
-    if (!open || (kind !== "markdown" && kind !== "text" && kind !== "html") || text !== null) return;
+    if (!needText || text !== null) return;
     let cancelled = false;
     fetch(downloadUrl).then((r) => r.text()).then((t) => { if (!cancelled) setText(t); }).catch(() => { if (!cancelled) setText("（读取失败）"); });
     return () => { cancelled = true; };
-  }, [open, kind, downloadUrl, text]);
+  }, [needText, downloadUrl, text]);
 
   const Icon = kind === "image" ? ImageIcon : kind === "html" ? Globe : kind === "binary" ? FileArchive : FileText;
+  const toggle = (v: "source" | "rendered") => setView((cur) => (cur === v ? "" : v));
 
   return (
     <li className="text-xs">
@@ -255,30 +262,36 @@ function FileRow({ reqId, round, file, name, indentStyle }: { reqId: string; rou
           </span>
         )}
         <span className="shrink-0 text-muted-foreground">{fmtSize(file.size)}</span>
-        {/* 动作：html 既能看源码（内联）又能打开渲染（隔离标签） */}
-        {(kind === "image" || kind === "markdown" || kind === "text" || kind === "html") && (
-          <button type="button" onClick={() => setOpen((v) => !v)} className="shrink-0 text-accent hover:underline">
-            {open ? "收起" : kind === "html" ? "源码" : "预览"}
+        {/* 源码：内联看原始文本 */}
+        {hasSource && (
+          <button type="button" onClick={() => toggle("source")} className="shrink-0 text-accent hover:underline">
+            {view === "source" ? "收起" : "源码"}
           </button>
         )}
-        {(kind === "image" || kind === "html") && (
-          <a href={previewUrl} target="_blank" rel="noreferrer noopener" className="inline-flex shrink-0 items-center gap-0.5 text-accent hover:underline" title={kind === "html" ? "在隔离新标签打开渲染后的 demo" : "新标签看原图"}>
-            <ExternalLink className="h-3 w-3" />{kind === "html" ? "打开" : "原图"}
+        {/* 预览：渲染后样子（图片/md 内联，html 隔离标签） */}
+        {hasInlineRender && (
+          <button type="button" onClick={() => toggle("rendered")} className="shrink-0 text-accent hover:underline">
+            {view === "rendered" ? "收起" : "预览"}
+          </button>
+        )}
+        {kind === "html" && (
+          <a href={previewUrl} target="_blank" rel="noreferrer noopener" className="inline-flex shrink-0 items-center gap-0.5 text-accent hover:underline" title="在隔离新标签打开渲染后的 demo">
+            <ExternalLink className="h-3 w-3" />预览
           </a>
         )}
         <a href={downloadUrl} className="inline-flex shrink-0 items-center gap-0.5 text-accent hover:underline" title="下载">
           <Download className="h-3 w-3" />
         </a>
       </div>
-      {open && (
+      {view && (
         <div className="border-t border-border bg-muted/20 p-3">
-          {kind === "image" && (
+          {view === "source" && (text === null ? <SkeletonRows count={3} /> : <CodeViewer code={text} filename={file.path} />)}
+          {view === "rendered" && kind === "image" && (
             <div className="flex justify-center bg-[repeating-conic-gradient(#0001_0_25%,transparent_0_50%)_50%/16px_16px]">
               <img src={previewUrl} alt={file.path} className="max-h-[400px] object-contain" />
             </div>
           )}
-          {kind === "markdown" && (text === null ? <SkeletonRows count={3} /> : <MarkdownView content={text} />)}
-          {(kind === "text" || kind === "html") && (text === null ? <SkeletonRows count={3} /> : <CodeViewer code={text} filename={file.path} />)}
+          {view === "rendered" && kind === "markdown" && (text === null ? <SkeletonRows count={3} /> : <MarkdownView content={text} />)}
         </div>
       )}
     </li>
