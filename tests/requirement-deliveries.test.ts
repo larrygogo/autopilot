@@ -48,6 +48,11 @@ import {
 } from "../src/core/requirements/deliveries";
 import { _clearTaskRootCacheForTest } from "../src/core/sandbox";
 import { _releaseAllLocks } from "../src/core/infra";
+import { handleRequest } from "../src/daemon/routes";
+
+const loopback = { requestIP: () => ({ address: "127.0.0.1", port: 0, family: "IPv4" }) } as unknown as import("bun").Server<undefined>;
+const previewReq = (id: string, round: number, path: string) =>
+  new Request(`http://127.0.0.1:6180/api/requirements/${id}/deliveries/preview?round=${round}&path=${encodeURIComponent(path)}`);
 
 let db: Database;
 let tmpHome: string;
@@ -219,5 +224,45 @@ describe("删除级联", () => {
     deleteRequirement(reqId);
     expect(hasDeliveries(reqId)).toBe(false);
     expect(existsSync(join(tmpHome, "runtime", "requirements", reqId))).toBe(false);
+  });
+});
+
+describe("交付物预览 route 安全（/deliveries/preview）", () => {
+  it("图片(svg) → 200 + image/svg+xml + nosniff + CSP（<img> 禁脚本）", async () => {
+    const { reqId, taskId } = makeFixture();
+    const src = makeSrcDir({ "hero.svg": "<svg xmlns='http://www.w3.org/2000/svg'></svg>" });
+    deliverArtifacts(taskId, src);
+    const res = await handleRequest(previewReq(reqId, 1, "hero.svg"), loopback);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("image/svg+xml");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'none'");
+    expect(res.headers.get("Content-Disposition")).toBe("inline");
+  });
+
+  it("html demo → 200 + CSP sandbox（隔离不可信内容，不给 same-origin）", async () => {
+    const { reqId, taskId } = makeFixture();
+    const src = makeSrcDir({ "index.html": "<html><body>demo</body></html>" });
+    deliverArtifacts(taskId, src);
+    const res = await handleRequest(previewReq(reqId, 1, "index.html"), loopback);
+    expect(res.status).toBe(200);
+    const csp = res.headers.get("Content-Security-Policy") ?? "";
+    expect(csp).toContain("sandbox allow-scripts");
+    expect(csp).not.toContain("allow-same-origin"); // 关键：拿不到 daemon cookie/token
+  });
+
+  it("二进制(zip) → 415（不内联，走下载）", async () => {
+    const { reqId, taskId } = makeFixture();
+    const src = makeSrcDir({ "out.zip": "PKbinary" });
+    deliverArtifacts(taskId, src);
+    const res = await handleRequest(previewReq(reqId, 1, "out.zip"), loopback);
+    expect(res.status).toBe(415);
+  });
+
+  it("路径穿越 → 拒（resolveDeliveryFilePath 防护）", async () => {
+    const { reqId, taskId } = makeFixture();
+    deliverArtifacts(taskId, makeSrcDir({ "a.svg": "<svg/>" }));
+    const res = await handleRequest(previewReq(reqId, 1, "../../../etc/passwd"), loopback);
+    expect(res.status).toBeGreaterThanOrEqual(400);
   });
 });

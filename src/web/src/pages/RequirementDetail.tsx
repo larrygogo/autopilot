@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { PAGE_W } from "@/lib/layout";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion, Bot, UserRound, Download, Package } from "lucide-react";
-import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type RequirementDelivery, type DeliveryFileEntry, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
+import { ArrowLeft, ExternalLink, Clock, MessageSquare, CheckCircle2, Send, Wifi, WifiOff, Loader2, ChevronRight, Settings2, Pencil, History, Trash2, FileQuestion, Bot, UserRound } from "lucide-react";
+import { api, type Requirement, type RequirementFeedback, type RequirementSubPr, type RequirementDelivery, type Question, type Project, type Workspace, type ProviderItem, type ClarifierRoundState, type RequirementStatusLog, type Attachment } from "@/hooks/useApi";
 import { AttachmentUploader } from "@/components/AttachmentUploader";
 import { RequirementWorkspacePicker } from "@/components/RequirementWorkspacePicker";
 import { AttachmentList } from "@/components/AttachmentList";
@@ -26,6 +26,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ConfirmDialog } from "@/components/Modal";
 import { SpecRevisionsSheet } from "@/components/SpecRevisionsSheet";
 import { MarkdownView } from "@/components/MarkdownView";
+import { DeliveriesCard } from "@/components/DeliveriesCard";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
@@ -434,7 +435,6 @@ export function RequirementDetail() {
   const [statusLogs, setStatusLogs] = useState<RequirementStatusLog[]>([]);
   const [workflowOptions, setWorkflowOptions] = useState<{ name: string; label?: string; description: string; requires_git?: boolean | "optional"; delivers?: string }[]>([]);
   const [deliveries, setDeliveries] = useState<RequirementDelivery[]>([]);
-  const [deliveryFiles, setDeliveryFiles] = useState<{ round: number; files: DeliveryFileEntry[] } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -474,12 +474,7 @@ export function RequirementDetail() {
       setStatusLogs(slogs);
       setAttachments(atts);
       setDeliveries(dels);
-      // artifacts 验收卡：最新轮文件列表（无交付记录则清空）
-      if (dels.length > 0) {
-        api.listDeliveryFiles(id).then(setDeliveryFiles).catch(() => setDeliveryFiles(null));
-      } else {
-        setDeliveryFiles(null);
-      }
+      // 交付物文件由 DeliveriesCard 自己按轮按需拉（含历史轮），不在此预取
     } catch (e: unknown) {
       const msg = (e as Error)?.message ?? String(e);
       // 需求不存在（已删除 / 链接失效）：不弹 toast，由页面空态承接；其他错误（网络等）仍 toast
@@ -1130,60 +1125,10 @@ export function RequirementDetail() {
   // artifacts 交付（v2 R5）：有交付物记录且无任何交付 PR（hasPr 优先——混合交付不支持，PR 赢）
   const hasAnyPr = !!req.pr_url || (req.pr_number ?? 0) > 0 || subPrs.length > 0;
   const isArtifactsDelivery = deliveries.length > 0 && !hasAnyPr;
-  const latestDelivery = deliveries.length > 0 ? deliveries[deliveries.length - 1] : null;
 
-  const fmtSize = (n: number) =>
-    n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`;
-
-  // 交付物验收卡：最新轮文件列表 + 下载（只列不渲染——范围控制）。通过/驳回动作在
-  // 「审查与修复」卡头部（验收通过按钮）与底部输入框（驳回 = 发布审查意见），与 PR 验收同管道。
-  const deliveriesCard = latestDelivery ? (
-    <Card>
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
-        <Package className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="text-sm font-medium">交付物</span>
-        <Badge variant="secondary">第 {latestDelivery.round} 轮</Badge>
-        <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-          {new Date(latestDelivery.created_at).toLocaleString()}
-        </span>
-      </div>
-      <div className="space-y-3 p-5">
-        {latestDelivery.summary && (
-          <div className="scrollbar-thin max-h-[280px] overflow-auto rounded-md border border-border bg-muted/30 p-3">
-            <MarkdownView content={latestDelivery.summary} />
-          </div>
-        )}
-        {deliveryFiles && deliveryFiles.round === latestDelivery.round && deliveryFiles.files.length > 0 ? (
-          <ul className="divide-y divide-border rounded-md border border-border">
-            {deliveryFiles.files.map((f) => (
-              <li key={f.path} className="flex items-center gap-3 px-3 py-2 font-mono text-xs">
-                <span className="min-w-0 flex-1 truncate" title={f.path}>{f.path}</span>
-                <span className="shrink-0 text-muted-foreground">{fmtSize(f.size)}</span>
-                <a
-                  href={api.deliveryDownloadUrl(req.id, latestDelivery.round, f.path)}
-                  className="inline-flex shrink-0 items-center gap-1 text-accent hover:underline"
-                  title="下载此文件"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  下载
-                </a>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="font-mono text-xs text-muted-foreground">
-            交付目录暂无可列出的文件（可能已被清理或尚未同步）。
-          </p>
-        )}
-        {deliveries.length > 1 && (
-          <p className="font-mono text-[10px] text-muted-foreground">
-            共 {deliveries.length} 轮交付（驳回重交递增）；历史轮文件在
-            runtime/requirements/{req.id}/deliveries/ 下。
-          </p>
-        )}
-      </div>
-    </Card>
-  ) : null;
+  // 交付物验收卡：按类型展示（图片缩略图+预览 / md·文本内联 / html 隔离新标签 / 二进制下载）+ 多轮时间线。
+  // 通过/驳回动作在「审查与修复」卡（验收通过按钮 / 驳回 = 发布审查意见），与 PR 验收同管道。
+  const deliveriesCard = <DeliveriesCard reqId={req.id} deliveries={deliveries} />;
 
   // 审查与修复对话卡（验收步专属）：时间线（审查意见 / GitHub review / Agent 修复回应 +
   // 进行中的修复进度条目）+ 底部发布输入框 —— 每发一条意见，对应的「正在做什么 / 进度 /

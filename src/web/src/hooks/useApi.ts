@@ -780,9 +780,13 @@ export const api = {
       round !== undefined ? { id, round } : { id },
     ),
 
-  /** 交付物单文件下载 URL（HTTP 二进制通道） */
+  /** 交付物单文件下载 URL（HTTP 二进制通道，强制 attachment） */
   deliveryDownloadUrl: (id: string, round: number, path: string) =>
     `/api/requirements/${encodeURIComponent(id)}/deliveries/download?round=${round}&path=${encodeURIComponent(path)}`,
+
+  /** 交付物单文件预览 URL（安全内联：图片 <img>/html CSP sandbox；其它 415） */
+  deliveryPreviewUrl: (id: string, round: number, path: string) =>
+    `/api/requirements/${encodeURIComponent(id)}/deliveries/preview?round=${round}&path=${encodeURIComponent(path)}`,
 
   // [WS-RPC] requirements.specRevisions
   listSpecRevisions: (id: string) =>

@@ -1019,6 +1019,58 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
+    // GET /api/requirements/:id/deliveries/preview?round=N&path=<relative> —— 安全内联预览
+    // 仅对白名单类型放行：图片（<img> 渲染，svg 经 <img> 禁脚本）+ html（CSP sandbox 隔离不可信 demo）。
+    // 其它类型 415（前端走下载，或文本类自行 fetch download 读 text 渲染）。
+    const reqDeliveryPreviewMatch = extractParam(path, /^\/api\/requirements\/([\w-]+)\/deliveries\/preview$/);
+    if (method === "GET" && reqDeliveryPreviewMatch) {
+      const reqId = reqDeliveryPreviewMatch;
+      if (!getRequirementById(reqId)) return error("requirement not found", 404);
+      const relPath = url.searchParams.get("path") ?? "";
+      if (!relPath) return error("path 参数必填", 400);
+      const roundParam = url.searchParams.get("round");
+      const round = roundParam ? parseInt(roundParam, 10) : maxDeliveryRound(reqId);
+      if (!Number.isInteger(round) || round < 1) return error("无可预览的交付轮", 404);
+      try {
+        const abs = resolveDeliveryFilePath(reqId, round, relPath);
+        if (!abs) return error("非法路径", 400);
+        const file = Bun.file(abs);
+        if (!(await file.exists())) return error("文件不存在", 404);
+        const ext = (relPath.split(".").pop() ?? "").toLowerCase();
+        // 类型从扩展名白名单映射（**不信任文件内容嗅探**）；nosniff 防浏览器把 svg 当 html 执行。
+        const IMG: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", svg: "image/svg+xml" };
+        if (IMG[ext]) {
+          return new Response(file, {
+            headers: {
+              "Content-Type": IMG[ext],
+              "Content-Disposition": "inline",
+              "X-Content-Type-Options": "nosniff",
+              // svg 即便被当文档加载也跑不了脚本（default-src none）；double-belt
+              "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'",
+              ...cors,
+            },
+          });
+        }
+        if (ext === "html" || ext === "htm") {
+          // 不可信 agent 生成 html：CSP `sandbox`（不给 allow-same-origin）= 放进唯一不透明 origin，
+          // 拿不到 daemon cookie/token、发不出带凭证请求；allow-scripts 让 demo 可交互。default-src none 切断外联。
+          return new Response(file, {
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Content-Disposition": "inline",
+              "X-Content-Type-Options": "nosniff",
+              "X-Frame-Options": "DENY",
+              "Content-Security-Policy": "sandbox allow-scripts; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+              ...cors,
+            },
+          });
+        }
+        return error("该类型不支持内联预览，请下载", 415);
+      } catch (e: unknown) {
+        return error(e instanceof Error ? e.message : String(e), 400);
+      }
+    }
+
     // ─────────── Comments（评论线程：question / feedback / handoff） ───────────
 
     // POST /api/requirements/:reqId/comments/:cid/resolve
