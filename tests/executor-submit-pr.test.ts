@@ -30,6 +30,11 @@ test("produceDiff：dev 阶段只产 diff，不提交、不推送，且不留脏
   expect(runGit(["diff", "--cached", "--name-only"], work, false).stdout.trim()).toBe("");
 });
 
+test("produceDiff：干净工作树（无改动）返回 \"\"", () => {
+  // beforeEach 末尾 checkout -B feat/x，未改任何文件 → 相对 origin/main 无 diff
+  expect(produceDiff(work, "main")).toBe("");
+});
+
 test("submitPrPure：commit+push（PR 步骤注入桩），返回纯数据无副作用", async () => {
   writeFileSync(join(work, "a.txt"), "2\n");
   const res = await submitPrPure(

@@ -28,11 +28,18 @@ export function diffStat(cwd: string, base: string): string {
 
 /**
  * 推交付分支到远程：注入 token 走 buildAuthUrl 拼临时 auth URL 直接 push 到该 URL，
- * **不碰 origin**（零痕迹，无需用后抹除 origin）。token=null 时用 remoteUrl 原样（公开仓/file://）。
+ * **不碰 origin**（零痕迹，无需用后抹除 origin）。token=null 时用 remoteUrl 原样
+ * （公开仓/file://，**也可是已配置的 remote 别名如 "origin"**——git 当别名解析，
+ * builtin-deliver-pr 在 remote_url=null 时正是传 "origin"）。
+ *
+ * refspec 用**显式本地分支** `refs/heads/<branch>:refs/heads/<branch>` 而非 `HEAD:...`：
+ * ensureCodebase/git-clone 的 `checkout -B <branch>` 是 warn-only 不抛错，若 checkout 失败
+ * HEAD 会停在默认分支——用 HEAD 会把默认分支内容**静默推上交付分支**（错误内容、静默成功）；
+ * 推显式本地分支则在本地无该分支时 git push 失败，恢复「安全失败」语义。
  */
 export function pushToRemote(cwd: string, remoteUrl: string, branch: string, token: string | null): void {
   const target = token ? buildAuthUrl(remoteUrl, token) : remoteUrl;
-  const r = Bun.spawnSync(["git", "push", target, `HEAD:refs/heads/${branch}`], {
+  const r = Bun.spawnSync(["git", "push", target, `refs/heads/${branch}:refs/heads/${branch}`], {
     cwd, stderr: "pipe", env: { ...process.env, ...GIT_NONINTERACTIVE_ENV },
   });
   if ((r.exitCode ?? 0) !== 0) {
