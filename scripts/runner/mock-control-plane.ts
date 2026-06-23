@@ -8,7 +8,9 @@
 //    下发到 runner 机器，故 mock 也不用它（真后端的全局 codex worker 路径不在 A 模式被测范围内）。
 //
 // DTO 契约（spec §15，与 A2 src/daemon/runner/backend.ts + types.ts 逐字段对齐）：
-//  - register 响应 data = {runner_id, secret}（token 经 Authorization: Bearer <regToken> 头传入，body={name,machine_meta}）。
+//  - register 请求 body = {token, name, machine_meta}（token 走 JSON body，与真后端 RunnerRegisterRequest 一致——
+//    handler 不读 Authorization 头）；响应 data = {runner_id, secret}。mock 只认 body.token，不回退 header，
+//    故 A2 若把 token 放 header 会 401，离线契约测试当场捕获漂移（见 §15 + routes/runners.rs::register）。
 //  - pending claim 命中 data = {session_id, current_stage, status="queued"}（C1，非裸 ORM）。
 //  - GET /api/internal/dev-sessions/{id} data = {id, status, current_stage, repos[]}，
 //    repos 元素 = {repo_id, alias, remote_url, default_branch, primary}（C2）。
@@ -87,13 +89,13 @@ export class MockControlPlane {
     const r = this.#runners.get(runnerId);
     if (r) r.revoked = true;
   }
-  /** 便捷注册：颁 token → 调真 register 端点换凭证（走 Authorization 头，与 A2 一致）。 */
+  /** 便捷注册：颁 token → 调真 register 端点换凭证（token 走 JSON body，与真后端 RunnerRegisterRequest 一致）。 */
   async registerRunner(name: string): Promise<{ runnerId: string; secret: string }> {
     const tok = this.issueRegistrationToken();
     const r = await fetch(`${this.url}/api/runners/register`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
-      body: JSON.stringify({ name, machine_meta: {} }),
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: tok, name, machine_meta: {} }),
     });
     const b = (await r.json()) as { data: { runner_id: string; secret: string } };
     return { runnerId: b.data.runner_id, secret: b.data.secret };
@@ -198,11 +200,10 @@ export class MockControlPlane {
       }
     }
     if (event_type === "session_failed" || event_type === "limit_hit") {
-      // B 摄取补分支（spec §14.2）：成本闸门触顶让大脑可见（session_failed 置 failed，limit_hit 仅记录）。
-      if (event_type === "session_failed") {
-        const s = this.#sessions.get(sid);
-        if (s) s.status = "failed";
-      }
+      // B 摄取补分支（spec §14.2，对齐 dev_session_service.rs:637-644）：成本闸门触顶让大脑可见——
+      // session_failed 与 limit_hit 同语义，均置 session failed（不静默退出）。
+      const s = this.#sessions.get(sid);
+      if (s) s.status = "failed";
     }
     const row: EventRow = { seq, event_type, stage, actor, payload: p };
     this.#events.get(sid)!.push(row);
@@ -240,10 +241,12 @@ export class MockControlPlane {
         headers: { "content-type": "application/json" },
       });
 
-    // ── 注册（token 经 Authorization: Bearer 头传入，与 A2 HttpRunnerBackend.register 一致；兼容 body.token）──
+    // ── 注册（token 走 JSON body，与真后端 routes/runners.rs::register 一致：Json(RunnerRegisterRequest{token,name,machine_meta})，
+    //    handler 完全不读 Authorization 头。**故意只认 body.token、不回退 header**——若 A2 把 token 放进 header 会因缺
+    //    必填 token 而 401，让离线契约测试当场捕获 A2↔B 漂移，而非假绿。）──
     if (req.method === "POST" && u.pathname === "/api/runners/register") {
       const b = (await req.json().catch(() => ({}))) as { name?: string; token?: string; machine_meta?: unknown };
-      const tok = this.#bearer(req) ?? b.token ?? "";
+      const tok = b.token ?? "";
       if (!this.#regTokens.has(tok) || this.#regTokens.get(tok) === true) {
         return json({ error: "token 无效或已消费" }, 401);
       }

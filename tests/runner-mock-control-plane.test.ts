@@ -20,14 +20,14 @@ afterEach(async () => {
   }
 });
 
-test("注册换凭证（token 经 Authorization 头）+ 一次性消费", async () => {
+test("注册换凭证（token 走 JSON body，与真后端 RunnerRegisterRequest 一致）+ 一次性消费", async () => {
   cp = new MockControlPlane();
   await cp.start();
   const regTok = cp.issueRegistrationToken();
   const reg = await fetch(`${cp.url}/api/runners/register`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${regTok}`, "content-type": "application/json" },
-    body: JSON.stringify({ name: "t1", machine_meta: {} }),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: regTok, name: "t1", machine_meta: {} }),
   });
   const body = (await reg.json()) as { data: { runner_id: string; secret: string } };
   expect(body.data.runner_id).toBeTruthy();
@@ -35,10 +35,23 @@ test("注册换凭证（token 经 Authorization 头）+ 一次性消费", async 
   // 一次性：同 token 再注册 401
   const again = await fetch(`${cp.url}/api/runners/register`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${regTok}`, "content-type": "application/json" },
-    body: JSON.stringify({ name: "t2", machine_meta: {} }),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: regTok, name: "t2", machine_meta: {} }),
   });
   expect(again.status).toBe(401);
+});
+
+test("register 只认 body.token：token 放 Authorization 头 → 401（捕获 A2↔B header-vs-body 漂移）", async () => {
+  cp = new MockControlPlane();
+  await cp.start();
+  const regTok = cp.issueRegistrationToken();
+  // 模拟「A2 把 token 放进 header、body 缺 token」的错误形态——真后端会因缺必填 token 反序列化失败/拒绝，mock 同样 401。
+  const reg = await fetch(`${cp.url}/api/runners/register`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${regTok}`, "content-type": "application/json" },
+    body: JSON.stringify({ name: "t1", machine_meta: {} }),
+  });
+  expect(reg.status).toBe(401);
 });
 
 test("派 session → /sessions/pending 原子 claim 只一次返回 payload（含 status=queued）", async () => {
@@ -106,6 +119,27 @@ test("裁决 gate / 取消 session 走事件流（驳回评论落 gate_decided.p
   expect(decided).toBeTruthy();
   expect(decided!.payload.decision).toBe("rejected");
   expect(decided!.payload.comment).toBe("缺测试"); // §14.4：评论在 gate_decided.payload.comment
+});
+
+test("摄取 limit_hit → session 置 failed（§14.2，与 session_failed 同语义，对齐 dev_session_service.rs）", async () => {
+  cp = new MockControlPlane();
+  await cp.start();
+  const { runnerId, secret } = await cp.registerRunner("r1");
+  const sid = cp.dispatchSession({ assignedRunner: runnerId, repos: [], stage: "dev" });
+  const h = { authorization: `Bearer ${secret}`, "x-runner-id": runnerId, "content-type": "application/json" };
+  await fetch(`${cp.url}/api/internal/dev-sessions/${sid}/events`, {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({ event_type: "limit_hit", stage: "dev", actor: "agent", payload: { reason: "STAGE_MAX" } }),
+  });
+  expect(cp.sessionStatus(sid)!.status).toBe("failed");
+  // 终态后再回写事件被拒（409）。
+  const after = await fetch(`${cp.url}/api/internal/dev-sessions/${sid}/events`, {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({ event_type: "assistant_message", stage: "dev", actor: "agent", payload: {} }),
+  });
+  expect(after.status).toBe(409);
 });
 
 test("claimAny：任意在线 runner 可领 created session（解决脚本拿不到 daemon 真实 runner_id）", async () => {
