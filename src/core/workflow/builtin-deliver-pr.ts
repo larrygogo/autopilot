@@ -13,7 +13,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import type { TaskRepoCtx } from "../sandbox";
-import { openOrUpdatePr } from "../executor/git-ops";
 import { submitPrPure, type ExecRepo } from "../executor/submit-pr";
 
 /**
@@ -64,7 +63,8 @@ export function makePrDeliverRunner(
     const totalRepos = taskRepos.length;
 
     // 构造 ExecRepo[]：remote_url 为 null 时传 "origin"（git push 会把它当 remote 别名，
-    // 等价于原来的 `git push -u origin <branch>`；token=null 不碰 remoteUrl）
+    // 与原来的 `git push -u origin <branch>` 功能等价——少 `-u` upstream tracking，
+    // 当前沙盒一次性交付不依赖 tracking branch；token=null 不碰 remoteUrl）
     const execRepos: ExecRepo[] = taskRepos.map((r) => ({
       path: r.path,
       remoteUrl: r.remote_url ?? "origin",
@@ -87,11 +87,10 @@ export function makePrDeliverRunner(
           multiNote
         );
       },
-      // gitToken=null：保持既有行为（靠环境 gh + clone 时写进 .git 的 origin）；A2 接 runner 时注入 vend token
+      // gitToken=null：保持既有行为（push 靠环境 gh + clone 时写进 .git 的 origin、PR 靠 gh 环境）；
+      // 不传 openPr → submitPrPure 默认走 openOrUpdatePr(path, {title,body,base,head}, gitToken)。
+      // A2 接 runner 时只需把 gitToken 改成 vend token，push 与 PR 同时拿到，无需再改注入闭包。
       gitToken: null,
-      // openPr：走 openOrUpdatePr（注入 cwd + GhPrInput，token=null 靠 gh 环境）
-      openPr: (cwd, repo, body) =>
-        openOrUpdatePr(cwd, { title, body, base: repo.base, head: repo.branch }, null),
     });
 
     if (results.length === 0 && failures.length === 0) {
@@ -103,7 +102,7 @@ export function makePrDeliverRunner(
 
     // DB 副作用层：登记交付 PR（pr-poller 聚合验收）
     for (const { repo, prUrl, prNumber } of results) {
-      // 找回对应的 TaskRepoCtx（按 path 对应）
+      // ExecRepo 不携带 workspace_id，按 path 反查回 TaskRepoCtx 取 workspace_id 给 appendSubPr
       const taskRepo = taskRepos.find((r) => r.path === repo.path);
       if (taskRepo?.workspace_id && reqId) {
         try {
