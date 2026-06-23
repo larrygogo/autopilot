@@ -23,6 +23,7 @@ test("fetchEvents：GET /events?after_seq=N，带 runner bearer，解析 wire ev
   expect(evs[0]!.text).toBe("hi");            // payload.message → text
   expect(calls[0]!.url).toBe("https://rg.example/api/internal/dev-sessions/sess-1/events?after_seq=4");
   expect((calls[0]!.init!.headers as Record<string, string>)["Authorization"]).toBe("Bearer sek");
+  expect((calls[0]!.init!.headers as Record<string, string>)["x-runner-id"]).toBe("rnr-1"); // C3: B 双鉴权归属校验
 });
 
 test("postEvent：POST /events，body event_type + 嵌套 payload、不含 seq（后端定序），归一回填的 event", async () => {
@@ -110,4 +111,6 @@ test("register：POST /api/runners/register 用注册 token（非 runner secret�
   expect(out.secret).toBe("newsek");
   expect(calls[0]!.url).toBe("https://rg.example/api/runners/register");
   expect((calls[0]!.init!.headers as Record<string, string>)["Authorization"]).toBe("Bearer reg-token-abc");
+  // register 尚无 runner_id，不能带 x-runner-id（静态方法，不经 auth()）
+  expect((calls[0]!.init!.headers as Record<string, string>)["x-runner-id"]).toBeUndefined();
 });

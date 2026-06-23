@@ -49,7 +49,7 @@ export class HttpRunnerBackend implements RunnerBackend {
   }
 
   private auth(): Record<string, string> {
-    return { Authorization: `Bearer ${this.creds.secret}` };
+    return { Authorization: `Bearer ${this.creds.secret}`, "x-runner-id": this.creds.runner_id };
   }
   private internal(sessionId: string, suffix: string): string {
     return `${this.base}/api/internal/dev-sessions/${sessionId}${suffix}`;
