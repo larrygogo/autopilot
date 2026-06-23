@@ -1905,12 +1905,16 @@ afterEach(() => {
   try { rmSync(home, { recursive: true, force: true }); } catch {}
 });
 
-test("cleanupSessionCodebase：删 runtime/requirements/<sessionId>/codebase", () => {
-  const cb = join(home, "runtime", "requirements", "sess-9", "codebase", "app");
+test("cleanupSessionCodebase：整树删 runtime/requirements/<sessionId>/（含 codebase + runs）", () => {
+  const reqRoot = join(home, "runtime", "requirements", "sess-9");
+  const cb = join(reqRoot, "codebase", "app");
+  const runRoot = join(reqRoot, "runs", "rs-sess-9");
   mkdirSync(cb, { recursive: true });
-  expect(existsSync(cb)).toBe(true);
+  mkdirSync(runRoot, { recursive: true });
+  writeFileSync(join(runRoot, "agent-calls.jsonl"), '{"k":"v"}\n');
   cleanupSessionCodebase("sess-9");
-  expect(existsSync(join(home, "runtime", "requirements", "sess-9", "codebase"))).toBe(false);
+  expect(existsSync(join(reqRoot, "runs"))).toBe(false);   // 当前漏点：只删 codebase/ 会泄漏这棵
+  expect(existsSync(reqRoot)).toBe(false);
 });
 
 test("cleanupSessionCodebase：无目录时 no-op 不抛", () => {
@@ -1924,19 +1928,28 @@ Run: `bun test tests/runner-retention.test.ts` → FAIL（`cleanupSessionCodebas
 
 - [ ] **Step 3：实现**
 
+> **[审查修正·major] 必须整树删，不能只删 codebase/。** runner session 是**合成身份、无 DB 需求行**，
+> 终态后没有任何 Web 浏览或 retention reaper 会再碰它（retention 按 DB 需求终态扫，碰不到无 DB 行的 session）。
+> 而 A1 executor 的 `runRoundAgent`→`bindTaskRunRoot` 把 agent-calls.jsonl/run 根落在
+> `runtime/requirements/<sessionId>/runs/<rs-sessionId>/`——只删 `codebase/`（`deleteRequirementCodebase`）会把
+> `runs/` 与父目录永久泄漏（逐 session 累积磁盘），且与本 Task 标题「清理 `runtime/requirements/<sessionId>/`（整树）」矛盾。
+> 故改用 `deleteRequirementRuntimeDir`（`src/core/requirements/clone.ts`，整树删 `codebase/` + `runs/` + 清单）。
+> 该函数是纯 fs 回收 helper（rmSync），不触状态机/调度/桥接，不违 A 模式红线。
+
 在 `src/daemon/runner/session-loop.ts` 顶部 import 区加：
 ```ts
-import { deleteRequirementCodebase } from "../../core/sandbox/codebase";
+import { deleteRequirementRuntimeDir } from "../../core/requirements/clone";
 ```
 新增导出（文件末尾）：
 ```ts
 /**
- * session 终态收尾（§6.7）：清需求级 codebase（sessionId 当合成需求 id）。
- * 复用 deleteRequirementCodebase（整树删 codebase/ + legacy workspace/ + 清单）。零痕迹原则
- * 在 push 时已抹除 origin 凭证，此处仅回收磁盘。
+ * session 终态收尾（§6.7）：整树回收 runtime/requirements/<sessionId>/（sessionId 当合成需求 id）。
+ * 必须整树删（codebase/ + runs/ + 清单）——runner session 无 DB 行、终态后无浏览/reaper 复访，
+ * 只删 codebase/ 会泄漏 A1 executor 落在 runs/<rs-sessionId>/ 的 run 根。复用 deleteRequirementRuntimeDir
+ * （纯 fs rmSync，不触状态机，不违 A 模式红线）。零痕迹原则在 push 时已抹除 origin 凭证，此处仅回收磁盘。
  */
 export function cleanupSessionCodebase(sessionId: string): void {
-  try { deleteRequirementCodebase(sessionId); } catch { /* best-effort 回收 */ }
+  try { deleteRequirementRuntimeDir(sessionId); } catch { /* best-effort 回收 */ }
 }
 ```
 在 `runSessionLoop` 的终态退出分支（`if (TERMINAL_STATUSES.has(session.status))` 内 `return;` 之前）调用：
@@ -1949,7 +1962,7 @@ export function cleanupSessionCodebase(sessionId: string): void {
 ```
 同理在两处成本闸门触顶 `return;` 前各加 `cleanupSessionCodebase(sessionId);`（session 已 failed，clone 无保留价值）。
 
-> 注：`deleteRequirementCodebase` 校验 `REQ_ID_RE = /^[\w.\-]+$/`；reqgenie session_id（如 `sess-1`、UUID）满足该集。若实际 session_id 含其他字符，此调用静默返 false（不抛），不影响退出——但应在 backend 层确认 session_id 字符集；当前协议假定 `[\w.\-]+`。
+> 注：`deleteRequirementRuntimeDir` 同样校验 `REQ_ID_RE = /^[\w.\-]+$/`；reqgenie session_id（如 `sess-1`、UUID）满足该集。若实际 session_id 含其他字符，此调用静默返 false（不抛），不影响退出——但应在 backend 层确认 session_id 字符集；当前协议假定 `[\w.\-]+`。
 
 - [ ] **Step 4：运行确认通过**
 

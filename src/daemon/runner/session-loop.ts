@@ -2,7 +2,7 @@ import type { RunnerBackend } from "./backend";
 import type { SessionEvent, SessionState } from "./types";
 import { TERMINAL_STATUSES } from "./types";
 import { CostBudget, withTimeout, type CostLimits } from "./cost-gate";
-import { deleteRequirementCodebase } from "../../core/sandbox/codebase";
+import { deleteRequirementRuntimeDir } from "../../core/requirements/clone";
 import { log } from "../../core/logger";
 
 /** waitGate 返回：批准则推进，驳回携带返工评论 + 目标 stage（reqgenie rework_target_stage）。 */
@@ -168,10 +168,18 @@ export async function defaultWaitGate(
 }
 
 /**
- * session 终态收尾（§6.7）：清需求级 codebase（sessionId 当合成需求 id）。
- * 复用 deleteRequirementCodebase（整树删 codebase/ + legacy workspace/ + 清单）。零痕迹原则
- * 在 push 时已抹除 origin 凭证，此处仅回收磁盘。
+ * session 终态收尾（§6.7）：整树回收 runtime/requirements/<sessionId>/（sessionId 当合成需求 id）。
+ *
+ * 必须整树删、不能只删 codebase/：runner session 是**合成身份、无 DB 需求行**，终态后没有任何
+ * Web 浏览或 retention reaper 会再碰它（retention 按 DB 需求终态扫，碰不到无 DB 行的 session）。
+ * 而 A1 executor 的 runRoundAgent→bindTaskRunRoot 把 agent-calls.jsonl/run 根落在
+ * runtime/requirements/<sessionId>/runs/<rs-sessionId>/——只删 codebase/（deleteRequirementCodebase）
+ * 会把 runs/ 与父目录永久泄漏（逐 session 累积磁盘）。故复用 deleteRequirementRuntimeDir
+ * （整树删 codebase/ + runs/ + 清单）。零痕迹原则在 push 时已抹除 origin 凭证，此处仅回收磁盘。
+ *
+ * 注：deleteRequirementRuntimeDir 是纯 fs 回收 helper（rmSync），不触状态机/调度器/桥接，
+ * 不违 A 模式红线（runner 仍是无状态执行器）。
  */
 export function cleanupSessionCodebase(sessionId: string): void {
-  try { deleteRequirementCodebase(sessionId); } catch { /* best-effort 回收 */ }
+  try { deleteRequirementRuntimeDir(sessionId); } catch { /* best-effort 回收 */ }
 }
