@@ -33,10 +33,11 @@ const PREREQS: Prereq[] = [
 ];
 
 /** reqgenie B 侧前置（迁移文件是否存在）——B 计划未落地时缺失，前置检查报「前置阻塞」不混入机检失败。 */
+// 迁移用日期格式（非计划草稿的 060/061/062——会与 reqgenie 已有 058+ 撞号；字母后缀 a/b/c 强制 FK 依赖序）。
 const B_PREREQS: Prereq[] = [
-  { id: "B/060_runners", desc: "reqgenie 迁移 060_runners.sql", file: "backend/migrations/060_runners.sql", base: "reqgenie" },
-  { id: "B/061_dev_sessions_runner", desc: "reqgenie 迁移 061_dev_sessions_runner.sql", file: "backend/migrations/061_dev_sessions_runner.sql", base: "reqgenie" },
-  { id: "B/062_runner_manage_perm", desc: "reqgenie 迁移 062_runner_manage_perm.sql", file: "backend/migrations/062_runner_manage_perm.sql", base: "reqgenie" },
+  { id: "B/runners", desc: "reqgenie 迁移 20260623a_runners.sql", file: "backend/migrations/20260623a_runners.sql", base: "reqgenie" },
+  { id: "B/dev_sessions_runner", desc: "reqgenie 迁移 20260623b_dev_sessions_runner.sql", file: "backend/migrations/20260623b_dev_sessions_runner.sql", base: "reqgenie" },
+  { id: "B/runner_manage_perm", desc: "reqgenie 迁移 20260623c_runner_manage_perm.sql", file: "backend/migrations/20260623c_runner_manage_perm.sql", base: "reqgenie" },
 ];
 
 function prereqPath(p: Prereq): string {
@@ -169,12 +170,12 @@ const checks: Check[] = [
   // ── reqgenie 侧（B）──
   {
     id: "B-migrations",
-    desc: "reqgenie 060/061/062 迁移存在",
+    desc: "reqgenie 20260623a/b/c runner 迁移存在",
     kind: "auto",
     run: () =>
-      reqgenieFileExists("backend/migrations/060_runners.sql") &&
-      reqgenieFileExists("backend/migrations/061_dev_sessions_runner.sql") &&
-      reqgenieFileExists("backend/migrations/062_runner_manage_perm.sql"),
+      reqgenieFileExists("backend/migrations/20260623a_runners.sql") &&
+      reqgenieFileExists("backend/migrations/20260623b_dev_sessions_runner.sql") &&
+      reqgenieFileExists("backend/migrations/20260623c_runner_manage_perm.sql"),
   },
   {
     id: "B-runner-e2e-compiles",
