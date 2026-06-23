@@ -21,7 +21,7 @@ ReqGenie（Rust+Axum+PG 后端、React 前端、飞书、K8s）已有一整套�
 | **D3 连接倒转** | 仅倒转「派发」一段 | agent-worker 出站端点（events 拉/推、status、git-token、heartbeat）对 runner 原样复用；只把入站 `POST /sessions` push 改成「runner 注册 + 长轮询领待派 session」。 |
 | **D4 复用而非新造** | 复用 dev_sessions 全套 | B 模式从零造协议暴露 9 blocker；A 复用 reqgenie 已验证的 seq 定序 / 事件溯源 / 关卡 rework / 心跳，那些 blocker 大半蒸发（§12）。飞书澄清/spec/gate 人审白拿。 |
 | **D5 autopilot 实现未建阶段** | autopilot 实现各 stage round | clarify/spec/review = 读 + 产文档 + 开 gate；**dev = clone + AI 改码 + 产 diff（不 commit/push）+ 开 gate；pr = commit/push 交付分支 + 开 PR + `pr_created` 事件**（§4.5）。reqgenie 放开 `autopilot_selfhosted` session 的 `max_stage=pr`。 |
-| **D6 凭证（相对 B 翻转，且是真改造非小改）** | **用 reqgenie vend 的 installation token** | 解决 B 模式「本机 gh 账号对组织私有仓没权限」。⚠ **工作量重估为 R1 实打实改造**（审查纠正）：clone 侧 `resolveGitToken` 无入参注入点；push/PR 侧 `builtin-deliver-pr.ts` **对 token 零管线**（裸 `git push` + `gh`，且 clone 后会抹除 origin 凭证）。需：token 全链路透传 + push/PR 时临时拼 auth URL 或注 `GH_TOKEN`（用后即抹，对齐零痕迹）+ **push 前现取**（1h installation token 跨 dev→gate 等人→pr 可能过期）。⚐ 待你确认：vend token（推荐）vs 本机 gh（省改但私有组织仓靠本机账号权限）。 |
+| **D6 凭证（相对 B 翻转，且是真改造非小改）** | **用 reqgenie vend 的 installation token** | 解决 B 模式「本机 gh 账号对组织私有仓没权限」。⚠ **工作量重估为 R1 实打实改造**（审查纠正）：clone 侧 `resolveGitToken` 无入参注入点；push/PR 侧 `builtin-deliver-pr.ts` **对 token 零管线**（裸 `git push` + `gh`，且 clone 后会抹除 origin 凭证）。需：token 全链路透传 + push/PR 时临时拼 auth URL 或注 `GH_TOKEN`（用后即抹，对齐零痕迹）+ **push 前现取**（1h installation token 跨 dev→gate 等人→pr 可能过期）。**已定（2026-06-23 用户确认）= 用 vend token**（非本机 gh）。 |
 | **D7 fix 回路** | 用 reqgenie 的 gate rework（增量沙箱契约见 §4.5） | 驳回 = gate `rejected` + `rework_target_stage` → session 回退重做该 stage，autopilot 下一 round 在**保留的脏工作树上增量重做**（与 autopilot 既有返工语义一致）。autopilot 自己的 pr-poller/fix-revision-runner 在 A 模式不参与。 |
 
 ## 3. 架构总览
