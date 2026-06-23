@@ -137,6 +137,21 @@ export class MockControlPlane {
       s.status = "running"; // 留本 stage 带评论重做
     }
   }
+  /**
+   * 推进 stage（无 gate 阶段的「大脑判清楚」决策替身，spec 行 124：clarify 产出
+   * `assistant_message +(clarification_requested | 推进)`——「推进」由大脑（reqgenie clarify 逻辑）
+   * 决定而非 gate）。runner 的 clarify round 只回 assistant_message、不开 gate，故 clarify→spec 的
+   * 推进必须由对端模拟。stage 推进由 getSession().current_stage 驱动，runner 不自驱（session-loop 契约）。
+   */
+  advanceStage(sessionId: string): void {
+    const s = this.#sessions.get(sessionId);
+    if (!s || TERMINAL.has(s.status)) return;
+    const idx = STAGE_ORDER.indexOf(s.current_stage);
+    const next = STAGE_ORDER[Math.min(idx + 1, STAGE_ORDER.length - 1)]!;
+    s.current_stage = next;
+    s.status = next === "done" ? "completed" : "running";
+    this.#appendEvent(sessionId, "stage_change", next, "agent", { to: next });
+  }
   injectUserMessage(sessionId: string, message: string, byName = "tester"): void {
     this.#appendEvent(sessionId, "user_message", null, "user", { message, by_name: byName });
     const s = this.#sessions.get(sessionId);

@@ -34,8 +34,13 @@ export async function runRoundAgent(
 ): Promise<AgentResult> {
   const taskId = ctx.ghostTaskId ?? ghostTaskIdFor(ctx.sessionId);
   bindTaskRunRoot(taskId, ctx.sessionId); // 种 taskRootCache：runtime/requirements/<sessionId>/runs/<taskId>/
+  // cwd 必须显式落到沙盒 clone —— Agent.run 只从 ctx 取 env/signal、不据 ctx.sandboxDir 设 cwd
+  // （那是各 phaseFn 的活：phaseFn 显式传 cwd: getCurrentSandboxDir()）。A 模式无 phaseFn，rounds
+  // 不另传 cwd，故在此兜底注入：否则 dev round 的 agent 子进程落在 daemon cwd、改不到交付分支工作树
+  // → produceDiff/hasChanges 空 → pr 阶段开不出 PR（runner-smoke 契约冒烟当场暴露此缺口）。
+  // 显式 opts.cwd 优先（调用方意图最高）。
   return await runWithTaskContext(
     { taskId, phase: ctx.phase, sandboxDir: ctx.sandboxDir, signal: ctx.signal },
-    () => agent.run(prompt, opts),
+    () => agent.run(prompt, { ...opts, cwd: opts?.cwd ?? ctx.sandboxDir }),
   );
 }

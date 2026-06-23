@@ -21,7 +21,8 @@
     "check:migrations": "bun run scripts/check-migrations.ts",
     "check:docs": "bun run scripts/check-docs-translation.ts",
     "check:docs:strict": "bun run scripts/check-docs-translation.ts --strict",
-    "smoke-test": "bun run scripts/smoke-test.ts"
+    "smoke-test": "bun run scripts/smoke-test.ts",
+    "runner-smoke": "bun run scripts/runner/runner-smoke.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",

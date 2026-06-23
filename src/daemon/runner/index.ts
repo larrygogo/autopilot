@@ -25,7 +25,15 @@ let _loopPromise: Promise<void> | null = null;
 /** 默认成本闸门（§4.3）。 */
 const COST_LIMITS = { sessionMax: 30, stageMax: 5 };
 const ROUND_TIMEOUT_MS = 30 * 60_000; // 单 round 30 分钟墙钟
-const WAIT_POLL_MS = 30_000;          // WAIT/gate 轮询 30s（§4.3）
+/**
+ * WAIT/gate 轮询间隔（§4.3 默认 30s）。
+ * 离线契约冒烟（runner-smoke）用 `RUNNER_WAIT_POLL_MS` 调小到亚秒级，让多 stage 链路在 CI 时限内跑完——
+ * 生产不设此 env 即保持 30s（人审/澄清场景对 30s 延迟容忍），默认行为不变。
+ */
+const WAIT_POLL_MS = (() => {
+  const v = Number(process.env.RUNNER_WAIT_POLL_MS);
+  return Number.isFinite(v) && v > 0 ? v : 30_000;
+})();
 
 /**
  * stage → agent permission_mode（纯映射，便于单测——createAgent 需 provider 解析，难直测）。
