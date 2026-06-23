@@ -104,6 +104,8 @@ export interface EnsureCodebaseOpts {
   base?: string;
   /** shallow clone 超时（默认 120s）；full clone 不限时 */
   timeoutMs?: number;
+  /** A 模式：注入 vend token，优先于环境解析（缺省回退 resolveGitToken） */
+  gitToken?: string;
 }
 
 export interface CodebaseRepoState<W extends CodebaseWorkspaceRef> {
@@ -124,6 +126,12 @@ export function safeAliasDir(alias: string, workspaceId: string): string {
   const cleaned = alias.replace(/[^\w.-]/g, "");
   if (cleaned && SAFE_DIR_RE.test(cleaned) && cleaned !== "." && cleaned !== "..") return cleaned;
   return workspaceId;
+}
+
+/** clone token 取值：注入优先，回退 config.git.token > gh auth token。 */
+export function pickCloneToken(injected?: string): string | null {
+  if (injected && injected.trim()) return injected;
+  return resolveGitToken();
 }
 
 // 进程内按 reqId 串行化（防御并发调用交错写同一 codebase）
@@ -223,6 +231,7 @@ async function ensureCodebaseInner<W extends CodebaseWorkspaceRef>(
         branch: ws.default_branch,
         base: ws.default_branch,
         timeoutMs: opts.timeoutMs ?? DEFAULT_SHALLOW_TIMEOUT_MS,
+        gitToken: opts.gitToken,
       });
       if (!ok) { failed.push(ws); byWsId.delete(ws.id); return; }
       const meta: CodebaseRepoMeta = { alias, dir, ws_id: ws.id, fidelity: "shallow", branch: ws.default_branch, base: ws.default_branch, remote_url: ws.remote_url };
@@ -246,6 +255,7 @@ async function ensureCodebaseInner<W extends CodebaseWorkspaceRef>(
       fidelity: "full", branch, base,
       checkoutExisting: opts.checkoutExisting === true,
       timeoutMs: opts.timeoutMs,
+      gitToken: opts.gitToken,
     });
     if (!ok) { failed.push(ws); byWsId.delete(ws.id); return; }
     const meta: CodebaseRepoMeta = { alias, dir, ws_id: ws.id, fidelity: "full", branch, base, remote_url: ws.remote_url };
@@ -303,7 +313,7 @@ async function cloneRepo(
   reqId: string,
   ws: CodebaseWorkspaceRef,
   dest: string,
-  opts: { fidelity: CodebaseFidelity; branch: string; base: string; checkoutExisting?: boolean; timeoutMs?: number },
+  opts: { fidelity: CodebaseFidelity; branch: string; base: string; checkoutExisting?: boolean; timeoutMs?: number; gitToken?: string },
 ): Promise<boolean> {
   if (!ws.remote_url) return false;
   if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
@@ -311,7 +321,7 @@ async function cloneRepo(
   let cloneUrl = ws.remote_url;
   const cleanUrl = ws.remote_url;
   try {
-    const gitToken = resolveGitToken(); // config git.token > gh auth token 兜底（私有仓库）
+    const gitToken = pickCloneToken(opts.gitToken); // 注入优先；config git.token > gh auth token 兜底（私有仓库）
     if (gitToken) cloneUrl = buildAuthUrl(ws.remote_url, gitToken);
   } catch (e: unknown) {
     log.warn("解析 git token 失败，将尝试无凭证 clone [req=%s ws=%s]: %s",
