@@ -7,6 +7,7 @@
 > 4. **[major] 事件总线 API（已核实 event-bus.ts）**：`onEvent(type, handler)` 返回 **void**，退订 `offEvent(type, handler)`；`emit` 仅 `enableBus()` 后生效。测试里 `const off = onEvent(...)` 全改 `onEvent("task:created", handler)` + `finally{ offEvent(...) }`，断言「不发某事件」前先 `enableBus()`（否则 no-op 假绿）。
 > 5. **[major·驳回审查具体改法] permission_mode**：`dev` = `bypassPermissions`。**clarify/spec/eng_review/ui_review 仍用 `bypassPermissions`**（要 git/grep 探索代码）——⚠ **不要**按审查改成 `undefined`：autopilot 无「Bash 只读、禁写」模式，`default` 拒 Bash → clarify 跑不了 git（同既有 clarifier，CLAUDE.md）。改法 = 保 bypassPermissions + prompt 明确「只读探索、不改文件」。
 > 6. **[minor] session_id 字符集**：`deleteRequirementCodebase` 的 `REQ_ID_RE=[\w.\-]+`，reqgenie UUID 满足；`cleanupSessionCodebase` 传前不满足须净化。
+> 7. **[跨契约·见 spec §14]** 内部 API（events/git-token/heartbeat）用 **per-runner secret**（`this.auth()`，对）——别下发全局 worker secret（§14.1 安全）；`PendingSession` 加 `status` 字段（§14.6）；barrel 导出 `TERMINAL_STATUSES`/`SessionStatus`/`SessionStage`/`SessionEvent`（§14.7）；rework 评论读 `gate_decided.payload.comment`（§14.4，不靠 user_message）。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

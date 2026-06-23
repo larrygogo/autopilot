@@ -4,7 +4,9 @@
 > **定位澄清（重要）**：C 是**最终集成计划**，硬性执行顺序 = **A1 → A2 → B → C**。C 的各 Task 依赖前三者已实现——这是设计意图，**不是缺陷**（审查把「A1/A2/B 代码还不存在」当 blocker 是把计划当已落地代码的误读）。修正如下：
 > 1. **[blocker→改前置守卫] 每个 Task 开头加前置检查**：缺 `src/core/executor/index.ts`（A1）/ `src/daemon/runner/session-loop.ts`（A2）/ `reqgenie backend/migrations/060_runners.sql` 等（B）则 `exit 2` 打印「前置阻塞：X 未落地，请先完成对应计划」，**而非当失败**。
 > 2. **[blocker] mock control plane 的 `claimAny` 在 Task 2 当场实现**（不是拖到 Task 6）：`#claimAny` 字段 + `enableClaimAny()` + pending 端点判据 `(this.#claimAny || s.assigned_runner===rid) && s.status==='created'`；Task 2 加第 5 个测试验证 claimAny；Task 6 runner-smoke 用 `cp.enableClaimAny()` 后任意 runner 可领（解决「脚本拿不到 daemon 内真实 runner_id」）。
-> 3. **[major] gate 驳回评论注入**：mock `decideGate` 在 `rejected` 时**追加一条 `user_message`（或 `clarification_answered`）事件携带 comment**，使 session-loop 标准「拉事件→并入 accumulated」能消费（Task 3「驳回带评论重做」用例才成立）。
+> 3. **[major·已修正] gate 驳回评论传递（对齐 agent-worker，见 spec §14.4）**：评论放 **`gate_decided` 事件的 `payload.comment`**，session-loop 读到 `gate_decided(rejected)` 时直接 `accumulated += payload.comment`（agent-worker `sessionLoop.mjs` 原样）。mock `decideGate` 把 comment 落进 `gate_decided` 事件 payload 即可——**不另追加 `user_message` 事件**（本条早先「追加 user_message」的说法作废）。
+> 8. **[blocker·安全·见 spec §14.1] mock 内部 API 鉴权用 runner secret**：mock-control-plane 的 `/api/internal/dev-sessions/{id}/*`（events/git-token/heartbeat）**用 per-runner secret + 会话归属校验**，不用全局 `DEV_SESSION_WORKER_SECRET`（与 A2 `backend.ts` 对齐；全局 worker secret 不下发 runner 机器）。
+> 9. **[major·见 spec §14] 其余跨契约修正**：B 摄取补 `session_failed`/`limit_hit`；迁移 CHECK 含 `kind=dev/pr` + 全 7 stage；`assigned_runner` 在 create_session 落库；`PendingSession` 含 `status`。C 的契约测试（Task 4）按 spec §14 校这些。
 > 4. **[major] CI 契约测试 = 多仓 checkout（方案 a）**：Task 10 CI 用 `actions/checkout` 把 reqgenie checkout 到同级 `../reqgenie`，保持 052 枚举单一真理来源（不用 fixture，避免漂移）。
 > 5. **[major] Task 9 验收脚本两阶段**：先前置检查（A1/A2/B 落地？缺则 `exit 2` 报「前置阻塞」），再跑机检——避免「11 项全红」被误读成 C 有缺陷。
 > 6. **[major] live e2e（Task 7）开头加 smoke 检查**：后端 `/api/health` 可达 + JWT 有效（GET 需求）+ runner 在线；任一不过即 `fail` 明确报因，避免轮询 30min 后以 `limit_hit` 掩盖 token 过期/权限问题。

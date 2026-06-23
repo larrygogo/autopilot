@@ -9,6 +9,7 @@
 > 6. **[minor] dispatcher 选择测试**：补一条单测覆盖未知 `agent_backend` → 默认 `PushDispatcher`（保守降级）。
 > 7. **[doc·已为设计前提] 多实例长轮询**：`broadcast` 仅进程内，跨 reqgenie 实例靠 `/sessions/pending` 的 last-chance 重查兜底（≤1s POLL_INTERVAL 延迟），`wait=50s`。单实例无此延迟。在 /sessions/pending handler 处补 caveat 注释。
 > 8. **[流程] 提交前必跑**（reqgenie CLAUDE.md）：`cargo +nightly fmt` + `cargo clippy -- -D warnings`；前端 `npm run build`。
+> 9. **[跨契约·见 spec §14]** ① 内部端点（events/git-token/heartbeat）**双鉴权**：全局 worker secret（codex 路径）**或** per-runner secret + `session.assigned_runner==runner` 归属校验（自托管路径）；全局 secret 不下发 runner 机器（§14.1 安全）。② `ingest_worker_event` 补 `session_failed`/`limit_hit`→failed（§14.2）。③ 迁移：`dev_session_stage_artifacts.kind` 含 `dev`/`pr`、`dev_sessions.current_stage` CHECK 含全 7 stage（§14.3）。④ `assigned_runner` 在 `create_session` 落库、`RunnerDispatcher.dispatch` 为 no-op（§14.5）。⑤ `/sessions/pending` claim 响应含 `status=queued`（§14.6）。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >

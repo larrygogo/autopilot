@@ -234,3 +234,19 @@ A 模式真正新增面（比 B 小、稳）：**注册 + 拉式派发 + 拉模�
 - **rev1→rev2（B 模式）**：4 路审查挖 9 blocker（claim 原子/fix 回路/seq 防回放/orphaned 脑裂/跨通道互斥/注册防冒充/凭证 revoke/ensureWorkspaceByRemote/awaiting_review 臆造）+ 一批 major，全修于 B 模式 spec（git f9ccbde）。
 - **A 模式切换**：用户定 A（reqgenie 为大脑），B 模式 9 blocker 大半因复用 reqgenie 成熟协议而蒸发（§12）。
 - **rev3（A 模式）3 路审查**：未发现推翻 A 架构的问题；纳入 major/minor 修正——拉模型 reaper 回收（非现成）、D6 token 注入是真改造、dev 中间态重启安全、交付分支命名源、rework 增量沙箱契约、dev/pr commit-push 拆分、executor 三块副作用剥离（submitPR 不纯/幽灵 task emit）、成本闸门提到 R1、session 等待 30s 延迟取舍、多实例 broadcast 仅 last-chance 兜底、runner 忙则停领。
+- **跨计划契约审查（第二轮，A2/B/C 起草后）**：发现 A2↔B↔C 的契约漂移，决议见 §14。
+
+## 14. 跨契约审查（第二轮）修正 —— A1/A2/B/C 执行前必读（契约权威，覆盖各计划对应处）
+
+1. **鉴权边界（重要·安全决策）**：
+   - **runner 专有端点**（`/api/runners/register|heartbeat|sessions/pending|deregister`）= **per-runner secret** bearer。
+   - **session 内部 API**（`/api/internal/dev-sessions/{id}/events` 拉推、`/git-token`、`/heartbeat`）= **也用 per-runner secret + 会话归属校验**（reqgenie 验 `session.assigned_runner == 调用 runner`）。reqgenie 内部端点改双鉴权：接受**全局 `DEV_SESSION_WORKER_SECRET`**（集中 codex worker 路径，原样）**或** **per-runner secret + 归属校验**（自托管 runner 路径）。
+   - ⚠ **驳回审查「内部 API 继续只用全局 worker secret」的建议**——理由：那等于把 codex 集中 worker 的全局密钥下发到每台用户 runner 机器，任一机器失陷即泄露全局密钥（安全回归）。**全局 worker secret 绝不下发到 runner 机器。**
+   - 落地：A2 `backend.ts` 内部 API 用 runner secret（`this.auth()`）= 对；**C 的 mock-control-plane 内部 API 也须用 runner secret（不是 workerSecret）**；B 内部端点加「runner secret + 归属校验」分支。
+2. **B 摄取补分支**：`ingest_worker_event` 除 `pr_created` 外补 `session_failed`/`limit_hit` → 置 session `failed`（成本闸门触顶让大脑可见，不静默退出）。
+3. **B 迁移枚举 CHECK**：`dev_session_stage_artifacts.kind` 须含 `'dev'`/`'pr'`（原可能仅 spec/review）；`dev_sessions.current_stage` CHECK 含全 7 阶段 `clarify/spec/eng_review/ui_review/dev/pr/done`。C Task 4 以该迁移为枚举单一真理来源校 A2 `types.ts`。
+4. **rework 驳回评论传递（修正 C 修正段第 3 点的错误）**：**对齐 agent-worker** —— 评论放在 `gate_decided` 事件的 `payload.comment`，session-loop 在 SYNC 读到 `gate_decided(decision=rejected)` 时直接 `accumulated += payload.comment`（`sessionLoop.mjs` 原样行为）。**不**另追加 `user_message` 事件（C 修正段第 3 点的「追加 user_message」作废）。mock `decideGate` 把 comment 落进 `gate_decided` 事件 payload 即可。
+5. **assigned_runner 落库时机**：用户在需求详情选目标 runner 创建 session 时即写 `dev_sessions.assigned_runner`（`create_session` 入口）；`RunnerDispatcher.dispatch` 对 `autopilot_selfhosted` 是 no-op（仅日志/指标），会话已是 `created`+`assigned_runner` 等 runner 来 `/pending` claim。
+6. **PendingSession 形状**：claim 成功返回含 `status`（=queued）+ `session_id` + `current_stage`；A2 `types.ts` 的 `PendingSession` 加 `status`，C mock 与 B 响应对齐。
+7. **A2 barrel** 导出 `TERMINAL_STATUSES`/`SessionStatus`/`SessionStage`/`SessionEvent`（session-loop 依赖）。
+8. **A2 前置守卫**：依赖 A1 的 Task 开头 `bun run typecheck` 验 `src/core/executor/` 在位（已在 A2 修正段）；可选加 prereq exit(2) 脚本区分「前置未落地」与「真编译错」。
