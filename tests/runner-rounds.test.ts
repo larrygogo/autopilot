@@ -87,3 +87,50 @@ test("pr：submitPrPure 推送并产 pr_created（branch_name/pr_url）", async 
   expect(pr?.pr?.pr_url).toBe("https://x/pull/3");
   expect(pr?.pr?.branch_name).toBe("reqgenie/sess-77");
 });
+
+// ── I3：多库场景逐库取 token ─────────────────────────────────────────────────────
+
+const multiRepoSession = (stage: SessionState["current_stage"]): SessionState => ({
+  id: "sess-multi",
+  status: "running",
+  current_stage: stage,
+  repos: [
+    { repo_id: "r-main", alias: "main-app", remote_url: "https://x/main.git", default_branch: "main", primary: true },
+    { repo_id: "r-sub",  alias: "sub-lib",  remote_url: "https://x/sub.git",  default_branch: "main", primary: false },
+  ],
+});
+
+test("I3（dev）：多库 session 用主库 repo_id 取 token（非无脑 repos[0]，即主库）", async () => {
+  const tokenRequests: string[] = [];
+  const evs = await runStageRound(multiRepoSession("dev"), stubDeps({
+    getGitToken: async (_sid, repoId) => { tokenRequests.push(repoId); return "tok-" + repoId; },
+    ensureCodebase: async () => ({ root: "/tmp/cb", repos: [
+      { ws: multiRepoSession("dev").repos[0] as any, alias: "main-app", dir: "main-app", path: "/tmp/cb/main-app", fidelity: "full", branch: "reqgenie/sess-multi", base: "main", reused: false },
+      { ws: multiRepoSession("dev").repos[1] as any, alias: "sub-lib",  dir: "sub-lib",  path: "/tmp/cb/sub-lib",  fidelity: "full", branch: "reqgenie/sess-multi", base: "main", reused: false },
+    ], failed: [] }),
+  }));
+  // dev 阶段：应用主库（r-main）的 repo_id 取 token
+  expect(tokenRequests).toContain("r-main");
+  expect(evs.some((e) => e.type === "gate_opened")).toBe(true);
+});
+
+test("I3（pr）：多库 session 逐库取 token（每库用自己的 repo_id）", async () => {
+  const tokenRequests: string[] = [];
+  const submitCalls: Array<{ repoLabel: string; gitToken: string }> = [];
+  await runStageRound(multiRepoSession("pr"), stubDeps({
+    getGitToken: async (_sid, repoId) => { tokenRequests.push(repoId); return "tok-" + repoId; },
+    ensureCodebase: async () => ({ root: "/tmp/cb", repos: [
+      { ws: multiRepoSession("pr").repos[0] as any, alias: "main-app", dir: "main-app", path: "/tmp/cb/main-app", fidelity: "full", branch: "reqgenie/sess-multi", base: "main", reused: false },
+      { ws: multiRepoSession("pr").repos[1] as any, alias: "sub-lib",  dir: "sub-lib",  path: "/tmp/cb/sub-lib",  fidelity: "full", branch: "reqgenie/sess-multi", base: "main", reused: false },
+    ], failed: [] }),
+    submitPrPure: async (repos, opts) => {
+      submitCalls.push({ repoLabel: repos[0]!.label, gitToken: opts.gitToken ?? "" });
+      return { results: repos.map((r) => ({ repo: r, prUrl: `https://x/pull/1`, prNumber: 1 })), failures: [] };
+    },
+  }));
+  // pr 阶段：main-app 用 r-main 的 token，sub-lib 用 r-sub 的 token
+  const mainCall = submitCalls.find((c) => c.repoLabel === "main-app");
+  const subCall  = submitCalls.find((c) => c.repoLabel === "sub-lib");
+  expect(mainCall?.gitToken).toBe("tok-r-main");
+  expect(subCall?.gitToken).toBe("tok-r-sub");
+});

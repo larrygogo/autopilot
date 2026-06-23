@@ -9,8 +9,15 @@ import { log } from "../../core/logger";
 export interface GateOutcome {
   approved: boolean;
   reworkComment?: string;
+  /**
+   * 诊断字段：大脑希望返工到的目标 stage（来自 gate_decided.rework_target_stage）。
+   * 仅供调试/日志参考——stage 推进由 getSession().current_stage 驱动，runner 不自驱 stage 跳转。
+   */
   reworkStage?: SessionState["current_stage"];
 }
+
+/** session 级心跳间隔（§4.3 = 30s；每 30s 一次，防 reqgenie 90s reaper 误杀长跑 session）。 */
+export const SESSION_HEARTBEAT_MS = 30_000;
 
 export interface SessionLoopDeps {
   /** 跑一轮 stage round（生产 = rounds.runStageRound 绑真实 deps；测试桩）。 */
@@ -26,6 +33,10 @@ export interface SessionLoopDeps {
    */
   waitGate: (gateId: string, sessionId: string) => Promise<GateOutcome>;
   signal?: AbortSignal;
+  /**
+   * session 心跳间隔（可注入，测试用；生产默认 SESSION_HEARTBEAT_MS=30s）。
+   */
+  heartbeatIntervalMs?: number;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -41,88 +52,132 @@ export async function runSessionLoop(sessionId: string, backend: RunnerBackend, 
   const budget = new CostBudget(deps.limits);
   let lastSeq = 0;
   let accumulated = "";
+  // 等待用户澄清时为 true，此状态下跳过成本闸门与 round 执行，直到收到新 user_message 或 stage 推进。
+  let waitingClarify = false;
+  let prevStageForClarify: string | null = null;
 
-  while (!deps.signal?.aborted) {
-    // ── SYNC ──
-    const incoming = await backend.fetchEvents(sessionId, lastSeq);
-    for (const ev of incoming) {
-      if (ev.seq > lastSeq) lastSeq = ev.seq;
-      // backend.fetchEvents 已把 reqgenie `payload.message`→`ev.text`（user_message）；再兜一层直读 payload，
-      // 防未归一的原始事件让用户回复静默丢失。
-      if (ev.type === "user_message") {
-        const payload = (ev as { payload?: Record<string, unknown> }).payload;
-        const msg = ev.text ?? (typeof payload?.message === "string" ? payload.message : undefined);
-        if (msg) accumulated += `\n${msg}`;
-      }
-    }
-    const session = await backend.getSession(sessionId);
-    if (TERMINAL_STATUSES.has(session.status)) {
-      log.info("runner session %s 终态 %s，退出回合循环", sessionId, session.status);
-      cleanupSessionCodebase(sessionId);
-      return;
-    }
-
-    // ── 闸门：session 上限 ──
-    if (budget.sessionExceeded()) {
-      await backend.postEvent(sessionId, { seq: 0, type: "limit_hit", text: `session 轮数触顶（${deps.limits.sessionMax}）` });
-      await backend.postEvent(sessionId, { seq: 0, type: "session_failed", text: "session 成本闸门触顶" });
-      cleanupSessionCodebase(sessionId);
-      return;
-    }
-    // ── 闸门：per-stage 上限 ──
-    if (budget.stageExceeded(session.current_stage)) {
-      await backend.postEvent(sessionId, { seq: 0, type: "limit_hit", text: `stage ${session.current_stage} 轮数触顶（${deps.limits.stageMax}）` });
-      await backend.postEvent(sessionId, { seq: 0, type: "session_failed", text: `stage ${session.current_stage} 反复返工触顶` });
-      cleanupSessionCodebase(sessionId);
-      return;
-    }
-
-    // ── ROUND ──
-    budget.tickSession();
-    budget.tickStage(session.current_stage);
-    let produced: SessionEvent[];
+  // ── session 级心跳（§4.3）：30s 一次，防 reqgenie 90s reaper 误杀长跑 session ──
+  let heartbeatStopped = false;
+  const heartbeatInterval = deps.heartbeatIntervalMs ?? SESSION_HEARTBEAT_MS;
+  const heartbeatTimer = setInterval(async () => {
+    if (heartbeatStopped) return;
     try {
-      produced = await withTimeout(deps.runStageRound(session, accumulated), deps.roundTimeoutMs, "round");
+      const result = await backend.sessionHeartbeat(sessionId);
+      if (result.terminal) {
+        // 409 终态：大脑已决，优雅退出——信号 aborted 下一次 while 检查退出
+        log.info("runner session %s 心跳返回 409（终态），准备退出", sessionId);
+        deps.signal?.throwIfAborted?.(); // 如有外部 signal 顺带检查
+        heartbeatStopped = true;
+        clearInterval(heartbeatTimer); // 防止重复触发
+      }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await backend.postEvent(sessionId, { seq: 0, type: "limit_hit", text: `round 失败/超时：${msg}` });
-      // 超时不立即 failed：回 SYNC 让闸门累计，反复超时由 STAGE_MAX 收口
-      await sleep(deps.pollMs);
-      continue;
+      log.warn("runner session %s 心跳失败：%s", sessionId, e instanceof Error ? e.message : String(e));
     }
+  }, heartbeatInterval);
 
-    // 回写事件，后端定 seq + 注入 gate_id（回填值留作 WAIT 用）
-    const filled: SessionEvent[] = [];
-    for (const ev of produced) filled.push(await backend.postEvent(sessionId, ev));
-    if (filled.length === 0) { await sleep(deps.pollMs); continue; }
-    const last = filled[filled.length - 1]!;
+  try {
+    while (!deps.signal?.aborted && !heartbeatStopped) {
+      // ── SYNC ──
+      const incoming = await backend.fetchEvents(sessionId, lastSeq);
+      let gotNewUserMessage = false;
+      for (const ev of incoming) {
+        if (ev.seq > lastSeq) lastSeq = ev.seq;
+        // backend.fetchEvents 已把 reqgenie `payload.message`→`ev.text`（user_message）；再兜一层直读 payload，
+        // 防未归一的原始事件让用户回复静默丢失。
+        if (ev.type === "user_message") {
+          const payload = (ev as { payload?: Record<string, unknown> }).payload;
+          const msg = ev.text ?? (typeof payload?.message === "string" ? payload.message : undefined);
+          if (msg) { accumulated += `\n${msg}`; gotNewUserMessage = true; }
+        }
+      }
+      const session = await backend.getSession(sessionId);
+      if (TERMINAL_STATUSES.has(session.status)) {
+        log.info("runner session %s 终态 %s，退出回合循环", sessionId, session.status);
+        cleanupSessionCodebase(sessionId);
+        return;
+      }
 
-    // ── WAIT ──
-    if (last.type === "clarification_requested") {
-      // 等用户回复（reqgenie 飞书/web 注入 user_message）：下一轮 SYNC 自然带回
-      await sleep(deps.pollMs);
-      continue;
-    }
-    if (last.type === "gate_opened" && last.gate_id) {
-      const outcome = await deps.waitGate(last.gate_id, sessionId);
-      if (!outcome.approved) {
-        // rework：累计驳回评论，回 SYNC 重做（rounds 层据 accumulated 非空走增量）
-        if (outcome.reworkComment) accumulated += `\n${outcome.reworkComment}`;
+      // ── clarify 等待态：等新 user_message 或 stage 推进（不消耗成本预算）──
+      if (waitingClarify) {
+        const stageAdvanced = prevStageForClarify !== null && session.current_stage !== prevStageForClarify;
+        if (!gotNewUserMessage && !stageAdvanced) {
+          // 还在等用户，不跑 round，不计成本
+          await sleep(deps.pollMs);
+          continue;
+        }
+        // 收到用户回复或大脑推进 stage，退出等待态继续正常流程
+        waitingClarify = false;
+        prevStageForClarify = null;
+      }
+
+      // ── 闸门：session 上限 ──
+      if (budget.sessionExceeded()) {
+        await backend.postEvent(sessionId, { seq: 0, type: "limit_hit", text: `session 轮数触顶（${deps.limits.sessionMax}）` });
+        await backend.postEvent(sessionId, { seq: 0, type: "session_failed", text: "session 成本闸门触顶" });
+        cleanupSessionCodebase(sessionId);
+        return;
+      }
+      // ── 闸门：per-stage 上限 ──
+      if (budget.stageExceeded(session.current_stage)) {
+        await backend.postEvent(sessionId, { seq: 0, type: "limit_hit", text: `stage ${session.current_stage} 轮数触顶（${deps.limits.stageMax}）` });
+        await backend.postEvent(sessionId, { seq: 0, type: "session_failed", text: `stage ${session.current_stage} 反复返工触顶` });
+        cleanupSessionCodebase(sessionId);
+        return;
+      }
+
+      // ── ROUND ──
+      budget.tickSession();
+      budget.tickStage(session.current_stage);
+      let produced: SessionEvent[];
+      try {
+        produced = await withTimeout(deps.runStageRound(session, accumulated), deps.roundTimeoutMs, "round");
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        await backend.postEvent(sessionId, { seq: 0, type: "limit_hit", text: `round 失败/超时：${msg}` });
+        // 超时不立即 failed：回 SYNC 让闸门累计，反复超时由 STAGE_MAX 收口
         await sleep(deps.pollMs);
         continue;
       }
-      // 批准：大脑推进 stage，下一轮 SYNC 的 getSession 拿到新 current_stage
-      accumulated = ""; // 进下一 stage 清返工上下文
+
+      // 回写事件，后端定 seq + 注入 gate_id（回填值留作 WAIT 用）
+      const filled: SessionEvent[] = [];
+      for (const ev of produced) filled.push(await backend.postEvent(sessionId, ev));
+      if (filled.length === 0) { await sleep(deps.pollMs); continue; }
+      const last = filled[filled.length - 1]!;
+
+      // ── WAIT ──
+      if (last.type === "clarification_requested") {
+        // 进入等待用户澄清态：不盲目重跑，等收到新 user_message 或 stage 推进（不消耗 STAGE_MAX 预算）
+        waitingClarify = true;
+        prevStageForClarify = session.current_stage;
+        await sleep(deps.pollMs);
+        continue;
+      }
+      if (last.type === "gate_opened" && last.gate_id) {
+        const outcome = await deps.waitGate(last.gate_id, sessionId);
+        if (!outcome.approved) {
+          // rework：累计驳回评论，回 SYNC 重做（rounds 层据 accumulated 非空走增量）
+          if (outcome.reworkComment) accumulated += `\n${outcome.reworkComment}`;
+          await sleep(deps.pollMs);
+          continue;
+        }
+        // 批准：大脑推进 stage，下一轮 SYNC 的 getSession 拿到新 current_stage
+        accumulated = ""; // 进下一 stage 清返工上下文
+        await sleep(deps.pollMs);
+        continue;
+      }
+      if (last.type === "pr_created") {
+        // pr 已交付，等大脑写 pr_url → done（下一轮 SYNC 检测终态退出）
+        await sleep(deps.pollMs);
+        continue;
+      }
+      // 其他（纯 assistant_message 推进）：直接进下一轮
       await sleep(deps.pollMs);
-      continue;
     }
-    if (last.type === "pr_created") {
-      // pr 已交付，等大脑写 pr_url → done（下一轮 SYNC 检测终态退出）
-      await sleep(deps.pollMs);
-      continue;
-    }
-    // 其他（纯 assistant_message 推进）：直接进下一轮
-    await sleep(deps.pollMs);
+  } finally {
+    // 确保无论以何种方式退出（正常/异常/abort），心跳定时器都被清理
+    heartbeatStopped = true;
+    clearInterval(heartbeatTimer);
   }
 }
 

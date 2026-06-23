@@ -105,7 +105,11 @@ export async function runStageRound(session: SessionState, deps: RoundDeps): Pro
   }
 
   if (stage === "dev") {
-    const token = await deps.getGitToken(session.id, session.repos[0]!.repo_id);
+    // 多库场景：不同库可能属于不同 GitHub installation，必须逐库取 token（I3 修复）。
+    // ensureCodebase 的 gitToken 用主库 token（clone 鉴权）；push 前 submitPrPure 再按库取（见 pr 阶段）。
+    // 此处用主库（primary=true，fallback repos[0]）的 repo_id 取 clone token。
+    const primaryRepo = session.repos.find((r) => r.primary) ?? session.repos[0]!;
+    const token = await deps.getGitToken(session.id, primaryRepo.repo_id);
     const { repos } = await deps.ensureCodebase(session.id, toWsRefs(session.repos), {
       fidelity: "full",
       deliverBranch: branch,
@@ -128,22 +132,33 @@ export async function runStageRound(session: SessionState, deps: RoundDeps): Pro
   }
 
   if (stage === "pr") {
-    const token = await deps.getGitToken(session.id, session.repos[0]!.repo_id);
+    // clone/checkout 用主库 token（I3 修复：主库取 token，非无脑 repos[0]）
+    const primaryRepo = session.repos.find((r) => r.primary) ?? session.repos[0]!;
+    const cloneToken = await deps.getGitToken(session.id, primaryRepo.repo_id);
     const { repos } = await deps.ensureCodebase(session.id, toWsRefs(session.repos), {
       fidelity: "full",
       deliverBranch: branch,
-      gitToken: token,
+      gitToken: cloneToken,
       checkoutExisting: true,
     });
     const execRepos = toExecRepos(session, repos as Array<CodebaseRepoState<CodebaseWorkspaceRef>>, branch);
-    const out = await deps.submitPrPure(execRepos, {
-      title: `reqgenie ${session.id}`,
-      bodyFor: (_r, diffStatText) => `自动交付（reqgenie session ${session.id}）\n\n${diffStatText}`,
-      gitToken: token,
-    });
-    if (out.failures.length > 0) throw new Error(`pr 阶段部分库失败：${out.failures.join("; ")}`);
-    const events: SessionEvent[] = [{ seq: 0, type: "assistant_message", text: `已开 ${out.results.length} 个 PR` }];
-    for (const r of out.results) {
+    // I3 修复：多库不同 installation → 逐库现取 token，逐库调 submitPrPure（单库无变化）。
+    const allResults: SubmitPrResult["results"] = [];
+    const allFailures: string[] = [];
+    for (const execRepo of execRepos) {
+      const meta = session.repos.find((r) => r.alias === execRepo.label);
+      const repoToken = meta ? await deps.getGitToken(session.id, meta.repo_id) : cloneToken;
+      const out = await deps.submitPrPure([execRepo], {
+        title: `reqgenie ${session.id}`,
+        bodyFor: (_r, diffStatText) => `自动交付（reqgenie session ${session.id}）\n\n${diffStatText}`,
+        gitToken: repoToken,
+      });
+      allResults.push(...out.results);
+      allFailures.push(...out.failures);
+    }
+    if (allFailures.length > 0) throw new Error(`pr 阶段部分库失败：${allFailures.join("; ")}`);
+    const events: SessionEvent[] = [{ seq: 0, type: "assistant_message", text: `已开 ${allResults.length} 个 PR` }];
+    for (const r of allResults) {
       events.push({ seq: 0, type: "pr_created", pr: { repo: r.repo.label, branch_name: branch, pr_url: r.prUrl } });
     }
     return events;

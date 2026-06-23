@@ -10,10 +10,17 @@ import { runRoundAgent, ensureCodebase, produceDiff, submitPrPure, runGit } from
 import type { SessionStage } from "./types";
 import { log } from "../../core/logger";
 
+// 按 spec §14.7 barrel 统一导出类型，供消费方统一从此模块导入。
+export * from "./types";
+
 // 注：CLI 命令组（registerRunnerCommands）由 Task 8 的 src/cli/runner.ts 提供，
 // 并直接在 src/cli/index.ts 注册——不经此 barrel 转发（避免 daemon 模块依赖 cli 模块）。
 
 let _poller: RunnerPoller | null = null;
+/** 当前跑 session 的 AbortController（dispose 时先 abort，再等 loop 结束，最后释放锁）。 */
+let _loopController: AbortController | null = null;
+/** 当前 session loop 的 Promise（用于 dispose 等待循环结束后再释放锁）。 */
+let _loopPromise: Promise<void> | null = null;
 
 /** 默认成本闸门（§4.3）。 */
 const COST_LIMITS = { sessionMax: 30, stageMax: 5 };
@@ -70,19 +77,42 @@ export function initRunnerMode(): void {
     pollWaitSeconds: cfg.poll_wait_seconds ?? 50,
     heartbeatMs: (cfg.heartbeat_seconds ?? 30) * 1000,
     runSession: async (sessionId: string) => {
-      await runSessionLoop(sessionId, backend, {
+      // 每个 session 独享 AbortController——dispose 时先 abort 再等 loop 结束再释放锁。
+      const controller = new AbortController();
+      _loopController = controller;
+      const loop = runSessionLoop(sessionId, backend, {
         runStageRound: (session, accumulated) => runStageRound(session, buildRoundDeps(backend, accumulated)),
         pollMs: WAIT_POLL_MS,
         limits: COST_LIMITS,
         roundTimeoutMs: ROUND_TIMEOUT_MS,
-        waitGate: (gateId, sid) => defaultWaitGate(backend, gateId, sid, WAIT_POLL_MS),
+        waitGate: (gateId, sid) => defaultWaitGate(backend, gateId, sid, WAIT_POLL_MS, controller.signal),
+        signal: controller.signal,
       });
+      _loopPromise = loop;
+      try {
+        await loop;
+      } finally {
+        if (_loopController === controller) { _loopController = null; _loopPromise = null; }
+      }
     },
   });
   _poller.start();
 }
 
-export function disposeRunnerMode(): void {
+/** dispose 顺序：先 abort loop（止损），再等 loop 结束，最后走 poller.dispose（释放锁 + deregister）。 */
+export async function disposeRunnerMode(): Promise<void> {
+  // 1. abort 当前正在跑的 session loop
+  if (_loopController) {
+    _loopController.abort();
+    _loopController = null;
+  }
+  // 2. 等 loop 结束（最多 5s，超时后强制继续，不卡 daemon 关闭）
+  if (_loopPromise) {
+    const timeout = new Promise<void>((r) => setTimeout(r, 5000));
+    await Promise.race([_loopPromise.catch(() => {}), timeout]);
+    _loopPromise = null;
+  }
+  // 3. 停 poller（释放 runner.lock + deregister）
   _poller?.dispose();
   _poller = null;
 }
