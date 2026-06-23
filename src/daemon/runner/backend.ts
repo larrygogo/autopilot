@@ -140,8 +140,8 @@ export class HttpRunnerBackend implements RunnerBackend {
     const machine_meta = { platform: process.platform, hostname: process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? "" };
     const res = await fetchFn(url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${registrationToken}`, ...JSON_HEADERS },
-      body: JSON.stringify({ name, machine_meta }),
+      headers: { ...JSON_HEADERS },
+      body: JSON.stringify({ token: registrationToken, name, machine_meta }),
     });
     if (!res.ok) throw httpError(url, res, await res.text().catch(() => ""));
     const body = unwrap<{ runner_id: string; secret: string }>(await res.json());

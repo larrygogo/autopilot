@@ -110,7 +110,11 @@ test("register：POST /api/runners/register 用注册 token（非 runner secret�
   expect(out.runner_id).toBe("rnr-7");
   expect(out.secret).toBe("newsek");
   expect(calls[0]!.url).toBe("https://rg.example/api/runners/register");
-  expect((calls[0]!.init!.headers as Record<string, string>)["Authorization"]).toBe("Bearer reg-token-abc");
+  // C5：注册 token 走 JSON body（对齐真 reqgenie RunnerRegisterRequest{token}），不放 Authorization 头
+  const sent = JSON.parse(String(calls[0]!.init!.body)) as { token?: string; name?: string };
+  expect(sent.token).toBe("reg-token-abc");
+  expect(sent.name).toBe("my-mac");
+  expect((calls[0]!.init!.headers as Record<string, string>)["Authorization"]).toBeUndefined();
   // register 尚无 runner_id，不能带 x-runner-id（静态方法，不经 auth()）
   expect((calls[0]!.init!.headers as Record<string, string>)["x-runner-id"]).toBeUndefined();
 });
