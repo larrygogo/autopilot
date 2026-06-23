@@ -25,11 +25,15 @@ export type SessionEventType =
   | "limit_hit"
   | "session_failed";
 
-/** 拉取/回写的事件。回写时 runner 不带 seq（占位 0），后端定序后回填。 */
+/**
+ * 拉取/回写的事件——**runner 域内的扁平形状**（消费/生产侧统一读 `type` + 顶层 text/gate_id/...）。
+ * ⚠ 与 reqgenie **线协议**（`WireEvent`：`event_type` + 嵌套 `payload.*`）不同：归一在 `backend.ts`
+ * 收口（拉时 wire→flat、推时 flat→wire），session-loop/rounds 只见此扁平形状。回写时 runner 不带 seq（占位 0），后端定序后回填。
+ */
 export interface SessionEvent {
   seq: number;
   type: SessionEventType;
-  /** 文本载荷（assistant_message / user_message 等）。 */
+  /** 文本载荷（assistant_message / user_message / gate_decided 评论 等）。 */
   text?: string;
   /** gate_opened/gate_decided 携带；runner 回写 gate_opened 不带，后端注入。 */
   gate_id?: string;
@@ -43,6 +47,65 @@ export interface SessionEvent {
   pr?: { repo: string; branch_name: string; pr_url: string };
   /** 透传的其他字段（围栏化由消费方负责）。 */
   [key: string]: unknown;
+}
+
+/**
+ * reqgenie **线协议**事件形状（`/events` GET 返回项 / POST body）。后端事实源 = 052 迁移：
+ * `event_type` 列 + 嵌套 `payload` jsonb（gate_id/decision/comment/message/kind/content/pr_url… 都在 payload 里）。
+ * 仅 `backend.ts` 触碰此形状，归一为 `SessionEvent` 后才进 runner 域。
+ */
+export interface WireEvent {
+  seq: number;
+  event_type: string;
+  stage?: string | null;
+  actor?: string | null;
+  payload?: Record<string, unknown>;
+}
+
+/**
+ * 线协议 → runner 扁平域（fetchEvents 收口）。把 reqgenie 嵌套 `payload.*` 提平到 `SessionEvent` 顶层字段：
+ *  - comment / message → text（gate_decided 驳回评论 = payload.comment；user_message = payload.message）
+ *  - gate_id / decision / rework_target_stage → 顶层同名
+ *  - kind + content → artifact（stage_artifact）
+ *  - repo / branch_name / pr_url → pr（pr_created）
+ * 未知字段整包透传到顶层（围栏化由消费方负责）。
+ */
+export function wireToSessionEvent(w: WireEvent): SessionEvent {
+  const p = w.payload ?? {};
+  const ev: SessionEvent = { seq: w.seq, type: w.event_type as SessionEventType };
+  // 文本载荷：assistant_message/clarification_requested 用 message；gate_decided 驳回评论用 comment。
+  const text = p.comment ?? p.message ?? p.question ?? p.text;
+  if (typeof text === "string") ev.text = text;
+  if (typeof p.gate_id === "string") ev.gate_id = p.gate_id;
+  if (p.decision === "approved" || p.decision === "rejected") ev.decision = p.decision;
+  if (typeof p.rework_target_stage === "string") ev.rework_target_stage = p.rework_target_stage as SessionStage;
+  if (typeof p.kind === "string" && typeof p.content === "string") ev.artifact = { kind: p.kind, content: p.content };
+  if (typeof p.pr_url === "string") {
+    ev.pr = {
+      repo: typeof p.repo === "string" ? p.repo : "",
+      branch_name: typeof p.branch_name === "string" ? p.branch_name : "",
+      pr_url: p.pr_url,
+    };
+  }
+  // 其余 payload 字段整包透传（不覆盖上面已提平的语义字段）。
+  for (const [k, v] of Object.entries(p)) if (!(k in ev)) ev[k] = v;
+  return ev;
+}
+
+/**
+ * runner 扁平域 → 线协议 body（postEvent 收口）。把 `SessionEvent` 顶层语义字段塞回 reqgenie `payload`。
+ * runner 永不自定 seq（剥离），gate_id 后端注入（gate_opened 回写不带）。
+ */
+export function sessionEventToWireBody(ev: SessionEvent): { event_type: string; stage?: string; actor: string; payload: Record<string, unknown> } {
+  const { seq: _seq, type, text, gate_id, decision, rework_target_stage, artifact, pr, ...rest } = ev;
+  const payload: Record<string, unknown> = { ...rest };
+  if (text !== undefined) payload.message = text;
+  if (gate_id !== undefined) payload.gate_id = gate_id;
+  if (decision !== undefined) payload.decision = decision;
+  if (rework_target_stage !== undefined) payload.rework_target_stage = rework_target_stage;
+  if (artifact) { payload.kind = artifact.kind; payload.content = artifact.content; }
+  if (pr) { payload.repo = pr.repo; payload.branch_name = pr.branch_name; payload.pr_url = pr.pr_url; }
+  return { event_type: type, actor: "agent", payload };
 }
 
 /** GET /dev-sessions/{id} 返回的会话状态快照。 */

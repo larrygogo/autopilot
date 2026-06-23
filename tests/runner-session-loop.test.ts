@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { runSessionLoop } from "../src/daemon/runner/session-loop";
+import { runSessionLoop, defaultWaitGate } from "../src/daemon/runner/session-loop";
 import type { RunnerBackend } from "../src/daemon/runner/backend";
 import type { SessionEvent, SessionState, PendingSession } from "../src/daemon/runner/types";
 
@@ -71,4 +71,50 @@ test("ROUND_TIMEOUT 触顶 → 产 limit_hit", async () => {
     waitGate: async () => ({ approved: true }),
   });
   expect(be.posted.some((e) => e.type === "limit_hit")).toBe(true);
+});
+
+// ── blocker：defaultWaitGate 读 gate_decided 评论（spec §14.4 = payload.comment，经 backend 归一到 ev.text）──
+
+/** 极简 mock backend：fetchEvents 返回脚本事件，getSession 末值粘滞（不参与本测试的终态退出）。 */
+function gateBackend(events: SessionEvent[], session: SessionState): RunnerBackend {
+  return {
+    async fetchEvents() { return events; },
+    async postEvent(_id, ev) { return { ...ev, seq: 1 }; },
+    async getSession() { return session; },
+    async getGitToken() { return "tok"; },
+    async sessionHeartbeat() { return { terminal: false }; },
+    async runnerHeartbeat() {},
+    async claimPending(): Promise<PendingSession | null> { return null; },
+    async deregister() {},
+  };
+}
+
+test("defaultWaitGate：rejected gate_decided 的评论命中（归一后 ev.text = payload.comment）", async () => {
+  // 模拟 backend.fetchEvents 已归一：reqgenie payload.comment → 顶层 ev.text、decision/rework 同理。
+  const be = gateBackend(
+    [{ seq: 7, type: "gate_decided", gate_id: "g-42", decision: "rejected", text: "缺错误处理", rework_target_stage: "spec" }],
+    S("spec", "running"),
+  );
+  const outcome = await defaultWaitGate(be, "g-42", "sess-1", 1);
+  expect(outcome.approved).toBe(false);
+  expect(outcome.reworkComment).toBe("缺错误处理"); // 评论不静默丢失（撞墙-失忆-重撞反模式）
+  expect(outcome.reworkStage).toBe("spec");
+});
+
+test("defaultWaitGate：approved gate_decided → approved=true", async () => {
+  const be = gateBackend(
+    [{ seq: 7, type: "gate_decided", gate_id: "g-42", decision: "approved" }],
+    S("spec", "running"),
+  );
+  const outcome = await defaultWaitGate(be, "g-42", "sess-1", 1);
+  expect(outcome.approved).toBe(true);
+});
+
+test("defaultWaitGate：防御读未归一原始事件（payload.comment 直读，不丢评论）", async () => {
+  // 万一上游喂来未经 backend 归一的原始 wire 事件（payload 嵌套），评论仍须命中。
+  const raw = { seq: 7, type: "gate_decided", payload: { gate_id: "g-9", decision: "rejected", comment: "改方案", rework_target_stage: "spec" } } as unknown as SessionEvent;
+  const be = gateBackend([raw], S("spec", "running"));
+  const outcome = await defaultWaitGate(be, "g-9", "sess-1", 1);
+  expect(outcome.approved).toBe(false);
+  expect(outcome.reworkComment).toBe("改方案");
 });

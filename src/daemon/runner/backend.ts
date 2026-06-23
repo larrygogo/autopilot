@@ -1,4 +1,5 @@
-import type { RunnerCredentials, SessionEvent, SessionState, PendingSession } from "./types";
+import type { RunnerCredentials, SessionEvent, SessionState, PendingSession, WireEvent } from "./types";
+import { wireToSessionEvent, sessionEventToWireBody } from "./types";
 
 /** 注入点：默认全局 fetch；测试桩可替换。 */
 export type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>;
@@ -33,6 +34,14 @@ function httpError(path: string, res: Response, extra = ""): Error {
   return new Error(`reqgenie ${path} 返回 ${res.status}${extra ? `：${extra}` : ""}`);
 }
 
+/** reqgenie 统一响应信封 `{success, data}`；兼容裸 payload（旧测试桩 / 非信封后端）。 */
+function unwrap<T>(body: unknown): T {
+  if (body && typeof body === "object" && "data" in (body as Record<string, unknown>)) {
+    return (body as { data: T }).data;
+  }
+  return body as T;
+}
+
 export class HttpRunnerBackend implements RunnerBackend {
   private readonly base: string;
   constructor(private readonly creds: RunnerCredentials, private readonly fetchFn: FetchLike = fetch) {
@@ -53,32 +62,40 @@ export class HttpRunnerBackend implements RunnerBackend {
     const url = this.internal(sessionId, `/events?after_seq=${afterSeq}`);
     const res = await this.fetchFn(url, { method: "GET", headers: this.auth() });
     if (!res.ok) throw httpError(url, res);
-    const body = (await res.json()) as { events?: SessionEvent[] };
-    return Array.isArray(body.events) ? body.events : [];
+    const body = await res.json();
+    // 线协议事实源 = `{success, data: WireEvent[]}`；兼容旧测试桩 `{events: [...]}`。
+    const rows = unwrap<WireEvent[]>(
+      body && typeof body === "object" && "events" in (body as Record<string, unknown>) ? (body as { events: unknown }).events : body,
+    );
+    return Array.isArray(rows) ? rows.map(wireToSessionEvent) : [];
   }
 
   async postEvent(sessionId: string, ev: SessionEvent): Promise<SessionEvent> {
     const url = this.internal(sessionId, "/events");
-    // runner 永不自定 seq：剥离 seq 字段，后端定序后回填。
-    const { seq: _drop, ...payload } = ev;
-    const res = await this.fetchFn(url, { method: "POST", headers: { ...this.auth(), ...JSON_HEADERS }, body: JSON.stringify(payload) });
+    // runner 永不自定 seq（归一时已剥离）；扁平域 → 线协议 body（event_type + 嵌套 payload）。
+    const wireBody = sessionEventToWireBody(ev);
+    const res = await this.fetchFn(url, { method: "POST", headers: { ...this.auth(), ...JSON_HEADERS }, body: JSON.stringify(wireBody) });
     if (!res.ok) throw httpError(url, res);
-    const body = (await res.json()) as { event: SessionEvent };
-    return body.event;
+    const body = await res.json();
+    // 后端定 seq + 注入 gate_id；信封 `{data: WireEvent}`，兼容旧测试桩 `{event: ...}`。
+    const row = unwrap<WireEvent>(
+      body && typeof body === "object" && "event" in (body as Record<string, unknown>) ? (body as { event: unknown }).event : body,
+    );
+    return wireToSessionEvent(row);
   }
 
   async getSession(sessionId: string): Promise<SessionState> {
     const url = this.internal(sessionId, "");
     const res = await this.fetchFn(url, { method: "GET", headers: this.auth() });
     if (!res.ok) throw httpError(url, res);
-    return (await res.json()) as SessionState;
+    return unwrap<SessionState>(await res.json());
   }
 
   async getGitToken(sessionId: string, repoId: string): Promise<string> {
     const url = this.internal(sessionId, `/git-token?repo_id=${encodeURIComponent(repoId)}`);
     const res = await this.fetchFn(url, { method: "GET", headers: this.auth() });
     if (!res.ok) throw httpError(url, res);
-    const body = (await res.json()) as { token: string };
+    const body = unwrap<{ token: string }>(await res.json());
     return body.token;
   }
 
@@ -101,7 +118,7 @@ export class HttpRunnerBackend implements RunnerBackend {
     const res = await this.fetchFn(url, { method: "GET", headers: this.auth() });
     if (res.status === 204) return null;
     if (!res.ok) throw httpError(url, res);
-    return (await res.json()) as PendingSession;
+    return unwrap<PendingSession>(await res.json());
   }
 
   async deregister(): Promise<void> {
@@ -127,7 +144,7 @@ export class HttpRunnerBackend implements RunnerBackend {
       body: JSON.stringify({ name, machine_meta }),
     });
     if (!res.ok) throw httpError(url, res, await res.text().catch(() => ""));
-    const body = (await res.json()) as { runner_id: string; secret: string };
+    const body = unwrap<{ runner_id: string; secret: string }>(await res.json());
     if (!body.runner_id || !body.secret) throw new Error("register: reqgenie 未返回 runner_id/secret");
     return body;
   }

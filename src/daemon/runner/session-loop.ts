@@ -46,7 +46,13 @@ export async function runSessionLoop(sessionId: string, backend: RunnerBackend, 
     const incoming = await backend.fetchEvents(sessionId, lastSeq);
     for (const ev of incoming) {
       if (ev.seq > lastSeq) lastSeq = ev.seq;
-      if (ev.type === "user_message" && ev.text) accumulated += `\n${ev.text}`;
+      // backend.fetchEvents 已把 reqgenie `payload.message`→`ev.text`（user_message）；再兜一层直读 payload，
+      // 防未归一的原始事件让用户回复静默丢失。
+      if (ev.type === "user_message") {
+        const payload = (ev as { payload?: Record<string, unknown> }).payload;
+        const msg = ev.text ?? (typeof payload?.message === "string" ? payload.message : undefined);
+        if (msg) accumulated += `\n${msg}`;
+      }
     }
     const session = await backend.getSession(sessionId);
     if (TERMINAL_STATUSES.has(session.status)) {
@@ -119,6 +125,11 @@ export async function runSessionLoop(sessionId: string, backend: RunnerBackend, 
 /**
  * 生产用 waitGate：轮询 fetchEvents 找匹配 gateId 的 gate_decided。
  * （session-loop 主循环复用 lastSeq 推进会与此竞争，故独立从当前 seq 起轮询、命中即返。）
+ *
+ * 驳回评论读取（spec §14.4）：reqgenie 把评论放进 `gate_decided` 的 `payload.comment`。`backend.fetchEvents`
+ * 已把 `payload.comment`→`ev.text`、`payload.{decision,rework_target_stage,gate_id}`→顶层（见 types.wireToSessionEvent），
+ * 故主路径读扁平字段即可。下面再兜一层「直读 payload」防御：万一上游喂来未归一的原始事件（绕过 backend 的桩/旧路径），
+ * 评论也不会静默丢失（项目反复警惕的「撞墙-失忆-重撞」）。
  */
 export async function defaultWaitGate(
   backend: RunnerBackend,
@@ -132,11 +143,16 @@ export async function defaultWaitGate(
     const evs = await backend.fetchEvents(sessionId, after);
     for (const ev of evs) {
       if (ev.seq > after) after = ev.seq;
-      if (ev.type === "gate_decided" && ev.gate_id === gateId) {
+      const payload = (ev as { payload?: Record<string, unknown> }).payload;
+      const gid = ev.gate_id ?? (typeof payload?.gate_id === "string" ? payload.gate_id : undefined);
+      if (ev.type === "gate_decided" && gid === gateId) {
+        const decision = ev.decision ?? payload?.decision;
+        const comment = ev.text ?? (typeof payload?.comment === "string" ? payload.comment : undefined);
+        const reworkStage = ev.rework_target_stage ?? (typeof payload?.rework_target_stage === "string" ? payload.rework_target_stage : undefined);
         return {
-          approved: ev.decision === "approved",
-          reworkComment: ev.text,
-          reworkStage: ev.rework_target_stage,
+          approved: decision === "approved",
+          reworkComment: comment,
+          reworkStage: reworkStage as GateOutcome["reworkStage"],
         };
       }
     }
