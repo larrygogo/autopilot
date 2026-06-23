@@ -22,7 +22,8 @@
     "check:docs": "bun run scripts/check-docs-translation.ts",
     "check:docs:strict": "bun run scripts/check-docs-translation.ts --strict",
     "smoke-test": "bun run scripts/smoke-test.ts",
-    "runner-smoke": "bun run scripts/runner/runner-smoke.ts"
+    "runner-smoke": "bun run scripts/runner/runner-smoke.ts",
+    "runner-e2e-live": "bun run scripts/runner/runner-e2e-live.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
