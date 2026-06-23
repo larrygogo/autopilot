@@ -250,3 +250,33 @@ A 模式真正新增面（比 B 小、稳）：**注册 + 拉式派发 + 拉模�
 6. **PendingSession 形状**：claim 成功返回含 `status`（=queued）+ `session_id` + `current_stage`；A2 `types.ts` 的 `PendingSession` 加 `status`，C mock 与 B 响应对齐。
 7. **A2 barrel** 导出 `TERMINAL_STATUSES`/`SessionStatus`/`SessionStage`/`SessionEvent`（session-loop 依赖）。
 8. **A2 前置守卫**：依赖 A1 的 Task 开头 `bun run typecheck` 验 `src/core/executor/` 在位（已在 A2 修正段）；可选加 prereq exit(2) 脚本区分「前置未落地」与「真编译错」。
+
+## 15. A2↔B 线协议 DTO 契约钉死（B opus 审查发现 C1/C2/C3，C 端到端前必须两侧对齐）
+
+B 服务端不得返回裸 `DevSession` ORM；runner 读取的三处响应/鉴权形状是**权威契约**，B 提供、A2 消费，逐字段对齐：
+
+**15.1 `GET /api/runners/{id}/sessions/pending` claim 命中响应（C1）** = 专用 DTO，**非裸 ORM**：
+```jsonc
+{ "session_id": "<uuid>", "current_stage": "clarify|spec|...", "status": "queued" }
+```
+B 现状返回裸 DevSession（主键字段名 `id`）→ 错；A2 读 `pending.session_id`。B 改为返回此 DTO（含 `session_id` 而非 `id`）。
+
+**15.2 `GET /api/internal/dev-sessions/{id}` 会话状态响应（C2）** = 含 `repos[]`，**字段名按 A2 `SessionState`**：
+```jsonc
+{
+  "id": "<uuid>",                    // 注意：此端点 A2 读 SessionState.id（与 pending 的 session_id 不同名，勿混）
+  "status": "...", "current_stage": "...",
+  "repos": [                          // B 须 JOIN dev_session_repos + github_repos 拼出
+    { "repo_id": "<uuid>", "alias": "<子目录别名>", "remote_url": "https://github.com/o/r.git",
+      "default_branch": "main", "primary": true }
+  ]
+}
+```
+B 现状返回裸 DevSession（无 repos、且其内嵌 SessionRepo 形状为 `{id,owner,repo_name,repo_url,default_branch}` ≠ A2）→ 错。A2 每个 round 读 `session.repos`（getGitToken 用 `repo_id`、clone 子目录用 `alias`、clone 用 `remote_url`、submitPR 用 `primary`）。repos 集合在 dev/pr 间冻结。
+
+**15.3 runner 身份头 `x-runner-id`（C3）**：runner 调**内部端点**（`/api/internal/dev-sessions/{id}/*`，其 `{id}` 是 session_id 不含 runner 身份）时，per-runner secret 路径须带头 **`x-runner-id: <runner_id>`** + `Authorization: Bearer <secret>`，B 据此做归属校验（`session.assigned_runner == x-runner-id` 且 secret 匹配）。
+- A2 `backend.ts` 的 `auth()` 须对所有 per-runner secret 调用附 `x-runner-id`（runner_id 在 creds 里）；**`register` 端点例外**（注册时尚无 runner_id，走 `Bearer <registrationToken>` 不带头）。
+- runner 专有端点（`/api/runners/{id}/*`）URL 已含 runner_id，B 可从 path 取；A2 一并带 `x-runner-id` 无害。
+- 全局 worker secret 路径（codex）不需要此头（§14.1）。
+
+**责任**：C1/C2 = B 偏离 spec（返裸 ORM），改 B 返回上述 DTO；C3 = 约定缺口，spec（本节）钉死 + A2 `auth()` 加头。三条任一不对齐，C 端到端首次 claim 或首个 round 即崩。**B 须补一条 e2e**：runner secret + `x-runner-id` POST `pr_created` → 写 pr_url（堵 I1 覆盖缺口，逼出 C3 对齐）。
