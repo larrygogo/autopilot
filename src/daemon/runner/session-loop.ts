@@ -2,6 +2,7 @@ import type { RunnerBackend } from "./backend";
 import type { SessionEvent, SessionState } from "./types";
 import { TERMINAL_STATUSES } from "./types";
 import { CostBudget, withTimeout, type CostLimits } from "./cost-gate";
+import { deleteRequirementCodebase } from "../../core/sandbox/codebase";
 import { log } from "../../core/logger";
 
 /** waitGate 返回：批准则推进，驳回携带返工评论 + 目标 stage（reqgenie rework_target_stage）。 */
@@ -57,6 +58,7 @@ export async function runSessionLoop(sessionId: string, backend: RunnerBackend, 
     const session = await backend.getSession(sessionId);
     if (TERMINAL_STATUSES.has(session.status)) {
       log.info("runner session %s 终态 %s，退出回合循环", sessionId, session.status);
+      cleanupSessionCodebase(sessionId);
       return;
     }
 
@@ -64,12 +66,14 @@ export async function runSessionLoop(sessionId: string, backend: RunnerBackend, 
     if (budget.sessionExceeded()) {
       await backend.postEvent(sessionId, { seq: 0, type: "limit_hit", text: `session 轮数触顶（${deps.limits.sessionMax}）` });
       await backend.postEvent(sessionId, { seq: 0, type: "session_failed", text: "session 成本闸门触顶" });
+      cleanupSessionCodebase(sessionId);
       return;
     }
     // ── 闸门：per-stage 上限 ──
     if (budget.stageExceeded(session.current_stage)) {
       await backend.postEvent(sessionId, { seq: 0, type: "limit_hit", text: `stage ${session.current_stage} 轮数触顶（${deps.limits.stageMax}）` });
       await backend.postEvent(sessionId, { seq: 0, type: "session_failed", text: `stage ${session.current_stage} 反复返工触顶` });
+      cleanupSessionCodebase(sessionId);
       return;
     }
 
@@ -161,4 +165,13 @@ export async function defaultWaitGate(
     await sleep(pollMs);
   }
   return { approved: false };
+}
+
+/**
+ * session 终态收尾（§6.7）：清需求级 codebase（sessionId 当合成需求 id）。
+ * 复用 deleteRequirementCodebase（整树删 codebase/ + legacy workspace/ + 清单）。零痕迹原则
+ * 在 push 时已抹除 origin 凭证，此处仅回收磁盘。
+ */
+export function cleanupSessionCodebase(sessionId: string): void {
+  try { deleteRequirementCodebase(sessionId); } catch { /* best-effort 回收 */ }
 }
