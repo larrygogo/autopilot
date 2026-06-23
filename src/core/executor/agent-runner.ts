@@ -4,7 +4,10 @@ import { runWithTaskContext } from "../task/context";
 import { bindTaskRunRoot } from "../sandbox";
 
 export interface RoundAgentCtx {
-  /** reqgenie dev_session id —— 当合成需求 id 用（runtime/requirements/<sessionId>/...） */
+  /**
+   * reqgenie dev_session id —— 当合成需求 id 用（runtime/requirements/<sessionId>/...）。
+   * **非真实 DB requirement 行**，仅借 runtime/requirements/<id>/ 路径约定复用 task 沙盒机制。
+   */
   sessionId: string;
   phase: string;
   sandboxDir: string;
@@ -31,8 +34,8 @@ export async function runRoundAgent(
 ): Promise<AgentResult> {
   const taskId = ctx.ghostTaskId ?? ghostTaskIdFor(ctx.sessionId);
   bindTaskRunRoot(taskId, ctx.sessionId); // 种 taskRootCache：runtime/requirements/<sessionId>/runs/<taskId>/
-  return runWithTaskContext(
+  return await runWithTaskContext(
     { taskId, phase: ctx.phase, sandboxDir: ctx.sandboxDir, signal: ctx.signal },
     () => agent.run(prompt, opts),
-  ) as Promise<AgentResult>;
+  );
 }
