@@ -531,6 +531,63 @@ export function saveSchedulerConfig(cfg: SchedulerConfig): void {
   writeDocument(doc);
 }
 
+// ──────────────────────────────────────────────
+// runner 模式配置（A 模式：autopilot 作为 reqgenie 自托管 runner）
+// ──────────────────────────────────────────────
+
+export type RunMode = "scheduler" | "runner";
+
+/**
+ * 读顶层 `mode:`（scheduler=传统调度 daemon；runner=reqgenie 自托管执行器）。
+ * 缺省/非法回退 scheduler（向后兼容：现存用户无 mode 字段=照旧）。
+ */
+export function loadRunMode(): RunMode {
+  try {
+    const raw = loadConfig();
+    const m = raw["mode"];
+    return m === "runner" ? "runner" : "scheduler";
+  } catch { return "scheduler"; }
+}
+
+export interface RunnerConfig {
+  /** reqgenie 控制平面 URL（凭证落 runner/credentials.json，此处只存非敏感连接元数据）。 */
+  control_plane_url?: string;
+  /** runner 展示名。 */
+  name?: string;
+  /** /sessions/pending 长轮询挂起秒数（默认 50）。 */
+  poll_wait_seconds?: number;
+  /** runner 级心跳间隔秒（默认 30）。 */
+  heartbeat_seconds?: number;
+}
+
+/** 读 config.yaml `runner:` 段（凭证不在此，见 runner/credentials.ts）。 */
+export function loadRunnerConfig(): RunnerConfig {
+  try {
+    const raw = loadConfig();
+    const section = raw["runner"];
+    if (!section || typeof section !== "object" || Array.isArray(section)) return {};
+    const s = section as Record<string, unknown>;
+    const out: RunnerConfig = {};
+    if (typeof s.control_plane_url === "string" && s.control_plane_url.trim()) out.control_plane_url = s.control_plane_url.trim();
+    if (typeof s.name === "string" && s.name.trim()) out.name = s.name.trim();
+    if (typeof s.poll_wait_seconds === "number" && Number.isInteger(s.poll_wait_seconds) && s.poll_wait_seconds > 0) out.poll_wait_seconds = s.poll_wait_seconds;
+    if (typeof s.heartbeat_seconds === "number" && Number.isInteger(s.heartbeat_seconds) && s.heartbeat_seconds > 0) out.heartbeat_seconds = s.heartbeat_seconds;
+    return out;
+  } catch { return {}; }
+}
+
+/** 写 `runner:` 段（merge-safe，保留注释；空字段删键，整段空删 runner 段）。 */
+export function saveRunnerConfig(cfg: RunnerConfig): void {
+  const doc = loadDocument();
+  const clean = stripUndefined(cfg as Record<string, unknown>);
+  if (Object.keys(clean).length === 0) {
+    if (doc.hasIn(["runner"])) doc.deleteIn(["runner"]);
+  } else {
+    doc.setIn(["runner"], clean);
+  }
+  writeDocument(doc);
+}
+
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {

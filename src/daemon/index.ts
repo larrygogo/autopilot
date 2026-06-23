@@ -10,7 +10,7 @@ import { listOutdatedWorkflowCopies } from "../core/workflow/templates";
 import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
 import { runInBackground } from "../core/runner";
 import { initDaemonFileLog, log } from "../core/logger";
-import { loadDaemonConfig, loadGithubConfig, getConfigPath } from "../core/config";
+import { loadDaemonConfig, loadGithubConfig, getConfigPath, loadRunMode } from "../core/config";
 import { enableBus, disableBus, bus, emit as emitEvent } from "../core/event-bus";
 import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
@@ -204,6 +204,43 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
 
   // 激活事件总线
   enableBus();
+
+  // ── mode:runner（A 模式自托管 runner）：绕开 autopilot 自家状态机 ──────────────
+  // 不启 scheduler/clarifier/task-bridge/fix-revision-runner/done-cleanup/clarifier-watchdog/
+  // pr-poller/recoverDanglingTasks —— 需求/阶段状态全由 reqgenie 事件协议驱动。只起
+  // HTTP/WS server（status/健康用）+ runner poller。
+  if (loadRunMode() === "runner") {
+    const { registerCoreRpcMethods } = await import("./rpc-methods");
+    registerCoreRpcMethods();
+    bus.on("*", (event: AutopilotEvent) => { wsManager.broadcast(event); });
+    const webDistDir = join(import.meta.dir, "../../web-dist");
+    setWebDistDir(webDistDir);
+    const server = await startServerWithRetry({ host, port });
+    writePid();
+    writeListenInfo({ host, port });
+    const { initRunnerMode, disposeRunnerMode } = await import("./runner");
+    initRunnerMode();
+    console.log(`autopilot runner daemon v${VERSION} started on http://${host}:${port} (pid=${process.pid})`);
+    const shutdownRunner = (exitCode = 0) => {
+      console.log(`\nrunner daemon 正在关闭...`);
+      disposeRunnerMode();
+      disableBus();
+      void (async () => {
+        try { await server.stop(true); } catch { /* 已停 */ }
+        closeDb();
+        removePid();
+        removeListenInfo();
+        console.log("runner daemon 已关闭。");
+        process.exit(exitCode);
+      })();
+      setTimeout(() => process.exit(exitCode), 3000).unref?.();
+    };
+    _activeShutdown = shutdownRunner;
+    process.on("SIGINT", () => shutdownRunner(0));
+    process.on("SIGTERM", () => shutdownRunner(0));
+    return; // runner 模式到此为止，不跑下面的 scheduler daemon 装配
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   // ── 外部编辑 config.yaml 热生效 ──────────────────────────────────────────
   // 监听目录（而非文件）有两个好处：
