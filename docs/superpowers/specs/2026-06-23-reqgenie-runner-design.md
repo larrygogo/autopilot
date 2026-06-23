@@ -117,7 +117,7 @@ runner 用**独立 per-runner 凭证**（不复用全局 `DEV_SESSION_WORKER_SEC
 ### 4.5 stage → runRound + 沙箱契约（A 模式核心，审查后钉死）
 **交付分支命名（命名链在 A 模式断了，须新定）**：`reqgenie/<session_id>`（全局唯一、重连可重算、**同一 session 所有 dev/pr round 间恒定**——不变式：dev round N 与 pr round 必须同分支）。
 
-**沙箱目录键**：A 模式无 autopilot reqId，clone 落 `runtime/runner-sessions/<session_id>/codebase/`，清单同此目录（替代既有 `runtime/requirements/<reqId>/`）。
+**沙箱目录键**：A 模式无 autopilot reqId，**复用既有 `ensureCodebase` 目录键**——把 `session_id` 当合成需求 id 传入，clone 落 `runtime/requirements/<sessionId>/codebase/`、幽灵 task 落 `runtime/requirements/<sessionId>/runs/<ghostTaskId>/`（A1 实现选择，零布局改动；早期设想的 `runtime/runner-sessions/<id>/` 已弃用）。⚠ 连带 known issue（A2 opus 审 I4，R1 跟进）：runner session 无 DB 行，daemon 崩在 dev round 中途（loop 不到终态）时该目录不被 retention 回收——需 retention 增「无 DB 行且 mtime 超阈的 requirements/<id>/」清扫轨，或 runner 启动清孤儿。
 
 | stage | runRound | 沙箱/复用 | 产出事件 |
 |-------|----------|----------|---------|
