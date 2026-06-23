@@ -5,9 +5,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { runGit, hasChanges, diffStat, pushToRemote, buildGhPrArgs } from "../src/core/executor/git-ops";
 
-let bare: string, work: string;
+let base: string, bare: string, work: string;
 beforeEach(() => {
-  const base = mkdtempSync(join(tmpdir(), "exec-gitops-"));
+  base = mkdtempSync(join(tmpdir(), "exec-gitops-"));
   bare = join(base, "bare.git");
   work = join(base, "work");
   runGit(["init", "--bare", "-b", "main", bare], base);
@@ -19,7 +19,7 @@ beforeEach(() => {
   runGit(["commit", "-m", "base"], work);
   runGit(["push", "-u", "origin", "main"], work);
 });
-afterEach(() => { try { rmSync(join(work, ".."), { recursive: true, force: true }); } catch {} });
+afterEach(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
 
 test("hasChanges：干净树 false，改动后 true", () => {
   expect(hasChanges(work, "main")).toBe(false);
@@ -29,7 +29,7 @@ test("hasChanges：干净树 false，改动后 true", () => {
 
 test("diffStat：返回非空统计", () => {
   writeFileSync(join(work, "a.txt"), "2\n");
-  runGit(["add", "-A"], work);
+  runGit(["add", "-A"], work); runGit(["commit", "-m", "c"], work);
   expect(diffStat(work, "main")).toContain("a.txt");
 });
 
