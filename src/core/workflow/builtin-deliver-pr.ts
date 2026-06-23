@@ -13,39 +13,8 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import type { TaskRepoCtx } from "../sandbox";
-
-function runGit(args: string[], cwd: string, check = true): { stdout: string; stderr: string; exitCode: number } {
-  const proc = Bun.spawnSync(["git", ...args], { cwd, stderr: "pipe" });
-  const stdout = new TextDecoder().decode(proc.stdout ?? new Uint8Array()).trim();
-  const stderr = new TextDecoder().decode(proc.stderr ?? new Uint8Array()).trim();
-  const exitCode = proc.exitCode ?? 0;
-  if (check && exitCode !== 0) {
-    throw new Error(`git 命令失败：git ${args.join(" ")}\nstderr: ${stderr}`);
-  }
-  return { stdout, stderr, exitCode };
-}
-
-/** gh pr view 判 OPEN 复用（pr edit）/ 否则 create。失败抛错（调用方按库聚合）。 */
-function ensurePr(repo: TaskRepoCtx, title: string, prBody: string): string {
-  const existing = Bun.spawnSync(["gh", "pr", "view", "--json", "url,state"], { cwd: repo.path, stderr: "pipe" });
-  const out = new TextDecoder().decode(existing.stdout ?? new Uint8Array()).trim();
-  let parsed: { url?: string; state?: string } | null = null;
-  if (existing.exitCode === 0 && out) {
-    try { parsed = JSON.parse(out) as { url?: string; state?: string }; } catch { parsed = null; }
-  }
-  if (parsed && parsed.state === "OPEN") {
-    Bun.spawnSync(["gh", "pr", "edit", "--body", prBody], { cwd: repo.path });
-    return parsed.url ?? "";
-  }
-  const created = Bun.spawnSync(
-    ["gh", "pr", "create", "--title", title, "--body", prBody, "--base", repo.base, "--head", repo.branch],
-    { cwd: repo.path, stderr: "pipe" },
-  );
-  if (created.exitCode !== 0) {
-    throw new Error(`创建 PR 失败：${new TextDecoder().decode(created.stderr ?? new Uint8Array()).trim()}`);
-  }
-  return new TextDecoder().decode(created.stdout ?? new Uint8Array()).trim();
-}
+import { openOrUpdatePr } from "../executor/git-ops";
+import { submitPrPure, type ExecRepo } from "../executor/submit-pr";
 
 /**
  * 生成 PR 交付器 runner。phaseName = 声明 deliver:pr 的阶段名（用于 transition 触发 ${phaseName}_complete）；
@@ -81,10 +50,10 @@ export function makePrDeliverRunner(
     }
 
     // 任务代码仓库布局（统一 multi-clone）；极旧任务无 meta 时用沙盒根兜底单库
-    let repos = listTaskRepos(taskId);
-    if (repos.length === 0) {
+    let taskRepos: TaskRepoCtx[] = listTaskRepos(taskId);
+    if (taskRepos.length === 0) {
       const p = getCurrentSandboxDir() ?? (task["repo_path"] as string);
-      repos = [{
+      taskRepos = [{
         workspace_id: "", alias: "", path: p, dir: "", primary: true,
         branch: task["branch"] as string, base: (task["default_branch"] as string) ?? "main", remote_url: null,
       }];
@@ -92,41 +61,38 @@ export function makePrDeliverRunner(
 
     const reqId = task["requirement_id"] as string | undefined;
     const title = task["title"] as string;
-    const results: Array<{ repo: TaskRepoCtx; prUrl: string }> = [];
-    const failures: string[] = [];
+    const totalRepos = taskRepos.length;
 
-    for (const r of repos) {
-      const label = r.alias || "仓库";
-      try {
-        runGit(["add", "-A"], r.path);
-        const staged = runGit(["diff", "--cached", "--quiet", `origin/${r.base}`], r.path, false).exitCode !== 0;
-        const ahead = runGit(["rev-list", "--count", `origin/${r.base}..HEAD`], r.path, false).stdout.trim() !== "0";
-        if (!staged && !ahead) continue; // 该库无改动 → 不开空 PR
-        runGit(["commit", "-m", `feat: ${title}`], r.path, false);
-        runGit(["push", "-u", "origin", r.branch], r.path);
+    // 构造 ExecRepo[]：remote_url 为 null 时传 "origin"（git push 会把它当 remote 别名，
+    // 等价于原来的 `git push -u origin <branch>`；token=null 不碰 remoteUrl）
+    const execRepos: ExecRepo[] = taskRepos.map((r) => ({
+      path: r.path,
+      remoteUrl: r.remote_url ?? "origin",
+      branch: r.branch,
+      base: r.base,
+      primary: r.primary,
+      label: r.alias || "仓库",
+    }));
 
-        const diffStat = runGit(["diff", `origin/${r.base}...HEAD`, "--stat"], r.path).stdout.slice(0, 3000);
+    // 调 submitPrPure 纯核：commit+push+PR，无 DB 副作用
+    const { results, failures } = await submitPrPure(execRepos, {
+      title,
+      bodyFor: (repo, diffStatText) => {
+        const label = repo.label;
         const multiNote =
-          repos.length > 1 ? `\n\n（本需求共 ${repos.length} 个仓库交付，当前 ${label}；全集见需求页）` : "";
-        const prBody =
+          totalRepos > 1 ? `\n\n（本需求共 ${totalRepos} 个仓库交付，当前 ${label}；全集见需求页）` : "";
+        return (
           (planContext.trim() ? `## 技术方案摘要\n\n${planContext.slice(0, 8000)}\n\n` : "") +
-          `## 变更统计\n\n\`\`\`\n${diffStat || "（无 diff stat）"}\n\`\`\`` +
-          multiNote;
-
-        const prUrl = ensurePr(r, title, prBody);
-        results.push({ repo: r, prUrl });
-
-        // 框架追踪原语：登记交付的 PR（pr-poller 据此聚合验收）
-        if (r.workspace_id && reqId) {
-          const n = Number(prUrl.match(/\/pull\/(\d+)/)?.[1] ?? 0);
-          try {
-            appendSubPr({ requirement_id: reqId, child_workspace_id: r.workspace_id, pr_url: prUrl, pr_number: n });
-          } catch { /* best-effort */ }
-        }
-      } catch (e: unknown) {
-        failures.push(`[${label}] ${(e as Error).message}`);
-      }
-    }
+          `## 变更统计\n\n\`\`\`\n${diffStatText || "（无 diff stat）"}\n\`\`\`` +
+          multiNote
+        );
+      },
+      // gitToken=null：保持既有行为（靠环境 gh + clone 时写进 .git 的 origin）；A2 接 runner 时注入 vend token
+      gitToken: null,
+      // openPr：走 openOrUpdatePr（注入 cwd + GhPrInput，token=null 靠 gh 环境）
+      openPr: (cwd, repo, body) =>
+        openOrUpdatePr(cwd, { title, body, base: repo.base, head: repo.branch }, null),
+    });
 
     if (results.length === 0 && failures.length === 0) {
       throw new Error("所有仓库均无改动，没有可交付内容");
@@ -135,12 +101,23 @@ export function makePrDeliverRunner(
       throw new Error(`部分仓库交付失败（已成功 ${results.length} 个，其 PR 已保留）：\n${failures.join("\n")}`);
     }
 
-    const primaryPr = results.find((x) => x.repo.primary) ?? results[0]!;
-    updateTask(taskId, { pr_url: primaryPr.prUrl });
+    // DB 副作用层：登记交付 PR（pr-poller 聚合验收）
+    for (const { repo, prUrl, prNumber } of results) {
+      // 找回对应的 TaskRepoCtx（按 path 对应）
+      const taskRepo = taskRepos.find((r) => r.path === repo.path);
+      if (taskRepo?.workspace_id && reqId) {
+        try {
+          appendSubPr({ requirement_id: reqId, child_workspace_id: taskRepo.workspace_id, pr_url: prUrl, pr_number: prNumber });
+        } catch { /* best-effort */ }
+      }
+    }
+
+    const primaryResult = results.find((x) => x.repo.primary) ?? results[0]!;
+    updateTask(taskId, { pr_url: primaryResult.prUrl });
     if (reqId) {
-      const m = primaryPr.prUrl.match(/\/pull\/(\d+)/);
+      const m = primaryResult.prUrl.match(/\/pull\/(\d+)/);
       try {
-        updateRequirement(reqId, { pr_url: primaryPr.prUrl, pr_number: m ? Number(m[1]) : null });
+        updateRequirement(reqId, { pr_url: primaryResult.prUrl, pr_number: m ? Number(m[1]) : null });
       } catch { /* best-effort */ }
     }
 
