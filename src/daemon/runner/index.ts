@@ -20,15 +20,24 @@ const COST_LIMITS = { sessionMax: 30, stageMax: 5 };
 const ROUND_TIMEOUT_MS = 30 * 60_000; // 单 round 30 分钟墙钟
 const WAIT_POLL_MS = 30_000;          // WAIT/gate 轮询 30s（§4.3）
 
+/**
+ * stage → agent permission_mode（纯映射，便于单测——createAgent 需 provider 解析，难直测）。
+ * clarify/spec/eng_review/ui_review/dev 都要跑 git/grep 探索代码 → bypassPermissions
+ * （autopilot 无「Bash 只读、禁写」模式，default/auto 拒 Bash 会让 headless 子进程探索不了代码 =
+ * 产垃圾 artifact「撞墙」，审查修正 #5 / CLAUDE.md）。只读探索由 STAGE_SYSTEM prompt 约束「不改文件」。
+ * pr/done 不需 git 探索，留 undefined（pr 的 commit/push 走 submitPrPure 而非 agent Bash）。
+ */
+export function runnerPermissionMode(stage: SessionStage): string | undefined {
+  return stage === "pr" || stage === "done" ? undefined : "bypassPermissions";
+}
+
 /** 把 A1 executor 公共面 + git 操作绑成 rounds 的 RoundDeps（生产装配）。 */
 function buildRoundDeps(backend: HttpRunnerBackend, accumulated: string): RoundDeps {
   return {
     buildAgent: (stage: SessionStage) => createAgent({
       name: `runner-${stage}`,
       provider: resolveDefaultProvider(),
-      // dev/clarify 需要 git/grep 探索代码 → bypassPermissions（autopilot 无「Bash 只读、禁写」模式，
-      // default 拒 Bash 会让 clarify 跑不了 git，CLAUDE.md）。只读探索由 STAGE_SYSTEM prompt 约束。
-      permission_mode: stage === "dev" || stage === "clarify" ? "bypassPermissions" : undefined,
+      permission_mode: runnerPermissionMode(stage),
       max_turns: stage === "dev" ? 40 : 15,
     }),
     runRoundAgent,
