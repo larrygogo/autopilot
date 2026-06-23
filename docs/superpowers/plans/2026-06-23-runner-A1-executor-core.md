@@ -415,7 +415,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { runRoundAgent } from "../src/core/executor/agent-runner";
 import { getCurrentSandboxDir } from "../src/core/task/context";
-import { onEvent } from "../src/core/event-bus";
+import { onEvent, offEvent, enableBus, disableBus } from "../src/core/event-bus";
 
 // 桩 Agent：实现 run(prompt) → 读 context 证明注入，返回固定文本
 const stubAgent = {
@@ -428,7 +428,9 @@ const stubAgent = {
 test("runRoundAgent：注入 sandboxDir 到 context，且不发 task:created", async () => {
   const sandboxDir = mkdtempSync(join(tmpdir(), "exec-ar-"));
   let sawTaskCreated = false;
-  const off = onEvent((ev: { type: string }) => { if (ev.type === "task:created") sawTaskCreated = true; });
+  const handler = (ev: { type: string }) => { if (ev.type === "task:created") sawTaskCreated = true; };
+  enableBus();                          // 必须激活总线：emit 仅 enableBus 后生效，否则永不触发=假绿
+  onEvent("task:created", handler);
   try {
     const res = await runRoundAgent(
       { sessionId: "sess-abc-1", phase: "dev", sandboxDir },
@@ -436,12 +438,12 @@ test("runRoundAgent：注入 sandboxDir 到 context，且不发 task:created", a
       "hi",
     );
     expect(res.text).toBe(`sandbox=${sandboxDir}`);
-    expect(sawTaskCreated).toBe(false); // 幽灵 task 不建 DB 行、不发事件
-  } finally { off(); }
+    expect(sawTaskCreated).toBe(false); // 幽灵 task 不建 DB 行、不发 task:created
+  } finally { offEvent("task:created", handler); disableBus(); }
 });
 ```
 
-> 注：`onEvent` 的精确签名实现前用 `Grep "export function onEvent" src/core/event-bus.ts` 核对（应为订阅 + 返回取消函数）。若实际是 `subscribe`/返回值不同，按真实签名微调本测试的订阅/退订两行。
+> 注（已核实 `src/core/event-bus.ts`）：`onEvent(type, handler)` 返回 **void**、退订用 `offEvent(type, handler)`；`emit` 仅在 `enableBus()` 后生效——故本测试先 `enableBus()` 再断言「不发 task:created」，否则 emit 是 no-op 会假绿。
 
 - [ ] **Step 2：运行确认失败**
 
