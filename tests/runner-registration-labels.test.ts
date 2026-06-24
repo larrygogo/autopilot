@@ -23,3 +23,12 @@ test("register 不传 labels 时 body.labels 为空数组", async () => {
   await HttpRunnerBackend.register("http://cp.test", "tok2", "srv", [], fakeFetch);
   expect((captured as any).labels).toEqual([]);
 });
+
+import { collectLabel } from "../src/cli/runner";
+
+test("collectLabel 累积可重复 --label", () => {
+  let acc: string[] = [];
+  acc = collectLabel("gpu", acc);
+  acc = collectLabel("linux", acc);
+  expect(acc).toEqual(["gpu", "linux"]);
+});
