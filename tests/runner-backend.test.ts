@@ -106,7 +106,7 @@ test("getSession：解 {success, data} 信封", async () => {
 
 test("register：POST /api/runners/register 用注册 token（非 runner secret）换凭证", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
-  const out = await HttpRunnerBackend.register("https://rg.example", "reg-token-abc", "my-mac", stubFetch(calls, () => ({ status: 200, body: { runner_id: "rnr-7", secret: "newsek" } })));
+  const out = await HttpRunnerBackend.register("https://rg.example", "reg-token-abc", "my-mac", [], stubFetch(calls, () => ({ status: 200, body: { runner_id: "rnr-7", secret: "newsek" } })));
   expect(out.runner_id).toBe("rnr-7");
   expect(out.secret).toBe("newsek");
   expect(calls[0]!.url).toBe("https://rg.example/api/runners/register");

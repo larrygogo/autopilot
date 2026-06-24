@@ -133,6 +133,7 @@ export class HttpRunnerBackend implements RunnerBackend {
     controlPlaneUrl: string,
     registrationToken: string,
     name: string,
+    labels: string[] = [],
     fetchFn: FetchLike = fetch,
   ): Promise<{ runner_id: string; secret: string }> {
     const base = controlPlaneUrl.replace(/\/+$/, "");
@@ -141,7 +142,7 @@ export class HttpRunnerBackend implements RunnerBackend {
     const res = await fetchFn(url, {
       method: "POST",
       headers: { ...JSON_HEADERS },
-      body: JSON.stringify({ token: registrationToken, name, machine_meta }),
+      body: JSON.stringify({ token: registrationToken, name, machine_meta, labels }),
     });
     if (!res.ok) throw httpError(url, res, await res.text().catch(() => ""));
     const body = unwrap<{ runner_id: string; secret: string }>(await res.json());
