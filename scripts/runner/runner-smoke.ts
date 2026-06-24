@@ -180,12 +180,20 @@ async function main(): Promise<void> {
   ok("bare 远程（GitHub 替身）seed 完成");
 
   // 7. 起 mode:runner daemon（后台子进程）—— stub bin 注入 PATH 最前，覆盖真 claude/gh
+  //    端口隔离到 ephemeral：config.yaml 不写 daemon.port → daemon 退回默认 6180，
+  //    而 startServerWithRetry 在 EADDRINUSE 时是「同端口重试 6×5s 后抛错」（server.ts），
+  //    不回退空闲端口。开发者本机 daemon 占着 6180 时 smoke daemon 永远绑不上 → poller 不起 →
+  //    脚本在 DEADLINE 处以泛化「等待超时」失败。故经 AUTOPILOT_PORT（env 覆盖优先级高于 cfg.port，
+  //    见 src/daemon/index.ts）把端口钉到随机高位，与任何 live 本机 daemon 解耦（CI 与本机都稳）。
+  //    smoke 本身不向 daemon 发 HTTP（链路全走 in-process mock-control-plane），故无需知道端口。
+  const daemonPort = 20000 + Math.floor(Math.random() * 20000);
   const pathSep = process.platform === "win32" ? ";" : ":";
   daemon = Bun.spawn(["bun", "run", join(REPO, "src/daemon/index.ts")], {
     cwd: REPO,
     env: {
       ...process.env,
       AUTOPILOT_HOME: home,
+      AUTOPILOT_PORT: String(daemonPort),
       PATH: `${stubBin}${pathSep}${process.env.PATH ?? ""}`,
       // 同时覆盖 Windows 可能用的 Path（大小写）
       Path: `${stubBin}${pathSep}${process.env.Path ?? process.env.PATH ?? ""}`,
@@ -195,7 +203,7 @@ async function main(): Promise<void> {
     stdout: "ignore",
     stderr: "ignore",
   });
-  ok("mode:runner daemon 已起（等 poller 领派）");
+  ok(`mode:runner daemon 已起（端口 ${daemonPort}，等 poller 领派）`);
 
   // 8. 派一个 session（file:// 远程 = GitHub 替身；claimAny 下 assignedRunner 占位即可）
   const sid = cp.dispatchSession({
