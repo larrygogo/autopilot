@@ -29,11 +29,6 @@ export function renderRunnerStatus(creds: RunnerCredentials | null, lockHeld: bo
   ].join("\n");
 }
 
-/** commander 可重复 option 收集器：每次 --label 触发一次，把值追加到数组。 */
-export function collectLabel(value: string, previous: string[]): string[] {
-  return [...previous, value];
-}
-
 export function registerRunnerCommands(program: Command): void {
   const runner = program.command("runner").description("reqgenie 自托管 runner 管理");
 
@@ -42,10 +37,9 @@ export function registerRunnerCommands(program: Command): void {
     .description("用一次性注册 token 换长期凭证（token 经 stdin 输入，不进 history）")
     .requiredOption("--url <url>", "reqgenie 控制平面 URL")
     .option("--name <name>", "runner 展示名", `${process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? "runner"}`)
-    .option("--label <label>", "runner 标签（可重复，如 --label gpu --label linux）", collectLabel, [] as string[])
-    .action(async (opts: { url: string; name: string; label: string[] }) => {
+    .action(async (opts: { url: string; name: string }) => {
       try {
-        const creds = await registerRunner({ url: opts.url, name: opts.name, labels: opts.label, readToken: readTokenFromStdin });
+        const creds = await registerRunner({ url: opts.url, name: opts.name, readToken: readTokenFromStdin });
         // 把非敏感连接元数据写入 config.yaml runner 段（凭证已落 credentials.json）
         saveRunnerConfig({ ...loadRunnerConfig(), control_plane_url: creds.control_plane_url, name: opts.name });
         console.log(`注册成功：runner_id=${creds.runner_id}`);

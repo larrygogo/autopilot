@@ -9,8 +9,6 @@ export interface RegisterInput {
   name: string;
   /** 一次性注册 token 的读取器（CLI 接 stdin，避免进 shell history）。 */
   readToken: () => Promise<string>;
-  /** runner 标签（能力标记，与 reqgenie RunnerRegisterRequest.labels 对齐）。 */
-  labels?: string[];
   /** 测试注入。 */
   fetchFn?: FetchLike;
 }
@@ -29,7 +27,6 @@ export async function registerRunner(input: RegisterInput): Promise<RunnerCreden
     input.url,
     token,
     input.name,
-    input.labels ?? [],
     input.fetchFn ?? fetch,
   );
   const creds: RunnerCredentials = {
