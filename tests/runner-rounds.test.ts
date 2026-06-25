@@ -1,6 +1,6 @@
 // tests/runner-rounds.test.ts
 import { test, expect } from "bun:test";
-import { runStageRound, deliveryBranchFor } from "../src/daemon/runner/rounds";
+import { runStageRound, deliveryBranchFor, parseClarifyResult, stripSentinel } from "../src/daemon/runner/rounds";
 import type { SessionState } from "../src/daemon/runner/types";
 
 const baseSession = (stage: SessionState["current_stage"]): SessionState => ({
@@ -190,4 +190,78 @@ test("自托管（clarify）：repo_id 为空时 toWsRefs 的 id 用 alias 兜�
   expect(wsRefs[0]!.id).toBe("demo");          // repo_id 空 → id 兜底用 alias
   expect(wsRefs[0]!.alias).toBe("demo");
   expect(wsRefs[0]!.remote_url).toBe("https://github.com/acme/demo.git");
+});
+
+// ── clarify 三分支产出 ──────────────────────────────────────────────────────
+
+test("parseClarifyResult：need_input + questions 非空", () => {
+  const text = "探索了代码库……\n<<<CLARIFY_RESULT>>>{\"status\":\"need_input\",\"questions\":[\"q1\",\"q2\"]}";
+  const r = parseClarifyResult(text);
+  expect(r).toEqual({ status: "need_input", questions: ["q1", "q2"] });
+});
+
+test("parseClarifyResult：ready", () => {
+  const text = "已充分了解\n<<<CLARIFY_RESULT>>>{\"status\":\"ready\"}";
+  const r = parseClarifyResult(text);
+  expect(r).toEqual({ status: "ready" });
+});
+
+test("parseClarifyResult：无哨兵返回 null", () => {
+  expect(parseClarifyResult("普通回复，没有哨兵行")).toBeNull();
+});
+
+test("parseClarifyResult：哨兵 JSON 格式错误返回 null", () => {
+  const text = "内容\n<<<CLARIFY_RESULT>>>not-json";
+  expect(parseClarifyResult(text)).toBeNull();
+});
+
+test("parseClarifyResult：need_input questions 为空数组 → null（不发空问题）", () => {
+  const text = "内容\n<<<CLARIFY_RESULT>>>{\"status\":\"need_input\",\"questions\":[]}";
+  expect(parseClarifyResult(text)).toBeNull();
+});
+
+test("stripSentinel：去掉哨兵行，保留正文", () => {
+  const text = "正文行1\n正文行2\n<<<CLARIFY_RESULT>>>{\"status\":\"ready\"}";
+  expect(stripSentinel(text)).toBe("正文行1\n正文行2");
+});
+
+test("stripSentinel：无哨兵时原样返回", () => {
+  expect(stripSentinel("没有哨兵")).toBe("没有哨兵");
+});
+
+test("clarify round：need_input + questions → clarification_requested（含 questions[]）", async () => {
+  const evs = await runStageRound(baseSession("clarify"), stubDeps({
+    runRoundAgent: async () => ({
+      text: "探索代码……\n<<<CLARIFY_RESULT>>>{\"status\":\"need_input\",\"questions\":[\"接口是 REST 还是 GraphQL？\",\"要支持哪些认证方式？\"]}",
+      usage: undefined,
+    }),
+  }));
+  expect(evs[0]!.type).toBe("assistant_message");
+  expect(evs[0]!.text).not.toContain("<<<CLARIFY_RESULT>>>");
+  expect(evs[1]!.type).toBe("clarification_requested");
+  expect(evs[1]!.questions).toEqual(["接口是 REST 还是 GraphQL？", "要支持哪些认证方式？"]);
+  expect(evs.length).toBe(2);
+});
+
+test("clarify round：ready → stage_advance to_stage=spec", async () => {
+  const evs = await runStageRound(baseSession("clarify"), stubDeps({
+    runRoundAgent: async () => ({
+      text: "代码库已充分探索，无歧义。\n<<<CLARIFY_RESULT>>>{\"status\":\"ready\"}",
+      usage: undefined,
+    }),
+  }));
+  expect(evs[0]!.type).toBe("assistant_message");
+  expect(evs[0]!.text).not.toContain("<<<CLARIFY_RESULT>>>");
+  expect(evs[1]!.type).toBe("stage_advance");
+  expect(evs[1]!.to_stage).toBe("spec");
+  expect(evs.length).toBe(2);
+});
+
+test("clarify round：无哨兵 → 保守兜底，只返回 assistant_message", async () => {
+  const evs = await runStageRound(baseSession("clarify"), stubDeps({
+    runRoundAgent: async () => ({ text: "普通回复没有哨兵", usage: undefined }),
+  }));
+  expect(evs.length).toBe(1);
+  expect(evs[0]!.type).toBe("assistant_message");
+  expect(evs[0]!.text).toBe("普通回复没有哨兵");
 });

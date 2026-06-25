@@ -37,6 +37,7 @@ const SESSION_LOOP = join(import.meta.dir, "../src/daemon/runner/session-loop.ts
 const RUNNER_EMITTED_EVENTS = [
   "assistant_message",
   "clarification_requested",
+  "stage_advance",
   "stage_artifact",
   "gate_opened",
   "pr_created",
@@ -124,9 +125,8 @@ test("被测枚举与 rounds.ts/session-loop.ts 实际 emit 的 type 字面量�
       `rounds/session-loop emit 的 "${t}" 不在 RUNNER_EMITTED_EVENTS 清单里（更新清单）`,
     ).toBe(true);
   }
-  // 反向：清单里除 clarification_requested（MVP 暂走 assistant_message，未实际 emit）外都应被 emit。
+  // 反向：清单里所有事件都应被 emit。
   for (const e of RUNNER_EMITTED_EVENTS) {
-    if (e === "clarification_requested") continue;
     expect(emitted.has(e), `清单里的 "${e}" 未在 rounds/session-loop 中 emit（清单含死项？）`).toBe(true);
   }
 });
@@ -170,4 +170,33 @@ test("出线 gate_opened body 不含 gate_id（仅当事件已带才透传）", 
   // 反例：若上游显式带了 gate_id（如重发后端回填的事件），则透传——证明剥离只针对「runner 不构造」。
   const withGate = sessionEventToWireBody({ seq: 0, type: "gate_opened", gate_id: "g-1" });
   expect(withGate.payload.gate_id).toBe("g-1");
+});
+
+// ── stage_advance 协议往返 ──────────────────────────────────────────────
+import { wireToSessionEvent } from "../src/daemon/runner/types";
+import type { WireEvent } from "../src/daemon/runner/types";
+
+test("stage_advance：wireToSessionEvent 从 payload.to_stage 提平", () => {
+  const w: WireEvent = { seq: 5, event_type: "stage_advance", payload: { to_stage: "spec" } };
+  const ev = wireToSessionEvent(w);
+  expect(ev.type).toBe("stage_advance");
+  expect(ev.to_stage).toBe("spec");
+});
+
+test("stage_advance：sessionEventToWireBody 把 to_stage 写进 payload", () => {
+  const ev = { seq: 0, type: "stage_advance" as const, to_stage: "spec" };
+  const body = sessionEventToWireBody(ev);
+  expect(body.event_type).toBe("stage_advance");
+  expect(body.payload.to_stage).toBe("spec");
+  expect("seq" in body).toBe(false);
+});
+
+test("clarification_requested：questions[] 经 wire 往返不丢失", () => {
+  const ev = { seq: 0, type: "clarification_requested" as const, questions: ["q1", "q2"] };
+  const body = sessionEventToWireBody(ev);
+  expect(body.payload.questions).toEqual(["q1", "q2"]);
+  // 反向：wire → flat（模拟 backend 喂来）
+  const w2: WireEvent = { seq: 3, event_type: "clarification_requested", payload: { questions: ["a", "b"] } };
+  const flat = wireToSessionEvent(w2);
+  expect(flat.questions).toEqual(["a", "b"]);
 });

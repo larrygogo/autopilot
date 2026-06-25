@@ -78,6 +78,7 @@ export async function runSessionLoop(sessionId: string, backend: RunnerBackend, 
   try {
     while (!deps.signal?.aborted && !heartbeatStopped) {
       // ── SYNC ──
+      const seqBeforeFetch = lastSeq; // 记录本轮 fetch 前的 seq（用于重连去重判断）
       const incoming = await backend.fetchEvents(sessionId, lastSeq);
       let gotNewUserMessage = false;
       for (const ev of incoming) {
@@ -95,6 +96,24 @@ export async function runSessionLoop(sessionId: string, backend: RunnerBackend, 
         log.info("runner session %s 终态 %s，退出回合循环", sessionId, session.status);
         cleanupSessionCodebase(sessionId);
         return;
+      }
+
+      // ── clarify 重连幂等去重（仅重连初始化时：seqBeforeFetch===0 且 incoming 即是全量历史）──
+      // 避免重连后重复产 clarification_requested（防重复建飞书卡）。
+      // 使用本轮 SYNC 已拉取的 incoming（无额外 fetchEvents 调用），不干扰普通流程。
+      if (seqBeforeFetch === 0 && session.current_stage === "clarify" && !waitingClarify) {
+        const lastClarifyReq = incoming.filter((e) => e.type === "clarification_requested").at(-1);
+        if (lastClarifyReq) {
+          const hasAnswer = incoming.some(
+            (e) => e.type === "user_message" && e.seq > lastClarifyReq.seq,
+          );
+          if (!hasAnswer) {
+            waitingClarify = true;
+            prevStageForClarify = session.current_stage;
+            await sleep(deps.pollMs);
+            continue;
+          }
+        }
       }
 
       // ── clarify 等待态：等新 user_message 或 stage 推进（不消耗成本预算）──
@@ -146,6 +165,12 @@ export async function runSessionLoop(sessionId: string, backend: RunnerBackend, 
       const last = filled[filled.length - 1]!;
 
       // ── WAIT ──
+      // stage_advance：clarify agent 自主判断「澄清够了、推进 spec」
+      if (last.type === "stage_advance") {
+        accumulated = ""; // 进下一 stage 清返工上下文（同 gate_opened 批准路径）
+        await sleep(deps.pollMs);
+        continue; // 下一轮 SYNC 的 getSession 拿到新 current_stage
+      }
       if (last.type === "clarification_requested") {
         // 进入等待用户澄清态：不盲目重跑，等收到新 user_message 或 stage 推进（不消耗 STAGE_MAX 预算）
         waitingClarify = true;

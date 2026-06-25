@@ -275,3 +275,120 @@ test("M2：clarify 等待期间不消耗 stageMax 预算（不会提前触顶）
   expect(rounds).toBe(2);
   expect(be.posted.some((e: SessionEvent) => e.type === "limit_hit")).toBe(false);
 });
+
+// ── stage_advance 处理 ──────────────────────────────────────────────────
+
+test("stage_advance：下一轮 getSession 进 spec（accumulated 清空）", async () => {
+  // 第 1 轮：clarify 产 stage_advance；第 2 轮：getSession 已是 spec；spec 产 gate_opened 批准；终态
+  const sessions = [
+    S("clarify", "running"),
+    S("spec", "running"),
+    S("done", "completed"),
+  ];
+  const be = mockBackend({ sessionScript: sessions });
+  const roundStages: string[] = [];
+  await runSessionLoop("sess-sa", be, {
+    runStageRound: async (session) => {
+      roundStages.push(session.current_stage);
+      if (session.current_stage === "clarify") {
+        return [
+          { seq: 0, type: "assistant_message", text: "已探索" },
+          { seq: 0, type: "stage_advance", to_stage: "spec" },
+        ];
+      }
+      return [{ seq: 0, type: "gate_opened" }];
+    },
+    pollMs: 1,
+    limits: { sessionMax: 30, stageMax: 5 },
+    roundTimeoutMs: 1000,
+    waitGate: async () => ({ approved: true }),
+  });
+  // clarify 跑了一轮，stage_advance 触发 accumulated 清空，spec 跑了一轮
+  expect(roundStages).toContain("clarify");
+  expect(roundStages).toContain("spec");
+});
+
+test("stage_advance：accumulated 在进入下一 stage 时被清空", async () => {
+  let accumulatedAtSpec = "UNKNOWN";
+  const sessions = [S("clarify", "running"), S("spec", "running"), S("done", "completed")];
+  const be = mockBackend({ sessionScript: sessions });
+  await runSessionLoop("sess-sa2", be, {
+    runStageRound: async (session, accumulated) => {
+      if (session.current_stage === "spec") {
+        accumulatedAtSpec = accumulated;
+        return [{ seq: 0, type: "gate_opened" }];
+      }
+      return [
+        { seq: 0, type: "assistant_message", text: "x" },
+        { seq: 0, type: "stage_advance", to_stage: "spec" },
+      ];
+    },
+    pollMs: 1,
+    limits: { sessionMax: 30, stageMax: 5 },
+    roundTimeoutMs: 1000,
+    waitGate: async () => ({ approved: true }),
+  });
+  // stage_advance 后 accumulated 被清空，spec round 拿到空字符串
+  expect(accumulatedAtSpec).toBe("");
+});
+
+// ── clarify 重连幂等去重 ────────────────────────────────────────────────────
+
+test("重连幂等去重：已有未答 clarification_requested → 不重跑 agent，进等待态", async () => {
+  // 事件流：已有 clarification_requested（seq=5）但无后续 user_message → runner 不应重跑 round
+  let rounds = 0;
+  const sessions = [
+    S("clarify", "running"), S("clarify", "running"),
+    S("clarify", "running"), S("done", "completed"),
+  ];
+  // fetchEvents 第 1 次（after=0）返回已有的 clarification_requested；之后无新事件
+  let fetchCount = 0;
+  const be: RunnerBackend = {
+    ...mockBackend({ sessionScript: sessions }),
+    async fetchEvents(_id, after) {
+      fetchCount++;
+      if (after === 0) {
+        return [
+          { seq: 3, type: "assistant_message", text: "探索结果" },
+          { seq: 5, type: "clarification_requested", questions: ["需要确认接口格式？"] },
+        ];
+      }
+      return [];
+    },
+  };
+  await runSessionLoop("sess-dedup", be, {
+    runStageRound: async () => { rounds++; return [{ seq: 0, type: "clarification_requested", questions: ["重复问"] }]; },
+    pollMs: 1,
+    limits: { sessionMax: 10, stageMax: 3 },
+    roundTimeoutMs: 1000,
+    waitGate: async () => ({ approved: true }),
+  });
+  // 已有未答 clarification_requested → runner 不重跑，所以 rounds=0
+  expect(rounds).toBe(0);
+});
+
+test("重连幂等去重：clarification_requested 之后有 user_message → 正常跑 round", async () => {
+  let rounds = 0;
+  const sessions = [S("clarify", "running"), S("done", "completed")];
+  const be: RunnerBackend = {
+    ...mockBackend({ sessionScript: sessions }),
+    async fetchEvents(_id, after) {
+      if (after === 0) {
+        return [
+          { seq: 3, type: "clarification_requested", questions: ["问题"] },
+          { seq: 7, type: "user_message", text: "用户已回答" },
+        ];
+      }
+      return [];
+    },
+  };
+  await runSessionLoop("sess-dedup2", be, {
+    runStageRound: async () => { rounds++; return [{ seq: 0, type: "assistant_message", text: "ok" }]; },
+    pollMs: 1,
+    limits: { sessionMax: 10, stageMax: 3 },
+    roundTimeoutMs: 1000,
+    waitGate: async () => ({ approved: true }),
+  });
+  // user_message 已回答，正常跑
+  expect(rounds).toBeGreaterThan(0);
+});

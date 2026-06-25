@@ -17,6 +17,7 @@ export const TERMINAL_STATUSES: ReadonlySet<SessionStatus> = new Set<SessionStat
 export type SessionEventType =
   | "assistant_message"
   | "clarification_requested"
+  | "stage_advance"
   | "stage_artifact"
   | "gate_opened"
   | "gate_decided"
@@ -41,6 +42,10 @@ export interface SessionEvent {
   decision?: "approved" | "rejected";
   /** rejected 时携带的返工目标 stage（reqgenie rework_target_stage）。 */
   rework_target_stage?: SessionStage;
+  /** stage_advance 携带的目标 stage（clarify agent 自主判断"澄清够了"时产出）。 */
+  to_stage?: string;
+  /** clarification_requested 携带的问题列表。 */
+  questions?: string[];
   /** stage_artifact 元信息。 */
   artifact?: { kind: string; content: string };
   /** pr_created 元信息。 */
@@ -79,6 +84,8 @@ export function wireToSessionEvent(w: WireEvent): SessionEvent {
   if (typeof p.gate_id === "string") ev.gate_id = p.gate_id;
   if (p.decision === "approved" || p.decision === "rejected") ev.decision = p.decision;
   if (typeof p.rework_target_stage === "string") ev.rework_target_stage = p.rework_target_stage as SessionStage;
+  if (typeof p.to_stage === "string") ev.to_stage = p.to_stage;
+  if (Array.isArray(p.questions)) ev.questions = p.questions as string[];
   if (typeof p.kind === "string" && typeof p.content === "string") ev.artifact = { kind: p.kind, content: p.content };
   if (typeof p.pr_url === "string") {
     ev.pr = {
@@ -97,12 +104,14 @@ export function wireToSessionEvent(w: WireEvent): SessionEvent {
  * runner 永不自定 seq（剥离），gate_id 后端注入（gate_opened 回写不带）。
  */
 export function sessionEventToWireBody(ev: SessionEvent): { event_type: string; stage?: string; actor: string; payload: Record<string, unknown> } {
-  const { seq: _seq, type, text, gate_id, decision, rework_target_stage, artifact, pr, ...rest } = ev;
+  const { seq: _seq, type, text, gate_id, decision, rework_target_stage, to_stage, questions, artifact, pr, ...rest } = ev;
   const payload: Record<string, unknown> = { ...rest };
   if (text !== undefined) payload.message = text;
   if (gate_id !== undefined) payload.gate_id = gate_id;
   if (decision !== undefined) payload.decision = decision;
   if (rework_target_stage !== undefined) payload.rework_target_stage = rework_target_stage;
+  if (to_stage !== undefined) payload.to_stage = to_stage;
+  if (questions !== undefined) payload.questions = questions;
   if (artifact) { payload.kind = artifact.kind; payload.content = artifact.content; }
   if (pr) { payload.repo = pr.repo; payload.branch_name = pr.branch_name; payload.pr_url = pr.pr_url; }
   return { event_type: type, actor: "agent", payload };
