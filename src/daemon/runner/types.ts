@@ -118,7 +118,11 @@ export interface SessionState {
 
 /** session 关联的仓库（dev_session_repos）。 */
 export interface SessionRepo {
-  repo_id: string;
+  /**
+   * 托管库走 reqgenie git-token 鉴权；**自托管派生库为空**（null/undefined/空串）——
+   * 此时 runner 不调 getGitToken、token 用空串走本机 git 凭证（executor 底层已支持空 token）。
+   */
+  repo_id?: string | null;
   /** 子目录别名（沙盒 codebase/<alias>/）。 */
   alias: string;
   remote_url: string;

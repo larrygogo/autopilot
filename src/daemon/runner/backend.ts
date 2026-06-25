@@ -94,9 +94,11 @@ export class HttpRunnerBackend implements RunnerBackend {
   async getGitToken(sessionId: string, repoId: string): Promise<string> {
     const url = this.internal(sessionId, `/git-token?repo_id=${encodeURIComponent(repoId)}`);
     const res = await this.fetchFn(url, { method: "GET", headers: this.auth() });
+    // 自托管派生库无凭证：reqgenie 返 404/422 → 容错回空串走本机 git 凭证（防御对方未改全）。
+    if (res.status === 404 || res.status === 422) return "";
     if (!res.ok) throw httpError(url, res);
-    const body = unwrap<{ token: string }>(await res.json());
-    return body.token;
+    const body = unwrap<{ token?: string }>(await res.json());
+    return body.token ?? "";
   }
 
   async sessionHeartbeat(sessionId: string): Promise<{ terminal: boolean }> {

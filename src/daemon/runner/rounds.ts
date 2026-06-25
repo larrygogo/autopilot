@@ -53,7 +53,8 @@ function buildPrompt(session: SessionState, deps: RoundDeps): string {
 
 /** clarify/spec/review 各库浅 clone 仅供 agent 读（无写、无交付分支）。 */
 function toWsRefs(repos: SessionRepo[]): CodebaseWorkspaceRef[] {
-  return repos.map((r) => ({ id: r.repo_id, remote_url: r.remote_url, default_branch: r.default_branch, alias: r.alias }));
+  // 自托管派生库 repo_id 为空：id 用 alias 兜底，避免 sanitizeAlias 回退到空目录名。
+  return repos.map((r) => ({ id: r.repo_id || r.alias, remote_url: r.remote_url, default_branch: r.default_branch, alias: r.alias }));
 }
 
 /** SessionRepo + CodebaseRepoState → ExecRepo（submitPrPure 输入）。 */
@@ -63,7 +64,8 @@ function toExecRepos(
   branch: string,
 ): ExecRepo[] {
   return states.map((st) => {
-    const meta = session.repos.find((r) => r.repo_id === st.ws.id);
+    // 按 alias 匹配（repo_id 自托管库为空，不可靠；alias 始终非空且唯一）。
+    const meta = session.repos.find((r) => r.alias === st.alias);
     return {
       path: st.path,
       remoteUrl: st.ws.remote_url ?? "",
@@ -109,7 +111,8 @@ export async function runStageRound(session: SessionState, deps: RoundDeps): Pro
     // ensureCodebase 的 gitToken 用主库 token（clone 鉴权）；push 前 submitPrPure 再按库取（见 pr 阶段）。
     // 此处用主库（primary=true，fallback repos[0]）的 repo_id 取 clone token。
     const primaryRepo = session.repos.find((r) => r.primary) ?? session.repos[0]!;
-    const token = await deps.getGitToken(session.id, primaryRepo.repo_id);
+    // 自托管派生库无 repo_id → 不调 git-token、token 用空串走本机 git 凭证（executor 底层已支持）。
+    const token = primaryRepo.repo_id ? await deps.getGitToken(session.id, primaryRepo.repo_id) : "";
     const { repos } = await deps.ensureCodebase(session.id, toWsRefs(session.repos), {
       fidelity: "full",
       deliverBranch: branch,
@@ -134,7 +137,8 @@ export async function runStageRound(session: SessionState, deps: RoundDeps): Pro
   if (stage === "pr") {
     // clone/checkout 用主库 token（I3 修复：主库取 token，非无脑 repos[0]）
     const primaryRepo = session.repos.find((r) => r.primary) ?? session.repos[0]!;
-    const cloneToken = await deps.getGitToken(session.id, primaryRepo.repo_id);
+    // 自托管派生库无 repo_id → 不调 git-token、token 用空串走本机 git 凭证。
+    const cloneToken = primaryRepo.repo_id ? await deps.getGitToken(session.id, primaryRepo.repo_id) : "";
     const { repos } = await deps.ensureCodebase(session.id, toWsRefs(session.repos), {
       fidelity: "full",
       deliverBranch: branch,
@@ -147,7 +151,8 @@ export async function runStageRound(session: SessionState, deps: RoundDeps): Pro
     const allFailures: string[] = [];
     for (const execRepo of execRepos) {
       const meta = session.repos.find((r) => r.alias === execRepo.label);
-      const repoToken = meta ? await deps.getGitToken(session.id, meta.repo_id) : cloneToken;
+      // 自托管派生库（无 repo_id）→ 空串走本机凭证；否则逐库现取 token（多库不同 installation）。
+      const repoToken = meta?.repo_id ? await deps.getGitToken(session.id, meta.repo_id) : "";
       const out = await deps.submitPrPure([execRepo], {
         title: `reqgenie ${session.id}`,
         bodyFor: (_r, diffStatText) => `自动交付（reqgenie session ${session.id}）\n\n${diffStatText}`,

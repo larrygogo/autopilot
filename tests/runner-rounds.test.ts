@@ -134,3 +134,60 @@ test("I3（pr）：多库 session 逐库取 token（每库用自己的 repo_id�
   expect(mainCall?.gitToken).toBe("tok-r-main");
   expect(subCall?.gitToken).toBe("tok-r-sub");
 });
+
+// ── 自托管派生库（repo_id 为空）：不调 git-token、走本机 git 凭证 ──────────────────────
+
+const selfHostedSession = (stage: SessionState["current_stage"]): SessionState => ({
+  id: "sess-self",
+  status: "running",
+  current_stage: stage,
+  repos: [
+    // 自托管派生库：repo_id null，alias 来自 url 末段去 .git。
+    { repo_id: null, alias: "demo", remote_url: "https://github.com/acme/demo.git", default_branch: "main", primary: true },
+  ],
+});
+
+test("自托管（dev）：repo_id 为空 → 不调 getGitToken，ensureCodebase 收到空 gitToken", async () => {
+  let tokenCalled = false;
+  let ensureOpts: any = null;
+  const evs = await runStageRound(selfHostedSession("dev"), stubDeps({
+    getGitToken: async () => { tokenCalled = true; return "should-not-be-used"; },
+    ensureCodebase: async (_sid, _ws, opts) => {
+      ensureOpts = opts;
+      return { root: "/tmp/cb", repos: [{ ws: selfHostedSession("dev").repos[0] as any, alias: "demo", dir: "demo", path: "/tmp/cb/demo", fidelity: "full", branch: "reqgenie/sess-self", base: "main", reused: false }], failed: [] };
+    },
+  }));
+  expect(tokenCalled).toBe(false);       // repo_id 空 → 根本不调 git-token
+  expect(ensureOpts.gitToken).toBe("");  // 空 token → executor 走本机凭证
+  expect(evs.some((e) => e.type === "gate_opened")).toBe(true);
+});
+
+test("自托管（pr）：repo_id 为空 → 不调 getGitToken，submitPrPure 收到空 gitToken", async () => {
+  let tokenCalled = false;
+  const submitCalls: Array<{ repoLabel: string; gitToken: string }> = [];
+  await runStageRound(selfHostedSession("pr"), stubDeps({
+    getGitToken: async () => { tokenCalled = true; return "should-not-be-used"; },
+    ensureCodebase: async () => ({ root: "/tmp/cb", repos: [
+      { ws: selfHostedSession("pr").repos[0] as any, alias: "demo", dir: "demo", path: "/tmp/cb/demo", fidelity: "full", branch: "reqgenie/sess-self", base: "main", reused: false },
+    ], failed: [] }),
+    submitPrPure: async (repos, opts) => {
+      submitCalls.push({ repoLabel: repos[0]!.label, gitToken: opts.gitToken ?? "<undef>" });
+      return { results: repos.map((r) => ({ repo: r, prUrl: "https://github.com/acme/demo/pull/1", prNumber: 1 })), failures: [] };
+    },
+  }));
+  expect(tokenCalled).toBe(false);                          // repo_id 空 → 不调 git-token
+  expect(submitCalls[0]!.repoLabel).toBe("demo");
+  expect(submitCalls[0]!.gitToken).toBe("");                // 空 token → 本机凭证 push/PR
+  // primary 仍被正确识别（按 alias 匹配，不依赖 repo_id）
+});
+
+test("自托管（clarify）：repo_id 为空时 toWsRefs 的 id 用 alias 兜底（避免空目录名）", async () => {
+  let wsRefs: any[] = [];
+  await runStageRound(selfHostedSession("clarify"), stubDeps({
+    getGitToken: async () => { throw new Error("clarify 不该取 token"); },
+    ensureCodebase: async (_sid, ws) => { wsRefs = ws as any[]; return { root: "/tmp/cb", repos: [], failed: [] }; },
+  }));
+  expect(wsRefs[0]!.id).toBe("demo");          // repo_id 空 → id 兜底用 alias
+  expect(wsRefs[0]!.alias).toBe("demo");
+  expect(wsRefs[0]!.remote_url).toBe("https://github.com/acme/demo.git");
+});

@@ -56,6 +56,18 @@ test("getGitToken：GET /git-token?repo_id= 返回 token 字符串", async () =>
   expect(calls[0]!.url).toBe("https://rg.example/api/internal/dev-sessions/sess-1/git-token?repo_id=repo-9");
 });
 
+test("getGitToken：自托管派生库无凭证 → 404/422 容错回空串（走本机 git 凭证）", async () => {
+  const be404 = new HttpRunnerBackend(creds, stubFetch([], () => ({ status: 404, body: { error: "no installation" } })));
+  expect(await be404.getGitToken("sess-1", "repo-9")).toBe("");
+  const be422 = new HttpRunnerBackend(creds, stubFetch([], () => ({ status: 422, body: { error: "unprocessable" } })));
+  expect(await be422.getGitToken("sess-1", "repo-9")).toBe("");
+});
+
+test("getGitToken：缺 token 字段 → 回空串（不是 undefined）", async () => {
+  const be = new HttpRunnerBackend(creds, stubFetch([], () => ({ status: 200, body: { success: true, data: {} } })));
+  expect(await be.getGitToken("sess-1", "repo-9")).toBe("");
+});
+
 // ── major：wire（event_type + 嵌套 payload）↔ runner 扁平域（type + 顶层 text/...）归一 ──
 // reqgenie 真实线协议 = `{success, data: [{seq, event_type, payload:{...}}]}`（C 的 MockControlPlane / B 后端）。
 // backend.fetchEvents 必须把它归一成扁平 SessionEvent，否则 session-loop 读 ev.text/ev.gate_id 全空。
