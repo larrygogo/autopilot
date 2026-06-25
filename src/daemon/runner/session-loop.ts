@@ -19,6 +19,12 @@ export interface GateOutcome {
 /** session 级心跳间隔（§4.3 = 30s；每 30s 一次，防 reqgenie 90s reaper 误杀长跑 session）。 */
 export const SESSION_HEARTBEAT_MS = 30_000;
 
+/**
+ * clarify 阶段无进展保险阈值：连续 N 轮只产 assistant_message（无 clarification_requested /
+ * stage_advance）即判定 agent 未按协议输出结构化结果，停下报人。
+ */
+export const CLARIFY_NO_PROGRESS_LIMIT = 3;
+
 export interface SessionLoopDeps {
   /** 跑一轮 stage round（生产 = rounds.runStageRound 绑真实 deps；测试桩）。 */
   runStageRound: (session: SessionState, accumulated: string) => Promise<SessionEvent[]>;
@@ -55,6 +61,8 @@ export async function runSessionLoop(sessionId: string, backend: RunnerBackend, 
   // 等待用户澄清时为 true，此状态下跳过成本闸门与 round 执行，直到收到新 user_message 或 stage 推进。
   let waitingClarify = false;
   let prevStageForClarify: string | null = null;
+  // clarify 无进展计数：连续只产 assistant_message（无结构化输出）的轮数。
+  let clarifyNoProgressCount = 0;
 
   // ── session 级心跳（§4.3）：30s 一次，防 reqgenie 90s reaper 误杀长跑 session ──
   let heartbeatStopped = false;
@@ -167,16 +175,31 @@ export async function runSessionLoop(sessionId: string, backend: RunnerBackend, 
       // ── WAIT ──
       // stage_advance：clarify agent 自主判断「澄清够了、推进 spec」
       if (last.type === "stage_advance") {
+        clarifyNoProgressCount = 0; // 结构化推进，重置无进展计数
         accumulated = ""; // 进下一 stage 清返工上下文（同 gate_opened 批准路径）
         await sleep(deps.pollMs);
         continue; // 下一轮 SYNC 的 getSession 拿到新 current_stage
       }
       if (last.type === "clarification_requested") {
+        clarifyNoProgressCount = 0; // 发了澄清请求，重置无进展计数
         // 进入等待用户澄清态：不盲目重跑，等收到新 user_message 或 stage 推进（不消耗 STAGE_MAX 预算）
         waitingClarify = true;
         prevStageForClarify = session.current_stage;
         await sleep(deps.pollMs);
         continue;
+      }
+      // clarify 无进展保险：连续只产 assistant_message 达到阈值 → 停下报人
+      if (session.current_stage === "clarify" && last.type === "assistant_message") {
+        clarifyNoProgressCount++;
+        if (clarifyNoProgressCount >= CLARIFY_NO_PROGRESS_LIMIT) {
+          await backend.postEvent(sessionId, {
+            seq: 0,
+            type: "session_failed",
+            text: `clarify agent 连续 ${clarifyNoProgressCount} 轮未按协议输出结构化澄清结果，停下报人——请检查 clarify 提示词/模型`,
+          });
+          cleanupSessionCodebase(sessionId);
+          return;
+        }
       }
       if (last.type === "gate_opened" && last.gate_id) {
         const outcome = await deps.waitGate(last.gate_id, sessionId);

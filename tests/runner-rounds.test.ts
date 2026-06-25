@@ -265,3 +265,79 @@ test("clarify round：无哨兵 → 保守兜底，只返回 assistant_message",
   expect(evs[0]!.type).toBe("assistant_message");
   expect(evs[0]!.text).toBe("普通回复没有哨兵");
 });
+
+// ── Bug A：需求上下文注入 buildPrompt ──────────────────────────────────────────
+
+test("buildPrompt：prompt 含「## 需求」区块（requirement_title + requirement_description）", async () => {
+  const session: SessionState = {
+    id: "sess-req",
+    status: "running",
+    current_stage: "clarify",
+    repos: [{ repo_id: "r1", alias: "app", remote_url: "https://x/app.git", default_branch: "main", primary: true }],
+    requirement_title: "实现用户登录功能",
+    requirement_description: "支持邮箱/密码登录，JWT token 鉴权",
+  };
+  let capturedPrompt = "";
+  await runStageRound(session, stubDeps({
+    runRoundAgent: async (_ctx, _agent, prompt) => {
+      capturedPrompt = prompt;
+      return { text: "已探索\n<<<CLARIFY_RESULT>>>{\"status\":\"ready\"}", usage: undefined };
+    },
+  }));
+  expect(capturedPrompt).toContain("## 需求");
+  expect(capturedPrompt).toContain("标题：实现用户登录功能");
+  expect(capturedPrompt).toContain("描述：支持邮箱/密码登录，JWT token 鉴权");
+});
+
+test("buildPrompt：无 requirement_title/description → 使用占位文本", async () => {
+  let capturedPrompt = "";
+  await runStageRound(baseSession("clarify"), stubDeps({
+    runRoundAgent: async (_ctx, _agent, prompt) => {
+      capturedPrompt = prompt;
+      return { text: "已探索\n<<<CLARIFY_RESULT>>>{\"status\":\"ready\"}", usage: undefined };
+    },
+  }));
+  expect(capturedPrompt).toContain("## 需求");
+  expect(capturedPrompt).toContain("标题：（未提供）");
+  expect(capturedPrompt).toContain("描述：（无描述）");
+});
+
+test("buildPrompt：spec/dev stage 同样含「## 需求」区块", async () => {
+  const session: SessionState = {
+    id: "sess-req2",
+    status: "running",
+    current_stage: "spec",
+    repos: [{ repo_id: "r1", alias: "app", remote_url: "https://x/app.git", default_branch: "main", primary: true }],
+    requirement_title: "需求标题",
+    requirement_description: "需求描述内容",
+  };
+  let capturedPrompt = "";
+  await runStageRound(session, stubDeps({
+    runRoundAgent: async (_ctx, _agent, prompt) => {
+      capturedPrompt = prompt;
+      return { text: "spec 内容", usage: undefined };
+    },
+  }));
+  expect(capturedPrompt).toContain("## 需求");
+  expect(capturedPrompt).toContain("标题：需求标题");
+});
+
+// ── Bug B：parseClarifyResult 解析 markdown 围栏包裹的哨兵 ──────────────────────
+
+test("parseClarifyResult：```json 围栏包裹的哨兵（ready）", () => {
+  const text = "探索结果\n```json\n<<<CLARIFY_RESULT>>>{\"status\":\"ready\"}\n```";
+  const r = parseClarifyResult(text);
+  expect(r).toEqual({ status: "ready" });
+});
+
+test("parseClarifyResult：``` 围栏包裹的哨兵（need_input）", () => {
+  const text = "探索结果\n```\n<<<CLARIFY_RESULT>>>{\"status\":\"need_input\",\"questions\":[\"接口格式？\"]}\n```";
+  const r = parseClarifyResult(text);
+  expect(r).toEqual({ status: "need_input", questions: ["接口格式？"] });
+});
+
+test("parseClarifyResult：哨兵行前后有空白仍能解析", () => {
+  const text = "探索结果\n  <<<CLARIFY_RESULT>>>{\"status\":\"ready\"}  ";
+  const r = parseClarifyResult(text);
+  expect(r).toEqual({ status: "ready" });
+});

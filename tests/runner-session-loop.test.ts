@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { runSessionLoop, defaultWaitGate, SESSION_HEARTBEAT_MS } from "../src/daemon/runner/session-loop";
+import { runSessionLoop, defaultWaitGate, SESSION_HEARTBEAT_MS, CLARIFY_NO_PROGRESS_LIMIT } from "../src/daemon/runner/session-loop";
 import type { RunnerBackend } from "../src/daemon/runner/backend";
 import type { SessionEvent, SessionState, PendingSession } from "../src/daemon/runner/types";
 
@@ -391,4 +391,74 @@ test("重连幂等去重：clarification_requested 之后有 user_message → �
   });
   // user_message 已回答，正常跑
   expect(rounds).toBeGreaterThan(0);
+});
+
+// ── Bug B：clarify 无进展保险 ──────────────────────────────────────────────────
+
+test("CLARIFY_NO_PROGRESS_LIMIT 常量值 = 3", () => {
+  expect(CLARIFY_NO_PROGRESS_LIMIT).toBe(3);
+});
+
+test("clarify 连续 N 轮只产 assistant_message → 触发 session_failed（无进展保险）", async () => {
+  // runStageRound 恒返回只含 assistant_message（无 clarification_requested / stage_advance）
+  // 期望：连续达到 CLARIFY_NO_PROGRESS_LIMIT 轮后 postEvent session_failed 并退出
+  const be = mockBackend({ sessionScript: [S("clarify", "running")] });
+  let rounds = 0;
+  await runSessionLoop("sess-noprog", be, {
+    runStageRound: async () => {
+      rounds++;
+      return [{ seq: 0, type: "assistant_message", text: "我探索了代码库但忘了输出哨兵" }];
+    },
+    pollMs: 1,
+    limits: { sessionMax: 30, stageMax: 10 },
+    roundTimeoutMs: 1000,
+    waitGate: async () => ({ approved: true }),
+  });
+  // 恰好跑了 CLARIFY_NO_PROGRESS_LIMIT 轮（第 N 轮触顶退出）
+  expect(rounds).toBe(CLARIFY_NO_PROGRESS_LIMIT);
+  // 产了 session_failed 事件
+  expect(be.posted.some((e) => e.type === "session_failed")).toBe(true);
+  // 不无限循环（rounds < sessionMax）
+  expect(rounds).toBeLessThan(30);
+});
+
+test("clarify 有 clarification_requested 后再无进展 → 计数重置，不提前触顶", async () => {
+  // 第 1 轮：有 clarification_requested（重置计数）；之后 user_message 触发 round 2；
+  // round 2 之后连续无进展 N 轮才触顶——确认计数是重置后重新累计，不跨越 clarification_requested 计
+  let rounds = 0;
+  let fetchCount = 0;
+  const sessions = [
+    S("clarify", "running"), // round 1：clarification_requested
+    S("clarify", "running"), // fetch user_message
+    S("clarify", "running"), // round 2 开始（后续无进展）
+    S("clarify", "running"),
+    S("clarify", "running"),
+    S("clarify", "running"),
+  ];
+  const baseBe = mockBackend({ sessionScript: sessions });
+  const be: typeof baseBe = {
+    ...baseBe,
+    async fetchEvents(_id, _after) {
+      fetchCount++;
+      // 第 2 次 fetch 喂 user_message（seq=10）触发等待退出
+      if (fetchCount === 2) return [{ seq: 10, type: "user_message", text: "用户回复" }];
+      return [];
+    },
+  };
+  await runSessionLoop("sess-noprog2", be, {
+    runStageRound: async () => {
+      rounds++;
+      // 第 1 轮产 clarification_requested；之后全部只产 assistant_message
+      if (rounds === 1) return [{ seq: 0, type: "clarification_requested", questions: ["需要确认？"] }];
+      return [{ seq: 0, type: "assistant_message", text: "没有哨兵" }];
+    },
+    pollMs: 1,
+    limits: { sessionMax: 30, stageMax: 10 },
+    roundTimeoutMs: 1000,
+    waitGate: async () => ({ approved: true }),
+  });
+  // round 1（clarification_requested，计数重置为 0）
+  // round 2、3、4（连续 3 轮 assistant_message，第 4 轮触顶 = round 1+3 = 4 总轮数）
+  expect(rounds).toBe(1 + CLARIFY_NO_PROGRESS_LIMIT);
+  expect(be.posted.some((e) => e.type === "session_failed")).toBe(true);
 });

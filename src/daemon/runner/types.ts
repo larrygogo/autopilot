@@ -123,6 +123,10 @@ export interface SessionState {
   status: SessionStatus;
   current_stage: SessionStage;
   repos: SessionRepo[];
+  /** 需求标题（reqgenie DTO 字段；clarify/spec/dev 等 agent prompt 注入需求上下文用）。 */
+  requirement_title?: string;
+  /** 需求描述（reqgenie DTO 字段；同上）。 */
+  requirement_description?: string;
 }
 
 /** session 关联的仓库（dev_session_repos）。 */

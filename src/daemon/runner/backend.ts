@@ -88,7 +88,17 @@ export class HttpRunnerBackend implements RunnerBackend {
     const url = this.internal(sessionId, "");
     const res = await this.fetchFn(url, { method: "GET", headers: this.auth() });
     if (!res.ok) throw httpError(url, res);
-    return unwrap<SessionState>(await res.json());
+    const raw = unwrap<SessionState & { requirement_title?: string; requirement_description?: string }>(await res.json());
+    // reqgenie DTO 两字段直接映射（字段名一致，显式赋值防止 unwrap 漏字段）。
+    const state: SessionState = {
+      id: raw.id,
+      status: raw.status,
+      current_stage: raw.current_stage,
+      repos: raw.repos,
+    };
+    if (typeof raw.requirement_title === "string") state.requirement_title = raw.requirement_title;
+    if (typeof raw.requirement_description === "string") state.requirement_description = raw.requirement_description;
+    return state;
   }
 
   async getGitToken(sessionId: string, repoId: string): Promise<string> {
