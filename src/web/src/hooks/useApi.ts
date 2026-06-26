@@ -713,6 +713,10 @@ export const api = {
     title: string;
     spec_md?: string;
     chat_session_id?: string | null;
+    source?: string | null;
+    external_ref?: string | null;
+    callback_url?: string | null;
+    callback_secret?: string | null;
   }) =>
     requestRpc<{ requirement: Requirement }>("requirements.create", body).then((r) => r.requirement),
 
@@ -1147,6 +1151,14 @@ export interface Requirement {
   workflow: string | null;
   /** 输入形态确认（迁移 045）：null=未确认 / 'git'=基于代码库 / 'none'=确认无库 */
   input_mode?: string | null;
+  /** 需求来源标识（如 'reqgenie'），B 模式深链触发时写入（迁移 050）。 */
+  source?: string | null;
+  /** 外部系统需求 id（如 reqgenie requirement uuid），用于回链（迁移 050）。 */
+  external_ref?: string | null;
+  /** 状态变化回传 webhook URL（迁移 050）。 */
+  callback_url?: string | null;
+  /** 回传 webhook HMAC secret（迁移 050）。 */
+  callback_secret?: string | null;
   created_at: number;
   updated_at: number;
 }
