@@ -234,6 +234,9 @@ export function initSelfhostedConnector(): () => void {
     onLinkCreated(link: ReqLink) {
       mirrorPusher.registerLink(link);
     },
+    async transitionClarifying(autopilotReqId: string) {
+      setRequirementStatus(autopilotReqId, "clarifying");
+    },
     triggerSnapshot(autopilotReqId: string) {
       void mirrorPusher.pushSnapshot(autopilotReqId);
     },

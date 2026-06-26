@@ -45,6 +45,14 @@ export interface AssignmentPollerDeps {
   /** 收到分配并建需求成功后回调（供 mirror-pusher 注册 link） */
   onLinkCreated(link: ReqLink): void;
 
+  /**
+   * 自动进澄清（in-process 注入）
+   * 建需求 + setWorkspaces 后调此将需求转入 clarifying 态启动生命周期。
+   * 无 repo_urls 时也可调（drafting → clarifying 是合法转换）。
+   * 失败 best-effort log，不崩循环，不丢 ack。
+   */
+  transitionClarifying(autopilotReqId: string): Promise<void>;
+
   /** 触发全量快照（建需求后立即推初始状态） */
   triggerSnapshot(autopilotReqId: string): void;
 }
@@ -116,13 +124,24 @@ export class AssignmentPoller {
           };
           this.deps.onLinkCreated(link);
 
-          // 4. Ack 分配
+          // 4. Ack 分配（create 成功即回，workspace/transition/snapshot 失败不丢 ack）
           await this.deps.backend.ackAssignment(
             assignment.assignment_id,
             autopilotReqId,
           );
 
-          // 5. 触发初始全量快照（让 reqgenie 侧立刻看到 drafting 状态）
+          // 5. 自动进澄清（best-effort，失败仅 log）
+          try {
+            await this.deps.transitionClarifying(autopilotReqId);
+          } catch (e: unknown) {
+            log.warn(
+              "transitionClarifying 失败（继续）req=%s: %s",
+              autopilotReqId,
+              e instanceof Error ? e.message : String(e),
+            );
+          }
+
+          // 6. 触发初始全量快照（让 reqgenie 侧立刻看到 clarifying 状态）
           this.deps.triggerSnapshot(autopilotReqId);
 
           log.info(
