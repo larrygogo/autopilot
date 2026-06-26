@@ -293,6 +293,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const { initNotificationRecorder } = await import("./notification-recorder");
   const disposeNotificationRecorder = initNotificationRecorder();
 
+  // 启动 selfhosted-mirror（reqgenie 里程碑回传；best-effort，失败只 warn）
+  const { initSelfhostedMirror } = await import("./selfhosted-mirror");
+  const disposeSelfhostedMirror = initSelfhostedMirror();
+
   // 启动 requirement-scheduler（订阅 event-bus）
   initRequirementScheduler();
   // 启动 requirement-clarifier（创建需求后自动 AI 澄清）
@@ -408,6 +412,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     disposeFixRevisionRunner();
     disposeDoneWorkspaceCleanup();
     disposeNotificationRecorder();
+    disposeSelfhostedMirror();
     disableBus();
     // server.stop 必须 await 完成后才能 exit：它是异步的（等 socket 真正关闭），
     // 同步调用后立刻 process.exit 会让进程死在 socket 关闭中途——浏览器保持着
