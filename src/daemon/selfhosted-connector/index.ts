@@ -19,7 +19,7 @@ import type { ReqLink } from "./types";
 
 // 本机 RPC 直接调（in-process，无 HTTP 往返）
 import { getRequirementById, createRequirement as coreCreateRequirement } from "../../core/requirements";
-import { listComments, createComment, nextCommentId } from "../../core/requirements/comments";
+import { listComments, createComment, nextCommentId, resolveComment } from "../../core/requirements/comments";
 import { listSubPrs } from "../../core/requirements/sub-prs";
 import { listTasksByRequirement, listTaskPhaseEvents, getDb } from "../../core/db";
 import {
@@ -262,6 +262,9 @@ export function initSelfhostedConnector(): () => void {
       if (kind === "feedback" && req?.status === "awaiting_review") {
         setRequirementStatus(requirementId, "fix_revision");
       }
+    },
+    resolveComment(commentId: string) {
+      resolveComment(commentId);
     },
     async finishClarification({ id }) {
       coreFinishClarification(id);

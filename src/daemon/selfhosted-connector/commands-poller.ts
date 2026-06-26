@@ -23,6 +23,11 @@ export interface CommandPollerRpcDeps {
     parent_id?: string | null;
   }): Promise<void>;
 
+  /**
+   * comments.resolve（answer_clarification 后 resolve 问题 → 触发 requirement:question-resolved → clarifier 续轮）
+   */
+  resolveComment(commentId: string): void;
+
   /** requirements.finishClarification */
   finishClarification(params: { id: string }): Promise<void>;
 
@@ -139,13 +144,18 @@ export class CommandPoller {
         case "answer_clarification": {
           const body = typeof payload.body === "string" ? payload.body.trim() : "";
           if (!body) return { ok: false, reason: "answer_clarification: body 必填" };
+          const questionId = typeof payload.question_id === "string" ? payload.question_id : null;
           await this.deps.addComment({
             requirementId: autopilotReqId,
             kind: "question",
             from_role: "user",
             body,
-            parent_id: typeof payload.question_id === "string" ? payload.question_id : null,
+            parent_id: questionId,
           });
+          // resolve 问题本身 → 触发 requirement:question-resolved → clarifier 续轮
+          if (questionId) {
+            this.deps.resolveComment(questionId);
+          }
           return { ok: true };
         }
 

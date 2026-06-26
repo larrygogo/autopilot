@@ -21,6 +21,7 @@ function makeRpcMocks() {
   return {
     calls,
     addComment: mock(async (p: unknown) => { calls.push({ method: "addComment", params: p }); }),
+    resolveComment: mock((p: unknown) => { calls.push({ method: "resolveComment", params: p }); }),
     finishClarification: mock(async (p: unknown) => { calls.push({ method: "finishClarification", params: p }); }),
     retryClarify: mock(async (p: unknown) => { calls.push({ method: "retryClarify", params: p }); }),
     enqueue: mock(async (p: unknown) => { calls.push({ method: "enqueue", params: p }); }),
@@ -52,7 +53,7 @@ const REQ_ID = "req-test-001";
 // ── 测试 ─────────────────────────────────────────────────────
 
 describe("commands-poller applyCommand", () => {
-  it("answer_clarification → addComment(kind=question, from_role=user)", async () => {
+  it("answer_clarification → addComment(kind=question, from_role=user) + resolveComment(question_id)", async () => {
     const rpc = makeRpcMocks();
     const { poller } = makePoller(rpc);
 
@@ -62,12 +63,30 @@ describe("commands-poller applyCommand", () => {
     });
 
     expect(ack.ok).toBe(true);
+    // 第一个调用：addComment（用户回复挂在问题下）
     expect(rpc.calls[0].method).toBe("addComment");
     const p = rpc.calls[0].params as { kind: string; from_role: string; body: string; parent_id: string };
     expect(p.kind).toBe("question");
     expect(p.from_role).toBe("user");
     expect(p.body).toBe("这是用户回复");
     expect(p.parent_id).toBe("qst-1");
+    // 第二个调用：resolveComment(question_id) → 触发 requirement:question-resolved → clarifier 续轮
+    expect(rpc.calls[1].method).toBe("resolveComment");
+    expect(rpc.calls[1].params).toBe("qst-1");
+  });
+
+  it("answer_clarification 无 question_id → addComment 但不调 resolveComment", async () => {
+    const rpc = makeRpcMocks();
+    const { poller } = makePoller(rpc);
+
+    const ack = await poller.applyCommand("answer_clarification", REQ_ID, {
+      body: "开放式回答，无特定问题",
+    });
+
+    expect(ack.ok).toBe(true);
+    expect(rpc.calls[0].method).toBe("addComment");
+    // 无 question_id 时不 resolve（没有 resolveComment 调用）
+    expect(rpc.calls.length).toBe(1);
   });
 
   it("answer_clarification 缺 body → ack ok=false", async () => {
