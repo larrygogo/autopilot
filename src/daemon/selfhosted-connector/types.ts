@@ -85,7 +85,8 @@ export interface MirrorEvent {
 
 export interface MirrorSnapshot {
   autopilot_req_id: string;
-  status: string;
+  /** reqgenie 读取字段名（ingest_mirror_snapshot 协议） */
+  mirror_status: string;
   status_reason?: string | null;
   spec_md?: string | null;
   title?: string | null;

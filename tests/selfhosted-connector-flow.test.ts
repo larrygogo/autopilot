@@ -61,7 +61,7 @@ function makeDeps(
 
   // Patch backend.ackAssignment to also record into calls
   const originalAck = backend.ackAssignment.bind(backend);
-  (backend as Record<string, unknown>).ackAssignment = mock(
+  (backend as unknown as Record<string, unknown>).ackAssignment = mock(
     async (assignmentId: string, autopilotReqId: string) => {
       await originalAck(assignmentId, autopilotReqId);
       calls.push({ op: "ack", assignmentId });
@@ -243,7 +243,7 @@ describe("selfhosted-connector 分配流程", () => {
   it("createRequirement 失败时不 ack（不 onLinkCreated、不 triggerSnapshot）", async () => {
     const { deps, calls, ackCalls } = makeDeps(baseAssignment);
     // Override createRequirement to throw
-    (deps as Record<string, unknown>).createRequirement = mock(async () => {
+    (deps as unknown as Record<string, unknown>).createRequirement = mock(async () => {
       throw new Error("DB write failed");
     });
 

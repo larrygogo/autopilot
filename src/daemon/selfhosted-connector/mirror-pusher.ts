@@ -132,7 +132,7 @@ export class MirrorPusher {
 
     const snapshot: MirrorSnapshot = {
       autopilot_req_id: autopilotReqId,
-      status: req.status,
+      mirror_status: req.status,
       status_reason: req.status_reason,
       spec_md: req.spec_md,
       title: req.title,
@@ -233,38 +233,60 @@ export class MirrorPusher {
 
   handleStatusChanged(event: AutopilotEvent): void {
     if (event.type !== "requirement:status-changed") return;
-    const { id, from, to, reason } = event.payload;
+    const { id, to, reason } = event.payload;
     if (!this._byAutopilotId.has(id)) return;
-    this.enqueue(id, "status_changed", { from, to, reason: reason ?? null });
+    // reqgenie ingest_mirror_events 读取 payload.status（非 from/to）
+    this.enqueue(id, "status_changed", {
+      status: to,
+      status_reason: reason ?? null,
+    });
+  }
+
+  /** 构建 clarify_updated 事件的 questions 数组（reqgenie 协议字段名对齐） */
+  private buildQuestionsPayload(requirementId: string): Record<string, unknown> {
+    const comments = this.deps.listComments(requirementId);
+    const questions = comments
+      .filter((c) => c.from_role === "agent" || c.from_role === "user")
+      .map((c) => ({
+        autopilot_question_id: c.id,
+        body: c.body,
+        answer: c.from_role === "user" ? c.body : null,
+        status: (c.status === "resolved" ? "resolved" : "open") as "open" | "resolved",
+      }));
+    return { questions };
   }
 
   handleQuestionsUpdated(event: AutopilotEvent): void {
     if (event.type !== "requirement:questions-updated") return;
     const { id } = event.payload;
     if (!this._byAutopilotId.has(id)) return;
-    // 澄清快照：直接触发全量 questions 同步（通过 snapshot 覆盖即可，避免维护 diff）
-    this.enqueue(id, "clarify_updated", { reason: "questions_updated" });
+    // reqgenie clarify_updated 协议要求 payload.questions[] 包含完整问题列表
+    this.enqueue(id, "clarify_updated", this.buildQuestionsPayload(id));
   }
 
   handleQuestionResolved(event: AutopilotEvent): void {
     if (event.type !== "requirement:question-resolved") return;
-    const { id, question_id } = event.payload;
+    const { id } = event.payload;
     if (!this._byAutopilotId.has(id)) return;
-    this.enqueue(id, "clarify_updated", { question_id, action: "resolved" });
+    // 问题解答后同步最新问题列表（含已 resolved 状态）
+    this.enqueue(id, "clarify_updated", this.buildQuestionsPayload(id));
   }
 
   handleActiveQuestionChanged(event: AutopilotEvent): void {
     if (event.type !== "requirement:active-question-changed") return;
-    const { id, question_id } = event.payload;
+    const { id } = event.payload;
     if (!this._byAutopilotId.has(id)) return;
-    this.enqueue(id, "clarify_updated", { question_id, action: "active_changed" });
+    // 活跃问题切换时同步最新问题列表
+    this.enqueue(id, "clarify_updated", this.buildQuestionsPayload(id));
   }
 
   handleSpecRevised(event: AutopilotEvent): void {
     if (event.type !== "requirement:spec-revised") return;
-    const { id, revision_id } = event.payload;
+    const { id } = event.payload;
     if (!this._byAutopilotId.has(id)) return;
-    this.enqueue(id, "spec_revised", { revision_id });
+    // reqgenie spec_revised 协议要求 payload.spec_md（非 revision_id）
+    const req = this.deps.getRequirement(id);
+    this.enqueue(id, "spec_revised", { spec_md: req?.spec_md ?? null });
   }
 
   handleClarifierRoundUpdate(event: AutopilotEvent): void {

@@ -105,7 +105,7 @@ describe("mirror-pusher", () => {
 
   // ── 测试 1：事件类型映射 ─────────────────────────────────────
 
-  it("requirement:status-changed 映射为 status_changed 事件", async () => {
+  it("requirement:status-changed 映射为 status_changed 事件（payload.status=to）", async () => {
     emit({ type: "requirement:status-changed", payload: { id: REQ_ID, from: "drafting", to: "clarifying" } });
     // 等待防抖刷新（200ms + 余量）
     await new Promise((r) => setTimeout(r, 350));
@@ -113,17 +113,21 @@ describe("mirror-pusher", () => {
     const batch = mockBe.sentEvents[0];
     expect(batch.length).toBeGreaterThan(0);
     expect(batch[0].type).toBe("status_changed");
-    expect(batch[0].payload["to"]).toBe("clarifying");
+    // reqgenie 读取 payload.status（非 payload.to）
+    expect(batch[0].payload["status"]).toBe("clarifying");
+    expect(batch[0].payload["to"]).toBeUndefined();
   });
 
-  it("requirement:spec-revised 映射为 spec_revised 事件", async () => {
+  it("requirement:spec-revised 映射为 spec_revised 事件（payload.spec_md）", async () => {
     emit({ type: "requirement:spec-revised", payload: { id: REQ_ID, revision_id: 1 } });
     await new Promise((r) => setTimeout(r, 350));
     expect(mockBe.sentEvents.length).toBeGreaterThan(0);
     const batch = mockBe.sentEvents.flat();
     const found = batch.find((e) => e.type === "spec_revised");
     expect(found).toBeDefined();
-    expect(found?.payload["revision_id"]).toBe(1);
+    // reqgenie 读取 payload.spec_md（非 payload.revision_id）
+    expect(found?.payload["spec_md"]).toBe("spec"); // getRequirement mock 返回 spec_md: "spec"
+    expect(found?.payload["revision_id"]).toBeUndefined();
   });
 
   it("requirement:questions-updated 映射为 clarify_updated 事件", async () => {
@@ -209,7 +213,8 @@ describe("mirror-pusher", () => {
     expect(mockBe.snapshots.length).toBeGreaterThan(0);
     const snapshot = mockBe.snapshots[0];
     expect(snapshot.autopilot_req_id).toBe(REQ_ID);
-    expect(snapshot.status).toBe("clarifying");
+    // reqgenie ingest_mirror_snapshot 读取 mirror_status（非 status）
+    expect(snapshot.mirror_status).toBe("clarifying");
   });
 
   // ── 测试 5：未注册 link 的事件被忽略 ─────────────────────────
@@ -218,5 +223,56 @@ describe("mirror-pusher", () => {
     emit({ type: "requirement:status-changed", payload: { id: "unknown-req", from: "drafting", to: "clarifying" } });
     await new Promise((r) => setTimeout(r, 350));
     expect(mockBe.sentEvents.length).toBe(0);
+  });
+
+  // ── 测试 6：clarify_updated 携带 questions 数组 ─────────────
+
+  it("requirement:questions-updated 发出的 clarify_updated 含 questions 数组", async () => {
+    // 构造带真实问题的 deps
+    const beWithQ = makeMockBackend();
+    const depsWithQ: MirrorPusherDeps = {
+      backend: beWithQ.backend,
+      getRequirement: (id) => ({
+        id,
+        title: "测试需求",
+        status: "clarifying",
+        spec_md: "spec",
+        status_reason: null,
+      }),
+      listComments: () => [
+        { id: "qst-1", parent_id: null, from_role: "agent", body: "请描述具体场景", status: "open", created_at: 1 },
+        { id: "qst-2", parent_id: "qst-1", from_role: "user", body: "用于电商场景", status: "resolved", created_at: 2 },
+      ],
+      listSubPrs: () => [],
+      listPhaseEvents: () => [],
+    };
+    const pusherQ = new MirrorPusher(depsWithQ);
+    pusherQ.start();
+    pusherQ.registerLink(makeLink());
+
+    emit({ type: "requirement:questions-updated", payload: { id: REQ_ID } });
+    await new Promise((r) => setTimeout(r, 350));
+
+    pusherQ.dispose();
+
+    const allEvents = beWithQ.sentEvents.flat();
+    const cuEv = allEvents.find((e) => e.type === "clarify_updated");
+    expect(cuEv).toBeDefined();
+    const questions = cuEv?.payload["questions"] as Array<{ autopilot_question_id: string; status: string }>;
+    expect(Array.isArray(questions)).toBe(true);
+    expect(questions.length).toBe(2);
+    expect(questions[0].autopilot_question_id).toBe("qst-1");
+    expect(questions[1].autopilot_question_id).toBe("qst-2");
+    expect(questions[1].status).toBe("resolved");
+  });
+
+  // ── 测试 7：snapshot 字段名为 mirror_status ──────────────────
+
+  it("pushSnapshot 发出的快照含 mirror_status 字段（无 status 字段）", async () => {
+    await pusher.pushSnapshot(REQ_ID);
+    expect(mockBe.snapshots.length).toBeGreaterThan(0);
+    const snap = mockBe.snapshots[0] as unknown as Record<string, unknown>;
+    expect(snap["mirror_status"]).toBe("clarifying");
+    expect(snap["status"]).toBeUndefined();
   });
 });
