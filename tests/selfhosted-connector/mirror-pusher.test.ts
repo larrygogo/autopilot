@@ -274,4 +274,90 @@ describe("mirror-pusher", () => {
     expect(snap["mirror_status"]).toBe("clarifying");
     expect(snap["status"]).toBeUndefined();
   });
+
+  // ── 测试 8：snapshot.phases 字段名对齐 reqgenie 接收端 ─────────
+
+  it("pushSnapshot 的 phases 项使用 status+finished_at（不是 state/ended_at）", async () => {
+    const beWithPhase = makeMockBackend();
+    const depsWithPhase: MirrorPusherDeps = {
+      backend: beWithPhase.backend,
+      getRequirement: (id) => ({
+        id,
+        title: "测试需求",
+        status: "running",
+        spec_md: "spec",
+        status_reason: null,
+      }),
+      listComments: () => [],
+      listSubPrs: () => [],
+      listPhaseEvents: () => [
+        {
+          run_seq: 1,
+          phase: "develop",
+          label: "开发",
+          state: "completed",
+          started_at: "2026-01-01T00:00:00.000Z",
+          ended_at: "2026-01-01T01:00:00.000Z",
+          seq: 0,
+        },
+      ],
+    };
+    const pusherP = new MirrorPusher(depsWithPhase);
+    pusherP.start();
+    pusherP.registerLink(makeLink());
+
+    await pusherP.pushSnapshot(REQ_ID);
+    pusherP.dispose();
+
+    expect(beWithPhase.snapshots.length).toBeGreaterThan(0);
+    const phases = beWithPhase.snapshots[0].phases;
+    expect(phases.length).toBe(1);
+    // reqgenie 接收端读取 status + finished_at
+    expect(phases[0].status).toBe("completed");
+    expect(phases[0].finished_at).toBe("2026-01-01T01:00:00.000Z");
+    // 不得出现旧字段名
+    expect((phases[0] as unknown as Record<string, unknown>)["state"]).toBeUndefined();
+    expect((phases[0] as unknown as Record<string, unknown>)["ended_at"]).toBeUndefined();
+  });
+
+  // ── 测试 9：snapshot.prs 字段名对齐 reqgenie 接收端 ───────────
+
+  it("pushSnapshot 的 prs 项使用 pr_status（不是 pr_state）", async () => {
+    const beWithPr = makeMockBackend();
+    const depsWithPr: MirrorPusherDeps = {
+      backend: beWithPr.backend,
+      getRequirement: (id) => ({
+        id,
+        title: "测试需求",
+        status: "awaiting_review",
+        spec_md: "spec",
+        status_reason: null,
+      }),
+      listComments: () => [],
+      listSubPrs: () => [
+        {
+          repo_alias: "main",
+          pr_url: "https://github.com/org/repo/pull/42",
+          pr_state: "open",
+          last_reviewed_event_id: null,
+        },
+      ],
+      listPhaseEvents: () => [],
+    };
+    const pusherPr = new MirrorPusher(depsWithPr);
+    pusherPr.start();
+    pusherPr.registerLink(makeLink());
+
+    await pusherPr.pushSnapshot(REQ_ID);
+    pusherPr.dispose();
+
+    expect(beWithPr.snapshots.length).toBeGreaterThan(0);
+    const prs = beWithPr.snapshots[0].prs;
+    expect(prs.length).toBe(1);
+    // reqgenie 接收端读取 pr_status
+    expect(prs[0].pr_url).toBe("https://github.com/org/repo/pull/42");
+    expect(prs[0].pr_status).toBe("open");
+    // 不得出现旧字段名
+    expect((prs[0] as unknown as Record<string, unknown>)["pr_state"]).toBeUndefined();
+  });
 });
