@@ -46,11 +46,13 @@ async function sendCallback(
   callbackUrl: string,
   secret: string | null,
   linkId: string,
+  autopilotReqId: string,
   status: string,
   prUrl: string | undefined,
 ): Promise<void> {
   const payload: Record<string, string | undefined> = {
     link_id: linkId,
+    autopilot_req_id: autopilotReqId,
     status,
     pr_url: prUrl,
   };
@@ -120,7 +122,7 @@ function onReqStatusChanged(event: AutopilotEvent): void {
   }
 
   // best-effort，不 await，失败只 warn
-  sendCallback(req.callback_url, req.callback_secret, req.external_ref, to, prUrl).catch(
+  sendCallback(req.callback_url, req.callback_secret, req.external_ref, id, to, prUrl).catch(
     (e: unknown) => {
       // sendCallback 内部已 try/catch，这里是兜底——理论上不会走到
       log.warn(

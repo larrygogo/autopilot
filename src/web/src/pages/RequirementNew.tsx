@@ -105,7 +105,44 @@ export function RequirementNew() {
         await api.setRequirementWorkspaces(req.id, [workspaceId]);
       }
 
-      // 步骤 d：跳转需求详情
+      // 步骤 d：若来自外部系统（有 callback_url + callback_secret + external_ref），
+      //         best-effort 发一次 "created" 回传——让 reqgenie 立即拿到 autopilot_req_id。
+      //         失败只 console.warn，绝不阻塞跳转。
+      if (qCallbackUrl && qCallbackSecret && qExternalRef) {
+        (async () => {
+          try {
+            const bodyStr = JSON.stringify({
+              link_id: qExternalRef,
+              autopilot_req_id: req.id,
+              status: "created",
+            });
+            // 用 Web Crypto 算 HMAC-SHA256，签名字节与发送 body 完全一致
+            const keyMaterial = await crypto.subtle.importKey(
+              "raw",
+              new TextEncoder().encode(qCallbackSecret),
+              { name: "HMAC", hash: "SHA-256" },
+              false,
+              ["sign"],
+            );
+            const sigBuf = await crypto.subtle.sign("HMAC", keyMaterial, new TextEncoder().encode(bodyStr));
+            const sigHex = Array.from(new Uint8Array(sigBuf))
+              .map((b) => b.toString(16).padStart(2, "0"))
+              .join("");
+            await fetch(qCallbackUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Reqgenie-Signature": sigHex,
+              },
+              body: bodyStr,
+            });
+          } catch (e: unknown) {
+            console.warn("[autopilot] created 回传失败（best-effort，不影响流程）:", e);
+          }
+        })();
+      }
+
+      // 步骤 e：跳转需求详情
       navigate(`/requirements/${req.id}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

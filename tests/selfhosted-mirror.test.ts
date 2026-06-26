@@ -202,6 +202,7 @@ describe("selfhosted-mirror", () => {
 
     const body = JSON.parse(call.init.body as string) as Record<string, string>;
     expect(body.link_id).toBe("rg-uuid-123");
+    expect(body.autopilot_req_id).toBe("req-1");
     expect(body.status).toBe("queued");
     expect(body.pr_url).toBeUndefined(); // queued 时不取 PR URL
 
