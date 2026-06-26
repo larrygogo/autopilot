@@ -137,34 +137,33 @@ describe("mirror-pusher", () => {
     expect(batch.some((e) => e.type === "clarify_updated")).toBe(true);
   });
 
-  it("phase:started 映射为 phase_progress（state=running）", async () => {
+  it("phase:started 触发全量快照推送（postMirrorSnapshot 被调用）", async () => {
     // 注册 task → req 映射
     pusher.registerTaskRequirement("task-abc", REQ_ID);
     emit({ type: "phase:started", payload: { taskId: "task-abc", phase: "develop", label: "开发" } });
-    await new Promise((r) => setTimeout(r, 350));
+    // 等待防抖快照触发（SNAPSHOT_DEBOUNCE_MS=300ms + 余量）
+    await new Promise((r) => setTimeout(r, 500));
+    expect(mockBe.snapshots.length).toBeGreaterThan(0);
+    expect(mockBe.snapshots[0].autopilot_req_id).toBe(REQ_ID);
+    // 不再以 phase_progress 增量事件形式推送
     const batch = mockBe.sentEvents.flat();
-    const found = batch.find((e) => e.type === "phase_progress");
-    expect(found).toBeDefined();
-    expect(found?.payload["state"]).toBe("running");
-    expect(found?.payload["phase"]).toBe("develop");
+    expect(batch.find((e) => e.type === "phase_progress")).toBeUndefined();
   });
 
-  it("phase:completed 映射为 phase_progress（state=completed）", async () => {
+  it("phase:completed 触发全量快照推送（postMirrorSnapshot 被调用）", async () => {
     pusher.registerTaskRequirement("task-abc", REQ_ID);
     emit({ type: "phase:completed", payload: { taskId: "task-abc", phase: "develop" } });
-    await new Promise((r) => setTimeout(r, 350));
-    const batch = mockBe.sentEvents.flat();
-    const found = batch.find((e) => e.type === "phase_progress");
-    expect(found?.payload["state"]).toBe("completed");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(mockBe.snapshots.length).toBeGreaterThan(0);
+    expect(mockBe.snapshots[0].autopilot_req_id).toBe(REQ_ID);
   });
 
-  it("phase:error 映射为 phase_progress（state=error）", async () => {
+  it("phase:error 触发全量快照推送（postMirrorSnapshot 被调用）", async () => {
     pusher.registerTaskRequirement("task-abc", REQ_ID);
     emit({ type: "phase:error", payload: { taskId: "task-abc", phase: "develop", error: "LLM 失败" } });
-    await new Promise((r) => setTimeout(r, 350));
-    const batch = mockBe.sentEvents.flat();
-    const found = batch.find((e) => e.type === "phase_progress");
-    expect(found?.payload["state"]).toBe("error");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(mockBe.snapshots.length).toBeGreaterThan(0);
+    expect(mockBe.snapshots[0].autopilot_req_id).toBe(REQ_ID);
   });
 
   // ── 测试 2：mirror_seq 单调递增 ─────────────────────────────

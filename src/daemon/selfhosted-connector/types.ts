@@ -109,16 +109,16 @@ export interface MirrorPhase {
   run_seq: number;
   phase: string;
   label: string;
-  state: "pending" | "running" | "awaiting" | "completed" | "error" | "aborted";
+  status: "pending" | "running" | "awaiting" | "completed" | "error" | "aborted";
   started_at?: string | null;
-  ended_at?: string | null;
+  finished_at?: string | null;
   seq: number;
 }
 
 export interface MirrorPr {
   repo_alias: string;
   pr_url: string;
-  pr_state: string;
+  pr_status: string;
   seq: number;
 }
 

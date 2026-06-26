@@ -80,6 +80,10 @@ export class MirrorPusher {
   private _flushTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly FLUSH_DEBOUNCE_MS = 200;
 
+  /** phase/pr 变化触发的全量快照防抖计时器（按 autopilot_req_id 分桶） */
+  private readonly _snapshotDebounce = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly SNAPSHOT_DEBOUNCE_MS = 300;
+
   constructor(private readonly deps: MirrorPusherDeps) {}
 
   /** 注册新 link（建需求成功后由 assignments-poller 调用） */
@@ -110,6 +114,10 @@ export class MirrorPusher {
       clearTimeout(this._flushTimer);
       this._flushTimer = null;
     }
+    for (const timer of this._snapshotDebounce.values()) {
+      clearTimeout(timer);
+    }
+    this._snapshotDebounce.clear();
     this._links.clear();
     this._byAutopilotId.clear();
     this._pending.clear();
@@ -150,15 +158,15 @@ export class MirrorPusher {
         run_seq: p.run_seq,
         phase: p.phase,
         label: p.label,
-        state: p.state as MirrorPhaseState,
+        status: p.state as MirrorPhaseState,
         started_at: p.started_at,
-        ended_at: p.ended_at,
+        finished_at: p.ended_at,
         seq: p.seq,
       })),
       prs: subPrs.map((sp, i) => ({
         repo_alias: sp.repo_alias,
         pr_url: sp.pr_url,
-        pr_state: sp.pr_state ?? "open",
+        pr_status: sp.pr_state ?? "open",
         seq: i,
       })),
     };
@@ -227,6 +235,20 @@ export class MirrorPusher {
         );
       }
     }
+  }
+
+  /**
+   * 防抖触发全量快照推送（phase/PR 变化专用）。
+   * 同一需求短时间内的多个 phase 事件合并成一次 pushSnapshot，避免快照风暴。
+   */
+  private scheduleSnapshot(autopilotReqId: string): void {
+    const existing = this._snapshotDebounce.get(autopilotReqId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this._snapshotDebounce.delete(autopilotReqId);
+      void this.pushSnapshot(autopilotReqId);
+    }, this.SNAPSHOT_DEBOUNCE_MS);
+    this._snapshotDebounce.set(autopilotReqId, timer);
   }
 
   // ── event-bus 事件处理 ────────────────────────────────────────
@@ -302,63 +324,42 @@ export class MirrorPusher {
 
   handlePhaseStarted(event: AutopilotEvent): void {
     if (event.type !== "phase:started") return;
-    const { taskId, phase, label } = event.payload;
+    const { taskId } = event.payload;
     const link = this.resolveByTaskId(taskId);
     if (!link) return;
-    this.enqueue(link.autopilot_req_id, "phase_progress", {
-      task_id: taskId,
-      phase,
-      label,
-      state: "running",
-    });
+    this.scheduleSnapshot(link.autopilot_req_id);
   }
 
   handlePhaseCompleted(event: AutopilotEvent): void {
     if (event.type !== "phase:completed") return;
-    const { taskId, phase } = event.payload;
+    const { taskId } = event.payload;
     const link = this.resolveByTaskId(taskId);
     if (!link) return;
-    this.enqueue(link.autopilot_req_id, "phase_progress", {
-      task_id: taskId,
-      phase,
-      state: "completed",
-    });
+    this.scheduleSnapshot(link.autopilot_req_id);
   }
 
   handlePhaseAwaiting(event: AutopilotEvent): void {
     if (event.type !== "phase:awaiting") return;
-    const { taskId, phase } = event.payload;
+    const { taskId } = event.payload;
     const link = this.resolveByTaskId(taskId);
     if (!link) return;
-    this.enqueue(link.autopilot_req_id, "phase_progress", {
-      task_id: taskId,
-      phase,
-      state: "awaiting",
-    });
+    this.scheduleSnapshot(link.autopilot_req_id);
   }
 
   handlePhaseError(event: AutopilotEvent): void {
     if (event.type !== "phase:error") return;
-    const { taskId, phase, error } = event.payload;
+    const { taskId } = event.payload;
     const link = this.resolveByTaskId(taskId);
     if (!link) return;
-    this.enqueue(link.autopilot_req_id, "phase_progress", {
-      task_id: taskId,
-      phase,
-      state: "error",
-      error,
-    });
+    this.scheduleSnapshot(link.autopilot_req_id);
   }
 
   handleTaskTransition(event: AutopilotEvent): void {
     if (event.type !== "task:transition") return;
-    const { taskId, from, to } = event.payload;
+    const { taskId } = event.payload;
     const link = this.resolveByTaskId(taskId);
     if (!link) return;
-    this.enqueue(link.autopilot_req_id, "phase_progress", {
-      task_id: taskId,
-      transition: { from, to },
-    });
+    this.scheduleSnapshot(link.autopilot_req_id);
   }
 
   // ── task_id → ReqLink 的反查辅助 ──────────────────────────────
