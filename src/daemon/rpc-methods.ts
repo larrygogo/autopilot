@@ -1188,6 +1188,10 @@ function registerRequirementRpc(): void {
         title,
         spec_md: typeof p.spec_md === "string" ? p.spec_md : "",
         chat_session_id: (p.chat_session_id as string | null | undefined) ?? null,
+        source: typeof p.source === "string" ? p.source : null,
+        external_ref: typeof p.external_ref === "string" ? p.external_ref : null,
+        callback_url: typeof p.callback_url === "string" ? p.callback_url : null,
+        callback_secret: typeof p.callback_secret === "string" ? p.callback_secret : null,
       });
       // 停在 drafting：澄清依赖代码库 clone，须由用户确认代码库后显式进入澄清
       // （自动派生的默认库只是预选；Web 在需求页确认、CLI 用 req clarify / -c 显式指定时自动开始）

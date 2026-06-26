@@ -53,6 +53,14 @@ export interface Requirement {
    * setRequirementWorkspaces 按集合空/非空写 'none'/'git'；闸门按所选工作流的 requires.git 校验。
    */
   input_mode: string | null;
+  /** 需求来源标识（如 'reqgenie'），B 模式深链触发时写入；原生建需求为 NULL。 */
+  source: string | null;
+  /** 外部系统需求 id（如 reqgenie requirement uuid），用于回链与去重。 */
+  external_ref: string | null;
+  /** 状态变化回传 webhook URL（仅 source 有值时使用）；失败不阻塞主流程。 */
+  callback_url: string | null;
+  /** 回传 webhook HMAC secret；与 callback_url 配对校验。 */
+  callback_secret: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -67,6 +75,10 @@ export interface CreateRequirementOpts {
   title: string;
   spec_md?: string;
   chat_session_id?: string | null;
+  source?: string | null;
+  external_ref?: string | null;
+  callback_url?: string | null;
+  callback_secret?: string | null;
 }
 
 export interface UpdateRequirementOpts {
@@ -159,6 +171,19 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
     return id;
   };
   const newId = opts.id ? insertReq(opts.id) : insertWithFreshId(nextRequirementId, insertReq);
+  // 写入 source 追踪列（migration 050 加，生产 DB 一定有；测试 DB 若没跑该迁移则忽略）
+  const hasSourceFields =
+    opts.source != null || opts.external_ref != null || opts.callback_url != null || opts.callback_secret != null;
+  if (hasSourceFields) {
+    try {
+      db.run(
+        "UPDATE requirements SET source = ?, external_ref = ?, callback_url = ?, callback_secret = ? WHERE id = ?",
+        [opts.source ?? null, opts.external_ref ?? null, opts.callback_url ?? null, opts.callback_secret ?? null, newId],
+      );
+    } catch {
+      // DB 未跑 migration 050（如旧测试手动选迁移）时列不存在，忽略；生产环境不会走到这里
+    }
+  }
   // 有 workspace_id 时自动写多对多关联（spec §5.1）
   if (resolvedWorkspaceId) {
     db.run(
