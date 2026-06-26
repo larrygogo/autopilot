@@ -1,0 +1,382 @@
+/**
+ * 镜像推送器（链路二）
+ *
+ * 订阅本机 event-bus，把需求相关事件翻译成 mirror 事件推给 reqgenie。
+ * 全量快照在：拉到分配 / daemon 重启 / 409 seq-gap 时触发。
+ * 仅处理 source=reqgenie 的需求（per-link 维护 mirror_seq 单调递增）。
+ * best-effort：推送失败只 warn，不阻塞需求推进。
+ */
+
+import { createLogger } from "../../core/logger";
+import { onEvent, offEvent } from "../../core/event-bus";
+import type { AutopilotEvent } from "../../core/events";
+import type { SelfhostedBackend } from "./backend";
+import type { MirrorEvent, MirrorSnapshot, ReqLink } from "./types";
+
+const log = createLogger("selfhosted:mirror");
+
+// ── 依赖注入接口（便于测试 mock）────────────────────────────────
+
+export interface MirrorPusherDeps {
+  backend: SelfhostedBackend;
+
+  /** 读取需求完整状态（用于全量快照） */
+  getRequirement(id: string): RequirementSnapshot | null;
+
+  /** 读取需求的澄清问答列表（全量快照用） */
+  listComments(requirementId: string): CommentSnapshot[];
+
+  /** 读取需求的 sub_prs 列表（全量快照用） */
+  listSubPrs(requirementId: string): SubPrSnapshot[];
+
+  /** 读取需求的活跃运行的执行阶段（phase events） */
+  listPhaseEvents(requirementId: string): PhaseEventSnapshot[];
+}
+
+export interface RequirementSnapshot {
+  id: string;
+  title: string | null;
+  status: string;
+  spec_md: string;
+  status_reason: string | null;
+}
+
+export interface CommentSnapshot {
+  id: string;
+  parent_id: string | null;
+  from_role: string;
+  body: string;
+  status: string;
+  created_at: number;
+}
+
+export interface SubPrSnapshot {
+  repo_alias: string;
+  pr_url: string;
+  pr_state: string;
+  last_reviewed_event_id: string | null;
+}
+
+export interface PhaseEventSnapshot {
+  run_seq: number;
+  phase: string;
+  label: string;
+  state: string;
+  started_at: string | null;
+  ended_at: string | null;
+  seq: number;
+}
+
+// ── 推送器主体 ─────────────────────────────────────────────────
+
+export class MirrorPusher {
+  /** reqgenie_req_id → ReqLink（含 mirror_seq）*/
+  private readonly _links = new Map<string, ReqLink>();
+  /** autopilot_req_id → ReqLink（反查用）*/
+  private readonly _byAutopilotId = new Map<string, ReqLink>();
+
+  /** 挂起的批量事件队列（按 autopilot_req_id 分桶，批量刷新） */
+  private readonly _pending = new Map<string, MirrorEvent[]>();
+  private _flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly FLUSH_DEBOUNCE_MS = 200;
+
+  constructor(private readonly deps: MirrorPusherDeps) {}
+
+  /** 注册新 link（建需求成功后由 assignments-poller 调用） */
+  registerLink(link: ReqLink): void {
+    this._links.set(link.reqgenie_req_id, link);
+    this._byAutopilotId.set(link.autopilot_req_id, link);
+    log.info(
+      "注册 mirror link reqgenie_req_id=%s autopilot_req_id=%s",
+      link.reqgenie_req_id,
+      link.autopilot_req_id,
+    );
+  }
+
+  /** 启动事件订阅 */
+  start(): void {
+    for (const [type, handler] of SUBSCRIPTIONS) {
+      onEvent(type, handler.bind(this) as (e: AutopilotEvent) => void);
+    }
+    log.info("mirror-pusher 已启动（订阅需求全状态事件）");
+  }
+
+  /** 停止并清理 */
+  dispose(): void {
+    for (const [type, handler] of SUBSCRIPTIONS) {
+      offEvent(type, handler.bind(this) as (e: AutopilotEvent) => void);
+    }
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer);
+      this._flushTimer = null;
+    }
+    this._links.clear();
+    this._byAutopilotId.clear();
+    this._pending.clear();
+    log.info("mirror-pusher 已停止");
+  }
+
+  // ── 全量快照 ──────────────────────────────────────────────────
+
+  /** 向 reqgenie 推全量快照，重置 seq 基线 */
+  async pushSnapshot(autopilotReqId: string): Promise<void> {
+    const link = this._byAutopilotId.get(autopilotReqId);
+    if (!link) return;
+
+    const req = this.deps.getRequirement(autopilotReqId);
+    if (!req) return;
+
+    const comments = this.deps.listComments(autopilotReqId);
+    const subPrs = this.deps.listSubPrs(autopilotReqId);
+    const phases = this.deps.listPhaseEvents(autopilotReqId);
+
+    const snapshot: MirrorSnapshot = {
+      autopilot_req_id: autopilotReqId,
+      status: req.status,
+      status_reason: req.status_reason,
+      spec_md: req.spec_md,
+      title: req.title,
+      questions: comments
+        .filter((c) => c.from_role === "agent" || c.from_role === "user")
+        .map((c, i) => ({
+          autopilot_question_id: c.id,
+          parent_id: c.parent_id,
+          from_role: c.from_role,
+          body: c.body,
+          status: (c.status === "resolved" ? "resolved" : "open") as "open" | "resolved",
+          seq: i,
+        })),
+      phases: phases.map((p) => ({
+        run_seq: p.run_seq,
+        phase: p.phase,
+        label: p.label,
+        state: p.state as MirrorPhaseState,
+        started_at: p.started_at,
+        ended_at: p.ended_at,
+        seq: p.seq,
+      })),
+      prs: subPrs.map((sp, i) => ({
+        repo_alias: sp.repo_alias,
+        pr_url: sp.pr_url,
+        pr_state: sp.pr_state ?? "open",
+        seq: i,
+      })),
+    };
+
+    try {
+      await this.deps.backend.postMirrorSnapshot(snapshot);
+      // 重置 seq 基线（snapshot 后 reqgenie 侧接受任意新 seq 从 0 开始）
+      link.mirror_seq = 0;
+      log.info("全量快照推送成功 req=%s", autopilotReqId);
+    } catch (e: unknown) {
+      log.warn(
+        "全量快照推送失败（忽略）req=%s: %s",
+        autopilotReqId,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+
+  // ── 增量事件入队 ──────────────────────────────────────────────
+
+  /** 将一个 mirror 事件入队（按 autopilot_req_id 分桶，防抖批量刷新） */
+  private enqueue(autopilotReqId: string, type: MirrorEvent["type"], payload: Record<string, unknown>): void {
+    const link = this._byAutopilotId.get(autopilotReqId);
+    if (!link) return;
+
+    if (!this._pending.has(autopilotReqId)) {
+      this._pending.set(autopilotReqId, []);
+    }
+
+    link.mirror_seq += 1;
+    const event: MirrorEvent = {
+      mirror_seq: link.mirror_seq,
+      type,
+      payload,
+    };
+    this._pending.get(autopilotReqId)!.push(event);
+    this.scheduledFlush();
+  }
+
+  private scheduledFlush(): void {
+    if (this._flushTimer) return;
+    this._flushTimer = setTimeout(() => {
+      this._flushTimer = null;
+      void this.flushAll();
+    }, this.FLUSH_DEBOUNCE_MS);
+  }
+
+  private async flushAll(): Promise<void> {
+    for (const [reqId, events] of this._pending.entries()) {
+      if (events.length === 0) continue;
+      const toSend = [...events];
+      this._pending.delete(reqId);
+
+      try {
+        const result = await this.deps.backend.postMirrorEvents(toSend);
+        if (result.seqGap) {
+          log.warn("mirror events seq-gap 检测到，触发全量快照 req=%s", reqId);
+          void this.pushSnapshot(reqId);
+        }
+      } catch (e: unknown) {
+        log.warn(
+          "mirror events 推送失败（忽略）req=%s events=%d: %s",
+          reqId,
+          toSend.length,
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+    }
+  }
+
+  // ── event-bus 事件处理 ────────────────────────────────────────
+
+  handleStatusChanged(event: AutopilotEvent): void {
+    if (event.type !== "requirement:status-changed") return;
+    const { id, from, to, reason } = event.payload;
+    if (!this._byAutopilotId.has(id)) return;
+    this.enqueue(id, "status_changed", { from, to, reason: reason ?? null });
+  }
+
+  handleQuestionsUpdated(event: AutopilotEvent): void {
+    if (event.type !== "requirement:questions-updated") return;
+    const { id } = event.payload;
+    if (!this._byAutopilotId.has(id)) return;
+    // 澄清快照：直接触发全量 questions 同步（通过 snapshot 覆盖即可，避免维护 diff）
+    this.enqueue(id, "clarify_updated", { reason: "questions_updated" });
+  }
+
+  handleQuestionResolved(event: AutopilotEvent): void {
+    if (event.type !== "requirement:question-resolved") return;
+    const { id, question_id } = event.payload;
+    if (!this._byAutopilotId.has(id)) return;
+    this.enqueue(id, "clarify_updated", { question_id, action: "resolved" });
+  }
+
+  handleActiveQuestionChanged(event: AutopilotEvent): void {
+    if (event.type !== "requirement:active-question-changed") return;
+    const { id, question_id } = event.payload;
+    if (!this._byAutopilotId.has(id)) return;
+    this.enqueue(id, "clarify_updated", { question_id, action: "active_changed" });
+  }
+
+  handleSpecRevised(event: AutopilotEvent): void {
+    if (event.type !== "requirement:spec-revised") return;
+    const { id, revision_id } = event.payload;
+    if (!this._byAutopilotId.has(id)) return;
+    this.enqueue(id, "spec_revised", { revision_id });
+  }
+
+  handleClarifierRoundUpdate(event: AutopilotEvent): void {
+    if (event.type !== "requirement:clarifier-round-update") return;
+    const payload = event.payload as unknown as Record<string, unknown>;
+    const reqId = typeof payload["requirement_id"] === "string" ? payload["requirement_id"] : null;
+    if (!reqId || !this._byAutopilotId.has(reqId)) return;
+    this.enqueue(reqId, "clarify_progress", {
+      round: payload["round"],
+      status: payload["status"],
+    });
+  }
+
+  handlePhaseStarted(event: AutopilotEvent): void {
+    if (event.type !== "phase:started") return;
+    const { taskId, phase, label } = event.payload;
+    const link = this.resolveByTaskId(taskId);
+    if (!link) return;
+    this.enqueue(link.autopilot_req_id, "phase_progress", {
+      task_id: taskId,
+      phase,
+      label,
+      state: "running",
+    });
+  }
+
+  handlePhaseCompleted(event: AutopilotEvent): void {
+    if (event.type !== "phase:completed") return;
+    const { taskId, phase } = event.payload;
+    const link = this.resolveByTaskId(taskId);
+    if (!link) return;
+    this.enqueue(link.autopilot_req_id, "phase_progress", {
+      task_id: taskId,
+      phase,
+      state: "completed",
+    });
+  }
+
+  handlePhaseAwaiting(event: AutopilotEvent): void {
+    if (event.type !== "phase:awaiting") return;
+    const { taskId, phase } = event.payload;
+    const link = this.resolveByTaskId(taskId);
+    if (!link) return;
+    this.enqueue(link.autopilot_req_id, "phase_progress", {
+      task_id: taskId,
+      phase,
+      state: "awaiting",
+    });
+  }
+
+  handlePhaseError(event: AutopilotEvent): void {
+    if (event.type !== "phase:error") return;
+    const { taskId, phase, error } = event.payload;
+    const link = this.resolveByTaskId(taskId);
+    if (!link) return;
+    this.enqueue(link.autopilot_req_id, "phase_progress", {
+      task_id: taskId,
+      phase,
+      state: "error",
+      error,
+    });
+  }
+
+  handleTaskTransition(event: AutopilotEvent): void {
+    if (event.type !== "task:transition") return;
+    const { taskId, from, to } = event.payload;
+    const link = this.resolveByTaskId(taskId);
+    if (!link) return;
+    this.enqueue(link.autopilot_req_id, "phase_progress", {
+      task_id: taskId,
+      transition: { from, to },
+    });
+  }
+
+  // ── task_id → ReqLink 的反查辅助 ──────────────────────────────
+  // 注：task:* 事件只有 taskId，需要反查 requirement_id → link。
+  // 这里通过注入的 getTaskRequirementId 来解析。
+
+  private _taskReqMap = new Map<string, string>();
+
+  /** 供外部（index.ts 的 task:created/updated 订阅）通知任务归属 */
+  registerTaskRequirement(taskId: string, requirementId: string): void {
+    this._taskReqMap.set(taskId, requirementId);
+  }
+
+  private resolveByTaskId(taskId: string): ReqLink | undefined {
+    const reqId = this._taskReqMap.get(taskId);
+    if (!reqId) return undefined;
+    return this._byAutopilotId.get(reqId);
+  }
+}
+
+type MirrorPhaseState = "pending" | "running" | "awaiting" | "completed" | "error" | "aborted";
+
+// ── 事件订阅绑定表（按 mirror-pusher 实例方法绑定）─────────────
+
+type HandlerMethod = (event: AutopilotEvent) => void;
+type HandlerEntry = [string, (this: MirrorPusher, event: AutopilotEvent) => void];
+
+const SUBSCRIPTIONS: HandlerEntry[] = [
+  ["requirement:status-changed", MirrorPusher.prototype.handleStatusChanged],
+  ["requirement:questions-updated", MirrorPusher.prototype.handleQuestionsUpdated],
+  ["requirement:question-resolved", MirrorPusher.prototype.handleQuestionResolved],
+  ["requirement:active-question-changed", MirrorPusher.prototype.handleActiveQuestionChanged],
+  ["requirement:spec-revised", MirrorPusher.prototype.handleSpecRevised],
+  ["requirement:clarifier-round-update", MirrorPusher.prototype.handleClarifierRoundUpdate],
+  ["phase:started", MirrorPusher.prototype.handlePhaseStarted],
+  ["phase:completed", MirrorPusher.prototype.handlePhaseCompleted],
+  ["phase:awaiting", MirrorPusher.prototype.handlePhaseAwaiting],
+  ["phase:error", MirrorPusher.prototype.handlePhaseError],
+  ["task:transition", MirrorPusher.prototype.handleTaskTransition],
+];
+
+// 导出 HandlerMethod 类型供测试使用
+export type { HandlerMethod };

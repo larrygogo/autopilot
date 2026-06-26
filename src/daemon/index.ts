@@ -297,6 +297,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const { initSelfhostedMirror } = await import("./selfhosted-mirror");
   const disposeSelfhostedMirror = initSelfhostedMirror();
 
+  // 启动 selfhosted-connector（B-interactive 模式：assignments/commands 轮询 + 全状态镜像推送）
+  // 仅在 config.selfhosted.enabled=true 且已注册凭证时生效；否则立即返回空 dispose
+  const { initSelfhostedConnector } = await import("./selfhosted-connector");
+  const disposeSelfhostedConnector = initSelfhostedConnector();
+
   // 启动 requirement-scheduler（订阅 event-bus）
   initRequirementScheduler();
   // 启动 requirement-clarifier（创建需求后自动 AI 澄清）
@@ -413,6 +418,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     disposeDoneWorkspaceCleanup();
     disposeNotificationRecorder();
     disposeSelfhostedMirror();
+    disposeSelfhostedConnector();
     disableBus();
     // server.stop 必须 await 完成后才能 exit：它是异步的（等 socket 真正关闭），
     // 同步调用后立刻 process.exit 会让进程死在 socket 关闭中途——浏览器保持着

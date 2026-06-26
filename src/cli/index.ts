@@ -32,6 +32,7 @@ import { registerRequirementCommands } from "./requirements-cli";
 import { registerProjectCommands } from "./project";
 import { registerWorkspaceCommands } from "./workspace";
 import { registerRunnerCommands } from "./runner";
+import { registerSelfhostedCommands } from "./selfhosted";
 import { runChecks as runDoctorChecks, hasTaskStartBlocker } from "../core/doctor";
 import {
   readPid,
@@ -849,6 +850,7 @@ registerWorkflowCommands(program, {
 registerConfigCommands(program);
 registerRequirementCommands(program);
 registerRunnerCommands(program);
+registerSelfhostedCommands(program);
 registerProjectCommands(program);
 registerWorkspaceCommands(program);
 
