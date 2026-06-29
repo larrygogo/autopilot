@@ -39,6 +39,8 @@ export interface RequirementSnapshot {
   status: string;
   spec_md: string;
   status_reason: string | null;
+  source?: string | null;
+  external_ref?: string | null;
 }
 
 export interface CommentSnapshot {
@@ -251,12 +253,36 @@ export class MirrorPusher {
     this._snapshotDebounce.set(autopilotReqId, timer);
   }
 
+  // ── 懒注册自愈 ───────────────────────────────────────────────
+
+  /**
+   * 检查 autopilotReqId 是否已有 link 映射；若无，尝试从 DB 懒加载并注册。
+   * 仅对 source=reqgenie 的需求注册（非 reqgenie 需求直接返回 false）。
+   * 注册成功后 fire-and-forget 一次全量快照重置基线。
+   * 返回 true 表示链路可用，false 表示无需处理（非 reqgenie 或无外部引用）。
+   */
+  private ensureRegistered(autopilotReqId: string): boolean {
+    if (this._byAutopilotId.has(autopilotReqId)) return true;
+    const req = this.deps.getRequirement(autopilotReqId);
+    if (req?.source === "reqgenie" && req.external_ref) {
+      this.registerLink({
+        reqgenie_req_id: req.external_ref,
+        autopilot_req_id: autopilotReqId,
+        assignment_id: "",   // 懒注册无原始 assignment_id，填空串（link 仅用 reqgenie_req_id 做 key）
+        mirror_seq: 0,
+      });
+      void this.pushSnapshot(autopilotReqId);  // fire-and-forget 基线全量快照
+      return true;
+    }
+    return false;
+  }
+
   // ── event-bus 事件处理 ────────────────────────────────────────
 
   handleStatusChanged(event: AutopilotEvent): void {
     if (event.type !== "requirement:status-changed") return;
     const { id, to, reason } = event.payload;
-    if (!this._byAutopilotId.has(id)) return;
+    if (!this.ensureRegistered(id)) return;
     // reqgenie ingest_mirror_events 读取 payload.status（非 from/to）
     this.enqueue(id, "status_changed", {
       status: to,
@@ -281,7 +307,7 @@ export class MirrorPusher {
   handleQuestionsUpdated(event: AutopilotEvent): void {
     if (event.type !== "requirement:questions-updated") return;
     const { id } = event.payload;
-    if (!this._byAutopilotId.has(id)) return;
+    if (!this.ensureRegistered(id)) return;
     // reqgenie clarify_updated 协议要求 payload.questions[] 包含完整问题列表
     this.enqueue(id, "clarify_updated", this.buildQuestionsPayload(id));
   }
@@ -289,7 +315,7 @@ export class MirrorPusher {
   handleQuestionResolved(event: AutopilotEvent): void {
     if (event.type !== "requirement:question-resolved") return;
     const { id } = event.payload;
-    if (!this._byAutopilotId.has(id)) return;
+    if (!this.ensureRegistered(id)) return;
     // 问题解答后同步最新问题列表（含已 resolved 状态）
     this.enqueue(id, "clarify_updated", this.buildQuestionsPayload(id));
   }
@@ -297,7 +323,7 @@ export class MirrorPusher {
   handleActiveQuestionChanged(event: AutopilotEvent): void {
     if (event.type !== "requirement:active-question-changed") return;
     const { id } = event.payload;
-    if (!this._byAutopilotId.has(id)) return;
+    if (!this.ensureRegistered(id)) return;
     // 活跃问题切换时同步最新问题列表
     this.enqueue(id, "clarify_updated", this.buildQuestionsPayload(id));
   }
@@ -305,7 +331,7 @@ export class MirrorPusher {
   handleSpecRevised(event: AutopilotEvent): void {
     if (event.type !== "requirement:spec-revised") return;
     const { id } = event.payload;
-    if (!this._byAutopilotId.has(id)) return;
+    if (!this.ensureRegistered(id)) return;
     // reqgenie spec_revised 协议要求 payload.spec_md（非 revision_id）
     const req = this.deps.getRequirement(id);
     this.enqueue(id, "spec_revised", { spec_md: req?.spec_md ?? null });
@@ -315,7 +341,7 @@ export class MirrorPusher {
     if (event.type !== "requirement:clarifier-round-update") return;
     const payload = event.payload as unknown as Record<string, unknown>;
     const reqId = typeof payload["requirement_id"] === "string" ? payload["requirement_id"] : null;
-    if (!reqId || !this._byAutopilotId.has(reqId)) return;
+    if (!reqId || !this.ensureRegistered(reqId)) return;
     this.enqueue(reqId, "clarify_progress", {
       round: payload["round"],
       status: payload["status"],
@@ -376,6 +402,7 @@ export class MirrorPusher {
   private resolveByTaskId(taskId: string): ReqLink | undefined {
     const reqId = this._taskReqMap.get(taskId);
     if (!reqId) return undefined;
+    this.ensureRegistered(reqId);  // 懒注册：_taskReqMap 有 reqId 但 _byAutopilotId 中无映射时自愈
     return this._byAutopilotId.get(reqId);
   }
 }

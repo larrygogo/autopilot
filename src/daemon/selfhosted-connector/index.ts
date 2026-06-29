@@ -213,6 +213,8 @@ export function initSelfhostedConnector(): () => void {
         status: req.status,
         spec_md: req.spec_md,
         status_reason: req.status_reason,
+        source: req.source,
+        external_ref: req.external_ref,
       };
     },
     listComments: (requirementId) => {
