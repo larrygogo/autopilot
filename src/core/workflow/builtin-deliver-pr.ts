@@ -13,7 +13,7 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import type { TaskRepoCtx } from "../sandbox";
-import { submitPrPure, type ExecRepo } from "../executor/submit-pr";
+import { submitPrPure, type ExecRepo } from "./submit-pr";
 
 /**
  * 生成 PR 交付器 runner。phaseName = 声明 deliver:pr 的阶段名（用于 transition 触发 ${phaseName}_complete）；
