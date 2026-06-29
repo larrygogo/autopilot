@@ -18,10 +18,14 @@ import type { AutopilotEvent } from "../../core/events";
 import type { ReqLink } from "./types";
 
 // 本机 RPC 直接调（in-process，无 HTTP 往返）
-import { getRequirementById, createRequirement as coreCreateRequirement } from "../../core/requirements";
+import {
+  getRequirementById,
+  createRequirement as coreCreateRequirement,
+  listInflightReqgenieRequirements,
+} from "../../core/requirements";
 import { listComments, createComment, nextCommentId, resolveComment } from "../../core/requirements/comments";
 import { listSubPrs } from "../../core/requirements/sub-prs";
-import { listTasksByRequirement, listTaskPhaseEvents, getDb } from "../../core/db";
+import { listTasksByRequirement, listTaskPhaseEvents, getDb, getTask } from "../../core/db";
 import {
   setRequirementStatus,
   finishClarification as coreFinishClarification,
@@ -105,6 +109,73 @@ async function resolveWorkspaceIds(
 
   return result;
 }
+
+// ── 启动恢复 ──────────────────────────────────────────────────
+
+/**
+ * daemon 重启后从本机 DB 重建 mirror-pusher 内存映射，并对每条进行中需求补推全量快照。
+ * best-effort：单条失败 warn 继续，不阻塞调用方。
+ */
+async function recoverInflightLinks(mirrorPusher: MirrorPusher): Promise<void> {
+  let inflight: ReturnType<typeof listInflightReqgenieRequirements>;
+  try {
+    inflight = listInflightReqgenieRequirements();
+  } catch (e: unknown) {
+    log.warn(
+      "启动恢复：查询进行中需求失败（跳过）: %s",
+      e instanceof Error ? e.message : String(e),
+    );
+    return;
+  }
+
+  if (inflight.length === 0) {
+    log.info("启动恢复：无进行中的 reqgenie 需求，跳过");
+    return;
+  }
+
+  log.info("启动恢复：发现 %d 条进行中的 reqgenie 需求，开始重建映射", inflight.length);
+  let recovered = 0;
+
+  for (const req of inflight) {
+    try {
+      // 1. 重建 reqgenie_req_id ↔ autopilot_req_id 映射
+      mirrorPusher.registerLink({
+        reqgenie_req_id: req.external_ref,
+        autopilot_req_id: req.id,
+        assignment_id: "",   // 重启恢复无原始 assignment_id，填空串（link 仅用 reqgenie_req_id 做 key）
+        mirror_seq: 0,
+      });
+
+      // 2. 若有活跃 task，重建 taskId → requirementId 反查表
+      if (req.task_id) {
+        const task = getTask(req.task_id);
+        const taskTerminal =
+          !task ||
+          task.status === "done" ||
+          task.status === "cancelled" ||
+          task.status === "failed";
+        if (!taskTerminal) {
+          mirrorPusher.registerTaskRequirement(req.task_id, req.id);
+        }
+      }
+
+      // 3. 补推全量快照（重置 mirror_seq 基线，把当前状态/澄清/阶段/PR 同步给 reqgenie）
+      await mirrorPusher.pushSnapshot(req.id);
+      recovered += 1;
+    } catch (e: unknown) {
+      log.warn(
+        "启动恢复：处理需求 %s 失败（跳过）: %s",
+        req.id,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+
+  log.info("启动恢复：完成，成功恢复 %d / %d 条", recovered, inflight.length);
+}
+
+// 导出供测试使用
+export { recoverInflightLinks };
 
 // ── 初始化入口 ────────────────────────────────────────────────
 
@@ -292,6 +363,10 @@ export function initSelfhostedConnector(): () => void {
       log.warn("selfhosted 心跳失败：%s", e instanceof Error ? e.message : String(e));
     });
   }, HEARTBEAT_MS);
+
+  // ── 启动恢复：重建进行中需求的 mirror 映射 ──────────────────
+  // best-effort，不阻塞启动（daemon 重启时内存映射丢失，从本机 DB 重建）
+  void recoverInflightLinks(mirrorPusher);
 
   log.info("selfhosted connector 已启动");
 

@@ -545,3 +545,31 @@ export function nextRequirementId(): string {
   const n = parseInt(rows[0].id.replace("req-", ""), 10) + 1;
   return `req-${String(n).padStart(3, "0")}`;
 }
+
+/**
+ * 列出所有 source='reqgenie' 且尚未终态的需求（daemon 重启时用于重建 mirror-pusher 映射）。
+ * 终态 = done / cancelled / failed；其余全视为进行中。
+ * 若 DB 中无 source 列（旧测试 DB），安全回退返回空列表。
+ */
+export interface InflightReqgenieRequirement {
+  id: string;
+  external_ref: string;
+  status: string;
+  task_id: string | null;
+}
+
+export function listInflightReqgenieRequirements(): InflightReqgenieRequirement[] {
+  const db = getDb();
+  try {
+    return db
+      .query<InflightReqgenieRequirement, []>(
+        "SELECT id, external_ref, status, task_id FROM requirements " +
+        "WHERE source = 'reqgenie' AND status NOT IN ('done', 'cancelled', 'failed') " +
+        "ORDER BY created_at ASC",
+      )
+      .all();
+  } catch {
+    // source 列不存在（旧测试 DB 未跑 migration 050）时安全回退
+    return [];
+  }
+}
