@@ -548,27 +548,28 @@ export function nextRequirementId(): string {
 }
 
 /**
- * 列出所有 source='reqgenie' 且尚未终态的需求（daemon 重启时用于重建 mirror-pusher 映射）。
+ * 列出指定来源（source）且尚未终态的需求（外部集成扩展 daemon 重启时用于重建映射）。
  * 终态 = done / cancelled / failed；其余全视为进行中。
  * 若 DB 中无 source 列（旧测试 DB），安全回退返回空列表。
+ * 注：core 不认识任何具体来源（如 'reqgenie'），来源由调用方（扩展）传入。
  */
-export interface InflightReqgenieRequirement {
+export interface InflightRequirement {
   id: string;
   external_ref: string;
   status: string;
   task_id: string | null;
 }
 
-export function listInflightReqgenieRequirements(): InflightReqgenieRequirement[] {
+export function listInflightRequirementsBySource(source: string): InflightRequirement[] {
   const db = getDb();
   try {
     return db
-      .query<InflightReqgenieRequirement, []>(
+      .query<InflightRequirement, [string]>(
         "SELECT id, external_ref, status, task_id FROM requirements " +
-        "WHERE source = 'reqgenie' AND status NOT IN ('done', 'cancelled', 'failed') " +
+        "WHERE source = ? AND status NOT IN ('done', 'cancelled', 'failed') " +
         "ORDER BY created_at ASC",
       )
-      .all();
+      .all(source);
   } catch {
     // source 列不存在（旧测试 DB 未跑 migration 050）时安全回退
     return [];
