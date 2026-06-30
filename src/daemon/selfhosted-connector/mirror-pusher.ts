@@ -290,16 +290,18 @@ export class MirrorPusher {
     });
   }
 
-  /** 构建 clarify_updated 事件的 questions 数组（reqgenie 协议字段名对齐） */
+  /** 构建 clarify_updated 事件的 questions 数组（与 snapshot questions 同形状） */
   private buildQuestionsPayload(requirementId: string): Record<string, unknown> {
     const comments = this.deps.listComments(requirementId);
     const questions = comments
       .filter((c) => c.from_role === "agent" || c.from_role === "user")
-      .map((c) => ({
+      .map((c, i) => ({
         autopilot_question_id: c.id,
+        parent_id: c.parent_id,
+        from_role: c.from_role,
         body: c.body,
-        answer: c.from_role === "user" ? c.body : null,
         status: (c.status === "resolved" ? "resolved" : "open") as "open" | "resolved",
+        seq: i,
       }));
     return { questions };
   }
