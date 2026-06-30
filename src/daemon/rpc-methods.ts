@@ -1481,9 +1481,12 @@ function registerRequirementRpc(): void {
         suggestions,
         github_review_id: typeof p.github_review_id === "string" ? p.github_review_id : null,
       });
-      // feedback 注入：若 requirement 当前 awaiting_review 自动进 fix_revision（沿用旧 inject_feedback 语义）
+      // feedback 注入：awaiting_review → fix_revision（沿用旧 inject_feedback 语义）；
+      // awaiting_approval → clarifying（审批驳回 spec：回澄清重做，clarifier 经 status-changed 自动续轮）
       if (comment.kind === "feedback" && r.status === "awaiting_review") {
         try { setRequirementStatus(reqId, "fix_revision"); } catch { /* tolerated */ }
+      } else if (comment.kind === "feedback" && r.status === "awaiting_approval") {
+        try { setRequirementStatus(reqId, "clarifying"); } catch { /* tolerated */ }
       }
       return { comment };
     },

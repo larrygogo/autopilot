@@ -115,7 +115,8 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   clarifying: ["drafting", "ready", "awaiting_approval", "cancelled"],
   ready: ["queued", "awaiting_approval", "drafting", "cancelled"],
   queued: ["running", "awaiting_approval", "ready", "cancelled"],
-  awaiting_approval: ["queued", "running", "drafting", "cancelled"],
+  // awaiting_approval → clarifying：审批驳回 spec 时回到澄清重做（带反馈）
+  awaiting_approval: ["queued", "running", "drafting", "clarifying", "cancelled"],
   running: ["awaiting_review", "done", "failed", "cancelled"],
   // awaiting_review → failed：task 在 await_review 期失败时 bridge 要能同步需求到 failed，
   // 否则需求永卡 awaiting_review、pr-poller 持续轮询死 task（SC-4）。

@@ -336,6 +336,9 @@ export function initSelfhostedConnector(): () => void {
       const req = getRequirementById(requirementId);
       if (kind === "feedback" && req?.status === "awaiting_review") {
         setRequirementStatus(requirementId, "fix_revision");
+      } else if (kind === "feedback" && req?.status === "awaiting_approval") {
+        // 审批驳回：spec 被驳回 → 回澄清重做（clarifier 经 status-changed 自动续轮、读到反馈）
+        setRequirementStatus(requirementId, "clarifying");
       }
     },
     resolveComment(commentId: string) {
