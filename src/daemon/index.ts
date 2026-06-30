@@ -256,10 +256,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const { initNotificationRecorder } = await import("./notification-recorder");
   const disposeNotificationRecorder = initNotificationRecorder();
 
-  // 启动 selfhosted-mirror（reqgenie 里程碑回传；best-effort，失败只 warn）
-  const { initSelfhostedMirror } = await import("./selfhosted-mirror");
-  const disposeSelfhostedMirror = initSelfhostedMirror();
-
   // 启动 selfhosted-connector（B-interactive 模式：assignments/commands 轮询 + 全状态镜像推送）
   // 通过扩展点 API 装配：reqgenieExtension.enabled() 内部检查 config + 凭证，未启用则跳过
   const { registerExtension, initExtensions } = await import("./extensions/registry");
@@ -382,7 +378,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     disposeFixRevisionRunner();
     disposeDoneWorkspaceCleanup();
     disposeNotificationRecorder();
-    disposeSelfhostedMirror();
     disposeSelfhostedConnector();
     disableBus();
     // server.stop 必须 await 完成后才能 exit：它是异步的（等 socket 真正关闭），
