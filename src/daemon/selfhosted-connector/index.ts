@@ -243,14 +243,16 @@ export function initSelfhostedConnector(): () => void {
       if (tasks.length === 0) return [];
       const latestTask = tasks.reduce((a, b) => (a.created_at > b.created_at ? a : b));
       const phaseEvents = listTaskPhaseEvents(latestTask.id);
+      // run_seq = 该 run 的轮次号（同一 run 所有阶段相同）；seq = 阶段在 run 内的顺序
+      const runSeq = latestTask.seq ?? 0;
       return phaseEvents.map((pe, i) => ({
-        run_seq: i,
+        run_seq: runSeq,
         phase: pe.phase,
         label: pe.phase,
         state: pe.status === "done" ? "completed" : pe.status,
         started_at: pe.started_at ? new Date(pe.started_at).toISOString() : null,
         ended_at: pe.ended_at ? new Date(pe.ended_at).toISOString() : null,
-        seq: pe.id,
+        seq: i,
       }));
     },
   });
