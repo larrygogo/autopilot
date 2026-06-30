@@ -226,6 +226,7 @@ export function initSelfhostedConnector(): () => void {
         body: c.body,
         status: c.status,
         created_at: c.created_at,
+        suggestions: c.suggestions ?? null,
       }));
     },
     listSubPrs: (requirementId) => {

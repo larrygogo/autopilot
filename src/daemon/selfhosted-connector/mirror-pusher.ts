@@ -50,6 +50,7 @@ export interface CommentSnapshot {
   body: string;
   status: string;
   created_at: number;
+  suggestions: string[] | null;
 }
 
 export interface SubPrSnapshot {
@@ -155,6 +156,7 @@ export class MirrorPusher {
           body: c.body,
           status: (c.status === "resolved" ? "resolved" : "open") as "open" | "resolved",
           seq: i,
+          suggestions: c.suggestions ?? null,
         })),
       phases: phases.map((p) => ({
         run_seq: p.run_seq,
@@ -302,6 +304,7 @@ export class MirrorPusher {
         body: c.body,
         status: (c.status === "resolved" ? "resolved" : "open") as "open" | "resolved",
         seq: i,
+        suggestions: c.suggestions ?? null,
       }));
     return { questions };
   }

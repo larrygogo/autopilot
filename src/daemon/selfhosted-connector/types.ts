@@ -103,6 +103,7 @@ export interface MirrorQuestion {
   body: string;
   status: "open" | "resolved";
   seq?: number;
+  suggestions?: string[] | null;
 }
 
 export interface MirrorPhase {
