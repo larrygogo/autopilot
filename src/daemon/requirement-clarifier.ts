@@ -304,6 +304,8 @@ function buildPrompt(opts: {
   qaHistory: string;
   attachmentContext: string;
   messagesReplay?: ConversationTurn[];  // session 失效时注入历史对话（与 qaHistory 互斥）
+  /** 审批驳回反馈（未处理时注入，强制 clarifier 就此重新澄清、不直接定稿） */
+  rejectionFeedback?: string | null;
 }): string {
   const ctxLines: string[] = [];
   ctxLines.push(`项目名称：${opts.projectName}`);
@@ -410,6 +412,17 @@ function buildPrompt(opts: {
     "",
     opts.qaHistory ? "# 已完成的 Q&A 历史\n\n" + opts.qaHistory : "# 已完成的 Q&A 历史\n\n(暂无)",
     "",
+    ...(opts.rejectionFeedback
+      ? [
+          "# ⚠️ 用户驳回了上一版规格（必须处理）",
+          "用户在审批环节驳回了上面的「当前 spec_md」，反馈如下：",
+          "> " + opts.rejectionFeedback.replace(/\n/g, "\n> "),
+          "",
+          "请**优先针对这条反馈向用户提一个澄清问题**（next_question），问清后再据此修订 spec_md；",
+          "在未就该反馈与用户确认前**不要 done=true**，否则会把被驳回的规格原样退回审批。",
+          "",
+        ]
+      : []),
     // I-1 修复：messagesReplay 段（替换 qaHistory，两段互斥，避免重叠）
     ...(opts.messagesReplay && opts.messagesReplay.length > 0
       ? [
@@ -629,6 +642,22 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
       return `Q${i + 1}：${q.body}\nA${i + 1}：${userReply}`;
     }).join("\n\n");
 
+  // 审批驳回检测：reject 加一条 feedback 评论 + 回 clarifying。若最新 feedback 比最新 question 还新
+  //（= 尚未被新一轮提问处理），注入 prompt 强制就此重新澄清，避免原样定稿把被驳回的 spec 又退回审批。
+  // clarifier 提问后该 question 变最新 → 下轮不再注入，天然不循环。
+  const _allFeedback = listComments(reqId, { kind: "feedback" });
+  const _allQ = listComments(reqId, { kind: "question", parent_id: null });
+  const _latestFeedback = _allFeedback.length
+    ? _allFeedback.reduce((a, b) => (a.created_at > b.created_at ? a : b))
+    : null;
+  const _latestQ = _allQ.length
+    ? _allQ.reduce((a, b) => (a.created_at > b.created_at ? a : b))
+    : null;
+  const pendingRejection =
+    _latestFeedback && (!_latestQ || _latestFeedback.created_at > _latestQ.created_at)
+      ? _latestFeedback.body
+      : null;
+
   // 读取需求的所有附件，构建 prompt 段落
   const attachments = listAttachments(reqId);
   const attachmentContext = buildAttachmentContext(attachments);
@@ -647,7 +676,8 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   // 设计前提：每轮最多一个 active question（_inflightRounds 进程内锁 + setActiveQuestionId 保证）
   const hasPriorQA = allQuestionsResolved.length > 0;
   // useIncremental 仅在 Anthropic + 有效 session + 有历史 Q&A 时为 true
-  const useIncremental = isAnthropicProvider && !!activeSessionRef && hasPriorQA;
+  // 有未处理驳回反馈时强制走全量 prompt（增量/replay 都不含驳回段，会原样定稿）
+  const useIncremental = isAnthropicProvider && !!activeSessionRef && hasPriorQA && !pendingRejection;
 
   // ── 增量消息（仅新回复 + 继续指令）────────────────────────────────────
   let incrementalPrompt: string | null = null;
@@ -669,7 +699,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   //   Anthropic + session 失效 + 有 snapshot → 用 replay 替换 qaHistory（互斥，避免重叠）
   //   非 Anthropic（无论是否有 snapshot）→ 始终走 qaHistory 原路径，行为完全不变
   const hasSnapshot = (session?.messages_snapshot?.length ?? 0) > 0;
-  const useReplay = isAnthropicProvider && !activeSessionRef && hasSnapshot;
+  const useReplay = isAnthropicProvider && !activeSessionRef && hasSnapshot && !pendingRejection;
 
   // clone 失败库的降级快照（远程拉结构事实 + 自述文档，prompt 里已声明可能过期）；
   // clone 就绪的库不预拼接（探索交给 agent 自主）
@@ -698,6 +728,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     qaHistory: useReplay ? "" : qaHistory,
     attachmentContext,
     messagesReplay: useReplay ? session!.messages_snapshot : [],
+    rejectionFeedback: pendingRejection,
   });
 
   // ── ② 重试循环 ─────────────────────────────────────────────────────
