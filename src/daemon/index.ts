@@ -261,9 +261,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   const disposeSelfhostedMirror = initSelfhostedMirror();
 
   // 启动 selfhosted-connector（B-interactive 模式：assignments/commands 轮询 + 全状态镜像推送）
-  // 仅在 config.selfhosted.enabled=true 且已注册凭证时生效；否则立即返回空 dispose
-  const { initSelfhostedConnector } = await import("./selfhosted-connector");
-  const disposeSelfhostedConnector = initSelfhostedConnector();
+  // 通过扩展点 API 装配：reqgenieExtension.enabled() 内部检查 config + 凭证，未启用则跳过
+  const { registerExtension, initExtensions } = await import("./extensions/registry");
+  const { reqgenieExtension } = await import("./selfhosted-connector/extension");
+  registerExtension(reqgenieExtension);
+  const disposeSelfhostedConnector = initExtensions();
 
   // 启动 requirement-scheduler（订阅 event-bus）
   initRequirementScheduler();

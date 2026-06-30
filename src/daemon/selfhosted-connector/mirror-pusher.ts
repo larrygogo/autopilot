@@ -8,7 +8,7 @@
  */
 
 import { createLogger } from "../../core/logger";
-import { onEvent, offEvent } from "../../core/event-bus";
+import { onEvent as coreOnEvent, offEvent } from "../../core/event-bus";
 import type { AutopilotEvent } from "../../core/events";
 import type { SelfhostedBackend } from "./backend";
 import type { MirrorEvent, MirrorSnapshot, ReqLink } from "./types";
@@ -31,6 +31,22 @@ export interface MirrorPusherDeps {
 
   /** 读取需求的活跃运行的执行阶段（phase events） */
   listPhaseEvents(requirementId: string): PhaseEventSnapshot[];
+
+  /**
+   * 事件订阅函数（可选，默认回退到 core/event-bus 的 onEvent）。
+   * 宿主（ExtensionContext）注入此字段时，其 ctx.on 会追踪所有 handler，
+   * dispose 时统一 offEvent，扩展无需手动清理。
+   * 独立测试时注入 mock 函数即可不依赖全局 event-bus。
+   * 不传时回退到 core 的 onEvent（保持与现有测试的向后兼容）。
+   */
+  onEvent?: (type: string, handler: (event: AutopilotEvent) => void) => void;
+
+  /**
+   * 事件取消订阅函数（可选，默认回退到 core/event-bus 的 offEvent）。
+   * 测试时与 onEvent 配套注入，保证 dispose() 能正确追踪清理。
+   * 不传时回退到 core 的 offEvent（生产行为不变）。
+   */
+  offEvent?: (type: string, handler: (event: AutopilotEvent) => void) => void;
 }
 
 export interface RequirementSnapshot {
@@ -87,6 +103,12 @@ export class MirrorPusher {
   private readonly _snapshotDebounce = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly SNAPSHOT_DEBOUNCE_MS = 300;
 
+  /**
+   * start() 时绑定的事件处理器（已修复 .bind() 每次创建新对象导致 offEvent 无效的旧 bug）。
+   * dispose() 用同一批对象调 offEvent，保证能正确移除监听。
+   */
+  private _boundHandlers: Array<[string, (e: AutopilotEvent) => void]> = [];
+
   constructor(private readonly deps: MirrorPusherDeps) {}
 
   /** 注册新 link（建需求成功后由 assignments-poller 调用） */
@@ -100,19 +122,33 @@ export class MirrorPusher {
     );
   }
 
-  /** 启动事件订阅 */
+  /**
+   * 启动事件订阅。
+   * 优先使用 deps.onEvent（宿主注入时追踪所有 handler，dispose 时统一 offEvent）；
+   * 未注入时回退到 core/event-bus 的 coreOnEvent（保持与现有测试向后兼容）。
+   */
   start(): void {
+    const onEventFn = this.deps.onEvent ?? coreOnEvent;
+    this._boundHandlers = [];
     for (const [type, handler] of SUBSCRIPTIONS) {
-      onEvent(type, handler.bind(this) as (e: AutopilotEvent) => void);
+      const bound = handler.bind(this) as (e: AutopilotEvent) => void;
+      this._boundHandlers.push([type, bound]);
+      onEventFn(type, bound);
     }
     log.info("mirror-pusher 已启动（订阅需求全状态事件）");
   }
 
-  /** 停止并清理 */
+  /**
+   * 停止并清理。
+   * 调用 offEvent 使用 start() 时保存的同一批绑定函数（修复旧实现 .bind() 对象不同无法 remove 的 bug）。
+   * 若宿主已通过 ctx.on 追踪并提前 offEvent，重复调用为 no-op（EventEmitter.off 幂等）。
+   */
   dispose(): void {
-    for (const [type, handler] of SUBSCRIPTIONS) {
-      offEvent(type, handler.bind(this) as (e: AutopilotEvent) => void);
+    const offEventFn = this.deps.offEvent ?? offEvent;
+    for (const [type, handler] of this._boundHandlers) {
+      offEventFn(type, handler);
     }
+    this._boundHandlers = [];
     if (this._flushTimer) {
       clearTimeout(this._flushTimer);
       this._flushTimer = null;
