@@ -83,12 +83,12 @@ export class SelfhostedBackend {
    * 批量推送增量 mirror 事件。
    * 正常 200；409 = seq-gap（调用方需回退到 snapshot 重置基线）。
    */
-  async postMirrorEvents(events: MirrorEvent[]): Promise<{ seqGap: boolean }> {
+  async postMirrorEvents(events: MirrorEvent[], autopilotReqId: string): Promise<{ seqGap: boolean }> {
     const url = this.instancePath("/mirror/events");
     const res = await this.fetchFn(url, {
       method: "POST",
       headers: { ...this.auth(), ...JSON_HEADERS },
-      body: JSON.stringify({ events }),
+      body: JSON.stringify({ autopilot_req_id: autopilotReqId, events }),
     });
     if (res.status === 409) return { seqGap: true };
     if (!res.ok) throw httpError(url, res);

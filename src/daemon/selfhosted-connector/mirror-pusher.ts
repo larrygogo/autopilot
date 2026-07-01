@@ -261,7 +261,7 @@ export class MirrorPusher {
       this._pending.delete(reqId);
 
       try {
-        const result = await this.deps.backend.postMirrorEvents(toSend);
+        const result = await this.deps.backend.postMirrorEvents(toSend, reqId);
         if (result.seqGap) {
           log.warn("mirror events seq-gap 检测到，触发全量快照 req=%s", reqId);
           void this.pushSnapshot(reqId);
