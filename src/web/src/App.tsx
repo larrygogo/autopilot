@@ -50,6 +50,7 @@ import {
   ListChecks,
   Bot,
   X,
+  Puzzle,
 } from "lucide-react";
 import { api } from "./hooks/useApi";
 
@@ -109,6 +110,7 @@ const SETTINGS_NAV_GROUPS: NavGroupDef[] = [
       { path: "/settings/lifecycle", label: "生命周期 agent", icon: Bot },
       { path: "/settings/scheduler", label: "任务调度", icon: Gauge },
       { path: "/settings/network", label: "网络访问", icon: Globe },
+      { path: "/settings/extensions", label: "扩展", icon: Puzzle },
       { path: "/settings/daemon", label: "Daemon", icon: Server },
     ],
   },
@@ -612,7 +614,7 @@ function TaskDetailRoute() {
   return <Navigate to={target} replace />;
 }
 
-const SETTINGS_SECTIONS = new Set(["providers", "lifecycle", "scheduler", "network", "daemon"]);
+const SETTINGS_SECTIONS = new Set(["providers", "lifecycle", "scheduler", "network", "extensions", "daemon"]);
 
 function SettingsRoute() {
   const { section } = useParams<{ section?: string }>();

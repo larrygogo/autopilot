@@ -28,7 +28,7 @@ import { LifecycleAgentsCard } from "@/components/LifecycleAgentsCard";
 export function Settings({
   section = "general",
 }: {
-  section?: "general" | "lifecycle" | "scheduler" | "network" | "daemon";
+  section?: "general" | "lifecycle" | "scheduler" | "network" | "extensions" | "daemon";
 }) {
   const toast = useToast();
 
@@ -79,9 +79,12 @@ export function Settings({
   };
 
   useEffect(() => {
-    if (section !== "daemon") return;
-    api.getStatus().then(setStatus).catch(() => {});
-    api.listExtensions().then((r) => setExtensions(r.extensions ?? [])).catch(() => {});
+    if (section === "daemon") {
+      api.getStatus().then(setStatus).catch(() => {});
+    }
+    if (section === "extensions") {
+      api.listExtensions().then((r) => setExtensions(r.extensions ?? [])).catch(() => {});
+    }
   }, [section]);
 
 
@@ -97,44 +100,17 @@ export function Settings({
     return <NetworkAccessCard />;
   }
 
-  if (section === "daemon") {
+  if (section === "extensions") {
+    // 扩展分区：daemon 级扩展及其自报状态（如 reqgenie 连接器的注册/心跳）——
+    // 内容 KV 由扩展 status() 自报，此处通用渲染、不含业务知识
     return (
       <div className="w-full">
-        {status && (
-          <Card className="mb-4 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold">Daemon 信息</h3>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setConfirmRestart(true)}
-                disabled={restartingDaemon}
-                title="重启 daemon（应用磁盘上已有的最新代码 / 配置；升级代码需先在终端 git pull）"
-              >
-                <RotateCw className={cn("h-4 w-4", restartingDaemon && "animate-spin")} />
-                {restartingDaemon ? "重启中…" : "重启 daemon"}
-              </Button>
-            </div>
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-              <InfoField label="版本" value={status.version} mono />
-              <InfoField
-                label="启动于"
-                value={status.started_at_iso ? new Date(status.started_at_iso).toLocaleString() : formatUptime(status.uptime)}
-              />
-            </dl>
-            {status.update?.status === "behind" && (
-              <div className="mt-3 rounded-md bg-warning/10 px-3 py-2 text-[11px] text-warning">
-                有更新可用：本地代码落后远端。在项目目录跑 <code className="rounded bg-warning/15 px-1 py-0.5 font-mono">git pull</code>（必要时 <code className="rounded bg-warning/15 px-1 py-0.5 font-mono">bun run build:web</code>）后再重启 daemon。
-              </div>
-            )}
+        {extensions.length === 0 ? (
+          <Card className="p-6 text-center text-sm text-muted-foreground">
+            没有已注册的 daemon 扩展。
           </Card>
-        )}
-
-        {/* 扩展：daemon 级扩展及其自报状态（如 reqgenie 连接器的注册/心跳）——
-            内容 KV 由扩展 status() 自报，此处通用渲染、不含业务知识 */}
-        {extensions.length > 0 && (
-          <Card className="mb-4 p-4">
-            <h3 className="mb-3 text-sm font-semibold">扩展</h3>
+        ) : (
+          <Card className="p-4">
             <div className="space-y-4">
               {extensions.map((ext) => (
                 <div key={ext.id}>
@@ -169,6 +145,42 @@ export function Settings({
                 </div>
               ))}
             </div>
+          </Card>
+        )}
+      </div>
+    );
+  }
+
+  if (section === "daemon") {
+    return (
+      <div className="w-full">
+        {status && (
+          <Card className="mb-4 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold">Daemon 信息</h3>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setConfirmRestart(true)}
+                disabled={restartingDaemon}
+                title="重启 daemon（应用磁盘上已有的最新代码 / 配置；升级代码需先在终端 git pull）"
+              >
+                <RotateCw className={cn("h-4 w-4", restartingDaemon && "animate-spin")} />
+                {restartingDaemon ? "重启中…" : "重启 daemon"}
+              </Button>
+            </div>
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+              <InfoField label="版本" value={status.version} mono />
+              <InfoField
+                label="启动于"
+                value={status.started_at_iso ? new Date(status.started_at_iso).toLocaleString() : formatUptime(status.uptime)}
+              />
+            </dl>
+            {status.update?.status === "behind" && (
+              <div className="mt-3 rounded-md bg-warning/10 px-3 py-2 text-[11px] text-warning">
+                有更新可用：本地代码落后远端。在项目目录跑 <code className="rounded bg-warning/15 px-1 py-0.5 font-mono">git pull</code>（必要时 <code className="rounded bg-warning/15 px-1 py-0.5 font-mono">bun run build:web</code>）后再重启 daemon。
+              </div>
+            )}
           </Card>
         )}
 
