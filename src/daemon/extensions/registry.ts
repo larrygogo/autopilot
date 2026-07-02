@@ -65,47 +65,81 @@ export function listExtensionsInfo(): ExtensionInfo[] {
  *   - 逆序调各扩展的 dispose()（LIFO）
  *   - 统一 offEvent 所有通过 ctx.on 登记的 handler（扩展无需手动清理事件）
  */
-export function initExtensions(): () => void {
-  type ExtState = {
-    ext: Extension;
-    registeredHandlers: Array<[string, (e: AutopilotEvent) => void]>;
-  };
-  const states: ExtState[] = [];
+type ExtState = {
+  ext: Extension;
+  registeredHandlers: Array<[string, (e: AutopilotEvent) => void]>;
+};
 
+/** 已初始化扩展的运行态（模块级，供 initExtensions 的 dispose 与 startExtension 共用） */
+const _states: ExtState[] = [];
+
+/** 初始化单个扩展（建 ctx → init → 登记状态）。调用方负责 enabled/running 检查。 */
+function startOne(ext: Extension): void {
+  const { ctx, registeredHandlers } = createExtensionContext(ext.id);
+
+  try {
+    const result = ext.init(ctx);
+    if (result instanceof Promise) {
+      result.catch((e: unknown) => {
+        log.error(
+          "扩展异步初始化失败: %s — %s",
+          ext.id,
+          e instanceof Error ? e.message : String(e),
+        );
+      });
+    }
+    log.info("扩展已初始化: %s", ext.id);
+    _running.add(ext.id);
+  } catch (e: unknown) {
+    log.error(
+      "扩展同步初始化失败: %s — %s",
+      ext.id,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
+
+  _states.push({ ext, registeredHandlers });
+}
+
+/**
+ * 运行期启动单个扩展（如注册凭证落盘后热启动，不必重启 daemon）。
+ * 已在运行则 no-op；未注册/未启用抛错。
+ */
+export function startExtension(id: string): void {
+  const ext = _extensions.find((e) => e.id === id);
+  if (!ext) throw new Error(`扩展不存在: ${id}`);
+  if (_running.has(id)) return;
+  if (!ext.enabled()) throw new Error(`扩展未启用: ${id}`);
+  startOne(ext);
+}
+
+/**
+ * 调用扩展自报的动作（Extension.invoke），供通用 RPC extensions.invoke 路由。
+ * 动作语义完全由扩展定义（宿主零业务知识）。
+ */
+export function invokeExtension(
+  id: string,
+  action: string,
+  params: Record<string, unknown>,
+): Promise<unknown> {
+  const ext = _extensions.find((e) => e.id === id);
+  if (!ext) throw new Error(`扩展不存在: ${id}`);
+  if (!ext.invoke) throw new Error(`扩展不支持动作调用: ${id}`);
+  return Promise.resolve(ext.invoke(action, params));
+}
+
+export function initExtensions(): () => void {
   for (const ext of _extensions) {
     if (!ext.enabled()) {
       log.info("扩展已跳过（未启用）: %s", ext.id);
       continue;
     }
-
-    const { ctx, registeredHandlers } = createExtensionContext(ext.id);
-
-    try {
-      const result = ext.init(ctx);
-      if (result instanceof Promise) {
-        result.catch((e: unknown) => {
-          log.error(
-            "扩展异步初始化失败: %s — %s",
-            ext.id,
-            e instanceof Error ? e.message : String(e),
-          );
-        });
-      }
-      log.info("扩展已初始化: %s", ext.id);
-      _running.add(ext.id);
-    } catch (e: unknown) {
-      log.error(
-        "扩展同步初始化失败: %s — %s",
-        ext.id,
-        e instanceof Error ? e.message : String(e),
-      );
-    }
-
-    states.push({ ext, registeredHandlers });
+    startOne(ext);
   }
 
   return () => {
-    // 逆序 dispose（LIFO，与初始化相反）
+    // 逆序 dispose（LIFO，与初始化相反）；含运行期经 startExtension 热启的扩展
+    const states = _states.splice(0, _states.length);
     for (let i = states.length - 1; i >= 0; i--) {
       const { ext, registeredHandlers } = states[i];
       try {

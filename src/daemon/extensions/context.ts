@@ -68,6 +68,11 @@ export interface Extension {
   dispose(): void | Promise<void>;
   /** 可选：自报展示状态（键=业务标签、值可序列化），供 extensions.list RPC / Web 设置页展示。 */
   status?(): Record<string, unknown>;
+  /**
+   * 可选：动作调用（供通用 RPC extensions.invoke 路由，如「注册」）。
+   * 动作名与参数语义完全由扩展定义；未运行时也可被调（注册正是发生在启用之前）。
+   */
+  invoke?(action: string, params: Record<string, unknown>): Promise<unknown> | unknown;
 }
 
 /** phase 事件条目（与 mirror-pusher.ts PhaseEventSnapshot 形状兼容，结构类型系统保证）。 */

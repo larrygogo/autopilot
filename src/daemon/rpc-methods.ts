@@ -168,7 +168,7 @@ import { registerRpcMethod, hasRpcMethod, RpcError } from "./rpc";
 import { wsManager } from "./ws";
 import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
 import { getUpdateInfo } from "../core/update-check";
-import { listExtensionsInfo } from "./extensions/registry";
+import { listExtensionsInfo, invokeExtension } from "./extensions/registry";
 
 /** 业务错误 → RpcError 透传（保留 code）；其他错误让 invokeRpcMethod 包成 INTERNAL */
 function rethrowAsRpc(e: unknown): never {
@@ -224,6 +224,20 @@ function registerCoreQueryRpc(): void {
     method: "extensions.list",
     description: "列出 daemon 扩展及其自报状态（enabled/running + 扩展 status() 的展示 KV）",
     handler: () => ({ extensions: listExtensionsInfo() }),
+  });
+
+  registerRpcMethod({
+    method: "extensions.invoke",
+    description: "调用扩展自报的动作（路由到 Extension.invoke；动作语义由扩展定义，如注册）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (typeof p.action !== "string" || !p.action) throw new RpcError("INVALID_PARAM", "需要 action");
+      const actionParams =
+        p.params && typeof p.params === "object" ? (p.params as Record<string, unknown>) : {};
+      const result = await invokeExtension(p.id, p.action, actionParams);
+      return { result: result ?? null };
+    },
   });
 
   registerRpcMethod({

@@ -201,6 +201,9 @@ export const api = {
   // [WS-RPC] extensions.list — daemon 扩展及其自报状态（设置 → Daemon「扩展」卡）
   listExtensions: () =>
     requestRpc<{ extensions: Array<{ id: string; enabled: boolean; running: boolean; status: Record<string, unknown> | null }> }>("extensions.list"),
+  // [WS-RPC] extensions.invoke — 调用扩展动作（如 reqgenie 连接器注册）
+  invokeExtension: (id: string, action: string, params?: Record<string, unknown>) =>
+    requestRpc<{ result: unknown }>("extensions.invoke", { id, action, params: params ?? {} }),
   // [WS-RPC] tasks.list — P3 第一批 PoC
   listTasks: (filters?: Record<string, string>) => {
     const params: Record<string, unknown> = {};

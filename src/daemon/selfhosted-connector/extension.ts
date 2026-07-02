@@ -11,8 +11,9 @@
  *   - dispose()：clearInterval + poller.dispose + mirrorPusher.dispose（事件清理由宿主接管）
  */
 
-import { loadSelfhostedConfig } from "../../core/config";
-import { loadSelfhostedCredentials } from "./credentials";
+import { loadSelfhostedConfig, saveSelfhostedConfig } from "../../core/config";
+import { loadSelfhostedCredentials, saveSelfhostedCredentials } from "./credentials";
+import { startExtension } from "../extensions/registry";
 import { SelfhostedBackend } from "./backend";
 import { AssignmentPoller } from "./assignments-poller";
 import { CommandPoller } from "./commands-poller";
@@ -54,6 +55,36 @@ export const reqgenieExtension: Extension = {
       连接: _lastHeartbeatOk === null ? "等待心跳" : _lastHeartbeatOk ? "正常" : "失联",
       最近心跳: _lastHeartbeatAt ? new Date(_lastHeartbeatAt).toLocaleString("zh-CN", { hour12: false }) : "—",
     };
+  },
+
+  async invoke(action: string, params: Record<string, unknown>): Promise<unknown> {
+    if (action === "register") {
+      const url = typeof params.control_plane_url === "string" ? params.control_plane_url.trim() : "";
+      const token = typeof params.token === "string" ? params.token.trim() : "";
+      const name =
+        typeof params.name === "string" && params.name.trim()
+          ? params.name.trim()
+          : (process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? "autopilot-instance");
+      if (!url) throw new Error("控制面 URL 必填");
+      if (!token) throw new Error("注册令牌必填");
+      if (loadSelfhostedCredentials()) {
+        throw new Error("本机已注册；先运行 `autopilot selfhosted remove` 下线后再重新注册");
+      }
+
+      const { instance_id, secret } = await SelfhostedBackend.register(url, token, name);
+      const controlPlaneUrl = url.replace(/\/+$/, "");
+      saveSelfhostedCredentials({ control_plane_url: controlPlaneUrl, instance_id, secret });
+      saveSelfhostedConfig({
+        ...loadSelfhostedConfig(),
+        control_plane_url: controlPlaneUrl,
+        enabled: true,
+      });
+
+      // 热启动连接器（凭证已就绪、enabled()=true），不必重启 daemon
+      startExtension("reqgenie-connector");
+      return { instance_id, name };
+    }
+    throw new Error(`未知动作: ${action}`);
   },
 
   init(ctx: ExtensionContext): void {

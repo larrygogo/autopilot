@@ -154,6 +154,12 @@ export function Settings({
                       ))}
                     </dl>
                   )}
+                  {/* 未注册的 reqgenie 连接器 → 内联注册表单（对等 CLI selfhosted register，注册后热启动） */}
+                  {ext.id === "reqgenie-connector" && ext.status?.["注册状态"] === "未注册" && (
+                    <ReqgenieRegisterForm
+                      onDone={() => api.listExtensions().then((r) => setExtensions(r.extensions ?? [])).catch(() => {})}
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -713,6 +719,58 @@ function NetworkAccessCard(): React.ReactElement {
         onCancel={() => setConfirmDelete(false)}
       />
     </Card>
+  );
+}
+
+/** reqgenie 连接器注册表单：控制面 URL + 实例名 + 一次性注册令牌 → extensions.invoke("register")。 */
+function ReqgenieRegisterForm({ onDone }: { onDone: () => void }) {
+  const toast = useToast();
+  const [url, setUrl] = useState("");
+  const [name, setName] = useState("");
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await api.invokeExtension("reqgenie-connector", "register", {
+        control_plane_url: url.trim(),
+        name: name.trim(),
+        token: token.trim(),
+      });
+      toast.success("注册成功，连接器已启动");
+      setToken("");
+      onDone();
+    } catch (e: unknown) {
+      toast.error("注册失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+      <p className="text-xs text-muted-foreground">
+        注册为 reqgenie 自托管实例：在 reqgenie「我的 Runner」生成一次性注册令牌后填入。注册成功即热启动连接器，无需重启 daemon。
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="rg-url" className="text-xs">控制面 URL</Label>
+          <Input id="rg-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://reqgenie 地址:3001" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rg-name" className="text-xs">实例展示名（可选）</Label>
+          <Input id="rg-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="默认取主机名" />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="rg-token" className="text-xs">注册令牌</Label>
+        <Input id="rg-token" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="reqgenie 生成的一次性令牌" />
+      </div>
+      <Button size="sm" onClick={submit} disabled={busy || !url.trim() || !token.trim()}>
+        {busy ? "注册中…" : "注册"}
+      </Button>
+    </div>
   );
 }
 
