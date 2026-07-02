@@ -114,6 +114,32 @@ export function startExtension(id: string): void {
 }
 
 /**
+ * 运行期停止单个扩展（如解除注册时下线连接器）。未在运行则 no-op。
+ * dispose 扩展 + offEvent 其登记的 handler + 从运行态移除。
+ */
+export function stopExtension(id: string): void {
+  const idx = _states.findIndex((s) => s.ext.id === id);
+  if (idx < 0) return;
+  const { ext, registeredHandlers } = _states[idx];
+  _states.splice(idx, 1);
+  try {
+    const result = ext.dispose();
+    if (result instanceof Promise) {
+      result.catch((e: unknown) => {
+        log.warn("扩展异步 dispose 失败: %s — %s", ext.id, e instanceof Error ? e.message : String(e));
+      });
+    }
+  } catch (e: unknown) {
+    log.warn("扩展同步 dispose 失败: %s — %s", ext.id, e instanceof Error ? e.message : String(e));
+  }
+  for (const [type, handler] of registeredHandlers) {
+    offEvent(type, handler);
+  }
+  _running.delete(id);
+  log.info("扩展已停止: %s", id);
+}
+
+/**
  * 调用扩展自报的动作（Extension.invoke），供通用 RPC extensions.invoke 路由。
  * 动作语义完全由扩展定义（宿主零业务知识）。
  */

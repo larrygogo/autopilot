@@ -12,8 +12,8 @@
  */
 
 import { loadSelfhostedConfig, saveSelfhostedConfig } from "../../core/config";
-import { loadSelfhostedCredentials, saveSelfhostedCredentials } from "./credentials";
-import { startExtension } from "../extensions/registry";
+import { loadSelfhostedCredentials, saveSelfhostedCredentials, clearSelfhostedCredentials } from "./credentials";
+import { startExtension, stopExtension } from "../extensions/registry";
 import { SelfhostedBackend } from "./backend";
 import { AssignmentPoller } from "./assignments-poller";
 import { CommandPoller } from "./commands-poller";
@@ -84,6 +84,18 @@ export const reqgenieExtension: Extension = {
       startExtension("reqgenie-connector");
       return { instance_id, name };
     }
+
+    if (action === "remove") {
+      if (!loadSelfhostedCredentials()) throw new Error("本机未注册 selfhosted 实例");
+      // 先停运行中的连接器（dispose 内 best-effort 向 reqgenie 发 deregister，此刻凭证仍在内存）
+      stopExtension("reqgenie-connector");
+      const removed = clearSelfhostedCredentials();
+      saveSelfhostedConfig({ ...loadSelfhostedConfig(), enabled: false });
+      _lastHeartbeatAt = null;
+      _lastHeartbeatOk = null;
+      return { removed };
+    }
+
     throw new Error(`未知动作: ${action}`);
   },
 

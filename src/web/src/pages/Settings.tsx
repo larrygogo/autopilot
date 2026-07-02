@@ -160,6 +160,12 @@ export function Settings({
                       onDone={() => api.listExtensions().then((r) => setExtensions(r.extensions ?? [])).catch(() => {})}
                     />
                   )}
+                  {/* 已注册 → 解除注册（停连接器 + 通知 reqgenie 下线 + 清凭证，对等 CLI selfhosted remove） */}
+                  {ext.id === "reqgenie-connector" && ext.status && ext.status["注册状态"] !== "未注册" && (
+                    <ReqgenieUnregisterButton
+                      onDone={() => api.listExtensions().then((r) => setExtensions(r.extensions ?? [])).catch(() => {})}
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -770,6 +776,51 @@ function ReqgenieRegisterForm({ onDone }: { onDone: () => void }) {
       <Button size="sm" onClick={submit} disabled={busy || !url.trim() || !token.trim()}>
         {busy ? "注册中…" : "注册"}
       </Button>
+    </div>
+  );
+}
+
+/** reqgenie 连接器解除注册：停连接器（向 reqgenie 发下线）+ 清本机凭证 + 关 enabled。 */
+function ReqgenieUnregisterButton({ onDone }: { onDone: () => void }) {
+  const toast = useToast();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const doRemove = async () => {
+    setBusy(true);
+    try {
+      await api.invokeExtension("reqgenie-connector", "remove", {});
+      toast.success("已解除注册，连接器已停止");
+      onDone();
+    } catch (e: unknown) {
+      toast.error("解除注册失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setBusy(false);
+      setConfirmOpen(false);
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      <Button variant="outline" size="sm" onClick={() => setConfirmOpen(true)} disabled={busy}>
+        <Trash2 className="h-3.5 w-3.5" />
+        {busy ? "解除中…" : "解除注册（下线）"}
+      </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        title="解除注册"
+        message={
+          <div className="space-y-2 text-sm">
+            <p>停止连接器、通知 reqgenie 下线，并删除本机凭证。</p>
+            <p className="text-muted-foreground">
+              进行中的镜像同步会中断（reqgenie 侧该实例变为离线）；重新接活需在 reqgenie 生成新的注册令牌后再次注册。
+            </p>
+          </div>
+        }
+        confirmText="解除注册"
+        onConfirm={doRemove}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   );
 }
