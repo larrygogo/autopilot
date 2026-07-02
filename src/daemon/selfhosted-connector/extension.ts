@@ -200,9 +200,18 @@ export const reqgenieExtension: Extension = {
       async setWorkspaces({ autopilot_req_id, repo_urls }) {
         const req = ctx.read.requirement(autopilot_req_id);
         if (!req) return;
+        if (repo_urls.length === 0) {
+          // reqgenie 侧没选仓库 → 显式确认空集（无库需求，澄清走纯文本）。
+          // 不显式确认的话 core 的「单库项目自动派生」兜底会把项目里无关的库挂上。
+          ctx.act.setWorkspaces(autopilot_req_id, []);
+          return;
+        }
         const wsIds = await ctx.act.resolveWorkspacesByUrls(req.project_id, repo_urls);
         if (wsIds.length > 0) {
           ctx.act.setWorkspaces(autopilot_req_id, wsIds);
+        } else {
+          // 有 urls 但全部解析失败（不可达等）：保持现状不动，只告警——不误确认「无库」
+          ctx.log.warn("setWorkspaces: repo_urls 全部解析失败，保持需求现有代码库不动 req=%s", autopilot_req_id);
         }
       },
 

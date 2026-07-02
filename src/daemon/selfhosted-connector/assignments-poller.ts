@@ -99,20 +99,19 @@ export class AssignmentPoller {
             project_id: assignment.project_hint ?? null,
           });
 
-          // 2. 设置代码库（如有）
-          if (assignment.repo_urls.length > 0) {
-            try {
-              await this.deps.setWorkspaces({
-                autopilot_req_id: autopilotReqId,
-                repo_urls: assignment.repo_urls,
-              });
-            } catch (e: unknown) {
-              log.warn(
-                "setWorkspaces 失败（继续）req=%s: %s",
-                autopilotReqId,
-                e instanceof Error ? e.message : String(e),
-              );
-            }
+          // 2. 设置代码库——空集也显式确认（= 无库需求，澄清走纯文本）。
+          // 跳过空集会让 core 的「单库项目自动派生」兜底把项目里无关的库挂上（dogfood 实锤 test-dev-pilot 误挂）。
+          try {
+            await this.deps.setWorkspaces({
+              autopilot_req_id: autopilotReqId,
+              repo_urls: assignment.repo_urls,
+            });
+          } catch (e: unknown) {
+            log.warn(
+              "setWorkspaces 失败（继续）req=%s: %s",
+              autopilotReqId,
+              e instanceof Error ? e.message : String(e),
+            );
           }
 
           // 3. 注册 link（供 mirror-pusher 订阅）
