@@ -199,20 +199,28 @@ export function createExtensionContext(extensionId: string): {
       },
 
       phaseEvents(reqId: string): PhaseEventEntry[] {
+        // 全部 run 的 phase 事件（执行历史多轮：重跑/fix run 各一组），
+        // run_seq = 该 run 的轮次号（task.seq），seq = 阶段在 run 内顺序。
         const tasks = listTasksByRequirement(reqId);
         if (tasks.length === 0) return [];
-        const latestTask = tasks.reduce((a, b) => (a.created_at > b.created_at ? a : b));
-        const events = listTaskPhaseEvents(latestTask.id);
-        const runSeq = latestTask.seq ?? 0;
-        return events.map((pe, i) => ({
-          run_seq: runSeq,
-          phase: pe.phase,
-          label: pe.phase,
-          state: pe.status === "done" ? "completed" : pe.status,
-          started_at: pe.started_at ? new Date(pe.started_at).toISOString() : null,
-          ended_at: pe.ended_at ? new Date(pe.ended_at).toISOString() : null,
-          seq: i,
-        }));
+        const sorted = [...tasks].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+        const out: PhaseEventEntry[] = [];
+        for (const task of sorted) {
+          const events = listTaskPhaseEvents(task.id);
+          const runSeq = task.seq ?? 0;
+          events.forEach((pe, i) => {
+            out.push({
+              run_seq: runSeq,
+              phase: pe.phase,
+              label: pe.phase,
+              state: pe.status === "done" ? "completed" : pe.status,
+              started_at: pe.started_at ? new Date(pe.started_at).toISOString() : null,
+              ended_at: pe.ended_at ? new Date(pe.ended_at).toISOString() : null,
+              seq: i,
+            });
+          });
+        }
+        return out;
       },
 
       task(taskId: string) {
