@@ -31,6 +31,8 @@ export interface AssignmentPollerDeps {
     source: string;
     external_ref: string;
     project_id?: string | null;
+    /** 分配时指定的工作流，透传给 core createRequirement */
+    workflow?: string | null;
   }): Promise<string>;
 
   /**
@@ -97,6 +99,7 @@ export class AssignmentPoller {
             source: "reqgenie",
             external_ref: assignment.reqgenie_req_id,
             project_id: assignment.project_hint ?? null,
+            workflow: assignment.workflow ?? null,
           });
 
           // 2. 设置代码库——空集也显式确认（= 无库需求，澄清走纯文本）。

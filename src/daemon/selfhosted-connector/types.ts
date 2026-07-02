@@ -31,6 +31,8 @@ export interface PendingAssignment {
   spec_md: string;
   repo_urls: string[];
   project_hint?: string | null;
+  /** 分配时指定的工作流（可选；传给本机 createRequirement） */
+  workflow?: string | null;
 }
 
 // ────────────────────────────────────────────────────

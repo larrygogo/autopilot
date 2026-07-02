@@ -79,6 +79,8 @@ export interface CreateRequirementOpts {
   external_ref?: string | null;
   callback_url?: string | null;
   callback_secret?: string | null;
+  /** 指定执行工作流（如 'dev'/'ad-hoc'），省略时 core 不写（调度器用 requirements.workflow 列的默认行为）。 */
+  workflow?: string | null;
 }
 
 export interface UpdateRequirementOpts {
@@ -183,6 +185,14 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
       );
     } catch {
       // DB 未跑 migration 050（如旧测试手动选迁移）时列不存在，忽略；生产环境不会走到这里
+    }
+  }
+  // 写入 workflow（create 时即指定，后续调度器消费）
+  if (opts.workflow != null) {
+    try {
+      db.run("UPDATE requirements SET workflow = ? WHERE id = ?", [opts.workflow, newId]);
+    } catch {
+      // 兼容未跑对应迁移的旧测试 DB
     }
   }
   // 有 workspace_id 时自动写多对多关联（spec §5.1）

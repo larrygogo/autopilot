@@ -20,6 +20,7 @@ import { CommandPoller } from "./commands-poller";
 import { MirrorPusher } from "./mirror-pusher";
 import { recoverInflightLinks } from "./index";
 import { DEFAULT_PROJECT_ID } from "../../core/projects";
+import { listWorkflows } from "../../core/workflow/registry";
 import type { AutopilotEvent } from "../../core/events";
 import type { Extension, ExtensionContext } from "../extensions/context";
 import type { ReqLink } from "./types";
@@ -191,6 +192,7 @@ export const reqgenieExtension: Extension = {
           spec_md: params.spec_md,
           source: params.source,
           external_ref: params.external_ref,
+          workflow: params.workflow ?? null,
           callback_url: null,
           callback_secret: null,
           chat_session_id: null,
@@ -280,8 +282,26 @@ export const reqgenieExtension: Extension = {
 
     // ── 心跳（成败记录进模块态，供 status() 报告连接健康）────────────────
     const HEARTBEAT_MS = 30_000;
-    const heartbeatTimer = setInterval(() => {
-      backend.heartbeat()
+
+    // 构建工作流目录（过滤内置 __ 前缀，listWorkflows 已过滤；失败退回 undefined = 空体）
+    const buildWorkflowList = () => {
+      try {
+        return listWorkflows().map((wf) => ({
+          name: wf.name,
+          label: wf.label,
+          requires_git: wf.requires_git,
+        }));
+      } catch (e: unknown) {
+        ctx.log.warn(
+          "构建工作流目录失败，回退空体心跳：%s",
+          e instanceof Error ? e.message : String(e),
+        );
+        return undefined;
+      }
+    };
+
+    const doHeartbeat = () => {
+      backend.heartbeat(buildWorkflowList())
         .then(() => {
           _lastHeartbeatAt = Date.now();
           _lastHeartbeatOk = true;
@@ -291,7 +311,11 @@ export const reqgenieExtension: Extension = {
           _lastHeartbeatOk = false;
           ctx.log.warn("selfhosted 心跳失败：%s", e instanceof Error ? e.message : String(e));
         });
-    }, HEARTBEAT_MS);
+    };
+
+    // 立即发一次心跳（不等 30s，让工作流目录尽快同步到 reqgenie）
+    doHeartbeat();
+    const heartbeatTimer = setInterval(doHeartbeat, HEARTBEAT_MS);
 
     // ── 启动恢复（best-effort，不阻塞启动）──────────────────────────────
     // daemon 重启时内存映射丢失，从本机 DB 重建进行中需求的 mirror 链接 + 补推快照

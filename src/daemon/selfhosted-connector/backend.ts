@@ -46,9 +46,17 @@ export class SelfhostedBackend {
 
   // ── 心跳 ──────────────────────────────────────
 
-  async heartbeat(): Promise<void> {
+  /**
+   * 刷新心跳。可选传入工作流目录（有参时附带 JSON body），
+   * 无参或目录构建失败时退回空体（兼容旧服务端）。
+   */
+  async heartbeat(workflows?: Array<{name:string;label?:string;requires_git:boolean}>): Promise<void> {
     const url = this.instancePath("/heartbeat");
-    const res = await this.fetchFn(url, { method: "POST", headers: this.auth() });
+    const res = await this.fetchFn(url, {
+      method: "POST",
+      headers: workflows ? { ...this.auth(), ...JSON_HEADERS } : this.auth(),
+      body: workflows ? JSON.stringify({ workflows }) : undefined,
+    });
     if (!res.ok) throw httpError(url, res);
   }
 
