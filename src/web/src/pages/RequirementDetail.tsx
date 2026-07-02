@@ -1926,62 +1926,25 @@ export function RequirementDetail() {
               );
             }
 
-            if (activeStep === "queue") {
-              return (
-                <>
-                  {readonly ? (
-                    /* 回看模式：排队步的特异信息是「何时入队、何时被调度开跑、等了多久」 */
-                    <Card className="space-y-2 p-5">
-                      {approvalLog || startRunLog ? (
-                        <>
-                          {approvalLog && (
-                            <div className="flex items-center justify-between gap-2 text-sm">
-                              <span>进入队列</span>
-                              <span className="font-mono text-[11px] text-muted-foreground">
-                                {new Date(approvalLog.created_at).toLocaleString()}
-                              </span>
-                            </div>
-                          )}
-                          {startRunLog && (
-                            <div className="flex items-center justify-between gap-2 text-sm">
-                              <span>开始执行</span>
-                              <span className="font-mono text-[11px] text-muted-foreground">
-                                {new Date(startRunLog.created_at).toLocaleString()}
-                              </span>
-                            </div>
-                          )}
-                          {approvalLog && startRunLog && (
-                            <div className="flex items-center justify-between gap-2 border-t border-border pt-2 text-xs text-muted-foreground">
-                              <span>排队等待</span>
-                              <span className="font-mono">
-                                {Math.max(0, Math.round((startRunLog.created_at - approvalLog.created_at) / 1000))}s
-                              </span>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">
-                          这条需求入队较早，没留下排队时间。
-                        </p>
-                      )}
-                    </Card>
-                  ) : (
-                    <>
-                      {specCard}
-                      {attachmentSection}
-                      {taskRecord}
-                      {req.status === "queued" && (
-                        <Button variant="outline" className="w-full" size="sm" onClick={recallToReady} disabled={actionBusy}>
-                          {actionBusy ? "处理中…" : "撤回（返回已澄清）"}
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </>
-              );
-            }
-
             if (activeStep === "execute") {
+              // 排队已并入执行步：还在排队时内容显示排队中（spec/附件/执行记录 + 撤回），
+              // 调度起跑后自然切换为执行内容
+              if (req.status === "queued") {
+                return (
+                  <>
+                    <Card className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin text-accent" />
+                      排队中 · 等调度器起任务
+                    </Card>
+                    {specCard}
+                    {attachmentSection}
+                    {taskRecord}
+                    <Button variant="outline" className="w-full" size="sm" onClick={recallToReady} disabled={actionBusy}>
+                      {actionBusy ? "处理中…" : "撤回（返回已澄清）"}
+                    </Button>
+                  </>
+                );
+              }
               return (
                 <>
                   {subPrCard}
