@@ -66,6 +66,8 @@ export interface Extension {
   enabled(): boolean;
   init(ctx: ExtensionContext): void | Promise<void>;
   dispose(): void | Promise<void>;
+  /** 可选：自报展示状态（键=业务标签、值可序列化），供 extensions.list RPC / Web 设置页展示。 */
+  status?(): Record<string, unknown>;
 }
 
 /** phase 事件条目（与 mirror-pusher.ts PhaseEventSnapshot 形状兼容，结构类型系统保证）。 */

@@ -20,10 +20,39 @@ const log = createLogger("extensions:registry");
 /** 进程内已注册扩展列表（module-level 单例） */
 const _extensions: Extension[] = [];
 
+/** 已成功进入 init 流程且未 dispose 的扩展 id（running 判定用） */
+const _running = new Set<string>();
+
 /** 注册一个扩展到进程内列表。必须在 initExtensions 调用前完成。 */
 export function registerExtension(ext: Extension): void {
   _extensions.push(ext);
   log.info("扩展已注册: %s", ext.id);
+}
+
+export interface ExtensionInfo {
+  id: string;
+  enabled: boolean;
+  running: boolean;
+  /** 扩展自报的展示状态（键=业务标签）；无 status 方法或调用异常时为 null */
+  status: Record<string, unknown> | null;
+}
+
+/** 列出所有已注册扩展及其状态（通用宿主能力；status 内容由各扩展自报，宿主零业务知识）。 */
+export function listExtensionsInfo(): ExtensionInfo[] {
+  return _extensions.map((ext) => {
+    let status: Record<string, unknown> | null = null;
+    try {
+      status = ext.status?.() ?? null;
+    } catch {
+      status = null;
+    }
+    return {
+      id: ext.id,
+      enabled: ext.enabled(),
+      running: _running.has(ext.id),
+      status,
+    };
+  });
 }
 
 /**
@@ -63,6 +92,7 @@ export function initExtensions(): () => void {
         });
       }
       log.info("扩展已初始化: %s", ext.id);
+      _running.add(ext.id);
     } catch (e: unknown) {
       log.error(
         "扩展同步初始化失败: %s — %s",
@@ -102,6 +132,7 @@ export function initExtensions(): () => void {
       for (const [type, handler] of registeredHandlers) {
         offEvent(type, handler);
       }
+      _running.delete(ext.id);
     }
     log.info("所有扩展已停止");
   };

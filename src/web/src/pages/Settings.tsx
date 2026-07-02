@@ -38,6 +38,7 @@ export function Settings({
   const [defaultsSaving, setDefaultsSaving] = useState(false);
 
   const [status, setStatus] = useState<any>(null);
+  const [extensions, setExtensions] = useState<Array<{ id: string; enabled: boolean; running: boolean; status: Record<string, unknown> | null }>>([]);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [restartingDaemon, setRestartingDaemon] = useState(false);
 
@@ -80,6 +81,7 @@ export function Settings({
   useEffect(() => {
     if (section !== "daemon") return;
     api.getStatus().then(setStatus).catch(() => {});
+    api.listExtensions().then((r) => setExtensions(r.extensions ?? [])).catch(() => {});
   }, [section]);
 
 
@@ -125,6 +127,36 @@ export function Settings({
                 有更新可用：本地代码落后远端。在项目目录跑 <code className="rounded bg-warning/15 px-1 py-0.5 font-mono">git pull</code>（必要时 <code className="rounded bg-warning/15 px-1 py-0.5 font-mono">bun run build:web</code>）后再重启 daemon。
               </div>
             )}
+          </Card>
+        )}
+
+        {/* 扩展：daemon 级扩展及其自报状态（如 reqgenie 连接器的注册/心跳）——
+            内容 KV 由扩展 status() 自报，此处通用渲染、不含业务知识 */}
+        {extensions.length > 0 && (
+          <Card className="mb-4 p-4">
+            <h3 className="mb-3 text-sm font-semibold">扩展</h3>
+            <div className="space-y-4">
+              {extensions.map((ext) => (
+                <div key={ext.id}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="font-mono text-xs text-foreground/85">{ext.id}</span>
+                    <span className={cn(
+                      "rounded-full px-2 py-0.5 text-[10px]",
+                      ext.running ? "bg-success/15 text-success" : ext.enabled ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground",
+                    )}>
+                      {ext.running ? "运行中" : ext.enabled ? "已启用（未运行）" : "未启用"}
+                    </span>
+                  </div>
+                  {ext.status && (
+                    <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                      {Object.entries(ext.status).map(([k, v]) => (
+                        <InfoField key={k} label={k} value={String(v)} mono={k === "实例ID" || k === "控制面"} />
+                      ))}
+                    </dl>
+                  )}
+                </div>
+              ))}
+            </div>
           </Card>
         )}
 

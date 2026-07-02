@@ -198,6 +198,9 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 export const api = {
   // [WS-RPC] daemon.status — P3 第一批 PoC，已切到 WS
   getStatus: () => requestRpc<any>("daemon.status"),
+  // [WS-RPC] extensions.list — daemon 扩展及其自报状态（设置 → Daemon「扩展」卡）
+  listExtensions: () =>
+    requestRpc<{ extensions: Array<{ id: string; enabled: boolean; running: boolean; status: Record<string, unknown> | null }> }>("extensions.list"),
   // [WS-RPC] tasks.list — P3 第一批 PoC
   listTasks: (filters?: Record<string, string>) => {
     const params: Record<string, unknown> = {};

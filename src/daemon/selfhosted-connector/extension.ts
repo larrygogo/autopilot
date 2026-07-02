@@ -27,6 +27,11 @@ import type { ReqLink } from "./types";
 
 let _disposeConnector: (() => void) | null = null;
 
+// ── 心跳健康态（status() 报告用）─────────────────────────────────────────
+
+let _lastHeartbeatAt: number | null = null;
+let _lastHeartbeatOk: boolean | null = null;
+
 // ── 扩展实现 ───────────────────────────────────────────────────────────────
 
 /** reqgenie B-interactive 连接器扩展（单例，由 daemon/index.ts 通过 registerExtension 注册）。 */
@@ -37,6 +42,18 @@ export const reqgenieExtension: Extension = {
     const cfg = loadSelfhostedConfig();
     if (!cfg.enabled) return false;
     return loadSelfhostedCredentials() !== null;
+  },
+
+  status(): Record<string, unknown> {
+    const creds = loadSelfhostedCredentials();
+    if (!creds) return { 注册状态: "未注册" };
+    return {
+      注册状态: "已注册（reqgenie 实例）",
+      实例ID: creds.instance_id,
+      控制面: creds.control_plane_url,
+      连接: _lastHeartbeatOk === null ? "等待心跳" : _lastHeartbeatOk ? "正常" : "失联",
+      最近心跳: _lastHeartbeatAt ? new Date(_lastHeartbeatAt).toLocaleString("zh-CN", { hour12: false }) : "—",
+    };
   },
 
   init(ctx: ExtensionContext): void {
@@ -209,12 +226,19 @@ export const reqgenieExtension: Extension = {
     });
     commandPoller.start();
 
-    // ── 心跳 ──────────────────────────────────────────────────────────────
+    // ── 心跳（成败记录进模块态，供 status() 报告连接健康）────────────────
     const HEARTBEAT_MS = 30_000;
     const heartbeatTimer = setInterval(() => {
-      backend.heartbeat().catch((e: unknown) => {
-        ctx.log.warn("selfhosted 心跳失败：%s", e instanceof Error ? e.message : String(e));
-      });
+      backend.heartbeat()
+        .then(() => {
+          _lastHeartbeatAt = Date.now();
+          _lastHeartbeatOk = true;
+        })
+        .catch((e: unknown) => {
+          _lastHeartbeatAt = Date.now();
+          _lastHeartbeatOk = false;
+          ctx.log.warn("selfhosted 心跳失败：%s", e instanceof Error ? e.message : String(e));
+        });
     }, HEARTBEAT_MS);
 
     // ── 启动恢复（best-effort，不阻塞启动）──────────────────────────────
