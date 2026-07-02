@@ -77,6 +77,7 @@ export interface PhaseEventEntry {
   started_at: string | null;
   ended_at: string | null;
   seq: number;
+  run_kind?: string;
 }
 
 /** addComment 入参（避免泄露 CommentKind/CommentFromRole 给扩展）。 */
@@ -208,6 +209,7 @@ export function createExtensionContext(extensionId: string): {
         for (const task of sorted) {
           const events = listTaskPhaseEvents(task.id);
           const runSeq = task.seq ?? 0;
+          const runKind = task.kind ?? "execution";
           events.forEach((pe, i) => {
             out.push({
               run_seq: runSeq,
@@ -217,6 +219,7 @@ export function createExtensionContext(extensionId: string): {
               started_at: pe.started_at ? new Date(pe.started_at).toISOString() : null,
               ended_at: pe.ended_at ? new Date(pe.ended_at).toISOString() : null,
               seq: i,
+              run_kind: runKind,
             });
           });
         }

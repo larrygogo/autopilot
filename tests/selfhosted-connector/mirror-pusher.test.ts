@@ -239,8 +239,8 @@ describe("mirror-pusher", () => {
         status_reason: null,
       }),
       listComments: () => [
-        { id: "qst-1", parent_id: null, from_role: "agent", body: "请描述具体场景", status: "open", created_at: 1, suggestions: null },
-        { id: "qst-2", parent_id: "qst-1", from_role: "user", body: "用于电商场景", status: "resolved", created_at: 2, suggestions: null },
+        { id: "qst-1", parent_id: null, kind: "question", from_role: "agent", body: "请描述具体场景", status: "open", created_at: 1, suggestions: null },
+        { id: "qst-2", parent_id: "qst-1", kind: "question", from_role: "user", body: "用于电商场景", status: "resolved", created_at: 2, suggestions: null },
       ],
       listSubPrs: () => [],
       listPhaseEvents: () => [],

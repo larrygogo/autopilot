@@ -77,6 +77,7 @@ export const reqgenieExtension: Extension = {
         ctx.read.comments(requirementId).map((c) => ({
           id: c.id,
           parent_id: c.parent_id,
+          kind: c.kind,
           from_role: c.from_role,
           body: c.body,
           status: c.status,

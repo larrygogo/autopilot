@@ -104,6 +104,7 @@ export interface MirrorQuestion {
   status: "open" | "resolved";
   seq?: number;
   suggestions?: string[] | null;
+  kind?: string;
 }
 
 export interface MirrorPhase {
@@ -114,6 +115,7 @@ export interface MirrorPhase {
   started_at?: string | null;
   finished_at?: string | null;
   seq: number;
+  run_kind?: string;
 }
 
 export interface MirrorPr {

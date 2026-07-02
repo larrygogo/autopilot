@@ -67,6 +67,7 @@ export interface CommentSnapshot {
   status: string;
   created_at: number;
   suggestions: string[] | null;
+  kind: string;
 }
 
 export interface SubPrSnapshot {
@@ -84,6 +85,7 @@ export interface PhaseEventSnapshot {
   started_at: string | null;
   ended_at: string | null;
   seq: number;
+  run_kind?: string;
 }
 
 // ── 推送器主体 ─────────────────────────────────────────────────
@@ -184,7 +186,7 @@ export class MirrorPusher {
       spec_md: req.spec_md,
       title: req.title,
       questions: comments
-        .filter((c) => c.from_role === "agent" || c.from_role === "user")
+        .filter((c) => c.from_role === "agent" || c.from_role === "user" || c.from_role === "github")
         .map((c, i) => ({
           autopilot_question_id: c.id,
           parent_id: c.parent_id,
@@ -193,6 +195,7 @@ export class MirrorPusher {
           status: (c.status === "resolved" ? "resolved" : "open") as "open" | "resolved",
           seq: i,
           suggestions: c.suggestions ?? null,
+          kind: c.kind,
         })),
       phases: phases.map((p) => ({
         run_seq: p.run_seq,
@@ -202,6 +205,7 @@ export class MirrorPusher {
         started_at: p.started_at,
         finished_at: p.ended_at,
         seq: p.seq,
+        run_kind: p.run_kind,
       })),
       prs: subPrs.map((sp, i) => ({
         repo_alias: sp.repo_alias,
@@ -332,7 +336,7 @@ export class MirrorPusher {
   private buildQuestionsPayload(requirementId: string): Record<string, unknown> {
     const comments = this.deps.listComments(requirementId);
     const questions = comments
-      .filter((c) => c.from_role === "agent" || c.from_role === "user")
+      .filter((c) => c.from_role === "agent" || c.from_role === "user" || c.from_role === "github")
       .map((c, i) => ({
         autopilot_question_id: c.id,
         parent_id: c.parent_id,
@@ -341,6 +345,7 @@ export class MirrorPusher {
         status: (c.status === "resolved" ? "resolved" : "open") as "open" | "resolved",
         seq: i,
         suggestions: c.suggestions ?? null,
+        kind: c.kind,
       }));
     return { questions };
   }
