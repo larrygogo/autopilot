@@ -10,7 +10,7 @@ import { mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
-  loadYamlWorkflow,
+  loadJsonWorkflow,
   getWorkflowGitRequirement,
   getWorkflowGitSandbox,
   registerBuiltin,
@@ -29,12 +29,12 @@ afterEach(() => {
   }
 });
 
-async function loadFromYaml(yaml: string): Promise<WorkflowDefinition | null> {
+async function loadFromSpec(spec: Record<string, unknown>): Promise<WorkflowDefinition | null> {
   const dir = join(tmpdir(), `autopilot-wfdecl-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   tmpDirs.push(dir);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "workflow.yaml"), yaml, "utf-8");
-  return await loadYamlWorkflow(dir);
+  writeFileSync(join(dir, "workflow.json"), JSON.stringify(spec, null, 2), "utf-8");
+  return await loadJsonWorkflow(dir);
 }
 
 function builtin(name: string, extra: Partial<WorkflowDefinition>): WorkflowDefinition {
@@ -51,96 +51,73 @@ function builtin(name: string, extra: Partial<WorkflowDefinition>): WorkflowDefi
 
 describe("registry 声明层透传与派生", () => {
   it("requires.git 二态原样透传；delivers 不校验枚举值（非标准也保留）", async () => {
-    const wf = await loadFromYaml([
-      "name: t1",
-      "requires:",
-      "  git: false",
-      "phases:",
-      "  - name: a",
-      "    prompt: hi",
-    ].join("\n"));
+    const wf = await loadFromSpec({
+      name: "t1",
+      requires: { git: false },
+      phases: [{ name: "a", prompt: "hi" }],
+    });
     expect(wf).not.toBeNull();
     expect(wf!.requires?.git).toBe(false);
 
-    const wf2 = await loadFromYaml([
-      "name: t2",
-      "delivers: something_else",
-      "phases:",
-      "  - name: a",
-      "    prompt: hi",
-    ].join("\n"));
+    const wf2 = await loadFromSpec({
+      name: "t2",
+      delivers: "something_else",
+      phases: [{ name: "a", prompt: "hi" }],
+    });
     expect(wf2!.delivers).toBe("something_else"); // 枚举语义在 daemon，core 不拦
   });
 
   it("requires.git 缺省派生 = sandbox.git ?? false（老工作流零感知）；显式优先", async () => {
-    const gitWf = await loadFromYaml([
-      "name: t3",
-      "sandbox:",
-      "  git: true",
-      "phases:",
-      "  - name: a",
-      "    prompt: hi",
-    ].join("\n"));
+    const gitWf = await loadFromSpec({
+      name: "t3",
+      sandbox: { git: true },
+      phases: [{ name: "a", prompt: "hi" }],
+    });
     expect(getWorkflowGitRequirement(gitWf!)).toBe(true);
 
-    const plainWf = await loadFromYaml([
-      "name: t4",
-      "phases:",
-      "  - name: a",
-      "    prompt: hi",
-    ].join("\n"));
+    const plainWf = await loadFromSpec({
+      name: "t4",
+      phases: [{ name: "a", prompt: "hi" }],
+    });
     expect(getWorkflowGitRequirement(plainWf!)).toBe(false);
 
     // 显式 requires.git=false 优先于 sandbox.git=true 派生
-    const explicitWf = await loadFromYaml([
-      "name: t5",
-      "sandbox:",
-      "  git: true",
-      "requires:",
-      "  git: false",
-      "phases:",
-      "  - name: a",
-      "    prompt: hi",
-    ].join("\n"));
+    const explicitWf = await loadFromSpec({
+      name: "t5",
+      sandbox: { git: true },
+      requires: { git: false },
+      phases: [{ name: "a", prompt: "hi" }],
+    });
     expect(getWorkflowGitRequirement(explicitWf!)).toBe(false);
   });
 
   it("非法形状容错：requires 非对象 / requires.git 非法值（含废弃的 optional）/ delivers 非字符串 → 删除回退派生", async () => {
-    const wf = await loadFromYaml([
-      "name: t6",
-      "requires: yes_please",
-      "delivers: 42",
-      "phases:",
-      "  - name: a",
-      "    prompt: hi",
-    ].join("\n"));
+    const wf = await loadFromSpec({
+      name: "t6",
+      requires: "yes_please",
+      delivers: 42,
+      phases: [{ name: "a", prompt: "hi" }],
+    });
     expect(wf!.requires).toBeUndefined();
     expect(wf!.delivers).toBeUndefined();
 
     // 任意非 true/false 值（含废弃的 "optional"）都被删 → 回退派生自 sandbox.git
-    const wf2 = await loadFromYaml([
-      "name: t7",
-      "sandbox:",
-      "  git: true",
-      "requires:",
-      "  git: optional",
-      "phases:",
-      "  - name: a",
-      "    prompt: hi",
-    ].join("\n"));
+    const wf2 = await loadFromSpec({
+      name: "t7",
+      sandbox: { git: true },
+      requires: { git: "optional" },
+      phases: [{ name: "a", prompt: "hi" }],
+    });
     expect(wf2!.requires?.git).toBeUndefined();
     expect(getWorkflowGitRequirement(wf2!)).toBe(true); // 回退 sandbox.git 派生
   });
 
   it("requires.git=true 而 sandbox.git 缺失仍可加载（sandbox.git 现从 requires.git 派生，不存在漏写）", async () => {
-    const wf = await loadFromYaml([
-      "name: t8",
-      "requires:",
-      "  git: true",
-      "phases:",
-      "  - name: a",
-      "    prompt: hi",
-    ].join("\n"));
+    const wf = await loadFromSpec({
+      name: "t8",
+      requires: { git: true },
+      phases: [{ name: "a", prompt: "hi" }],
+    });
     expect(wf).not.toBeNull();
     expect(getWorkflowGitRequirement(wf!)).toBe(true);
   });

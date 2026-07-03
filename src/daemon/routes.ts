@@ -1426,27 +1426,20 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     //   POST /api/workflows/author       → workflows.author
     //   POST /api/workflows/author/save  → workflows.saveAuthored
 
-    // GET /api/workflows/health — 扫描 yaml.name 跟目录名不一致 / 重名碰撞
+    // GET /api/workflows/health — file 轨退役（P1），孤儿扫描已无意义；返回 410
     if (method === "GET" && path === "/api/workflows/health") {
-      const { scanWorkflowHealth } = await import("../core/workflow/templates");
-      return json(scanWorkflowHealth());
+      return new Response(JSON.stringify({ error: "已退役：file 轨工作流孤儿扫描在 P1 移除" }), {
+        status: 410,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    // POST /api/workflows/health/fix-orphan — 修复指定孤儿目录（改 yaml.name 为目录名）
+    // POST /api/workflows/health/fix-orphan — file 轨退役（P1），返回 410
     if (method === "POST" && path === "/api/workflows/health/fix-orphan") {
-      const body = await req.json().catch(() => null) as { dir?: string } | null;
-      if (!body?.dir) return error("dir is required", 400);
-      try {
-        const { fixOrphanWorkflow } = await import("../core/workflow/templates");
-        const r = fixOrphanWorkflow(body.dir);
-        const { discover } = await import("../core/workflow/registry");
-        await discover();
-        emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true, ...r });
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return error(msg, msg.includes("不存在") || msg.includes("非法") ? 400 : 500);
-      }
+      return new Response(JSON.stringify({ error: "已退役：file 轨工作流孤儿修复在 P1 移除" }), {
+        status: 410,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     // POST /api/workflows/:name/clone — 从用户已有工作流克隆（区别于 from-template 只克隆 examples 模板）

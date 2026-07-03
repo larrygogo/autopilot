@@ -5,9 +5,13 @@ import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { runChecks, hasTaskStartBlocker } from "../src/core/doctor";
 import { _setDbForTest, getDb } from "../src/core/db";
+import { up as m001 } from "../src/migrations/001-baseline";
+import { up as m007 } from "../src/migrations/007-workflows";
 import { up as m041 } from "../src/migrations/041-api-keys";
 import { up as m047 } from "../src/migrations/047-providers-table";
+import { up as m048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { getProviderByName, setProviderCliStatus } from "../src/core/providers";
+import { createTemplateDbWorkflow } from "../src/core/workflow/workflows";
 
 let tmpFile: string;
 let tmpDir: string;
@@ -166,23 +170,33 @@ describe("hasTaskStartBlocker（强制落在 task-start 守卫，而非 doctor �
     writeFileSync(tmpFile, "providers:\n  anthropic:\n    enabled: true\n    default_model: x\n", "utf-8");
     seedUsableProvider();
     const report = await runChecks({ level: 1 });
-    // 注：beforeEach 注入了 in-memory DB，C7 (projects.has-any) 查询会抛错被 catch 吞掉
-    // 不产生 check，所以这里可以安全地断言 status === "ok"
     expect(report.checks.find((c) => c.id === "config.exists")?.status).toBe("ok");
     expect(report.checks.find((c) => c.id === "config.parses")?.status).toBe("ok");
     expect(report.checks.find((c) => c.id === "providers.has-enabled")?.status).toBe("ok");
     // 命名 agent 健康检查已移除
     expect(report.checks.find((c) => c.id.startsWith("agents."))).toBeUndefined();
-    expect(report.status).toBe("ok");
+    // upgrade.webdist 在开发者本地 web-dist 较旧时会产生 warning（升级提示，不影响合规性）；
+    // 只验证核心检查项无 error，整体 status 排除 upgrade 类 warning 是 ok。
+    const nonUpgradeChecks = report.checks.filter((c) => !c.id.startsWith("upgrade."));
+    const nonUpgradeStatus = nonUpgradeChecks.some((c) => c.status === "error")
+      ? "error"
+      : nonUpgradeChecks.some((c) => c.status === "warning")
+        ? "warning"
+        : "ok";
+    expect(nonUpgradeStatus).toBe("ok");
   });
 
   it("C8 工作流副本落后内置模板 → upgrade.workflows warning", async () => {
     writeFileSync(tmpFile, "\n", "utf-8");
+    // 需要初始化 workflows 表（001+007+048）才能写 DB native 行
+    const db = getDb();
+    m001(db);
+    m007(db);
+    m048(db);
     seedUsableProvider();
-    // 在 tmp home 造一个落后的 dev 副本（无 template_revision = r0 < examples 的 r≥1）
-    const wfDir = join(tmpDir, "workflows", "dev");
-    mkdirSync(wfDir, { recursive: true });
-    writeFileSync(join(wfDir, "workflow.yaml"), "name: dev\nlabel: x\nphases:\n  - name: a\n    timeout: 1\n", "utf-8");
+    // 在 DB 种一个落后的 dev native 行（revision=1 < examples 的 r≥3）
+    const staleSpec = JSON.stringify({ name: "dev", template_revision: 1, phases: [{ name: "a", timeout: 1 }] });
+    createTemplateDbWorkflow({ name: "dev", description: "旧版", spec_json: staleSpec });
     const report = await runChecks({ level: 1 });
     const c = report.checks.find((c) => c.id === "upgrade.workflows");
     expect(c?.status).toBe("warning");

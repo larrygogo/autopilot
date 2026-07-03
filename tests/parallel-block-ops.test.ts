@@ -3,14 +3,15 @@
  * 后端 setWorkflowPhases 已支持 parallel 结构，这里只测两件事：
  *
  * 1. 后端 setWorkflowPhases 接受含 parallel 的 phases 数组并能正确保存
- * 2. registry.loadYamlWorkflow 能加载 parallel 块（含 prompt 子项）
+ * 2. registry.loadJsonWorkflow 能加载 parallel 块（含 prompt 子项）
+ * P1 后：改用 loadJsonWorkflow + workflow.json。
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
-  loadYamlWorkflow,
+  loadJsonWorkflow,
   isParallelPhase,
   _clearRegistry,
   type ParallelDefinition,
@@ -36,26 +37,28 @@ describe("parallel block in yaml", () => {
     const wfDir = join(tmpHome, "workflows", "par");
     mkdirSync(wfDir, { recursive: true });
     writeFileSync(
-      join(wfDir, "workflow.yaml"),
-      `name: par
-phases:
-  - name: prepare
-    prompt: do prep
-  - parallel:
-      name: build
-      fail_strategy: cancel_all
-      phases:
-        - name: build_a
-          prompt: build A
-        - name: build_b
-          prompt: build B
-  - name: deploy
-    prompt: deploy
-`,
+      join(wfDir, "workflow.json"),
+      JSON.stringify({
+        name: "par",
+        phases: [
+          { name: "prepare", prompt: "do prep" },
+          {
+            parallel: {
+              name: "build",
+              fail_strategy: "cancel_all",
+              phases: [
+                { name: "build_a", prompt: "build A" },
+                { name: "build_b", prompt: "build B" },
+              ],
+            },
+          },
+          { name: "deploy", prompt: "deploy" },
+        ],
+      }, null, 2),
       "utf-8",
     );
 
-    const wf = await loadYamlWorkflow(wfDir);
+    const wf = await loadJsonWorkflow(wfDir);
     expect(wf).not.toBeNull();
     expect(wf!.phases.length).toBe(3);
     expect(isParallelPhase(wf!.phases[1])).toBe(true);
@@ -73,21 +76,25 @@ phases:
     const wfDir = join(tmpHome, "workflows", "par2");
     mkdirSync(wfDir, { recursive: true });
     writeFileSync(
-      join(wfDir, "workflow.yaml"),
-      `name: par2
-phases:
-  - parallel:
-      name: dual
-      phases:
-        - name: a
-          prompt: a
-        - name: b
-          prompt: b
-`,
+      join(wfDir, "workflow.json"),
+      JSON.stringify({
+        name: "par2",
+        phases: [
+          {
+            parallel: {
+              name: "dual",
+              phases: [
+                { name: "a", prompt: "a" },
+                { name: "b", prompt: "b" },
+              ],
+            },
+          },
+        ],
+      }, null, 2),
       "utf-8",
     );
 
-    const wf = await loadYamlWorkflow(wfDir);
+    const wf = await loadJsonWorkflow(wfDir);
     const par = (wf!.phases[0] as { parallel: ParallelDefinition }).parallel;
     expect(par.fail_strategy).toBe("cancel_all");
   });
@@ -96,19 +103,24 @@ phases:
     const wfDir = join(tmpHome, "workflows", "par3");
     mkdirSync(wfDir, { recursive: true });
     writeFileSync(
-      join(wfDir, "workflow.yaml"),
-      `name: par3
-phases:
-  - parallel:
-      name: build
-      phases:
-        - name: build_a
-          prompt: a
-`,
+      join(wfDir, "workflow.json"),
+      JSON.stringify({
+        name: "par3",
+        phases: [
+          {
+            parallel: {
+              name: "build",
+              phases: [
+                { name: "build_a", prompt: "a" },
+              ],
+            },
+          },
+        ],
+      }, null, 2),
       "utf-8",
     );
 
-    const wf = await loadYamlWorkflow(wfDir);
+    const wf = await loadJsonWorkflow(wfDir);
     const par = (wf!.phases[0] as { parallel: ParallelDefinition }).parallel;
     expect(par.name).toBe("build");
     // 子节点的 pending_state / running_state 都正常推导

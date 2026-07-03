@@ -1,0 +1,29 @@
+{
+  "name": "review_loop",
+  "template_revision": 2,
+  "label": "评审回路示例",
+  "description": "最小声明式判据示例——设计 → 评审（agent 判 PASS/REJECT）→ 通过即完成、驳回则回设计重做。全 prompt 模式、零 ts。展示 decision / ${HANDOFF} / ${REJECTION} 三件套，可克隆改造，也可忽略。",
+  "requires": {
+    "git": false
+  },
+  "phases": [
+    {
+      "name": "design",
+      "timeout": 600,
+      "handoff": true,
+      "prompt": "你是方案设计者。根据下面的需求，输出一份简短但完整的技术方案。\n\n## 需求\n${REQUIREMENT}\n\n${REJECTION}\n\n要求：直接把方案正文写在你的回复里（系统会自动保存，无需你写文件）。\n不要去读取、诊断或修改任何文件，也不要谈论文件路径或运行环境——只管输出方案内容本身。\n"
+    },
+    {
+      "name": "review",
+      "timeout": 600,
+      "reject": "design",
+      "max_rejections": 3,
+      "prompt": "你是技术评审。只依据下面「待评审方案」的文本内容判断它是否满足需求，不要去读任何文件。\n\n## 需求\n${REQUIREMENT}\n\n## 待评审方案\n${HANDOFF_design}\n\n最后必须独占一行输出 REVIEW_RESULT: PASS 或 REVIEW_RESULT: REJECT。\n若驳回，在 \"## 驳回理由\" 标题下写明问题。方案只要覆盖了需求要点即可通过，不必吹毛求疵。\n",
+      "decision": {
+        "pass": "REVIEW_RESULT: PASS",
+        "reject": "REVIEW_RESULT: REJECT",
+        "reason_section": "## 驳回理由"
+      }
+    }
+  ]
+}

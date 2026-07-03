@@ -60,13 +60,3 @@ export function installAutopilotResolver(): void {
     },
   });
 }
-
-/**
- * 兜底：直接返回 autopilot src 绝对路径，给 registry.ts 的 sed 预处理用。
- * Bun.plugin 在 dynamic import 后续的静态 import 链上不一定生效，所以
- * loadYamlWorkflow 加载 workflow.ts 前会读文件、把 `@autopilot/...` 替换
- * 成绝对路径再 import，确保用户工作流 cp 到任意位置都能跑。
- */
-export function getAutopilotSrcPath(): string {
-  return dirname(import.meta.dir);
-}

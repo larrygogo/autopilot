@@ -1,0 +1,28 @@
+{
+  "name": "artifact",
+  "template_revision": 1,
+  "label": "产物交付",
+  "description": "产出文件类交付物（设计图 / 网页 demo / 文档）：制作 → 交付到需求 deliveries/ → 需求级人工验收（通过 = done；驳回 = fix_revision 修复轮重做产物）",
+  "requires": {
+    "git": false
+  },
+  "phases": [
+    {
+      "name": "produce",
+      "label": "制作",
+      "timeout": 1800,
+      "agent": {
+        "label": "制作者",
+        "provider": "anthropic",
+        "permission_mode": "bypassPermissions"
+      },
+      "prompt": "你是一位多面手创作者（设计 / 前端 / 文档均可）。请根据需求产出交付物。\n\n## 需求\n${REQUIREMENT}\n\n## 工作目录\n当前目录下若有代码仓库克隆，仅供阅读参考。**不要修改仓库已有文件，不要 git commit / push。**\n\n## 交付规则\n1. 所有交付物写入此绝对路径目录（框架已预建）：`${DELIVERABLES}`\n   ⚠ 写文件必须用上面的绝对路径前缀，不要写到任何其他位置（尤其不要写到用户主目录）\n2. 网页 demo = 自包含静态文件（单 html 或 html+css+js），双击可开，不依赖构建工具或服务器\n3. 设计图 = svg，或可在浏览器直接打开的 html 画布\n4. 最后写 `${DELIVERABLES}/SUMMARY.md`：交付了什么、每个文件是什么、怎么打开查看\n5. 完成前自查：SUMMARY.md 列出的每个文件都真实存在且可打开\n"
+    },
+    {
+      "name": "deliver",
+      "label": "交付",
+      "timeout": 300,
+      "deliver": "artifacts"
+    }
+  ]
+}

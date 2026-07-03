@@ -1,7 +1,6 @@
 import { getTask, createTask, closeOpenPhaseEvents, nextRunSeqForRequirement } from "../db";
 import type { Task } from "../db";
 import { discover, getWorkflow, getWorkflowGitSandbox, listWorkflows, isParallelPhase, getTerminalStates } from "../workflow/registry";
-import { isWorkflowCopyOutdated } from "../workflow/templates";
 import { snapshotWorkflow } from "../manifest";
 import { ensureTaskSandbox, ensureRunCodebaseSandbox, deleteRemoteDeliverBranch, getTaskWorktreeMeta, getTaskSandbox, bindTaskRunRoot, removeTaskWorktree, type WorkspaceRef } from "../sandbox";
 import { rmSync } from "fs";
@@ -229,14 +228,6 @@ export async function startTaskFromTemplate(opts: StartTaskOpts): Promise<Task> 
       (typeof extra["codebase_id"] === "string" ? extra["codebase_id"] : undefined) ??
       (getRequirementById(reqLink)?.workspace_id ?? undefined);
     workspaceRefs = resolveWorkspaceRefs(reqLink, fallbackWsId, "起任务失败");
-    // 仅当该工作流的本地副本「确实落后内置模板」（template_revision 比对）才提示同步——
-    // 旧版对每个 git 任务无条件 warn（狼来了），已同步过的用户也照样被刷屏。
-    if (workspaceRefs.length >= 1 && isWorkflowCopyOutdated(workflowName)) {
-      console.warn(
-        `[task=${taskId}] 工作流「${workflowName}」本地副本落后于内置模板，` +
-        `统一子目录布局下 git 任务可能 fatal：autopilot workflow sync ${workflowName} --apply`,
-      );
-    }
   }
   try {
     // 代码沙盒供给（源仓库零痕迹）。v2 R4：代码 clone 归需求所有——git 工作流经

@@ -6,7 +6,6 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
 import { WorkflowCatalog } from "@/components/WorkflowCatalog";
-import { WorkflowHealthBanner } from "@/components/WorkflowHealthBanner";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,9 +75,6 @@ export function Workflows() {
         ),
       }}
     >
-
-      {/* 工作流目录健康检查：孤儿 / 重名碰撞 → 顶部警告条 + 修复 dialog */}
-      <WorkflowHealthBanner onFixed={refresh} />
 
       {/* 用例目录视图：点卡片跳独立详情页 /workflows/:name */}
       <WorkflowCatalog

@@ -457,12 +457,14 @@ phases:
     }
   });
 
-  it("Step5b：seedTemplateWorkflow 幂等——磁盘已有 file 副本 → skip（不撞名）", async () => {
-    writeFileWorkflow("dev", "name: dev\nphases:\n  - name: x\n    prompt: y\n");
+  it("Step5b：seedTemplateWorkflow 幂等——DB 已有 template 行 → 返回 exists（P1 后 file 副本不再检测）", async () => {
     const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");
+    // 第一次种入
+    expect(seedTemplateWorkflow("dev")).toBe("seeded");
+    // 第二次调用：DB 已有 → exists（幂等）
     expect(seedTemplateWorkflow("dev")).toBe("exists");
-    // 没往 DB 种 template 行
-    const row = db.query<{ kind: string }, []>("SELECT kind FROM workflows WHERE name='dev' AND kind='template'").get();
-    expect(row).toBeNull();
+    // 只有一行 template，不会重复写
+    const rows = db.query<{ kind: string }, []>("SELECT kind FROM workflows WHERE name='dev' AND kind='template'").all();
+    expect(rows.length).toBe(1);
   });
 });

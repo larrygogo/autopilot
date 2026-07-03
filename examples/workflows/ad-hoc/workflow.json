@@ -1,0 +1,17 @@
+{
+  "name": "ad-hoc",
+  "template_revision": 1,
+  "label": "即兴任务",
+  "description": "一句话发包：跳过项目/需求，直接跑一个 agent prompt。autopilot run \"<prompt>\" 的默认 workflow。",
+  "sandbox": {
+    "git": true
+  },
+  "phases": [
+    {
+      "name": "run",
+      "label": "执行",
+      "timeout": 1800,
+      "prompt": "${REQUIREMENT}\n"
+    }
+  ]
+}

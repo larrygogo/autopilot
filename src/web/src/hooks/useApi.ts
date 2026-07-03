@@ -343,14 +343,6 @@ export const api = {
   // [WS-RPC] workflows.import —— 从 JSON 文本导入落 DB（不写磁盘；无 derives_from = native）
   importWorkflow: (body: { name: string; content: string; derives_from?: string; description?: string }) =>
     requestRpc<{ name: string; kind: string; source: string }>("workflows.import", body),
-  // [WS-RPC] workflows.scanHealth
-  scanWorkflowHealth: () =>
-    requestRpc<WorkflowHealthReport>("workflows.scanHealth"),
-  fixOrphanWorkflow: (dir: string) =>
-    request<{ ok: boolean; fixed: boolean; oldName: string; newName: string }>(
-      `/api/workflows/health/fix-orphan`,
-      { method: "POST", body: JSON.stringify({ dir }) },
-    ),
   // [WS-RPC] workflows.author（AI 长任务，给 5min 超时）
   authorWorkflow: (body: { description: string; prior_yaml?: string }) =>
     requestRpc<AuthoredWorkflow>("workflows.author", body, { timeoutMs: 300_000 }),
@@ -920,22 +912,6 @@ export interface WorkflowTemplate {
   agent_count: number;
 }
 
-export interface OrphanWorkflow {
-  dir: string;
-  yamlName: string;
-  issue: "name_mismatch";
-  suggestion: string;
-}
-
-export interface WorkflowCollision {
-  name: string;
-  dirs: string[];
-}
-
-export interface WorkflowHealthReport {
-  orphans: OrphanWorkflow[];
-  collisions: WorkflowCollision[];
-}
 
 export interface AuthoredWorkflow {
   name: string;

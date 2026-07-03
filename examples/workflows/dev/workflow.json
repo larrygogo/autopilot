@@ -1,0 +1,101 @@
+{
+  "name": "dev",
+  "template_revision": 3,
+  "label": "完整开发",
+  "description": "完整开发流程（设计 → 评审 → 开发 → 代码审查 → PR）",
+  "requires": {
+    "git": true
+  },
+  "phases": [
+    {
+      "name": "design",
+      "label": "设计",
+      "timeout": 900,
+      "sandbox": {
+        "code": "read-only"
+      },
+      "handoff": true,
+      "agent": {
+        "label": "架构师",
+        "provider": "anthropic",
+        "model": "claude-opus-4-8",
+        "permission_mode": "bypassPermissions",
+        "system_prompt": "你是一位资深架构师，擅长把需求拆解为清晰、可执行、风险可控的技术方案。代码注释与 commit message 用中文，代码本身用英文，遵循项目已有风格。"
+      },
+      "prompt": "请根据以下需求，生成一份完整、可执行的技术方案。\n\n## 需求\n${REQUIREMENT}\n\n先在当前工作目录用 `ls` / 查看子目录了解仓库结构与代码：本任务的代码库各自克隆在当前目录的子目录里（每个仓库一个子目录），**先看清布局，不要在根目录直接跑 git**。这是设计阶段，**只读代码、不要改动任何文件**。\n\n然后输出包含以下内容的技术方案：\n1. 需求分析\n2. 技术方案\n3. 实现步骤\n4. 影响范围\n5. 测试计划\n\n若下方存在上一轮评审的驳回意见，请针对性修订方案后重新输出（无内容则忽略）：\n${REJECTION}\n"
+    },
+    {
+      "name": "review",
+      "label": "设计评审",
+      "timeout": 900,
+      "reject": "design",
+      "max_rejections": 3,
+      "sandbox": {
+        "code": "read-only"
+      },
+      "agent": {
+        "label": "评审员",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "permission_mode": "bypassPermissions",
+        "max_turns": 5,
+        "system_prompt": "你是一位技术评审专家，从完整性、可行性、风险点、测试覆盖维度评审技术方案。指出真问题而非格式纠错，最后按判据自行裁决并提交。"
+      },
+      "decision": {
+        "mode": "tool",
+        "criteria": "判定对象是【设计方案】而非最终代码——后面还有完整的开发 + 代码审查环节兜底，无需在设计阶段追求面面俱到。\n通过(pass)：架构方向正确、技术可行、核心需求有覆盖即可。**可在开发阶段处理的 gap 一律不构成驳回**——包括边界 case 未写全、次要规格未钉死、测试细节、可读性/命名建议、以及评审标注为 Important/minor 但不影响架构成立的问题。\n驳回(reject)：仅当存在【架构性硬伤】——技术方向错误 / 方案不可行 / 核心需求遗漏 / 重大风险且方案毫无意识。\n原则：评审即便挑了不少刺，只要架构站得住、能据此往下开发，就判 pass，把细节留给后续环节。\n"
+      },
+      "prompt": "请评审下面的技术方案是否满足需求。\n\n## 需求\n${REQUIREMENT}\n\n## 待评审的技术方案\n${HANDOFF_design}\n\n请从完整性、可行性、风险点、测试覆盖四个维度给出散文评审，指出真问题而非格式纠错，说明是否建议通过；然后依据下面的判据自行裁决（通过 / 驳回，驳回必须说明问题与改进方向）。\n"
+    },
+    {
+      "name": "develop",
+      "label": "开发",
+      "timeout": 1800,
+      "sandbox": {
+        "code": "read-write"
+      },
+      "agent": {
+        "label": "开发者",
+        "provider": "anthropic",
+        "model": "claude-opus-4-8",
+        "permission_mode": "bypassPermissions",
+        "system_prompt": "你是一位高级开发工程师，按技术方案在仓库中实现代码并自查，确保可编译、可运行。代码注释与 commit message 用中文，代码本身用英文，遵循项目已有风格。"
+      },
+      "prompt": "请根据技术方案在仓库中实现代码。\n\n## 技术方案\n${HANDOFF_design}\n\n先用 `ls` / 查看子目录了解仓库布局：代码库各自克隆在当前目录的子目录里（每个仓库一个子目录）。直接在对应子目录内创建/修改文件完成开发，确保代码可编译、可运行。**不要自己 git commit / push**（提交与开 PR 由后续 submit_pr 阶段统一做）。跨仓库接口（API 契约 / 类型定义）必须两侧同步修改。\n\n若下方存在上一轮代码审查的驳回反馈——这是返工轮，你的上一轮改动已在工作树里（未提交、保留着），请在其基础上**继续修改**、针对性解决所有 Critical / Important 问题，**不要因为\"已经改过\"就当作完成**（无内容则忽略）：\n${REJECTION}\n"
+    },
+    {
+      "name": "code_review",
+      "label": "代码评审",
+      "timeout": 1200,
+      "reject": "develop",
+      "max_rejections": 3,
+      "sandbox": {
+        "code": "read-only"
+      },
+      "agent": {
+        "label": "评审员",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "permission_mode": "bypassPermissions",
+        "max_turns": 5,
+        "system_prompt": "你是一位代码审查专家。关注正确性、可读性、边界与失败处理；找出真问题而非格式纠错，按 critical / important / minor 分级反馈，最后按判据自行裁决并提交。"
+      },
+      "decision": {
+        "mode": "tool",
+        "criteria": "通过(pass)：改动正确实现了需求与技术方案的核心目标，无明显正确性/安全问题，关键路径可验证。仅 minor 风格问题不驳回。\n驳回(reject)：critical/important 缺陷——功能未实现 / 逻辑错误 / 安全隐患 / 与方案严重不符。\n"
+      },
+      "prompt": "请审查本次代码改动是否正确实现了技术方案。\n\n## 技术方案\n${HANDOFF_design}\n\n你在仓库工作目录、有完整 shell 权限。请**自己采集真实改动再评审**：代码库各自在当前目录的子目录里，对每个子目录进入后运行\n`git add -A && git diff --cached --no-ext-diff origin/<base 分支>`（base 通常是 main）查看相对基线的全量改动，必要时配合 `git diff --cached --stat` 看文件全景、用 Read 查看具体文件内容。**禁止以\"diff 里没看到\"为由认定功能缺失**——看不到就主动进仓库目录里查清楚。\n\n请从正确性、代码质量、安全性、测试覆盖四个维度给出散文审查，指出真问题而非格式纠错、说明是否建议通过；然后依据下面的判据自行裁决（通过 / 驳回，驳回必须说明问题与改进方向）。\n"
+    },
+    {
+      "name": "submit_pr",
+      "label": "提交 PR",
+      "timeout": 300,
+      "deliver": "pr",
+      "pr_body_from": "design",
+      "sandbox": {
+        "code": "read-write",
+        "deliver": true
+      }
+    }
+  ]
+}

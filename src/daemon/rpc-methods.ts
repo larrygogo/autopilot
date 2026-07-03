@@ -30,7 +30,7 @@ import {
 import { patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
 import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb, createDbWorkflow, createNativeDbWorkflow } from "../core/workflow/workflows";
 import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
-import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow/templates";
+import { listWorkflowTemplates } from "../core/workflow/templates";
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
 import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig, loadSchedulerConfig, saveSchedulerConfig, systemTimezone, isValidTimezone } from "../core/config";
 import { requestRestart, requestShutdown } from "./index";
@@ -883,11 +883,7 @@ function registerWorkflowRpc(): void {
     handler: () => ({ templates: listWorkflowTemplates() }),
   });
 
-  registerRpcMethod({
-    method: "workflows.scanHealth",
-    description: "扫描 yaml.name 跟目录名不一致 / 重名碰撞",
-    handler: () => scanWorkflowHealth(),
-  });
+  // workflows.scanHealth 已于 P1 退役（file 轨孤儿扫描无意义），已从 rpc-methods 移除。
 
   registerRpcMethod({
     method: "workflows.import",

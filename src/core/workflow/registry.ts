@@ -313,40 +313,40 @@ function expandParallelDefaults(
 }
 
 // ──────────────────────────────────────────────
-// YAML 工作流加载
+// JSON 工作流加载（P1：examples 模板 JSON 化）
 // ──────────────────────────────────────────────
 
 /**
- * 从工作流目录加载 YAML 工作流定义（纯 yaml：file 轨退役后 workflow.ts 不再被加载）。
- * 目录需包含 workflow.yaml；如残留 workflow.ts 会被忽略并告警。
+ * 从工作流目录加载 JSON 工作流定义（P1 后：examples 模板均为 workflow.json）。
+ * 目录需包含 workflow.json；如残留 workflow.ts 会被忽略并告警。
  * 现存消费者：examples 模板解析（种子/测试/导出投影），不再用于运行时 discover。
  */
-export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinition | null> {
-  const yamlPath = join(wfDir, "workflow.yaml");
+export async function loadJsonWorkflow(wfDir: string): Promise<WorkflowDefinition | null> {
+  const jsonPath = join(wfDir, "workflow.json");
   const tsPath = join(wfDir, "workflow.ts");
 
-  if (!existsSync(yamlPath)) {
+  if (!existsSync(jsonPath)) {
     return null;
   }
 
   let wfDef: Record<string, unknown>;
   try {
-    const content = readFileSync(yamlPath, "utf-8");
-    const parsed = parseYaml(content);
+    const content = readFileSync(jsonPath, "utf-8");
+    const parsed = JSON.parse(content) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object") {
-      log.warn("YAML 工作流 %s 为空或格式错误", yamlPath);
+      log.warn("JSON 工作流 %s 为空或格式错误", jsonPath);
       return null;
     }
-    wfDef = parsed as Record<string, unknown>;
+    wfDef = parsed;
     // Schema 级归一化：允许字段类型宽松但会转为正确类型并记警告
-    normalizeWorkflowFields(wfDef, yamlPath);
+    normalizeWorkflowFields(wfDef, jsonPath);
     // `workspace:` 段已更名为 `sandbox:`；优先读 sandbox，回退老字段并 warn
-    normalizeSandboxSection(wfDef, yamlPath);
+    normalizeSandboxSection(wfDef, jsonPath);
     // 声明层（requires/delivers）：只做形状归一 + lint，不校验枚举值（语义在 daemon）
-    normalizeDeclarations(wfDef, yamlPath);
+    normalizeDeclarations(wfDef, jsonPath);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
-    log.error("解析 YAML 工作流 %s 失败：%s", yamlPath, message);
+    log.error("解析 JSON 工作流 %s 失败：%s", jsonPath, message);
     return null;
   }
 
@@ -354,7 +354,7 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
   // 阶段一律走框架原语（prompt / gate / deliver / decision）；含自定义函数的老工作流
   // 由 migration 052 告警指引重建。
   if (existsSync(tsPath)) {
-    log.warn("工作流 %s 含 workflow.ts——file 轨已退役，TS 阶段函数不再加载（仅按 yaml 声明式解析）", wfDir);
+    log.warn("工作流 %s 含 workflow.ts——file 轨已退役，TS 阶段函数不再加载（仅按 json 声明式解析）", wfDir);
   }
 
   return buildWorkflowDefinition(wfDef, null);
@@ -363,8 +363,8 @@ export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinitio
 /**
  * 从「已解析 + 归一化的 wfDef 对象」构建完整 WorkflowDefinition：收集 phase 名、声明式安全闸门、
  * 展开默认值 + 绑定函数、推导 initial/terminal_state、绑定 workflow 级函数、归一化 transitions。
- * file 工作流（loadYamlWorkflow 解析 yaml + import ts 后）与 native DB 工作流（解析 spec_json、
- * tsModule=null）共用此构建路径——统一入口，消除 yaml-only 假设。
+ * examples 模板（loadJsonWorkflow 解析 json 后）与 native DB 工作流（解析 spec_json、
+ * tsModule=null）共用此构建路径——统一入口。
  */
 export function buildWorkflowDefinition(
   wfDef: Record<string, unknown>,
