@@ -144,13 +144,14 @@ describe("selfhosted-connector 分配流程", () => {
     ]);
   });
 
-  it("(a) 无 repo_urls 时 setWorkspaces 不被调用", async () => {
+  it("(a) 无 repo_urls 时 setWorkspaces 也被调用（空集=显式确认无库，防单库项目自动派生误挂）", async () => {
     const noRepoAssignment: PendingAssignment = { ...baseAssignment, repo_urls: [] };
     const { deps, calls } = makeDeps(noRepoAssignment);
     await runOnePoll(deps, noRepoAssignment);
 
     const wsCall = calls.find((c) => c.op === "setWorkspaces");
-    expect(wsCall).toBeUndefined();
+    expect(wsCall).toBeDefined();
+    expect((wsCall as { op: "setWorkspaces"; repo_urls: string[] }).repo_urls).toEqual([]);
   });
 
   // ── (b) 自动进澄清 ────────────────────────────────────────────────────
