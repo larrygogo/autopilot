@@ -12,7 +12,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { up as migrate052 } from "../src/migrations/052-import-file-workflows";
 import { _setDbForTest } from "../src/core/db";
-import { getWorkflowFromDb, createNativeDbWorkflow } from "../src/core/workflow/workflows";
+import { getWorkflowFromDb, createNativeDbWorkflow, upsertFileWorkflow } from "../src/core/workflow/workflows";
 
 describe("migration 052: import file workflows", () => {
   let tmpHome: string;
@@ -80,6 +80,40 @@ describe("migration 052: import file workflows", () => {
     const row = getWorkflowFromDb("dup_wf")!;
     expect(row.description).toBe("已在库"); // 未被目录版本覆盖
     expect(existsSync(dir)).toBe(true); // 目录保留
+  });
+
+  it("主路径：source=file 镜像行（老用户真实形态）→ 从行内 yaml_content 转 native，不被同名跳过", () => {
+    // 老用户目录工作流跑过 discover 后必有镜像行——052 必须转换而非「DB 同名→跳过」
+    const dir = writeDirWorkflow("mirror_wf", "name: mirror_wf\ndescription: 镜像\nphases:\n  - name: a\n    prompt: x\n");
+    upsertFileWorkflow({ name: "mirror_wf", description: "镜像", yaml_content: "name: mirror_wf\ndescription: 镜像\nphases:\n  - name: a\n    prompt: x\n", file_path: dir });
+    const afterCommit = migrate052(db);
+
+    const row = getWorkflowFromDb("mirror_wf");
+    expect(row).not.toBeNull();
+    expect(row!.kind).toBe("native"); // 镜像行已被替换为 native
+    expect(row!.source).toBe("db");
+
+    afterCommit();
+    expect(existsSync(dir)).toBe(false); // 目录备份后删除
+    expect(existsSync(join(tmpHome, "workflows", "_migrated-052", "mirror_wf", "workflow.yaml"))).toBe(true);
+  });
+
+  it("主路径：镜像行 + 目录含 workflow.ts → 删镜像行、目录原样保留", () => {
+    const dir = writeDirWorkflow("mirror_ts", "name: mirror_ts\nphases:\n  - name: a\n    prompt: x\n", "export function run_a() {}\n");
+    upsertFileWorkflow({ name: "mirror_ts", description: "", yaml_content: "name: mirror_ts\nphases:\n  - name: a\n    prompt: x\n", file_path: dir });
+    migrate052(db)();
+
+    expect(getWorkflowFromDb("mirror_ts")).toBeNull(); // 镜像行（死行）已删
+    expect(existsSync(join(dir, "workflow.ts"))).toBe(true); // 目录原样保留
+  });
+
+  it("主路径：镜像行在、目录已被用户删 → 仍能从 yaml_content 转换", () => {
+    upsertFileWorkflow({ name: "ghost_wf", description: "", yaml_content: "name: ghost_wf\nphases:\n  - name: a\n    prompt: x\n", file_path: join(tmpHome, "workflows", "ghost_wf") });
+    migrate052(db)();
+
+    const row = getWorkflowFromDb("ghost_wf");
+    expect(row).not.toBeNull();
+    expect(row!.kind).toBe("native");
   });
 
   it("幂等：重跑扫描落空 no-op", () => {
