@@ -151,7 +151,7 @@ describe("selfhosted-connector 分配流程", () => {
 
     const wsCall = calls.find((c) => c.op === "setWorkspaces");
     expect(wsCall).toBeDefined();
-    expect((wsCall as { op: "setWorkspaces"; repo_urls: string[] }).repo_urls).toEqual([]);
+    expect((wsCall as { op: "setWorkspaces"; repoUrls: string[] }).repoUrls).toEqual([]);
   });
 
   // ── (b) 自动进澄清 ────────────────────────────────────────────────────
