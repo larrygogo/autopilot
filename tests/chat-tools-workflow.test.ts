@@ -92,11 +92,11 @@ describe("chat tools 工作流管理（W3）", () => {
   });
 
   it("create_db_workflow + update_db_workflow + delete_db_workflow 完整链路", async () => {
-    // create
+    // create（P2 后用 spec_json 而非 yaml_content）
     const created = await callTool("create_db_workflow", {
       name: "req_dev_fast",
       derives_from: "req_dev",
-      yaml_content: "name: req_dev_fast\nphases:\n  - name: design\n",
+      spec_json: JSON.stringify({ phases: [{ name: "design", prompt: "快速设计" }] }),
       description: "skip review",
     });
     expect(created).not.toMatch(/^错误/);
@@ -107,7 +107,7 @@ describe("chat tools 工作流管理（W3）", () => {
     // update
     const updated = await callTool("update_db_workflow", {
       name: "req_dev_fast",
-      yaml_content: "name: req_dev_fast\nphases:\n  - name: design\n  - name: develop\n",
+      spec_json: JSON.stringify({ phases: [{ name: "design", prompt: "设计" }, { name: "develop", prompt: "开发" }] }),
     });
     expect(updated).not.toMatch(/^错误/);
 
@@ -120,7 +120,7 @@ describe("chat tools 工作流管理（W3）", () => {
     const text = await callTool("create_db_workflow", {
       name: "wf_x",
       derives_from: "no_such",
-      yaml_content: "x",
+      spec_json: JSON.stringify({ phases: [{ name: "design" }] }),
     });
     expect(text).toMatch(/^错误/);
     expect(text).toMatch(/不存在/);
@@ -130,7 +130,7 @@ describe("chat tools 工作流管理（W3）", () => {
     // file 轨已退役，不存在 file 只读工作流；对不存在名字报 NOT_FOUND
     const text = await callTool("update_db_workflow", {
       name: "no_such_workflow",
-      yaml_content: "x",
+      spec_json: JSON.stringify({ description: "new" }),
     });
     expect(text).toMatch(/^错误/);
   });

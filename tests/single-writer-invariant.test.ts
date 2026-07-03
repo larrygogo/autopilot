@@ -53,6 +53,7 @@ const ALLOWLIST = new Set([
   "src/migrations/049-seed-native-products.ts", // 产品工作流 dev/ad-hoc：file 副本就地转 native（DELETE 旧行 + createTemplateDbWorkflow 重插，一次性，幂等）
   "src/migrations/051-workspace-path-nullable.ts", // workspaces.path 改为可空：表重建 INSERT...SELECT 数据 copy（一次性，幂等）
   "src/migrations/052-import-file-workflows.ts", // file 轨退役：source=file 镜像行转 native（DELETE 死行 + createNativeDbWorkflow 重插，一次性，幂等）
+  "src/migrations/053-drop-yaml-content.ts", // P2：yaml_content 列删除：derived 行先回填 spec_json 再表重建（一次性，UPDATE+建表，幂等）
 ]);
 
 // 注：`\s` 已含换行，故整文件扫描（而非逐行）即可抓住跨行写法

@@ -46,7 +46,7 @@ describe("workflows CRUD", () => {
     expect(wf.file_path).toBe("/tmp/wf/req_dev");
   });
 
-  it("upsertFileWorkflow 已存在时更新 yaml_content + updated_at", () => {
+  it("upsertFileWorkflow 已存在时更新 description + updated_at", () => {
     const w1 = upsertFileWorkflow({
       name: "req_dev",
       description: "v1",
@@ -59,7 +59,7 @@ describe("workflows CRUD", () => {
       yaml_content: "yaml: v2",
       file_path: "/tmp/wf/req_dev",
     });
-    expect(w2.yaml_content).toBe("yaml: v2");
+    // spec_json 是唯一真相（yaml_content 列已删除），只校验 description 和 updated_at
     expect(w2.description).toBe("v2");
     expect(w2.updated_at).toBeGreaterThanOrEqual(w1.updated_at);
   });
@@ -74,7 +74,7 @@ describe("workflows CRUD", () => {
       name: "req_dev_fast",
       description: "快速版",
       derives_from: "req_dev",
-      yaml_content: "name: req_dev_fast\nphases: []\n",
+      spec_json: JSON.stringify({ name: "req_dev_fast", phases: [{ name: "a", timeout: 60 }] }),
     });
     expect(wf.source).toBe("db");
     expect(wf.derives_from).toBe("req_dev");
@@ -87,7 +87,7 @@ describe("workflows CRUD", () => {
         name: "wf_x",
         description: "",
         derives_from: "no_such",
-        yaml_content: "x",
+        spec_json: "{}",
       })
     ).toThrow(/derives_from.*不存在/);
   });
@@ -102,14 +102,14 @@ describe("workflows CRUD", () => {
       name: "wf_db1",
       description: "",
       derives_from: "req_dev",
-      yaml_content: "x",
+      spec_json: JSON.stringify({ phases: [{ name: "a", timeout: 60 }] }),
     });
     expect(() =>
       createDbWorkflow({
         name: "wf_db2",
         description: "",
         derives_from: "wf_db1",
-        yaml_content: "x",
+        spec_json: JSON.stringify({ phases: [{ name: "a", timeout: 60 }] }),
       })
     ).toThrow(/嵌套|file/);
   });
@@ -124,14 +124,14 @@ describe("workflows CRUD", () => {
       name: "wf_a",
       description: "",
       derives_from: "req_dev",
-      yaml_content: "x",
+      spec_json: JSON.stringify({ phases: [{ name: "a", timeout: 60 }] }),
     });
     expect(() =>
       createDbWorkflow({
         name: "wf_a",
         description: "",
         derives_from: "req_dev",
-        yaml_content: "y",
+        spec_json: JSON.stringify({ phases: [{ name: "a", timeout: 60 }] }),
       })
     ).toThrow();
   });
@@ -145,20 +145,18 @@ describe("workflows CRUD", () => {
     // file 残留行只读保护仍在（052 后正常不该有，防御性守卫）
     upsertFileWorkflow({ name: "legacy_file", description: "", yaml_content: "x", file_path: "/tmp/x" });
     expect(() =>
-      updateDbWorkflow("legacy_file", { yaml_content: "y" })
+      updateDbWorkflow("legacy_file", { description: "y" })
     ).toThrow(/file|只读/);
 
     createDbWorkflow({
       name: "wf_a",
       description: "",
       derives_from: "req_dev",
-      yaml_content: "x",
+      spec_json: JSON.stringify({ phases: [{ name: "a", timeout: 60 }] }),
     });
     const updated = updateDbWorkflow("wf_a", {
-      yaml_content: "y",
       description: "new desc",
     });
-    expect(updated?.yaml_content).toBe("y");
     expect(updated?.description).toBe("new desc");
   });
 
@@ -176,7 +174,7 @@ describe("workflows CRUD", () => {
       name: "wf_a",
       description: "",
       derives_from: "req_dev",
-      yaml_content: "x",
+      spec_json: JSON.stringify({ phases: [{ name: "a", timeout: 60 }] }),
     });
     deleteDbWorkflow("wf_a");
     expect(getWorkflowFromDb("wf_a")).toBeNull();
@@ -192,13 +190,13 @@ describe("workflows CRUD", () => {
       name: "wf_a",
       description: "",
       derives_from: "req_dev",
-      yaml_content: "x",
+      spec_json: JSON.stringify({ phases: [{ name: "a", timeout: 60 }] }),
     });
     createDbWorkflow({
       name: "wf_b",
       description: "",
       derives_from: "req_dev",
-      yaml_content: "x",
+      spec_json: JSON.stringify({ phases: [{ name: "a", timeout: 60 }] }),
     });
     const list = listWorkflowsInDb();
     expect(list.length).toBe(3);

@@ -83,8 +83,8 @@ phases:
     // 直接写 DB 行（derived from native base），绕过 createDbWorkflow 的 file-only 守卫（守卫是旧语义）
     const ts = Date.now();
     db.run(
-      "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
-      ["req_dev_fast", "skip review", "name: req_dev_fast\nphases:\n  - name: design\n    timeout: 60\n", "req_dev", ts, ts]
+      "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'derived', ?, ?, ?)",
+      ["req_dev_fast", "skip review", "", JSON.stringify({ name: "req_dev_fast", phases: [{ name: "design", timeout: 60 }] }), "req_dev", ts, ts]
     );
     _clearRegistry();
     await discover();
@@ -106,8 +106,8 @@ phases:
     // 直接写 DB 行（derived from native base），绕过 createDbWorkflow 的 file-only 守卫
     const ts = Date.now();
     db.run(
-      "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
-      ["wf_bad", "", "name: wf_bad\nphases:\n  - name: design\n  - name: nonexistent_phase\n", "req_dev", ts, ts]
+      "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'derived', ?, ?, ?)",
+      ["wf_bad", "", "", JSON.stringify({ name: "wf_bad", phases: [{ name: "design" }, { name: "nonexistent_phase" }] }), "req_dev", ts, ts]
     );
     _clearRegistry();
     await discover();
@@ -118,8 +118,8 @@ phases:
   it("DB 工作流 derives_from 不存在的 base → 跳过加载", async () => {
     const ts = Date.now();
     db.run(
-      "INSERT INTO workflows (name, description, yaml_content, source, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', ?, ?, ?)",
-      ["wf_orphan", "", "name: wf_orphan\nphases: []\n", "no_such_base", ts, ts]
+      "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'derived', ?, ?, ?)",
+      ["wf_orphan", "", "", JSON.stringify({ name: "wf_orphan", phases: [] }), "no_such_base", ts, ts]
     );
     await discover();
     expect(getWorkflow("wf_orphan")).toBeNull();
@@ -242,9 +242,9 @@ phases:
       description: "",
       spec_json: JSON.stringify({ name: "edit_native", phases: [{ name: "a", timeout: 60, prompt: "原始" }] }),
     });
-    // 模拟 Web 编辑器保存：改 yaml_content（加一个 phase）
+    // 模拟 Web 编辑器保存：改 spec_json（加一个 phase）
     updateDbWorkflow("edit_native", {
-      yaml_content: "name: edit_native\nphases:\n  - name: a\n    timeout: 60\n    prompt: 改后\n  - name: b\n    timeout: 60\n    prompt: 新增\n",
+      spec_json: JSON.stringify({ name: "edit_native", phases: [{ name: "a", timeout: 60, prompt: "改后" }, { name: "b", timeout: 60, prompt: "新增" }] }),
     });
     // spec_json（真相）必须同步更新
     const row = getWorkflowFromDb("edit_native")!;
@@ -306,8 +306,8 @@ phases:
     // derived = DB 行寄生 base（无磁盘目录），直接写 DB 绕过 file-only 守卫
     const ts2 = Date.now();
     db.run(
-      "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
-      ["der_src", "", "name: der_src\nphases:\n  - name: design\n    prompt: d2\n", "base_wf", ts2, ts2]
+      "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'derived', ?, ?, ?)",
+      ["der_src", "", "", JSON.stringify({ name: "der_src", phases: [{ name: "design", prompt: "d2" }] }), "base_wf", ts2, ts2]
     );
     const { cloneWorkflow } = await import("../src/core/workflow/templates");
     cloneWorkflow("der_src", "der_clone"); // DB 克隆

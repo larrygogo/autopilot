@@ -74,12 +74,11 @@ import {
   buildTransitions,
   getTerminalStates,
   isParallelPhase,
-  getWorkflowYaml,
   getWorkflowTs,
   WORKFLOW_NAME_RE,
   type PhaseEntryInput,
 } from "../core/workflow/registry";
-import { setWorkflowPhases, applyPhasesToYaml } from "../core/workflow/registry-authoring";
+import { applyPhasesToSpec, patchWorkflowMetaSpec } from "../core/workflow/registry-authoring";
 import {
   listWorkflowsInDb,
   getWorkflowFromDb,
@@ -1644,33 +1643,29 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // GET /api/workflows/:name/yaml
-    const yamlReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
-    if (method === "GET" && yamlReadMatch) {
-      const row = getWorkflowFromDb(yamlReadMatch);
-      if (row && row.source === "db") {
-        return json({ yaml: row.yaml_content });
-      }
-      const yaml = getWorkflowYaml(yamlReadMatch);
-      if (yaml === null) return error("Workflow not found", 404);
-      return json({ yaml });
+    // GET /api/workflows/:name/spec — 读 spec_json（P2 后：yaml_content 列已删除）
+    const specReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/spec$/);
+    if (method === "GET" && specReadMatch) {
+      const row = getWorkflowFromDb(specReadMatch);
+      if (!row) return error("Workflow not found", 404);
+      return json({ spec: row.spec_json ?? "{}" });
     }
 
-    // GET /api/workflows/:name/export — 纯 yaml 文本响应（用于 CLI export 备份）
-    // 注意：必须放在 /api/workflows/:name 通配匹配前面（位于 yaml 端点附近避免被吃掉）
+    // GET /api/workflows/:name/yaml → 410（P2 已废弃，改用 /spec）
+    const yamlReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
+    if (method === "GET" && yamlReadMatch) {
+      return error("yaml 端点已废弃（P2），请改用 GET /api/workflows/:name/spec（返回 JSON spec）", 410);
+    }
+
+    // GET /api/workflows/:name/export — JSON spec 文本响应（P2 后：统一 JSON，用于 CLI export 备份）
+    // 注意：必须放在 /api/workflows/:name 通配匹配前面（位于 spec 端点附近避免被吃掉）
     const exportMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/export$/);
     if (method === "GET" && exportMatch) {
       const row = getWorkflowFromDb(exportMatch);
-      let yaml: string | null = null;
-      if (row && row.source === "db") {
-        yaml = row.yaml_content;
-      } else {
-        yaml = getWorkflowYaml(exportMatch);
-      }
-      if (yaml === null) return error("Workflow not found", 404);
-      return new Response(yaml, {
+      if (!row) return error("Workflow not found", 404);
+      return new Response(row.spec_json ?? "{}", {
         status: 200,
-        headers: { "Content-Type": "text/yaml; charset=utf-8" },
+        headers: { "Content-Type": "application/json; charset=utf-8" },
       });
     }
 
@@ -1731,29 +1726,34 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       return error("工作流是纯声明式，没有可编辑的 ts 函数——请改用 phase 的 prompt 字段", 400);
     }
 
-    // PUT /api/workflows/:name/yaml — 区分 source：db 走 updateDbWorkflow，file 写文件
-    const yamlWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
-    if (method === "PUT" && yamlWriteMatch) {
-      const body = await req.json() as { yaml: string };
-      if (typeof body.yaml !== "string") return error("yaml field is required");
+    // PUT /api/workflows/:name/spec — 写 spec_json（P2 后唯一真相）
+    const specWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/spec$/);
+    if (method === "PUT" && specWriteMatch) {
+      const body = await req.json() as { spec: string };
+      if (typeof body.spec !== "string") return error("spec field is required");
 
-      const row = getWorkflowFromDb(yamlWriteMatch);
-      if (row && row.source === "db") {
-        try {
-          updateDbWorkflow(yamlWriteMatch, { yaml_content: body.yaml });
-          await reload();
-          emit({ type: "workflow:reloaded", payload: {} });
-          return json({ ok: true });
-        } catch (e: unknown) {
-          return error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
-        }
+      const row = getWorkflowFromDb(specWriteMatch);
+      if (!row) return error(`workflow not found: ${specWriteMatch}`, 404);
+      if (row.source !== "db") return error("file 轨工作流只读", 400);
+      try {
+        // 校验 JSON 可解析
+        JSON.parse(body.spec);
+        updateDbWorkflow(specWriteMatch, { spec_json: body.spec });
+        await reload();
+        emit({ type: "workflow:reloaded", payload: {} });
+        return json({ ok: true });
+      } catch (e: unknown) {
+        return error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
       }
-
-      // file 轨已退役：所有工作流都在 DB（上方分支已覆盖）
-      return error(`workflow not found: ${yamlWriteMatch}`, 404);
     }
 
-    // PUT /api/workflows/:name/phases — 结构化更新 phases 段
+    // PUT /api/workflows/:name/yaml → 410（P2 已废弃，改用 /spec）
+    const yamlWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
+    if (method === "PUT" && yamlWriteMatch) {
+      return error("yaml 端点已废弃（P2），请改用 PUT /api/workflows/:name/spec（传 {spec: <JSON文本>}）", 410);
+    }
+
+    // PUT /api/workflows/:name/phases — 结构化更新 phases 段（P2 后操作 spec_json）
     const phasesWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/phases$/);
     if (method === "PUT" && phasesWriteMatch) {
       const body = await req.json() as {
@@ -1762,12 +1762,12 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         renames?: Record<string, string>;
       };
       if (!Array.isArray(body.phases)) return error("phases must be array", 400);
-      // db 来源工作流：纯声明式，应用 phases 到 yaml_content 写回 DB；无 ts 同步 / 函数 rename。
+      // db 来源工作流：纯声明式，应用 phases 到 spec_json 写回 DB；无 ts 同步 / 函数 rename。
       const phasesRow = getWorkflowFromDb(phasesWriteMatch);
       if (phasesRow && phasesRow.source === "db") {
         try {
-          const newYaml = applyPhasesToYaml(phasesRow.yaml_content, body.phases as PhaseEntryInput[]);
-          updateDbWorkflow(phasesWriteMatch, { yaml_content: newYaml });
+          const newSpec = applyPhasesToSpec(phasesRow.spec_json ?? "{}", body.phases as PhaseEntryInput[]);
+          updateDbWorkflow(phasesWriteMatch, { spec_json: newSpec });
           await reload();
           emit({ type: "workflow:reloaded", payload: {} });
           return json({ ok: true, ts: null, ts_error: null, renamed: [] });

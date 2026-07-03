@@ -23,11 +23,10 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import {
   listWorkflows,
-  getWorkflowYaml as registryGetWorkflowYaml,
   getWorkflowTs as registryGetWorkflowTs,
   reload as reloadRegistry,
 } from "../core/workflow/registry";
-import { patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
+import { patchWorkflowMetaSpec, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
 import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb, createDbWorkflow, createNativeDbWorkflow } from "../core/workflow/workflows";
 import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
 import { listWorkflowTemplates } from "../core/workflow/templates";
@@ -850,18 +849,23 @@ function registerWorkflowRpc(): void {
   });
 
   registerRpcMethod({
-    method: "workflows.getYaml",
-    description: "读取 workflow.yaml 原文（db 来源直接读 yaml_content / file 读磁盘）",
+    method: "workflows.getSpec",
+    description: "读取 workflow spec_json（P2 后：yaml_content 列已删除，spec_json 是唯一真相）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
       const row = getWorkflowFromDb(p.name);
-      if (row && row.source === "db") {
-        return { yaml: row.yaml_content };
-      }
-      const yaml = registryGetWorkflowYaml(p.name);
-      if (yaml === null) throw new RpcError("NOT_FOUND", "Workflow not found");
-      return { yaml };
+      if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
+      return { spec: row.spec_json ?? "{}" };
+    },
+  });
+
+  // workflows.getYaml → 410（P2 废弃，改用 workflows.getSpec）
+  registerRpcMethod({
+    method: "workflows.getYaml",
+    description: "已废弃（P2），请改用 workflows.getSpec",
+    handler: () => {
+      throw new RpcError("GONE", "workflows.getYaml 已废弃（P2），请改用 workflows.getSpec（返回 {spec: <JSON文本>}）");
     },
   });
 
@@ -906,7 +910,7 @@ function registerWorkflowRpc(): void {
       }
       try {
         const row = derivesFrom
-          ? createDbWorkflow({ name: p.name, description, derives_from: derivesFrom, yaml_content: stringifyWorkflowDoc(doc, "yaml") })
+          ? createDbWorkflow({ name: p.name, description, derives_from: derivesFrom, spec_json: stringifyWorkflowDoc(doc, "json") })
           : createNativeDbWorkflow({ name: p.name, description, spec_json: stringifyWorkflowDoc(doc, "json") });
         await reloadRegistry();
         return { name: row.name, kind: row.kind, source: row.source };
@@ -918,19 +922,15 @@ function registerWorkflowRpc(): void {
 
   registerRpcMethod({
     method: "workflows.export",
-    description: "导出工作流为 JSON（结构原生 json，跟内部 spec_json 真相一致）",
+    description: "导出工作流为 JSON（结构原生 json，跟内部 spec_json 真相一致；P2 后所有 kind 均从 spec_json 读）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
       const row = getWorkflowFromDb(p.name);
-      // native/template 真相 = spec_json：直接吐
-      if (row && (row.kind === "native" || row.kind === "template") && row.spec_json) {
-        return { content: row.spec_json };
-      }
-      // file / derived：真相存 yaml（db 源读 yaml_content / file 源读磁盘）→ parse 成原生 json
-      const yaml = row && row.source === "db" ? row.yaml_content : registryGetWorkflowYaml(p.name);
-      if (yaml == null) throw new RpcError("NOT_FOUND", "Workflow not found");
-      return { content: stringifyWorkflowDoc(parseWorkflowText(yaml, "yaml"), "json") };
+      if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
+      // P2 后：所有工作流真相在 spec_json（yaml_content 列已删除）
+      if (!row.spec_json) throw new RpcError("NOT_FOUND", "Workflow spec not found");
+      return { content: row.spec_json };
     },
   });
 
@@ -973,23 +973,33 @@ function registerWorkflowRpc(): void {
   });
 
   registerRpcMethod({
-    method: "workflows.saveYaml",
-    description: "保存 workflow.yaml（写回 DB 工作流；file 轨已退役）",
+    method: "workflows.saveSpec",
+    description: "保存 workflow spec_json（P2 后：yaml_content 列已删除，直接写 spec_json）",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      if (typeof p.yaml !== "string") throw new RpcError("INVALID_PARAM", "需要 yaml");
+      if (typeof p.spec !== "string") throw new RpcError("INVALID_PARAM", "需要 spec（JSON 文本）");
       const row = getWorkflowFromDb(p.name);
       try {
-        // file 轨已退役：所有工作流都在 DB
         if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
-        updateDbWorkflow(p.name, { yaml_content: p.yaml });
+        // 校验 JSON 可解析
+        JSON.parse(p.spec);
+        updateDbWorkflow(p.name, { spec_json: p.spec });
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
         return { ok: true };
       } catch (e: unknown) {
         throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
       }
+    },
+  });
+
+  // workflows.saveYaml → 410（P2 废弃，改用 workflows.saveSpec）
+  registerRpcMethod({
+    method: "workflows.saveYaml",
+    description: "已废弃（P2），请改用 workflows.saveSpec",
+    handler: () => {
+      throw new RpcError("GONE", "workflows.saveYaml 已废弃（P2），请改用 workflows.saveSpec（传 {name, spec: <JSON文本>}）");
     },
   });
 
@@ -1032,7 +1042,9 @@ function registerWorkflowRpc(): void {
       try {
         // file 轨已退役：所有工作流都在 DB
         if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
-        updateDbWorkflow(p.name, { yaml_content: patchWorkflowMetaYaml(row.yaml_content, meta) });
+        // P2 后：操作 spec_json（patchWorkflowMetaSpec 纯 JSON 操作，yaml_content 已删除）
+        const newSpec = patchWorkflowMetaSpec(row.spec_json ?? "{}", meta);
+        updateDbWorkflow(p.name, { spec_json: newSpec });
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
         return { ok: true };

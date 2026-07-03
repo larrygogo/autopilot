@@ -3,13 +3,11 @@ import { spawnSync } from "child_process";
 import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
 import type { AutopilotClient } from "../client";
 import {
   discover,
   listWorkflows as registryListWorkflows,
   getWorkflow as registryGetWorkflow,
-  getWorkflowYaml as registryGetWorkflowYaml,
 } from "../core/workflow/registry";
 import { listWorkflowsInDb } from "../core/workflow/workflows";
 
@@ -114,13 +112,13 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
           const meta = (await client.getWorkflow(name)) as unknown as WorkflowItem & {
             phases?: unknown[];
           };
-          const yaml = (await client.getWorkflowYaml(name)) as { yaml: string };
+          const specResult = (await client.getWorkflowSpec(name)) as { spec: string };
           console.log(`# ${meta.name}`);
           console.log(`source: ${meta.source ?? "file"}`);
           if (meta.derives_from) console.log(`derives_from: ${meta.derives_from}`);
           if (meta.description) console.log(`description: ${meta.description}`);
-          console.log("\n--- yaml ---\n");
-          console.log(yaml.yaml);
+          console.log("\n--- spec (JSON) ---\n");
+          console.log(specResult.spec);
         } catch (e: unknown) {
           console.error(`查询失败：${e instanceof Error ? e.message : String(e)}`);
           process.exit(1);
@@ -137,22 +135,23 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
       }
       let source: "db" | "file" = "file";
       let derivesFrom: string | null = null;
+      let specJson: string | null = null;
       try {
         const row = listWorkflowsInDb().find((r) => r.name === name);
         if (row) {
           source = row.source;
           derivesFrom = row.derives_from;
+          specJson = row.spec_json;
         }
       } catch {
         /* DB 不可用时按 file 处理 */
       }
-      const yamlStr = registryGetWorkflowYaml(name);
       console.log(`# ${meta.name}`);
       console.log(`source: ${source}`);
       if (derivesFrom) console.log(`derives_from: ${derivesFrom}`);
       if (meta.description) console.log(`description: ${meta.description}`);
-      console.log("\n--- yaml ---\n");
-      console.log(yamlStr ?? "(无 yaml 内容)");
+      console.log("\n--- spec (JSON) ---\n");
+      console.log(specJson ?? "(无 spec 内容)");
     });
 
   // ── create ──
@@ -171,26 +170,24 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
       const client = ctx.getClient(opts);
       await ctx.ensureDaemon(client);
 
-      let yaml: string;
+      let specText: string;
       if (opts.from) {
         try {
-          yaml = readFileSync(opts.from, "utf8");
+          specText = readFileSync(opts.from, "utf8");
         } catch (e: unknown) {
           console.error(`读 ${opts.from} 失败：${e instanceof Error ? e.message : String(e)}`);
           process.exit(1);
         }
       } else {
-        // 用 base 的 yaml 起编辑
-        const baseYaml = (await client.getWorkflowYaml(opts.derivesFrom)) as { yaml: string };
-        yaml = await editInTempFile(baseYaml.yaml);
+        // 用 base 的 spec（JSON）起编辑
+        const baseSpec = (await client.getWorkflowSpec(opts.derivesFrom)) as { spec: string };
+        specText = await editInTempFile(baseSpec.spec);
       }
 
       try {
-        // create 编辑的是 base 的 yaml（人类友好），但用户面入库统一 JSON：转成 json 再 import
-        const doc = parseWorkflowText(yaml, "yaml");
         const result = await client.importWorkflow({
           name,
-          content: stringifyWorkflowDoc(doc, "json"),
+          content: specText,
           derives_from: opts.derivesFrom,
           description: opts.description,
         });
@@ -203,19 +200,19 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
 
   // ── edit ──
   wf.command("edit <name>")
-    .description("用 EDITOR 编辑工作流的 yaml（仅 source=db 可改）")
+    .description("用 EDITOR 编辑工作流的 spec（JSON，仅 source=db 可改）")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
     .action(async (name: string, opts: { port: string }) => {
       const client = ctx.getClient(opts);
       await ctx.ensureDaemon(client);
       try {
-        const cur = (await client.getWorkflowYaml(name)) as { yaml: string };
-        const newYaml = await editInTempFile(cur.yaml);
-        if (newYaml === cur.yaml) {
+        const cur = (await client.getWorkflowSpec(name)) as { spec: string };
+        const newSpec = await editInTempFile(cur.spec);
+        if (newSpec === cur.spec) {
           console.log("内容未变，跳过保存。");
           return;
         }
-        await client.saveWorkflowYaml(name, newYaml);
+        await client.saveWorkflowSpec(name, newSpec);
         console.log(`✓ 已保存 ${name}`);
       } catch (e: unknown) {
         console.error(`编辑失败：${e instanceof Error ? e.message : String(e)}`);

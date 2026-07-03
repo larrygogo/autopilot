@@ -87,7 +87,7 @@ describe("cloneWorkflow（DB 分支）", () => {
     expect(parsed.name).toBe("my_clone");
   });
 
-  it("克隆 derived 行 → 新 derived 行（保留 derives_from + yaml_content）", () => {
+  it("克隆 derived 行 → 新 derived 行（保留 derives_from + spec_json）", () => {
     // 先种 native base
     const baseSpec = JSON.stringify({ name: "base", phases: [{ name: "step", timeout: 60 }] });
     createNativeDbWorkflow({ name: "base", description: "", spec_json: baseSpec });
@@ -96,7 +96,7 @@ describe("cloneWorkflow（DB 分支）", () => {
       name: "derived_wf",
       description: "派生",
       derives_from: "base",
-      yaml_content: "name: derived_wf\nphases:\n  - name: step\n    timeout: 120\n",
+      spec_json: JSON.stringify({ phases: [{ name: "step", timeout: 120 }] }),
     });
 
     cloneWorkflow("derived_wf", "derived_wf_copy");

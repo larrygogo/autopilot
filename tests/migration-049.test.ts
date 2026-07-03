@@ -133,8 +133,8 @@ describe("migration 049：file dev/ad-hoc → native", () => {
     {
       const ts = Date.now();
       db.run(
-        "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
-        ["my-dev-fast", "派生自 dev", "name: my-dev-fast\nphases:\n  - name: design\n    timeout: 60\n", "dev", ts, ts],
+        "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'derived', ?, ?, ?)",
+        ["my-dev-fast", "派生自 dev", "", JSON.stringify({ name: "my-dev-fast", phases: [{ name: "design", timeout: 60 }] }), "dev", ts, ts],
       );
     }
 

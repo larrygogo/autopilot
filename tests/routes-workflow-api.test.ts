@@ -154,7 +154,7 @@ describe("workflows API（W2 扩展）", () => {
     expect(body.source).toBe("db"); // native 工作流 source=db
   });
 
-  it("workflows.saveYaml 修改 DB 工作流走 updateDbWorkflow", async () => {
+  it("workflows.saveSpec 修改 DB 工作流走 updateDbWorkflow（P2 后 saveYaml 返回 GONE）", async () => {
     createNativeDbWorkflow({
       name: "wf_db",
       description: "",
@@ -163,17 +163,21 @@ describe("workflows API（W2 扩展）", () => {
     _clearRegistry();
     await discover();
 
-    // 新 yaml 含 prompt 才能通过 native 校验
-    const newYaml = "name: wf_db\nphases:\n  - name: design\n    prompt: 做设计\n  - name: develop\n    prompt: 开发\n";
-    const saveR = await invokeRpcMethod("workflows.saveYaml", { name: "wf_db", yaml: newYaml });
+    // P2：saveYaml 已退役，改用 saveSpec（JSON spec 文本）
+    const newSpec = JSON.stringify({ name: "wf_db", phases: [{ name: "design", prompt: "做设计" }, { name: "develop", prompt: "开发" }] });
+    const saveR = await invokeRpcMethod("workflows.saveSpec", { name: "wf_db", spec: newSpec });
     expect(saveR.ok).toBe(true);
 
-    // 验证 DB 里 phase 数量真的改了（yaml 投影可能含额外字段，不做完整字符串比较）
-    const getR = await invokeRpcMethod("workflows.getYaml", { name: "wf_db" });
+    // saveYaml 现在返回 GONE
+    const goneR = await invokeRpcMethod("workflows.saveYaml", { name: "wf_db", yaml: "anything" });
+    expect(goneR.ok).toBe(false);
+
+    // 验证 DB 里 phase 数量真的改了
+    const getR = await invokeRpcMethod("workflows.getSpec", { name: "wf_db" });
     expect(getR.ok).toBe(true);
     if (getR.ok) {
-      const body = getR.payload as { yaml: string };
-      expect(body.yaml).toContain("develop"); // 新增的 develop 阶段已写入
+      const body = getR.payload as { spec: string };
+      expect(body.spec).toContain("develop"); // 新增的 develop 阶段已写入
     }
   });
 
@@ -194,7 +198,7 @@ describe("workflows API（W2 扩展）", () => {
     if (!getR.ok) expect(getR.error.code).toBe("NOT_FOUND");
   });
 
-  it("GET /api/workflows/:name/export 返回纯 yaml 文本", async () => {
+  it("GET /api/workflows/:name/export 返回 JSON spec（P2 后 yaml 已退役）", async () => {
     createNativeDbWorkflow({
       name: "wf_export",
       description: "",
@@ -205,17 +209,19 @@ describe("workflows API（W2 扩展）", () => {
 
     const res = await handleRequest(new Request("http://localhost/api/workflows/wf_export/export"), fakeLoopbackServer);
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toMatch(/yaml|text/);
+    expect(res.headers.get("content-type")).toMatch(/json/);
     const text = await res.text();
-    expect(text).toContain("name: wf_export");
+    const doc = JSON.parse(text) as { name?: string };
+    expect(doc.name).toBe("wf_export");
   });
 
-  it("GET /api/workflows/:name/export native base 也支持", async () => {
+  it("GET /api/workflows/:name/export native base 也支持（返回 JSON）", async () => {
     // req_dev 是 native DB 工作流（file 轨已退役）
     const res = await handleRequest(new Request("http://localhost/api/workflows/req_dev/export"), fakeLoopbackServer);
     expect(res.status).toBe(200);
     const text = await res.text();
-    expect(text).toContain("name: req_dev");
+    const doc = JSON.parse(text) as { name?: string };
+    expect(doc.name).toBe("req_dev");
   });
 
   it("GET /api/workflows/:name/export 不存在 → 404", async () => {

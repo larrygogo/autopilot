@@ -184,11 +184,11 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
 
     tool(
       "create_db_workflow",
-      "创建 DB 工作流（必须 derives_from 一个 file workflow）。yaml 里 phase name 必须 ⊆ derives_from 的 phase 集合（先用 list_phase_functions 看）。",
+      "创建 DB 派生工作流（必须 derives_from 一个 native/template 工作流）。spec_json 是完整 JSON spec（含 name / phases 等），phase name 必须 ⊆ derives_from 的 phase 集合（先用 list_phase_functions 看）。",
       {
         name: z.string().describe("新工作流名（不能跟现有工作流冲突）"),
-        derives_from: z.string().describe("派生自的 file 工作流名（如 dev）"),
-        yaml_content: z.string().describe("完整 yaml（含 name / phases 等）"),
+        derives_from: z.string().describe("派生自的工作流名（如 dev，必须是 native/template）"),
+        spec_json: z.string().describe("完整 JSON spec 文本（含 name / phases 等）"),
         description: z.string().optional().describe("可选描述"),
       },
       async (args) => {
@@ -197,7 +197,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
             name: args.name,
             description: args.description ?? "",
             derives_from: args.derives_from,
-            yaml_content: args.yaml_content,
+            spec_json: args.spec_json,
           });
           try { await reloadRegistry(); } catch (e: unknown) { /* reload 失败不阻塞 */ }
           return ok({ name: wf.name, source: wf.source, derives_from: wf.derives_from });
@@ -209,16 +209,16 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
 
     tool(
       "update_db_workflow",
-      "更新 DB 工作流的 yaml_content（覆盖写）。仅 source=db 可改。",
+      "更新 DB 工作流的 spec_json（覆盖写）。仅 source=db 可改。spec_json 是完整 JSON spec 文本。",
       {
         name: z.string(),
-        yaml_content: z.string(),
+        spec_json: z.string().describe("完整 JSON spec 文本（native/template 会归一化校验，derived 直接写）"),
         description: z.string().optional(),
       },
       async (args) => {
         try {
           const r = updateDbWorkflow(args.name, {
-            yaml_content: args.yaml_content,
+            spec_json: args.spec_json,
             description: args.description,
           });
           if (!r) return err(`工作流不存在：${args.name}`);

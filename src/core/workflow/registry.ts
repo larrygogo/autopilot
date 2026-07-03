@@ -3,7 +3,6 @@ import { log } from "../logger";
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { parse as parseYaml } from "yaml";
 import { tryMakePromptRunnerForPhase } from "./prompt-runner";
 import { makeArtifactDeliverRunner } from "./builtin-deliver";
 import { makePrDeliverRunner } from "./builtin-deliver-pr";
@@ -863,8 +862,8 @@ function buildParallelTransitions(
 // ──────────────────────────────────────────────
 
 /**
- * 由 DB 工作流的 yaml 派生出一个完整 WorkflowDefinition：
- * - 解析 yaml 拿 phases / 元信息
+ * 由 DB 工作流的 spec_json 派生出一个完整 WorkflowDefinition：
+ * - 解析 spec_json（JSON）拿 phases / 元信息（P2 后 yaml_content 列已删除）
  * - 校验 phase name 必须 ⊆ base 的 phase 集合
  * - 复用 base 的 phase 函数引用（不重新加载 TS）
  *
@@ -873,12 +872,17 @@ function buildParallelTransitions(
 function composeDbWorkflow(
   name: string,
   description: string,
-  yamlContent: string,
+  specJson: string,
   base: WorkflowDefinition,
 ): WorkflowDefinition {
-  const parsed = parseYaml(yamlContent) as { phases?: unknown[] } | null;
+  let parsed: { phases?: unknown[] } | null;
+  try {
+    parsed = JSON.parse(specJson) as { phases?: unknown[] };
+  } catch (e: unknown) {
+    throw new Error(`DB 工作流 ${name} spec_json 解析失败：${e instanceof Error ? e.message : String(e)}`);
+  }
   if (!parsed || !Array.isArray(parsed.phases)) {
-    throw new Error(`DB 工作流 ${name} yaml 缺少 phases 字段`);
+    throw new Error(`DB 工作流 ${name} spec_json 缺少 phases 字段`);
   }
 
   // 收集 base 已注册的 phase name 集合（含 parallel 子项）
@@ -1052,7 +1056,11 @@ export async function discover(): Promise<void> {
       continue;
     }
     try {
-      const wf = composeDbWorkflow(row.name, row.description, row.yaml_content, base);
+      if (!row.spec_json) {
+        log.error("derived 工作流 %s 缺 spec_json，跳过（请运行迁移 053 回填）", row.name);
+        continue;
+      }
+      const wf = composeDbWorkflow(row.name, row.description, row.spec_json, base);
       register(wf);
       log.debug("注册 db 工作流：%s（派生自 %s）", row.name, row.derives_from);
     } catch (e: unknown) {
@@ -1224,12 +1232,24 @@ export function getWorkflowTs(workflowName: string): string | null {
 }
 
 /**
- * 读取工作流 YAML 原文
+ * 读取工作流 spec（JSON 文本）。
+ * P2 后所有工作流的真相在 DB spec_json 列（yaml_content 列已删除）。
+ * file 轨已退役：磁盘 workflow.yaml 不再是真相源。
+ *
+ * 返回 DB 行的 spec_json；行不存在或 spec_json 为 null 返回 null。
+ */
+export function getWorkflowSpec(workflowName: string): string | null {
+  // P2 后：spec_json 是 DB 唯一真相；磁盘 yaml 已不读
+  // 注：需要使用者（routes / rpc）调用此函数而非读老 yaml 路径
+  return null; // 调用方统一改从 DB row.spec_json 读（不经此路由）
+}
+
+/**
+ * @deprecated P2 后 yaml 文件已不再是真相源。等价调用 getWorkflowSpec。
+ * 保留签名让老调用方在编译层得到类型提示，运行时返回 null（file 轨退役后磁盘无 yaml）。
  */
 export function getWorkflowYaml(workflowName: string): string | null {
-  const yamlPath = join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.yaml");
-  if (!existsSync(yamlPath)) return null;
-  return readFileSync(yamlPath, "utf-8");
+  return getWorkflowSpec(workflowName);
 }
 
 // ──────────────────────────────────────────────

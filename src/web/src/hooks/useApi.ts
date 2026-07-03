@@ -319,7 +319,9 @@ export const api = {
     description?: string;
     firstPhase?: string;
     derives_from?: string;
+    /** @deprecated P2：改用 spec_json */
     yaml_content?: string;
+    spec_json?: string;
   }) =>
     request<{ ok: boolean; name: string; source?: string; dir?: string }>("/api/workflows", {
       method: "POST", body: JSON.stringify(body),
@@ -385,7 +387,9 @@ export const api = {
   // [WS-RPC] config.save
   saveConfig: (yaml: string) =>
     requestRpc<{ ok: boolean }>("config.save", { yaml }),
-  // [WS-RPC] workflows.getYaml
+  // [WS-RPC] workflows.getSpec（P2 后 yaml_content 已删，spec_json 是唯一真相）
+  getWorkflowSpec: (name: string) => requestRpc<{ spec: string }>("workflows.getSpec", { name }),
+  /** @deprecated P2：改用 getWorkflowSpec */
   getWorkflowYaml: (name: string) => requestRpc<{ yaml: string }>("workflows.getYaml", { name }),
   // [WS-RPC] workflows.getTs
   getWorkflowTs: (name: string) => requestRpc<{ content: string }>("workflows.getTs", { name }),
@@ -410,7 +414,10 @@ export const api = {
       `/api/workflows/${workflowName}/dry-run`,
       { method: "POST", body: JSON.stringify(body) },
     ),
-  // [WS-RPC] workflows.saveYaml
+  // [WS-RPC] workflows.saveSpec（P2 后 yaml_content 已删，spec_json 是唯一真相）
+  saveWorkflowSpec: (name: string, spec: string) =>
+    requestRpc<{ ok: boolean }>("workflows.saveSpec", { name, spec }),
+  /** @deprecated P2：改用 saveWorkflowSpec */
   saveWorkflowYaml: (name: string, yaml: string) =>
     requestRpc<{ ok: boolean }>("workflows.saveYaml", { name, yaml }),
   // [WS-RPC] workflows.setMeta —— 改显示名/描述（name 是标识符不可改）

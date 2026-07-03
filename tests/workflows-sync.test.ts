@@ -54,7 +54,8 @@ describe("syncFileWorkflowsToDb", () => {
     expect(result.removed).toEqual([]);
 
     const after = listWorkflowsInDb()[0];
-    expect(after.yaml_content).toBe("y_new");
+    // yaml_content 列已删除（P2）；description 变化说明 update 生效
+    expect(after.description).toBe("new");
     expect(after.created_at).toBe(before.created_at);
     expect(after.updated_at).toBeGreaterThanOrEqual(before.updated_at);
   });
@@ -76,8 +77,8 @@ describe("syncFileWorkflowsToDb", () => {
     {
       const ts = Date.now();
       db.run(
-        "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
-        ["wf_db", "", "y", "req_dev", ts, ts],
+        "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'derived', ?, ?, ?)",
+        ["wf_db", "", "y", null, "req_dev", ts, ts],
       );
     }
 

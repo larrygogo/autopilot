@@ -203,7 +203,8 @@ export function cloneWorkflow(sourceName: string, targetName: string): void {
   } else if (row.kind === "derived" && row.derives_from) {
     const doc = JSON.parse(row.spec_json ?? "{}") as Record<string, unknown>;
     doc["name"] = targetName;
-    createDbWorkflow({ name: targetName, description: row.description, derives_from: row.derives_from, yaml_content: row.yaml_content });
+    const clonedSpec = stringifyWorkflowDoc(doc, "json");
+    createDbWorkflow({ name: targetName, description: row.description, derives_from: row.derives_from, spec_json: clonedSpec });
   } else {
     throw new Error("source workflow not found");
   }
@@ -271,10 +272,10 @@ export function reseedTemplateWorkflow(name: string): "reseeded" | "up-to-date" 
   if (!spec) return "no-template";
   const local = row.spec_json ? parseSpecRevision(row.spec_json) : 0;
   if (spec.revision <= local) return "up-to-date";
-  // examples 更新 → 覆盖。updateDbWorkflow 接 yaml_content，内部对 native/template 归一化 + 重派生 spec_json。
+  // examples 更新 → 覆盖。P2 后：updateDbWorkflow 接 spec_json（JSON 文本），内部对 native/template 归一化。
   updateDbWorkflow(name, {
     description: spec.description,
-    yaml_content: stringifyWorkflowDoc(JSON.parse(spec.specJson) as Record<string, unknown>, "yaml"),
+    spec_json: spec.specJson,
   });
   return "reseeded";
 }
