@@ -411,11 +411,31 @@ phases:
     expect(getWorkflowGitRequirement(wf)).toBe(false); // 回退派生自 sandbox.git=false
   });
 
-  it("L6：含 workflow.ts 的模板 → seedTemplateWorkflow 拒种（has-ts，避免幽灵死行）", async () => {
+  it("L6：with_human 已声明式化（最后一个含 ts 的模板去 ts）→ 正常种入 DB", async () => {
     const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");
-    // with_human 含 setup_with_human_task（workflow.ts）
-    expect(seedTemplateWorkflow("with_human")).toBe("has-ts");
-    expect(getWorkflowFromDb("with_human")).toBeNull(); // 没种进 DB
+    expect(seedTemplateWorkflow("with_human")).toBe("seeded");
+    const row = getWorkflowFromDb("with_human");
+    expect(row).not.toBeNull();
+    expect(row!.kind).toBe("template");
+  });
+
+  it("L6b：含 workflow.ts 的模板 → seedTemplateWorkflow 拒种（has-ts，避免幽灵死行）", async () => {
+    // examples 里已无含 ts 的真实模板（with_human 是最后一个），用临时合成 fixture 覆盖守卫
+    const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");
+    const { mkdirSync, writeFileSync, rmSync, existsSync } = await import("fs");
+    const { join, dirname } = await import("path");
+    const { fileURLToPath } = await import("url");
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+    const fixDir = join(repoRoot, "examples", "workflows", "__ts_fixture");
+    try {
+      mkdirSync(fixDir, { recursive: true });
+      writeFileSync(join(fixDir, "workflow.yaml"), "name: __ts_fixture\nphases:\n  - name: a\n    prompt: x\n");
+      writeFileSync(join(fixDir, "workflow.ts"), "export function run_a() {}\n");
+      expect(seedTemplateWorkflow("__ts_fixture")).toBe("has-ts");
+      expect(getWorkflowFromDb("__ts_fixture")).toBeNull(); // 没种进 DB
+    } finally {
+      if (existsSync(fixDir)) rmSync(fixDir, { recursive: true, force: true });
+    }
   });
 
   it("Step5b：seedTemplateWorkflow 幂等——磁盘已有 file 副本 → skip（不撞名）", async () => {

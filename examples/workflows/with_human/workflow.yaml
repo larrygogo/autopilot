@@ -1,12 +1,26 @@
 name: with_human
-template_revision: 1   # 模板修订号；examples 改了 bug fix 就 +1，老副本据此被提示同步
+template_revision: 2   # 模板修订号；examples 改了 bug fix 就 +1，老副本据此被提示同步
 label: "人机协作"
 description: "演示人机交互：agent 中途可调 ask_user 询问，phase 完成后人工 gate 审批"
-setup_func: setup_with_human_task
 
-config:
-  # 默认让 agent 阅读这个 repo；可改成你自己的项目路径
-  repo_path: /home/larry/repos/autopilot
+# 教学示例：演示 autopilot 的两种人机交互机制（纯声明式，无 workflow.ts）。
+#
+# - **ask_user**（agent 中途主动提问）：plan 阶段的 prompt 鼓励 planner agent
+#   遇到方向二选一时调 mcp__autopilot_workflow__ask_user 工具问用户；agent 拿到
+#   答案继续。框架自动注入工具，工作流不需要写任何代码。
+#
+# - **gate**（phase 完成后人工审批）：plan 阶段配 gate: true。runner 在阶段
+#   跑完后挂起 task 到 awaiting_plan，UI 弹 banner [通过/驳回/取消]；
+#   驳回意见经 ${REJECTION} 喂给下一轮 plan。
+#
+# - **decision(mode: tool)**（agent 自行裁决）：review 阶段的评审 agent 按判据
+#   调 submit_decision 提交 pass/reject，reject 自动回退 plan 重做，触顶转 failed。
+#
+# 参考文档：docs/workflow-development.md「人机交互」一节。
+
+# 教学定位：不需要代码库（纯文字计划演练）；要演练真实仓库可改 requires.git: true 并给需求挂库。
+requires:
+  git: false
 
 phases:
   # plan 阶段：agent 写计划，遇到不确定可调 ask_user 问用户；
@@ -15,14 +29,30 @@ phases:
     label: "计划"
     timeout: 600
     gate: true
-    gate_message: "请审阅 plan.md。通过则进入 review，驳回需写明改进方向。"
+    gate_message: "请审阅计划。通过则进入评审，驳回需写明改进方向。"
+    handoff: true
     agent:
       label: "计划员"
       provider: anthropic
       model: claude-sonnet-4-6
       permission_mode: bypassPermissions
+      system_prompt: "你是一位项目计划员，擅长把需求拆成清晰可执行的实施计划。拿不准的方向性取舍不要擅自决定——用 ask_user 工具问用户。"
+    prompt: |
+      请根据以下需求撰写一份实施计划。
 
-  # review 阶段：reviewer 评审，未通过自动回 plan 重做（驳回意见喂给下一轮 plan）
+      ## 需求
+      ${REQUIREMENT}
+
+      要求：
+      - 计划包含：目标、实施步骤（含顺序与依赖）、风险与对策、验收标准
+      - **遇到方向性二选一（如技术选型、范围取舍）时，不要擅自拍板**：
+        调用 mcp__autopilot_workflow__ask_user 工具向用户提问，拿到答案再继续
+      - 把完整计划写入 ${WORKSPACE}/plan.md
+
+      若下方存在上一轮的驳回意见（人工审批驳回或评审驳回），请针对性修订后重新输出（无内容则忽略）：
+      ${REJECTION}
+
+  # review 阶段：评审 agent 按判据自行裁决，未通过自动回 plan 重做（驳回意见喂给下一轮）
   - name: review
     label: "评审"
     timeout: 600
@@ -34,4 +64,21 @@ phases:
       model: claude-sonnet-4-6
       permission_mode: bypassPermissions
       max_turns: 5
-      system_prompt: "你是代码审查员。关注正确性、可读性、边界与失败处理。找出真问题而非格式纠错；按 critical / important / minor 分级反馈。"
+      system_prompt: "你是计划评审员。关注可执行性、步骤完整性、风险覆盖与验收标准是否可检验。找出真问题而非格式纠错；最后按判据自行裁决并提交。"
+    decision:
+      mode: tool
+      criteria: |
+        判定对象是【实施计划】。
+        通过(pass)：目标明确、步骤可执行、关键风险有对策、验收标准可检验即可。措辞、格式、次要细节不构成驳回。
+        驳回(reject)：仅当存在硬伤——步骤不可执行 / 关键环节遗漏 / 风险毫无覆盖 / 验收标准无法检验。驳回必须写明问题与改进方向。
+    prompt: |
+      请评审下面的实施计划是否满足需求。
+
+      ## 需求
+      ${REQUIREMENT}
+
+      ## 待评审的计划
+      ${HANDOFF_plan}
+
+      从可执行性、完整性、风险覆盖、验收标准四个维度给出评审意见，指出真问题；
+      然后依据判据自行裁决（通过 / 驳回，驳回必须说明问题与改进方向）。
