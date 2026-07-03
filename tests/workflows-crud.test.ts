@@ -8,6 +8,7 @@ import {
   listWorkflowsInDb,
   getWorkflowFromDb,
   createDbWorkflow,
+  createNativeDbWorkflow,
   updateDbWorkflow,
   deleteDbWorkflow,
   upsertFileWorkflow,
@@ -63,12 +64,11 @@ describe("workflows CRUD", () => {
     expect(w2.updated_at).toBeGreaterThanOrEqual(w1.updated_at);
   });
 
-  it("createDbWorkflow 必须 derives_from 一个 file workflow", () => {
-    upsertFileWorkflow({
+  it("createDbWorkflow 必须 derives_from 一个 native/template workflow", () => {
+    createNativeDbWorkflow({
       name: "req_dev",
       description: "",
-      yaml_content: "x",
-      file_path: "/tmp/x",
+      spec_json: JSON.stringify({ name: "req_dev", phases: [{ name: "a", prompt: "x" }] }),
     });
     const wf = createDbWorkflow({
       name: "req_dev_fast",
@@ -93,11 +93,10 @@ describe("workflows CRUD", () => {
   });
 
   it("createDbWorkflow derives_from 指向 source=db 时报错（禁嵌套）", () => {
-    upsertFileWorkflow({
+    createNativeDbWorkflow({
       name: "req_dev",
       description: "",
-      yaml_content: "x",
-      file_path: "/tmp/x",
+      spec_json: JSON.stringify({ name: "req_dev", phases: [{ name: "a", prompt: "x" }] }),
     });
     createDbWorkflow({
       name: "wf_db1",
@@ -116,11 +115,10 @@ describe("workflows CRUD", () => {
   });
 
   it("createDbWorkflow 同名冲突报错", () => {
-    upsertFileWorkflow({
+    createNativeDbWorkflow({
       name: "req_dev",
       description: "",
-      yaml_content: "x",
-      file_path: "/tmp/x",
+      spec_json: JSON.stringify({ name: "req_dev", phases: [{ name: "a", prompt: "x" }] }),
     });
     createDbWorkflow({
       name: "wf_a",
@@ -139,14 +137,15 @@ describe("workflows CRUD", () => {
   });
 
   it("updateDbWorkflow 仅修改 db 工作流", () => {
-    upsertFileWorkflow({
+    createNativeDbWorkflow({
       name: "req_dev",
       description: "",
-      yaml_content: "x",
-      file_path: "/tmp/x",
+      spec_json: JSON.stringify({ name: "req_dev", phases: [{ name: "a", prompt: "x" }] }),
     });
+    // file 残留行只读保护仍在（052 后正常不该有，防御性守卫）
+    upsertFileWorkflow({ name: "legacy_file", description: "", yaml_content: "x", file_path: "/tmp/x" });
     expect(() =>
-      updateDbWorkflow("req_dev", { yaml_content: "y" })
+      updateDbWorkflow("legacy_file", { yaml_content: "y" })
     ).toThrow(/file|只读/);
 
     createDbWorkflow({
@@ -164,13 +163,14 @@ describe("workflows CRUD", () => {
   });
 
   it("deleteDbWorkflow 仅删 db 工作流", () => {
-    upsertFileWorkflow({
+    createNativeDbWorkflow({
       name: "req_dev",
       description: "",
-      yaml_content: "x",
-      file_path: "/tmp/x",
+      spec_json: JSON.stringify({ name: "req_dev", phases: [{ name: "a", prompt: "x" }] }),
     });
-    expect(() => deleteDbWorkflow("req_dev")).toThrow(/file|只读/);
+    // file 残留行只读保护仍在（052 后正常不该有，防御性守卫）
+    upsertFileWorkflow({ name: "legacy_file", description: "", yaml_content: "x", file_path: "/tmp/x" });
+    expect(() => deleteDbWorkflow("legacy_file")).toThrow(/file|只读/);
 
     createDbWorkflow({
       name: "wf_a",
@@ -183,11 +183,10 @@ describe("workflows CRUD", () => {
   });
 
   it("listWorkflowsInDb 列出全部 + 按 name 排序", () => {
-    upsertFileWorkflow({
+    createNativeDbWorkflow({
       name: "req_dev",
       description: "",
-      yaml_content: "x",
-      file_path: "/tmp/x",
+      spec_json: JSON.stringify({ name: "req_dev", phases: [{ name: "a", prompt: "x" }] }),
     });
     createDbWorkflow({
       name: "wf_a",

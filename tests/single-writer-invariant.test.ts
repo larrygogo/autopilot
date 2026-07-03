@@ -52,6 +52,7 @@ const ALLOWLIST = new Set([
   "src/migrations/048-workflow-kind-spec-json.ts", // workflows 加 kind/spec_json + 放开 derives_from 强制：表重建 INSERT...SELECT 数据 copy（一次性）
   "src/migrations/049-seed-native-products.ts", // 产品工作流 dev/ad-hoc：file 副本就地转 native（DELETE 旧行 + createTemplateDbWorkflow 重插，一次性，幂等）
   "src/migrations/051-workspace-path-nullable.ts", // workspaces.path 改为可空：表重建 INSERT...SELECT 数据 copy（一次性，幂等）
+  "src/migrations/052-import-file-workflows.ts", // file 轨退役：source=file 镜像行转 native（DELETE 死行 + createNativeDbWorkflow 重插，一次性，幂等）
 ]);
 
 // 注：`\s` 已含换行，故整文件扫描（而非逐行）即可抓住跨行写法

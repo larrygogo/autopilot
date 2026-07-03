@@ -45,7 +45,7 @@ describe("registry 多源加载", () => {
     if (ts) writeFileSync(join(dir, "workflow.ts"), ts);
   }
 
-  it("仅文件工作流：加载并镜像到 DB", async () => {
+  it("file 工作流目录被无视：discover 后 registry 里不存在（file 轨已退役）", async () => {
     writeFileWorkflow(
       "req_dev",
       `name: req_dev
@@ -59,37 +59,33 @@ phases:
       `export async function run_design() {}\nexport async function run_develop() {}\n`
     );
     await discover();
-    const wfs = listWorkflows();
-    expect(wfs.find((w) => w.name === "req_dev")).toBeDefined();
+    // file 轨退役：目录无视，注册表里不存在，DB 也没有行
+    expect(getWorkflow("req_dev")).toBeNull();
     const rows = db.query<{ name: string; source: string }, []>(
       "SELECT name, source FROM workflows ORDER BY name"
     ).all();
-    expect(rows).toEqual([{ name: "req_dev", source: "file" }]);
+    expect(rows.length).toBe(0);
   });
 
-  it("DB 工作流加载（derives_from 一个 file）", async () => {
-    writeFileWorkflow(
-      "req_dev",
-      `name: req_dev
-phases:
-  - name: design
-    timeout: 60
-  - name: develop
-    timeout: 60
-`,
-      `export async function run_design() {}\nexport async function run_develop() {}\n`
-    );
-    await discover();
-    createDbWorkflow({
-      name: "req_dev_fast",
-      description: "skip review",
-      derives_from: "req_dev",
-      yaml_content: `name: req_dev_fast
-phases:
-  - name: design
-    timeout: 60
-`,
+  it("DB 工作流加载（derives_from 一个 native base）", async () => {
+    createNativeDbWorkflow({
+      name: "req_dev",
+      description: "",
+      spec_json: JSON.stringify({
+        name: "req_dev",
+        phases: [
+          { name: "design", timeout: 60, prompt: "做设计" },
+          { name: "develop", timeout: 60, prompt: "开发" },
+        ],
+      }),
     });
+    await discover();
+    // 直接写 DB 行（derived from native base），绕过 createDbWorkflow 的 file-only 守卫（守卫是旧语义）
+    const ts = Date.now();
+    db.run(
+      "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
+      ["req_dev_fast", "skip review", "name: req_dev_fast\nphases:\n  - name: design\n    timeout: 60\n", "req_dev", ts, ts]
+    );
     _clearRegistry();
     await discover();
     const wf = getWorkflow("req_dev_fast");
@@ -98,26 +94,21 @@ phases:
   });
 
   it("DB 工作流 yaml 含 base 没有的 phase name → 跳过加载（不影响其他）", async () => {
-    writeFileWorkflow(
-      "req_dev",
-      `name: req_dev
-phases:
-  - name: design
-    timeout: 60
-`,
-      `export async function run_design() {}\n`
-    );
-    await discover();
-    createDbWorkflow({
-      name: "wf_bad",
+    createNativeDbWorkflow({
+      name: "req_dev",
       description: "",
-      derives_from: "req_dev",
-      yaml_content: `name: wf_bad
-phases:
-  - name: design
-  - name: nonexistent_phase
-`,
+      spec_json: JSON.stringify({
+        name: "req_dev",
+        phases: [{ name: "design", timeout: 60, prompt: "做设计" }],
+      }),
     });
+    await discover();
+    // 直接写 DB 行（derived from native base），绕过 createDbWorkflow 的 file-only 守卫
+    const ts = Date.now();
+    db.run(
+      "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
+      ["wf_bad", "", "name: wf_bad\nphases:\n  - name: design\n  - name: nonexistent_phase\n", "req_dev", ts, ts]
+    );
     _clearRegistry();
     await discover();
     expect(getWorkflow("wf_bad")).toBeNull();
@@ -134,20 +125,20 @@ phases:
     expect(getWorkflow("wf_orphan")).toBeNull();
   });
 
-  it("文件被删除：再次 discover 时 DB 同步删除", async () => {
-    writeFileWorkflow(
-      "req_dev",
-      `name: req_dev
-phases:
-  - name: design
-    timeout: 60
-`,
-      `export async function run_design() {}\n`
-    );
+  it("native DB 工作流删除后 discover → 不再注册（DB 行已删）", async () => {
+    createNativeDbWorkflow({
+      name: "req_dev",
+      description: "",
+      spec_json: JSON.stringify({
+        name: "req_dev",
+        phases: [{ name: "design", timeout: 60, prompt: "做设计" }],
+      }),
+    });
     await discover();
     expect(getWorkflow("req_dev")).not.toBeNull();
 
-    rmSync(join(tmpHome, "workflows", "req_dev"), { recursive: true });
+    // 删除 DB 行
+    db.run("DELETE FROM workflows WHERE name = 'req_dev'");
     _clearRegistry();
     await discover();
     expect(getWorkflow("req_dev")).toBeNull();
@@ -200,21 +191,19 @@ phases:
   });
 
   it("phase 声明 deliver:pr → 绑框架内置 PR 交付器（零 ts，submit_pr 不再需要用户函数）", async () => {
-    writeFileWorkflow(
-      "pr_demo",
-      `name: pr_demo
-delivers: pr
-sandbox: { git: true }
-phases:
-  - name: develop
-    timeout: 60
-    prompt: 开发
-  - name: submit_pr
-    timeout: 60
-    deliver: pr
-    pr_body_from: develop
-`
-    );
+    createNativeDbWorkflow({
+      name: "pr_demo",
+      description: "",
+      spec_json: JSON.stringify({
+        name: "pr_demo",
+        delivers: "pr",
+        sandbox: { git: true },
+        phases: [
+          { name: "develop", timeout: 60, prompt: "开发" },
+          { name: "submit_pr", timeout: 60, deliver: "pr", pr_body_from: "develop" },
+        ],
+      }),
+    });
     await discover();
     const wf = getWorkflow("pr_demo");
     expect(wf).not.toBeNull();
@@ -222,22 +211,7 @@ phases:
     expect(typeof ph?.func).toBe("function"); // 绑了内置 PR 交付器（无 workflow.ts 也能跑交付）
   });
 
-  it("compat：phase 无 deliver:pr 但有同名 run_ ts → 回退 ts（老 dev 副本未 sync 不破）", async () => {
-    writeFileWorkflow(
-      "pr_legacy",
-      `name: pr_legacy
-phases:
-  - name: submit_pr
-    timeout: 60
-`,
-      `export async function run_submit_pr() {}\n`
-    );
-    await discover();
-    const wf = getWorkflow("pr_legacy");
-    expect(wf).not.toBeNull();
-    const ph = wf!.phases.find((p) => !("parallel" in p) && (p as { name: string }).name === "submit_pr") as { func?: unknown } | undefined;
-    expect(typeof ph?.func).toBe("function"); // 回退到 run_submit_pr ts
-  });
+  // compat：workflow.ts 回退已退役（file 轨退役）。ts 函数不再被加载。测试已移除。
 
   it("Step5b：seedTemplateWorkflow 把 dev 种成 DB 模板 → 组装注册等价 file 版（零 ts）", async () => {
     const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");
@@ -315,14 +289,28 @@ phases:
     expect(JSON.parse(row!.spec_json!).name).toBe("my_dev"); // 内层 name 归一
   });
 
-  it("H2：克隆 DB-only derived（无磁盘目录）→ 回退 DB 克隆出 derived 且能注册", async () => {
-    // base = file 工作流
-    writeFileWorkflow("base_wf", "name: base_wf\nphases:\n  - name: design\n    prompt: d\n  - name: develop\n    prompt: v\n");
+  it("H2：克隆 DB-only derived（base 是 native）→ 克隆出 derived 且能注册", async () => {
+    // base = native DB 工作流
+    createNativeDbWorkflow({
+      name: "base_wf",
+      description: "",
+      spec_json: JSON.stringify({
+        name: "base_wf",
+        phases: [
+          { name: "design", timeout: 60, prompt: "做设计" },
+          { name: "develop", timeout: 60, prompt: "开发" },
+        ],
+      }),
+    });
     await discover();
-    // derived = DB 行寄生 base（无磁盘目录）
-    createDbWorkflow({ name: "der_src", description: "", derives_from: "base_wf", yaml_content: "name: der_src\nphases:\n  - name: design\n    prompt: d2\n" });
+    // derived = DB 行寄生 base（无磁盘目录），直接写 DB 绕过 file-only 守卫
+    const ts2 = Date.now();
+    db.run(
+      "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
+      ["der_src", "", "name: der_src\nphases:\n  - name: design\n    prompt: d2\n", "base_wf", ts2, ts2]
+    );
     const { cloneWorkflow } = await import("../src/core/workflow/templates");
-    cloneWorkflow("der_src", "der_clone"); // 磁盘无 der_src → 回退 DB 克隆
+    cloneWorkflow("der_src", "der_clone"); // DB 克隆
     const row = getWorkflowFromDb("der_clone");
     expect(row).not.toBeNull();
     expect(row!.kind).toBe("derived");
@@ -355,14 +343,37 @@ phases:
   // delivers 已改为从 phases 派生（2026-06-22 deriveDelivers，取代 validateDeliveryConsistency）：
   // 顶层不再是用户输入，整类「顶层 vs phase 不一致」的拒绝规则退役，改测派生语义。
   it("派生：顶层旧 delivers 与 phase deliver 不一致 → 以 phase 为准覆盖（不再冲突报错）", async () => {
-    // yaml 还留着旧的 delivers:artifacts 但 submit_pr 是 deliver:pr —— 派生取 phase 值
-    writeFileWorkflow("inconsistent", "name: inconsistent\ndelivers: artifacts\nsandbox: { git: true }\nphases:\n  - name: develop\n    prompt: 写\n  - name: submit_pr\n    deliver: pr\n");
+    // spec_json 里留着旧的 delivers:artifacts 但 submit_pr 是 deliver:pr —— 派生取 phase 值
+    createNativeDbWorkflow({
+      name: "inconsistent",
+      description: "",
+      spec_json: JSON.stringify({
+        name: "inconsistent",
+        delivers: "artifacts",
+        sandbox: { git: true },
+        phases: [
+          { name: "develop", prompt: "写" },
+          { name: "submit_pr", deliver: "pr" },
+        ],
+      }),
+    });
     await discover();
     expect(getWorkflow("inconsistent")?.delivers).toBe("pr");
   });
 
   it("派生：有 deliver 阶段但顶层未写 delivers → 自动派生注入", async () => {
-    writeFileWorkflow("no_top", "name: no_top\nsandbox: { git: true }\nphases:\n  - name: x\n    prompt: 写\n  - name: d\n    deliver: pr\n");
+    createNativeDbWorkflow({
+      name: "no_top",
+      description: "",
+      spec_json: JSON.stringify({
+        name: "no_top",
+        sandbox: { git: true },
+        phases: [
+          { name: "x", prompt: "写" },
+          { name: "d", deliver: "pr" },
+        ],
+      }),
+    });
     await discover();
     expect(getWorkflow("no_top")?.delivers).toBe("pr");
   });
@@ -373,14 +384,22 @@ phases:
     expect(getWorkflow("decl_nodeliver")?.delivers).toBe("artifacts"); // 派生 null → 回退 yaml/spec 显式值
   });
 
-  it("交付一致性：非声明式(有 ts) + delivers:pr 无 deliver 阶段 → 放行（ts 可能在交付，如老 dev run_submit_pr）", async () => {
-    writeFileWorkflow("ts_deliver", "name: ts_deliver\ndelivers: pr\nsandbox: { git: true }\nphases:\n  - name: develop\n    prompt: 写\n  - name: submit_pr\n", "export async function run_submit_pr() {}\n");
-    await discover();
-    expect(getWorkflow("ts_deliver")).not.toBeNull(); // 规则④ 对有 ts 的工作流不生效
-  });
+  // 「非声明式(有 ts) + delivers:pr 放行」：ts 回退已退役（file 轨退役），测试已移除。
 
-  it("交付一致性：dev 式（delivers:pr + deliver:pr 一致）→ 正常加载", async () => {
-    writeFileWorkflow("ok_pr", "name: ok_pr\ndelivers: pr\nsandbox: { git: true }\nphases:\n  - name: develop\n    prompt: 写\n  - name: submit_pr\n    deliver: pr\n");
+  it("交付一致性：native（delivers:pr + deliver:pr 一致）→ 正常加载", async () => {
+    createNativeDbWorkflow({
+      name: "ok_pr",
+      description: "",
+      spec_json: JSON.stringify({
+        name: "ok_pr",
+        delivers: "pr",
+        sandbox: { git: true },
+        phases: [
+          { name: "develop", prompt: "写" },
+          { name: "submit_pr", deliver: "pr" },
+        ],
+      }),
+    });
     await discover();
     expect(getWorkflow("ok_pr")).not.toBeNull();
   });

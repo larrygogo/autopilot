@@ -25,11 +25,9 @@ import {
   listWorkflows,
   getWorkflowYaml as registryGetWorkflowYaml,
   getWorkflowTs as registryGetWorkflowTs,
-  saveWorkflowYaml,
-  deleteWorkflowDir,
   reload as reloadRegistry,
 } from "../core/workflow/registry";
-import { setWorkflowMeta, patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
+import { patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
 import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb, createDbWorkflow, createNativeDbWorkflow } from "../core/workflow/workflows";
 import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
 import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow/templates";
@@ -980,18 +978,16 @@ function registerWorkflowRpc(): void {
 
   registerRpcMethod({
     method: "workflows.saveYaml",
-    description: "保存 workflow.yaml（db 来源走 updateDbWorkflow，file 写文件）",
+    description: "保存 workflow.yaml（写回 DB 工作流；file 轨已退役）",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
       if (typeof p.yaml !== "string") throw new RpcError("INVALID_PARAM", "需要 yaml");
       const row = getWorkflowFromDb(p.name);
       try {
-        if (row && row.source === "db") {
-          updateDbWorkflow(p.name, { yaml_content: p.yaml });
-        } else {
-          saveWorkflowYaml(p.name, p.yaml);
-        }
+        // file 轨已退役：所有工作流都在 DB
+        if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
+        updateDbWorkflow(p.name, { yaml_content: p.yaml });
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
         return { ok: true };
@@ -1038,11 +1034,9 @@ function registerWorkflowRpc(): void {
       if (!registryGetWorkflow(p.name)) throw new RpcError("NOT_FOUND", "Workflow not found");
       const row = getWorkflowFromDb(p.name);
       try {
-        if (row && row.source === "db") {
-          updateDbWorkflow(p.name, { yaml_content: patchWorkflowMetaYaml(row.yaml_content, meta) });
-        } else {
-          setWorkflowMeta(p.name, meta);
-        }
+        // file 轨已退役：所有工作流都在 DB
+        if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
+        updateDbWorkflow(p.name, { yaml_content: patchWorkflowMetaYaml(row.yaml_content, meta) });
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
         return { ok: true };
@@ -1060,12 +1054,9 @@ function registerWorkflowRpc(): void {
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
       const row = getWorkflowFromDb(p.name);
       try {
-        if (row && row.source === "db") {
-          deleteDbWorkflow(p.name);
-        } else {
-          const ok = deleteWorkflowDir(p.name);
-          if (!ok) throw new RpcError("NOT_FOUND", "Workflow not found");
-        }
+        // file 轨已退役：所有工作流都在 DB
+        if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
+        deleteDbWorkflow(p.name);
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
         return { ok: true };

@@ -167,8 +167,8 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
         const wf = getWorkflow(args.workflow_name);
         if (!wf) return err(`工作流不存在：${args.workflow_name}`);
         const row = getWorkflowFromDb(args.workflow_name);
-        if (row && row.source !== "file") {
-          return err(`${args.workflow_name} 是 source=${row.source}，必须用 source=file 工作流的 phase 函数`);
+        if (row && row.kind === "derived") {
+          return err(`${args.workflow_name} 是派生工作流（kind=derived），请用 native/template base 工作流查询 phase 集合`);
         }
         const names: string[] = [];
         for (const p of wf.phases) {

@@ -28,12 +28,14 @@ function makeWf(yaml: string, ts?: string): string {
 }
 
 describe("declarative 安全闸门", () => {
-  it("declarative:true + workflow.ts 含 run_ 函数 → 加载失败报错", async () => {
+  it("declarative:true + workflow.ts 含 run_ 函数 → ts 被忽略（warn），工作流仍正常加载", async () => {
     const dir = makeWf(
-      ["name: decl_bad", "declarative: true", "phases:", "  - name: design", "    prompt: 做设计"].join("\n"),
+      ["name: decl_ok_ts", "declarative: true", "phases:", "  - name: design", "    prompt: 做设计"].join("\n"),
       "export async function run_design(_t: string): Promise<void> {}\n",
     );
-    await expect(loadYamlWorkflow(dir)).rejects.toThrow(/不得包含任何 TS 函数|run_design/);
+    const wf = await loadYamlWorkflow(dir);
+    expect(wf).not.toBeNull(); // ts 被忽略，工作流仍然加载成功
+    expect(wf!.phases.length).toBe(1);
   });
 
   it("declarative:true + 纯 prompt phase（无 ts）→ 正常加载", async () => {

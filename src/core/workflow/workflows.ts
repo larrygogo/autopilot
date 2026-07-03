@@ -133,9 +133,9 @@ export function createDbWorkflow(opts: CreateDbWorkflowOpts): WorkflowRow {
   if (!base) {
     throw new Error(`derives_from "${opts.derives_from}" 不存在`);
   }
-  if (base.source !== "file") {
+  if (base.kind !== "native" && base.kind !== "template") {
     throw new Error(
-      `derives_from "${opts.derives_from}" 是 source=${base.source}，DB 工作流必须派生自 file 工作流（不支持嵌套派生）`
+      `derives_from "${opts.derives_from}" 是 kind=${base.kind}，DB 工作流只能派生自 native/template 工作流（不支持嵌套派生）`
     );
   }
   if (getWorkflowFromDb(opts.name)) {
