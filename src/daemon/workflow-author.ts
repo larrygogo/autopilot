@@ -1,29 +1,28 @@
 /**
- * 工作流 AI 作者：用户用自然语言描述要做什么 → AI 生成 workflow.yaml + workflow.ts。
+ * 工作流 AI 作者：用户用自然语言描述要做什么 → AI 生成声明式 workflow spec（JSON）。
  *
- * 跟 PR #65 extract 同模式：复用 clarifier agent 系统，传专用 system_prompt。
- * 半轮生成 + 允许追问调整（带上 prior_yaml / prior_ts 让 AI 增量改）。
+ * 跟 extract 同模式：复用 clarifier agent 系统，传专用 system_prompt。
+ * 半轮生成 + 允许追问调整（带上 prior_spec 让 AI 增量改）。
+ * 输出主路径 = submit_workflow 工具提交结构化 spec；降级 = 正文 ```json 块。
  *
  * 永不抛——LLM 失败 / 非法 JSON / 缺字段 → 兜底返回 stub 让用户至少有起点。
  */
 
-import { parse as parseYaml } from "yaml";
 import { createLogger } from "../core/logger";
-import { parseLlmYamlWrapper } from "../core/llm-yaml";
 import { buildClarifierAgent } from "./clarifier-agent";
 import { createNativeDbWorkflow } from "../core/workflow/workflows";
-import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
 import { WORKFLOW_NAME_RE } from "../core/workflow/registry";
 import { runWithTaskContext } from "../core/task/context";
 import { tmpdir } from "node:os";
 import { takeAuthorResult } from "../agents/pending-author";
+import { extractJsonBlock } from "./llm-json";
 
 const log = createLogger("workflow-author");
 
-const AUTHOR_SYSTEM_PROMPT = `你是 autopilot 工作流作者。autopilot 工作流是**纯声明式数据**——只写 yaml 声明，
+const AUTHOR_SYSTEM_PROMPT = `你是 autopilot 工作流作者。autopilot 工作流是**纯声明式数据**——只写声明式 spec（JSON 对象），
 **绝不写任何代码（无 workflow.ts、无 run_ 函数）**。所有能力都由框架内置原语提供，你只负责声明。
 
-工作流 yaml 结构：
+工作流 spec 字段结构（下面用 yaml 记法紧凑示意字段；**实际提交是 JSON 对象**，经 submit_workflow 工具的 spec 参数）：
 
 \`\`\`yaml
 name: <短名>             # snake_case 英文标识符
@@ -44,7 +43,7 @@ phases:
 
 **五种声明式原语**（覆盖几乎所有场景，无需任何代码）：
 
-1. **agent 阶段（prompt）**：要 AI 干活（写作 / 设计 / 写代码 / 评审 / 分析…）就写 \`prompt:\` 字段，
+1. **agent 阶段（prompt）**：要 AI 干活（写作 / 设计 / 写代码 / 评审 / 分析…）就写 \`prompt\` 字段，
    框架自动用该 phase 的 agent 跑它。这是最常见的阶段。
 
 2. **人工审批（gate）**：要人点头才往下走，写 \`gate: true\`——该 phase 跑完挂起等用户「通过 / 驳回」。
@@ -108,7 +107,7 @@ phases:
 - 每个 phase 必须能跑：要么有 \`prompt\`，要么 \`gate: true\`，要么 \`deliver: pr|artifacts\`。
 - name 是 snake_case 英文；label 是中文显示名（用户用什么语言就用什么）；顶层 + 每个 phase 都尽量填 label。
 
-读用户描述（可能含 prior_yaml 表示在原基础上增量调整）。
+读用户描述（可能含 prior_spec 表示在原基础上增量调整）。
 
 **输出方式**：分析完成后，调用 **submit_workflow** 工具提交结果（不要把结果写成正文文本）。
 
@@ -121,13 +120,15 @@ phases:
 
 export interface AuthorInput {
   description: string;
-  prior_yaml?: string;
+  /** 上一版 spec 的 JSON 文本（追问调整时带上，AI 在其基础上增量改） */
+  prior_spec?: string;
 }
 
 export interface AuthorResult {
   name: string;
   description: string;
-  yaml: string;
+  /** 结构化 spec 的 JSON pretty 文本（与 DB 列 spec_json 语义一致） */
+  spec_json: string;
   warnings: string[];
 }
 
@@ -136,12 +137,6 @@ let _authorFn: AuthorFn = callClaudeForAuthor;
 
 export function _setAuthorFnForTest(fn: AuthorFn | null): void {
   _authorFn = fn ?? callClaudeForAuthor;
-}
-
-/** 从 LLM 输出提取 ```json ... ``` 块内容（降级：agent 未调工具时解析 JSON 块）。 */
-function extractJsonBlock(text: string): string | null {
-  const m = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-  return m ? m[1].trim() : null;
 }
 
 async function callClaudeForAuthor(prompt: string): Promise<string> {
@@ -162,14 +157,14 @@ async function callClaudeForAuthor(prompt: string): Promise<string> {
   const textOut = result.text ?? "";
   const jsonBlock = extractJsonBlock(textOut);
   if (jsonBlock) return jsonBlock;
-  // 最终降级：返回原始文本（兼容旧路径）
+  // 最终降级：返回原始文本（可能是裸 JSON，交给 runWorkflowAuthor 解析）
   return textOut;
 }
 
 function buildPrompt(input: AuthorInput): string {
   let p = `用户描述：\n${input.description}`;
-  if (input.prior_yaml) {
-    p += "\n\n上一版 yaml：\n```yaml\n" + input.prior_yaml + "\n```";
+  if (input.prior_spec) {
+    p += "\n\n上一版 spec（JSON）：\n```json\n" + input.prior_spec + "\n```";
     p += "\n\n请在上一版基础上按用户描述调整。";
   }
   return p;
@@ -178,17 +173,16 @@ function buildPrompt(input: AuthorInput): string {
 function fallback(input: AuthorInput, reason: string): AuthorResult {
   const name = "new_workflow";
   const description = input.description.slice(0, 60);
-  const yaml = `# AI 生成失败：${reason}
-# 请手工填写或重新生成
-name: ${name}
-description: ${JSON.stringify(description)}
-phases:
-  - name: do_it
-    timeout: 900
-    prompt: |
-      ${description}
-`;
-  return { name, description, yaml, warnings: [`AI 生成失败：${reason}`] };
+  const spec_json = JSON.stringify(
+    {
+      name,
+      description,
+      phases: [{ name: "do_it", timeout: 900, prompt: description }],
+    },
+    null,
+    2,
+  );
+  return { name, description, spec_json, warnings: [`AI 生成失败：${reason}`] };
 }
 
 export async function runWorkflowAuthor(input: AuthorInput): Promise<AuthorResult> {
@@ -200,45 +194,38 @@ export async function runWorkflowAuthor(input: AuthorInput): Promise<AuthorResul
     return fallback(input, e instanceof Error ? e.message : String(e));
   }
 
-  let parsed: { name?: unknown; description?: unknown; yaml?: unknown; spec?: unknown };
-  // 优先 JSON.parse（新路径：submit_workflow 工具捕获 + 降级 JSON 块）
-  try {
-    parsed = JSON.parse(raw) as { name?: unknown; description?: unknown; yaml?: unknown; spec?: unknown };
-  } catch {
-    // JSON 失败 → 兜底 YAML 解析（兼容旧测试 mock 输出 yaml 文本的场景）
+  // JSON only（P3 后 yaml 输出面已全部移除）：裸 JSON 文本（工具捕获 / callClaudeForAuthor
+  // 已剥围栏的降级块）优先；仍失败再剥一次 ```json 围栏兜底（测试注入 / 极端降级形状）。
+  const tryParseObj = (s: string): Record<string, unknown> | null => {
     try {
-      parsed = parseLlmYamlWrapper(raw);
-    } catch (e: unknown) {
-      log.warn("AI 顶层解析失败（JSON + YAML 均失败）：%s", e instanceof Error ? e.message : String(e));
-      return fallback(input, "AI 返回非法格式");
+      const obj = JSON.parse(s) as unknown;
+      return obj && typeof obj === "object" && !Array.isArray(obj) ? (obj as Record<string, unknown>) : null;
+    } catch {
+      return null;
     }
+  };
+  let parsed = tryParseObj(raw);
+  if (!parsed) {
+    const block = extractJsonBlock(raw);
+    if (block) parsed = tryParseObj(block);
+  }
+  if (!parsed) {
+    log.warn("AI 顶层 JSON 解析失败（裸 JSON 与围栏块均不可解析）");
+    return fallback(input, "AI 返回非法格式");
   }
 
-  // 从 spec 字段（新格式）或 yaml 字段（旧格式兼容）提取 spec 文档
-  const warnings: string[] = [];
-  let parsedYaml: Record<string, unknown> | null = null;
-
+  // spec 提取（宽进）：工具提交形状 {name, description, spec} 优先；
+  // 降级 JSON 块直接输出 spec doc 本身（顶层就有 phases）也接受。
+  let specDoc: Record<string, unknown>;
   if (parsed.spec && typeof parsed.spec === "object" && !Array.isArray(parsed.spec)) {
-    // 新格式：spec 字段直接是 JSON 对象
-    parsedYaml = parsed.spec as Record<string, unknown>;
-    // 同时生成 yaml 字段供 AuthorResult 消费（保持接口不变）
-    try {
-      const { stringify: yamlStringify } = await import("yaml");
-      parsed = { ...parsed, yaml: yamlStringify(parsedYaml) };
-    } catch (e: unknown) {
-      // yaml stringify 失败：退回 JSON 文本作 yaml 字段（saveAuthoredWorkflow 会 parseWorkflowText 解析）
-      parsed = { ...parsed, yaml: JSON.stringify(parsedYaml, null, 2) };
-    }
-  } else if (typeof parsed.yaml === "string" && parsed.yaml.trim()) {
-    // 旧格式：yaml 字段是 yaml 文本（兼容旧测试 mock）
-    try {
-      parsedYaml = parseYaml(parsed.yaml) as Record<string, unknown>;
-    } catch (e: unknown) {
-      warnings.push(`yaml 解析失败：${e instanceof Error ? e.message : String(e)}`);
-    }
+    specDoc = parsed.spec as Record<string, unknown>;
+  } else if (Array.isArray(parsed.phases)) {
+    specDoc = parsed;
   } else {
-    return fallback(input, "缺 yaml/spec 字段");
+    return fallback(input, "缺 spec 字段");
   }
+
+  const warnings: string[] = [];
 
   // 声明式工作流：每个 phase 必须有框架原语能跑——prompt（agent）/ gate（人工审批）/ deliver（交付）。
   // 没有任一 = 声明式下跑不起来（不再有 ts 兜底）。
@@ -246,8 +233,8 @@ export async function runWorkflowAuthor(input: AuthorInput): Promise<AuthorResul
     (typeof p.prompt === "string" && p.prompt.trim() !== "") ||
     p.gate === true ||
     (typeof p.deliver === "string" && p.deliver.trim() !== "");
-  if (parsedYaml && Array.isArray(parsedYaml.phases)) {
-    for (const p of parsedYaml.phases as Array<Record<string, unknown>>) {
+  if (Array.isArray(specDoc.phases)) {
+    for (const p of specDoc.phases as Array<Record<string, unknown>>) {
       if (!p || typeof p !== "object") continue;
       if (p.parallel && typeof p.parallel === "object") {
         const par = p.parallel as Record<string, unknown>;
@@ -265,38 +252,45 @@ export async function runWorkflowAuthor(input: AuthorInput): Promise<AuthorResul
         warnings.push(`阶段 ${String(p.name)} 声明了 func（代码引用）——声明式工作流不支持，请改用 prompt / gate / deliver`);
       }
     }
+  } else {
+    warnings.push("spec 缺 phases 数组，会跑不起来");
   }
 
   const name = typeof parsed.name === "string" && WORKFLOW_NAME_RE.test(parsed.name)
     ? parsed.name
-    : "new_workflow";
+    : (typeof specDoc.name === "string" && WORKFLOW_NAME_RE.test(specDoc.name) ? specDoc.name : "new_workflow");
   const description = typeof parsed.description === "string"
     ? parsed.description
-    : input.description.slice(0, 60);
+    : (typeof specDoc.description === "string" ? specDoc.description : input.description.slice(0, 60));
 
   return {
     name,
     description,
-    yaml: typeof parsed.yaml === "string" ? parsed.yaml : JSON.stringify(parsed.yaml, null, 2),
+    spec_json: JSON.stringify(specDoc, null, 2),
     warnings,
   };
 }
 
 /**
- * 把 AI 生成的声明式 yaml 落成 **native DB 工作流**（不写磁盘）——与 json-only / DB 真相源方向一致。
- * yaml 是 AI 的人类友好生成面，这里转 spec_json 经 createNativeDbWorkflow 落库（内部 normalizeSpecDoc
- * 校验 phases / 归一 name / strip 函数字段）。名字非法 / 已存在 / 结构非法 → 抛错。
+ * 把 AI 生成的声明式 spec（JSON 文本）落成 **native DB 工作流**（不写磁盘）——与 json-only / DB 真相源一致。
+ * 经 createNativeDbWorkflow 落库（内部 normalizeSpecDoc 校验 phases / 归一 name / strip 函数字段）。
+ * 名字非法 / 已存在 / 结构非法 → 抛错。
  */
-export function saveAuthoredWorkflow(name: string, yaml: string): void {
+export function saveAuthoredWorkflow(name: string, specJson: string): void {
   if (!WORKFLOW_NAME_RE.test(name)) {
     throw new Error("name 只允许小写字母开头 + 小写字母/数字/_/-（≤40 字符）");
   }
-  const doc = parseWorkflowText(yaml, "yaml");
+  let doc: unknown;
+  try {
+    doc = JSON.parse(specJson);
+  } catch (e: unknown) {
+    throw new Error(`spec_json 不是合法 JSON：${e instanceof Error ? e.message : String(e)}`);
+  }
   if (!doc || typeof doc !== "object" || !Array.isArray((doc as Record<string, unknown>).phases)) {
-    throw new Error("yaml 缺 phases 字段");
+    throw new Error("spec 缺 phases 字段");
   }
   const description = typeof (doc as Record<string, unknown>).description === "string"
     ? (doc as Record<string, unknown>).description as string
     : "";
-  createNativeDbWorkflow({ name, description, spec_json: stringifyWorkflowDoc(doc, "json") });
+  createNativeDbWorkflow({ name, description, spec_json: JSON.stringify(doc, null, 2) + "\n" });
 }

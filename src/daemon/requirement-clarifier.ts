@@ -20,6 +20,7 @@ import {
 import { buildClarifierAgent } from "./clarifier-agent";
 import { resolveDefaultProvider } from "../core/default-provider";
 import { takeClarifyResult } from "../agents/pending-clarify";
+import { extractJsonBlock } from "./llm-json";
 import { listAttachments, buildAttachmentContext } from "../core/requirements/attachments";
 import { ensureRequirementClones } from "../core/requirements/clone";
 import { deleteRequirementCodebase } from "../core/sandbox/codebase";
@@ -177,12 +178,6 @@ async function callClaude(
     } catch { /* 不是有效 JSON，继续报错 */ }
     throw new Error("agent 未提交澄清结果（未调 submit_clarify）");
   }
-}
-
-/** 从 LLM 输出提取 ```json ... ``` 块内容（降级：agent 未调工具时解析 JSON 块）。 */
-function extractJsonBlock(text: string): string | null {
-  const m = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
-  return m ? m[1].trim() : null;
 }
 
 // ──────────────────────────────────────────────
@@ -814,14 +809,14 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
       }
 
       // #15：解析失败（确定性格式错）→ 给下一轮 attempt 加纠错前言。否则两次同 prompt 必然
-      // 两连挂（「YAML 顶层不是对象」这类确定性违规，无差异重试无意义）。
+      // 两连挂（「非 JSON」这类确定性违规，无差异重试无意义）。
       if (i === 0 && isParseFailure && attempts[1]) {
         attempts[1] = {
           ...attempts[1],
           prompt:
             `⚠ 你上一次的输出无法解析：${lastError.message}\n` +
-            "请严格只输出**顶层为对象的 YAML**（key: value 形式），不要任何额外解释 / 围栏外文字 / " +
-            "数组 / 标量 / `---` 多文档分隔。\n\n" +
+            "请严格只输出结构化结果：优先调用 submit_clarify 工具提交；工具不可用时在正文输出" +
+            "一个 ```json 块（顶层为对象），不要任何额外解释文字。\n\n" +
             attempts[1].prompt,
         };
       }

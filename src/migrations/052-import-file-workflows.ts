@@ -3,7 +3,9 @@ import { existsSync, readdirSync, readFileSync, statSync, cpSync, rmSync, mkdirS
 import { join } from "path";
 import { homedir } from "os";
 import { log } from "../core/logger";
-import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
+// 冻结历史迁移：自带 yaml 解析（serialize codec 已收敛 json-only，不再提供 yaml 能力；同 053 模式）
+import { parse as parseYaml } from "yaml";
+import { stringifyWorkflowDoc } from "../core/workflow/serialize";
 import { createNativeDbWorkflow } from "../core/workflow/workflows";
 
 /**
@@ -49,7 +51,7 @@ export function up(db: Database): () => void {
   const convert = (name: string, yamlText: string, sourceLabel: string): boolean => {
     let doc: Record<string, unknown> | null = null;
     try {
-      doc = parseWorkflowText(yamlText, "yaml") as Record<string, unknown> | null;
+      doc = parseYaml(yamlText) as Record<string, unknown> | null;
     } catch (e: unknown) {
       log.warn("迁移 052：%s 的 yaml 解析失败（%s），跳过：%s", name, sourceLabel, e instanceof Error ? e.message : String(e));
       return false;
@@ -128,7 +130,7 @@ export function up(db: Database): () => void {
       let raw = "";
       try {
         raw = readFileSync(yamlPath, "utf-8");
-        doc = parseWorkflowText(raw, "yaml") as Record<string, unknown> | null;
+        doc = parseYaml(raw) as Record<string, unknown> | null;
       } catch { /* 解析失败下面告警 */ }
       const name = doc && typeof doc["name"] === "string" && doc["name"] ? (doc["name"] as string) : entry;
       if (handled.has(name)) continue; // ① 已处理

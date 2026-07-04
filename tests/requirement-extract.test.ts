@@ -45,6 +45,18 @@ describe("runClarifierExtract", () => {
     expect(r.spec_md).toContain("## 背景");
   });
 
+  it("```json 围栏块输出也能解析（降级契约格式）", async () => {
+    _setExtractFnForTest(async () =>
+      "```json\n" + JSON.stringify({ title: "围栏标题", spec_md: "## 背景\n围栏内容" }) + "\n```",
+    );
+    const r = await runClarifierExtract({
+      raw_text: "随便说点啥",
+      project_id: "proj-001",
+    });
+    expect(r.title).toBe("围栏标题");
+    expect(r.spec_md).toContain("围栏内容");
+  });
+
   it("LLM 抛错走兜底（title=前30字 spec_md=原文）", async () => {
     _setExtractFnForTest(async () => {
       throw new Error("provider down");

@@ -346,10 +346,10 @@ export const api = {
   importWorkflow: (body: { name: string; content: string; derives_from?: string; description?: string }) =>
     requestRpc<{ name: string; kind: string; source: string }>("workflows.import", body),
   // [WS-RPC] workflows.author（AI 长任务，给 5min 超时）
-  authorWorkflow: (body: { description: string; prior_yaml?: string }) =>
+  authorWorkflow: (body: { description: string; prior_spec?: string }) =>
     requestRpc<AuthoredWorkflow>("workflows.author", body, { timeoutMs: 300_000 }),
   // [WS-RPC] workflows.saveAuthored（落 native DB，零 ts）
-  saveAuthoredWorkflow: (body: { name: string; yaml: string }) =>
+  saveAuthoredWorkflow: (body: { name: string; spec_json: string }) =>
     requestRpc<{ ok: boolean; name: string }>("workflows.saveAuthored", body),
   // [WS-RPC] workflows.delete
   deleteWorkflow: (name: string) =>
@@ -923,7 +923,8 @@ export interface WorkflowTemplate {
 export interface AuthoredWorkflow {
   name: string;
   description: string;
-  yaml: string;
+  /** 结构化 spec 的 JSON pretty 文本（与 DB 列 spec_json 语义一致） */
+  spec_json: string;
   warnings: string[];
 }
 

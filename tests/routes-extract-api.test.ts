@@ -40,7 +40,7 @@ beforeEach(async () => {
   codebaseId = nextWorkspaceId();
   createWorkspace({ id: codebaseId, project_id: projectId, alias: "cb", path: "/tmp/x" });
   _setExtractFnForTest(async () =>
-    "title: 测试标题\nspec_md: |\n  ## 背景\n  x\n  ## 目标\n  y\n  ## 验收\n  z",
+    "```json\n" + JSON.stringify({ title: "测试标题", spec_md: "## 背景\nx\n## 目标\ny\n## 验收\nz" }) + "\n```",
   );
 });
 
