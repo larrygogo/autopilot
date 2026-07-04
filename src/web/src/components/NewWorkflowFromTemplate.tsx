@@ -248,7 +248,7 @@ export function NewWorkflowFromTemplate({ open, onCancel, onCreated, onFromAI }:
       {/* AI 起点：不在此填名，给说明条 + CTA 跳路由 */}
       {mode === "ai" && (
         <p className="rounded-md border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
-          ✨ 进入 AI 工作流生成页，用自然语言描述你要的流程，AI 生成 yaml + ts。点下方「用 AI 描述 →」继续。
+          ✨ 进入 AI 工作流生成页，用自然语言描述你要的流程，AI 生成完整的工作流定义。点下方「用 AI 描述 →」继续。
         </p>
       )}
 

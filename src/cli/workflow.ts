@@ -102,7 +102,7 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
 
   // ── show ──
   wf.command("show <name>")
-    .description("查看单个工作流（yaml + 元信息）")
+    .description("查看单个工作流（spec JSON + 元信息）")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
     .action(async (name: string, opts: { port: string }) => {
       const client = ctx.getClient(opts);
@@ -156,9 +156,9 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
 
   // ── create ──
   wf.command("create <name>")
-    .description("创建 DB 工作流（必须 --derives-from 一个 file 工作流）")
-    .requiredOption("--derives-from <base>", "派生自的 file 工作流名（如 dev）")
-    .option("--from <yaml-file>", "初始 yaml 文件路径；不传则用 base 的 yaml 进 EDITOR 编辑")
+    .description("创建 DB 工作流（必须 --derives-from 一个基底工作流）")
+    .requiredOption("--derives-from <base>", "派生自的基底工作流名（如 dev）")
+    .option("--from <spec-file>", "初始 spec（JSON）文件路径；不传则用 base 的 spec 进 EDITOR 编辑")
     .option("-d, --description <desc>", "工作流描述", "")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
     .action(async (name: string, opts: {
@@ -327,7 +327,7 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
  */
 async function editInTempFile(initial: string): Promise<string> {
   const tmpDir = mkdtempSync(join(tmpdir(), "autopilot-edit-"));
-  const tmpFile = join(tmpDir, "workflow.yaml");
+  const tmpFile = join(tmpDir, "workflow.json");
   writeFileSync(tmpFile, initial, "utf8");
   const editor =
     process.env.EDITOR ||

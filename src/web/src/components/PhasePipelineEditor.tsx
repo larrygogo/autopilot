@@ -89,8 +89,8 @@ function rewriteRunFnHeader(code: string, oldName: string, newName: string): str
 // ──────────────────────────────────────────────
 // 归一化「展开态 → 编写态」：workflows.get 返回的是 registry 展开后的 phases
 // （reject 语法糖已被删、变成 jump_trigger/jump_target + 一堆状态机派生字段，label 兜底成大写）。
-// 编辑器只认编写态字段。若把展开态原样回写 yaml：①旧 jump_target 会盖住新改的 reject（改驳回不生效）
-// ②派生字段污染 yaml。故进编辑器先剥成编写态——jump_target 反推回 reject，剥派生字段与兜底 label。
+// 编辑器只认编写态字段。若把展开态原样回写 spec：①旧 jump_target 会盖住新改的 reject（改驳回不生效）
+// ②派生字段污染 spec。故进编辑器先剥成编写态——jump_target 反推回 reject，剥派生字段与兜底 label。
 // ──────────────────────────────────────────────
 const ALWAYS_STRIP_FIELDS = ["jump_trigger", "_jump_origin", "reject_trigger", "retry_target"];
 
@@ -114,7 +114,7 @@ function normalizeSinglePhase(raw: Record<string, unknown>): Record<string, unkn
   for (const [k, v] of Object.entries(derived)) {
     if (out[k] === v) delete out[k];
   }
-  // registry 兜底 label = NAME.toUpperCase()，非用户填，剥掉避免烤进 yaml
+  // registry 兜底 label = NAME.toUpperCase()，非用户填，剥掉避免烤进 spec
   if (typeof out.label === "string" && name && out.label === name.toUpperCase()) {
     delete out.label;
   }
@@ -859,7 +859,7 @@ export function PhasePipelineEditor({
       const renamesToSend = Object.keys(valid).length > 0 ? valid : undefined;
       const parts: string[] = [];
 
-      // 1. 结构 / 字段 / rename —— 仅当有结构改动时调用（纯 ts 改动跳过，避免无谓重写 yaml）。
+      // 1. 结构 / 字段 / rename —— 仅当有结构改动时调用（纯 ts 改动跳过，避免无谓重写 spec）。
       let res: Awaited<ReturnType<typeof api.setWorkflowPhases>> | null = null;
       if (dirty) {
         res = await api.setWorkflowPhases(workflowName, phases, true, renamesToSend);
@@ -1501,7 +1501,7 @@ function PhaseTsEditor({
   originalCode: string | null;
   value: string;
   onChange: (code: string) => void;
-  /** 该 phase 在 yaml 里有 prompt 字段：用于显示优先级提示 */
+  /** 该 phase 在 spec 里有 prompt 字段：用于显示优先级提示 */
   hasPrompt?: boolean;
 }) {
   const dirty = value.trim() !== (originalCode ?? "").trim();
@@ -1516,7 +1516,7 @@ function PhaseTsEditor({
       </div>
       {hasPrompt && originalCode === null && (
         <p className="mb-1 border border-success/40 bg-success/5 p-2 text-[11px] text-success">
-          该阶段由 prompt 驱动（yaml 里有 prompt 字段），框架自动调 agent.run；无需 ts 函数
+          该阶段由 prompt 驱动（spec 里有 prompt 字段），框架自动调 agent.run；无需 ts 函数
         </p>
       )}
       {hasPrompt && originalCode !== null && (

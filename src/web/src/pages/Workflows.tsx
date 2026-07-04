@@ -14,7 +14,6 @@ interface WorkflowInfo {
   name: string;
   label?: string;
   description: string;
-  source?: "db" | "file";
   derives_from?: string | null;
 }
 
@@ -105,7 +104,7 @@ export function Workflows() {
         open={cloneSource !== null}
         onOpenChange={(v) => { if (!v) { setCloneSource(null); setCloneName(""); } }}
         title={`克隆工作流 ${cloneSource ?? ""}`}
-        description="拷贝 yaml + ts 到新工作流目录；新工作流可以独立编辑、不影响原版。"
+        description="拷贝该工作流的完整定义为新工作流；新工作流可以独立编辑、不影响原版。"
         submitText="克隆"
         submitDisabled={!cloneName.trim()}
         onSubmit={async () => {
