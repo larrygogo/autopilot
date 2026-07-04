@@ -14,6 +14,9 @@ import { buildClarifierAgent } from "./clarifier-agent";
 import { createNativeDbWorkflow } from "../core/workflow/workflows";
 import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
 import { WORKFLOW_NAME_RE } from "../core/workflow/registry";
+import { runWithTaskContext } from "../core/task/context";
+import { tmpdir } from "node:os";
+import { takeAuthorResult } from "../agents/pending-author";
 
 const log = createLogger("workflow-author");
 
@@ -107,25 +110,14 @@ phases:
 
 读用户描述（可能含 prior_yaml 表示在原基础上增量调整）。
 
-**输出格式为 YAML**（不是 JSON），结构如下：
+**输出方式**：分析完成后，调用 **submit_workflow** 工具提交结果（不要把结果写成正文文本）。
 
-\`\`\`yaml
-name: backend_dev                       # snake_case 短名
-description: 一句话用例说明
-yaml: |
-  # 这里写完整 workflow.yaml 内容（纯声明，无 ts）
-  name: backend_dev
-  label: 后端开发
-  phases:
-    - name: design
-      label: 设计
-      prompt: |
-        ...                              # prompt 可含任意引号 / 多行，不需转义
-\`\`\`
+工具参数：
+- \`name\`: 工作流名（snake_case 英文标识符）
+- \`description\`: 一句话用例说明
+- \`spec\`: 完整 workflow spec JSON 对象（含 name/label/description/requires/phases[] 等）
 
-⭐ 用 **YAML** 而不是 JSON：yaml 的 \`|\` 块内 prompt 可原样含双引号 / 中文 / 多行 / 反斜杠，**不需转义**。
-
-直接输出 YAML 文本，不要解释、不要 \`\`\`yaml 围栏、**不要 ts 字段**。`;
+**非 Anthropic provider 降级**：若工具不可用，改为在正文输出一个 \`\`\`json 块，内含与上述参数相同的 JSON 对象。`;
 
 export interface AuthorInput {
   description: string;
@@ -146,10 +138,32 @@ export function _setAuthorFnForTest(fn: AuthorFn | null): void {
   _authorFn = fn ?? callClaudeForAuthor;
 }
 
+/** 从 LLM 输出提取 ```json ... ``` 块内容（降级：agent 未调工具时解析 JSON 块）。 */
+function extractJsonBlock(text: string): string | null {
+  const m = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+  return m ? m[1].trim() : null;
+}
+
 async function callClaudeForAuthor(prompt: string): Promise<string> {
   const agent = buildClarifierAgent();
-  const result = await agent.run(prompt, { system_prompt: AUTHOR_SYSTEM_PROMPT });
-  return result.text ?? "";
+  // 生成唯一 callId，用于工具捕获位 key
+  const callId = `author-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const sandboxDir = tmpdir();
+  const result = await runWithTaskContext(
+    { taskId: callId, phase: "authoring", sandboxDir, signal: undefined },
+    () => agent.run(prompt, { system_prompt: AUTHOR_SYSTEM_PROMPT }),
+  );
+  // 优先从工具捕获位取结构化结果（submit_workflow 工具调用）
+  const captured = takeAuthorResult(callId);
+  if (captured) {
+    return JSON.stringify({ name: captured.name, description: captured.description, spec: captured.spec });
+  }
+  // 降级：agent 未调工具，尝试从文本提取 JSON 块
+  const textOut = result.text ?? "";
+  const jsonBlock = extractJsonBlock(textOut);
+  if (jsonBlock) return jsonBlock;
+  // 最终降级：返回原始文本（兼容旧路径）
+  return textOut;
 }
 
 function buildPrompt(input: AuthorInput): string {
@@ -186,25 +200,44 @@ export async function runWorkflowAuthor(input: AuthorInput): Promise<AuthorResul
     return fallback(input, e instanceof Error ? e.message : String(e));
   }
 
-  let parsed: { name?: unknown; description?: unknown; yaml?: unknown };
+  let parsed: { name?: unknown; description?: unknown; yaml?: unknown; spec?: unknown };
+  // 优先 JSON.parse（新路径：submit_workflow 工具捕获 + 降级 JSON 块）
   try {
-    parsed = parseLlmYamlWrapper(raw);
-  } catch (e: unknown) {
-    log.warn("AI 顶层 YAML 解析失败：%s", e instanceof Error ? e.message : String(e));
-    return fallback(input, "AI 返回非法格式");
+    parsed = JSON.parse(raw) as { name?: unknown; description?: unknown; yaml?: unknown; spec?: unknown };
+  } catch {
+    // JSON 失败 → 兜底 YAML 解析（兼容旧测试 mock 输出 yaml 文本的场景）
+    try {
+      parsed = parseLlmYamlWrapper(raw);
+    } catch (e: unknown) {
+      log.warn("AI 顶层解析失败（JSON + YAML 均失败）：%s", e instanceof Error ? e.message : String(e));
+      return fallback(input, "AI 返回非法格式");
+    }
   }
 
-  if (typeof parsed.yaml !== "string" || !parsed.yaml.trim()) {
-    return fallback(input, "缺 yaml 字段");
-  }
-
-  // yaml 合法性
+  // 从 spec 字段（新格式）或 yaml 字段（旧格式兼容）提取 spec 文档
   const warnings: string[] = [];
   let parsedYaml: Record<string, unknown> | null = null;
-  try {
-    parsedYaml = parseYaml(parsed.yaml) as Record<string, unknown>;
-  } catch (e: unknown) {
-    warnings.push(`yaml 解析失败：${e instanceof Error ? e.message : String(e)}`);
+
+  if (parsed.spec && typeof parsed.spec === "object" && !Array.isArray(parsed.spec)) {
+    // 新格式：spec 字段直接是 JSON 对象
+    parsedYaml = parsed.spec as Record<string, unknown>;
+    // 同时生成 yaml 字段供 AuthorResult 消费（保持接口不变）
+    try {
+      const { stringify: yamlStringify } = await import("yaml");
+      parsed = { ...parsed, yaml: yamlStringify(parsedYaml) };
+    } catch (e: unknown) {
+      // yaml stringify 失败：退回 JSON 文本作 yaml 字段（saveAuthoredWorkflow 会 parseWorkflowText 解析）
+      parsed = { ...parsed, yaml: JSON.stringify(parsedYaml, null, 2) };
+    }
+  } else if (typeof parsed.yaml === "string" && parsed.yaml.trim()) {
+    // 旧格式：yaml 字段是 yaml 文本（兼容旧测试 mock）
+    try {
+      parsedYaml = parseYaml(parsed.yaml) as Record<string, unknown>;
+    } catch (e: unknown) {
+      warnings.push(`yaml 解析失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  } else {
+    return fallback(input, "缺 yaml/spec 字段");
   }
 
   // 声明式工作流：每个 phase 必须有框架原语能跑——prompt（agent）/ gate（人工审批）/ deliver（交付）。
@@ -244,7 +277,7 @@ export async function runWorkflowAuthor(input: AuthorInput): Promise<AuthorResul
   return {
     name,
     description,
-    yaml: parsed.yaml,
+    yaml: typeof parsed.yaml === "string" ? parsed.yaml : JSON.stringify(parsed.yaml, null, 2),
     warnings,
   };
 }
