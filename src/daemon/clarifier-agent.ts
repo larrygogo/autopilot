@@ -15,7 +15,7 @@ export interface ClarifierAgentOverride {
  * clarify agent 的内置默认配置（代码兜底；零配置时行为）。
  *
  * 生命周期 agent 配置（2026-06-13）：clarify 的生效配置 = CLARIFIER_DEFAULTS ←
- * config.yaml `lifecycle.clarify`（字段级 merge）← 需求级 override（provider/model）。
+ * config.json `lifecycle.clarify`（字段级 merge）← 需求级 override（provider/model）。
  * extract / author 共用 buildClarifierAgent，所以一并继承 lifecycle.clarify 的 provider/model
  * /max_turns/permission_mode（各自 system_prompt 在 run() 时覆盖）。
  */
@@ -34,7 +34,7 @@ const CLARIFIER_DEFAULTS: InlineAgentConfig = {
 
 /**
  * clarify agent 的「生效配置 / 用户配置 / 默认」三件（供 buildClarifierAgent 与 lifecycle.list RPC 共用）。
- * 字段级 merge：用户在 config.yaml lifecycle.clarify 写的字段覆盖同名默认，未写的走默认。
+ * 字段级 merge：用户在 config.json lifecycle.clarify 写的字段覆盖同名默认，未写的走默认。
  */
 export function effectiveClarifyConfig(): {
   effective: InlineAgentConfig;

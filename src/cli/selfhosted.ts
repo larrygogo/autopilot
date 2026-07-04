@@ -30,7 +30,7 @@ export function renderSelfhostedStatus(creds: SelfhostedCredentials | null, enab
   if (!creds) {
     return "selfhosted connector 未注册。先运行：autopilot selfhosted register --url <reqgenie 控制平面 URL>";
   }
-  const enabledStr = enabled ? "已启用（config.selfhosted.enabled=true）" : "已注册但未启用（需在 config.yaml 设 selfhosted.enabled: true）";
+  const enabledStr = enabled ? "已启用（config.selfhosted.enabled=true）" : "已注册但未启用（需在 config.json 设 selfhosted.enabled: true）";
   return [
     `状态：${enabledStr}`,
     `instance_id：${creds.instance_id}`,
@@ -45,7 +45,7 @@ export function registerSelfhostedCommands(program: Command): void {
 
   selfhosted
     .command("register")
-    .description("用一次性注册 token 换长期凭证，并在 config.yaml 开启 connector（token 经 stdin 输入，不进 history）")
+    .description("用一次性注册 token 换长期凭证，并在 config.json 开启 connector（token 经 stdin 输入，不进 history）")
     .requiredOption("--url <url>", "reqgenie 控制平面 URL")
     .option("--name <name>", "实例展示名", `${process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? "autopilot-instance"}`)
     .action(async (opts: { url: string; name: string }) => {
@@ -83,7 +83,7 @@ export function registerSelfhostedCommands(program: Command): void {
         };
         saveSelfhostedCredentials(creds);
 
-        // 把连接元数据写 config.yaml selfhosted 段 + 自动启用
+        // 把连接元数据写 config.json selfhosted 段 + 自动启用
         saveSelfhostedConfig({
           ...loadSelfhostedConfig(),
           control_plane_url: creds.control_plane_url,
@@ -92,7 +92,7 @@ export function registerSelfhostedCommands(program: Command): void {
 
         console.log(`注册成功：instance_id=${instance_id}`);
         console.log("下次启动 daemon 时 selfhosted connector 将自动连接 reqgenie 控制面。");
-        console.log("（无需改 config.yaml mode，标准 daemon 模式 + connector 并存）");
+        console.log("（无需改 config.json mode，标准 daemon 模式 + connector 并存）");
       } catch (e: unknown) {
         console.error("注册失败：", e instanceof Error ? e.message : String(e));
         process.exit(1);
@@ -114,7 +114,7 @@ export function registerSelfhostedCommands(program: Command): void {
     .action(() => {
       const removed = clearSelfhostedCredentials();
       if (removed) {
-        // 同步关闭 config.yaml 中的 enabled 开关，防止下次 daemon 启动报无凭证
+        // 同步关闭 config.json 中的 enabled 开关，防止下次 daemon 启动报无凭证
         saveSelfhostedConfig({ ...loadSelfhostedConfig(), enabled: false });
         console.log("selfhosted 凭证已删除，connector 已禁用。");
       } else {

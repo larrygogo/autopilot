@@ -88,8 +88,8 @@ describe("tick 全局并发上限 FIFO", () => {
 
     tmpCfgDir = join(tmpdir(), `ap-sched-global-${Date.now()}`);
     mkdirSync(tmpCfgDir, { recursive: true });
-    tmpCfgFile = join(tmpCfgDir, "config.yaml");
-    writeFileSync(tmpCfgFile, "", "utf-8");
+    tmpCfgFile = join(tmpCfgDir, "config.json");
+    writeFileSync(tmpCfgFile, "{}", "utf-8");
     process.env.DEV_WORKFLOW_CONFIG = tmpCfgFile;
   });
 
@@ -101,7 +101,7 @@ describe("tick 全局并发上限 FIFO", () => {
   });
 
   beforeEach(() => {
-    writeFileSync(tmpCfgFile, "", "utf-8"); // 重置 max=1（默认）
+    writeFileSync(tmpCfgFile, "{}", "utf-8"); // 重置 max=1（默认）
     db.run("DELETE FROM requirement_comments WHERE kind = 'feedback'");
     db.run("DELETE FROM requirement_workspaces");
     db.run("DELETE FROM requirements");
@@ -130,7 +130,7 @@ describe("tick 全局并发上限 FIFO", () => {
   });
 
   it("N=2：1 个 running 时不阻塞下一个 queued（调度器尝试启动，startTaskFromTemplate 真实失败回滚 → ready）", async () => {
-    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
+    writeFileSync(tmpCfgFile, JSON.stringify({scheduler: {max_concurrent_tasks: 2}}, null, 2), "utf-8");
 
     const idA = nextRequirementId();
     createRequirement({ id: idA, project_id: "proj-global", workspace_id: "ws-g1", title: "A" });
@@ -152,7 +152,7 @@ describe("tick 全局并发上限 FIFO", () => {
   });
 
   it("N=2：2 个 running 时阻塞第 3 个（status 保持 queued）", async () => {
-    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
+    writeFileSync(tmpCfgFile, JSON.stringify({scheduler: {max_concurrent_tasks: 2}}, null, 2), "utf-8");
 
     const idA = nextRequirementId();
     createRequirement({ id: idA, project_id: "proj-global", workspace_id: "ws-g1", title: "A" });
@@ -177,7 +177,7 @@ describe("tick 全局并发上限 FIFO", () => {
   });
 
   it("rank14：scheduleOne await 期间他方转入 fix_revision（占用方向）→ 每迭代重算 live active 不超 cap", async () => {
-    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
+    writeFileSync(tmpCfgFile, JSON.stringify({scheduler: {max_concurrent_tasks: 2}}, null, 2), "utf-8");
 
     // B 在 awaiting_review（不在 queued），稍后被「外部驱动者」（模拟 pr-poller）转 fix_revision
     const idB = nextRequirementId();
@@ -218,7 +218,7 @@ describe("tick 全局并发上限 FIFO", () => {
   // ──────── 全局 FIFO（created_at 序，跨 workspace）────────
 
   it("queued 按 created_at 先进先出调度（与 workspace 无关）", async () => {
-    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 3\n", "utf-8");
+    writeFileSync(tmpCfgFile, JSON.stringify({scheduler: {max_concurrent_tasks: 3}}, null, 2), "utf-8");
 
     const idA = nextRequirementId();
     createRequirement({ id: idA, project_id: "proj-global", workspace_id: "ws-g1", title: "A" });
@@ -246,7 +246,7 @@ describe("tick 全局并发上限 FIFO", () => {
   });
 
   it("N=2：一次 tick 填满两个空槽，第 3 个（最新）保持 queued", async () => {
-    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
+    writeFileSync(tmpCfgFile, JSON.stringify({scheduler: {max_concurrent_tasks: 2}}, null, 2), "utf-8");
 
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) {
@@ -317,7 +317,7 @@ describe("tick 全局并发上限 FIFO", () => {
   // ──────── TOCTOU 全局锁：pending 标志不丢 tick ────────
 
   it("全局锁：tick 进行中再触发 tick → 记 pending，锁释放后补跑（不丢失）", async () => {
-    writeFileSync(tmpCfgFile, "scheduler:\n  max_concurrent_tasks: 2\n", "utf-8");
+    writeFileSync(tmpCfgFile, JSON.stringify({scheduler: {max_concurrent_tasks: 2}}, null, 2), "utf-8");
 
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>((r) => (releaseFirst = r));

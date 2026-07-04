@@ -1,12 +1,74 @@
-import { existsSync, readFileSync, writeFileSync, copyFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, renameSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { parse as parseYaml, parseDocument, type Document } from "yaml";
+// yaml import 仅此迁移入口（config.yaml → config.json 自动升级 shim）+ 冻结迁移 052/053。
+// 产品面（新写配置/DB/编辑器/LLM）已全部零 yaml，勿在此处添加新 yaml 用法。
+import { parse as parseYaml } from "yaml";
 import { AUTOPILOT_HOME } from "../index";
 import { log } from "./logger";
 
 export const PROVIDER_NAMES = ["anthropic", "openai", "google"] as const;
 export type ProviderName = typeof PROVIDER_NAMES[number];
+
+// ──────────────────────────────────────────────
+// 配置文件路径
+// ──────────────────────────────────────────────
+
+/**
+ * 返回当前使用的 config.json 路径。
+ * 优先级：DEV_WORKFLOW_CONFIG（测试注入，可指向 .json 或任意路径）> AUTOPILOT_HOME/config.json
+ * 注意：每次调用时动态读取环境变量，以支持测试隔离。
+ */
+export function getConfigPath(): string {
+  if (process.env.DEV_WORKFLOW_CONFIG && existsSync(process.env.DEV_WORKFLOW_CONFIG)) {
+    return process.env.DEV_WORKFLOW_CONFIG;
+  }
+  const home = process.env.AUTOPILOT_HOME || join(homedir(), ".autopilot");
+  return join(home, "config.json");
+}
+
+/**
+ * 自动迁移：config.yaml → config.json（一次性、幂等、无损）。
+ *
+ * 规则：
+ *   - config.json 存在 → 直接用（config.yaml 即使还在也忽略）
+ *   - config.json 不存在且 config.yaml 存在 → parseYaml → 写 config.json
+ *     → 把 config.yaml 改名 config.yaml.migrated（失败仅 warn）→ log.info 说明
+ *   - 都不存在 → 空配置（空对象，由 loadConfig 处理）
+ *
+ * 并发安全：两进程同时跑最坏重复解析写 json，无损（JSON 写成功才改名 yaml）。
+ * 仅 getConfigPath 一致的进程会跑此函数（测试通过 DEV_WORKFLOW_CONFIG 隔离）。
+ */
+export function ensureJsonConfig(): void {
+  // DEV_WORKFLOW_CONFIG 模式：路径已由测试方控制（可能直接是 .json），不自动迁移避免干扰
+  if (process.env.DEV_WORKFLOW_CONFIG) return;
+
+  const home = process.env.AUTOPILOT_HOME || join(homedir(), ".autopilot");
+  const jsonPath = join(home, "config.json");
+  const yamlPath = join(home, "config.yaml");
+
+  if (existsSync(jsonPath)) return; // 已有 json，直接用
+  if (!existsSync(yamlPath)) return; // 都不存在，空配置
+
+  // yaml → json 迁移
+  try {
+    const yamlContent = readFileSync(yamlPath, "utf-8");
+    const parsed = parseYaml(yamlContent) ?? {};
+    const jsonContent = JSON.stringify(parsed, null, 2);
+    writeFileSync(jsonPath, jsonContent, "utf-8");
+  } catch (e: unknown) {
+    log.warn("config.yaml → config.json 迁移失败，将继续使用 config.yaml：%s", e instanceof Error ? e.message : String(e));
+    return;
+  }
+
+  // 改名备份（失败不阻塞）
+  try {
+    renameSync(yamlPath, `${yamlPath}.migrated`);
+    log.info("已将 config.yaml 迁移为 config.json（config.yaml.migrated 备份保留）。注意：YAML 注释已丢失（预期行为）。");
+  } catch (e: unknown) {
+    log.warn("config.yaml 改名 config.yaml.migrated 失败（json 已写成功，可手动删除 yaml）：%s", e instanceof Error ? e.message : String(e));
+  }
+}
 
 // ──────────────────────────────────────────────
 // 默认偏好（defaults）
@@ -49,18 +111,11 @@ export function loadDefaultsConfig(): DefaultsConfig {
 }
 
 export function saveDefaultsConfig(cfg: DefaultsConfig): void {
-  const doc = loadDocument();
-  const clean = stripUndefined(cfg as Record<string, unknown>);
-  if (Object.keys(clean).length === 0) {
-    if (doc.hasIn(["defaults"])) doc.deleteIn(["defaults"]);
-  } else {
-    doc.setIn(["defaults"], clean);
-  }
-  writeDocument(doc);
+  patchConfig("defaults", stripUndefined(cfg as Record<string, unknown>));
 }
 
 // ──────────────────────────────────────────────
-// notify driver 配置（config.yaml notify.drivers[]）
+// notify driver 配置（config.json notify.drivers[]）
 // ──────────────────────────────────────────────
 
 export interface NotifyDriverConfigEntry {
@@ -70,7 +125,7 @@ export interface NotifyDriverConfigEntry {
 }
 
 /**
- * 读取 config.yaml 的 notify.drivers 段。返回 driver 配置数组；段缺失/非法时返回 []。
+ * 读取 config.json 的 notify.drivers 段。返回 driver 配置数组；段缺失/非法时返回 []。
  * 任意 entry 缺 type 字段 → 跳过该 entry + warn。
  */
 export function loadNotifyDrivers(): NotifyDriverConfigEntry[] {
@@ -111,7 +166,7 @@ export interface DaemonListenConfig {
 }
 
 /**
- * 读取 config.yaml 的 daemon 段。返回已校验的部分配置；字段缺失或类型
+ * 读取 config.json 的 daemon 段。返回已校验的部分配置；字段缺失或类型
  * 非法时忽略（调用方用自己默认值）。
  */
 export function loadDaemonConfig(): DaemonListenConfig {
@@ -131,17 +186,10 @@ export function loadDaemonConfig(): DaemonListenConfig {
 
 /**
  * 写回 daemon section 的 host/port。Token 不在此处管理 —— 见 core/api-token.ts。
- * 字段为 undefined 时从 yaml 删除对应键；section 整体空则删 daemon 段。
+ * 字段为 undefined 时从 json 删除对应键；section 整体空则删 daemon 段。
  */
 export function saveDaemonConfig(cfg: DaemonListenConfig): void {
-  const doc = loadDocument();
-  const clean = stripUndefined(cfg as Record<string, unknown>);
-  if (Object.keys(clean).length === 0) {
-    if (doc.hasIn(["daemon"])) doc.deleteIn(["daemon"]);
-  } else {
-    doc.setIn(["daemon"], clean);
-  }
-  writeDocument(doc);
+  patchConfig("daemon", stripUndefined(cfg as Record<string, unknown>));
 }
 
 // ──────────────────────────────────────────────
@@ -159,12 +207,12 @@ export interface GithubConfig {
   ci_fix_conclusions: string[];
 }
 
-/** CI 自动修复的容错策略缺省（用户可在 config.yaml github 段覆盖）——框架给机制，阈值/触发集归用户。 */
+/** CI 自动修复的容错策略缺省（用户可在 config.json github 段覆盖）——框架给机制，阈值/触发集归用户。 */
 const DEFAULT_CI_FIX_LIMIT = 2;
 const DEFAULT_CI_FIX_CONCLUSIONS = ["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"];
 
 /**
- * 读取 config.yaml 的 github 段。缺字段或类型不对走默认值。
+ * 读取 config.json 的 github 段。缺字段或类型不对走默认值。
  *
  * 默认值：
  *   - cli: "gh"
@@ -226,68 +274,6 @@ export interface ProviderConfig {
 }
 
 /**
- * 返回当前使用的 config.yaml 路径。
- * 优先级：DEV_WORKFLOW_CONFIG > AUTOPILOT_HOME/config.yaml
- * 注意：每次调用时动态读取环境变量，以支持测试隔离。
- */
-export function getConfigPath(): string {
-  if (process.env.DEV_WORKFLOW_CONFIG && existsSync(process.env.DEV_WORKFLOW_CONFIG)) {
-    return process.env.DEV_WORKFLOW_CONFIG;
-  }
-  const home = process.env.AUTOPILOT_HOME || join(homedir(), ".autopilot");
-  return join(home, "config.yaml");
-}
-
-export function loadConfig(): Record<string, unknown> {
-  const paths = [
-    getConfigPath(),                     // DEV_WORKFLOW_CONFIG > AUTOPILOT_HOME/config.yaml（动态读取环境变量）
-    join(process.cwd(), "config.yaml"),  // cwd 兜底
-  ];
-
-  for (const p of paths) {
-    if (existsSync(p)) {
-      try {
-        const content = readFileSync(p, "utf-8");
-        return parseYaml(content) ?? {};
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        log.error("配置文件解析失败（%s）：%s", p, message);
-        throw new Error(`配置文件解析失败（${p}）：${message}`);
-      }
-    }
-  }
-  return {};
-}
-
-/**
- * 读取 config.yaml 原文。
- */
-export function loadConfigRaw(): string {
-  const p = getConfigPath();
-  if (existsSync(p)) {
-    return readFileSync(p, "utf-8");
-  }
-  return "";
-}
-
-/**
- * 保存配置到 config.yaml。写入前备份原文件。
- * @param yamlContent YAML 格式的字符串
- * @throws 如果 YAML 解析失败
- */
-export function saveConfigRaw(yamlContent: string): void {
-  // 先校验 YAML 语法
-  parseYaml(yamlContent);
-
-  const p = getConfigPath();
-  // 备份
-  if (existsSync(p)) {
-    copyFileSync(p, p + ".bak");
-  }
-  writeFileSync(p, yamlContent, "utf-8");
-}
-
-/**
  * 读取 `providers.<name>` 段。返回已知的三个内置 provider + 所有用户配置的自定义 provider；
  * 未配置时内置 provider 对应值为 {}。
  */
@@ -323,18 +309,94 @@ function loadSection(key: string): Record<string, Record<string, unknown>> {
 }
 
 // ──────────────────────────────────────────────
-// 结构化写入（保留 YAML 注释与其他段）
+// JSON read-modify-write（取代 yaml Document merge-safe 写法）
 // ──────────────────────────────────────────────
 
-function loadDocument(): Document {
-  const raw = loadConfigRaw();
-  return raw ? parseDocument(raw) : parseDocument("{}\n");
+/**
+ * 读取顶层 key 段，merge 传入对象，写回全量 JSON。
+ * clean 为空对象时删除该 key（和原 yaml Document 删段行为一致）。
+ */
+function patchConfig(key: string, clean: Record<string, unknown>): void {
+  const current = loadConfigRaw();
+  let obj: Record<string, unknown>;
+  try {
+    obj = current ? (JSON.parse(current) as Record<string, unknown>) : {};
+  } catch {
+    obj = {};
+  }
+  if (Object.keys(clean).length === 0) {
+    delete obj[key];
+  } else {
+    obj[key] = clean;
+  }
+  saveConfigRaw(JSON.stringify(obj, null, 2));
 }
 
-function writeDocument(doc: Document): void {
-  // toString 可能产生 "{}\n" 这种空文档；需要时自动整理
-  const yaml = doc.toString();
-  saveConfigRaw(yaml);
+/**
+ * 字段级 merge 到嵌套路径 [topKey, subKey]（用于 setProviderDefaultModel 等字段级写入）。
+ * value 为 undefined 时删除 subKey；subKey 所在 section 删空后也一并删。
+ */
+function patchConfigNested(topKey: string, subKey: string, value: unknown): void {
+  const current = loadConfigRaw();
+  let obj: Record<string, unknown>;
+  try {
+    obj = current ? (JSON.parse(current) as Record<string, unknown>) : {};
+  } catch {
+    obj = {};
+  }
+  const section = (obj[topKey] && typeof obj[topKey] === "object" && !Array.isArray(obj[topKey]))
+    ? { ...(obj[topKey] as Record<string, unknown>) }
+    : {};
+  if (value === undefined) {
+    delete section[subKey];
+  } else {
+    section[subKey] = value;
+  }
+  if (Object.keys(section).length === 0) {
+    delete obj[topKey];
+  } else {
+    obj[topKey] = section;
+  }
+  saveConfigRaw(JSON.stringify(obj, null, 2));
+}
+
+/**
+ * 字段级 merge 到三层路径 [topKey, midKey, leafKey]（用于 setProviderDefaultModel 的 provider.name.field 写）。
+ * value 为 undefined 时删除 leafKey；mid section 删空后也一并删。
+ */
+function patchConfigDeep(topKey: string, midKey: string, leafKey: string, value: unknown): void {
+  const current = loadConfigRaw();
+  let obj: Record<string, unknown>;
+  try {
+    obj = current ? (JSON.parse(current) as Record<string, unknown>) : {};
+  } catch {
+    obj = {};
+  }
+  const top = (obj[topKey] && typeof obj[topKey] === "object" && !Array.isArray(obj[topKey]))
+    ? { ...(obj[topKey] as Record<string, unknown>) }
+    : {};
+  const mid = (top[midKey] && typeof top[midKey] === "object" && !Array.isArray(top[midKey]))
+    ? { ...(top[midKey] as Record<string, unknown>) }
+    : {};
+
+  if (value === undefined) {
+    delete mid[leafKey];
+  } else {
+    mid[leafKey] = value;
+  }
+
+  if (Object.keys(mid).length === 0) {
+    delete top[midKey];
+  } else {
+    top[midKey] = mid;
+  }
+
+  if (Object.keys(top).length === 0) {
+    delete obj[topKey];
+  } else {
+    obj[topKey] = top;
+  }
+  saveConfigRaw(JSON.stringify(obj, null, 2));
 }
 
 /**
@@ -344,14 +406,24 @@ export function saveProvider(name: ProviderName, cfg: ProviderConfig): void {
   if (!PROVIDER_NAMES.includes(name)) {
     throw new Error(`未知 provider：${name}`);
   }
-  const doc = loadDocument();
+  const current = loadConfigRaw();
+  let obj: Record<string, unknown>;
+  try {
+    obj = current ? (JSON.parse(current) as Record<string, unknown>) : {};
+  } catch {
+    obj = {};
+  }
+  const providers = (obj["providers"] && typeof obj["providers"] === "object" && !Array.isArray(obj["providers"]))
+    ? { ...(obj["providers"] as Record<string, unknown>) }
+    : {};
   const clean = stripUndefined(cfg);
-  doc.setIn(["providers", name], clean);
-  writeDocument(doc);
+  providers[name] = clean;
+  obj["providers"] = providers;
+  saveConfigRaw(JSON.stringify(obj, null, 2));
 }
 
 /**
- * 读 config.yaml `providers.default` —— 系统默认 provider 名（用户偏好指针）。
+ * 读 config.json `providers.default` —— 系统默认 provider 名（用户偏好指针）。
  * `default` 是 providers 段下的保留键（字符串值，非 provider 条目）；loadProviders/loadSection
  * 只收对象值，天然不会把它误当条目。未设/空返回 undefined（由 resolveDefaultProvider 派生兜底）。
  */
@@ -365,64 +437,64 @@ export function loadDefaultProviderName(): string | undefined {
   return undefined;
 }
 
-/** 写/删 `providers.default`（merge-safe，保留 YAML 注释与其他段）。空 = 删键回退派生。 */
+/** 写/删 `providers.default`（merge-safe，只改该单键）。空 = 删键回退派生。 */
 export function setDefaultProviderName(name: string | undefined): void {
-  const doc = loadDocument();
   const trimmed = name?.trim();
-  if (trimmed) doc.setIn(["providers", "default"], trimmed);
-  else doc.deleteIn(["providers", "default"]);
-  writeDocument(doc);
+  patchConfigNested("providers", "default", trimmed || undefined);
 }
 
 // ──────────────────────────────────────────────
 // 生命周期 agent 配置（lifecycle: 段）
-//   平台固定生命周期阶段（clarify / extract / fix / author）的 agent override。
-//   不属于任何工作流（数据层/平台），全局生效。字段省略走代码兜底。
 // ──────────────────────────────────────────────
 
 const LIFECYCLE_NAME_RE = /^[a-z][a-z0-9_-]*$/;
 
-/** 读 config.yaml `lifecycle:` 段 → { clarify: {...}, ... }（用户显式写的 override，未写=空）。 */
+/** 读 config.json `lifecycle:` 段 → { clarify: {...}, ... }（用户显式写的 override，未写=空）。 */
 export function loadLifecycleConfig(): Record<string, Record<string, unknown>> {
   return loadSection("lifecycle");
 }
 
-/** 写/删某生命周期 agent 的 override；cfg=null 删整段回退默认。保留 YAML 注释与其他段。 */
+/** 写/删某生命周期 agent 的 override；cfg=null 删整段回退默认。 */
 export function saveLifecycleAgent(name: string, cfg: Record<string, unknown> | null): void {
   if (!LIFECYCLE_NAME_RE.test(name)) {
     throw new Error(`非法生命周期 agent 名：${name}`);
   }
-  const doc = loadDocument();
-  if (cfg === null) {
-    doc.deleteIn(["lifecycle", name]);
-    const node = doc.getIn(["lifecycle"]) as { items?: unknown[] } | undefined;
-    if (node && Array.isArray(node.items) && node.items.length === 0) doc.deleteIn(["lifecycle"]);
-  } else {
-    doc.setIn(["lifecycle", name], stripUndefined(cfg));
+  const current = loadConfigRaw();
+  let obj: Record<string, unknown>;
+  try {
+    obj = current ? (JSON.parse(current) as Record<string, unknown>) : {};
+  } catch {
+    obj = {};
   }
-  writeDocument(doc);
+  const lifecycle = (obj["lifecycle"] && typeof obj["lifecycle"] === "object" && !Array.isArray(obj["lifecycle"]))
+    ? { ...(obj["lifecycle"] as Record<string, unknown>) }
+    : {};
+  if (cfg === null) {
+    delete lifecycle[name];
+  } else {
+    lifecycle[name] = stripUndefined(cfg);
+  }
+  if (Object.keys(lifecycle).length === 0) {
+    delete obj["lifecycle"];
+  } else {
+    obj["lifecycle"] = lifecycle;
+  }
+  saveConfigRaw(JSON.stringify(obj, null, 2));
 }
 
 const PROVIDER_NAME_RE = /^[a-z0-9_-]+$/i;
 
 /**
  * 字段级写入某 provider 的 default_model（merge-safe：只动 default_model 单键，
- * 保留 base_url / env_key_name 等兄弟字段与 YAML 注释）。服务任意已注册 provider
- * （官方 + compat），故只做格式校验，业务白名单（哪些名合法）由调用方/RPC 层把关。
+ * 保留 base_url / env_key_name 等兄弟字段）。
  * model 为空 = 删字段回退到预置默认。
  */
 export function setProviderDefaultModel(name: string, model?: string): void {
   if (!name || !PROVIDER_NAME_RE.test(name)) {
     throw new Error(`非法 provider 名：${name}`);
   }
-  const doc = loadDocument();
   const trimmed = model?.trim();
-  if (trimmed) {
-    doc.setIn(["providers", name, "default_model"], trimmed);
-  } else {
-    doc.deleteIn(["providers", name, "default_model"]);
-  }
-  writeDocument(doc);
+  patchConfigDeep("providers", name, "default_model", trimmed || undefined);
 }
 
 // ──────────────────────────────────────────────
@@ -440,7 +512,7 @@ export interface GitConfig {
 }
 
 /**
- * 读取 config.yaml 的 git 段。
+ * 读取 config.json 的 git 段。
  */
 export function loadGitConfig(): GitConfig {
   try {
@@ -460,14 +532,7 @@ export function loadGitConfig(): GitConfig {
  * 写入 git 段配置（token 为 undefined 时删除键）。
  */
 export function saveGitConfig(cfg: GitConfig): void {
-  const doc = loadDocument();
-  const clean = stripUndefined(cfg as Record<string, unknown>);
-  if (Object.keys(clean).length === 0) {
-    if (doc.hasIn(["git"])) doc.deleteIn(["git"]);
-  } else {
-    doc.setIn(["git"], clean);
-  }
-  writeDocument(doc);
+  patchConfig("git", stripUndefined(cfg as Record<string, unknown>));
 }
 
 // ──────────────────────────────────────────────
@@ -479,22 +544,15 @@ export interface SchedulerConfig {
    * 全局最大并发任务数（所有工作区合计运行中任务总数 ≤ N）。
    * 默认 1（向后兼容：不配置时行为与之前相同）。
    *
-   * ⚠️ 行为说明（N=1 时）：原实现是「组内串行，不同组可并行」；
-   * 改为全局计数后，N=1 对多 workspace 用户是更严格的全局串行。
-   * 这是有意为之的行为统一（需求澄清 Q1 答案：全局总上限）。
-   *
    * ⚠️ 约束范围 = 仅 execution run（scheduler 起的常规任务）。**fix 修复回路例外**：
    * 需求转 fix_revision 时 fix-revision-runner 直接起 kind=fix run（续作），不经 scheduler 闸门、
-   * 不读此值。fix_revision 计入 active 只阻止再调度新 queued，不阻止 fix-runner 自己起 fix run，
-   * 故 awaiting_review 释放槽后又被 fix run 占回时 active 可瞬时 +1 超 N（有界、短暂）——这是有意
-   * 设计：修复回路是「已接活的需求把活干完」，不该被并发上限二次排队卡住。要严格限流需另立 fix
-   * 专属上限，非本字段语义。
+   * 不读此值。
    */
   max_concurrent_tasks?: number;
 }
 
 /**
- * 读取 config.yaml 的 scheduler 段。
+ * 读取 config.json 的 scheduler 段。
  * 字段缺失或类型非法时返回空对象；调用方使用 `?? 1` 取默认值 1。
  */
 export function loadSchedulerConfig(): SchedulerConfig {
@@ -521,14 +579,7 @@ export function loadSchedulerConfig(): SchedulerConfig {
  * 写入/更新 scheduler 段。max_concurrent_tasks 为 undefined 时删除整段。
  */
 export function saveSchedulerConfig(cfg: SchedulerConfig): void {
-  const doc = loadDocument();
-  const clean = stripUndefined(cfg as Record<string, unknown>);
-  if (Object.keys(clean).length === 0) {
-    if (doc.hasIn(["scheduler"])) doc.deleteIn(["scheduler"]);
-  } else {
-    doc.setIn(["scheduler"], clean);
-  }
-  writeDocument(doc);
+  patchConfig("scheduler", stripUndefined(cfg as Record<string, unknown>));
 }
 
 // ──────────────────────────────────────────────
@@ -547,7 +598,7 @@ export interface SelfhostedConfig {
 }
 
 /**
- * 读 config.yaml `selfhosted:` 段（B-interactive 实例连接器配置）。
+ * 读 config.json `selfhosted:` 段（B-interactive 实例连接器配置）。
  * 凭证不在此，见 selfhosted-connector/credentials.ts。
  * 字段缺失/类型非法时忽略，调用方用自己默认值。
  */
@@ -566,16 +617,59 @@ export function loadSelfhostedConfig(): SelfhostedConfig {
   } catch { return {}; }
 }
 
-/** 写 `selfhosted:` 段（merge-safe，保留注释；空字段删键，整段空删 selfhosted 段）。 */
+/** 写 `selfhosted:` 段（空字段删键，整段空删 selfhosted 段）。 */
 export function saveSelfhostedConfig(cfg: SelfhostedConfig): void {
-  const doc = loadDocument();
-  const clean = stripUndefined(cfg as Record<string, unknown>);
-  if (Object.keys(clean).length === 0) {
-    if (doc.hasIn(["selfhosted"])) doc.deleteIn(["selfhosted"]);
-  } else {
-    doc.setIn(["selfhosted"], clean);
+  patchConfig("selfhosted", stripUndefined(cfg as Record<string, unknown>));
+}
+
+// ──────────────────────────────────────────────
+// 底层 load/save 接口
+// ──────────────────────────────────────────────
+
+export function loadConfig(): Record<string, unknown> {
+  const paths = [
+    getConfigPath(),                      // DEV_WORKFLOW_CONFIG > AUTOPILOT_HOME/config.json（动态读取环境变量）
+    join(process.cwd(), "config.json"),   // cwd 兜底
+  ];
+
+  for (const p of paths) {
+    if (existsSync(p)) {
+      try {
+        const content = readFileSync(p, "utf-8");
+        if (!content.trim()) return {};
+        return JSON.parse(content) as Record<string, unknown>;
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        log.error("配置文件解析失败（%s）：%s", p, message);
+        throw new Error(`配置文件解析失败（${p}）：${message}`);
+      }
+    }
   }
-  writeDocument(doc);
+  return {};
+}
+
+/**
+ * 读取 config.json 原文。
+ */
+export function loadConfigRaw(): string {
+  const p = getConfigPath();
+  if (existsSync(p)) {
+    return readFileSync(p, "utf-8");
+  }
+  return "";
+}
+
+/**
+ * 保存配置到 config.json。写入前校验 JSON 语法。
+ * @param jsonContent JSON 格式的字符串
+ * @throws 如果 JSON 解析失败
+ */
+export function saveConfigRaw(jsonContent: string): void {
+  // 先校验 JSON 语法
+  JSON.parse(jsonContent);
+
+  const p = getConfigPath();
+  writeFileSync(p, jsonContent, "utf-8");
 }
 
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {

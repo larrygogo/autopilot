@@ -247,7 +247,7 @@ export function Settings({
 // ──────────────────────────────────────────────
 // 任务调度设置
 //   - 全局最大并发任务数（scheduler.max_concurrent_tasks，默认 1）
-//   - 写入 config.yaml 后即热生效（调度器每次 tick 现读，无需重启）
+//   - 写入 config.json 后即热生效（调度器每次 tick 现读，无需重启）
 // ──────────────────────────────────────────────
 function SchedulerCard(): React.ReactElement {
   const toast = useToast();

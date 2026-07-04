@@ -10,7 +10,7 @@ import { listOutdatedWorkflowCopies } from "../core/workflow/templates";
 import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
 import { runInBackground } from "../core/runner";
 import { initDaemonFileLog, log } from "../core/logger";
-import { loadDaemonConfig, loadGithubConfig, getConfigPath } from "../core/config";
+import { loadDaemonConfig, loadGithubConfig, getConfigPath, ensureJsonConfig } from "../core/config";
 import { enableBus, disableBus, bus, emit as emitEvent } from "../core/event-bus";
 import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
@@ -88,7 +88,7 @@ const DEFAULT_HOST = "127.0.0.1";
 const WATCHER_INTERVAL_MS = 60_000;
 const CLARIFIER_WATCHDOG_INTERVAL_MS = 60_000;
 const RETENTION_INTERVAL_MS = 3600_000;  // 每小时扫一次 workspace 保留策略
-// PR_POLL_INTERVAL_MS 由 config.yaml.github.poll_interval_seconds 决定
+// PR_POLL_INTERVAL_MS 由 config.json.github.poll_interval_seconds 决定
 
 export interface DaemonOptions {
   host?: string;
@@ -98,7 +98,10 @@ export interface DaemonOptions {
 }
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
-  // 优先级：显式参数 > env > config.yaml > 内置默认
+  // 自动迁移 config.yaml → config.json（一次性、幂等）
+  ensureJsonConfig();
+
+  // 优先级：显式参数 > env > config.json > 内置默认
   const cfg = loadDaemonConfig();
   const host = opts.host
     ?? process.env.AUTOPILOT_HOST
@@ -174,7 +177,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   1. 在 Web 设置页生成 token 或创建登录用户（推荐）
   2. 写入 ~/.autopilot/runtime/api-token 文件（一行 token 文本）
   3. 设置环境变量 AUTOPILOT_API_TOKEN
-  4. 切回 127.0.0.1（autopilot daemon stop && autopilot daemon run，或改 config.yaml）
+  4. 切回 127.0.0.1（autopilot daemon stop && autopilot daemon run，或改 config.json）
   5. 明知风险仍要继续：autopilot daemon run --insecure-no-auth
 `);
         process.exit(FATAL_CONFIG_CODE);
@@ -205,9 +208,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 激活事件总线
   enableBus();
 
-  // ── 外部编辑 config.yaml 热生效 ──────────────────────────────────────────
+  // ── 外部编辑 config.json 热生效 ──────────────────────────────────────────
   // 监听目录（而非文件）有两个好处：
-  //   1. daemon 启动时 config.yaml 不存在也能正常监听，文件创建后即可热生效
+  //   1. daemon 启动时 config.json 不存在也能正常监听，文件创建后即可热生效
   //   2. 部分编辑器（如 vim、Emacs）先写临时文件再重命名，监听文件会失去跟踪
   // 防抖 300ms：编辑器保存时 fs.watch 可能连续触发（Windows 尤甚）。
   // 已通过 RPC/Web UI 写的路径（rpc-methods.ts / routes.ts）不受此影响，各自 emit。
@@ -224,7 +227,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       if (configWatchDebounce) clearTimeout(configWatchDebounce);
       configWatchDebounce = setTimeout(() => {
         configWatchDebounce = null;
-        log.info("config.yaml 检测到外部变化（目录监听），发射 config:updated 热生效");
+        log.info("config.json 检测到外部变化（目录监听），发射 config:updated 热生效");
         emitEvent({ type: "config:updated", payload: {} });
       }, 300);
     });

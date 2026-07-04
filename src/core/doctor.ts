@@ -1,6 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
-import { parse as parseYaml } from "yaml";
 import { getConfigPath } from "./config";
 import { initDb, getDb } from "./db";
 import { listProviders } from "./providers";
@@ -60,29 +59,30 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
   if (!existsSync(path)) {
     checks.push({
       id: "config.exists", category: "config", status: "error",
-      title: `config.yaml 不存在（${path}）`,
+      title: `config.json 不存在（${path}）`,
       fix: { cli: "bun run dev init", auto: "fix.config.create" },
     });
     return finalize(opts, checks, startedAt);
   }
-  checks.push({ id: "config.exists", category: "config", status: "ok", title: `config.yaml 已就绪（${path}）` });
+  checks.push({ id: "config.exists", category: "config", status: "ok", title: `config.json 已就绪（${path}）` });
 
   // C2
   let raw: Record<string, unknown>;
   try {
-    raw = parseYaml(readFileSync(path, "utf-8")) ?? {};
+    const content = readFileSync(path, "utf-8");
+    raw = content.trim() ? (JSON.parse(content) as Record<string, unknown>) : {};
   } catch (e: unknown) {
     checks.push({
       id: "config.parses", category: "config", status: "error",
-      title: "config.yaml 解析失败",
+      title: "config.json 解析失败",
       detail: e instanceof Error ? e.message : String(e),
       fix: { cli: "bun run dev config show" },
     });
     return finalize(opts, checks, startedAt);
   }
-  checks.push({ id: "config.parses", category: "config", status: "ok", title: "config.yaml 解析正常" });
+  checks.push({ id: "config.parses", category: "config", status: "ok", title: "config.json 解析正常" });
 
-  // C3：providers 段结构校验（仅查 config.yaml 形状，真相源是 providers 条目表）
+  // C3：providers 段结构校验（仅查 config.json 形状，真相源是 providers 条目表）
   const providersSection = (raw["providers"] ?? {}) as Record<string, unknown>;
   for (const [name, cfg] of Object.entries(providersSection)) {
     if (name === "default") continue; // providers.default 是字符串保留键，非条目
@@ -128,7 +128,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
 
   // 命名复用 agent 机制已移除（Phase 3）：不再有"全局命名 agent"概念，
   // 每个 phase 内联配置 agent、省略则走 DEFAULT_AGENT 兜底。
-  // config.yaml.agents 段不再被框架读取，doctor 也不再对其做健康检查。
+  // config.json.agents 段不再被框架读取，doctor 也不再对其做健康检查。
 
   // C7：projects
   try {

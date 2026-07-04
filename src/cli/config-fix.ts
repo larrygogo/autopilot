@@ -76,7 +76,7 @@ export async function runFixWizard(): Promise<void> {
   // 命名复用 agent 机制已移除（Phase 3）：不再向导式创建命名 agent。
   // 每个工作流 phase 内联配置 agent、省略则走 DEFAULT_AGENT 兜底。
 
-  console.log("\n✓ 已写入 ~/.autopilot/config.yaml");
+  console.log("\n✓ 已写入 ~/.autopilot/config.json");
   if (manualSteps.length > 0) {
     console.log("\n仍需手动：");
     for (const s of manualSteps) console.log(`  ${s}`);

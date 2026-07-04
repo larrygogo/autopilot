@@ -1,8 +1,8 @@
 /**
  * scheduler.get / scheduler.save RPC 测试。
  *
- * 设置页（Web）通过这对 RPC 读写 config.yaml 的 scheduler.max_concurrent_tasks，
- * 与 CLI 直接编辑 YAML 是同一份配置。save 后调度器下次 tick 现读即生效。
+ * 设置页（Web）通过这对 RPC 读写 config.json 的 scheduler.max_concurrent_tasks，
+ * 与 CLI 直接编辑 JSON 是同一份配置。save 后调度器下次 tick 现读即生效。
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
@@ -26,8 +26,8 @@ describe("scheduler.get / scheduler.save RPC", () => {
     _setDbForTest(db);
     tmpCfgDir = join(tmpdir(), `ap-rpc-sched-${Date.now()}`);
     mkdirSync(tmpCfgDir, { recursive: true });
-    tmpCfgFile = join(tmpCfgDir, "config.yaml");
-    writeFileSync(tmpCfgFile, "", "utf-8");
+    tmpCfgFile = join(tmpCfgDir, "config.json");
+    writeFileSync(tmpCfgFile, "{}", "utf-8");
     process.env.DEV_WORKFLOW_CONFIG = tmpCfgFile;
     registerCoreRpcMethods();
   });
@@ -40,7 +40,7 @@ describe("scheduler.get / scheduler.save RPC", () => {
   });
 
   beforeEach(() => {
-    writeFileSync(tmpCfgFile, "", "utf-8");
+    writeFileSync(tmpCfgFile, "{}", "utf-8");
   });
 
   it("get：未配置时 max_concurrent_tasks=null，effective=1", async () => {

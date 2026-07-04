@@ -24,10 +24,10 @@ beforeEach(async () => {
   tmpHome = join(tmpdir(), `autopilot-extract-api-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(join(tmpHome, "runtime"), { recursive: true });
   process.env.AUTOPILOT_HOME = tmpHome;
-  process.env.DEV_WORKFLOW_CONFIG = join(tmpHome, "config.yaml");
+  process.env.DEV_WORKFLOW_CONFIG = join(tmpHome, "config.json");
   writeFileSync(
-    join(tmpHome, "config.yaml"),
-    "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n",
+    join(tmpHome, "config.json"),
+    "{}",
     "utf-8",
   );
   _setDbForTest(new Database(":memory:"));

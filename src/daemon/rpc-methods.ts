@@ -239,7 +239,7 @@ function registerCoreQueryRpc(): void {
 
   registerRpcMethod({
     method: "daemon.setHost",
-    description: "写入 config.yaml.daemon.host；需配合 daemon.restart 才生效",
+    description: "写入 config.json.daemon.host；需配合 daemon.restart 才生效",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.host !== "string" || !p.host.trim()) {
@@ -506,8 +506,8 @@ function registerCoreQueryRpc(): void {
 
   registerRpcMethod({
     method: "config.get",
-    description: "返回 config.yaml 原文（用户配置）",
-    handler: () => ({ yaml: loadConfigRaw() }),
+    description: "返回 config.json 原文（用户配置）",
+    handler: () => ({ content: loadConfigRaw() }),
   });
 
 }
@@ -1874,7 +1874,7 @@ function registerSandboxSetupRpc(): void {
       if (!p.providers || typeof p.providers !== "object" || Array.isArray(p.providers)) {
         throw new RpcError("INVALID_PARAM", "providers must be an object");
       }
-      // onboarding 写 config.yaml（doctor 诊断暂仍读 config，P1 务实保留）+ 同步条目表
+      // onboarding 写 config.json（doctor 诊断暂仍读 config，P1 务实保留）+ 同步条目表
       for (const [name, cfg] of Object.entries(p.providers as Record<string, unknown>)) {
         if (!(PROVIDER_NAMES as readonly string[]).includes(name)) continue;
         if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
@@ -1919,7 +1919,7 @@ function registerSandboxSetupRpc(): void {
       const gitCfg = loadGitConfig();
       const probe = probeRemote(remoteUrl, gitCfg.token);
       if (!probe.ok) {
-        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.yaml 配置 git.token`);
+        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.json 配置 git.token`);
       }
       const parsed = parseGithubFromRemote(remoteUrl);
       const ws = createWorkspace({
@@ -1938,16 +1938,17 @@ function registerSandboxSetupRpc(): void {
 
   registerRpcMethod({
     method: "config.save",
-    description: "保存 config.yaml 原文 + emit config:updated",
+    description: "保存 config.json 原文 + emit config:updated",
     handler: (params) => {
       const p = asObj(params);
-      if (typeof p.yaml !== "string") throw new RpcError("INVALID_PARAM", "需要 yaml");
+      const content = p.content ?? p.yaml; // content 为新字段；yaml 为向后兼容旧客户端
+      if (typeof content !== "string") throw new RpcError("INVALID_PARAM", "需要 content");
       try {
-        saveConfigRaw(p.yaml);
+        saveConfigRaw(content);
         emitBus({ type: "config:updated", payload: {} });
         return { ok: true };
       } catch (e: unknown) {
-        throw new RpcError("INVALID_YAML", e instanceof Error ? e.message : String(e));
+        throw new RpcError("INVALID_JSON", e instanceof Error ? e.message : String(e));
       }
     },
   });
@@ -2052,7 +2053,7 @@ function registerMiscMutationRpc(): void {
       const gitCfg = loadGitConfig();
       const probe = probeRemote(remoteUrl, gitCfg.token);
       if (!probe.ok) {
-        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.yaml 配置 git.token`);
+        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.json 配置 git.token`);
       }
 
       // ── alias 基础值：显式传入优先，否则从 remote_url 推导 ──
@@ -2292,7 +2293,7 @@ function registerWorkspaceRpc(): void {
       const gitCfg = loadGitConfig();
       const probe = probeRemote(remoteUrl, gitCfg.token);
       if (!probe.ok) {
-        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.yaml 配置 git.token`);
+        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.json 配置 git.token`);
       }
 
       // 默认分支：显式指定 > probe 探测 > "main"
@@ -2356,7 +2357,7 @@ function registerWorkspaceRpc(): void {
         const gitCfg = loadGitConfig();
         const probe = probeRemote(rawUrl, gitCfg.token);
         if (!probe.ok) {
-          throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或 config.yaml 的 git.token`);
+          throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或 config.json 的 git.token`);
         }
         patch.remote_url = rawUrl;
         // 若 default_branch 未显式指定，用 probe 探测到的默认分支

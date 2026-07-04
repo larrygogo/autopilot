@@ -383,10 +383,10 @@ export const api = {
 
   // Config
   // [WS-RPC] config.get
-  getConfig: () => requestRpc<{ yaml: string }>("config.get"),
+  getConfig: () => requestRpc<{ content: string }>("config.get"),
   // [WS-RPC] config.save
-  saveConfig: (yaml: string) =>
-    requestRpc<{ ok: boolean }>("config.save", { yaml }),
+  saveConfig: (content: string) =>
+    requestRpc<{ ok: boolean }>("config.save", { content }),
   // [WS-RPC] workflows.getSpec（P2 后 yaml_content 已删，spec_json 是唯一真相）
   getWorkflowSpec: (name: string) => requestRpc<{ spec: string }>("workflows.getSpec", { name }),
   /** @deprecated P2：改用 getWorkflowSpec */
@@ -537,7 +537,7 @@ export const api = {
       "/api/daemon/listen",
       { method: "PUT", body: JSON.stringify(body) },
     ),
-  // [WS-RPC] daemon.setHost — 写 config.yaml.daemon.host
+  // [WS-RPC] daemon.setHost — 写 config.json.daemon.host
   setDaemonHost: (host: string) =>
     requestRpc<{ ok: true; host: string; restart_required: true }>("daemon.setHost", { host }),
   // [WS-RPC] daemon.restart — 请求 supervisor 重启 daemon（exit code 75）

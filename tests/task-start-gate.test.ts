@@ -35,7 +35,7 @@ function runCli(...args: string[]) {
 describe("task start 前置 doctor", () => {
   it("空 config → 退出码 2 + 提示 fix", () => {
     runCli("init");
-    writeFileSync(join(tmpHome, "config.yaml"), "providers: {}\nagents: {}\n", "utf-8");
+    writeFileSync(join(tmpHome, "config.json"), JSON.stringify({providers: {}, agents: {}}, null, 2), "utf-8");
     const r = runCli("task", "start", "test-task");
     expect(r.exitCode).toBe(2);
     expect(r.stderr).toContain("doctor --fix");

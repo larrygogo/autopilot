@@ -154,7 +154,7 @@ export interface ExtensionContext {
   };
 
   config: {
-    /** 读取 config.yaml 的顶层 key 段（不存在返回 null）。 */
+    /** 读取 config.json 的顶层 key 段（不存在返回 null）。 */
     section(key: string): unknown;
   };
 

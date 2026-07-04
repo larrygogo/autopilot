@@ -132,7 +132,7 @@ export function TasksOverview({
             <strong className="text-foreground">{formatBytes(diskTotal)}</strong>
           </span>
           <span className="ml-auto text-[11px]">
-            配置 <code className="text-foreground">config.yaml</code> 的{" "}
+            配置 <code className="text-foreground">config.json</code> 的{" "}
             <code>sandbox_retention</code> 自动清理
           </span>
         </div>

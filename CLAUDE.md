@@ -68,7 +68,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 
 ```
 ~/.autopilot/                    # AUTOPILOT_HOME
-├── config.yaml                  # 用户配置
+├── config.json                  # 用户配置（P4 起；存量 config.yaml 首次启动自动迁移为 config.json）
 ├── workflows/                   # （历史）file 轨已退役：不再被读取；存量已由迁移 052 转入 DB，
 │   └── _migrated-049|052/       #  备份目录保留用户资产
 ├── prompts/                     # 用户提示词模板
@@ -363,33 +363,32 @@ bun run coverage:rpc     # RPC × {web/tui/cli} 覆盖矩阵（发现死代码 /
 
 ## 配置
 
-全局 `config.yaml`（位于 `AUTOPILOT_HOME/config.yaml`）只承载**跨工作流共享的基础设施**，两个框架识别段：
+全局 `config.json`（位于 `AUTOPILOT_HOME/config.json`）只承载**跨工作流共享的基础设施**，两个框架识别段：
 
-```yaml
-providers:             # LLM 提供商默认值（凭证由 CLI 管理）
-  anthropic:
-    default_model: claude-sonnet-4-6
-    base_url: ""       # 可选，自建代理时用
-    enabled: true
-  openai: { ... }
-  google: { ... }
-
-# 注：已无全局 `agents:` 段。agent 现按 phase 内联配置在各工作流的
-# workflow.yaml 里（省略则走框架内置 DEFAULT_AGENT）。详见「新增工作流」一节。
-
-daemon:                # 可选：daemon 监听配置（改后 `autopilot daemon restart` 生效）
-  host: 127.0.0.1      # 默认 127.0.0.1；设 0.0.0.0 暴露到局域网
-  port: 6180
-
-workspace_retention:   # 可选：代码 clone 自动清理策略（新名 sandbox_retention，老字段兼容读）
-  days: 30             # 超 30 天自动清（仅代码目录，日志/记录保留）。两条轨：存量任务 workspace/
-                       # 按任务终态清；需求级 codebase/（v2 R4）按需求终态清（非终态永不清）
-  max_total_mb: 5120   # 总占用超 5 GB 时按旧→新清理（两轨合并计量，各自终态闸门）
+```json
+{
+  "providers": {
+    "anthropic": {
+      "default_model": "claude-sonnet-4-6",
+      "base_url": "",
+      "enabled": true
+    }
+  },
+  "daemon": {
+    "host": "127.0.0.1",
+    "port": 6180
+  },
+  "sandbox_retention": {
+    "days": 30,
+    "max_total_mb": 5120
+  }
+}
 ```
 
-工作流专属字段请写在该工作流目录下的 `workflow.yaml`（或其独立配置文件），不要放全局。
-
-工作流专属示例详见 `examples/` 下各工作流的 `config.example.yaml`。
+注：
+- 已无全局 `agents:` 段。agent 现按 phase 内联配置在各工作流的 workflow.yaml 里（省略则走框架内置 DEFAULT_AGENT）。详见「新增工作流」一节。
+- `workspace_retention` 已更名 `sandbox_retention`（老字段兼容读）。
+- **自动迁移**：存量 `config.yaml` 在 daemon 启动或 `autopilot init` 时自动转为 `config.json`（yaml 改名 `config.yaml.migrated` 备份，注释丢失属预期行为）。
 
 ## 知识库
 

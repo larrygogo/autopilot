@@ -16,7 +16,7 @@ let _ghTokenCache: { at: number; token: string | null } | null = null;
 const GH_TOKEN_TTL_MS = 5 * 60_000;
 
 /**
- * 解析 git 操作可用的 token：config.yaml `git.token` 优先；缺省时回退 `gh auth token`
+ * 解析 git 操作可用的 token：config.json `git.token` 优先；缺省时回退 `gh auth token`
  * （用户通常用 gh 管 GitHub 凭证而不单独配 token —— 私有仓库的探测/clone 因此可用）。
  * 两者都没有返回 null（公开仓库无需凭证）。
  */
@@ -306,7 +306,7 @@ export function probeRemote(remoteUrl: string, token?: string | null): ProbeResu
     return {
       ok: false,
       defaultBranch: null,
-      error: firstLine || "git ls-remote 无输出退出（疑似等待凭证超时被杀；私有仓库请配置 config.yaml git.token 或 gh auth login）",
+      error: firstLine || "git ls-remote 无输出退出（疑似等待凭证超时被杀；私有仓库请配置 config.json git.token 或 gh auth login）",
     };
   }
 

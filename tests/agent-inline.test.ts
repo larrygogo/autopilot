@@ -45,8 +45,8 @@ describe("agentForPhase — phase 内联 agent 配置", () => {
     // 且条目 default_model=null → eff.default_model=undefined → model 落 DEFAULT_AGENT.model。
     isoDir = join(tmpdir(), `autopilot-agentinline-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(isoDir, { recursive: true });
-    writeFileSync(join(isoDir, "config.yaml"), "", "utf-8");
-    process.env.DEV_WORKFLOW_CONFIG = join(isoDir, "config.yaml");
+    writeFileSync(join(isoDir, "config.json"), "{}", "utf-8");
+    process.env.DEV_WORKFLOW_CONFIG = join(isoDir, "config.json");
     const sqlite = new Database(":memory:");
     _setDbForTest(sqlite);
     initDb();
@@ -122,8 +122,8 @@ describe("agentForPhase — config default_model 三级回退", () => {
     _setDbForTest(new Database(":memory:"));
     const dir = join(tmpdir(), `autopilot-agentmodel-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(dir, { recursive: true });
-    tmpFile = join(dir, "config.yaml");
-    writeFileSync(tmpFile, "", "utf-8");
+    tmpFile = join(dir, "config.json");
+    writeFileSync(tmpFile, "{}", "utf-8");
     process.env.DEV_WORKFLOW_CONFIG = tmpFile; // loadProviders 读它，不污染真实 config
   });
 

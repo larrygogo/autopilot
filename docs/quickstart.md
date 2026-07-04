@@ -88,7 +88,7 @@ autopilot init
 已创建目录：/Users/you/.autopilot/prompts
 已创建目录：/Users/you/.autopilot/runtime
 已初始化数据库：/Users/you/.autopilot/runtime/workflow.db（应用 19 条迁移）
-已生成配置模板：/Users/you/.autopilot/config.yaml
+已生成配置模板：/Users/you/.autopilot/config.json
 已装入默认工作流：/Users/you/.autopilot/workflows/dev
 初始化完成。
 ```
@@ -105,18 +105,22 @@ autopilot 靠 AI agent 来干活，必须配置至少一个 provider。
 
 ### 方式 A：编辑配置文件（推荐）
 
-打开 `~/.autopilot/config.yaml`，加上 providers 段：
+打开 `~/.autopilot/config.json`，加上 providers 段：
 
-```yaml
-providers:
-  anthropic:
-    default_model: claude-sonnet-4-6
-    enabled: true
+```json
+{
+  "providers": {
+    "anthropic": {
+      "default_model": "claude-sonnet-4-6",
+      "enabled": true
+    }
+  }
+}
 ```
 
 > **凭证**：autopilot 不存储 API key，由你已登录的 CLI 工具（claude-code / codex / gemini-cli）负责管理。确保已在对应 CLI 里 `claude login` / `codex login` 登录过。
 
-> **agent 配置在工作流里，不在全局**：全局 `config.yaml` 只放 providers 等跨工作流基础设施。每个阶段的 agent（provider / model / system_prompt / max_turns / permission_mode）写在工作流目录的 `workflow.yaml` 里，由阶段内联声明；阶段省略 `agent:` 时框架用内置默认 agent（anthropic / claude-sonnet-4-6）兜底。详见[工作流开发指南](workflow-development.md)。
+> **agent 配置在工作流里，不在全局**：全局 `config.json` 只放 providers 等跨工作流基础设施。每个阶段的 agent（provider / model / system_prompt / max_turns / permission_mode）写在工作流目录的 `workflow.yaml` 里，由阶段内联声明；阶段省略 `agent:` 时框架用内置默认 agent（anthropic / claude-sonnet-4-6）兜底。详见[工作流开发指南](workflow-development.md)。
 
 ### 方式 B：Web UI 配置
 
@@ -153,7 +157,7 @@ daemon 运行中 (pid=12345)
   任务统计: 无任务
 ```
 
-> **默认端口**：`6180`。如需修改，在 `~/.autopilot/config.yaml` 加 `daemon: { port: 你的端口 }` 后 `autopilot daemon restart`。
+> **默认端口**：`6180`。如需修改，在 `~/.autopilot/config.json` 设 `"daemon": { "port": 你的端口 }` 后 `autopilot daemon restart`。
 
 ---
 
@@ -317,5 +321,5 @@ bun run build:web               # 重新构建 Web UI（pull 后必跑，否则�
 ## 遇到问题？
 
 - **`autopilot daemon start` 超时**：检查端口 6180 是否被占用，或改用 `autopilot daemon run`（前台模式，日志直接输出）
-- **AI agent 不工作**：确认已用对应 CLI 登录，`~/.autopilot/config.yaml` 中 `enabled: true`
+- **AI agent 不工作**：确认已用对应 CLI 登录，`~/.autopilot/config.json` 中 `"enabled": true`
 - **任务卡住不动**：运行 `autopilot task logs <id>` 看报错；或查看 [FAQ](faq.md)

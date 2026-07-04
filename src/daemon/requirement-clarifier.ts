@@ -38,7 +38,7 @@ import { tmpdir } from "node:os";
 const log = createLogger("requirement-clarifier");
 
 // 默认 agent name: "clarifier"
-// 用户配置示例（写在 ~/.autopilot/config.yaml）：
+// 用户配置示例（写在 ~/.autopilot/config.json）：
 //   agents:
 //     clarifier:
 //       provider: anthropic

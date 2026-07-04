@@ -3,7 +3,7 @@
  *
  * 取代散落各处的 `?? "anthropic"` 硬编码：默认不再写死，而是按用户**实际配置**解析。
  * fallback 链（短路）：
- *   1. 显式默认（config.yaml providers.default 指向的已存在且 enabled 条目）
+ *   1. 显式默认（config.json providers.default 指向的已存在且 enabled 条目）
  *   2. 唯一已配（恰好一条 enabled 条目）
  *   3. 首个「CLI 已就绪」（cli_status==='ok'，最可能真可用）
  *   4. 首个 enabled 条目

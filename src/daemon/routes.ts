@@ -1584,7 +1584,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       });
     }
 
-    // PUT /api/daemon/listen —— 写 host/port 到 config.yaml；需 daemon restart 生效
+    // PUT /api/daemon/listen —— 写 host/port 到 config.json；需 daemon restart 生效
     if (method === "PUT" && path === "/api/daemon/listen") {
       const body = (await req.json()) as { host?: string; port?: number };
       const host = typeof body.host === "string" ? body.host.trim() : undefined;

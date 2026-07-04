@@ -2,7 +2,7 @@
  * dogfood-bug22 / bug23 回归测试。
  *
  * bug22：CLI getClient 之前因为 commander 注入 `--port` default 值，永远走
- * fallback parseInt(defaultPort)，listen.json 被忽略。客户改 config.yaml
+ * fallback parseInt(defaultPort)，listen.json 被忽略。客户改 config.json
  * daemon.port=16180 后跑 `daemon status` 报"daemon 运行中 (pid=主daemon)"
  * 因为 client 实际连 6180。
  *

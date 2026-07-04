@@ -68,7 +68,7 @@ program
  *   3. DEFAULT_PORT 兜底
  *
  * 之前 commander 永远把 String(DEFAULT_PORT) 注入 opts.port → opts.port
- * 永远 truthy → readListenInfo 永远走不到。客户改 config.yaml.daemon.port
+ * 永远 truthy → readListenInfo 永远走不到。客户改 config.json.daemon.port
  * = 16180 后跑 daemon status / tui / dashboard 都连 6180 → 错的 daemon。
  */
 function resolvePort(opts?: { port?: string }): number {
@@ -101,13 +101,13 @@ const daemon = program.command("daemon").description("daemon 生命周期管理"
 
 daemon
   .command("run")
-  .description("前台启动 daemon（缺省时监听地址由 config.yaml 的 daemon 段决定）")
+  .description("前台启动 daemon（缺省时监听地址由 config.json 的 daemon 段决定）")
   .option("-p, --port <port>", "端口")
   .option("-H, --host <host>", "主机")
   .option("--insecure-no-auth", "明知风险：对外暴露且不设鉴权时仍然启动")
   .action(async (opts: { port?: string; host?: string; insecureNoAuth?: boolean }) => {
     const { startDaemon } = await import("../daemon/index");
-    // 不给 CLI 默认值：显式参数 > env > config.yaml > 内置默认 的优先级链由
+    // 不给 CLI 默认值：显式参数 > env > config.json > 内置默认 的优先级链由
     // startDaemon 统一裁决；CLI 默认 127.0.0.1 会掩盖 config 的 host 配置，
     // 导致 daemon run 与 daemon start 监听地址不一致（2026-06-10 事故排查假象）
     await startDaemon({
@@ -123,7 +123,7 @@ daemon
 
 daemon
   .command("supervise")
-  .description("前台启动 supervisor（崩溃自动重启 daemon；缺省监听地址由 config.yaml 决定）")
+  .description("前台启动 supervisor（崩溃自动重启 daemon；缺省监听地址由 config.json 决定）")
   .option("-p, --port <port>", "端口")
   .option("-H, --host <host>", "主机")
   .action(async (opts: { port?: string; host?: string }) => {
@@ -136,7 +136,7 @@ daemon
 
 daemon
   .command("start")
-  .description("后台启动 daemon（监听地址由 ~/.autopilot/config.yaml 的 daemon 段决定）")
+  .description("后台启动 daemon（监听地址由 ~/.autopilot/config.json 的 daemon 段决定）")
   .option("--no-supervise", "不带 supervisor，直接跑 daemon（崩了不重启）")
   .action(async (opts: { supervise: boolean }) => {
     if (isDaemonRunning() || isSupervisorRunning()) {
@@ -427,7 +427,7 @@ async function startDaemonProcess(supervise: boolean): Promise<number | null> {
 
 daemon
   .command("restart")
-  .description("重启 daemon（应用 ~/.autopilot/config.yaml 的最新 daemon 配置）")
+  .description("重启 daemon（应用 ~/.autopilot/config.json 的最新 daemon 配置）")
   .option("--no-supervise", "不带 supervisor 重启")
   .action(async (opts: { supervise: boolean }) => {
     const wasRunning = isDaemonRunning() || isSupervisorRunning();
@@ -1585,7 +1585,11 @@ program
       console.log(`已初始化数据库：${join(AUTOPILOT_HOME, "runtime", "workflow.db")}`);
     }
 
-    const cfgPath = join(AUTOPILOT_HOME, "config.yaml");
+    // 自动迁移 config.yaml → config.json（存量用户升级路径）
+    const { ensureJsonConfig } = await import("../core/config");
+    ensureJsonConfig();
+
+    const cfgPath = join(AUTOPILOT_HOME, "config.json");
     if (!existsSync(cfgPath)) {
       writeFileSync(cfgPath, buildConfigTemplate(), "utf-8");
       console.log(`已生成配置模板：${cfgPath}`);

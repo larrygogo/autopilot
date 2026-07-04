@@ -189,8 +189,8 @@ bun run build:web
    # Windows
    netstat -ano | findstr :6180
    ```
-3. 改端口：编辑 `config.yaml` 的 `daemon.port`，然后 `autopilot daemon restart`
-4. 如需局域网访问：把 `config.yaml` 的 `daemon.host` 设为 `0.0.0.0` 后重启 daemon
+3. 改端口：编辑 `config.json` 的 `daemon.port`，然后 `autopilot daemon restart`
+4. 如需局域网访问：把 `config.json` 的 `daemon.host` 设为 `"0.0.0.0"` 后重启 daemon
 
 ---
 

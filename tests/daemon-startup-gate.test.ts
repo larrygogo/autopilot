@@ -25,8 +25,8 @@ const homes: string[] = [];
 function makeExposedHome(port: number): string {
   const home = mkdtempSync(join(tmpdir(), "ap-gate-"));
   writeFileSync(
-    join(home, "config.yaml"),
-    `daemon:\n  host: 0.0.0.0\n  port: ${port}\n`,
+    join(home, "config.json"),
+    JSON.stringify({daemon: {host: "0.0.0.0", port}}, null, 2),
     "utf-8",
   );
   homes.push(home);
