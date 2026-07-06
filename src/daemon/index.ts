@@ -16,6 +16,7 @@ import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
 import { startServerWithRetry } from "./server";
 import { setWebDistDir, reloadApiToken, getApiTokenState, extendAllowedOrigins, detectLanIPv4, isExposedHost, startupAuthBlocked } from "./routes";
+import { initWebAssets } from "../generated/web-assets";
 import { generateApiToken, saveApiToken } from "../core/api-token";
 import { hasAnyUser } from "../core/auth";
 import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo, writeRestartFlag, consumeRestartFlag, isSupervisorRunning } from "./pid";
@@ -297,9 +298,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     wsManager.broadcast(event);
   });
 
-  // 配置静态文件目录
+  // 配置静态文件目录，并初始化嵌入资源清单（编译产物；dev 未生成时退化空表）
   const webDistDir = join(import.meta.dir, "../../web-dist");
   setWebDistDir(webDistDir);
+  await initWebAssets();
 
   // 生成 MCP token + 写 mcp-config.json（必须在 startServer 之前调用：
   // /mcp 路由用 getMcpToken() 判鉴权；如果 server 先起来、initMcpRuntime 后跑，

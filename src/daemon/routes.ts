@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { timingSafeEqual } from "node:crypto";
 import { invokeRpcMethod } from "./rpc";
 import { join, resolve, sep, dirname, parse as parsePath } from "path";
+import { getWebAsset, hasWebAssets } from "../generated/web-assets";
 import {
   signJwt,
   verifyJwt,
@@ -506,7 +507,25 @@ const MIME_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-function serveStatic(urlPath: string): Response | null {
+/**
+ * URL 路径安全解码并归一化为 `/assets/...` 形态的 key。
+ * - 解码失败 → null
+ * - 含 NUL 字符 → null
+ * - 多前导斜杠/反斜杠 → 归一成单 `/`
+ */
+export function decodeSafe(urlPath: string): string | null {
+  let d: string;
+  try {
+    d = decodeURIComponent(urlPath);
+  } catch {
+    return null;
+  }
+  if (d.includes("\0")) return null;
+  return "/" + d.replace(/^[/\\]+/, "");
+}
+
+/** 磁盘静态文件服务（dev 未构建 / 未生成嵌入清单时的回退路径）。逻辑与原 serveStatic 完全一致，勿改。 */
+function serveStaticFromDisk(urlPath: string): Response | null {
   if (!webDistDir) return null;
   const rootDir = resolve(webDistDir);
 
@@ -561,6 +580,33 @@ function serveStatic(urlPath: string): Response | null {
   }
 
   return null;
+}
+
+/**
+ * 静态文件服务：
+ * - 有嵌入清单（编译产物 / dev 已 build:web + gen:web-assets）→ 查表（天然白名单）
+ * - 无嵌入清单（dev 未构建/未生成）→ 磁盘回退（保留 notBuiltPage 指引）
+ */
+function serveStatic(urlPath: string): Response | null {
+  if (hasWebAssets()) {
+    // 查表分支：key 是嵌入清单中的 URL 路径（如 "/index.html"、"/assets/x.js"）
+    const key = (urlPath === "" || urlPath === "/") ? "/index.html" : decodeSafe(urlPath);
+    if (key === null) return null;
+    let handle = getWebAsset(key);
+    // SPA fallback — 只在无明确扩展名时生效
+    if (!handle && !/\.[a-zA-Z0-9]+$/.test(urlPath)) handle = getWebAsset("/index.html");
+    if (!handle) return /\.[a-zA-Z0-9]+$/.test(urlPath) ? null : notBuiltPage();
+    const ext = key.substring(key.lastIndexOf("."));
+    const isHashed = key.startsWith("/assets/");
+    return new Response(Bun.file(handle), {
+      headers: {
+        "Content-Type": MIME_TYPES[ext] ?? "application/octet-stream",
+        "Cache-Control": isHashed ? "public, max-age=31536000, immutable" : "no-cache",
+      },
+    });
+  }
+  // 磁盘回退（dev 未构建 / 未生成嵌入清单）
+  return serveStaticFromDisk(urlPath);
 }
 
 /** Web UI 未构建时的导航占位页 —— 明确告诉用户跑 `bun run build:web`。 */
