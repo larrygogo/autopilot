@@ -5,7 +5,6 @@ import { buildConfigTemplate } from "./config-template";
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
 import { isStandaloneBinary } from "../core/runtime-env";
-export { daemonSpawnPlan } from "./spawn-plan";
 import { daemonSpawnPlan } from "./spawn-plan";
 import { notificationIntentToLabel } from "../client/notification-intent";
 import { localizeLogLine } from "../core/logger";
@@ -312,13 +311,15 @@ async function stopDaemonProcess(): Promise<boolean> {
  * 后台启动 daemon / supervisor 子进程，并等待其在 PID 文件中登记。
  *
  * 跨平台 detach 策略：
- * - Windows: `cmd /c start /b bun run <path>` —— start 派生进程后 cmd 立即退出，
- *   子进程脱离 CLI 的 Job 对象。Bun runtime 下 node:child_process 的 detached:true
- *   不可靠（CLI 仍 hold 住子进程），Bun.spawn 也无 detached 选项。
- *   两个易踩坑：
+ * - Windows 编译版（isStandaloneBinary）：plan.cmd 是标准 PE .exe，nodeSpawn detached 可靠；
+ *   数组传参处理含空格的 execPath（如 Program Files/autopilot.exe）无需额外引号。
+ * - Windows dev 模式：plan.cmd="bun"，Bun runtime 下 nodeSpawn detached 不可靠
+ *   （CLI 仍 hold 住子进程），Bun.spawn 也无 detached 选项。
+ *   沿用 `cmd /c start /b bun run <script.ts>`——start 派生后 cmd 立即退出，子进程
+ *   脱离 CLI 的 Job 对象。两个易踩坑：
  *     1) cmd /c 后必须接单个完整命令字符串，不能拆多 args；
  *     2) 不要给 start 加 `""` 标题占位 + 引号包裹绝对路径，会触发 "Access denied"。
- *   scriptPath 是工程内路径，含空格场景未支持，提前报错让用户改用前台启动。
+ *   脚本路径含空格时提前报错让用户改用前台启动（dev 工程目录通常不含空格）。
  * - POSIX: 标准 node:child_process.spawn + detached:true + stdio:"ignore" + unref()。
  */
 /**
@@ -408,14 +409,31 @@ async function startDaemonProcess(supervise: boolean): Promise<number | null> {
   });
 
   if (process.platform === "win32") {
-    // 数组传参：nodeSpawn detached 在 Windows 下可直接后台拉起，
-    // 且对含空格的 execPath（如 Program Files/autopilot.exe）无需引号处理。
-    const child = nodeSpawn(plan.cmd, plan.args, {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    child.unref();
+    if (isStandaloneBinary()) {
+      // 编译版：plan.cmd 是标准 PE .exe（process.execPath），不受 Bun event loop 约束，
+      // nodeSpawn detached 可靠；数组传参处理含空格的 execPath（如 Program Files/...）。
+      const child = nodeSpawn(plan.cmd, plan.args, {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.unref();
+    } else {
+      // dev 模式：plan.cmd="bun"，Bun runtime 下 nodeSpawn detached 不可靠
+      // （CLI 仍 hold 住子进程）。沿用 cmd /c start /b 机制让 cmd 派生后立即退出。
+      // 注意：start 对含空格路径需引号、但引号+start 有 "Access denied" 坑；
+      // dev 模式脚本在工程目录内，含空格时提前报错让用户用前台 daemon run。
+      const scriptArg = plan.args.find((a) => a.endsWith(".ts")) ?? "";
+      if (/\s/.test(scriptArg)) {
+        console.error(
+          `错误：daemon 脚本路径含空格（${scriptArg}），daemon start 暂不支持此场景，请用 \`autopilot daemon run\` 前台启动。`,
+        );
+        return null;
+      }
+      const cmdStr = `start /b ${plan.cmd} ${plan.args.join(" ")}`;
+      const child = nodeSpawn("cmd.exe", ["/c", cmdStr], { stdio: "ignore", windowsHide: true });
+      child.unref();
+    }
   } else {
     const child = nodeSpawn(plan.cmd, plan.args, {
       detached: true,
