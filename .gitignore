@@ -14,3 +14,9 @@ node_modules/
 .superpowers/
 
 .claude/worktrees/
+
+# web 资源嵌入清单（由 build:web 自动生成，依赖 gitignore 的 web-dist，故本身亦不入库）
+src/generated/_web-assets.generated.ts
+
+# 单文件可执行安装包构建产物
+dist/

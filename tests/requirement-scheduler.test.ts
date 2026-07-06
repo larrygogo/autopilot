@@ -58,12 +58,12 @@ describe("tick 全局并发上限（基础语义）", () => {
   let tmpCfgDir: string;
 
   beforeAll(() => {
-    // 隔离 scheduler 配置：不设的话 loadSchedulerConfig 会读真实用户 config.yaml，
+    // 隔离 scheduler 配置：不设的话 loadSchedulerConfig 会读真实用户 config.json，
     // max_concurrent_tasks > 1 时 N=1 语义的用例全部失真
     tmpCfgDir = join(tmpdir(), `ap-sched-basic-${Date.now()}`);
     mkdirSync(tmpCfgDir, { recursive: true });
-    const tmpCfgFile = join(tmpCfgDir, "config.yaml");
-    writeFileSync(tmpCfgFile, "", "utf-8"); // 空配置 = 默认 N=1
+    const tmpCfgFile = join(tmpCfgDir, "config.json");
+    writeFileSync(tmpCfgFile, "{}", "utf-8"); // 空配置 = 默认 N=1
     process.env.DEV_WORKFLOW_CONFIG = tmpCfgFile;
 
     db = new Database(":memory:");

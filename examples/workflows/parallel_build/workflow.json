@@ -1,0 +1,44 @@
+{
+  "name": "parallel_build",
+  "template_revision": 1,
+  "label": "并行构建",
+  "description": "演示 parallel: 块（fork/join 并行 + fail_strategy）：准备 → 前端/后端并行 → 集成测试。全 prompt 模式、零 ts，可克隆改造。",
+  "requires": {
+    "git": false
+  },
+  "phases": [
+    {
+      "name": "prepare",
+      "label": "准备",
+      "timeout": 300,
+      "handoff": true,
+      "prompt": "你是构建协调者。根据下面的需求，制定一份「前端 / 后端并行构建」的任务拆解：\n各自要做什么、接口契约、集成测试点。\n\n## 需求\n${REQUIREMENT}\n\n直接把拆解方案写在回复里（系统自动保存，无需写文件）。\n"
+    },
+    {
+      "parallel": {
+        "name": "build",
+        "fail_strategy": "cancel_all",
+        "phases": [
+          {
+            "name": "build_frontend",
+            "label": "前端构建",
+            "timeout": 1200,
+            "prompt": "你是前端工程师。依据下面的构建拆解，描述前端部分的实现方案与产物（组件 / 页面 / 接口调用）。\n\n## 构建拆解\n${HANDOFF_prepare}\n\n直接把方案写在回复里，不要读取或修改任何文件。\n"
+          },
+          {
+            "name": "build_backend",
+            "label": "后端构建",
+            "timeout": 1200,
+            "prompt": "你是后端工程师。依据下面的构建拆解，描述后端部分的实现方案与产物（接口 / 数据模型 / 服务）。\n\n## 构建拆解\n${HANDOFF_prepare}\n\n直接把方案写在回复里，不要读取或修改任何文件。\n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "integration_test",
+      "label": "集成测试",
+      "timeout": 900,
+      "prompt": "你是集成测试工程师。依据下面的构建拆解，列出前后端集成的测试用例与验证点。\n\n## 构建拆解\n${HANDOFF_prepare}\n\n直接把测试方案写在回复里，不要读取或修改任何文件。\n"
+    }
+  ]
+}

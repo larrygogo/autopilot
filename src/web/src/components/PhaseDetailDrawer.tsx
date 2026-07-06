@@ -9,7 +9,7 @@ import { Term } from "@/components/Term";
 // ──────────────────────────────────────────────
 // 阶段详情 Drawer：点击流水线节点时弹出，按上下文显示不同内容。
 //
-// mode="preview"：工作流定义视角 — 展示 yaml 字段（label/agent/timeout/reject/gate）+ 对应 ts 函数代码
+// mode="preview"：工作流定义视角 — 展示 spec 字段（label/agent/timeout/reject/gate）+ 对应 ts 函数代码
 // mode="status"： 任务运行视角 — 展示当前状态（pending/running/done/failed）、耗时、最近错误
 // ──────────────────────────────────────────────
 
@@ -109,7 +109,7 @@ export function PhaseDetailDrawer(props: PhaseDetailDrawerProps) {
 }
 
 // ──────────────────────────────────────────────
-// 预览模式：yaml 字段表 + ts 函数代码
+// 预览模式：spec 字段表 + ts 函数代码
 // ──────────────────────────────────────────────
 
 function PreviewBody({

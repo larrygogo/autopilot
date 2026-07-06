@@ -85,7 +85,7 @@ autopilot init
 已创建目录：/Users/you/.autopilot/prompts
 已创建目录：/Users/you/.autopilot/runtime
 已初始化数据库：/Users/you/.autopilot/runtime/workflow.db（应用 19 条迁移）
-已生成配置模板：/Users/you/.autopilot/config.yaml
+已生成配置模板：/Users/you/.autopilot/config.json
 已装入默认工作流：/Users/you/.autopilot/workflows/dev
 初始化完成。
 ```
@@ -102,18 +102,22 @@ autopilot relies on AI agents to do the work. You must configure at least one pr
 
 ### Option A: Edit config file (recommended)
 
-Open `~/.autopilot/config.yaml` and add a `providers` section:
+Open `~/.autopilot/config.json` and add a `providers` section:
 
-```yaml
-providers:
-  anthropic:
-    default_model: claude-sonnet-4-6
-    enabled: true
+```json
+{
+  "providers": {
+    "anthropic": {
+      "default_model": "claude-sonnet-4-6",
+      "enabled": true
+    }
+  }
+}
 ```
 
 > **Credentials**: autopilot does not store API keys. Your installed AI CLI tool (claude-code / codex / gemini-cli) manages authentication. Make sure you've run `claude login` (or equivalent) before starting.
 
-> **Agent config lives in the workflow, not globally**: the global `config.yaml` only holds cross-workflow infrastructure such as providers. Each phase's agent (provider / model / system_prompt / max_turns / permission_mode) is declared inline in the workflow directory's `workflow.yaml`; a phase that omits `agent:` falls back to the framework's built-in default agent (anthropic / claude-sonnet-4-6). See the [Workflow Development Guide](workflow-development.md).
+> **Agent config lives in the workflow, not globally**: the global `config.json` only holds cross-workflow infrastructure such as providers. Each phase's agent (provider / model / system_prompt / max_turns / permission_mode) is declared inline in the workflow directory's `workflow.yaml`; a phase that omits `agent:` falls back to the framework's built-in default agent (anthropic / claude-sonnet-4-6). See the [Workflow Development Guide](workflow-development.md).
 
 ### Option B: Web UI settings
 
@@ -150,7 +154,7 @@ daemon 运行中 (pid=12345)
   任务统计: 无任务
 ```
 
-> **Default port**: `6180`. To change it, add `daemon: { port: <your-port> }` to `~/.autopilot/config.yaml` and run `autopilot daemon restart`.
+> **Default port**: `6180`. To change it, set `"daemon": { "port": <your-port> }` in `~/.autopilot/config.json` and run `autopilot daemon restart`.
 
 ---
 
@@ -235,12 +239,6 @@ PRIO  TITLE                        WAIT    ACTIONS
 P0    Plan awaiting review: task-001  5min  Approve / Reject
 ```
 
-**Terminal UI**:
-
-```bash
-autopilot tui
-```
-
 **Task details and logs**:
 
 ```bash
@@ -282,7 +280,6 @@ autopilot workflow show <name>  # inspect a workflow
 
 # UI
 autopilot now                   # text card stream (CLI version of /now)
-autopilot tui                   # terminal UI
 autopilot dashboard             # open Web UI in browser
 autopilot chat                  # chat with an agent (REPL)
 
@@ -307,5 +304,5 @@ autopilot upgrade               # run database migrations (after updates)
 ## Troubleshooting
 
 - **`autopilot daemon start` times out**: check if port 6180 is already in use, or use `autopilot daemon run` (foreground mode with live log output)
-- **AI agent doesn't respond**: confirm you've logged in with the corresponding CLI, and that `enabled: true` is set in `~/.autopilot/config.yaml`
+- **AI agent doesn't respond**: confirm you've logged in with the corresponding CLI, and that `"enabled": true` is set in `~/.autopilot/config.json`
 - **Task stuck**: run `autopilot task logs <id>` to see errors; also check [FAQ](faq.md)

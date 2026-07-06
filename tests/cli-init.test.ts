@@ -30,21 +30,23 @@ function runInit() {
 }
 
 describe("init 写模板", () => {
-  it("首次 init 后 config.yaml 存在（零配置模板）", () => {
+  it("首次 init 后 config.json 存在（零配置模板）", () => {
     const r = runInit();
     expect(r.exitCode).toBe(0);
-    const cfgPath = join(tmpHome, "config.yaml");
+    const cfgPath = join(tmpHome, "config.json");
     expect(existsSync(cfgPath)).toBe(true);
-    // 零配置模板：providers / agents 全是注释；只检查 doctor 引导
-    expect(readFileSync(cfgPath, "utf-8")).toContain("bun run dev config doctor");
+    // 零配置模板：空 JSON 对象（高级说明在 JSDoc 注释里，不在文件内容中）
+    const content = readFileSync(cfgPath, "utf-8").trim();
+    expect(content).toBe("{}"); // config.json 是纯空对象
   });
 
-  it("二次 init 不覆盖已有 config.yaml", () => {
+  it("二次 init 不覆盖已有 config.json", () => {
     runInit();
-    const cfgPath = join(tmpHome, "config.yaml");
-    writeFileSync(cfgPath, "providers: {}\n# my edits\n", "utf-8");
+    const cfgPath = join(tmpHome, "config.json");
+    // 写入合法 JSON（含自定义字段）
+    writeFileSync(cfgPath, JSON.stringify({ providers: {}, agents: {}, "_my_marker": "my_edits" }, null, 2), "utf-8");
     runInit();
-    expect(readFileSync(cfgPath, "utf-8")).toContain("my edits");
+    expect(readFileSync(cfgPath, "utf-8")).toContain("my_edits");
   });
 
   it("init 输出包含三个下一步提示", () => {

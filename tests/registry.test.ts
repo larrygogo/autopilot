@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 
 import {
   expandPhaseDefaults,
-  loadYamlWorkflow,
+  loadJsonWorkflow,
   buildTransitions,
   register,
   getWorkflow,
@@ -85,26 +85,25 @@ describe("expandPhaseDefaults", () => {
 });
 
 // ──────────────────────────────────────────────
-// 3. loadYamlWorkflow 解析基本工作流
+// 3. loadJsonWorkflow 解析基本工作流（P1 后）
 // ──────────────────────────────────────────────
-describe("loadYamlWorkflow", () => {
-  it("应当解析基本工作流 YAML", async () => {
+describe("loadJsonWorkflow（P1 后）", () => {
+  it("应当解析基本工作流 JSON", async () => {
     const dir = makeTmpDir("basic");
     try {
       writeFileSync(
-        join(dir, "workflow.yaml"),
-        `
-name: basic_test
-description: 测试工作流
-phases:
-  - name: step1
-    timeout: 900
-  - name: step2
-    timeout: 600
-`
+        join(dir, "workflow.json"),
+        JSON.stringify({
+          name: "basic_test",
+          description: "测试工作流",
+          phases: [
+            { name: "step1", timeout: 900, prompt: "做步骤1" },
+            { name: "step2", timeout: 600, prompt: "做步骤2" },
+          ],
+        }, null, 2)
       );
 
-      const wf = await loadYamlWorkflow(dir);
+      const wf = await loadJsonWorkflow(dir);
 
       expect(wf).not.toBeNull();
       expect(wf!.name).toBe("basic_test");
@@ -123,22 +122,23 @@ phases:
   });
 
   // ──────────────────────────────────────────────
-  // 4. loadYamlWorkflow 推导 initial_state 和 terminal_states
+  // 4. loadJsonWorkflow 推导 initial_state 和 terminal_states
   // ──────────────────────────────────────────────
   it("应当推导 initial_state 和 terminal_states", async () => {
     const dir = makeTmpDir("states");
     try {
       writeFileSync(
-        join(dir, "workflow.yaml"),
-        `
-name: state_test
-phases:
-  - name: alpha
-  - name: beta
-`
+        join(dir, "workflow.json"),
+        JSON.stringify({
+          name: "state_test",
+          phases: [
+            { name: "alpha", prompt: "做 alpha" },
+            { name: "beta", prompt: "做 beta" },
+          ],
+        }, null, 2)
       );
 
-      const wf = await loadYamlWorkflow(dir);
+      const wf = await loadJsonWorkflow(dir);
 
       expect(wf!.initial_state).toBe("pending_alpha");
       expect(wf!.terminal_states).toEqual(["done", "cancelled", "failed"]);
@@ -147,23 +147,22 @@ phases:
     }
   });
 
-  it("yaml 顶层 label 和 phase.label 都会被原样保留（不再被 name.toUpperCase 覆盖）", async () => {
+  it("json 顶层 label 和 phase.label 都会被原样保留（不再被 name.toUpperCase 覆盖）", async () => {
     const dir = makeTmpDir("labels");
     try {
       writeFileSync(
-        join(dir, "workflow.yaml"),
-        `
-name: labels_test
-label: "完整开发"
-phases:
-  - name: design
-    label: "设计"
-  - name: review
-    label: "评审"
-`
+        join(dir, "workflow.json"),
+        JSON.stringify({
+          name: "labels_test",
+          label: "完整开发",
+          phases: [
+            { name: "design", label: "设计", prompt: "做设计" },
+            { name: "review", label: "评审", prompt: "做评审" },
+          ],
+        }, null, 2)
       );
 
-      const wf = await loadYamlWorkflow(dir);
+      const wf = await loadJsonWorkflow(dir);
 
       expect(wf).not.toBeNull();
       expect(wf!.label).toBe("完整开发");
@@ -180,15 +179,14 @@ phases:
     const dir = makeTmpDir("labels-default");
     try {
       writeFileSync(
-        join(dir, "workflow.yaml"),
-        `
-name: labels_default
-phases:
-  - name: foo
-`
+        join(dir, "workflow.json"),
+        JSON.stringify({
+          name: "labels_default",
+          phases: [{ name: "foo", prompt: "做 foo" }],
+        }, null, 2)
       );
 
-      const wf = await loadYamlWorkflow(dir);
+      const wf = await loadJsonWorkflow(dir);
 
       const foo = wf!.phases[0] as PhaseDefinition;
       expect(foo.label).toBe("FOO");
@@ -199,36 +197,33 @@ phases:
     }
   });
 
-  it("不存在 workflow.yaml 时返回 null", async () => {
+  it("不存在 workflow.json 时返回 null", async () => {
     const dir = makeTmpDir("empty");
     try {
-      const wf = await loadYamlWorkflow(dir);
+      const wf = await loadJsonWorkflow(dir);
       expect(wf).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("应当绑定 workflow.ts 中的阶段函数", async () => {
-    const dir = makeTmpDir("with-ts");
+  it("phase 有 prompt → func 自动绑定（无 ts 也可运行）", async () => {
+    const dir = makeTmpDir("with-prompt");
     try {
       writeFileSync(
-        join(dir, "workflow.yaml"),
-        `
-name: ts_test
-phases:
-  - name: build
-`
-      );
-      writeFileSync(
-        join(dir, "workflow.ts"),
-        `export async function run_build(taskId: string) { return; }`
+        join(dir, "workflow.json"),
+        JSON.stringify({
+          name: "prompt_test",
+          phases: [{ name: "build", prompt: "执行构建 ${TASK_TITLE}" }],
+        }, null, 2)
       );
 
-      const wf = await loadYamlWorkflow(dir);
+      const wf = await loadJsonWorkflow(dir);
       expect(wf).not.toBeNull();
       const build = wf!.phases[0] as PhaseDefinition;
       expect(typeof build.func).toBe("function");
+      // prompt-runner 绑定：func 源码不包含「未定义」错误
+      expect(build.func!.toString()).not.toContain("未定义且未提供 prompt");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

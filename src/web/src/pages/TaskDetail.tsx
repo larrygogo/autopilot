@@ -713,7 +713,7 @@ function GateBanner({
 }: {
   taskId: string;
   phase: string;
-  /** 来自工作流 yaml 的业务标签，如「设计评审」；缺省时只显示 phase name */
+  /** 来自工作流 spec 的业务标签，如「设计评审」；缺省时只显示 phase name */
   phaseLabel?: string;
   gateMessage?: string;
   toast: ReturnType<typeof useToast>;

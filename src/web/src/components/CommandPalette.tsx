@@ -25,7 +25,7 @@ interface Task {
 
 interface Workflow {
   name: string;
-  /** yaml label:（中文显示名）；缺省回落 name */
+  /** spec label:（中文显示名）；缺省回落 name */
   label?: string;
 }
 

@@ -10,6 +10,16 @@
 
 `1.0` 发布后将严格遵守语义化版本：patch = bugfix，minor = 向后兼容的新功能，major = 破坏性变更。
 
+## [未发布]
+
+### Added
+
+- **单文件可执行安装包（子项目 A · 核心单文件化）**：`bun run build:exe` 用 `bun build --compile` 产出真单文件 `dist/autopilot.exe`（前端 web-dist 用 `with { type: "file" }` 嵌入 + 资源清单，迁移与 examples 模板 codegen 成静态注册表，进程 spawn 编译模式哨兵走 `process.execPath` 子命令）。四类「运行时从磁盘读框架自带资源」障碍改为编译期嵌入/静态分析，dev 与编译走同一代码路径（CI 校验生成物一致性防漂移）。含三平台交叉编译 `build:exe:{win,linux,macos}`。多平台实机验收与各平台 installer + 代码签名为后续子项目 B/C。
+
+### Removed
+
+- **移除 TUI 客户端**：observer-only 的 ink 终端界面（`src/tui/`、`autopilot tui` 命令、`ink`/`ink-spinner` 依赖）整体删除。原因：功能不追决策对等、维护价值低，且 ink 依赖树（`react-devtools-core` 等）阻塞单文件 `bun build --compile` 打包。终端里盯进度改用 CLI —— `autopilot task status` / `autopilot task logs --follow` / `autopilot notifications list`。
+
 ## [0.1.0] - 2026-06-17
 
 版本号体系重置：此前代码内的 `1.0.0` 是从未随发布变动的占位符，与实际发布节奏脱节。现把版本号收敛为**单一真相源** `package.json`（`src/index.ts` 的 `VERSION`、daemon status、CLI `--version`、MCP serverInfo、WS 握手全部从此取值），并从 `0.1.0` 重新计数。

@@ -6,7 +6,6 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { NewWorkflowFromTemplate } from "@/components/NewWorkflowFromTemplate";
 import { WorkflowCatalog } from "@/components/WorkflowCatalog";
-import { WorkflowHealthBanner } from "@/components/WorkflowHealthBanner";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +14,6 @@ interface WorkflowInfo {
   name: string;
   label?: string;
   description: string;
-  source?: "db" | "file";
   derives_from?: string | null;
 }
 
@@ -77,9 +75,6 @@ export function Workflows() {
       }}
     >
 
-      {/* 工作流目录健康检查：孤儿 / 重名碰撞 → 顶部警告条 + 修复 dialog */}
-      <WorkflowHealthBanner onFixed={refresh} />
-
       {/* 用例目录视图：点卡片跳独立详情页 /workflows/:name */}
       <WorkflowCatalog
         workflows={workflows}
@@ -109,7 +104,7 @@ export function Workflows() {
         open={cloneSource !== null}
         onOpenChange={(v) => { if (!v) { setCloneSource(null); setCloneName(""); } }}
         title={`克隆工作流 ${cloneSource ?? ""}`}
-        description="拷贝 yaml + ts 到新工作流目录；新工作流可以独立编辑、不影响原版。"
+        description="拷贝该工作流的完整定义为新工作流；新工作流可以独立编辑、不影响原版。"
         submitText="克隆"
         submitDisabled={!cloneName.trim()}
         onSubmit={async () => {

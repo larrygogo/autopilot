@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { timingSafeEqual } from "node:crypto";
 import { invokeRpcMethod } from "./rpc";
 import { join, resolve, sep, dirname, parse as parsePath } from "path";
+import { getWebAsset, hasWebAssets } from "../generated/web-assets";
 import {
   signJwt,
   verifyJwt,
@@ -74,25 +75,17 @@ import {
   buildTransitions,
   getTerminalStates,
   isParallelPhase,
-  getWorkflowYaml,
   getWorkflowTs,
-  saveWorkflowYaml,
-  createWorkflow,
-  deleteWorkflowDir,
+  WORKFLOW_NAME_RE,
   type PhaseEntryInput,
 } from "../core/workflow/registry";
-import { setWorkflowPhases, applyPhasesToYaml } from "../core/workflow/registry-authoring";
-import {
-  syncWorkflowTs,
-  renameRunFunctions,
-  pruneOrphanRunFunctions,
-  replaceRunFunction,
-} from "../core/workflow/ts-authoring";
+import { applyPhasesToSpec, patchWorkflowMetaSpec } from "../core/workflow/registry-authoring";
 import {
   listWorkflowsInDb,
   getWorkflowFromDb,
   updateDbWorkflow,
   deleteDbWorkflow,
+  createNativeDbWorkflow,
 } from "../core/workflow/workflows";
 import {
   loadDaemonConfig,
@@ -514,7 +507,25 @@ const MIME_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-function serveStatic(urlPath: string): Response | null {
+/**
+ * URL 路径安全解码并归一化为 `/assets/...` 形态的 key。
+ * - 解码失败 → null
+ * - 含 NUL 字符 → null
+ * - 多前导斜杠/反斜杠 → 归一成单 `/`
+ */
+export function decodeSafe(urlPath: string): string | null {
+  let d: string;
+  try {
+    d = decodeURIComponent(urlPath);
+  } catch {
+    return null;
+  }
+  if (d.includes("\0")) return null;
+  return "/" + d.replace(/^[/\\]+/, "");
+}
+
+/** 磁盘静态文件服务（dev 未构建 / 未生成嵌入清单时的回退路径）。逻辑与原 serveStatic 完全一致，勿改。 */
+function serveStaticFromDisk(urlPath: string): Response | null {
   if (!webDistDir) return null;
   const rootDir = resolve(webDistDir);
 
@@ -569,6 +580,35 @@ function serveStatic(urlPath: string): Response | null {
   }
 
   return null;
+}
+
+/**
+ * 静态文件服务：
+ * - 有嵌入清单（编译产物 / dev 已 build:web + gen:web-assets）→ 查表（天然白名单）
+ * - 无嵌入清单（dev 未构建/未生成）→ 磁盘回退（保留 notBuiltPage 指引）
+ */
+function serveStatic(urlPath: string): Response | null {
+  if (hasWebAssets()) {
+    // 查表分支：key 是嵌入清单中的 URL 路径（如 "/index.html"、"/assets/x.js"）
+    let key = (urlPath === "" || urlPath === "/") ? "/index.html" : decodeSafe(urlPath);
+    if (key === null) return null;
+    let handle = getWebAsset(key);
+    // SPA fallback — 只在无明确扩展名时生效；命中 index.html 后 key 一并更新，
+    // 使下方 Content-Type/缓存按 index.html（text/html、no-cache）算，而非原请求路径扩展名
+    // （否则 /requirements/xxx 这类前端路由直接访问会返回 octet-stream，浏览器下载而非渲染）
+    if (!handle && !/\.[a-zA-Z0-9]+$/.test(urlPath)) { handle = getWebAsset("/index.html"); key = "/index.html"; }
+    if (!handle) return /\.[a-zA-Z0-9]+$/.test(urlPath) ? null : notBuiltPage();
+    const ext = key.substring(key.lastIndexOf("."));
+    const isHashed = key.startsWith("/assets/");
+    return new Response(Bun.file(handle), {
+      headers: {
+        "Content-Type": MIME_TYPES[ext] ?? "application/octet-stream",
+        "Cache-Control": isHashed ? "public, max-age=31536000, immutable" : "no-cache",
+      },
+    });
+  }
+  // 磁盘回退（dev 未构建 / 未生成嵌入清单）
+  return serveStaticFromDisk(urlPath);
 }
 
 /** Web UI 未构建时的导航占位页 —— 明确告诉用户跑 `bun run build:web`。 */
@@ -1433,27 +1473,20 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
     //   POST /api/workflows/author       → workflows.author
     //   POST /api/workflows/author/save  → workflows.saveAuthored
 
-    // GET /api/workflows/health — 扫描 yaml.name 跟目录名不一致 / 重名碰撞
+    // GET /api/workflows/health — file 轨退役（P1），孤儿扫描已无意义；返回 410
     if (method === "GET" && path === "/api/workflows/health") {
-      const { scanWorkflowHealth } = await import("../core/workflow/templates");
-      return json(scanWorkflowHealth());
+      return new Response(JSON.stringify({ error: "已退役：file 轨工作流孤儿扫描在 P1 移除" }), {
+        status: 410,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    // POST /api/workflows/health/fix-orphan — 修复指定孤儿目录（改 yaml.name 为目录名）
+    // POST /api/workflows/health/fix-orphan — file 轨退役（P1），返回 410
     if (method === "POST" && path === "/api/workflows/health/fix-orphan") {
-      const body = await req.json().catch(() => null) as { dir?: string } | null;
-      if (!body?.dir) return error("dir is required", 400);
-      try {
-        const { fixOrphanWorkflow } = await import("../core/workflow/templates");
-        const r = fixOrphanWorkflow(body.dir);
-        const { discover } = await import("../core/workflow/registry");
-        await discover();
-        emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true, ...r });
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return error(msg, msg.includes("不存在") || msg.includes("非法") ? 400 : 500);
-      }
+      return new Response(JSON.stringify({ error: "已退役：file 轨工作流孤儿修复在 P1 移除" }), {
+        status: 410,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     // POST /api/workflows/:name/clone — 从用户已有工作流克隆（区别于 from-template 只克隆 examples 模板）
@@ -1504,10 +1537,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // POST /api/workflows — 创建工作流（文件脚手架）
-    // 注：曾支持 body.derives_from 创建 DB 派生工作流，已下线（派生概念被克隆 + drawer 内
-    // 编辑 ts/prompt 完全替代）；旧 DB 派生工作流仍能加载（registry composeDbWorkflow 保留），
-    // 但不再支持新建。
+    // POST /api/workflows — 创建工作流（file 轨退役后：直接建 native DB 行，纯声明式脚手架）
     if (method === "POST" && path === "/api/workflows") {
       const body = await req.json() as {
         name?: string;
@@ -1515,16 +1545,26 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         firstPhase?: string;
       };
       if (typeof body.name !== "string" || !body.name) return error("name is required");
+      if (!WORKFLOW_NAME_RE.test(body.name)) {
+        return error("工作流名称非法：需以小写字母开头，仅包含小写字母、数字、下划线、连字符，长度 ≤ 40", 400);
+      }
+      const firstPhase = body.firstPhase ?? "step1";
+      if (!/^[a-z][a-z0-9_]*$/.test(firstPhase)) {
+        return error("首阶段名非法：需以小写字母开头，仅包含小写字母、数字、下划线", 400);
+      }
 
       try {
-        const result = createWorkflow({
+        const spec = {
           name: body.name,
-          description: body.description,
-          firstPhase: body.firstPhase,
-        });
+          description: body.description ?? "",
+          phases: [
+            { name: firstPhase, label: firstPhase, timeout: 600, prompt: "在这里描述这个阶段要 agent 做什么（可用 ${REQUIREMENT} / ${WORKSPACE} 等变量）" },
+          ],
+        };
+        createNativeDbWorkflow({ name: body.name, description: body.description ?? "", spec_json: JSON.stringify(spec) });
         await reload();
         emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true, name: body.name, source: "file", dir: result.dir }, 201);
+        return json({ ok: true, name: body.name, source: "db" }, 201);
       } catch (e: unknown) {
         return error(`创建失败：${e instanceof Error ? e.message : String(e)}`, 400);
       }
@@ -1545,16 +1585,8 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
           return error(`删除失败：${e instanceof Error ? e.message : String(e)}`, 400);
         }
       }
-      // 文件来源走原文件目录删除
-      try {
-        const ok = deleteWorkflowDir(wfDeleteMatch);
-        if (!ok) return error("Workflow not found", 404);
-        await reload();
-        emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true });
-      } catch (e: unknown) {
-        return error(`删除失败：${e instanceof Error ? e.message : String(e)}`, 400);
-      }
+      // file 轨已退役：所有工作流都在 DB（上方分支已覆盖）
+      return error("Workflow not found", 404);
     }
 
     // GET /api/workflows/:name
@@ -1600,7 +1632,7 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       });
     }
 
-    // PUT /api/daemon/listen —— 写 host/port 到 config.yaml；需 daemon restart 生效
+    // PUT /api/daemon/listen —— 写 host/port 到 config.json；需 daemon restart 生效
     if (method === "PUT" && path === "/api/daemon/listen") {
       const body = (await req.json()) as { host?: string; port?: number };
       const host = typeof body.host === "string" ? body.host.trim() : undefined;
@@ -1659,33 +1691,29 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // GET /api/workflows/:name/yaml
-    const yamlReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
-    if (method === "GET" && yamlReadMatch) {
-      const row = getWorkflowFromDb(yamlReadMatch);
-      if (row && row.source === "db") {
-        return json({ yaml: row.yaml_content });
-      }
-      const yaml = getWorkflowYaml(yamlReadMatch);
-      if (yaml === null) return error("Workflow not found", 404);
-      return json({ yaml });
+    // GET /api/workflows/:name/spec — 读 spec_json（P2 后：yaml_content 列已删除）
+    const specReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/spec$/);
+    if (method === "GET" && specReadMatch) {
+      const row = getWorkflowFromDb(specReadMatch);
+      if (!row) return error("Workflow not found", 404);
+      return json({ spec: row.spec_json ?? "{}" });
     }
 
-    // GET /api/workflows/:name/export — 纯 yaml 文本响应（用于 CLI export 备份）
-    // 注意：必须放在 /api/workflows/:name 通配匹配前面（位于 yaml 端点附近避免被吃掉）
+    // GET /api/workflows/:name/yaml → 410（P2 已废弃，改用 /spec）
+    const yamlReadMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
+    if (method === "GET" && yamlReadMatch) {
+      return error("yaml 端点已废弃（P2），请改用 GET /api/workflows/:name/spec（返回 JSON spec）", 410);
+    }
+
+    // GET /api/workflows/:name/export — JSON spec 文本响应（P2 后：统一 JSON，用于 CLI export 备份）
+    // 注意：必须放在 /api/workflows/:name 通配匹配前面（位于 spec 端点附近避免被吃掉）
     const exportMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/export$/);
     if (method === "GET" && exportMatch) {
       const row = getWorkflowFromDb(exportMatch);
-      let yaml: string | null = null;
-      if (row && row.source === "db") {
-        yaml = row.yaml_content;
-      } else {
-        yaml = getWorkflowYaml(exportMatch);
-      }
-      if (yaml === null) return error("Workflow not found", 404);
-      return new Response(yaml, {
+      if (!row) return error("Workflow not found", 404);
+      return new Response(row.spec_json ?? "{}", {
         status: 200,
-        headers: { "Content-Type": "text/yaml; charset=utf-8" },
+        headers: { "Content-Type": "application/json; charset=utf-8" },
       });
     }
 
@@ -1741,42 +1769,24 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       if (!body || typeof body.code !== "string" || !body.code.trim()) {
         return error("code (function source) is required", 400);
       }
-      // db 来源工作流是纯声明式（无 ts 文件）：拒绝 ts 函数编辑，引导用 prompt 字段。
-      const phaseFnRow = getWorkflowFromDb(wfName);
-      if (phaseFnRow && phaseFnRow.source === "db") {
-        return error("db 工作流是纯声明式工作流，没有可编辑的 ts 函数——请改用 phase 的 prompt 字段", 400);
-      }
-      try {
-        const result = replaceRunFunction(wfName, phaseName, body.code);
-        emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true, mode: result.mode });
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return error(msg, msg.includes("不存在") ? 404 : 400);
-      }
+      // file 轨已退役：所有工作流都是纯声明式，没有可编辑的 ts 函数
+      void wfName; void phaseName;
+      return error("工作流是纯声明式，没有可编辑的 ts 函数——请改用 phase 的 prompt 字段", 400);
     }
 
-    // PUT /api/workflows/:name/yaml — 区分 source：db 走 updateDbWorkflow，file 写文件
-    const yamlWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
-    if (method === "PUT" && yamlWriteMatch) {
-      const body = await req.json() as { yaml: string };
-      if (typeof body.yaml !== "string") return error("yaml field is required");
+    // PUT /api/workflows/:name/spec — 写 spec_json（P2 后唯一真相）
+    const specWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/spec$/);
+    if (method === "PUT" && specWriteMatch) {
+      const body = await req.json() as { spec: string };
+      if (typeof body.spec !== "string") return error("spec field is required");
 
-      const row = getWorkflowFromDb(yamlWriteMatch);
-      if (row && row.source === "db") {
-        try {
-          updateDbWorkflow(yamlWriteMatch, { yaml_content: body.yaml });
-          await reload();
-          emit({ type: "workflow:reloaded", payload: {} });
-          return json({ ok: true });
-        } catch (e: unknown) {
-          return error(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-
-      // file 来源 → 写文件（保持原行为）
+      const row = getWorkflowFromDb(specWriteMatch);
+      if (!row) return error(`workflow not found: ${specWriteMatch}`, 404);
+      if (row.source !== "db") return error("file 轨工作流只读", 400);
       try {
-        saveWorkflowYaml(yamlWriteMatch, body.yaml);
+        // 校验 JSON 可解析
+        JSON.parse(body.spec);
+        updateDbWorkflow(specWriteMatch, { spec_json: body.spec });
         await reload();
         emit({ type: "workflow:reloaded", payload: {} });
         return json({ ok: true });
@@ -1785,7 +1795,13 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
       }
     }
 
-    // PUT /api/workflows/:name/phases — 结构化更新 phases 段
+    // PUT /api/workflows/:name/yaml → 410（P2 已废弃，改用 /spec）
+    const yamlWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/yaml$/);
+    if (method === "PUT" && yamlWriteMatch) {
+      return error("yaml 端点已废弃（P2），请改用 PUT /api/workflows/:name/spec（传 {spec: <JSON文本>}）", 410);
+    }
+
+    // PUT /api/workflows/:name/phases — 结构化更新 phases 段（P2 后操作 spec_json）
     const phasesWriteMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/phases$/);
     if (method === "PUT" && phasesWriteMatch) {
       const body = await req.json() as {
@@ -1794,12 +1810,12 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
         renames?: Record<string, string>;
       };
       if (!Array.isArray(body.phases)) return error("phases must be array", 400);
-      // db 来源工作流：纯声明式，应用 phases 到 yaml_content 写回 DB；无 ts 同步 / 函数 rename。
+      // db 来源工作流：纯声明式，应用 phases 到 spec_json 写回 DB；无 ts 同步 / 函数 rename。
       const phasesRow = getWorkflowFromDb(phasesWriteMatch);
       if (phasesRow && phasesRow.source === "db") {
         try {
-          const newYaml = applyPhasesToYaml(phasesRow.yaml_content, body.phases as PhaseEntryInput[]);
-          updateDbWorkflow(phasesWriteMatch, { yaml_content: newYaml });
+          const newSpec = applyPhasesToSpec(phasesRow.spec_json ?? "{}", body.phases as PhaseEntryInput[]);
+          updateDbWorkflow(phasesWriteMatch, { spec_json: newSpec });
           await reload();
           emit({ type: "workflow:reloaded", payload: {} });
           return json({ ok: true, ts: null, ts_error: null, renamed: [] });
@@ -1807,67 +1823,18 @@ export async function handleRequest(req: Request, server?: import("bun").Server<
           return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
         }
       }
-      try {
-        // 1. 先重命名 run_ 函数（保留函数体），避免产生孤儿
-        let renamedFns: string[] = [];
-        if (body.renames && typeof body.renames === "object") {
-          const r = renameRunFunctions(phasesWriteMatch, body.renames);
-          renamedFns = r.renamed;
-        }
-        // 2. 写入 phases
-        setWorkflowPhases(phasesWriteMatch, body.phases as PhaseEntryInput[]);
-        await reload();
-        let tsResult: { added: string[]; orphans: string[]; modified: boolean; legacy_signature?: string[] } | null = null;
-        let tsError: string | null = null;
-        if (body.sync_ts !== false) {
-          try {
-            tsResult = syncWorkflowTs(phasesWriteMatch);
-            if (tsResult.modified) await reload();
-          } catch (e: unknown) {
-            tsError = e instanceof Error ? e.message : String(e);
-            tsResult = { added: [], orphans: [], modified: false };
-          }
-        }
-        emit({ type: "workflow:reloaded", payload: {} });
-        return json({ ok: true, ts: tsResult, ts_error: tsError, renamed: renamedFns });
-      } catch (e: unknown) {
-        return error(`保存失败：${e instanceof Error ? e.message : String(e)}`, 400);
-      }
+      // file 轨已退役：所有工作流都是 DB 声明式（上方分支已覆盖）；走到这说明工作流不存在
+      return error(`workflow not found: ${phasesWriteMatch}`, 404);
     }
 
     // PUT /api/workflows/:name/agents 已移除 —— 命名复用 agent 机制删除（Phase 3）。
     // phase 内联 agent 配置走 PUT /api/workflows/:name/yaml（整文件写）或 phases 编辑。
 
-    // POST /api/workflows/:name/prune-orphans — 删除指定的孤儿 run_ 函数
-    const pruneMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/prune-orphans$/);
-    if (method === "POST" && pruneMatch) {
-      const body = await req.json() as { names?: string[] };
-      if (!Array.isArray(body.names)) return error("names must be array", 400);
-      try {
-        const result = pruneOrphanRunFunctions(pruneMatch, body.names);
-        if (result.removed.length > 0) {
-          await reload();
-          emit({ type: "workflow:reloaded", payload: {} });
-        }
-        return json(result);
-      } catch (e: unknown) {
-        return error(`清理失败：${e instanceof Error ? e.message : String(e)}`, 400);
-      }
-    }
-
-    // POST /api/workflows/:name/sync-ts — 校准 workflow.ts
-    const syncTsMatch = extractParam(path, /^\/api\/workflows\/([\w.\-]+)\/sync-ts$/);
-    if (method === "POST" && syncTsMatch) {
-      try {
-        const result = syncWorkflowTs(syncTsMatch);
-        if (result.modified) {
-          await reload();
-          emit({ type: "workflow:reloaded", payload: {} });
-        }
-        return json(result);
-      } catch (e: unknown) {
-        return error(`校准失败：${e instanceof Error ? e.message : String(e)}`, 400);
-      }
+    // POST /api/workflows/:name/prune-orphans、/sync-ts —— file 轨退役（2026-07-03）随
+    // workflow.ts 编辑机制一并移除（410）：所有工作流均为 DB 声明式，无 ts 函数可校准/清理。
+    const tsGoneMatch = path.match(/^\/api\/workflows\/[\w.\-]+\/(prune-orphans|sync-ts)$/);
+    if (method === "POST" && tsGoneMatch) {
+      return error("file 轨已退役：工作流均为纯声明式，无 workflow.ts 可操作", 410);
     }
 
     // POST /api/reload

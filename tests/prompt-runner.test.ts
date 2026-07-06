@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { expandPromptTemplate, tryMakePromptRunnerForPhase, phaseUsesDeliverables } from "../src/core/workflow/prompt-runner";
-import { _clearRegistry, loadYamlWorkflow, register, type PhaseDefinition } from "../src/core/workflow/registry";
+import { _clearRegistry, loadJsonWorkflow, register, type PhaseDefinition } from "../src/core/workflow/registry";
 import { runWithTaskContext } from "../src/core/task/context";
 
 let tmpHome: string;
@@ -112,22 +112,20 @@ describe("tryMakePromptRunnerForPhase", () => {
   });
 });
 
-describe("loadYamlWorkflow + phase.prompt 集成", () => {
+describe("loadJsonWorkflow + phase.prompt 集成（P1 后）", () => {
   it("phase 有 prompt + 无 ts run_ 函数 → 自动绑定 prompt-runner", async () => {
     const wfDir = join(tmpHome, "workflows", "promptwf");
     mkdirSync(wfDir, { recursive: true });
     writeFileSync(
-      join(wfDir, "workflow.yaml"),
-      `name: promptwf
-phases:
-  - name: do_it
-    prompt: |
-      用 \${TASK_TITLE} 做一个测试
-`,
+      join(wfDir, "workflow.json"),
+      JSON.stringify({
+        name: "promptwf",
+        phases: [{ name: "do_it", prompt: "用 ${TASK_TITLE} 做一个测试" }],
+      }, null, 2),
       "utf-8",
     );
 
-    const wf = await loadYamlWorkflow(wfDir);
+    const wf = await loadJsonWorkflow(wfDir);
     expect(wf).not.toBeNull();
     const phase = wf!.phases[0] as PhaseDefinition;
     expect(typeof phase.func).toBe("function");
@@ -139,29 +137,28 @@ phases:
     const wfDir = join(tmpHome, "workflows", "stub");
     mkdirSync(wfDir, { recursive: true });
     writeFileSync(
-      join(wfDir, "workflow.yaml"),
-      `name: stub
-phases:
-  - name: empty
-`,
+      join(wfDir, "workflow.json"),
+      JSON.stringify({
+        name: "stub",
+        phases: [{ name: "empty" }],
+      }, null, 2),
       "utf-8",
     );
 
-    const wf = await loadYamlWorkflow(wfDir);
+    const wf = await loadJsonWorkflow(wfDir);
     const phase = wf!.phases[0] as PhaseDefinition;
     await expect(phase.func!("t1")).rejects.toThrow(/未定义且未提供 prompt|未定义/);
   });
 
-  it("ts 有 run_ 函数 + yaml 也有 prompt → 提示词优先，用 prompt-runner（忽略 ts）", async () => {
+  it("ts 有 run_ 函数 + json 也有 prompt → 提示词优先，用 prompt-runner（忽略 ts）", async () => {
     const wfDir = join(tmpHome, "workflows", "both");
     mkdirSync(wfDir, { recursive: true });
     writeFileSync(
-      join(wfDir, "workflow.yaml"),
-      `name: both
-phases:
-  - name: do_it
-    prompt: this is yaml prompt
-`,
+      join(wfDir, "workflow.json"),
+      JSON.stringify({
+        name: "both",
+        phases: [{ name: "do_it", prompt: "this is json prompt" }],
+      }, null, 2),
       "utf-8",
     );
     writeFileSync(
@@ -172,7 +169,7 @@ phases:
       "utf-8",
     );
 
-    const wf = await loadYamlWorkflow(wfDir);
+    const wf = await loadJsonWorkflow(wfDir);
     const phase = wf!.phases[0] as PhaseDefinition;
     // 提示词优先（全局翻转）：phase 绑定 prompt-runner 而非 ts 函数 → 绑定的 func 源码不含 ts 的抛错串
     expect(phase.func!.toString()).not.toContain("从 ts 函数抛出");

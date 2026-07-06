@@ -19,5 +19,6 @@
       "@autopilot/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "bin/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "bin/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["src/generated/_web-assets.generated.ts"]
 }

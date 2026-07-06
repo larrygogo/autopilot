@@ -207,6 +207,72 @@ describe("clarifier B 模式 — 单轮逻辑", () => {
     expect(qs.map((q) => q.id).sort()).toEqual(["qst-concurrent", "qst-pre"]);
   });
 
+  it("agent 未调 submit_clarify（callFn 抛 '未调 submit_clarify'）→ 重试 1 次仍失败 → emit clarifier-error", async () => {
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "原稿" });
+    setRequirementStatus("r1", "clarifying");
+
+    let calls = 0;
+    _setClarifyFnForTest(async () => {
+      calls++;
+      throw new Error("agent 未提交澄清结果（未调 submit_clarify）");
+    });
+
+    const errors: Array<{ id: string; reason: string }> = [];
+    const { onEvent, offEvent } = await import("../src/core/event-bus");
+    const handler = (e: { type: string; payload: { id: string; reason: string } }) => {
+      if (e.type === "requirement:clarifier-error") errors.push(e.payload);
+    };
+    onEvent("requirement:clarifier-error", handler as never);
+
+    await runClarifierRound("r1");
+
+    expect(calls).toBe(2);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].id).toBe("r1");
+    expect(errors[0].reason).toContain("submit_clarify");
+
+    const req = getRequirementById("r1");
+    expect(req?.spec_md).toBe("原稿");
+    expect(req?.active_question_id).toBeNull();
+
+    offEvent("requirement:clarifier-error", handler as never);
+  });
+
+  it("done=true 但 next_question 非 null → parseClarifyResult 抛错 → emit clarifier-error", async () => {
+    createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "原稿" });
+    setRequirementStatus("r1", "clarifying");
+
+    _setClarifyFnForTest(async () => ({
+      rawText: JSON.stringify({
+        new_spec_md: "改了",
+        summary: null,
+        next_question: { agent_text: "Q?", suggestions: [] },
+        done: true,
+        new_title: null,
+      }),
+      newSessionRef: undefined,
+    }));
+
+    const errors: Array<{ id: string; reason: string }> = [];
+    const { onEvent, offEvent } = await import("../src/core/event-bus");
+    const handler = (e: { type: string; payload: { id: string; reason: string } }) => {
+      if (e.type === "requirement:clarifier-error") errors.push(e.payload);
+    };
+    onEvent("requirement:clarifier-error", handler as never);
+
+    await runClarifierRound("r1");
+
+    // parseClarifyResult 中检查 done=true && next_question != null → 抛错
+    expect(errors).toHaveLength(1);
+    expect(errors[0].id).toBe("r1");
+
+    const req = getRequirementById("r1");
+    // spec 未被写入（解析失败，不动 spec）
+    expect(req?.spec_md).toBe("原稿");
+
+    offEvent("requirement:clarifier-error", handler as never);
+  });
+
   it("AI 返回时状态已变（race）→ 丢弃结果，不写 spec/不创建 question", async () => {
     createRequirement({ id: "r1", project_id: "p1", title: "T", spec_md: "原稿" });
     setRequirementStatus("r1", "clarifying");

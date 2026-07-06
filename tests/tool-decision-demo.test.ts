@@ -8,7 +8,7 @@ import { mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
-  loadYamlWorkflow,
+  loadJsonWorkflow,
   buildTransitions,
   _clearRegistry,
   type WorkflowDefinition,
@@ -27,7 +27,7 @@ beforeEach(async () => {
   mkdirSync(join(tmpHome, "workflows"), { recursive: true });
   process.env.AUTOPILOT_HOME = tmpHome;
   _clearRegistry();
-  const loaded = await loadYamlWorkflow(EXAMPLE_DIR);
+  const loaded = await loadJsonWorkflow(EXAMPLE_DIR);
   if (!loaded) throw new Error("tool_decision_demo 示例加载失败");
   wf = loaded;
   review = wf.phases.find((p) => !("parallel" in p) && (p as PhaseDefinition).name === "review") as PhaseDefinition;

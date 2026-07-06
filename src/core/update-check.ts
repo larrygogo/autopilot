@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import type { UpdateInfo } from "../daemon/protocol";
+import { isStandaloneBinary } from "./runtime-env";
 
 // ──────────────────────────────────────────────
 // 更新检查 —— 只读判断本地代码是否落后远端，把「发现更新」从用户记忆挪到机制。
@@ -85,6 +86,8 @@ let _timer: ReturnType<typeof setInterval> | null = null;
 
 /** daemon 启动时调起：首次检查异步跑（不阻塞启动），之后每 6h 重查。 */
 export function initUpdateMonitor(): void {
+  // 编译单文件模式：无源码仓库、无 git，更新检测无意义，直接跳过。
+  if (isStandaloneBinary()) return;
   checkForUpdate().catch(() => { /* best-effort，离线不报错 */ });
   if (_timer) clearInterval(_timer);
   _timer = setInterval(() => { checkForUpdate().catch(() => {}); }, REFRESH_INTERVAL_MS);

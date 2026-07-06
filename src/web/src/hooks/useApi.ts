@@ -198,6 +198,12 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 export const api = {
   // [WS-RPC] daemon.status — P3 第一批 PoC，已切到 WS
   getStatus: () => requestRpc<any>("daemon.status"),
+  // [WS-RPC] extensions.list — daemon 扩展及其自报状态（设置 → Daemon「扩展」卡）
+  listExtensions: () =>
+    requestRpc<{ extensions: Array<{ id: string; enabled: boolean; running: boolean; status: Record<string, unknown> | null }> }>("extensions.list"),
+  // [WS-RPC] extensions.invoke — 调用扩展动作（如 reqgenie 连接器注册）
+  invokeExtension: (id: string, action: string, params?: Record<string, unknown>) =>
+    requestRpc<{ result: unknown }>("extensions.invoke", { id, action, params: params ?? {} }),
   // [WS-RPC] tasks.list — P3 第一批 PoC
   listTasks: (filters?: Record<string, string>) => {
     const params: Record<string, unknown> = {};
@@ -313,7 +319,7 @@ export const api = {
     description?: string;
     firstPhase?: string;
     derives_from?: string;
-    yaml_content?: string;
+    spec_json?: string;
   }) =>
     request<{ ok: boolean; name: string; source?: string; dir?: string }>("/api/workflows", {
       method: "POST", body: JSON.stringify(body),
@@ -337,19 +343,11 @@ export const api = {
   // [WS-RPC] workflows.import —— 从 JSON 文本导入落 DB（不写磁盘；无 derives_from = native）
   importWorkflow: (body: { name: string; content: string; derives_from?: string; description?: string }) =>
     requestRpc<{ name: string; kind: string; source: string }>("workflows.import", body),
-  // [WS-RPC] workflows.scanHealth
-  scanWorkflowHealth: () =>
-    requestRpc<WorkflowHealthReport>("workflows.scanHealth"),
-  fixOrphanWorkflow: (dir: string) =>
-    request<{ ok: boolean; fixed: boolean; oldName: string; newName: string }>(
-      `/api/workflows/health/fix-orphan`,
-      { method: "POST", body: JSON.stringify({ dir }) },
-    ),
   // [WS-RPC] workflows.author（AI 长任务，给 5min 超时）
-  authorWorkflow: (body: { description: string; prior_yaml?: string }) =>
+  authorWorkflow: (body: { description: string; prior_spec?: string }) =>
     requestRpc<AuthoredWorkflow>("workflows.author", body, { timeoutMs: 300_000 }),
   // [WS-RPC] workflows.saveAuthored（落 native DB，零 ts）
-  saveAuthoredWorkflow: (body: { name: string; yaml: string }) =>
+  saveAuthoredWorkflow: (body: { name: string; spec_json: string }) =>
     requestRpc<{ ok: boolean; name: string }>("workflows.saveAuthored", body),
   // [WS-RPC] workflows.delete
   deleteWorkflow: (name: string) =>
@@ -383,12 +381,12 @@ export const api = {
 
   // Config
   // [WS-RPC] config.get
-  getConfig: () => requestRpc<{ yaml: string }>("config.get"),
+  getConfig: () => requestRpc<{ content: string }>("config.get"),
   // [WS-RPC] config.save
-  saveConfig: (yaml: string) =>
-    requestRpc<{ ok: boolean }>("config.save", { yaml }),
-  // [WS-RPC] workflows.getYaml
-  getWorkflowYaml: (name: string) => requestRpc<{ yaml: string }>("workflows.getYaml", { name }),
+  saveConfig: (content: string) =>
+    requestRpc<{ ok: boolean }>("config.save", { content }),
+  // [WS-RPC] workflows.getSpec（P2 后 yaml_content 已删，spec_json 是唯一真相）
+  getWorkflowSpec: (name: string) => requestRpc<{ spec: string }>("workflows.getSpec", { name }),
   // [WS-RPC] workflows.getTs
   getWorkflowTs: (name: string) => requestRpc<{ content: string }>("workflows.getTs", { name }),
   setWorkflowPhaseFn: (name: string, phase: string, code: string) =>
@@ -412,9 +410,9 @@ export const api = {
       `/api/workflows/${workflowName}/dry-run`,
       { method: "POST", body: JSON.stringify(body) },
     ),
-  // [WS-RPC] workflows.saveYaml
-  saveWorkflowYaml: (name: string, yaml: string) =>
-    requestRpc<{ ok: boolean }>("workflows.saveYaml", { name, yaml }),
+  // [WS-RPC] workflows.saveSpec（P2 后 yaml_content 已删，spec_json 是唯一真相）
+  saveWorkflowSpec: (name: string, spec: string) =>
+    requestRpc<{ ok: boolean }>("workflows.saveSpec", { name, spec }),
   // [WS-RPC] workflows.setMeta —— 改显示名/描述（name 是标识符不可改）
   setWorkflowMeta: (
     name: string,
@@ -532,7 +530,7 @@ export const api = {
       "/api/daemon/listen",
       { method: "PUT", body: JSON.stringify(body) },
     ),
-  // [WS-RPC] daemon.setHost — 写 config.yaml.daemon.host
+  // [WS-RPC] daemon.setHost — 写 config.json.daemon.host
   setDaemonHost: (host: string) =>
     requestRpc<{ ok: true; host: string; restart_required: true }>("daemon.setHost", { host }),
   // [WS-RPC] daemon.restart — 请求 supervisor 重启 daemon（exit code 75）
@@ -713,6 +711,10 @@ export const api = {
     title: string;
     spec_md?: string;
     chat_session_id?: string | null;
+    source?: string | null;
+    external_ref?: string | null;
+    callback_url?: string | null;
+    callback_secret?: string | null;
   }) =>
     requestRpc<{ requirement: Requirement }>("requirements.create", body).then((r) => r.requirement),
 
@@ -910,27 +912,12 @@ export interface WorkflowTemplate {
   agent_count: number;
 }
 
-export interface OrphanWorkflow {
-  dir: string;
-  yamlName: string;
-  issue: "name_mismatch";
-  suggestion: string;
-}
-
-export interface WorkflowCollision {
-  name: string;
-  dirs: string[];
-}
-
-export interface WorkflowHealthReport {
-  orphans: OrphanWorkflow[];
-  collisions: WorkflowCollision[];
-}
 
 export interface AuthoredWorkflow {
   name: string;
   description: string;
-  yaml: string;
+  /** 结构化 spec 的 JSON pretty 文本（与 DB 列 spec_json 语义一致） */
+  spec_json: string;
   warnings: string[];
 }
 
@@ -1147,6 +1134,14 @@ export interface Requirement {
   workflow: string | null;
   /** 输入形态确认（迁移 045）：null=未确认 / 'git'=基于代码库 / 'none'=确认无库 */
   input_mode?: string | null;
+  /** 需求来源标识（如 'reqgenie'），B 模式深链触发时写入（迁移 050）。 */
+  source?: string | null;
+  /** 外部系统需求 id（如 reqgenie requirement uuid），用于回链（迁移 050）。 */
+  external_ref?: string | null;
+  /** 状态变化回传 webhook URL（迁移 050）。 */
+  callback_url?: string | null;
+  /** 回传 webhook HMAC secret（迁移 050）。 */
+  callback_secret?: string | null;
   created_at: number;
   updated_at: number;
 }

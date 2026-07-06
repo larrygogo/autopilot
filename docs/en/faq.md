@@ -191,8 +191,8 @@ bun run build:web
    # Windows
    netstat -ano | findstr :6180
    ```
-3. Change the port: edit `daemon.port` in `config.yaml`, then `autopilot daemon restart`
-4. For LAN access: set `daemon.host` in `config.yaml` to `0.0.0.0`, then restart the daemon
+3. Change the port: edit `daemon.port` in `config.json`, then `autopilot daemon restart`
+4. For LAN access: set `daemon.host` in `config.json` to `"0.0.0.0"`, then restart the daemon
 
 ---
 

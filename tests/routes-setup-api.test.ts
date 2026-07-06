@@ -35,10 +35,10 @@ beforeEach(async () => {
   tmpHome = join(tmpdir(), `autopilot-setup-api-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(join(tmpHome, "runtime"), { recursive: true });
   process.env.AUTOPILOT_HOME = tmpHome;
-  process.env.DEV_WORKFLOW_CONFIG = join(tmpHome, "config.yaml");
+  process.env.DEV_WORKFLOW_CONFIG = join(tmpHome, "config.json");
   writeFileSync(
-    join(tmpHome, "config.yaml"),
-    "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n",
+    join(tmpHome, "config.json"),
+    "{}",
     "utf-8",
   );
   // 注入 in-memory DB 并跑迁移，确保 kv 表存在
@@ -80,7 +80,7 @@ describe("setup.status RPC", () => {
 
 describe("setup.save* RPC", () => {
   it("setup.saveProviders 写入 + 返回最新 report", async () => {
-    writeFileSync(join(tmpHome, "config.yaml"), "providers: {}\nagents: {}\n", "utf-8");
+    writeFileSync(join(tmpHome, "config.json"), JSON.stringify({providers: {}, agents: {}}, null, 2), "utf-8");
     const r = await invokeRpcMethod("setup.saveProviders", {
       providers: { anthropic: { enabled: true, default_model: "claude-sonnet-4-6" } },
     });

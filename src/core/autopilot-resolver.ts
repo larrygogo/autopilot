@@ -27,6 +27,7 @@
 
 import { resolve, dirname } from "path";
 import { existsSync } from "fs";
+import { isStandaloneBinary } from "./runtime-env";
 
 let installed = false;
 
@@ -43,6 +44,8 @@ function resolveWithExt(base: string): string {
 }
 
 export function installAutopilotResolver(): void {
+  // 编译单文件模式：用户 workflow.ts 已退役，Bun.plugin 在 compile 运行时可能报错，直接跳过。
+  if (isStandaloneBinary()) return;
   if (installed) return;
   installed = true;
 
@@ -59,14 +62,4 @@ export function installAutopilotResolver(): void {
       });
     },
   });
-}
-
-/**
- * 兜底：直接返回 autopilot src 绝对路径，给 registry.ts 的 sed 预处理用。
- * Bun.plugin 在 dynamic import 后续的静态 import 链上不一定生效，所以
- * loadYamlWorkflow 加载 workflow.ts 前会读文件、把 `@autopilot/...` 替换
- * 成绝对路径再 import，确保用户工作流 cp 到任意位置都能跑。
- */
-export function getAutopilotSrcPath(): string {
-  return dirname(import.meta.dir);
 }

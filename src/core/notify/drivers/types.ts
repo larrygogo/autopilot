@@ -18,7 +18,7 @@ export interface NotifyPayload {
   event: NotifyEvent;
 }
 
-/** 单个通知 driver 的配置（config.yaml notify.drivers[]） */
+/** 单个通知 driver 的配置（config.json notify.drivers[]） */
 export interface NotifyDriverConfig {
   type: string;
   on_events?: NotifyEvent[];
@@ -28,7 +28,7 @@ export interface NotifyDriverConfig {
 
 /** notify driver 接口（spec §3.5） */
 export interface NotifyDriver {
-  /** driver 名（如 "windows-toast"），与 config.yaml notify.drivers[].type 对应 */
+  /** driver 名（如 "windows-toast"），与 config.json notify.drivers[].type 对应 */
   readonly name: string;
   /** driver 是否可用（平台 + 依赖探测）。enabled=false 时不会被调用 */
   enabled(): boolean | Promise<boolean>;

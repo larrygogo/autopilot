@@ -23,16 +23,13 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import {
   listWorkflows,
-  getWorkflowYaml as registryGetWorkflowYaml,
   getWorkflowTs as registryGetWorkflowTs,
-  saveWorkflowYaml,
-  deleteWorkflowDir,
   reload as reloadRegistry,
 } from "../core/workflow/registry";
-import { setWorkflowMeta, patchWorkflowMetaYaml, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
+import { patchWorkflowMetaSpec, type WorkflowMetaInput } from "../core/workflow/registry-authoring";
 import { updateDbWorkflow, deleteDbWorkflow, getWorkflowFromDb, listWorkflowsInDb, createDbWorkflow, createNativeDbWorkflow } from "../core/workflow/workflows";
 import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
-import { listWorkflowTemplates, scanWorkflowHealth } from "../core/workflow/templates";
+import { listWorkflowTemplates } from "../core/workflow/templates";
 import { runWorkflowAuthor, saveAuthoredWorkflow as saveAuthoredWf } from "./workflow-author";
 import { loadDefaultsConfig, saveDefaultsConfig, saveConfigRaw, loadDaemonConfig, saveDaemonConfig, loadGitConfig, loadSchedulerConfig, saveSchedulerConfig, systemTimezone, isValidTimezone } from "../core/config";
 import { requestRestart, requestShutdown } from "./index";
@@ -168,6 +165,7 @@ import { registerRpcMethod, hasRpcMethod, RpcError } from "./rpc";
 import { wsManager } from "./ws";
 import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
 import { getUpdateInfo } from "../core/update-check";
+import { listExtensionsInfo, invokeExtension } from "./extensions/registry";
 
 /** 业务错误 → RpcError 透传（保留 code）；其他错误让 invokeRpcMethod 包成 INTERNAL */
 function rethrowAsRpc(e: unknown): never {
@@ -220,8 +218,28 @@ function registerCoreQueryRpc(): void {
   });
 
   registerRpcMethod({
+    method: "extensions.list",
+    description: "列出 daemon 扩展及其自报状态（enabled/running + 扩展 status() 的展示 KV）",
+    handler: () => ({ extensions: listExtensionsInfo() }),
+  });
+
+  registerRpcMethod({
+    method: "extensions.invoke",
+    description: "调用扩展自报的动作（路由到 Extension.invoke；动作语义由扩展定义，如注册）",
+    handler: async (params) => {
+      const p = asObj(params);
+      if (typeof p.id !== "string" || !p.id) throw new RpcError("INVALID_PARAM", "需要 id");
+      if (typeof p.action !== "string" || !p.action) throw new RpcError("INVALID_PARAM", "需要 action");
+      const actionParams =
+        p.params && typeof p.params === "object" ? (p.params as Record<string, unknown>) : {};
+      const result = await invokeExtension(p.id, p.action, actionParams);
+      return { result: result ?? null };
+    },
+  });
+
+  registerRpcMethod({
     method: "daemon.setHost",
-    description: "写入 config.yaml.daemon.host；需配合 daemon.restart 才生效",
+    description: "写入 config.json.daemon.host；需配合 daemon.restart 才生效",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.host !== "string" || !p.host.trim()) {
@@ -488,8 +506,8 @@ function registerCoreQueryRpc(): void {
 
   registerRpcMethod({
     method: "config.get",
-    description: "返回 config.yaml 原文（用户配置）",
-    handler: () => ({ yaml: loadConfigRaw() }),
+    description: "返回 config.json 原文（用户配置）",
+    handler: () => ({ content: loadConfigRaw() }),
   });
 
 }
@@ -831,18 +849,23 @@ function registerWorkflowRpc(): void {
   });
 
   registerRpcMethod({
-    method: "workflows.getYaml",
-    description: "读取 workflow.yaml 原文（db 来源直接读 yaml_content / file 读磁盘）",
+    method: "workflows.getSpec",
+    description: "读取 workflow spec_json（P2 后：yaml_content 列已删除，spec_json 是唯一真相）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
       const row = getWorkflowFromDb(p.name);
-      if (row && row.source === "db") {
-        return { yaml: row.yaml_content };
-      }
-      const yaml = registryGetWorkflowYaml(p.name);
-      if (yaml === null) throw new RpcError("NOT_FOUND", "Workflow not found");
-      return { yaml };
+      if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
+      return { spec: row.spec_json ?? "{}" };
+    },
+  });
+
+  // workflows.getYaml → 410（P2 废弃，改用 workflows.getSpec）
+  registerRpcMethod({
+    method: "workflows.getYaml",
+    description: "已废弃（P2），请改用 workflows.getSpec",
+    handler: () => {
+      throw new RpcError("GONE", "workflows.getYaml 已废弃（P2），请改用 workflows.getSpec（返回 {spec: <JSON文本>}）");
     },
   });
 
@@ -864,11 +887,7 @@ function registerWorkflowRpc(): void {
     handler: () => ({ templates: listWorkflowTemplates() }),
   });
 
-  registerRpcMethod({
-    method: "workflows.scanHealth",
-    description: "扫描 yaml.name 跟目录名不一致 / 重名碰撞",
-    handler: () => scanWorkflowHealth(),
-  });
+  // workflows.scanHealth 已于 P1 退役（file 轨孤儿扫描无意义），已从 rpc-methods 移除。
 
   registerRpcMethod({
     method: "workflows.import",
@@ -891,7 +910,7 @@ function registerWorkflowRpc(): void {
       }
       try {
         const row = derivesFrom
-          ? createDbWorkflow({ name: p.name, description, derives_from: derivesFrom, yaml_content: stringifyWorkflowDoc(doc, "yaml") })
+          ? createDbWorkflow({ name: p.name, description, derives_from: derivesFrom, spec_json: stringifyWorkflowDoc(doc, "json") })
           : createNativeDbWorkflow({ name: p.name, description, spec_json: stringifyWorkflowDoc(doc, "json") });
         await reloadRegistry();
         return { name: row.name, kind: row.kind, source: row.source };
@@ -903,25 +922,21 @@ function registerWorkflowRpc(): void {
 
   registerRpcMethod({
     method: "workflows.export",
-    description: "导出工作流为 JSON（结构原生 json，跟内部 spec_json 真相一致）",
+    description: "导出工作流为 JSON（结构原生 json，跟内部 spec_json 真相一致；P2 后所有 kind 均从 spec_json 读）",
     handler: (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
       const row = getWorkflowFromDb(p.name);
-      // native/template 真相 = spec_json：直接吐
-      if (row && (row.kind === "native" || row.kind === "template") && row.spec_json) {
-        return { content: row.spec_json };
-      }
-      // file / derived：真相存 yaml（db 源读 yaml_content / file 源读磁盘）→ parse 成原生 json
-      const yaml = row && row.source === "db" ? row.yaml_content : registryGetWorkflowYaml(p.name);
-      if (yaml == null) throw new RpcError("NOT_FOUND", "Workflow not found");
-      return { content: stringifyWorkflowDoc(parseWorkflowText(yaml, "yaml"), "json") };
+      if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
+      // P2 后：所有工作流真相在 spec_json（yaml_content 列已删除）
+      if (!row.spec_json) throw new RpcError("NOT_FOUND", "Workflow spec not found");
+      return { content: row.spec_json };
     },
   });
 
   registerRpcMethod({
     method: "workflows.author",
-    description: "AI 生成声明式 workflow.yaml（零 ts，不落盘，返回预览）",
+    description: "AI 生成声明式 workflow spec（JSON，零 ts，不落盘，返回预览）",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.description !== "string" || !p.description.trim()) {
@@ -929,21 +944,21 @@ function registerWorkflowRpc(): void {
       }
       return await runWorkflowAuthor({
         description: p.description,
-        prior_yaml: typeof p.prior_yaml === "string" ? p.prior_yaml : undefined,
+        prior_spec: typeof p.prior_spec === "string" ? p.prior_spec : undefined,
       });
     },
   });
 
   registerRpcMethod({
     method: "workflows.saveAuthored",
-    description: "把 AI 生成的声明式 workflow 落 DB（native）+ reload + emit",
+    description: "把 AI 生成的声明式 workflow spec 落 DB（native）+ reload + emit",
     handler: async (params) => {
       const p = asObj(params);
-      if (typeof p.name !== "string" || !p.name || typeof p.yaml !== "string") {
-        throw new RpcError("INVALID_PARAM", "需要 name + yaml");
+      if (typeof p.name !== "string" || !p.name || typeof p.spec_json !== "string") {
+        throw new RpcError("INVALID_PARAM", "需要 name + spec_json");
       }
       try {
-        saveAuthoredWf(p.name, p.yaml);
+        saveAuthoredWf(p.name, p.spec_json);
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
         return { ok: true, name: p.name };
@@ -958,25 +973,33 @@ function registerWorkflowRpc(): void {
   });
 
   registerRpcMethod({
-    method: "workflows.saveYaml",
-    description: "保存 workflow.yaml（db 来源走 updateDbWorkflow，file 写文件）",
+    method: "workflows.saveSpec",
+    description: "保存 workflow spec_json（P2 后：yaml_content 列已删除，直接写 spec_json）",
     handler: async (params) => {
       const p = asObj(params);
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
-      if (typeof p.yaml !== "string") throw new RpcError("INVALID_PARAM", "需要 yaml");
+      if (typeof p.spec !== "string") throw new RpcError("INVALID_PARAM", "需要 spec（JSON 文本）");
       const row = getWorkflowFromDb(p.name);
       try {
-        if (row && row.source === "db") {
-          updateDbWorkflow(p.name, { yaml_content: p.yaml });
-        } else {
-          saveWorkflowYaml(p.name, p.yaml);
-        }
+        if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
+        // 校验 JSON 可解析
+        JSON.parse(p.spec);
+        updateDbWorkflow(p.name, { spec_json: p.spec });
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
         return { ok: true };
       } catch (e: unknown) {
         throw new RpcError("SAVE_FAILED", e instanceof Error ? e.message : String(e));
       }
+    },
+  });
+
+  // workflows.saveYaml → 410（P2 废弃，改用 workflows.saveSpec）
+  registerRpcMethod({
+    method: "workflows.saveYaml",
+    description: "已废弃（P2），请改用 workflows.saveSpec",
+    handler: () => {
+      throw new RpcError("GONE", "workflows.saveYaml 已废弃（P2），请改用 workflows.saveSpec（传 {name, spec: <JSON文本>}）");
     },
   });
 
@@ -1017,11 +1040,11 @@ function registerWorkflowRpc(): void {
       if (!registryGetWorkflow(p.name)) throw new RpcError("NOT_FOUND", "Workflow not found");
       const row = getWorkflowFromDb(p.name);
       try {
-        if (row && row.source === "db") {
-          updateDbWorkflow(p.name, { yaml_content: patchWorkflowMetaYaml(row.yaml_content, meta) });
-        } else {
-          setWorkflowMeta(p.name, meta);
-        }
+        // file 轨已退役：所有工作流都在 DB
+        if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
+        // P2 后：操作 spec_json（patchWorkflowMetaSpec 纯 JSON 操作，yaml_content 已删除）
+        const newSpec = patchWorkflowMetaSpec(row.spec_json ?? "{}", meta);
+        updateDbWorkflow(p.name, { spec_json: newSpec });
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
         return { ok: true };
@@ -1039,12 +1062,9 @@ function registerWorkflowRpc(): void {
       if (typeof p.name !== "string" || !p.name) throw new RpcError("INVALID_PARAM", "需要 name");
       const row = getWorkflowFromDb(p.name);
       try {
-        if (row && row.source === "db") {
-          deleteDbWorkflow(p.name);
-        } else {
-          const ok = deleteWorkflowDir(p.name);
-          if (!ok) throw new RpcError("NOT_FOUND", "Workflow not found");
-        }
+        // file 轨已退役：所有工作流都在 DB
+        if (!row) throw new RpcError("NOT_FOUND", "Workflow not found");
+        deleteDbWorkflow(p.name);
         await reloadRegistry();
         emitBus({ type: "workflow:reloaded", payload: {} });
         return { ok: true };
@@ -1188,6 +1208,10 @@ function registerRequirementRpc(): void {
         title,
         spec_md: typeof p.spec_md === "string" ? p.spec_md : "",
         chat_session_id: (p.chat_session_id as string | null | undefined) ?? null,
+        source: typeof p.source === "string" ? p.source : null,
+        external_ref: typeof p.external_ref === "string" ? p.external_ref : null,
+        callback_url: typeof p.callback_url === "string" ? p.callback_url : null,
+        callback_secret: typeof p.callback_secret === "string" ? p.callback_secret : null,
       });
       // 停在 drafting：澄清依赖代码库 clone，须由用户确认代码库后显式进入澄清
       // （自动派生的默认库只是预选；Web 在需求页确认、CLI 用 req clarify / -c 显式指定时自动开始）
@@ -1477,9 +1501,12 @@ function registerRequirementRpc(): void {
         suggestions,
         github_review_id: typeof p.github_review_id === "string" ? p.github_review_id : null,
       });
-      // feedback 注入：若 requirement 当前 awaiting_review 自动进 fix_revision（沿用旧 inject_feedback 语义）
+      // feedback 注入：awaiting_review → fix_revision（沿用旧 inject_feedback 语义）；
+      // awaiting_approval → clarifying（审批驳回 spec：回澄清重做，clarifier 经 status-changed 自动续轮）
       if (comment.kind === "feedback" && r.status === "awaiting_review") {
         try { setRequirementStatus(reqId, "fix_revision"); } catch { /* tolerated */ }
+      } else if (comment.kind === "feedback" && r.status === "awaiting_approval") {
+        try { setRequirementStatus(reqId, "clarifying"); } catch { /* tolerated */ }
       }
       return { comment };
     },
@@ -1847,7 +1874,7 @@ function registerSandboxSetupRpc(): void {
       if (!p.providers || typeof p.providers !== "object" || Array.isArray(p.providers)) {
         throw new RpcError("INVALID_PARAM", "providers must be an object");
       }
-      // onboarding 写 config.yaml（doctor 诊断暂仍读 config，P1 务实保留）+ 同步条目表
+      // onboarding 写 config.json（doctor 诊断暂仍读 config，P1 务实保留）+ 同步条目表
       for (const [name, cfg] of Object.entries(p.providers as Record<string, unknown>)) {
         if (!(PROVIDER_NAMES as readonly string[]).includes(name)) continue;
         if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
@@ -1892,7 +1919,7 @@ function registerSandboxSetupRpc(): void {
       const gitCfg = loadGitConfig();
       const probe = probeRemote(remoteUrl, gitCfg.token);
       if (!probe.ok) {
-        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.yaml 配置 git.token`);
+        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.json 配置 git.token`);
       }
       const parsed = parseGithubFromRemote(remoteUrl);
       const ws = createWorkspace({
@@ -1911,16 +1938,17 @@ function registerSandboxSetupRpc(): void {
 
   registerRpcMethod({
     method: "config.save",
-    description: "保存 config.yaml 原文 + emit config:updated",
+    description: "保存 config.json 原文 + emit config:updated",
     handler: (params) => {
       const p = asObj(params);
-      if (typeof p.yaml !== "string") throw new RpcError("INVALID_PARAM", "需要 yaml");
+      const content = p.content ?? p.yaml; // content 为新字段；yaml 为向后兼容旧客户端
+      if (typeof content !== "string") throw new RpcError("INVALID_PARAM", "需要 content");
       try {
-        saveConfigRaw(p.yaml);
+        saveConfigRaw(content);
         emitBus({ type: "config:updated", payload: {} });
         return { ok: true };
       } catch (e: unknown) {
-        throw new RpcError("INVALID_YAML", e instanceof Error ? e.message : String(e));
+        throw new RpcError("INVALID_JSON", e instanceof Error ? e.message : String(e));
       }
     },
   });
@@ -2025,7 +2053,7 @@ function registerMiscMutationRpc(): void {
       const gitCfg = loadGitConfig();
       const probe = probeRemote(remoteUrl, gitCfg.token);
       if (!probe.ok) {
-        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.yaml 配置 git.token`);
+        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.json 配置 git.token`);
       }
 
       // ── alias 基础值：显式传入优先，否则从 remote_url 推导 ──
@@ -2265,7 +2293,7 @@ function registerWorkspaceRpc(): void {
       const gitCfg = loadGitConfig();
       const probe = probeRemote(remoteUrl, gitCfg.token);
       if (!probe.ok) {
-        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.yaml 配置 git.token`);
+        throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或在 config.json 配置 git.token`);
       }
 
       // 默认分支：显式指定 > probe 探测 > "main"
@@ -2329,7 +2357,7 @@ function registerWorkspaceRpc(): void {
         const gitCfg = loadGitConfig();
         const probe = probeRemote(rawUrl, gitCfg.token);
         if (!probe.ok) {
-          throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或 config.yaml 的 git.token`);
+          throw new RpcError("REMOTE_UNREACHABLE", `远程仓库不可达：${probe.error ?? "git ls-remote 失败"}。请检查 URL 或 config.json 的 git.token`);
         }
         patch.remote_url = rawUrl;
         // 若 default_branch 未显式指定，用 probe 探测到的默认分支

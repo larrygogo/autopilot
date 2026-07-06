@@ -8,7 +8,7 @@ import { createSlackWebhookDriver } from "./slack-webhook";
 export type { NotifyDriver, NotifyDriverConfig, NotifyPayload, NotifyEvent } from "./types";
 
 /**
- * driver type → factory。新增 driver 在此注册即可被 config.yaml notify.drivers[].type 引用。
+ * driver type → factory。新增 driver 在此注册即可被 config.json notify.drivers[].type 引用。
  */
 const FACTORIES: Record<string, NotifyDriverFactory> = {
   "windows-toast": createWindowsToastDriver,

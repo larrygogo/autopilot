@@ -53,6 +53,14 @@ export interface Requirement {
    * setRequirementWorkspaces 按集合空/非空写 'none'/'git'；闸门按所选工作流的 requires.git 校验。
    */
   input_mode: string | null;
+  /** 需求来源标识（如 'reqgenie'），B 模式深链触发时写入；原生建需求为 NULL。 */
+  source: string | null;
+  /** 外部系统需求 id（如 reqgenie requirement uuid），用于回链与去重。 */
+  external_ref: string | null;
+  /** 状态变化回传 webhook URL（仅 source 有值时使用）；失败不阻塞主流程。 */
+  callback_url: string | null;
+  /** 回传 webhook HMAC secret；与 callback_url 配对校验。 */
+  callback_secret: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -67,6 +75,12 @@ export interface CreateRequirementOpts {
   title: string;
   spec_md?: string;
   chat_session_id?: string | null;
+  source?: string | null;
+  external_ref?: string | null;
+  callback_url?: string | null;
+  callback_secret?: string | null;
+  /** 指定执行工作流（如 'dev'/'ad-hoc'），省略时 core 不写（调度器用 requirements.workflow 列的默认行为）。 */
+  workflow?: string | null;
 }
 
 export interface UpdateRequirementOpts {
@@ -103,7 +117,8 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   clarifying: ["drafting", "ready", "awaiting_approval", "cancelled"],
   ready: ["queued", "awaiting_approval", "drafting", "cancelled"],
   queued: ["running", "awaiting_approval", "ready", "cancelled"],
-  awaiting_approval: ["queued", "running", "drafting", "cancelled"],
+  // awaiting_approval → clarifying：审批驳回 spec 时回到澄清重做（带反馈）
+  awaiting_approval: ["queued", "running", "drafting", "clarifying", "cancelled"],
   running: ["awaiting_review", "done", "failed", "cancelled"],
   // awaiting_review → failed：task 在 await_review 期失败时 bridge 要能同步需求到 failed，
   // 否则需求永卡 awaiting_review、pr-poller 持续轮询死 task（SC-4）。
@@ -159,6 +174,27 @@ export function createRequirement(opts: CreateRequirementOpts): Requirement {
     return id;
   };
   const newId = opts.id ? insertReq(opts.id) : insertWithFreshId(nextRequirementId, insertReq);
+  // 写入 source 追踪列（migration 050 加，生产 DB 一定有；测试 DB 若没跑该迁移则忽略）
+  const hasSourceFields =
+    opts.source != null || opts.external_ref != null || opts.callback_url != null || opts.callback_secret != null;
+  if (hasSourceFields) {
+    try {
+      db.run(
+        "UPDATE requirements SET source = ?, external_ref = ?, callback_url = ?, callback_secret = ? WHERE id = ?",
+        [opts.source ?? null, opts.external_ref ?? null, opts.callback_url ?? null, opts.callback_secret ?? null, newId],
+      );
+    } catch {
+      // DB 未跑 migration 050（如旧测试手动选迁移）时列不存在，忽略；生产环境不会走到这里
+    }
+  }
+  // 写入 workflow（create 时即指定，后续调度器消费）
+  if (opts.workflow != null) {
+    try {
+      db.run("UPDATE requirements SET workflow = ? WHERE id = ?", [opts.workflow, newId]);
+    } catch {
+      // 兼容未跑对应迁移的旧测试 DB
+    }
+  }
   // 有 workspace_id 时自动写多对多关联（spec §5.1）
   if (resolvedWorkspaceId) {
     db.run(
@@ -519,4 +555,33 @@ export function nextRequirementId(): string {
   if (rows.length === 0) return "req-001";
   const n = parseInt(rows[0].id.replace("req-", ""), 10) + 1;
   return `req-${String(n).padStart(3, "0")}`;
+}
+
+/**
+ * 列出指定来源（source）且尚未终态的需求（外部集成扩展 daemon 重启时用于重建映射）。
+ * 终态 = done / cancelled / failed；其余全视为进行中。
+ * 若 DB 中无 source 列（旧测试 DB），安全回退返回空列表。
+ * 注：core 不认识任何具体来源（如 'reqgenie'），来源由调用方（扩展）传入。
+ */
+export interface InflightRequirement {
+  id: string;
+  external_ref: string;
+  status: string;
+  task_id: string | null;
+}
+
+export function listInflightRequirementsBySource(source: string): InflightRequirement[] {
+  const db = getDb();
+  try {
+    return db
+      .query<InflightRequirement, [string]>(
+        "SELECT id, external_ref, status, task_id FROM requirements " +
+        "WHERE source = ? AND status NOT IN ('done', 'cancelled', 'failed') " +
+        "ORDER BY created_at ASC",
+      )
+      .all(source);
+  } catch {
+    // source 列不存在（旧测试 DB 未跑 migration 050）时安全回退
+    return [];
+  }
 }

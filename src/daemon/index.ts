@@ -10,12 +10,13 @@ import { listOutdatedWorkflowCopies } from "../core/workflow/templates";
 import { checkStuckTasks, pruneSandboxesByPolicy } from "../core/watcher";
 import { runInBackground } from "../core/runner";
 import { initDaemonFileLog, log } from "../core/logger";
-import { loadDaemonConfig, loadGithubConfig, getConfigPath } from "../core/config";
+import { loadDaemonConfig, loadGithubConfig, getConfigPath, ensureJsonConfig } from "../core/config";
 import { enableBus, disableBus, bus, emit as emitEvent } from "../core/event-bus";
 import { pollAllPRs } from "./pr-poller";
 import { wsManager } from "./ws";
 import { startServerWithRetry } from "./server";
 import { setWebDistDir, reloadApiToken, getApiTokenState, extendAllowedOrigins, detectLanIPv4, isExposedHost, startupAuthBlocked } from "./routes";
+import { initWebAssets } from "../generated/web-assets";
 import { generateApiToken, saveApiToken } from "../core/api-token";
 import { hasAnyUser } from "../core/auth";
 import { writePid, removePid, isDaemonRunning, writeListenInfo, removeListenInfo, writeRestartFlag, consumeRestartFlag, isSupervisorRunning } from "./pid";
@@ -88,7 +89,7 @@ const DEFAULT_HOST = "127.0.0.1";
 const WATCHER_INTERVAL_MS = 60_000;
 const CLARIFIER_WATCHDOG_INTERVAL_MS = 60_000;
 const RETENTION_INTERVAL_MS = 3600_000;  // 每小时扫一次 workspace 保留策略
-// PR_POLL_INTERVAL_MS 由 config.yaml.github.poll_interval_seconds 决定
+// PR_POLL_INTERVAL_MS 由 config.json.github.poll_interval_seconds 决定
 
 export interface DaemonOptions {
   host?: string;
@@ -98,7 +99,10 @@ export interface DaemonOptions {
 }
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
-  // 优先级：显式参数 > env > config.yaml > 内置默认
+  // 自动迁移 config.yaml → config.json（一次性、幂等）
+  ensureJsonConfig();
+
+  // 优先级：显式参数 > env > config.json > 内置默认
   const cfg = loadDaemonConfig();
   const host = opts.host
     ?? process.env.AUTOPILOT_HOST
@@ -174,7 +178,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   1. 在 Web 设置页生成 token 或创建登录用户（推荐）
   2. 写入 ~/.autopilot/runtime/api-token 文件（一行 token 文本）
   3. 设置环境变量 AUTOPILOT_API_TOKEN
-  4. 切回 127.0.0.1（autopilot daemon stop && autopilot daemon run，或改 config.yaml）
+  4. 切回 127.0.0.1（autopilot daemon stop && autopilot daemon run，或改 config.json）
   5. 明知风险仍要继续：autopilot daemon run --insecure-no-auth
 `);
         process.exit(FATAL_CONFIG_CODE);
@@ -205,9 +209,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 激活事件总线
   enableBus();
 
-  // ── 外部编辑 config.yaml 热生效 ──────────────────────────────────────────
+  // ── 外部编辑 config.json 热生效 ──────────────────────────────────────────
   // 监听目录（而非文件）有两个好处：
-  //   1. daemon 启动时 config.yaml 不存在也能正常监听，文件创建后即可热生效
+  //   1. daemon 启动时 config.json 不存在也能正常监听，文件创建后即可热生效
   //   2. 部分编辑器（如 vim、Emacs）先写临时文件再重命名，监听文件会失去跟踪
   // 防抖 300ms：编辑器保存时 fs.watch 可能连续触发（Windows 尤甚）。
   // 已通过 RPC/Web UI 写的路径（rpc-methods.ts / routes.ts）不受此影响，各自 emit。
@@ -224,7 +228,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
       if (configWatchDebounce) clearTimeout(configWatchDebounce);
       configWatchDebounce = setTimeout(() => {
         configWatchDebounce = null;
-        log.info("config.yaml 检测到外部变化（目录监听），发射 config:updated 热生效");
+        log.info("config.json 检测到外部变化（目录监听），发射 config:updated 热生效");
         emitEvent({ type: "config:updated", payload: {} });
       }, 300);
     });
@@ -255,6 +259,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 启动通知 recorder（事件型通知流；必须先于 scheduler / 恢复逻辑挂订阅，避免漏记）
   const { initNotificationRecorder } = await import("./notification-recorder");
   const disposeNotificationRecorder = initNotificationRecorder();
+
+  // 启动 selfhosted-connector（B-interactive 模式：assignments/commands 轮询 + 全状态镜像推送）
+  // 通过扩展点 API 装配：reqgenieExtension.enabled() 内部检查 config + 凭证，未启用则跳过
+  const { registerExtension, initExtensions } = await import("./extensions/registry");
+  const { reqgenieExtension } = await import("./selfhosted-connector/extension");
+  registerExtension(reqgenieExtension);
+  const disposeSelfhostedConnector = initExtensions();
 
   // 启动 requirement-scheduler（订阅 event-bus）
   initRequirementScheduler();
@@ -287,9 +298,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     wsManager.broadcast(event);
   });
 
-  // 配置静态文件目录
+  // 配置静态文件目录，并初始化嵌入资源清单（编译产物；dev 未生成时退化空表）
   const webDistDir = join(import.meta.dir, "../../web-dist");
   setWebDistDir(webDistDir);
+  await initWebAssets();
 
   // 生成 MCP token + 写 mcp-config.json（必须在 startServer 之前调用：
   // /mcp 路由用 getMcpToken() 判鉴权；如果 server 先起来、initMcpRuntime 后跑，
@@ -371,6 +383,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     disposeFixRevisionRunner();
     disposeDoneWorkspaceCleanup();
     disposeNotificationRecorder();
+    disposeSelfhostedConnector();
     disableBus();
     // server.stop 必须 await 完成后才能 exit：它是异步的（等 socket 真正关闭），
     // 同步调用后立刻 process.exit 会让进程死在 socket 关闭中途——浏览器保持着

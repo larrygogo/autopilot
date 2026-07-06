@@ -24,10 +24,10 @@ beforeEach(async () => {
   tmpHome = join(tmpdir(), `autopilot-extract-api-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(join(tmpHome, "runtime"), { recursive: true });
   process.env.AUTOPILOT_HOME = tmpHome;
-  process.env.DEV_WORKFLOW_CONFIG = join(tmpHome, "config.yaml");
+  process.env.DEV_WORKFLOW_CONFIG = join(tmpHome, "config.json");
   writeFileSync(
-    join(tmpHome, "config.yaml"),
-    "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n",
+    join(tmpHome, "config.json"),
+    "{}",
     "utf-8",
   );
   _setDbForTest(new Database(":memory:"));
@@ -40,7 +40,7 @@ beforeEach(async () => {
   codebaseId = nextWorkspaceId();
   createWorkspace({ id: codebaseId, project_id: projectId, alias: "cb", path: "/tmp/x" });
   _setExtractFnForTest(async () =>
-    "title: 测试标题\nspec_md: |\n  ## 背景\n  x\n  ## 目标\n  y\n  ## 验收\n  z",
+    "```json\n" + JSON.stringify({ title: "测试标题", spec_md: "## 背景\nx\n## 目标\ny\n## 验收\nz" }) + "\n```",
   );
 });
 

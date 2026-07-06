@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { join } from "path";
-import { loadYamlWorkflow, type PhaseDefinition } from "../src/core/workflow/registry";
+import { loadJsonWorkflow, type PhaseDefinition } from "../src/core/workflow/registry";
 
 // 验证 dev 工作流「agent 阶段纯提示词 + 提示词优先 + submit_pr 框架内置 PR 交付」转换正确：
 // - design/review/develop/code_review 绑定 prompt-runner（不是 stub、不是 ts run_）；
@@ -10,7 +10,7 @@ describe("dev 工作流：agent 阶段纯提示词 + submit_pr 框架内置 PR �
   const devDir = join(import.meta.dir, "..", "examples", "workflows", "dev");
 
   it("加载成功且各 phase 绑定符合预期", async () => {
-    const wf = await loadYamlWorkflow(devDir);
+    const wf = await loadJsonWorkflow(devDir);
     expect(wf).not.toBeNull();
     const byName: Record<string, PhaseDefinition> = {};
     for (const p of wf!.phases) {

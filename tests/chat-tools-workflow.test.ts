@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
@@ -8,6 +8,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { _setDbForTest } from "../src/core/db";
 import { _clearRegistry, discover } from "../src/core/workflow/registry";
+import { createNativeDbWorkflow } from "../src/core/workflow/workflows";
 import { buildAutopilotTools } from "../src/agents/tools";
 
 function getText(res: { content: Array<{ type: string; text?: string }> }): string {
@@ -21,15 +22,7 @@ describe("chat tools 工作流管理（W3）", () => {
 
   beforeAll(async () => {
     tmpHome = join(tmpdir(), `autopilot-w3-tools-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    mkdirSync(join(tmpHome, "workflows", "req_dev"), { recursive: true });
-    writeFileSync(
-      join(tmpHome, "workflows", "req_dev", "workflow.yaml"),
-      `name: req_dev\nphases:\n  - name: design\n    timeout: 60\n  - name: develop\n    timeout: 60\n`
-    );
-    writeFileSync(
-      join(tmpHome, "workflows", "req_dev", "workflow.ts"),
-      `export async function run_design() {}\nexport async function run_develop() {}\n`
-    );
+    mkdirSync(join(tmpHome, "workflows"), { recursive: true });
     process.env.AUTOPILOT_HOME = tmpHome;
 
     db = new Database(":memory:");
@@ -37,8 +30,6 @@ describe("chat tools 工作流管理（W3）", () => {
     migrate007(db);
     migrate048(db);
     _setDbForTest(db);
-    _clearRegistry();
-    await discover();
   });
 
   afterAll(() => {
@@ -49,9 +40,25 @@ describe("chat tools 工作流管理（W3）", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
+  /** 在 DB 里种入 req_dev native base */
+  function seedReqDev() {
+    createNativeDbWorkflow({
+      name: "req_dev",
+      description: "",
+      spec_json: JSON.stringify({
+        name: "req_dev",
+        phases: [
+          { name: "design", timeout: 60, prompt: "做设计" },
+          { name: "develop", timeout: 60, prompt: "开发" },
+        ],
+      }),
+    });
+  }
+
   beforeEach(async () => {
-    db.run("DELETE FROM workflows WHERE source = 'db'");
+    db.run("DELETE FROM workflows");
     _clearRegistry();
+    seedReqDev();
     await discover();
   });
 
@@ -63,13 +70,13 @@ describe("chat tools 工作流管理（W3）", () => {
     return getText(res);
   }
 
-  it("list_workflows 返回 source / derives_from", async () => {
+  it("list_workflows 返回 source / derives_from（native base）", async () => {
     const text = await callTool("list_workflows", {});
     expect(text).not.toMatch(/^错误/);
     const obj = JSON.parse(text);
     const reqDev = obj.find((w: { name: string }) => w.name === "req_dev");
     expect(reqDev).toBeDefined();
-    expect(reqDev.source).toBe("file");
+    expect(reqDev.source).toBe("db"); // native 工作流 source=db（file 轨已退役）
   });
 
   it("list_phase_functions 返回 base 的 phase name 集合", async () => {
@@ -85,11 +92,11 @@ describe("chat tools 工作流管理（W3）", () => {
   });
 
   it("create_db_workflow + update_db_workflow + delete_db_workflow 完整链路", async () => {
-    // create
+    // create（P2 后用 spec_json 而非 yaml_content）
     const created = await callTool("create_db_workflow", {
       name: "req_dev_fast",
       derives_from: "req_dev",
-      yaml_content: "name: req_dev_fast\nphases:\n  - name: design\n",
+      spec_json: JSON.stringify({ phases: [{ name: "design", prompt: "快速设计" }] }),
       description: "skip review",
     });
     expect(created).not.toMatch(/^错误/);
@@ -100,7 +107,7 @@ describe("chat tools 工作流管理（W3）", () => {
     // update
     const updated = await callTool("update_db_workflow", {
       name: "req_dev_fast",
-      yaml_content: "name: req_dev_fast\nphases:\n  - name: design\n  - name: develop\n",
+      spec_json: JSON.stringify({ phases: [{ name: "design", prompt: "设计" }, { name: "develop", prompt: "开发" }] }),
     });
     expect(updated).not.toMatch(/^错误/);
 
@@ -113,24 +120,29 @@ describe("chat tools 工作流管理（W3）", () => {
     const text = await callTool("create_db_workflow", {
       name: "wf_x",
       derives_from: "no_such",
-      yaml_content: "x",
+      spec_json: JSON.stringify({ phases: [{ name: "design" }] }),
     });
     expect(text).toMatch(/^错误/);
     expect(text).toMatch(/不存在/);
   });
 
-  it("update_db_workflow 改 file 工作流 → 错误", async () => {
+  it("update_db_workflow 改不存在的工作流 → 错误（NOT_FOUND）", async () => {
+    // file 轨已退役，不存在 file 只读工作流；对不存在名字报 NOT_FOUND
     const text = await callTool("update_db_workflow", {
-      name: "req_dev",
-      yaml_content: "x",
+      name: "no_such_workflow",
+      spec_json: JSON.stringify({ description: "new" }),
     });
     expect(text).toMatch(/^错误/);
-    expect(text).toMatch(/file|只读/);
   });
 
-  it("delete_db_workflow 删 file 工作流 → 错误", async () => {
-    const text = await callTool("delete_db_workflow", { name: "req_dev" });
+  it("delete_db_workflow 删 template 工作流 → 错误（内置模板禁删）", async () => {
+    // template 工作流（内置）不可删
+    const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");
+    seedTemplateWorkflow("dev"); // 种入 dev template
+    _clearRegistry();
+    await discover();
+    const text = await callTool("delete_db_workflow", { name: "dev" });
     expect(text).toMatch(/^错误/);
-    expect(text).toMatch(/file|只读/);
+    expect(text).toMatch(/内置模板/);
   });
 });

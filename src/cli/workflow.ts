@@ -3,13 +3,11 @@ import { spawnSync } from "child_process";
 import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { parseWorkflowText, stringifyWorkflowDoc } from "../core/workflow/serialize";
 import type { AutopilotClient } from "../client";
 import {
   discover,
   listWorkflows as registryListWorkflows,
   getWorkflow as registryGetWorkflow,
-  getWorkflowYaml as registryGetWorkflowYaml,
 } from "../core/workflow/registry";
 import { listWorkflowsInDb } from "../core/workflow/workflows";
 
@@ -104,7 +102,7 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
 
   // ── show ──
   wf.command("show <name>")
-    .description("查看单个工作流（yaml + 元信息）")
+    .description("查看单个工作流（spec JSON + 元信息）")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
     .action(async (name: string, opts: { port: string }) => {
       const client = ctx.getClient(opts);
@@ -114,13 +112,13 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
           const meta = (await client.getWorkflow(name)) as unknown as WorkflowItem & {
             phases?: unknown[];
           };
-          const yaml = (await client.getWorkflowYaml(name)) as { yaml: string };
+          const specResult = (await client.getWorkflowSpec(name)) as { spec: string };
           console.log(`# ${meta.name}`);
           console.log(`source: ${meta.source ?? "file"}`);
           if (meta.derives_from) console.log(`derives_from: ${meta.derives_from}`);
           if (meta.description) console.log(`description: ${meta.description}`);
-          console.log("\n--- yaml ---\n");
-          console.log(yaml.yaml);
+          console.log("\n--- spec (JSON) ---\n");
+          console.log(specResult.spec);
         } catch (e: unknown) {
           console.error(`查询失败：${e instanceof Error ? e.message : String(e)}`);
           process.exit(1);
@@ -137,29 +135,30 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
       }
       let source: "db" | "file" = "file";
       let derivesFrom: string | null = null;
+      let specJson: string | null = null;
       try {
         const row = listWorkflowsInDb().find((r) => r.name === name);
         if (row) {
           source = row.source;
           derivesFrom = row.derives_from;
+          specJson = row.spec_json;
         }
       } catch {
         /* DB 不可用时按 file 处理 */
       }
-      const yamlStr = registryGetWorkflowYaml(name);
       console.log(`# ${meta.name}`);
       console.log(`source: ${source}`);
       if (derivesFrom) console.log(`derives_from: ${derivesFrom}`);
       if (meta.description) console.log(`description: ${meta.description}`);
-      console.log("\n--- yaml ---\n");
-      console.log(yamlStr ?? "(无 yaml 内容)");
+      console.log("\n--- spec (JSON) ---\n");
+      console.log(specJson ?? "(无 spec 内容)");
     });
 
   // ── create ──
   wf.command("create <name>")
-    .description("创建 DB 工作流（必须 --derives-from 一个 file 工作流）")
-    .requiredOption("--derives-from <base>", "派生自的 file 工作流名（如 dev）")
-    .option("--from <yaml-file>", "初始 yaml 文件路径；不传则用 base 的 yaml 进 EDITOR 编辑")
+    .description("创建 DB 工作流（必须 --derives-from 一个基底工作流）")
+    .requiredOption("--derives-from <base>", "派生自的基底工作流名（如 dev）")
+    .option("--from <spec-file>", "初始 spec（JSON）文件路径；不传则用 base 的 spec 进 EDITOR 编辑")
     .option("-d, --description <desc>", "工作流描述", "")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
     .action(async (name: string, opts: {
@@ -171,26 +170,24 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
       const client = ctx.getClient(opts);
       await ctx.ensureDaemon(client);
 
-      let yaml: string;
+      let specText: string;
       if (opts.from) {
         try {
-          yaml = readFileSync(opts.from, "utf8");
+          specText = readFileSync(opts.from, "utf8");
         } catch (e: unknown) {
           console.error(`读 ${opts.from} 失败：${e instanceof Error ? e.message : String(e)}`);
           process.exit(1);
         }
       } else {
-        // 用 base 的 yaml 起编辑
-        const baseYaml = (await client.getWorkflowYaml(opts.derivesFrom)) as { yaml: string };
-        yaml = await editInTempFile(baseYaml.yaml);
+        // 用 base 的 spec（JSON）起编辑
+        const baseSpec = (await client.getWorkflowSpec(opts.derivesFrom)) as { spec: string };
+        specText = await editInTempFile(baseSpec.spec);
       }
 
       try {
-        // create 编辑的是 base 的 yaml（人类友好），但用户面入库统一 JSON：转成 json 再 import
-        const doc = parseWorkflowText(yaml, "yaml");
         const result = await client.importWorkflow({
           name,
-          content: stringifyWorkflowDoc(doc, "json"),
+          content: specText,
           derives_from: opts.derivesFrom,
           description: opts.description,
         });
@@ -203,19 +200,19 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
 
   // ── edit ──
   wf.command("edit <name>")
-    .description("用 EDITOR 编辑工作流的 yaml（仅 source=db 可改）")
+    .description("用 EDITOR 编辑工作流的 spec（JSON，仅 source=db 可改）")
     .option("-p, --port <port>", "daemon 端口", String(ctx.defaultPort))
     .action(async (name: string, opts: { port: string }) => {
       const client = ctx.getClient(opts);
       await ctx.ensureDaemon(client);
       try {
-        const cur = (await client.getWorkflowYaml(name)) as { yaml: string };
-        const newYaml = await editInTempFile(cur.yaml);
-        if (newYaml === cur.yaml) {
+        const cur = (await client.getWorkflowSpec(name)) as { spec: string };
+        const newSpec = await editInTempFile(cur.spec);
+        if (newSpec === cur.spec) {
           console.log("内容未变，跳过保存。");
           return;
         }
-        await client.saveWorkflowYaml(name, newYaml);
+        await client.saveWorkflowSpec(name, newSpec);
         console.log(`✓ 已保存 ${name}`);
       } catch (e: unknown) {
         console.error(`编辑失败：${e instanceof Error ? e.message : String(e)}`);
@@ -256,69 +253,34 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
     });
 
   // ── import ──
-  // ── sync ──（dogfood-bug9）
+  // ── sync ──（P1 后：只走 DB reseed 路径；file sync 分支已删）
   wf.command("sync <name>")
-    .description("用 repo 内 examples/workflows/<name>/ 覆盖 ~/.autopilot/workflows/<name>/ (老用户拿 dev workflow bug fix 用)")
-    .option("--apply", "真正写入；不带此 flag 时只 dry-run 显示 diff")
+    .description("从 repo 内 examples/workflows/<name>/workflow.json 更新 DB 内置模板（按 template_revision 比对）")
+    .option("--apply", "真正写入；不带此 flag 时只 dry-run 显示版本差异")
     .action(async (name: string, opts: { apply: boolean }) => {
-      const { diffWorkflowTemplate, syncWorkflowTemplate, templateRevisionStatus, reseedTemplateWorkflow } =
+      const { templateRevisionStatus, reseedTemplateWorkflow } =
         await import("../core/workflow/templates");
 
-      // native/template DB 工作流（049 迁移后 / 新装机）：无磁盘目录可覆盖，文件 sync 失效。
-      // 改走 template_revision 比对 + reseed（命令名 / 体验不变，底层从「覆盖文件」变「刷新 DB 行」）。
       const status = templateRevisionStatus(name);
-      if (status) {
-        if (status.template <= status.local) {
-          console.log(`✓ ${name} 已是最新（DB 内置模板 revision ${status.local}），无需同步`);
-          return;
-        }
-        console.log(`${name} 是 DB 内置模板，examples 修订 ${status.template} > 本地 ${status.local}，可刷新。`);
-        if (!opts.apply) {
-          console.log(`\n(dry-run) 加 --apply 后用 examples 最新版覆盖该 DB 工作流。`);
-          return;
-        }
-        const r = reseedTemplateWorkflow(name);
-        if (r === "reseeded") {
-          console.log(`\n✓ 已刷新 ${name} 到 revision ${status.template}`);
-          console.log(`  daemon 需重启才能加载：autopilot daemon restart`);
-        } else {
-          console.log(`\n${name}：${r}`);
-        }
-        return;
-      }
-
-      let entries;
-      try {
-        entries = diffWorkflowTemplate(name);
-      } catch (e: unknown) {
-        console.error(`错误：${e instanceof Error ? e.message : String(e)}`);
+      if (!status) {
+        console.error(`错误：${name} 不是 DB 内置模板（native/template），无法 sync`);
         process.exit(1);
       }
-      const changed = entries.filter((e) => !e.identical);
-      if (changed.length === 0) {
-        console.log(`✓ ${name} 已是最新，无需同步`);
+      if (status.template <= status.local) {
+        console.log(`✓ ${name} 已是最新（DB 内置模板 revision ${status.local}），无需同步`);
         return;
       }
-      console.log(`本地 ~/.autopilot/workflows/${name}/ vs repo examples/workflows/${name}/ 差异：\n`);
-      for (const e of changed) {
-        const tag = !e.hasLocal ? "新增" : !e.hasTemplate ? "本地多" : "差异";
-        const lines = e.hasLocal && e.hasTemplate
-          ? `  本地 ${e.localLines} 行 / 模板 ${e.templateLines} 行`
-          : e.hasLocal ? `  本地 ${e.localLines} 行` : `  模板 ${e.templateLines} 行`;
-        console.log(`  [${tag}] ${e.path}\n${lines}`);
-      }
+      console.log(`${name} 是 DB 内置模板，examples 修订 ${status.template} > 本地 ${status.local}，可刷新。`);
       if (!opts.apply) {
-        console.log(`\n(dry-run) 加 --apply 后才真正覆盖本地文件。`);
-        console.log(`注意：本地文件改动会被覆盖；本地多出的文件不会被删（保留你自己加的辅助文件）。`);
+        console.log(`\n(dry-run) 加 --apply 后用 examples 最新版覆盖该 DB 工作流。`);
         return;
       }
-      try {
-        const { copied } = syncWorkflowTemplate(name);
-        console.log(`\n✓ 已同步 ${copied.length} 个文件到 ~/.autopilot/workflows/${name}/`);
-        console.log(`  daemon 需重启才能加载新 workflow.ts：autopilot daemon restart`);
-      } catch (e: unknown) {
-        console.error(`同步失败：${e instanceof Error ? e.message : String(e)}`);
-        process.exit(1);
+      const r = reseedTemplateWorkflow(name);
+      if (r === "reseeded") {
+        console.log(`\n✓ 已刷新 ${name} 到 revision ${status.template}`);
+        console.log(`  daemon 需重启才能加载：autopilot daemon restart`);
+      } else {
+        console.log(`\n${name}：${r}`);
       }
     });
 
@@ -365,7 +327,7 @@ export function registerWorkflowCommands(program: Command, ctx: WorkflowCmdConte
  */
 async function editInTempFile(initial: string): Promise<string> {
   const tmpDir = mkdtempSync(join(tmpdir(), "autopilot-edit-"));
-  const tmpFile = join(tmpDir, "workflow.yaml");
+  const tmpFile = join(tmpDir, "workflow.json");
   writeFileSync(tmpFile, initial, "utf8");
   const editor =
     process.env.EDITOR ||

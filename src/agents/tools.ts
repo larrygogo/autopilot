@@ -167,8 +167,8 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
         const wf = getWorkflow(args.workflow_name);
         if (!wf) return err(`工作流不存在：${args.workflow_name}`);
         const row = getWorkflowFromDb(args.workflow_name);
-        if (row && row.source !== "file") {
-          return err(`${args.workflow_name} 是 source=${row.source}，必须用 source=file 工作流的 phase 函数`);
+        if (row && row.kind === "derived") {
+          return err(`${args.workflow_name} 是派生工作流（kind=derived），请用 native/template base 工作流查询 phase 集合`);
         }
         const names: string[] = [];
         for (const p of wf.phases) {
@@ -184,11 +184,11 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
 
     tool(
       "create_db_workflow",
-      "创建 DB 工作流（必须 derives_from 一个 file workflow）。yaml 里 phase name 必须 ⊆ derives_from 的 phase 集合（先用 list_phase_functions 看）。",
+      "创建 DB 派生工作流（必须 derives_from 一个 native/template 工作流）。spec_json 是完整 JSON spec（含 name / phases 等），phase name 必须 ⊆ derives_from 的 phase 集合（先用 list_phase_functions 看）。",
       {
         name: z.string().describe("新工作流名（不能跟现有工作流冲突）"),
-        derives_from: z.string().describe("派生自的 file 工作流名（如 dev）"),
-        yaml_content: z.string().describe("完整 yaml（含 name / phases 等）"),
+        derives_from: z.string().describe("派生自的工作流名（如 dev，必须是 native/template）"),
+        spec_json: z.string().describe("完整 JSON spec 文本（含 name / phases 等）"),
         description: z.string().optional().describe("可选描述"),
       },
       async (args) => {
@@ -197,7 +197,7 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
             name: args.name,
             description: args.description ?? "",
             derives_from: args.derives_from,
-            yaml_content: args.yaml_content,
+            spec_json: args.spec_json,
           });
           try { await reloadRegistry(); } catch (e: unknown) { /* reload 失败不阻塞 */ }
           return ok({ name: wf.name, source: wf.source, derives_from: wf.derives_from });
@@ -209,16 +209,16 @@ export async function buildAutopilotTools(): Promise<RegisteredTool[]> {
 
     tool(
       "update_db_workflow",
-      "更新 DB 工作流的 yaml_content（覆盖写）。仅 source=db 可改。",
+      "更新 DB 工作流的 spec_json（覆盖写）。仅 source=db 可改。spec_json 是完整 JSON spec 文本。",
       {
         name: z.string(),
-        yaml_content: z.string(),
+        spec_json: z.string().describe("完整 JSON spec 文本（native/template 会归一化校验，derived 直接写）"),
         description: z.string().optional(),
       },
       async (args) => {
         try {
           const r = updateDbWorkflow(args.name, {
-            yaml_content: args.yaml_content,
+            spec_json: args.spec_json,
             description: args.description,
           });
           if (!r) return err(`工作流不存在：${args.name}`);
@@ -622,7 +622,7 @@ export const TOOL_NAMES = [
 // 工作流 agent 不该改 task 元数据，只暴露 ask_user 用于人机交互。
 // ──────────────────────────────────────────────
 
-export const WORKFLOW_TOOL_NAMES = ["ask_user", "submit_decision"] as const;
+export const WORKFLOW_TOOL_NAMES = ["ask_user", "submit_decision", "submit_clarify", "submit_workflow"] as const;
 
 export async function buildWorkflowAgentTools(): Promise<RegisteredTool[]> {
   const tool = defineTool;
@@ -631,6 +631,8 @@ export async function buildWorkflowAgentTools(): Promise<RegisteredTool[]> {
   const { updateTask } = await import("../core/db");
   const { registerPending } = await import("./pending-questions");
   const { captureDecision } = await import("./pending-decisions");
+  const { captureClarifyResult } = await import("./pending-clarify");
+  const { captureAuthorResult } = await import("./pending-author");
   const { emit } = await import("../core/event-bus");
 
   return [
@@ -703,6 +705,60 @@ export async function buildWorkflowAgentTools(): Promise<RegisteredTool[]> {
         captureDecision(ctx.taskId, { verdict: args.verdict, reason: args.reason.trim() });
         emit({ type: "task:decision", payload: { taskId: ctx.taskId, phase: ctx.phase, verdict: args.verdict } });
         return ok({ recorded: true, verdict: args.verdict });
+      },
+    ),
+    tool(
+      "submit_clarify",
+      "提交本轮需求澄清结果。分析完成后调用此工具提交结构化结果——不要把结果写成正文文本。",
+      {
+        new_spec_md: z.string().describe("修订后的完整 spec_md（保留原文正确内容，只改不对的、加缺失的、删冗余的）"),
+        summary: z.string().nullable().describe("本轮改了什么（1-2句）；无变化时为 null"),
+        next_question: z.object({
+          agent_text: z.string().describe("问题文本"),
+          suggestions: z.array(z.string()).describe("快捷回答选项"),
+        }).nullable().describe("下一个问题；done=true 时必须为 null；不再追问时为 null"),
+        done: z.boolean().describe("true=澄清完成（信息已足够）；false=还需继续提问"),
+        new_title: z.string().nullable().describe("改进后的需求标题；当前标题已够好时为 null"),
+      },
+      async (args) => {
+        const ctx = getTaskContext();
+        // taskId 形如 "clarify-req-NNN"，从中取 reqId
+        const reqId = ctx?.taskId.replace(/^clarify-/, "") ?? "";
+        if (!reqId) return err("submit_clarify 必须在 clarifier 上下文中调用");
+        if (args.done && args.next_question !== null) {
+          return err("done=true 时 next_question 必须为 null");
+        }
+        if (!args.done && (!args.next_question || !args.next_question.agent_text.trim())) {
+          return err("done=false 时 next_question 不能为空");
+        }
+        captureClarifyResult(reqId, {
+          new_spec_md: args.new_spec_md,
+          summary: args.summary,
+          next_question: args.next_question,
+          done: args.done,
+          new_title: args.new_title,
+        });
+        return ok({ recorded: true, done: args.done });
+      },
+    ),
+    tool(
+      "submit_workflow",
+      "提交生成的工作流声明。分析完成后调用此工具提交结构化结果——不要把结果写成正文文本。",
+      {
+        name: z.string().describe("工作流名（snake_case 英文标识符）"),
+        description: z.string().describe("一句话用例说明"),
+        spec: z.record(z.string(), z.unknown()).describe("完整 workflow spec JSON 对象（含 name/label/description/requires/phases[] 等）"),
+      },
+      async (args) => {
+        const ctx = getTaskContext();
+        const callId = ctx?.taskId ?? "";
+        if (!callId) return err("submit_workflow 必须在 author 上下文中调用");
+        captureAuthorResult(callId, {
+          name: args.name,
+          description: args.description,
+          spec: args.spec as Record<string, unknown>,
+        });
+        return ok({ recorded: true, name: args.name });
       },
     ),
   ];

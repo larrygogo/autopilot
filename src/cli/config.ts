@@ -37,11 +37,11 @@ export function registerConfigCommands(program: Command): void {
 
   config
     .command("show")
-    .description("打印 config.yaml 原文（脱敏 base_url 凭证）")
+    .description("打印 config.json 原文（脱敏 base_url 凭证）")
     .action(() => {
       const p = getConfigPath();
       if (!existsSync(p)) {
-        console.error(`config.yaml 不存在：${p}`);
+        console.error(`config.json 不存在：${p}`);
         process.exit(1);
       }
       console.log(redactCredentials(readFileSync(p, "utf-8")));
@@ -49,7 +49,7 @@ export function registerConfigCommands(program: Command): void {
 
   config
     .command("path")
-    .description("打印 config.yaml 绝对路径")
+    .description("打印 config.json 绝对路径")
     .action(() => { console.log(getConfigPath()); });
 }
 
@@ -74,6 +74,7 @@ function exitCodeFor(status: DoctorReport["status"]): number {
   return status === "error" ? 1 : 0;
 }
 
-function redactCredentials(yaml: string): string {
-  return yaml.replace(/(base_url:\s*['"]?)([^'"\s]+:\/\/)([^@'"\s]+)@/g, "$1$2***@");
+function redactCredentials(content: string): string {
+  // 脱敏 JSON 字符串值中的 URL 凭证（匹配 "base_url": "https://user:pass@host..." 的 user:pass 部分）
+  return content.replace(/(base_url[":\s]+["']?)([^"']+:\/\/)([^@"']+)@/g, "$1$2***@");
 }

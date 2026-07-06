@@ -298,7 +298,7 @@ function createProviderAdapter(eff: EffectiveProvider, apiKey: string): Provider
       const compatBaseUrl = baseUrl || getCompatPreset(eff.name)?.base_url;
       if (!compatBaseUrl) {
         throw new Error(
-          `provider "${eff.name}" 需要 base_url（在「设置 → 提供商」编辑该条目，或 config.yaml 配 base_url）。`,
+          `provider "${eff.name}" 需要 base_url（在「设置 → 提供商」编辑该条目，或 config.json 配 base_url）。`,
         );
       }
       return createCompatAdapter(apiKey, compatBaseUrl, eff.name);

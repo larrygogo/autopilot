@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-// ── 声明层（v2 R5）UI 代码 ↔ yaml 值映射 ──────────────────────────
+// ── 声明层（v2 R5）UI 代码 ↔ spec 值映射 ──────────────────────────
 // requires.git 在表单里用稳定的 string 代码（二态：需要 / 不需要），读 detail 时派生、提交时映射回 setMeta。
 // 注：sandbox.git（建 git 沙盒）从 requires.git 派生；**产出形态 delivers 不在工作流编辑/展示 UI 露出**
 // ——它是 phase 结构（deliver:pr/artifacts 阶段）的隐含结果 + workflow-author 给 AI 的声明式接口，不是用户概念。
@@ -51,7 +51,6 @@ interface WorkflowDetailData {
   phases?: unknown[];
   initial_state?: string;
   terminal_states?: string[];
-  source?: "db" | "file";
   derives_from?: string | null;
   [key: string]: unknown;
 }
@@ -192,7 +191,6 @@ export function WorkflowDetail() {
                   <Pencil className="h-4 w-4" />
                   编辑
                 </Button>
-                {/* file 工作流同样可删（workflows.delete 对 file source 走 deleteWorkflowDir 删目录） */}
                 <Button variant="destructive" size="sm" onClick={() => setPendingDelete(true)} title="删除">
                   <Trash2 className="h-4 w-4" />
                   删除
@@ -360,12 +358,10 @@ export function WorkflowDetail() {
             </p>
             <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
               <p className="text-xs text-destructive">
-                ⚠ 将永久删除整个目录：
-                <br />
-                <code className="font-mono">AUTOPILOT_HOME/workflows/{name}/</code>
+                ⚠ 将永久删除该工作流的完整定义（全部阶段与 agent 配置）。
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                包括 workflow.yaml、workflow.ts 及该目录内的所有文件。此操作不可恢复。
+                历史任务的执行记录不受影响。此操作不可恢复。
               </p>
             </div>
           </div>

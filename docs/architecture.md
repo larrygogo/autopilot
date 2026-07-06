@@ -14,7 +14,6 @@ autopilot 是一个**轻量级多阶段任务编排引擎**，基于状态机 + 
 graph TB
     subgraph Clients["客户端层（薄客户端）"]
       CLI["CLI<br/>autopilot task / workflow / daemon"]
-      TUI["TUI<br/>ink + React 终端 UI"]
       WEB["Web UI<br/>React + Vite SPA"]
     end
 
@@ -61,7 +60,7 @@ graph TB
 
 **两个层面的解耦**：
 
-1. **Daemon vs 客户端** — 核心引擎只跑在 daemon 进程里；CLI/TUI/Web 都是 HTTP+WS 客户端，没有"哪种 UI 才能用"的概念
+1. **Daemon vs 客户端** — 核心引擎只跑在 daemon 进程里；CLI/Web 都是 HTTP+WS 客户端，没有"哪种 UI 才能用"的概念
 2. **核心引擎 vs 工作流** — `src/core/` 不含任何业务知识，工作流以目录形式装在 `AUTOPILOT_HOME/workflows/<name>/`（YAML + TS）
 
 ## 进程模型
@@ -77,7 +76,6 @@ autopilot daemon start
             └─ PR Poller    定时轮询 GitHub PR review/merge
 
 autopilot task start <req-id>  ← CLI 是薄客户端，HTTP 调 daemon
-autopilot tui                   ← 终端 UI，WebSocket 连 daemon
 autopilot dashboard             ← 浏览器打开 daemon serve 的 SPA
 ```
 

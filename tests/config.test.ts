@@ -17,8 +17,8 @@ let tmpFile: string;
 beforeEach(() => {
   const dir = join(tmpdir(), `autopilot-config-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
-  tmpFile = join(dir, "config.yaml");
-  writeFileSync(tmpFile, "", "utf-8");
+  tmpFile = join(dir, "config.json");
+  writeFileSync(tmpFile, "{}", "utf-8");
   process.env.DEV_WORKFLOW_CONFIG = tmpFile;
 });
 
@@ -48,14 +48,14 @@ describe("providers 段读写", () => {
     expect(providers.openai).toEqual({});
   });
 
-  it("saveProvider 保留 YAML 其他段", () => {
-    writeFileSync(tmpFile, "agents:\n  existing:\n    provider: openai\n", "utf-8");
+  it("saveProvider 保留 JSON 其他段", () => {
+    writeFileSync(tmpFile, JSON.stringify({ agents: { existing: { provider: "openai" } } }, null, 2), "utf-8");
     saveProvider("anthropic", { default_model: "claude-opus-4-7" });
     const content = readFileSync(tmpFile, "utf-8");
-    expect(content).toContain("agents:");
-    expect(content).toContain("existing:");
-    expect(content).toContain("anthropic:");
-    expect(content).toContain("claude-opus-4-7");
+    const parsed = JSON.parse(content);
+    expect(parsed.agents).toBeDefined();
+    expect(parsed.agents.existing).toBeDefined();
+    expect(parsed.providers.anthropic.default_model).toBe("claude-opus-4-7");
   });
 
   it("saveProvider 拒绝未知 provider", () => {
@@ -84,7 +84,7 @@ describe("setProviderDefaultModel（字段级写默认模型）", () => {
   it("不丢兄弟字段：只改 default_model，base_url / env_key_name 仍在", () => {
     writeFileSync(
       tmpFile,
-      "providers:\n  mimo:\n    base_url: https://api.mimo.ai/v1\n    env_key_name: MIMO_API_KEY\n",
+      JSON.stringify({ providers: { mimo: { base_url: "https://api.mimo.ai/v1", env_key_name: "MIMO_API_KEY" } } }, null, 2),
       "utf-8",
     );
     setProviderDefaultModel("mimo", "mimo-large");
@@ -122,14 +122,14 @@ describe("github 段读取", () => {
   });
 
   it("自定义 cli 和 poll_interval_seconds", () => {
-    writeFileSync(tmpFile, "github:\n  cli: /usr/local/bin/gh\n  poll_interval_seconds: 60\n", "utf-8");
+    writeFileSync(tmpFile, JSON.stringify({ github: { cli: "/usr/local/bin/gh", poll_interval_seconds: 60 } }, null, 2), "utf-8");
     const cfg = loadGithubConfig();
     expect(cfg.cli).toBe("/usr/local/bin/gh");
     expect(cfg.poll_interval_seconds).toBe(60);
   });
 
   it("poll_interval_seconds < 30 走默认值", () => {
-    writeFileSync(tmpFile, "github:\n  cli: gh\n  poll_interval_seconds: 20\n", "utf-8");
+    writeFileSync(tmpFile, JSON.stringify({ github: { cli: "gh", poll_interval_seconds: 20 } }, null, 2), "utf-8");
     const cfg = loadGithubConfig();
     expect(cfg.cli).toBe("gh");
     expect(cfg.poll_interval_seconds).toBe(300);
@@ -142,14 +142,14 @@ describe("github 段读取", () => {
   });
 
   it("ci_fix_limit / ci_fix_conclusions 用户可覆盖（含 0=关闭、结论集大写归一）", () => {
-    writeFileSync(tmpFile, "github:\n  ci_fix_limit: 0\n  ci_fix_conclusions:\n    - failure\n    - cancelled\n", "utf-8");
+    writeFileSync(tmpFile, JSON.stringify({ github: { ci_fix_limit: 0, ci_fix_conclusions: ["failure", "cancelled"] } }, null, 2), "utf-8");
     const cfg = loadGithubConfig();
     expect(cfg.ci_fix_limit).toBe(0);
     expect(cfg.ci_fix_conclusions).toEqual(["FAILURE", "CANCELLED"]);
   });
 
   it("非法 ci_fix_limit（负数 / 非整数）走默认 2；空结论集走默认", () => {
-    writeFileSync(tmpFile, "github:\n  ci_fix_limit: -1\n  ci_fix_conclusions: []\n", "utf-8");
+    writeFileSync(tmpFile, JSON.stringify({ github: { ci_fix_limit: -1, ci_fix_conclusions: [] } }, null, 2), "utf-8");
     const cfg = loadGithubConfig();
     expect(cfg.ci_fix_limit).toBe(2);
     expect(cfg.ci_fix_conclusions).toEqual(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"]);

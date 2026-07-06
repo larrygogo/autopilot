@@ -3,7 +3,7 @@
  *
  * tests/workspace-retention.test.ts 用 tasksRoot 注入覆盖 applyRetentionPolicy
  * 纯函数路径。本测试用 spawnSync 起子进程完整跑：
- *   - 真 config.yaml.workspace_retention 加载
+ *   - 真 config.json.workspace_retention 加载
  *   - 真 DB 里查 isTaskTerminal
  *   - 真 scanTaskSandboxes 扫文件系统
  *   - 真 pruneSandboxesByPolicy 删 workspace
@@ -31,10 +31,11 @@ afterEach(() => {
 });
 
 function setupConfig(retention: { days?: number; max_total_mb?: number }): void {
-  const lines = ["sandbox_retention:"];
-  if (typeof retention.days === "number") lines.push(`  days: ${retention.days}`);
-  if (typeof retention.max_total_mb === "number") lines.push(`  max_total_mb: ${retention.max_total_mb}`);
-  writeFileSync(join(tmpHome, "config.yaml"), lines.join("\n") + "\n", "utf-8");
+  const cfg: Record<string, unknown> = { sandbox_retention: {} };
+  const sr = cfg.sandbox_retention as Record<string, number>;
+  if (typeof retention.days === "number") sr.days = retention.days;
+  if (typeof retention.max_total_mb === "number") sr.max_total_mb = retention.max_total_mb;
+  writeFileSync(join(tmpHome, "config.json"), JSON.stringify(cfg, null, 2), "utf-8");
 }
 
 function seedWorkspace(taskId: string, opts: { mtimeMs?: number } = {}): void {
@@ -141,7 +142,7 @@ describe("workspace_retention 集成（dogfood-bug25 e2e）", () => {
   });
 
   it("无 retention 配置 → 不动任何 workspace", () => {
-    writeFileSync(join(tmpHome, "config.yaml"), "providers: {}\n", "utf-8"); // 无 workspace_retention 段
+    writeFileSync(join(tmpHome, "config.json"), JSON.stringify({providers: {}}, null, 2), "utf-8"); // 无 workspace_retention 段
     seedWorkspace("task-old-done", { mtimeMs: NOW - 30 * DAY_MS });
     seedWorkspace("task-new", { mtimeMs: NOW - 1000 });
 

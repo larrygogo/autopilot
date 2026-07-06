@@ -40,7 +40,9 @@ export class AutopilotClient {
   get listWorkflows() { return this.http.listWorkflows.bind(this.http); }
   get getWorkflow() { return this.http.getWorkflow.bind(this.http); }
   get getWorkflowGraph() { return this.http.getWorkflowGraph.bind(this.http); }
+  get getWorkflowSpec() { return this.http.getWorkflowSpec.bind(this.http); }
   get getWorkflowYaml() { return this.http.getWorkflowYaml.bind(this.http); }
+  get saveWorkflowSpec() { return this.http.saveWorkflowSpec.bind(this.http); }
   get saveWorkflowYaml() { return this.http.saveWorkflowYaml.bind(this.http); }
   get importWorkflow() { return this.http.importWorkflow.bind(this.http); }
   get deleteWorkflow() { return this.http.deleteWorkflow.bind(this.http); }

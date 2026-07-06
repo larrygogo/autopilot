@@ -54,7 +54,8 @@ describe("syncFileWorkflowsToDb", () => {
     expect(result.removed).toEqual([]);
 
     const after = listWorkflowsInDb()[0];
-    expect(after.yaml_content).toBe("y_new");
+    // yaml_content 列已删除（P2）；description 变化说明 update 生效
+    expect(after.description).toBe("new");
     expect(after.created_at).toBe(before.created_at);
     expect(after.updated_at).toBeGreaterThanOrEqual(before.updated_at);
   });
@@ -72,7 +73,14 @@ describe("syncFileWorkflowsToDb", () => {
 
   it("DB 工作流不受 sync 影响", () => {
     upsertFileWorkflow({ name: "req_dev", description: "", yaml_content: "x", file_path: "/tmp/req_dev" });
-    createDbWorkflow({ name: "wf_db", description: "", derives_from: "req_dev", yaml_content: "y" });
+    // 直接 INSERT 模拟存量 derived 行（新守卫不允许 file base，绕过 API 造历史数据）
+    {
+      const ts = Date.now();
+      db.run(
+        "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'derived', ?, ?, ?)",
+        ["wf_db", "", "y", null, "req_dev", ts, ts],
+      );
+    }
 
     syncFileWorkflowsToDb([
       { name: "req_dev", description: "", yaml_content: "x", file_path: "/tmp/req_dev" },

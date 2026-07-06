@@ -42,7 +42,7 @@ export function loadRetentionPolicy(): RetentionPolicy {
       raw["workspace_retention"] &&
       typeof raw["workspace_retention"] === "object"
     ) {
-      log.warn("config.yaml 的 `workspace_retention` 已更名为 `sandbox_retention`，请尽快迁移（本次回退读老字段）");
+      log.warn("config.json 的 `workspace_retention` 已更名为 `sandbox_retention`，请尽快迁移（本次回退读老字段）");
       section = raw["workspace_retention"];
     }
     if (!section || typeof section !== "object") return {};

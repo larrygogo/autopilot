@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
@@ -8,7 +8,7 @@ import { up as migrate007 } from "../src/migrations/007-workflows";
 import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
 import { _setDbForTest } from "../src/core/db";
 import { _clearRegistry, discover, getWorkflow } from "../src/core/workflow/registry";
-import { createDbWorkflow } from "../src/core/workflow/workflows";
+import { createDbWorkflow, createNativeDbWorkflow } from "../src/core/workflow/workflows";
 import { handleRequest } from "../src/daemon/routes";
 
 // 模拟 loopback 来源让 checkAuth 豁免 token（测试场景 daemon 可能已设 token）
@@ -23,17 +23,9 @@ describe("workflows API（W2 扩展）", () => {
   let db: Database;
 
   beforeAll(() => {
-    // setup 一次：创建 tmp home + base 文件工作流
+    // setup 一次：创建 tmp home（file 轨已退役，不再写磁盘工作流）
     tmpHome = join(tmpdir(), `autopilot-w2-routes-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    mkdirSync(join(tmpHome, "workflows", "req_dev"), { recursive: true });
-    writeFileSync(
-      join(tmpHome, "workflows", "req_dev", "workflow.yaml"),
-      `name: req_dev\nphases:\n  - name: design\n    timeout: 60\n  - name: develop\n    timeout: 60\n`
-    );
-    writeFileSync(
-      join(tmpHome, "workflows", "req_dev", "workflow.ts"),
-      `export async function run_design() {}\nexport async function run_develop() {}\n`
-    );
+    mkdirSync(join(tmpHome, "workflows"), { recursive: true });
     process.env.AUTOPILOT_HOME = tmpHome;
 
     db = new Database(":memory:");
@@ -52,9 +44,25 @@ describe("workflows API（W2 扩展）", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
+  /** 每次测试前重建 req_dev native base + discover，确保派生测试有 base 可用 */
+  function seedReqDev() {
+    createNativeDbWorkflow({
+      name: "req_dev",
+      description: "",
+      spec_json: JSON.stringify({
+        name: "req_dev",
+        phases: [
+          { name: "design", timeout: 60, prompt: "做设计" },
+          { name: "develop", timeout: 60, prompt: "开发" },
+        ],
+      }),
+    });
+  }
+
   beforeEach(async () => {
     db.run("DELETE FROM workflows");
     _clearRegistry();
+    seedReqDev();
     await discover();
   });
 
@@ -73,7 +81,8 @@ describe("workflows API（W2 扩展）", () => {
     expect(getWorkflow("imp_native")).not.toBeNull(); // import 内 reloadRegistry
   });
 
-  it("workflows.import（JSON）有 derives_from → 派生(derived)", async () => {
+  it("workflows.import（JSON）有 derives_from → 派生(derived)（base 是 native）", async () => {
+    // req_dev 已在 beforeEach 作为 native 种入
     const r = await invokeRpcMethod("workflows.import", {
       name: "imp_derived",
       derives_from: "req_dev",
@@ -112,21 +121,20 @@ describe("workflows API（W2 扩展）", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("workflows.list 响应包含 source / derives_from", async () => {
+  it("workflows.list 响应包含 source / derives_from（native base）", async () => {
     const r = await invokeRpcMethod("workflows.list", {});
     expect(r.ok).toBe(true);
     if (r.ok) {
       const body = r.payload as Array<{ name: string; source: string; derives_from: string | null }>;
       const reqDev = body.find((w) => w.name === "req_dev");
       expect(reqDev).toBeDefined();
-      expect(reqDev!.source).toBe("file");
+      expect(reqDev!.source).toBe("db"); // native 工作流 source=db
       expect(reqDev!.derives_from).toBeNull();
     }
   });
 
-  it("POST /api/workflows 带 derives_from → 不再走派生分支，走文件脚手架（兼容历史调用）", async () => {
-    // 派生功能 UI 已下线（"派生鸡肋"），POST /api/workflows 不再识别 derives_from，
-    // 改为统一走文件脚手架。旧调用方仍能创建 file 工作流，只是 derives_from 字段被忽略。
+  it("POST /api/workflows 带 derives_from → 走 native DB 创建（file 轨已退役）", async () => {
+    // file 轨已退役，POST /api/workflows 统一建 native DB 行，source:"db"。
     const res = await handleRequest(
       new Request("http://localhost/api/workflows", {
         method: "POST",
@@ -134,7 +142,7 @@ describe("workflows API（W2 扩展）", () => {
         body: JSON.stringify({
           name: "req_dev_fast",
           description: "skip review",
-          derives_from: "req_dev", // 被忽略
+          derives_from: "req_dev",
         }),
       }),
       fakeLoopbackServer,
@@ -143,38 +151,41 @@ describe("workflows API（W2 扩展）", () => {
     const body = (await res.json()) as { ok: boolean; name: string; source: string };
     expect(body.ok).toBe(true);
     expect(body.name).toBe("req_dev_fast");
-    expect(body.source).toBe("file");
+    expect(body.source).toBe("db"); // native 工作流 source=db
   });
 
-  it("workflows.saveYaml 修改 DB 工作流走 updateDbWorkflow", async () => {
-    createDbWorkflow({
+  it("workflows.saveSpec 修改 DB 工作流走 updateDbWorkflow（P2 后 saveYaml 返回 GONE）", async () => {
+    createNativeDbWorkflow({
       name: "wf_db",
       description: "",
-      derives_from: "req_dev",
-      yaml_content: "name: wf_db\nphases:\n  - name: design\n",
+      spec_json: JSON.stringify({ name: "wf_db", phases: [{ name: "design", timeout: 60, prompt: "做设计" }] }),
     });
     _clearRegistry();
     await discover();
 
-    const newYaml = "name: wf_db\nphases:\n  - name: design\n  - name: develop\n";
-    const saveR = await invokeRpcMethod("workflows.saveYaml", { name: "wf_db", yaml: newYaml });
+    // P2：saveYaml 已退役，改用 saveSpec（JSON spec 文本）
+    const newSpec = JSON.stringify({ name: "wf_db", phases: [{ name: "design", prompt: "做设计" }, { name: "develop", prompt: "开发" }] });
+    const saveR = await invokeRpcMethod("workflows.saveSpec", { name: "wf_db", spec: newSpec });
     expect(saveR.ok).toBe(true);
 
-    // 验证 DB 里 yaml 真的改了
-    const getR = await invokeRpcMethod("workflows.getYaml", { name: "wf_db" });
+    // saveYaml 现在返回 GONE
+    const goneR = await invokeRpcMethod("workflows.saveYaml", { name: "wf_db", yaml: "anything" });
+    expect(goneR.ok).toBe(false);
+
+    // 验证 DB 里 phase 数量真的改了
+    const getR = await invokeRpcMethod("workflows.getSpec", { name: "wf_db" });
     expect(getR.ok).toBe(true);
     if (getR.ok) {
-      const body = getR.payload as { yaml: string };
-      expect(body.yaml).toBe(newYaml);
+      const body = getR.payload as { spec: string };
+      expect(body.spec).toContain("develop"); // 新增的 develop 阶段已写入
     }
   });
 
   it("workflows.delete 删 DB 工作流", async () => {
-    createDbWorkflow({
+    createNativeDbWorkflow({
       name: "wf_to_delete",
       description: "",
-      derives_from: "req_dev",
-      yaml_content: "name: wf_to_delete\nphases: []\n",
+      spec_json: JSON.stringify({ name: "wf_to_delete", phases: [{ name: "a", timeout: 60, prompt: "x" }] }),
     });
     _clearRegistry();
     await discover();
@@ -187,28 +198,30 @@ describe("workflows API（W2 扩展）", () => {
     if (!getR.ok) expect(getR.error.code).toBe("NOT_FOUND");
   });
 
-  it("GET /api/workflows/:name/export 返回纯 yaml 文本", async () => {
-    createDbWorkflow({
+  it("GET /api/workflows/:name/export 返回 JSON spec（P2 后 yaml 已退役）", async () => {
+    createNativeDbWorkflow({
       name: "wf_export",
       description: "",
-      derives_from: "req_dev",
-      yaml_content: "name: wf_export\nphases:\n  - name: design\n",
+      spec_json: JSON.stringify({ name: "wf_export", phases: [{ name: "design", timeout: 60, prompt: "做设计" }] }),
     });
     _clearRegistry();
     await discover();
 
     const res = await handleRequest(new Request("http://localhost/api/workflows/wf_export/export"), fakeLoopbackServer);
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toMatch(/yaml|text/);
+    expect(res.headers.get("content-type")).toMatch(/json/);
     const text = await res.text();
-    expect(text).toContain("name: wf_export");
+    const doc = JSON.parse(text) as { name?: string };
+    expect(doc.name).toBe("wf_export");
   });
 
-  it("GET /api/workflows/:name/export 文件来源也支持", async () => {
+  it("GET /api/workflows/:name/export native base 也支持（返回 JSON）", async () => {
+    // req_dev 是 native DB 工作流（file 轨已退役）
     const res = await handleRequest(new Request("http://localhost/api/workflows/req_dev/export"), fakeLoopbackServer);
     expect(res.status).toBe(200);
     const text = await res.text();
-    expect(text).toContain("name: req_dev");
+    const doc = JSON.parse(text) as { name?: string };
+    expect(doc.name).toBe("req_dev");
   });
 
   it("GET /api/workflows/:name/export 不存在 → 404", async () => {

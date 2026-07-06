@@ -9,7 +9,7 @@ export type AgentMode = "cli" | "api";
 
 /**
  * Agent 定义。可出现在：
- *   - 全局 config.yaml 的 `agents.<name>`（无需 name 字段，以 key 为名）
+ *   - 全局 config.json 的 `agents.<name>`（无需 name 字段，以 key 为名）
  *   - 工作流 workflow.yaml 的 `agents[]`（可用 `extends` 指定全局同名基底）
  *
  * 合并顺序：global[extends || name] → workflow 覆盖 → 调用时 RunOptions 覆盖。

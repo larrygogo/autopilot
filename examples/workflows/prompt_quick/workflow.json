@@ -1,0 +1,33 @@
+{
+  "name": "prompt_quick",
+  "template_revision": 1,
+  "label": "提示词速写",
+  "description": "零代码工作流示例：仅 yaml 写 prompt，框架自动调用 agent 执行；适合简单的串行 agent 任务",
+  "phases": [
+    {
+      "name": "draft",
+      "label": "撰稿",
+      "timeout": 600,
+      "handoff": true,
+      "agent": {
+        "label": "写作助手"
+      },
+      "prompt": "你是一位专业写作助手。请根据下面的需求撰写一篇 800-1200 字的文章。\n\n## 需求\n${REQUIREMENT}\n\n## 输出要求\n- 中文输出\n- 结构清晰：引言、主体、结论\n- markdown 格式\n\n请把完整文章写入 ${WORKSPACE}/draft.md。\n"
+    },
+    {
+      "name": "polish",
+      "label": "润色",
+      "timeout": 600,
+      "handoff": true,
+      "agent": {
+        "label": "审稿员",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "max_turns": 5,
+        "permission_mode": "default",
+        "system_prompt": "你是一位资深审稿编辑。关注逻辑连贯、语言流畅、结构清晰；指出真问题并直接改进，不做无谓改写。"
+      },
+      "prompt": "你是一位审稿员。请阅读 ${WORKSPACE}/draft.md，对它进行修改改进。\n\n## 上一阶段的决策与遗留事项\n${HANDOFF}\n\n重点：\n- 检查逻辑连贯性\n- 优化语言流畅度\n- 修正错别字 / 标点\n\n请把改进后的版本写到 ${WORKSPACE}/final.md，同时简要列出做了哪些修改。\n"
+    }
+  ]
+}

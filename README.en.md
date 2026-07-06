@@ -8,7 +8,7 @@
 
 Define phases, write the logic for each step, and let the framework handle sequential execution, failure retries, rejection rollback, parallel execution, and stall recovery.
 
-Ships with a Web UI (claude.ai aesthetic · light & dark themes · graphical workflow editor · ⌘K command palette · live logs · human-in-the-loop banners), a TUI, and a CLI.
+Ships with a Web UI (claude.ai aesthetic · light & dark themes · graphical workflow editor · ⌘K command palette · live logs · human-in-the-loop banners) and a CLI.
 
 [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1.svg)](https://bun.sh/)
 [![TypeScript](https://img.shields.io/badge/language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
@@ -129,14 +129,13 @@ agent receives your answer and continues
 | **🚀** | **Push Model** | Non-blocking launch of the next phase upon completion, no polling required |
 | **🛡️** | **Supervisor Watchdog** | Daemon auto-restarts on crash, exponential backoff + fast-crash protection |
 | **📜** | **Three-Layer Log Persistence** | Process logs / task event stream / agent transcript — all traceable |
-| **🔔** | **Notification System** | Append-only event stream replacing the old `autopilot now`; covered across Web/CLI/TUI |
+| **🔔** | **Notification System** | Append-only event stream replacing the old `autopilot now`; covered across Web/CLI |
 
 ## Architecture
 
 ```mermaid
 graph TB
     CLI["CLI Client"] --HTTP--> Daemon
-    TUI["TUI (ink)"] --WS--> Daemon
     Web["Web UI<br/>(React 19 + Vite + shadcn/ui)"] --HTTP + WS--> Daemon
 
     Daemon["autopilot daemon<br/>(Bun.serve)"] --> Core
@@ -154,7 +153,7 @@ graph TB
     Daemon --> DaemonLog
 ```
 
-- The **core engine** runs as a long-lived daemon; CLI / TUI / Web connect over HTTP + WebSocket
+- The **core engine** runs as a long-lived daemon; CLI / Web connect over HTTP + WebSocket
 - The **Supervisor** watches the daemon and auto-restarts it on crash
 - Each task has its own isolated **workspace** sandbox; on phase completion the framework auto-archives the agent transcript + phase log
 
@@ -175,7 +174,6 @@ For existing users after `git pull`: run `autopilot upgrade` to apply new migrat
 ```bash
 autopilot daemon start            # start daemon in background (with supervisor)
 autopilot dashboard               # open Web UI (browser http://127.0.0.1:6180)
-# or: autopilot tui  for the TUI
 ```
 
 ### Pure-CLI path (no browser needed)
@@ -282,7 +280,6 @@ autopilot notifications dismiss <id>
 autopilot workflow list
 
 # UI
-autopilot tui                       # terminal UI
 autopilot dashboard                 # open Web UI in browser
 
 # build Web (run after editing the frontend)
@@ -300,7 +297,6 @@ autopilot/
 │   ├── daemon/                     # daemon process: server / routes / ws / event-bus / supervisor / protocol
 │   ├── client/                     # thin client library (HTTP + WS)
 │   ├── cli/                        # thin CLI client
-│   ├── tui/                        # ink (React) terminal UI
 │   ├── web/                        # React 19 + Vite + Tailwind v4 + shadcn/ui SPA
 │   └── agents/                     # agent system (providers + tools + pending-questions)
 ├── ~/.autopilot/                   # user space (AUTOPILOT_HOME)
@@ -366,7 +362,6 @@ bun run build:web
 
 - **Runtime**: Bun >= 1.3
 - **Core**: commander >= 13 · yaml >= 2.8
-- **TUI**: React 19 · ink 7
 - **Web frontend**: React 19 · Vite 6 · Tailwind v4 · shadcn/ui (Radix) · cmdk · sonner · lucide-react · dagre
 
 Optional Agent CLIs (login as needed):

@@ -1,0 +1,47 @@
+{
+  "name": "with_human",
+  "template_revision": 2,
+  "label": "人机协作",
+  "description": "演示人机交互：agent 中途可调 ask_user 询问，phase 完成后人工 gate 审批",
+  "requires": {
+    "git": false
+  },
+  "phases": [
+    {
+      "name": "plan",
+      "label": "计划",
+      "timeout": 600,
+      "gate": true,
+      "gate_message": "请审阅计划。通过则进入评审，驳回需写明改进方向。",
+      "handoff": true,
+      "agent": {
+        "label": "计划员",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "permission_mode": "bypassPermissions",
+        "system_prompt": "你是一位项目计划员，擅长把需求拆成清晰可执行的实施计划。拿不准的方向性取舍不要擅自决定——用 ask_user 工具问用户。"
+      },
+      "prompt": "请根据以下需求撰写一份实施计划。\n\n## 需求\n${REQUIREMENT}\n\n要求：\n- 计划包含：目标、实施步骤（含顺序与依赖）、风险与对策、验收标准\n- **遇到方向性二选一（如技术选型、范围取舍）时，不要擅自拍板**：\n  调用 mcp__autopilot_workflow__ask_user 工具向用户提问，拿到答案再继续\n- 把完整计划写入 ${WORKSPACE}/plan.md\n\n若下方存在上一轮的驳回意见（人工审批驳回或评审驳回），请针对性修订后重新输出（无内容则忽略）：\n${REJECTION}\n"
+    },
+    {
+      "name": "review",
+      "label": "评审",
+      "timeout": 600,
+      "reject": "plan",
+      "max_rejections": 3,
+      "agent": {
+        "label": "评审员",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "permission_mode": "bypassPermissions",
+        "max_turns": 5,
+        "system_prompt": "你是计划评审员。关注可执行性、步骤完整性、风险覆盖与验收标准是否可检验。找出真问题而非格式纠错；最后按判据自行裁决并提交。"
+      },
+      "decision": {
+        "mode": "tool",
+        "criteria": "判定对象是【实施计划】。\n通过(pass)：目标明确、步骤可执行、关键风险有对策、验收标准可检验即可。措辞、格式、次要细节不构成驳回。\n驳回(reject)：仅当存在硬伤——步骤不可执行 / 关键环节遗漏 / 风险毫无覆盖 / 验收标准无法检验。驳回必须写明问题与改进方向。\n"
+      },
+      "prompt": "请评审下面的实施计划是否满足需求。\n\n## 需求\n${REQUIREMENT}\n\n## 待评审的计划\n${HANDOFF_plan}\n\n从可执行性、完整性、风险覆盖、验收标准四个维度给出评审意见，指出真问题；\n然后依据判据自行裁决（通过 / 驳回，驳回必须说明问题与改进方向）。\n"
+    }
+  ]
+}

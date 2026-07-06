@@ -14,7 +14,7 @@ import { createLogger } from "../core/logger";
 
 const log = createLogger("pr-poller");
 
-// CI 自动修复的触发上限与失败结论集已挪到 config.yaml github 段（loadGithubConfig 提供缺省 2 /
+// CI 自动修复的触发上限与失败结论集已挪到 config.json github 段（loadGithubConfig 提供缺省 2 /
 // FAILURE·TIMED_OUT·STARTUP_FAILURE，用户可覆盖）——框架给「计数+触顶停下报人」机制，阈值归用户。
 
 interface GhReview {
@@ -55,7 +55,7 @@ function checkIsPending(c: GhCheckItem): boolean {
   return c.status !== undefined && c.status !== "COMPLETED";
 }
 
-/** 「算可自动修复的失败」判定。失败结论集（CheckRun.conclusion）由调用方从 config.yaml
+/** 「算可自动修复的失败」判定。失败结论集（CheckRun.conclusion）由调用方从 config.json
  *  github.ci_fix_conclusions 传入（缺省 FAILURE/TIMED_OUT/STARTUP_FAILURE；用户可覆盖）。 */
 function checkIsFailed(c: GhCheckItem, failedConclusions: Set<string>): boolean {
   if (c.__typename === "StatusContext" || c.context !== undefined) {
@@ -233,7 +233,7 @@ export async function pollOne(reqId: string, cli: string): Promise<void> {
   //    旧 main-scope 兼容路径无水位落点，跳过——新需求主 PR 已全集落 sub_prs）。
   //    触发条件：PR OPEN + checks 全部完成 + 有失败 + head SHA ≠ 已处理水位。
   //    护栏：同 PR 自动修复 CI_FIX_LIMIT 次后停下报人（通知），不再自动转 fix_revision。
-  // CI 自动修复的容错策略来自 config.yaml github 段（阈值 ci_fix_limit / 触发结论集
+  // CI 自动修复的容错策略来自 config.json github 段（阈值 ci_fix_limit / 触发结论集
   // ci_fix_conclusions 用户可覆盖；框架只给「计数 + 触顶停下报人」机制）。ci_fix_limit=0 → 关闭。
   const gh = loadGithubConfig();
   const failedConclusions = new Set(gh.ci_fix_conclusions);

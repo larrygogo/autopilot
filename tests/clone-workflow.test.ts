@@ -1,94 +1,108 @@
+/**
+ * P1 后：cloneWorkflow 只走 DB 分支（file 轨退役）。
+ * 磁盘目录克隆路径已删，只测试 DB native/template/derived 克隆。
+ */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "fs";
+import { mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { Database } from "bun:sqlite";
+import { up as migrate001 } from "../src/migrations/001-baseline";
+import { up as migrate007 } from "../src/migrations/007-workflows";
+import { up as migrate048 } from "../src/migrations/048-workflow-kind-spec-json";
+import { _setDbForTest } from "../src/core/db";
+import { createNativeDbWorkflow, createDbWorkflow, getWorkflowFromDb } from "../src/core/workflow/workflows";
 import { cloneWorkflow } from "../src/core/workflow/templates";
 
 let tmpHome: string;
+let db: Database;
 
 beforeEach(() => {
   tmpHome = join(tmpdir(), `autopilot-clone-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(join(tmpHome, "workflows"), { recursive: true });
   process.env.AUTOPILOT_HOME = tmpHome;
+  db = new Database(":memory:");
+  migrate001(db);
+  migrate007(db);
+  migrate048(db);
+  _setDbForTest(db);
 });
 
 afterEach(() => {
   delete process.env.AUTOPILOT_HOME;
+  _setDbForTest(null);
+  db.close();
   if (existsSync(tmpHome)) rmSync(tmpHome, { recursive: true, force: true });
 });
 
-function mkSrc(name: string, yamlBody: string, tsBody?: string) {
-  const dir = join(tmpHome, "workflows", name);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "workflow.yaml"), yamlBody, "utf-8");
-  if (tsBody !== undefined) {
-    writeFileSync(join(dir, "workflow.ts"), tsBody, "utf-8");
-  }
-}
-
-describe("cloneWorkflow", () => {
-  it("从用户已有的工作流克隆到新目录 + 自动改新 yaml 的 name", () => {
-    mkSrc(
-      "my_dev",
-      `name: my_dev
-description: 我的工作流
-phases:
-  - name: do_it
-    prompt: hi
-`,
-      `// custom\nexport async function run_do_it() {}\n`,
-    );
+describe("cloneWorkflow（DB 分支）", () => {
+  it("从 native DB 工作流克隆到新 native 行，name 改为 targetName", () => {
+    const srcSpec = JSON.stringify({
+      name: "my_dev",
+      description: "源",
+      phases: [{ name: "do_it", timeout: 60, prompt: "hi" }],
+    });
+    createNativeDbWorkflow({ name: "my_dev", description: "源", spec_json: srcSpec });
 
     cloneWorkflow("my_dev", "my_dev_v2");
-    const dstYaml = readFileSync(join(tmpHome, "workflows", "my_dev_v2", "workflow.yaml"), "utf-8");
-    expect(dstYaml).toMatch(/^name: my_dev_v2/m);
-    expect(dstYaml).not.toMatch(/^name: my_dev$/m);
-    // ts 也一并拷贝
-    expect(existsSync(join(tmpHome, "workflows", "my_dev_v2", "workflow.ts"))).toBe(true);
-  });
-
-  it("克隆带 ts 的工作流：yaml + ts 都完整拷贝", () => {
-    mkSrc(
-      "with_ts",
-      `name: with_ts\nphases:\n  - name: x\n`,
-      `export async function run_x(_t: string): Promise<void> {\n  console.log("hi");\n}\n`,
-    );
-
-    cloneWorkflow("with_ts", "with_ts_copy");
-    const copyTs = readFileSync(join(tmpHome, "workflows", "with_ts_copy", "workflow.ts"), "utf-8");
-    expect(copyTs).toContain('console.log("hi")');
+    const row = getWorkflowFromDb("my_dev_v2");
+    expect(row).not.toBeNull();
+    expect(row!.source).toBe("db");
+    expect(row!.kind).toBe("native");
+    const spec = JSON.parse(row!.spec_json!) as { name?: string };
+    expect(spec.name).toBe("my_dev_v2");
   });
 
   it("源工作流不存在 → 抛错", () => {
     expect(() => cloneWorkflow("not_here", "anywhere")).toThrow(/source workflow not found/);
   });
 
-  it("目标已存在 → 抛错", () => {
-    mkSrc("a", `name: a\nphases: []\n`);
-    mkSrc("b", `name: b\nphases: []\n`);
+  it("目标已存在（DB 中已有）→ 抛错", () => {
+    const specA = JSON.stringify({ name: "a", phases: [{ name: "x", timeout: 60, prompt: "x" }] });
+    const specB = JSON.stringify({ name: "b", phases: [{ name: "y", timeout: 60, prompt: "y" }] });
+    createNativeDbWorkflow({ name: "a", description: "", spec_json: specA });
+    createNativeDbWorkflow({ name: "b", description: "", spec_json: specB });
     expect(() => cloneWorkflow("a", "b")).toThrow(/already exists/);
   });
 
   it("目标名非法 → 抛错", () => {
-    mkSrc("a", `name: a\nphases: []\n`);
+    const spec = JSON.stringify({ name: "a", phases: [{ name: "x", timeout: 60, prompt: "x" }] });
+    createNativeDbWorkflow({ name: "a", description: "", spec_json: spec });
     expect(() => cloneWorkflow("a", "bad name!")).toThrow(/只允许/);
   });
 
-  it("源没有 workflow.yaml → 抛错", () => {
-    mkdirSync(join(tmpHome, "workflows", "empty"), { recursive: true });
-    expect(() => cloneWorkflow("empty", "target")).toThrow(/no workflow\.yaml/);
-  });
-
-  it("克隆 prompt-only 工作流（无 workflow.ts）正常 — 不创建空 ts 文件", () => {
-    mkSrc(
-      "prompt_only",
-      `name: prompt_only\nphases:\n  - name: do\n    prompt: hi\n`,
-      // 不提供 ts
+  it("克隆 template 行 → native 行（可编辑）", () => {
+    const spec = JSON.stringify({ name: "my_tpl", template_revision: 1, phases: [{ name: "x", timeout: 60 }] });
+    // 直接插 template 行（通过 createNativeDbWorkflow 再手改 kind 模拟）
+    db.run(
+      "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, derives_from, file_path, created_at, updated_at) VALUES (?, ?, '', ?, 'db', 'template', NULL, NULL, ?, ?)",
+      ["my_tpl", "模板", spec, Date.now(), Date.now()],
     );
 
-    cloneWorkflow("prompt_only", "prompt_only_copy");
-    expect(existsSync(join(tmpHome, "workflows", "prompt_only_copy", "workflow.yaml"))).toBe(true);
-    // 源没 ts，副本也不该凭空多出 ts 文件
-    expect(existsSync(join(tmpHome, "workflows", "prompt_only_copy", "workflow.ts"))).toBe(false);
+    cloneWorkflow("my_tpl", "my_clone");
+    const row = getWorkflowFromDb("my_clone");
+    expect(row).not.toBeNull();
+    expect(row!.kind).toBe("native");
+    const parsed = JSON.parse(row!.spec_json!) as { name?: string };
+    expect(parsed.name).toBe("my_clone");
+  });
+
+  it("克隆 derived 行 → 新 derived 行（保留 derives_from + spec_json）", () => {
+    // 先种 native base
+    const baseSpec = JSON.stringify({ name: "base", phases: [{ name: "step", timeout: 60 }] });
+    createNativeDbWorkflow({ name: "base", description: "", spec_json: baseSpec });
+    // 种 derived
+    createDbWorkflow({
+      name: "derived_wf",
+      description: "派生",
+      derives_from: "base",
+      spec_json: JSON.stringify({ phases: [{ name: "step", timeout: 120 }] }),
+    });
+
+    cloneWorkflow("derived_wf", "derived_wf_copy");
+    const row = getWorkflowFromDb("derived_wf_copy");
+    expect(row).not.toBeNull();
+    expect(row!.kind).toBe("derived");
+    expect(row!.derives_from).toBe("base");
   });
 });

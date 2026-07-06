@@ -1,52 +1,20 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
-import { parseDocument, isMap } from "yaml";
-
 /**
- * 在 yaml 文档里写嵌套键 doc[parentKey][childKey]=value，但**容错 parent 不是 map** 的情况：
- * 若 parentKey 已存在却是 null 标量 / 字符串（如 `requires:` 空、`requires: optional` 等被写坏的状态），
- * 直接 `setIn([parentKey, childKey])` 会抛「Expected YAML collection at parentKey」。这里先整体替换成
- * 只含该子键的 map（workflow 级 requires/sandbox 只含 git，替换无损），杜绝保存声明时崩。
+ * 工作流 phases / meta 的 JSON Spec 编辑（authoring）——P2 后 yaml_content 列已删除，
+ * 以 spec_json（JSON 对象）为唯一真相，applyPhasesToYaml/patchWorkflowMetaYaml 全面迁至 JSON 操作。
+ *
+ * 「编辑 DB 工作流的 phases / meta 字段」这一与工作流注册/运行无关的关注点：
+ * collectPhaseNames / setWorkflowPhases（已废弃：file 轨退役）/ applyPhasesToSpec /
+ * patchWorkflowMetaSpec / setWorkflowMeta（已废弃）+ 清洗私有。
+ * Web 工作流编辑器经 rpc 调用。依赖 registry 的只读接口（isParallelInput）；
+ * registry 不依赖本模块 → 干净 DAG 无回环。
  */
-function setNestedSafe(doc: ReturnType<typeof parseDocument>, parentKey: string, childKey: string, value: unknown): void {
-  const parent = doc.getIn([parentKey], true); // keepScalar：拿到 Node（含 null/字符串标量）
-  if (parent != null && !isMap(parent)) {
-    doc.setIn([parentKey], { [childKey]: value });
-    return;
-  }
-  doc.setIn([parentKey, childKey], value);
-}
 
-/**
- * 删嵌套键 doc[parentKey][childKey]，容错 parent 不是 map 或**根本不存在**：
- * yaml 的 `deleteIn([parentKey, childKey])` 在 parentKey 缺失 / 非 collection 时也抛
- * 「Expected YAML collection at parentKey」（不是无声 no-op）。这是用户「跟随默认（requiresGit=null）」
- * 保存崩的真凶——dev 根本没 requires 键，删它的 git 子键就炸。
- * 这里：parent 是 map → 删子键；否则（缺失 / 非 map）→ 删整个 parent 键（缺失则无声 no-op）。
- */
-function deleteNestedSafe(doc: ReturnType<typeof parseDocument>, parentKey: string, childKey: string): void {
-  if (isMap(doc.getIn([parentKey], true))) {
-    doc.deleteIn([parentKey, childKey]);
-  } else {
-    doc.deleteIn([parentKey]); // 缺失 → no-op（返回 false 不抛）；非 map 坏状态 → 整删
-  }
-}
 import {
-  getWorkflowYamlPath,
   isParallelInput,
-  reload,
   type PhaseEntryInput,
   type PhaseInput,
   type ParallelPhaseInput,
 } from "./registry";
-
-/**
- * 工作流 phases / meta 的 YAML 编辑（authoring）——从 registry.ts 拆出的叶子模块。
- *
- * 「编辑用户 workflow.yaml 的 phases 数组 / meta 字段」这一与工作流注册/运行无关的关注点：
- * collectPhaseNames / setWorkflowPhases / patchWorkflowMetaYaml / setWorkflowMeta + 清洗私有。
- * Web 工作流编辑器经 rpc 调用。依赖 registry 的只读接口（getWorkflowYamlPath/isParallelInput/
- * reload）；registry 不依赖本模块 → 干净 DAG 无回环。
- */
 
 /** 合法 phase 名（小写字母开头 + 小写字母/数字/下划线）。 */
 const PHASE_NAME_RE = /^[a-z][a-z0-9_]*$/;
@@ -67,10 +35,10 @@ export function collectPhaseNames(phases: PhaseEntryInput[]): string[] {
 }
 
 /**
- * 结构化校验 + 把 phases 段写进一段 yaml 文本（保留其他字段与注释），返回新 yaml 文本。
- * 纯函数、不碰磁盘/DB —— file 来源与 db 来源共用（file 读写文件、db 读写 yaml_content）。
+ * 结构化校验 + 把 phases 段写进 JSON spec 对象（保留其他字段），返回新 JSON 文本。
+ * 纯函数、不碰磁盘/DB —— P2 后专用于 DB spec_json 路径。
  */
-export function applyPhasesToYaml(rawYaml: string, phases: PhaseEntryInput[]): string {
+export function applyPhasesToSpec(rawSpec: string, phases: PhaseEntryInput[]): string {
   if (!Array.isArray(phases) || phases.length === 0) {
     throw new Error(`phases 不能为空数组（至少一个阶段）`);
   }
@@ -115,23 +83,34 @@ export function applyPhasesToYaml(rawYaml: string, phases: PhaseEntryInput[]): s
     orderedNames.push(myName);
   }
 
-  // 3. 写入 yaml Document（保留其他段、注释）
-  const doc = parseDocument(rawYaml);
+  // 3. 写入 JSON 对象（保留其他段）
+  let doc: Record<string, unknown>;
+  try {
+    doc = JSON.parse(rawSpec) as Record<string, unknown>;
+  } catch (e: unknown) {
+    throw new Error(`spec_json 解析失败：${e instanceof Error ? e.message : String(e)}`);
+  }
   // 清洗 undefined / null / 空串 避免脏字段
   const cleaned = phases.map((p) => cleanPhaseEntry(p));
-  doc.setIn(["phases"], cleaned);
-  return doc.toString();
+  doc["phases"] = cleaned;
+  return JSON.stringify(doc, null, 2) + "\n";
 }
 
 /**
- * 结构化校验 + 写入 file 来源工作流的 phases 段。保留 YAML 中的其他字段与注释。
- * 不自动调用 reload —— 调用方负责。db 来源工作流由调用方用 applyPhasesToYaml + updateDbWorkflow 处理。
+ * @deprecated P2 后用 applyPhasesToSpec（JSON 操作）。
+ * 此函数已改为调用 applyPhasesToSpec——rawYaml 参数现在应传 JSON spec 文本。
+ * 保留签名让调用方编译通过，逻辑委托给新实现。
  */
-export function setWorkflowPhases(workflowName: string, phases: PhaseEntryInput[]): void {
-  const yamlPath = getWorkflowYamlPath(workflowName);
-  if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
-  const raw = readFileSync(yamlPath, "utf-8");
-  writeFileSync(yamlPath, applyPhasesToYaml(raw, phases), "utf-8");
+export function applyPhasesToYaml(rawYaml: string, phases: PhaseEntryInput[]): string {
+  return applyPhasesToSpec(rawYaml, phases);
+}
+
+/**
+ * @deprecated file 轨已退役（P2）。仅保留签名兼容，内部为 no-op。
+ * 结构化校验 + 写入 file 来源工作流的 phases 段——file 轨退役后不再有 file 工作流。
+ */
+export function setWorkflowPhases(_workflowName: string, _phases: PhaseEntryInput[]): void {
+  throw new Error("file 轨已退役（P2），setWorkflowPhases 不再可用；请用 applyPhasesToSpec + updateDbWorkflow");
 }
 
 /**
@@ -154,50 +133,70 @@ export interface WorkflowMetaInput {
 }
 
 /**
- * 删除嵌套键后，若父 map 已空则一并删除（保持 yaml 不留 `requires: {}` 空壳）。
+ * 在 JSON spec 对象上手术式修改 label / description + 声明层（requires.git）。
+ * 纯函数：file 来源与 db 来源共用（P2 后均为 JSON）。
  */
-function pruneEmptyMap(doc: ReturnType<typeof parseDocument>, key: string): void {
-  const node = doc.getIn([key]) as { items?: unknown[] } | undefined;
-  if (node && typeof node === "object" && Array.isArray(node.items) && node.items.length === 0) {
-    doc.deleteIn([key]);
+export function patchWorkflowMetaSpec(rawSpec: string, meta: WorkflowMetaInput): string {
+  let doc: Record<string, unknown>;
+  try {
+    doc = JSON.parse(rawSpec) as Record<string, unknown>;
+  } catch (e: unknown) {
+    throw new Error(`spec_json 解析失败：${e instanceof Error ? e.message : String(e)}`);
   }
-}
 
-/**
- * 在 yaml 原文上手术式修改 label / description + 声明层（requires.git / sandbox.git /
- * delivers）（Document API，保留注释与其他段）。纯函数：file 来源与 db 来源共用。
- */
-export function patchWorkflowMetaYaml(raw: string, meta: WorkflowMetaInput): string {
-  const doc = parseDocument(raw);
   for (const key of ["label", "description"] as const) {
     const v = meta[key];
     if (v === undefined) continue;
     const trimmed = typeof v === "string" ? v.trim() : v;
-    if (trimmed === null || trimmed === "") doc.deleteIn([key]);
-    else doc.setIn([key], trimmed);
-  }
-  // requires.git：显式值写键；null 删键 + 清空壳
-  if (meta.requiresGit !== undefined) {
-    if (meta.requiresGit === null) {
-      deleteNestedSafe(doc, "requires", "git");
-      pruneEmptyMap(doc, "requires");
+    if (trimmed === null || trimmed === "") {
+      delete doc[key];
     } else {
-      setNestedSafe(doc, "requires", "git", meta.requiresGit);
+      doc[key] = trimmed;
     }
   }
-  // 注：① sandbox.git 不再写——建 git 沙盒从 requires.git 派生（getWorkflowGitSandbox），不是 meta 字段；
-  //   ② delivers 不再写——产出形态从 phase 派生（deriveDelivers）。patchWorkflowMetaYaml 只改 requires.git。
-  return doc.toString();
+
+  // requires.git：显式值写键；null = 删键（回退派生自 sandbox.git）
+  if (meta.requiresGit !== undefined) {
+    if (meta.requiresGit === null) {
+      const requires = doc["requires"];
+      if (requires && typeof requires === "object" && !Array.isArray(requires)) {
+        const r = { ...(requires as Record<string, unknown>) };
+        delete r["git"];
+        if (Object.keys(r).length === 0) {
+          delete doc["requires"];
+        } else {
+          doc["requires"] = r;
+        }
+      } else {
+        delete doc["requires"];
+      }
+    } else {
+      const existing = doc["requires"];
+      if (existing && typeof existing === "object" && !Array.isArray(existing)) {
+        doc["requires"] = { ...(existing as Record<string, unknown>), git: meta.requiresGit };
+      } else {
+        doc["requires"] = { git: meta.requiresGit };
+      }
+    }
+  }
+
+  return JSON.stringify(doc, null, 2) + "\n";
 }
 
 /**
- * 修改 file 来源工作流的元信息。不自动 reload —— 调用方负责。
+ * @deprecated P2 后用 patchWorkflowMetaSpec（JSON 操作）。
+ * 此函数已改为调用 patchWorkflowMetaSpec——raw 参数现在应传 JSON spec 文本。
+ * 保留签名让调用方编译通过，逻辑委托给新实现。
  */
-export function setWorkflowMeta(workflowName: string, meta: WorkflowMetaInput): void {
-  const yamlPath = getWorkflowYamlPath(workflowName);
-  if (!existsSync(yamlPath)) throw new Error(`工作流不存在：${workflowName}`);
-  const raw = readFileSync(yamlPath, "utf-8");
-  writeFileSync(yamlPath, patchWorkflowMetaYaml(raw, meta), "utf-8");
+export function patchWorkflowMetaYaml(raw: string, meta: WorkflowMetaInput): string {
+  return patchWorkflowMetaSpec(raw, meta);
+}
+
+/**
+ * @deprecated file 轨已退役（P2）。仅保留签名兼容，内部抛错。
+ */
+export function setWorkflowMeta(_workflowName: string, _meta: WorkflowMetaInput): void {
+  throw new Error("file 轨已退役（P2），setWorkflowMeta 不再可用；请用 patchWorkflowMetaSpec + updateDbWorkflow");
 }
 
 function cleanPhaseEntry(p: PhaseEntryInput): Record<string, unknown> {
@@ -224,3 +223,9 @@ function cleanSinglePhase(p: PhaseInput): Record<string, unknown> {
   return out;
 }
 
+// ── 旧 file-路径占位（file 轨退役后不再需要 YAML 格式路径，但接口仍保留签名兼容）──
+// 已删除 getWorkflowYamlPath（file 轨退役，不再需要磁盘 yaml 路径）。
+// routes / rpc 中原先调 setWorkflowPhases/setWorkflowMeta 的地方已改直接走
+// applyPhasesToSpec/patchWorkflowMetaSpec + updateDbWorkflow。
+
+// P2 废弃：不再需要 reload（调用方已在 rpc-methods/routes 中直接调 reloadRegistry）

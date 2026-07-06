@@ -8,7 +8,7 @@ import { AUTOPILOT_HOME } from "../index";
  *
  * 设计：
  *   - 独立文件 <AUTOPILOT_HOME>/runtime/api-token，权限 0600（仅 owner 可读写）
- *   - 不写入 config.yaml（用户经常截图 / 贴日志 config.yaml）
+ *   - 不写入 config.json（用户经常截图 / 贴日志 config.json）
  *   - 取值优先级在调用方：env AUTOPILOT_API_TOKEN > 此文件 > 空
  *   - 删除文件 = 关闭 token 鉴权
  *

@@ -422,7 +422,7 @@ describe("clarifier session 路径", () => {
       capturedPrompts.push(prompt);
       call++;
       if (call === 1) {
-        // 解析失败：返回非对象纯文本，parseLlmYamlWrapper 抛 /不是对象/（确定性格式错）
+        // 解析失败：返回非 JSON 纯文本，parseClarifyResult 抛 /非 JSON/（确定性格式错）
         return { rawText: "这不是 YAML 对象只是一段普通说明文字", newSessionRef: "sess-x" };
       }
       return {
@@ -443,7 +443,7 @@ describe("clarifier session 路径", () => {
     expect(capturedPrompts[0]).toContain("用户已回答");
     expect(capturedPrompts[0]).not.toContain("你上一次的输出无法解析");
     // 次轮 = 纠错前言 + 全量 prompt 主体（fallback 用全量，故含 Q&A 历史段）。断言锁固定的前言
-    // 文案，不依赖被插值进来的下游 llm-yaml 错误文案（否则改 llm-yaml 文案会让本 test 假红）。
+    // 文案，不依赖被插值进来的下游解析错误文案（否则改解析错误文案会让本 test 假红）。
     expect(capturedPrompts[1]).toContain("你上一次的输出无法解析");
     expect(capturedPrompts[1]).toContain("请严格只输出");
     expect(capturedPrompts[1]).toContain("已完成的 Q&A 历史");

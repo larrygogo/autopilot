@@ -1,6 +1,6 @@
 import { getDb } from "../db";
 import { createLogger } from "../logger";
-import { stringifyWorkflowDoc, parseWorkflowText } from "./serialize";
+import { stringifyWorkflowDoc } from "./serialize";
 
 const log = createLogger("workflows");
 
@@ -13,8 +13,7 @@ export type WorkflowKind = "file" | "derived" | "native" | "template";
 export interface WorkflowRow {
   name: string;
   description: string;
-  yaml_content: string;
-  /** 结构原生 json 真相（kind=native/template）；file/derived 为 null（真相是 yaml_content/磁盘） */
+  /** 结构原生 json 真相（所有 kind）；derived 的 phases 子集 JSON；native/template 完整 spec；file 行为 NULL */
   spec_json: string | null;
   source: "db" | "file";
   kind: WorkflowKind;
@@ -27,7 +26,8 @@ export interface WorkflowRow {
 export interface UpsertFileWorkflowOpts {
   name: string;
   description: string;
-  yaml_content: string;
+  /** @deprecated file 轨已退役（P2）：此字段仅保留供迁移期 upsertFileWorkflow 调用，053 后 schema 无此列勿在运行时新增 */
+  yaml_content?: string;
   file_path: string;
 }
 
@@ -35,7 +35,8 @@ export interface CreateDbWorkflowOpts {
   name: string;
   description: string;
   derives_from: string;
-  yaml_content: string;
+  /** derived 行的 phases 子集 JSON（053 后 spec_json 成唯一真相，不再写 yaml_content） */
+  spec_json: string;
 }
 
 export interface CreateNativeDbWorkflowOpts {
@@ -47,7 +48,8 @@ export interface CreateNativeDbWorkflowOpts {
 
 export interface UpdateDbWorkflowOpts {
   description?: string;
-  yaml_content?: string;
+  /** JSON spec 文本（归一化后写 spec_json；native/template 的唯一真相） */
+  spec_json?: string;
 }
 
 // ──────────────────────────────────────────────
@@ -77,8 +79,11 @@ export function getWorkflowFromDb(name: string): WorkflowRow | null {
 
 /**
  * 把文件工作流写入 / 更新到 DB（source=file 镜像）。
- * 已存在时 yaml_content / description / updated_at 更新；created_at 保留。
+ * 已存在时 description / updated_at 更新；created_at 保留。
  * 若 DB 中存在同名 source=db 行 → 抛错（同名冲突，spec §4.3）。
+ *
+ * @deprecated 迁移期专用（052 之前的 file 轨窗口 + 测试夹具）。
+ *   053 后 schema 无 yaml_content 列——schema 自适应：有列才写，无列跳过。
  */
 export function upsertFileWorkflow(opts: UpsertFileWorkflowOpts): WorkflowRow {
   const db = getDb();
@@ -89,18 +94,47 @@ export function upsertFileWorkflow(opts: UpsertFileWorkflowOpts): WorkflowRow {
       `workflow "${opts.name}" 在 DB 中已存在但 source=${existing.source}，与文件冲突；请先删除 DB 工作流或重命名文件目录`
     );
   }
+  // schema 自适应：053 后 yaml_content 列已删除
+  const hasYamlCol = hasYamlContentColumn(db);
   if (existing) {
-    db.run(
-      "UPDATE workflows SET description = ?, yaml_content = ?, file_path = ?, updated_at = ? WHERE name = ?",
-      [opts.description, opts.yaml_content, opts.file_path, ts, opts.name]
-    );
+    if (hasYamlCol && opts.yaml_content !== undefined) {
+      db.run(
+        "UPDATE workflows SET description = ?, yaml_content = ?, file_path = ?, updated_at = ? WHERE name = ?",
+        [opts.description, opts.yaml_content, opts.file_path, ts, opts.name]
+      );
+    } else {
+      db.run(
+        "UPDATE workflows SET description = ?, file_path = ?, updated_at = ? WHERE name = ?",
+        [opts.description, opts.file_path, ts, opts.name]
+      );
+    }
   } else {
-    db.run(
-      "INSERT INTO workflows (name, description, yaml_content, source, kind, file_path, created_at, updated_at) VALUES (?, ?, ?, 'file', 'file', ?, ?, ?)",
-      [opts.name, opts.description, opts.yaml_content, opts.file_path, ts, ts]
-    );
+    if (hasYamlCol) {
+      db.run(
+        "INSERT INTO workflows (name, description, yaml_content, source, kind, file_path, created_at, updated_at) VALUES (?, ?, ?, 'file', 'file', ?, ?, ?)",
+        [opts.name, opts.description, opts.yaml_content ?? "", opts.file_path, ts, ts]
+      );
+    } else {
+      db.run(
+        "INSERT INTO workflows (name, description, source, kind, file_path, created_at, updated_at) VALUES (?, ?, 'file', 'file', ?, ?, ?)",
+        [opts.name, opts.description, opts.file_path, ts, ts]
+      );
+    }
   }
   return getWorkflowFromDb(opts.name) as WorkflowRow;
+}
+
+/**
+ * 检查 workflows 表是否仍存在 yaml_content 列（schema 自适应：053 跑前存在，跑后消失）。
+ * 每次查询，不缓存——迁移中会变。
+ * @internal
+ */
+function hasYamlContentColumn(db: ReturnType<typeof getDb>): boolean {
+  const cols = db
+    .query<{ name: string }, []>("PRAGMA table_info(workflows)")
+    .all()
+    .map((r) => r.name);
+  return cols.includes("yaml_content");
 }
 
 /**
@@ -133,9 +167,9 @@ export function createDbWorkflow(opts: CreateDbWorkflowOpts): WorkflowRow {
   if (!base) {
     throw new Error(`derives_from "${opts.derives_from}" 不存在`);
   }
-  if (base.source !== "file") {
+  if (base.kind !== "native" && base.kind !== "template") {
     throw new Error(
-      `derives_from "${opts.derives_from}" 是 source=${base.source}，DB 工作流必须派生自 file 工作流（不支持嵌套派生）`
+      `derives_from "${opts.derives_from}" 是 kind=${base.kind}，DB 工作流只能派生自 native/template 工作流（不支持嵌套派生）`
     );
   }
   if (getWorkflowFromDb(opts.name)) {
@@ -144,10 +178,18 @@ export function createDbWorkflow(opts: CreateDbWorkflowOpts): WorkflowRow {
 
   const db = getDb();
   const ts = Date.now();
-  db.run(
-    "INSERT INTO workflows (name, description, yaml_content, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
-    [opts.name, opts.description, opts.yaml_content, opts.derives_from, ts, ts]
-  );
+  // schema 自适应：053 前有 yaml_content 列（NOT NULL）需要写占位；053 后列不在
+  if (hasYamlContentColumn(db)) {
+    db.run(
+      "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'derived', ?, ?, ?)",
+      [opts.name, opts.description, opts.spec_json, opts.spec_json, opts.derives_from, ts, ts]
+    );
+  } else {
+    db.run(
+      "INSERT INTO workflows (name, description, spec_json, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, 'db', 'derived', ?, ?, ?)",
+      [opts.name, opts.description, opts.spec_json, opts.derives_from, ts, ts]
+    );
+  }
   return getWorkflowFromDb(opts.name) as WorkflowRow;
 }
 
@@ -201,8 +243,11 @@ function normalizeSpecDoc(raw: unknown, name: string, description: string): Reco
 
 /**
  * 创建「spec_json 真相」的 DB 工作流（native 或 template）。
- * spec_json 是唯一真相；yaml_content 存 spec_json 的 yaml 投影（兼容 getYaml / 编辑器读路径）。
+ * spec_json 是唯一真相（053 后 yaml_content 列已删除）。
  * native = 用户导入/创建；template = 框架 init 种子（语义区分，组装路径同）。
+ *
+ * schema 自适应：PRAGMA table_info 查 yaml_content 列存在（053 前）→ 写占位（满足 NOT NULL）；
+ * 列不存在（053 后）→ 不写。
  */
 function insertSpecDbWorkflow(opts: CreateNativeDbWorkflowOpts, kind: "native" | "template"): WorkflowRow {
   if (getWorkflowFromDb(opts.name)) {
@@ -211,14 +256,21 @@ function insertSpecDbWorkflow(opts: CreateNativeDbWorkflowOpts, kind: "native" |
   // 校验 + 归一化（非法结构 / 函数字段挡在写库前；行 name = spec.name = yaml.name 恒等）
   const doc = normalizeSpecDoc(JSON.parse(opts.spec_json), opts.name, opts.description);
   const spec_json = stringifyWorkflowDoc(doc, "json");
-  const yaml_content = stringifyWorkflowDoc(doc, "yaml");
 
   const db = getDb();
   const ts = Date.now();
-  db.run(
-    "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', ?, ?, ?)",
-    [opts.name, opts.description, yaml_content, spec_json, kind, ts, ts]
-  );
+  // schema 自适应：053 前 yaml_content NOT NULL，需写占位（spec_json 文本）；053 后列已删，不写
+  if (hasYamlContentColumn(db)) {
+    db.run(
+      "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', ?, ?, ?)",
+      [opts.name, opts.description, spec_json, spec_json, kind, ts, ts]
+    );
+  } else {
+    db.run(
+      "INSERT INTO workflows (name, description, spec_json, source, kind, created_at, updated_at) VALUES (?, ?, ?, 'db', ?, ?, ?)",
+      [opts.name, opts.description, spec_json, kind, ts, ts]
+    );
+  }
   return getWorkflowFromDb(opts.name) as WorkflowRow;
 }
 
@@ -249,20 +301,21 @@ export function updateDbWorkflow(
     fields.push("description = ?");
     vals.push(opts.description);
   }
-  if (opts.yaml_content !== undefined) {
-    fields.push("yaml_content = ?");
-    vals.push(opts.yaml_content);
-    // native/template 的真相是 spec_json（compose 读它）。编辑器改的是 yaml_content（投影 +
-    // 人类编辑面），若不同步 spec_json，编辑会在 reload/compose 时静默丢失。这里校验+归一化+重派生
-    // spec_json，保持「spec_json === parse(yaml_content)」不变式（畸形结构在此抛错，不写脏行）。
-    // derived/file 的 spec_json 恒 null，不动。
+  if (opts.spec_json !== undefined) {
+    // 校验 + 归一化（非法结构 / 函数字段挡在写库前；行 name = spec.name 恒等）。
+    // native/template 校验完整 spec；derived 只含 phases 子集，直接写（不归一化 name/description）。
+    let finalSpecJson = opts.spec_json;
     if (existing.kind === "native" || existing.kind === "template") {
       const desc = opts.description ?? existing.description;
-      const doc = normalizeSpecDoc(parseWorkflowText(opts.yaml_content, "yaml"), name, desc);
-      // 用归一化后的 doc 覆盖 yaml_content（保证 yaml 投影也归一）+ spec_json
-      vals[vals.length - 1] = stringifyWorkflowDoc(doc, "yaml"); // 替换刚 push 的 yaml_content
-      fields.push("spec_json = ?");
-      vals.push(stringifyWorkflowDoc(doc, "json"));
+      const doc = normalizeSpecDoc(JSON.parse(opts.spec_json), name, desc);
+      finalSpecJson = stringifyWorkflowDoc(doc, "json");
+    }
+    fields.push("spec_json = ?");
+    vals.push(finalSpecJson);
+    // schema 自适应：053 前 yaml_content 列仍存在，同步写以保持 DB 一致
+    if (hasYamlContentColumn(db)) {
+      fields.push("yaml_content = ?");
+      vals.push(finalSpecJson); // 占位（053 后列删除，不再用）
     }
   }
   if (fields.length === 0) return existing;
@@ -296,7 +349,8 @@ export function deleteDbWorkflow(name: string): void {
 export interface FileWorkflowScan {
   name: string;
   description: string;
-  yaml_content: string;
+  /** @deprecated file 轨已退役（P2）：仅供迁移期（052 前）使用 */
+  yaml_content?: string;
   file_path: string;
 }
 
@@ -341,7 +395,7 @@ export function syncFileWorkflowsToDb(scans: FileWorkflowScan[]): SyncResult {
     }
     const changed =
       existing.description !== scan.description ||
-      existing.yaml_content !== scan.yaml_content ||
+      (scan.yaml_content !== undefined && (existing as WorkflowRow & { yaml_content?: string }).yaml_content !== scan.yaml_content) ||
       existing.file_path !== scan.file_path;
     if (changed) {
       upsertFileWorkflow(scan);

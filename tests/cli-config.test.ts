@@ -46,7 +46,7 @@ describe("config doctor 退出码", () => {
 
   it("缺 provider → 0（warning，不阻塞 exit；强制在 task-start 守卫）", () => {
     runCli("init");
-    writeFileSync(join(tmpHome, "config.yaml"), "providers: {}\nagents: {}\n", "utf-8");
+    writeFileSync(join(tmpHome, "config.json"), JSON.stringify({providers: {}, agents: {}}, null, 2), "utf-8");
     const r = runCli("config", "doctor");
     // 「无可用 provider」是 onboarding 正常态，doctor 只引导不阻塞 exit（恢复 bug16/17 契约 +
     // 「warn 不拒启」）。真正的强制在 hasTaskStartBlocker（起任务时拦），不在诊断退出码。
@@ -79,20 +79,23 @@ describe("config path / show", () => {
     runCli("init");
     const r = runCli("config", "path");
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe(join(tmpHome, "config.yaml"));
+    expect(r.stdout.trim()).toBe(join(tmpHome, "config.json"));
   });
 
-  it("config show 打印 yaml 原文（零配置模板含 doctor 引导注释）", () => {
+  it("config show 打印 config.json 原文（零配置模板=空对象）", () => {
     runCli("init");
     const r = runCli("config", "show");
-    expect(r.stdout).toContain("bun run dev config doctor");
+    expect(r.exitCode).toBe(0);
+    // 零配置模板是纯空 JSON 对象
+    const parsed = JSON.parse(r.stdout.trim());
+    expect(parsed).toEqual({});
   });
 });
 
 describe("config doctor --fix 交互式", () => {
   it("空 config + 输入选 anthropic + 默认 model（命名 agent 创建已移除）", () => {
     runCli("init");
-    writeFileSync(join(tmpHome, "config.yaml"), "providers: {}\nagents: {}\n", "utf-8");
+    writeFileSync(join(tmpHome, "config.json"), JSON.stringify({providers: {}, agents: {}}, null, 2), "utf-8");
     // Phase 3：向导不再创建命名 agent，只配 provider。stdin 只需 provider + model。
     const stdin = ["anthropic", "claude-sonnet-4-6"].join("\n") + "\n";
 
@@ -105,8 +108,10 @@ describe("config doctor --fix 交互式", () => {
     });
     expect(r.exitCode).toBe(0);
 
-    const yaml = readFileSync(join(tmpHome, "config.yaml"), "utf-8");
-    expect(yaml).toContain("default_model: claude-sonnet-4-6");
-    expect(yaml).toContain("enabled: true");
+    const cfgJson = readFileSync(join(tmpHome, "config.json"), "utf-8");
+    const cfg = JSON.parse(cfgJson);
+    // 向导调 saveProvider 写 providers.anthropic 段
+    expect(cfg.providers?.anthropic?.default_model).toBe("claude-sonnet-4-6");
+    expect(cfg.providers?.anthropic?.enabled).toBe(true);
   });
 });

@@ -28,7 +28,7 @@ import { LifecycleAgentsCard } from "@/components/LifecycleAgentsCard";
 export function Settings({
   section = "general",
 }: {
-  section?: "general" | "lifecycle" | "scheduler" | "network" | "daemon";
+  section?: "general" | "lifecycle" | "scheduler" | "network" | "extensions" | "daemon";
 }) {
   const toast = useToast();
 
@@ -38,6 +38,7 @@ export function Settings({
   const [defaultsSaving, setDefaultsSaving] = useState(false);
 
   const [status, setStatus] = useState<any>(null);
+  const [extensions, setExtensions] = useState<Array<{ id: string; enabled: boolean; running: boolean; status: Record<string, unknown> | null }>>([]);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [restartingDaemon, setRestartingDaemon] = useState(false);
 
@@ -78,8 +79,12 @@ export function Settings({
   };
 
   useEffect(() => {
-    if (section !== "daemon") return;
-    api.getStatus().then(setStatus).catch(() => {});
+    if (section === "daemon") {
+      api.getStatus().then(setStatus).catch(() => {});
+    }
+    if (section === "extensions") {
+      api.listExtensions().then((r) => setExtensions(r.extensions ?? [])).catch(() => {});
+    }
   }, [section]);
 
 
@@ -93,6 +98,57 @@ export function Settings({
 
   if (section === "network") {
     return <NetworkAccessCard />;
+  }
+
+  if (section === "extensions") {
+    // 扩展分区：daemon 级扩展及其自报状态（如 reqgenie 连接器的注册/心跳）——
+    // 内容 KV 由扩展 status() 自报，此处通用渲染、不含业务知识
+    return (
+      <div className="w-full">
+        {extensions.length === 0 ? (
+          <Card className="p-6 text-center text-sm text-muted-foreground">
+            没有已注册的 daemon 扩展。
+          </Card>
+        ) : (
+          <Card className="p-4">
+            <div className="space-y-4">
+              {extensions.map((ext) => (
+                <div key={ext.id}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="font-mono text-xs text-foreground/85">{ext.id}</span>
+                    <span className={cn(
+                      "rounded-full px-2 py-0.5 text-[10px]",
+                      ext.running ? "bg-success/15 text-success" : ext.enabled ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground",
+                    )}>
+                      {ext.running ? "运行中" : ext.enabled ? "已启用（未运行）" : "未启用"}
+                    </span>
+                  </div>
+                  {ext.status && (
+                    <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                      {Object.entries(ext.status).map(([k, v]) => (
+                        <InfoField key={k} label={k} value={String(v)} mono={k === "实例ID" || k === "控制面"} />
+                      ))}
+                    </dl>
+                  )}
+                  {/* 未注册的 reqgenie 连接器 → 内联注册表单（对等 CLI selfhosted register，注册后热启动） */}
+                  {ext.id === "reqgenie-connector" && ext.status?.["注册状态"] === "未注册" && (
+                    <ReqgenieRegisterForm
+                      onDone={() => api.listExtensions().then((r) => setExtensions(r.extensions ?? [])).catch(() => {})}
+                    />
+                  )}
+                  {/* 已注册 → 解除注册（停连接器 + 通知 reqgenie 下线 + 清凭证，对等 CLI selfhosted remove） */}
+                  {ext.id === "reqgenie-connector" && ext.status && ext.status["注册状态"] !== "未注册" && (
+                    <ReqgenieUnregisterButton
+                      onDone={() => api.listExtensions().then((r) => setExtensions(r.extensions ?? [])).catch(() => {})}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+    );
   }
 
   if (section === "daemon") {
@@ -191,7 +247,7 @@ export function Settings({
 // ──────────────────────────────────────────────
 // 任务调度设置
 //   - 全局最大并发任务数（scheduler.max_concurrent_tasks，默认 1）
-//   - 写入 config.yaml 后即热生效（调度器每次 tick 现读，无需重启）
+//   - 写入 config.json 后即热生效（调度器每次 tick 现读，无需重启）
 // ──────────────────────────────────────────────
 function SchedulerCard(): React.ReactElement {
   const toast = useToast();
@@ -681,6 +737,103 @@ function NetworkAccessCard(): React.ReactElement {
         onCancel={() => setConfirmDelete(false)}
       />
     </Card>
+  );
+}
+
+/** reqgenie 连接器注册表单：控制面 URL + 实例名 + 一次性注册令牌 → extensions.invoke("register")。 */
+function ReqgenieRegisterForm({ onDone }: { onDone: () => void }) {
+  const toast = useToast();
+  const [url, setUrl] = useState("");
+  const [name, setName] = useState("");
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await api.invokeExtension("reqgenie-connector", "register", {
+        control_plane_url: url.trim(),
+        name: name.trim(),
+        token: token.trim(),
+      });
+      toast.success("注册成功，连接器已启动");
+      setToken("");
+      onDone();
+    } catch (e: unknown) {
+      toast.error("注册失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+      <p className="text-xs text-muted-foreground">
+        注册为 reqgenie 自托管实例：在 reqgenie「我的 Runner」生成一次性注册令牌后填入。注册成功即热启动连接器，无需重启 daemon。
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="rg-url" className="text-xs">控制面 URL</Label>
+          <Input id="rg-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://reqgenie 地址:3001" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="rg-name" className="text-xs">实例展示名（可选）</Label>
+          <Input id="rg-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="默认取主机名" />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="rg-token" className="text-xs">注册令牌</Label>
+        <Input id="rg-token" type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="reqgenie 生成的一次性令牌" />
+      </div>
+      <Button size="sm" onClick={submit} disabled={busy || !url.trim() || !token.trim()}>
+        {busy ? "注册中…" : "注册"}
+      </Button>
+    </div>
+  );
+}
+
+/** reqgenie 连接器解除注册：停连接器（向 reqgenie 发下线）+ 清本机凭证 + 关 enabled。 */
+function ReqgenieUnregisterButton({ onDone }: { onDone: () => void }) {
+  const toast = useToast();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const doRemove = async () => {
+    setBusy(true);
+    try {
+      await api.invokeExtension("reqgenie-connector", "remove", {});
+      toast.success("已解除注册，连接器已停止");
+      onDone();
+    } catch (e: unknown) {
+      toast.error("解除注册失败", (e as Error)?.message ?? String(e));
+    } finally {
+      setBusy(false);
+      setConfirmOpen(false);
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      <Button variant="outline" size="sm" onClick={() => setConfirmOpen(true)} disabled={busy}>
+        <Trash2 className="h-3.5 w-3.5" />
+        {busy ? "解除中…" : "解除注册（下线）"}
+      </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        title="解除注册"
+        message={
+          <div className="space-y-2 text-sm">
+            <p>停止连接器、通知 reqgenie 下线，并删除本机凭证。</p>
+            <p className="text-muted-foreground">
+              进行中的镜像同步会中断（reqgenie 侧该实例变为离线）；重新接活需在 reqgenie 生成新的注册令牌后再次注册。
+            </p>
+          </div>
+        }
+        confirmText="解除注册"
+        onConfirm={doRemove}
+        onCancel={() => setConfirmOpen(false)}
+      />
+    </div>
   );
 }
 

@@ -1,7 +1,7 @@
 /**
  * 工作流阶段显示名工具。
  *
- * 唯一显示名来源：工作流 yaml 里的 `label:` 字段。所有 UI 渲染阶段名都
+ * 唯一显示名来源：工作流 spec 里的 `label:` 字段。所有 UI 渲染阶段名都
  * 应通过 pickPhaseLabel 取值，避免节点 / drawer / 标题等显示不一致。
  *
  * registry 在 expandPhaseDefaults 会把缺省 label 兜底填成 name.toUpperCase()，

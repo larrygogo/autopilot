@@ -128,12 +128,15 @@ describe("migration 049：file dev/ad-hoc → native", () => {
     // 老用户：file dev 副本（磁盘目录 + DB file 行）+ 派生自 dev 的 derived 工作流
     // （workflow create my-dev-fast --derives-from dev 的官方引导路径）。
     seedFileRow("dev");
-    createDbWorkflow({
-      name: "my-dev-fast",
-      description: "派生自 dev",
-      derives_from: "dev",
-      yaml_content: "name: my-dev-fast\nphases:\n  - name: design\n    timeout: 60\n",
-    });
+    // 直接 INSERT 模拟存量 derived 行（历史上 createDbWorkflow 允许 file base；
+    // file 轨退役后新守卫只允许 native/template，故绕过 API 造历史数据）
+    {
+      const ts = Date.now();
+      db.run(
+        "INSERT INTO workflows (name, description, yaml_content, spec_json, source, kind, derives_from, created_at, updated_at) VALUES (?, ?, ?, ?, 'db', 'derived', ?, ?, ?)",
+        ["my-dev-fast", "派生自 dev", "", JSON.stringify({ name: "my-dev-fast", phases: [{ name: "design", timeout: 60 }] }), "dev", ts, ts],
+      );
+    }
 
     // 049：dev 转 native + 删磁盘目录（base 从 file 形态变 native 形态）
     runMig();

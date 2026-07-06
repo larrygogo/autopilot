@@ -19,7 +19,8 @@ import {
 } from "./clarifier-progress";
 import { buildClarifierAgent } from "./clarifier-agent";
 import { resolveDefaultProvider } from "../core/default-provider";
-import { parseLlmYamlWrapper } from "../core/llm-yaml";
+import { takeClarifyResult } from "../agents/pending-clarify";
+import { extractJsonBlock } from "./llm-json";
 import { listAttachments, buildAttachmentContext } from "../core/requirements/attachments";
 import { ensureRequirementClones } from "../core/requirements/clone";
 import { deleteRequirementCodebase } from "../core/sandbox/codebase";
@@ -37,7 +38,7 @@ import { tmpdir } from "node:os";
 const log = createLogger("requirement-clarifier");
 
 // 默认 agent name: "clarifier"
-// 用户配置示例（写在 ~/.autopilot/config.yaml）：
+// 用户配置示例（写在 ~/.autopilot/config.json）：
 //   agents:
 //     clarifier:
 //       provider: anthropic
@@ -122,9 +123,24 @@ async function callClaude(
       timeout: CLARIFIER_IDLE_TIMEOUT_MS,
       signal: _roundAbort.get(reqId)?.signal,
     });
-    const rawText = result.text.trim();
-    if (!rawText) throw new Error("clarifier agent 返回空");
-    return { rawText, newSessionRef: result.providerSessionId };
+    // 优先从工具捕获位取结构化结果（submit_clarify 工具调用）
+    const captured = takeClarifyResult(reqId);
+    if (captured) {
+      return { rawText: JSON.stringify(captured), newSessionRef: result.providerSessionId };
+    }
+    // 降级：agent 未调工具，尝试从文本输出提取 JSON 块（优先），或直接 JSON 文本（宽容降级）
+    const textOut = result.text.trim();
+    if (!textOut) throw new Error("clarifier agent 返回空");
+    const jsonBlock = extractJsonBlock(textOut);
+    if (jsonBlock) {
+      return { rawText: jsonBlock, newSessionRef: result.providerSessionId };
+    }
+    // 最宽容降级：如果文本本身就是合法 JSON，直接接受（兼容工具不可用时直接输出 JSON 的 provider）
+    try {
+      JSON.parse(textOut);
+      return { rawText: textOut, newSessionRef: result.providerSessionId };
+    } catch { /* 不是有效 JSON，继续报错 */ }
+    throw new Error("agent 未提交澄清结果（未调 submit_clarify）");
   } else {
     // OpenAI/Google：chat() 未实现（base.ts 抛错），沿用 run()，不做 session 跟踪
     // 传入的 sessionRef 被忽略；返回 newSessionRef = undefined
@@ -143,9 +159,24 @@ async function callClaude(
       { taskId: `clarify-${reqId}`, phase: "clarifying", sandboxDir, signal },
       () => agent.run(prompt, { ...(cwd ? { cwd } : {}), signal }),
     );
-    const rawText = result.text.trim();
-    if (!rawText) throw new Error("clarifier agent 返回空");
-    return { rawText, newSessionRef: undefined };
+    // 优先从工具捕获位取结构化结果（submit_clarify 工具调用）
+    const captured = takeClarifyResult(reqId);
+    if (captured) {
+      return { rawText: JSON.stringify(captured), newSessionRef: undefined };
+    }
+    // 降级：agent 未调工具，尝试从文本输出提取 JSON 块（优先），或直接 JSON 文本（宽容降级）
+    const textOut = result.text.trim();
+    if (!textOut) throw new Error("clarifier agent 返回空");
+    const jsonBlock = extractJsonBlock(textOut);
+    if (jsonBlock) {
+      return { rawText: jsonBlock, newSessionRef: undefined };
+    }
+    // 最宽容降级：如果文本本身就是合法 JSON，直接接受（兼容工具不可用时直接输出 JSON 的 provider）
+    try {
+      JSON.parse(textOut);
+      return { rawText: textOut, newSessionRef: undefined };
+    } catch { /* 不是有效 JSON，继续报错 */ }
+    throw new Error("agent 未提交澄清结果（未调 submit_clarify）");
   }
 }
 
@@ -304,6 +335,8 @@ function buildPrompt(opts: {
   qaHistory: string;
   attachmentContext: string;
   messagesReplay?: ConversationTurn[];  // session 失效时注入历史对话（与 qaHistory 互斥）
+  /** 审批驳回反馈（未处理时注入，强制 clarifier 就此重新澄清、不直接定稿） */
+  rejectionFeedback?: string | null;
 }): string {
   const ctxLines: string[] = [];
   ctxLines.push(`项目名称：${opts.projectName}`);
@@ -364,32 +397,18 @@ function buildPrompt(opts: {
     "   - 不要在 new_spec_md 字段值里再包 ``` 代码块",
     "2. 决定下一个最该问的问题，或宣告澄清完成。",
     "",
-    "# 输出格式（严格 YAML，顶层对象）",
-    "用 YAML 而不是 JSON 的理由：new_spec_md / next_question.agent_text 等字段经常含",
-    "**任意引号 / 中文 / 多行 / 反斜杠**，YAML 的 `|` 多行块完全不需要转义，从根上",
-    "绕开 JSON 字符串转义地狱。模板：",
+    "# 输出方式",
+    "分析完成后，调用 **submit_clarify** 工具提交结果（不要把结果写成正文文本）。",
     "",
-    "```yaml",
-    "new_spec_md: |",
-    "  # 修订后的完整 spec_md，多行任意内容，不需要转义",
-    "  ## 背景",
-    "  ...",
-    "summary: 本轮改了什么（短，1-2 句）；无变化时填 null",
-    "next_question:",
-    "  agent_text: |",
-    "    下一个问题（可多行，含任意引号 / 中文 / 反斜杠都行）",
-    "  suggestions:",
-    "    - 短选项 A",
-    "    - 短选项 B",
-    "done: false",
-    "new_title: 改进后的需求标题（10-20 字）",
-    "```",
+    "工具参数说明：",
+    "- `new_spec_md`: 修订后的完整 spec_md（多行 markdown，保留原文正确内容，只改不对的、加缺失的、删冗余的）",
+    "- `summary`: 本轮改了什么（1-2句）；无变化时填 null",
+    "- `next_question.agent_text`: 下一个问题文本；不再追问时整个 next_question 设为 null",
+    "- `next_question.suggestions`: 快捷回答选项列表",
+    "- `done`: true=澄清完成（信息已足够）；false=还需继续提问",
+    "- `new_title`: 改进后的需求标题（10-20字）；当前标题已足够好时设为 null",
     "",
-    "字段说明：",
-    "- `next_question`: 不再追问时整字段设为 `null`（含 agent_text 整体）",
-    "- `done`: true 时 `next_question` 必须为 null",
-    "- `new_title`: 当前 title 已足够好时设为 `null`",
-    "- `summary`: spec_md 无变化时设为 `null`",
+    "**非 Anthropic provider 降级**：若工具不可用，改为在正文输出 ```json 块（字段相同）。",
     "",
     "# 关键规则",
     "- 如果 spec_md 没变化，new_spec_md 仍要原样输出，但 summary 可为 null。",
@@ -410,6 +429,17 @@ function buildPrompt(opts: {
     "",
     opts.qaHistory ? "# 已完成的 Q&A 历史\n\n" + opts.qaHistory : "# 已完成的 Q&A 历史\n\n(暂无)",
     "",
+    ...(opts.rejectionFeedback
+      ? [
+          "# ⚠️ 用户驳回了上一版规格（必须处理）",
+          "用户在审批环节驳回了上面的「当前 spec_md」，反馈如下：",
+          "> " + opts.rejectionFeedback.replace(/\n/g, "\n> "),
+          "",
+          "请**优先针对这条反馈向用户提一个澄清问题**（next_question），问清后再据此修订 spec_md；",
+          "在未就该反馈与用户确认前**不要 done=true**，否则会把被驳回的规格原样退回审批。",
+          "",
+        ]
+      : []),
     // I-1 修复：messagesReplay 段（替换 qaHistory，两段互斥，避免重叠）
     ...(opts.messagesReplay && opts.messagesReplay.length > 0
       ? [
@@ -425,7 +455,7 @@ function buildPrompt(opts: {
         ]
       : []),
     "",
-    "请直接输出 YAML：",
+    "分析完成后调用 submit_clarify 工具提交（工具参数含义见上方「输出方式」段）：",
   ].join("\n");
 }
 
@@ -453,7 +483,7 @@ function buildIncrementalPrompt(opts: {
     opts.currentTitle,
     "",
     "请根据此回答更新 spec_md，并决定是否需要继续追问。",
-    "以相同 YAML 格式输出（字段含义与首轮相同）：",
+    "分析完成后调用 submit_clarify 工具提交（字段含义与首轮相同）：",
   ].join("\n");
 }
 
@@ -470,9 +500,13 @@ interface ClarifyResult {
 }
 
 function parseClarifyResult(raw: string): ClarifyResult {
-  // 走 llm-yaml 顶层 wrapper：剥围栏 + YAML 解析。YAML 解析对 LLM 输出格式
-  // 更宽容（兼容 JSON、容忍轻微缩进偏移、支持 | 多行块零转义）。
-  const parsed = parseLlmYamlWrapper(raw);
+  // 走 JSON.parse：结果来自 submit_clarify 工具（结构化输出）或降级 JSON 块（```json ... ```）。
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new Error("解析澄清结果失败（非 JSON）");
+  }
   if (typeof parsed.new_spec_md !== "string") throw new Error("missing/invalid new_spec_md");
   if (typeof parsed.done !== "boolean") throw new Error("missing/invalid done");
   const summary = parsed.summary === null || typeof parsed.summary === "string" ? parsed.summary : null;
@@ -489,6 +523,9 @@ function parseClarifyResult(raw: string): ClarifyResult {
               : [],
           }
         : null);
+  if (parsed.done && next_question !== null) {
+    throw new Error("done=true 时 next_question 必须为 null");
+  }
   if (!parsed.done && (!next_question || !next_question.agent_text)) {
     throw new Error("done=false but next_question is empty");
   }
@@ -629,6 +666,22 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
       return `Q${i + 1}：${q.body}\nA${i + 1}：${userReply}`;
     }).join("\n\n");
 
+  // 审批驳回检测：reject 加一条 feedback 评论 + 回 clarifying。若最新 feedback 比最新 question 还新
+  //（= 尚未被新一轮提问处理），注入 prompt 强制就此重新澄清，避免原样定稿把被驳回的 spec 又退回审批。
+  // clarifier 提问后该 question 变最新 → 下轮不再注入，天然不循环。
+  const _allFeedback = listComments(reqId, { kind: "feedback" });
+  const _allQ = listComments(reqId, { kind: "question", parent_id: null });
+  const _latestFeedback = _allFeedback.length
+    ? _allFeedback.reduce((a, b) => (a.created_at > b.created_at ? a : b))
+    : null;
+  const _latestQ = _allQ.length
+    ? _allQ.reduce((a, b) => (a.created_at > b.created_at ? a : b))
+    : null;
+  const pendingRejection =
+    _latestFeedback && (!_latestQ || _latestFeedback.created_at > _latestQ.created_at)
+      ? _latestFeedback.body
+      : null;
+
   // 读取需求的所有附件，构建 prompt 段落
   const attachments = listAttachments(reqId);
   const attachmentContext = buildAttachmentContext(attachments);
@@ -647,7 +700,8 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   // 设计前提：每轮最多一个 active question（_inflightRounds 进程内锁 + setActiveQuestionId 保证）
   const hasPriorQA = allQuestionsResolved.length > 0;
   // useIncremental 仅在 Anthropic + 有效 session + 有历史 Q&A 时为 true
-  const useIncremental = isAnthropicProvider && !!activeSessionRef && hasPriorQA;
+  // 有未处理驳回反馈时强制走全量 prompt（增量/replay 都不含驳回段，会原样定稿）
+  const useIncremental = isAnthropicProvider && !!activeSessionRef && hasPriorQA && !pendingRejection;
 
   // ── 增量消息（仅新回复 + 继续指令）────────────────────────────────────
   let incrementalPrompt: string | null = null;
@@ -669,7 +723,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
   //   Anthropic + session 失效 + 有 snapshot → 用 replay 替换 qaHistory（互斥，避免重叠）
   //   非 Anthropic（无论是否有 snapshot）→ 始终走 qaHistory 原路径，行为完全不变
   const hasSnapshot = (session?.messages_snapshot?.length ?? 0) > 0;
-  const useReplay = isAnthropicProvider && !activeSessionRef && hasSnapshot;
+  const useReplay = isAnthropicProvider && !activeSessionRef && hasSnapshot && !pendingRejection;
 
   // clone 失败库的降级快照（远程拉结构事实 + 自述文档，prompt 里已声明可能过期）；
   // clone 就绪的库不预拼接（探索交给 agent 自主）
@@ -698,6 +752,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
     qaHistory: useReplay ? "" : qaHistory,
     attachmentContext,
     messagesReplay: useReplay ? session!.messages_snapshot : [],
+    rejectionFeedback: pendingRejection,
   });
 
   // ── ② 重试循环 ─────────────────────────────────────────────────────
@@ -754,14 +809,14 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
       }
 
       // #15：解析失败（确定性格式错）→ 给下一轮 attempt 加纠错前言。否则两次同 prompt 必然
-      // 两连挂（「YAML 顶层不是对象」这类确定性违规，无差异重试无意义）。
+      // 两连挂（「非 JSON」这类确定性违规，无差异重试无意义）。
       if (i === 0 && isParseFailure && attempts[1]) {
         attempts[1] = {
           ...attempts[1],
           prompt:
             `⚠ 你上一次的输出无法解析：${lastError.message}\n` +
-            "请严格只输出**顶层为对象的 YAML**（key: value 形式），不要任何额外解释 / 围栏外文字 / " +
-            "数组 / 标量 / `---` 多文档分隔。\n\n" +
+            "请严格只输出结构化结果：优先调用 submit_clarify 工具提交；工具不可用时在正文输出" +
+            "一个 ```json 块（顶层为对象），不要任何额外解释文字。\n\n" +
             attempts[1].prompt,
         };
       }

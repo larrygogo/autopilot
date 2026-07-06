@@ -1,13 +1,13 @@
 import { test, expect } from "bun:test";
 import { statusToStep, stepPosition, resolveCurrentStep, STEP_ORDER, STEPS } from "./requirement-steps";
 
-test("statusToStep: 12 个 status 映射到 6 步", () => {
+test("statusToStep: 12 个 status 映射到 5 步", () => {
   expect(statusToStep("drafting")).toBe("clarify");
   expect(statusToStep("clarifying")).toBe("clarify");
   expect(statusToStep("investigating")).toBe("clarify");
   expect(statusToStep("ready")).toBe("approve");
   expect(statusToStep("awaiting_approval")).toBe("approve");
-  expect(statusToStep("queued")).toBe("queue");
+  expect(statusToStep("queued")).toBe("execute");
   expect(statusToStep("running")).toBe("execute");
   // fix_revision 属验收循环（验收 ⇄ 修复），当前步留在「验收」
   expect(statusToStep("fix_revision")).toBe("review");
@@ -21,8 +21,8 @@ test("statusToStep: 未知 status 落到 done", () => {
   expect(statusToStep("weird-unknown")).toBe("done");
 });
 
-test("STEP_ORDER 是 6 步固定顺序", () => {
-  expect(STEP_ORDER).toEqual(["clarify", "approve", "queue", "execute", "review", "done"]);
+test("STEP_ORDER 是 5 步固定顺序", () => {
+  expect(STEP_ORDER).toEqual(["clarify", "approve", "execute", "review", "done"]);
 });
 
 test("stepPosition: past/current/future", () => {
@@ -45,8 +45,8 @@ test("resolveCurrentStep: 终态时定位死亡步，✗ 画在实际失败处",
   expect(resolveCurrentStep("done", null)).toBe("done");
 });
 
-test("STEPS 含 6 项，key 顺序与 label 文案正确", () => {
-  expect(STEPS.map((s) => s.key)).toEqual(["clarify", "approve", "queue", "execute", "review", "done"]);
-  expect(STEPS.map((s) => s.label)).toEqual(["澄清", "审批", "排队", "执行", "验收", "完成"]);
+test("STEPS 含 5 项，key 顺序与 label 文案正确", () => {
+  expect(STEPS.map((s) => s.key)).toEqual(["clarify", "approve", "execute", "review", "done"]);
+  expect(STEPS.map((s) => s.label)).toEqual(["澄清", "审批", "执行", "验收", "完成"]);
   for (const s of STEPS) expect(s.label.trim().length).toBeGreaterThan(0);
 });

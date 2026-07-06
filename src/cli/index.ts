@@ -4,6 +4,8 @@ import { join, sep } from "path";
 import { buildConfigTemplate } from "./config-template";
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
+import { isStandaloneBinary } from "../core/runtime-env";
+import { daemonSpawnPlan } from "./spawn-plan";
 import { notificationIntentToLabel } from "../client/notification-intent";
 import { localizeLogLine } from "../core/logger";
 import { initDb, closeDb } from "../core/db";
@@ -31,6 +33,7 @@ import { loadLifecycleConfig, saveLifecycleAgent } from "../core/config";
 import { registerRequirementCommands } from "./requirements-cli";
 import { registerProjectCommands } from "./project";
 import { registerWorkspaceCommands } from "./workspace";
+import { registerSelfhostedCommands } from "./selfhosted";
 import { runChecks as runDoctorChecks, hasTaskStartBlocker } from "../core/doctor";
 import {
   readPid,
@@ -67,8 +70,8 @@ program
  *   3. DEFAULT_PORT 兜底
  *
  * 之前 commander 永远把 String(DEFAULT_PORT) 注入 opts.port → opts.port
- * 永远 truthy → readListenInfo 永远走不到。客户改 config.yaml.daemon.port
- * = 16180 后跑 daemon status / tui / dashboard 都连 6180 → 错的 daemon。
+ * 永远 truthy → readListenInfo 永远走不到。客户改 config.json.daemon.port
+ * = 16180 后跑 daemon status / dashboard 都连 6180 → 错的 daemon。
  */
 function resolvePort(opts?: { port?: string }): number {
   const explicitPort =
@@ -100,13 +103,24 @@ const daemon = program.command("daemon").description("daemon 生命周期管理"
 
 daemon
   .command("run")
-  .description("前台启动 daemon（缺省时监听地址由 config.yaml 的 daemon 段决定）")
+  .description("前台启动 daemon（缺省时监听地址由 config.json 的 daemon 段决定）")
   .option("-p, --port <port>", "端口")
   .option("-H, --host <host>", "主机")
   .option("--insecure-no-auth", "明知风险：对外暴露且不设鉴权时仍然启动")
-  .action(async (opts: { port?: string; host?: string; insecureNoAuth?: boolean }) => {
+  .option("--supervise", "以 supervisor 模式运行（崩溃自动重启 daemon；编译单文件后台启动用）")
+  .action(async (opts: { port?: string; host?: string; insecureNoAuth?: boolean; supervise?: boolean }) => {
+    // 编译单文件模式：daemon start --supervise 会重入 `autopilot.exe daemon run --supervise`
+    // 走此分支启动 supervisor，而不是 spawn supervisor.ts（编译版无 .ts 文件）
+    if (opts.supervise) {
+      const { runSupervisor } = await import("../daemon/supervisor");
+      await runSupervisor({
+        host: opts.host,
+        port: opts.port ? parseInt(opts.port, 10) : undefined,
+      });
+      return;
+    }
     const { startDaemon } = await import("../daemon/index");
-    // 不给 CLI 默认值：显式参数 > env > config.yaml > 内置默认 的优先级链由
+    // 不给 CLI 默认值：显式参数 > env > config.json > 内置默认 的优先级链由
     // startDaemon 统一裁决；CLI 默认 127.0.0.1 会掩盖 config 的 host 配置，
     // 导致 daemon run 与 daemon start 监听地址不一致（2026-06-10 事故排查假象）
     await startDaemon({
@@ -122,7 +136,7 @@ daemon
 
 daemon
   .command("supervise")
-  .description("前台启动 supervisor（崩溃自动重启 daemon；缺省监听地址由 config.yaml 决定）")
+  .description("前台启动 supervisor（崩溃自动重启 daemon；缺省监听地址由 config.json 决定）")
   .option("-p, --port <port>", "端口")
   .option("-H, --host <host>", "主机")
   .action(async (opts: { port?: string; host?: string }) => {
@@ -135,7 +149,7 @@ daemon
 
 daemon
   .command("start")
-  .description("后台启动 daemon（监听地址由 ~/.autopilot/config.yaml 的 daemon 段决定）")
+  .description("后台启动 daemon（监听地址由 ~/.autopilot/config.json 的 daemon 段决定）")
   .option("--no-supervise", "不带 supervisor，直接跑 daemon（崩了不重启）")
   .action(async (opts: { supervise: boolean }) => {
     if (isDaemonRunning() || isSupervisorRunning()) {
@@ -297,13 +311,15 @@ async function stopDaemonProcess(): Promise<boolean> {
  * 后台启动 daemon / supervisor 子进程，并等待其在 PID 文件中登记。
  *
  * 跨平台 detach 策略：
- * - Windows: `cmd /c start /b bun run <path>` —— start 派生进程后 cmd 立即退出，
- *   子进程脱离 CLI 的 Job 对象。Bun runtime 下 node:child_process 的 detached:true
- *   不可靠（CLI 仍 hold 住子进程），Bun.spawn 也无 detached 选项。
- *   两个易踩坑：
+ * - Windows 编译版（isStandaloneBinary）：plan.cmd 是标准 PE .exe，nodeSpawn detached 可靠；
+ *   数组传参处理含空格的 execPath（如 Program Files/autopilot.exe）无需额外引号。
+ * - Windows dev 模式：plan.cmd="bun"，Bun runtime 下 nodeSpawn detached 不可靠
+ *   （CLI 仍 hold 住子进程），Bun.spawn 也无 detached 选项。
+ *   沿用 `cmd /c start /b bun run <script.ts>`——start 派生后 cmd 立即退出，子进程
+ *   脱离 CLI 的 Job 对象。两个易踩坑：
  *     1) cmd /c 后必须接单个完整命令字符串，不能拆多 args；
  *     2) 不要给 start 加 `""` 标题占位 + 引号包裹绝对路径，会触发 "Access denied"。
- *   scriptPath 是工程内路径，含空格场景未支持，提前报错让用户改用前台启动。
+ *   脚本路径含空格时提前报错让用户改用前台启动（dev 工程目录通常不含空格）。
  * - POSIX: 标准 node:child_process.spawn + detached:true + stdio:"ignore" + unref()。
  */
 /**
@@ -385,28 +401,41 @@ async function startDaemonProcess(supervise: boolean): Promise<number | null> {
     }
   } catch { /* 配置加载失败时让 daemon 自己处理 */ }
 
-  const scriptPath = supervise
-    ? join(import.meta.dir, "../daemon/supervisor.ts")
-    : join(import.meta.dir, "../daemon/index.ts");
+  const plan = daemonSpawnPlan({
+    standalone: isStandaloneBinary(),
+    supervise,
+    execPath: process.execPath,
+    scriptDir: import.meta.dir,
+  });
 
   if (process.platform === "win32") {
-    if (/\s/.test(scriptPath)) {
-      console.error(
-        `错误：daemon 脚本路径含空格（${scriptPath}），daemon start 暂不支持此场景，` +
-          `请用 \`autopilot daemon run\` 前台启动。`,
-      );
-      return null;
+    if (isStandaloneBinary()) {
+      // 编译版：plan.cmd 是标准 PE .exe（process.execPath），不受 Bun event loop 约束，
+      // nodeSpawn detached 可靠；数组传参处理含空格的 execPath（如 Program Files/...）。
+      const child = nodeSpawn(plan.cmd, plan.args, {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.unref();
+    } else {
+      // dev 模式：plan.cmd="bun"，Bun runtime 下 nodeSpawn detached 不可靠
+      // （CLI 仍 hold 住子进程）。沿用 cmd /c start /b 机制让 cmd 派生后立即退出。
+      // 注意：start 对含空格路径需引号、但引号+start 有 "Access denied" 坑；
+      // dev 模式脚本在工程目录内，含空格时提前报错让用户用前台 daemon run。
+      const scriptArg = plan.args.find((a) => a.endsWith(".ts")) ?? "";
+      if (/\s/.test(scriptArg)) {
+        console.error(
+          `错误：daemon 脚本路径含空格（${scriptArg}），daemon start 暂不支持此场景，请用 \`autopilot daemon run\` 前台启动。`,
+        );
+        return null;
+      }
+      const cmdStr = `start /b ${plan.cmd} ${plan.args.join(" ")}`;
+      const child = nodeSpawn("cmd.exe", ["/c", cmdStr], { stdio: "ignore", windowsHide: true });
+      child.unref();
     }
-    // 关键：cmd /c 后必须接单个完整命令字符串；不要用 "" 标题占位 + 引号包裹路径
-    // （会触发 cmd 的 "Access denied"）。Bun.spawn 在此场景下不可靠，必须用 nodeSpawn。
-    const cmdStr = `start /b bun run ${scriptPath}`;
-    const child = nodeSpawn("cmd.exe", ["/c", cmdStr], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    child.unref();
   } else {
-    const child = nodeSpawn("bun", ["run", scriptPath], {
+    const child = nodeSpawn(plan.cmd, plan.args, {
       detached: true,
       stdio: "ignore",
     });
@@ -426,7 +455,7 @@ async function startDaemonProcess(supervise: boolean): Promise<number | null> {
 
 daemon
   .command("restart")
-  .description("重启 daemon（应用 ~/.autopilot/config.yaml 的最新 daemon 配置）")
+  .description("重启 daemon（应用 ~/.autopilot/config.json 的最新 daemon 配置）")
   .option("--no-supervise", "不带 supervisor 重启")
   .action(async (opts: { supervise: boolean }) => {
     const wasRunning = isDaemonRunning() || isSupervisorRunning();
@@ -847,6 +876,7 @@ registerWorkflowCommands(program, {
 
 registerConfigCommands(program);
 registerRequirementCommands(program);
+registerSelfhostedCommands(program);
 registerProjectCommands(program);
 registerWorkspaceCommands(program);
 
@@ -1001,25 +1031,6 @@ program
       if (sessionId) console.log(`\n（session 已保存：${sessionId}）`);
       process.exit(0);
     });
-  });
-
-// ──────────────────────────────────────────────
-// tui — 终端 UI
-// ──────────────────────────────────────────────
-
-program
-  .command("tui")
-  .description("启动终端 UI")
-  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (opts: { port: string }) => {
-    try {
-      const { startTui } = await import("../tui/index");
-      startTui({ port: resolvePort(opts) });
-    } catch (e: unknown) {
-      console.error("错误：TUI 模块未安装。请运行 `bun install` 安装依赖。");
-      console.error(e instanceof Error ? e.message : String(e));
-      process.exit(1);
-    }
   });
 
 // ──────────────────────────────────────────────
@@ -1583,7 +1594,11 @@ program
       console.log(`已初始化数据库：${join(AUTOPILOT_HOME, "runtime", "workflow.db")}`);
     }
 
-    const cfgPath = join(AUTOPILOT_HOME, "config.yaml");
+    // 自动迁移 config.yaml → config.json（存量用户升级路径）
+    const { ensureJsonConfig } = await import("../core/config");
+    ensureJsonConfig();
+
+    const cfgPath = join(AUTOPILOT_HOME, "config.json");
     if (!existsSync(cfgPath)) {
       writeFileSync(cfgPath, buildConfigTemplate(), "utf-8");
       console.log(`已生成配置模板：${cfgPath}`);
@@ -1662,14 +1677,79 @@ migrateCmd
 // 启动
 // ──────────────────────────────────────────────
 
-// 短命令跑完后强制退出（WS RPC 连接保活 event loop 会阻塞自然 exit）。
-// long-running 命令（daemon run / daemon serve）通过 setInterval / signal 保活，不受影响。
-program.parseAsync(process.argv).then(() => {
-  // 给 ws 一个 50ms 的窗口 flush 缓冲（unref 让计时器自身不阻塞 exit）
-  const t = setTimeout(() => process.exit(0), 50);
-  // Bun Timer 兼容 Node Timer 的 unref（动态访问避开类型分歧）
-  (t as { unref?: () => void }).unref?.();
-}).catch((err: unknown) => {
-  console.error("CLI 错误：", err);
-  process.exit(1);
-});
+// 双击启动（Explorer 启动、无子命令）：启动服务 + 打开 Web 控制台，而非打印 help 一闪而过。
+// 命令行调用（有子命令，或终端里敲 autopilot）走正常 CLI 分支。
+// 注意：不能用 process.stdout.isTTY 判双击——Windows 双击的 console 窗口里 isTTY 常为 false，
+// 而终端里敲命令 isTTY 为 true，刚好相反。可靠信号是父进程：双击=explorer.exe、命令行=shell。
+function isDoubleClickLaunch(): boolean {
+  // 编译版 argv=[bun, "B:/~BUN/root/autopilot.exe", ...用户参数]、dev argv=[bun, script, ...]——
+  // 两者前两项都是 runtime，用户参数从 index 2 起。有子命令 = 命令行调用，排除。
+  const userArgs = process.argv.slice(2);
+  if (userArgs.length > 0) return false;
+  if (process.env.CI) return false;
+  // 无子命令：靠父进程区分「双击（explorer 启动）」vs「终端里敲 autopilot（cmd/powershell/bash）」。
+  // 注意：不能用 isTTY 判——双击 console 与终端里 isTTY 都可能为 true，无区分度；父进程才可靠。
+  if (process.platform !== "win32") return false; // 双击裸二进制主要是 Windows 场景
+  try {
+    const r = nodeSpawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `(Get-CimInstance Win32_Process -Filter "ProcessId=${process.ppid}").Name`,
+      ],
+      { encoding: "utf-8", windowsHide: true },
+    );
+    return (r.stdout ?? "").trim().toLowerCase().includes("explorer");
+  } catch {
+    return false;
+  }
+}
+
+if (isDoubleClickLaunch()) {
+  const url = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
+  console.log("");
+  console.log("  autopilot —— 多阶段任务编排引擎");
+  console.log("");
+  console.log(`  正在启动服务，Web 控制台将自动打开：${url}`);
+  console.log("  · 本机访问免登录（loopback 豁免鉴权）");
+  console.log("  · 关闭此窗口即停止服务");
+  console.log("  · 命令行用法：autopilot --help");
+  console.log("");
+  // 延迟拉起浏览器，给 daemon 一点 ready 时间（本机 loopback 访问免 token）。unref 不阻塞 exit。
+  const openTimer = setTimeout(() => {
+    const platform = process.platform;
+    const cmd: string[] =
+      platform === "darwin" ? ["open", url]
+      : platform === "win32" ? ["cmd", "/c", "start", "", url]
+      : ["xdg-open", url];
+    try {
+      Bun.spawn(cmd, { stdio: ["ignore", "ignore", "ignore"] });
+    } catch {
+      /* 打开浏览器失败：用户手动访问上面的 URL 即可 */
+    }
+  }, 2500);
+  (openTimer as { unref?: () => void }).unref?.();
+  try {
+    const { startDaemon } = await import("../daemon/index");
+    await startDaemon({}); // 前台长驻（默认 127.0.0.1），console 窗口保持，不再一闪而过
+  } catch (e: unknown) {
+    console.error(`\n启动失败：${e instanceof Error ? e.message : String(e)}`);
+    console.error("服务可能已在运行——直接访问上面的 URL，或用 `autopilot daemon stop` 停止后重试。");
+    prompt("按 Enter 退出…"); // 别让错误窗口一闪而过
+    process.exit(1);
+  }
+} else {
+  // 短命令跑完后强制退出（WS RPC 连接保活 event loop 会阻塞自然 exit）。
+  // long-running 命令（daemon run / daemon serve）通过 setInterval / signal 保活，不受影响。
+  program.parseAsync(process.argv).then(() => {
+    // 给 ws 一个 50ms 的窗口 flush 缓冲（unref 让计时器自身不阻塞 exit）
+    const t = setTimeout(() => process.exit(0), 50);
+    // Bun Timer 兼容 Node Timer 的 unref（动态访问避开类型分歧）
+    (t as { unref?: () => void }).unref?.();
+  }).catch((err: unknown) => {
+    console.error("CLI 错误：", err);
+    process.exit(1);
+  });
+}

@@ -72,7 +72,10 @@ async function main(): Promise<void> {
   mkdirSync(tmpHome, { recursive: true });
   const r1 = runCli(["init"]);
   assertContains(r1.stdout, "应用", "输出含'应用 N 条迁移'（bug 19 fix）");
-  assertContains(r1.stdout, "默认工作流", "输出含'装入默认工作流'（bug 8 fix）");
+  // 迁移 049 已把 dev/ad-hoc 种成 template（source=db），init 的 seedTemplateWorkflow 便输出
+  // 「dev 工作流已存在，保留」而非「已装入」——两者都表默认工作流就绪。断言 init 处理到 dev，
+  // 不锁死易变的「装入」文案；真正就绪由下方「workflows 表含 dev/ad-hoc 行」本质验证（bug 8 fix）。
+  assertContains(r1.stdout, "dev", "输出提及默认工作流 dev（已装入或已存在）");
 
   // ────────────────────────────────────────────────
   step("验数据库表完整 —— schema_version + 5 个核心业务表");
@@ -112,6 +115,19 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     console.log(`  ✓ schedules 表已移除（migration 035）`);
+
+    // 本质验证：默认工作流 dev/ad-hoc 真正种入 workflows 表（不依赖 init 输出文案）。
+    const wfNames = new Set(
+      (db.query("SELECT name FROM workflows").all() as { name: string }[]).map((w) => w.name),
+    );
+    for (const wf of ["dev", "ad-hoc"]) {
+      if (!wfNames.has(wf)) {
+        console.error(`  ✗ 默认工作流 ${wf} 未种入 workflows 表`);
+        cleanup();
+        process.exit(1);
+      }
+    }
+    console.log(`  ✓ 默认工作流 dev / ad-hoc 已在 workflows 表`);
   } finally {
     db.close();
   }
@@ -131,10 +147,19 @@ async function main(): Promise<void> {
   step("autopilot config show / path —— 不需要 daemon");
   // ────────────────────────────────────────────────
   const showR = runCli(["config", "show"]);
-  assertContains(showR.stdout, "bun run dev config doctor", "config show 输出含 doctor 引导注释");
+  // config.json 是最小合法 JSON（{}，零配置=全走内置默认；P4 后 yaml 时代的注释引导已随
+  // JSON 格式取消）。断言 config show 正常读到 config.json 且输出可解析 JSON。
+  try {
+    JSON.parse(showR.stdout.trim());
+    console.log(`  ✓ config show 输出合法 JSON`);
+  } catch {
+    console.error(`  ✗ config show 输出非合法 JSON：${showR.stdout.trim()}`);
+    cleanup();
+    process.exit(1);
+  }
   const pathR = runCli(["config", "path"]);
-  if (!pathR.stdout.trim().endsWith("config.yaml")) {
-    console.error("  ✗ config path 输出不以 config.yaml 结尾");
+  if (!pathR.stdout.trim().endsWith("config.json")) {
+    console.error("  ✗ config path 输出不以 config.json 结尾");
     cleanup();
     process.exit(1);
   }

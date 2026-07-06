@@ -21,7 +21,7 @@ import { AgentDryRunDialog } from "@/components/AgentDryRunDialog";
 // 人设与任务是同一个智能体的两面，应在一张卡里就近配置，不再拆成两个相隔的模块。
 // 卡内顺序：模型 → 角色设定 → 任务 → 高级 → 试跑（先定人设，再写任务）。
 //   - 模型 / 提供商「常驻显示」当前生效值（默认也明确亮出来，不留空隐式），放在最前；
-//     且彻底显式——defaultAgent 加载后把默认 model/provider 固化进 draft，保存即写进 yaml。
+//     且彻底显式——defaultAgent 加载后把默认 model/provider 固化进 draft，保存即写进 spec。
 //   - 角色设定（system_prompt）独立折叠，放在任务之上；
 //   - 任务（taskSlot：写提示词 / 写执行函数）由外部构建后嵌入，紧跟角色设定；
 //   - 高级（权限 / 最大轮数）折叠。
@@ -105,7 +105,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName, taskSlot }: Props
       .finally(() => setModelsLoading(false));
   }, []);
 
-  // 彻底显式：default 加载后，phase 没显式写 model/provider 的，固化默认进 draft（保存即写 yaml）。
+  // 彻底显式：default 加载后，phase 没显式写 model/provider 的，固化默认进 draft（保存即写 spec）。
   // 用户要的「即使默认也写出来」——打开阶段就把生效值固化成显式值，不再有「留空=默认」的隐式态。
   useEffect(() => {
     if (!defaultAgent) return;
@@ -215,7 +215,7 @@ export function PhaseAgentEditor({ agent, onChange, phaseName, taskSlot }: Props
           <Textarea
             className="mt-2 min-h-[120px] resize-y text-sm leading-relaxed"
             placeholder="AI 扮演谁（如「资深架构师」）。留空就用默认。"
-            // 留空时预填默认人设（可编辑黑字）；保存时「值==默认」按留空处理，不把默认烤进 yaml
+            // 留空时预填默认人设（可编辑黑字）；保存时「值==默认」按留空处理，不把默认烤进 spec
             value={draft.system_prompt ?? defaultAgent?.system_prompt ?? ""}
             onChange={(e) => {
               const v = e.target.value;

@@ -1,5 +1,5 @@
 /**
- * 生命周期 agent 配置（lifecycle: 段）：config.yaml 读写 + clarify 生效配置字段级 merge。
+ * 生命周期 agent 配置（lifecycle: 段）：config.json 读写 + clarify 生效配置字段级 merge。
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
@@ -19,8 +19,8 @@ let sqlite: Database;
 beforeEach(() => {
   const dir = join(tmpdir(), `autopilot-lifecycle-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
-  tmpFile = join(dir, "config.yaml");
-  writeFileSync(tmpFile, "", "utf-8");
+  tmpFile = join(dir, "config.json");
+  writeFileSync(tmpFile, "{}", "utf-8");
   process.env.DEV_WORKFLOW_CONFIG = tmpFile;
   // effective.provider 现在走 resolveDefaultProvider()（读 providers 条目表）。
   // 给一个 seed 三家、无 cli_status 的 DB → 解析确定性返回 anthropic（首个 enabled），
@@ -49,12 +49,11 @@ describe("lifecycle 配置读写", () => {
   });
 
   it("保留其他段（providers 不受影响）", () => {
-    writeFileSync(tmpFile, "providers:\n  anthropic:\n    default_model: x\n", "utf-8");
+    writeFileSync(tmpFile, JSON.stringify({ providers: { anthropic: { default_model: "x" } } }, null, 2), "utf-8");
     saveLifecycleAgent("clarify", { provider: "kimi-code" });
-    const raw = require("fs").readFileSync(tmpFile, "utf-8");
-    expect(raw).toContain("providers:");
-    expect(raw).toContain("default_model: x");
-    expect(raw).toContain("lifecycle:");
+    const parsed = JSON.parse(require("fs").readFileSync(tmpFile, "utf-8"));
+    expect(parsed.providers?.anthropic?.default_model).toBe("x");
+    expect(parsed.lifecycle?.clarify?.provider).toBe("kimi-code");
   });
 });
 

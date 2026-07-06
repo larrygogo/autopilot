@@ -2,20 +2,20 @@ import { test, expect } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StepBar } from "./StepBar";
 
-test("渲染 6 个步骤标签", () => {
+test("渲染 5 个步骤标签", () => {
   const html = renderToStaticMarkup(
     <StepBar status="running" selected="execute" onSelect={() => {}} />,
   );
-  for (const label of ["澄清", "审批", "排队", "执行", "验收", "完成"]) {
+  for (const label of ["澄清", "审批", "执行", "验收", "完成"]) {
     expect(html).toContain(label);
   }
 });
 
-test("每个步骤都是可点击 button（含未到达，共 6 个）", () => {
+test("每个步骤都是可点击 button（含未到达，共 5 个）", () => {
   const html = renderToStaticMarkup(
     <StepBar status="drafting" selected="clarify" onSelect={() => {}} />,
   );
-  expect((html.match(/<button/g) || []).length).toBe(6);
+  expect((html.match(/<button/g) || []).length).toBe(5);
 });
 
 test("当前步骤之前的步骤是 done 态（success 配色）", () => {
@@ -47,9 +47,9 @@ test("cancelled 时完成步同样标红", () => {
   expect(html).toContain("font-medium text-destructive");
 });
 
-test("running 时恰好 3 个步骤为 done 态", () => {
+test("running 时恰好 2 个步骤为 done 态", () => {
   const html = renderToStaticMarkup(
     <StepBar status="running" selected="execute" onSelect={() => {}} />,
   );
-  expect((html.match(/bg-success\/15/g) || []).length).toBe(3); // 澄清/审批/排队
+  expect((html.match(/bg-success\/15/g) || []).length).toBe(2); // 澄清/审批
 });

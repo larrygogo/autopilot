@@ -70,7 +70,7 @@ const MAX_FEEDBACKS_IN_PROMPT = 5;
 /**
  * 修复 agent 的【代码兜底缺省】（信任级同 dev develop 阶段；模型回退 provider 默认）。
  * system_prompt 里「修小而准，不顺手重构」是一种修复取向——属用户该掌控的领域决策，
- * 故下面 effectiveFixConfig 让 config.yaml `lifecycle.fix` 字段级覆盖它（与 clarify 同构）。
+ * 故下面 effectiveFixConfig 让 config.json `lifecycle.fix` 字段级覆盖它（与 clarify 同构）。
  */
 const FIXER_DEFAULTS: InlineAgentConfig = {
   // provider 不写死：缺省走 resolveDefaultProvider()（按用户实际配置派生），见 effectiveFixConfig
@@ -83,10 +83,10 @@ const FIXER_DEFAULTS: InlineAgentConfig = {
 };
 
 /**
- * 修复 agent 的生效配置 = FIXER_DEFAULTS ← config.yaml `lifecycle.fix`（字段级 merge）。
+ * 修复 agent 的生效配置 = FIXER_DEFAULTS ← config.json `lifecycle.fix`（字段级 merge）。
  * 与 effectiveClarifyConfig 同构（返回 {effective, userConfig, defaults}，供 lifecycle RPC 复用）：
  * 用户写的字段（含 system_prompt / provider / model / max_turns / permission_mode）覆盖同名缺省，
- * 未写的走兜底。改 config.yaml 后 daemon 重启生效。
+ * 未写的走兜底。改 config.json 后 daemon 重启生效。
  */
 export function effectiveFixConfig(): {
   effective: InlineAgentConfig;

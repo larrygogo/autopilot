@@ -8,6 +8,7 @@
 // ──────────────────────────────────────────────
 import { readdirSync, existsSync } from "fs";
 import { join } from "path";
+import { execSync } from "child_process";
 
 const dir = join(import.meta.dir, "../src/migrations");
 if (!existsSync(dir)) {
@@ -15,7 +16,8 @@ if (!existsSync(dir)) {
   process.exit(1);
 }
 
-const all = readdirSync(dir).filter((f) => f.endsWith(".ts"));
+// 排除 codegen 生成的注册表文件（下划线前缀），只扫描真正的迁移文件
+const all = readdirSync(dir).filter((f) => f.endsWith(".ts") && !f.startsWith("_"));
 const valid = all.filter((f) => /^\d{3}-[\w-]+\.ts$/.test(f)).sort();
 let bad = false;
 
@@ -45,4 +47,22 @@ if (bad) {
   console.error("迁移检查未通过。");
   process.exit(1);
 }
-console.log(`✓ ${valid.length} 条迁移：编号无撞号、命名规范。`);
+
+// ③ 生成物与磁盘一致性：重跑 codegen 后 git 无 diff
+execSync("bun run scripts/gen-migrations-index.ts", { stdio: "ignore" });
+const diff = execSync("git status --porcelain src/migrations/_generated-index.ts", { encoding: "utf-8" }).trim();
+if (diff) {
+  console.error("✗ src/migrations/_generated-index.ts 与磁盘迁移文件不一致。请跑 `bun run gen:migrations` 并提交。");
+  process.exit(1);
+}
+
+// ④ examples 常量生成物一致性：重跑 gen:examples 后 git 无 diff
+execSync("bun run scripts/gen-examples-index.ts", { stdio: "ignore" });
+const examplesDiff = execSync("git status --porcelain src/generated/_examples.ts", { encoding: "utf-8" }).trim();
+if (examplesDiff) {
+  console.error("✗ src/generated/_examples.ts 与磁盘 examples/workflows/ 不一致。请跑 `bun run gen:examples` 并提交。");
+  process.exit(1);
+}
+
+console.log(`✓ ${valid.length} 条迁移：编号无撞号、命名规范、注册表与磁盘一致。`);
+console.log(`✓ examples 常量与磁盘 examples/workflows/ 一致。`);

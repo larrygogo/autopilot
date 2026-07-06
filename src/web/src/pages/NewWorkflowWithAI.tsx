@@ -2,7 +2,6 @@ import { useMemo, useRef, useState } from "react";
 import { PageShell } from "@/components/pro";
 import { useNavigate } from "react-router-dom";
 import { Loader2, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
-import { parse as parseYaml } from "yaml";
 import { api, type AuthoredWorkflow } from "@/hooks/useApi";
 import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
@@ -21,27 +20,28 @@ export function NewWorkflowWithAI() {
   const [followup, setFollowup] = useState("");
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
-  /** YAML/TS 文本编辑折叠区，默认收起；给"我要看 yaml 原文"的用户出口 */
+  /** spec JSON 文本编辑折叠区，默认收起；给"我要看 spec 原文"的用户出口 */
   const [editorOpen, setEditorOpen] = useState(false);
   /** 编辑器 anchor — scroll target */
   const editorAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  // 把 AI 生成的 yaml 解析成 phases 数组，喂给 PhasePipeline。
+  // 把 AI 生成的 spec JSON 解析成 phases 数组，喂给 PhasePipeline。
   // 解析失败时 phases 为空，UI 会显示空态而不是崩溃。
   const parsedPhases = useMemo<unknown[]>(() => {
-    if (!authored?.yaml) return [];
+    if (!authored?.spec_json) return [];
     try {
-      const doc = parseYaml(authored.yaml) as { phases?: unknown[] } | null;
+      const doc = JSON.parse(authored.spec_json) as { phases?: unknown[] } | null;
       return Array.isArray(doc?.phases) ? doc!.phases : [];
     } catch {
       return [];
     }
-  }, [authored?.yaml]);
+  }, [authored?.spec_json]);
 
-  // 识别后端 fallback（AI 调用挂了、返回非法 JSON 等）— 此时 yaml/ts 是占位 stub，
+  // 识别后端 fallback（AI 调用挂了、返回非法 JSON 等）— 此时 spec_json 是占位 stub，
   // 用户不应该能保存这种垃圾工作流。一律走"重新生成"或"追问"路径。
+  // 后端 fallback 的 warnings 统一以「AI 生成失败」开头（见 workflow-author.ts fallback()）。
   const isFallback = useMemo(
-    () => !!authored?.warnings?.some((w) => w.startsWith("AI 生成失败") || w.startsWith("缺 yaml") || w.startsWith("AI 返回")),
+    () => !!authored?.warnings?.some((w) => w.startsWith("AI 生成失败")),
     [authored?.warnings],
   );
 
@@ -54,7 +54,7 @@ export function NewWorkflowWithAI() {
     try {
       const result = await api.authorWorkflow({
         description: prompt.trim(),
-        prior_yaml: includePrior ? authored?.yaml : undefined,
+        prior_spec: includePrior ? authored?.spec_json : undefined,
       });
       setAuthored(result);
       if (!editName) setEditName(result.name);
@@ -84,7 +84,7 @@ export function NewWorkflowWithAI() {
       const created = editName.trim();
       await api.saveAuthoredWorkflow({
         name: created,
-        yaml: authored.yaml,
+        spec_json: authored.spec_json,
       });
       toast.success(`已创建工作流 ${created}，进入编辑`);
       // 落地后直接进详情页，用全功能编辑器补 agent / prompt / 驳回 / ts 等字段
@@ -180,14 +180,14 @@ export function NewWorkflowWithAI() {
                 </>
               ) : (
                 <p className="border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-                  yaml 解析失败或没有 phases；请检查警告区，或追问让 AI 调整。
+                  JSON 解析失败或没有 phases；请检查警告区，或追问让 AI 调整。
                 </p>
               )}
             </div>
           </Card>
 
-          {/* YAML 直接编辑（高级）— 给"我要精确改一个字段，不想 AI 再跑一轮"的用户出口；
-              改完 PhasePipeline 会从 authored.yaml 实时 re-parse。工作流是纯声明式，无 ts。 */}
+          {/* spec JSON 直接编辑（高级）— 给"我要精确改一个字段，不想 AI 再跑一轮"的用户出口；
+              改完 PhasePipeline 会从 authored.spec_json 实时 re-parse。工作流是纯声明式，无 ts。 */}
           <Card className="mb-4" ref={editorAnchorRef as unknown as React.RefObject<HTMLDivElement>}>
             <button
               type="button"
@@ -197,7 +197,7 @@ export function NewWorkflowWithAI() {
             >
               {editorOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
               <span className="font-mono text-[10px] text-muted-foreground">
-                直接编辑 YAML · 高级
+                直接编辑 JSON · 高级
               </span>
               <span className="ml-2 font-mono text-[10px] text-muted-foreground/70">
                 改完实时刷新上方预览
@@ -206,14 +206,14 @@ export function NewWorkflowWithAI() {
             {editorOpen && (
               <div className="space-y-3 p-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="edit-yaml" className="font-mono text-[10px] ">
-                    workflow.yaml
+                  <Label htmlFor="edit-spec" className="font-mono text-[10px] ">
+                    workflow spec (JSON)
                   </Label>
                   <Textarea
-                    id="edit-yaml"
-                    value={authored.yaml}
-                    onChange={(e) => setAuthored({ ...authored, yaml: e.target.value })}
-                    rows={Math.min(20, Math.max(8, authored.yaml.split("\n").length + 1))}
+                    id="edit-spec"
+                    value={authored.spec_json}
+                    onChange={(e) => setAuthored({ ...authored, spec_json: e.target.value })}
+                    rows={Math.min(20, Math.max(8, authored.spec_json.split("\n").length + 1))}
                     className="font-mono text-xs"
                     disabled={saving || generating}
                   />

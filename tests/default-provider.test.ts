@@ -27,8 +27,8 @@ let cfgDir: string;
 beforeEach(() => {
   cfgDir = join(tmpdir(), `autopilot-defprov-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(cfgDir, { recursive: true });
-  writeFileSync(join(cfgDir, "config.yaml"), "", "utf-8");
-  process.env.DEV_WORKFLOW_CONFIG = join(cfgDir, "config.yaml");
+  writeFileSync(join(cfgDir, "config.json"), "{}", "utf-8");
+  process.env.DEV_WORKFLOW_CONFIG = join(cfgDir, "config.json");
   sqlite = new Database(":memory:");
   _setDbForTest(sqlite);
   initDb();

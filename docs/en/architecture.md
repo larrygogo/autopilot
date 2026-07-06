@@ -14,7 +14,6 @@ It splits a "long-running development task" (design → review → code → code
 graph TB
     subgraph Clients["Client layer (thin clients)"]
       CLI["CLI<br/>autopilot task / workflow / daemon"]
-      TUI["TUI<br/>ink + React terminal UI"]
       WEB["Web UI<br/>React + Vite SPA"]
     end
 
@@ -61,7 +60,7 @@ graph TB
 
 **Two levels of decoupling**:
 
-1. **Daemon vs clients** — the core engine runs only in the daemon process; CLI/TUI/Web are all HTTP+WS clients, with no notion of "only this UI can do that"
+1. **Daemon vs clients** — the core engine runs only in the daemon process; CLI/Web are all HTTP+WS clients, with no notion of "only this UI can do that"
 2. **Core engine vs workflows** — `src/core/` contains no business knowledge; workflows are installed as directories under `AUTOPILOT_HOME/workflows/<name>/` (YAML + TS)
 
 ## Process model
@@ -77,7 +76,6 @@ autopilot daemon start
             └─ PR Poller    periodically polls GitHub PR review/merge
 
 autopilot task start <req-id>  ← CLI is a thin client, calls daemon over HTTP
-autopilot tui                   ← terminal UI, connects to daemon over WebSocket
 autopilot dashboard             ← browser opens the SPA served by the daemon
 ```
 

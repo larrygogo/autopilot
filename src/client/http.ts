@@ -152,12 +152,23 @@ export class HttpClient {
     return this.call("workflows.graph", { name });
   }
 
-  async getWorkflowYaml(name: string): Promise<{ yaml: string }> {
-    return this.call("workflows.getYaml", { name });
+  async getWorkflowSpec(name: string): Promise<{ spec: string }> {
+    return this.call("workflows.getSpec", { name });
   }
 
+  /** @deprecated P2：改用 getWorkflowSpec */
+  async getWorkflowYaml(name: string): Promise<{ yaml: string }> {
+    const r = await this.getWorkflowSpec(name);
+    return { yaml: r.spec };
+  }
+
+  async saveWorkflowSpec(name: string, spec: string): Promise<{ ok: boolean }> {
+    return this.call("workflows.saveSpec", { name, spec });
+  }
+
+  /** @deprecated P2：改用 saveWorkflowSpec */
   async saveWorkflowYaml(name: string, yaml: string): Promise<{ ok: boolean }> {
-    return this.call("workflows.saveYaml", { name, yaml });
+    return this.saveWorkflowSpec(name, yaml);
   }
 
   /**

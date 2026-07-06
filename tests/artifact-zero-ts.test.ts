@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { join } from "path";
 import { existsSync } from "fs";
-import { loadYamlWorkflow, type PhaseDefinition } from "../src/core/workflow/registry";
+import { loadJsonWorkflow, type PhaseDefinition } from "../src/core/workflow/registry";
 
 // 验证 artifact 工作流「零 ts」（P1）：produce=prompt-runner、deliver=框架内置交付器（deliver:artifacts），
 // 无 workflow.ts、无 setup_func。delivers=artifacts 声明保留。
@@ -13,7 +13,7 @@ describe("artifact 工作流：零 ts（produce prompt + deliver 框架内置）
   });
 
   it("加载成功且各 phase 绑定符合预期", async () => {
-    const wf = await loadYamlWorkflow(dir);
+    const wf = await loadJsonWorkflow(dir);
     expect(wf).not.toBeNull();
     expect((wf as unknown as Record<string, unknown>).delivers).toBe("artifacts");
     expect(wf!.setup_func).toBeUndefined();

@@ -18,11 +18,12 @@ import {
   deleteProvider,
 } from "../src/core/providers";
 
-function tmpConfig(yaml: string): string {
+function tmpConfig(content: string | Record<string, unknown>): string {
   const dir = join(tmpdir(), `autopilot-prov-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
-  const f = join(dir, "config.yaml");
-  writeFileSync(f, yaml, "utf-8");
+  const f = join(dir, "config.json");
+  const text = typeof content === "string" ? (content || "{}") : JSON.stringify(content, null, 2);
+  writeFileSync(f, text, "utf-8");
   return f;
 }
 
@@ -88,11 +89,12 @@ describe("providers 迁移导入（config 含 mode:api + compat）", () => {
   let cfgFile: string;
 
   beforeAll(() => {
-    cfgFile = tmpConfig(
-      "providers:\n" +
-      "  anthropic:\n    mode: api\n    default_model: claude-fable-5\n" +
-      "  deepseek:\n    base_url: https://api.deepseek.com\n",
-    );
+    cfgFile = tmpConfig({
+      providers: {
+        anthropic: { mode: "api", default_model: "claude-fable-5" },
+        deepseek: { base_url: "https://api.deepseek.com" },
+      },
+    });
     process.env.DEV_WORKFLOW_CONFIG = cfgFile;
     sqlite = new Database(":memory:");
     _setDbForTest(sqlite);

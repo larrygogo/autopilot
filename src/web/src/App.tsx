@@ -50,6 +50,7 @@ import {
   ListChecks,
   Bot,
   X,
+  Puzzle,
 } from "lucide-react";
 import { api } from "./hooks/useApi";
 
@@ -63,6 +64,9 @@ const WorkflowDetail = lazy(() => import("./pages/WorkflowDetail").then((m) => (
 const Tasks = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.Tasks })));
 const ProjectDetail = lazy(() =>
   import("./pages/ProjectDetail").then((m) => ({ default: m.ProjectDetail })),
+);
+const RequirementNew = lazy(() =>
+  import("./pages/RequirementNew").then((m) => ({ default: m.RequirementNew })),
 );
 const RequirementDetail = lazy(() =>
   import("./pages/RequirementDetail").then((m) => ({ default: m.RequirementDetail })),
@@ -106,6 +110,7 @@ const SETTINGS_NAV_GROUPS: NavGroupDef[] = [
       { path: "/settings/lifecycle", label: "生命周期 agent", icon: Bot },
       { path: "/settings/scheduler", label: "任务调度", icon: Gauge },
       { path: "/settings/network", label: "网络访问", icon: Globe },
+      { path: "/settings/extensions", label: "扩展", icon: Puzzle },
       { path: "/settings/daemon", label: "Daemon", icon: Server },
     ],
   },
@@ -151,6 +156,7 @@ function titleForPath(pathname: string): string {
   if (pathname.startsWith("/providers")) return "提供商";
   if (pathname.startsWith("/agents")) return "智能体";
   if (pathname.startsWith("/settings")) return "设置";
+  if (pathname === "/requirements/new") return "新建需求";
   if (pathname.startsWith("/requirements/")) return "需求详情";
   return "";
 }
@@ -419,6 +425,8 @@ function AppInner() {
                 <Route path="/tasks/:id" element={<TaskDetailRoute />} />
                 <Route path="/projects/:id" element={<ProjectDetailRoute />} />
                 <Route path="/projects/:id/:section" element={<ProjectDetailRoute />} />
+                {/* 深链预填新建需求：必须在 /requirements/:id 之前，防止 "new" 被当作 reqId */}
+                <Route path="/requirements/new" element={<RequirementNew />} />
                 {/* RESTful 深链：/:id（当前阶段）·/:id/:step（生命周期阶段）·/:id/:step/:runId
                     （执行阶段具体 run）。三条都挂 RequirementDetail，由其按 useParams 取 step/runId。 */}
                 <Route path="/requirements/:id" element={<RequirementDetail />} />
@@ -606,7 +614,7 @@ function TaskDetailRoute() {
   return <Navigate to={target} replace />;
 }
 
-const SETTINGS_SECTIONS = new Set(["providers", "lifecycle", "scheduler", "network", "daemon"]);
+const SETTINGS_SECTIONS = new Set(["providers", "lifecycle", "scheduler", "network", "extensions", "daemon"]);
 
 function SettingsRoute() {
   const { section } = useParams<{ section?: string }>();

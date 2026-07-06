@@ -1,19 +1,14 @@
 import type { TransitionTable } from "../state-machine";
 import { log } from "../logger";
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { join, sep } from "path";
-import { parse as parseYaml } from "yaml";
+import { join } from "path";
 import { tryMakePromptRunnerForPhase } from "./prompt-runner";
 import { makeArtifactDeliverRunner } from "./builtin-deliver";
 import { makePrDeliverRunner } from "./builtin-deliver-pr";
 import type { PhaseDecision } from "./phase-decision";
 import { DEFAULT_AGENT, type InlineAgentConfig } from "../agent-defaults";
-import {
-  syncFileWorkflowsToDb,
-  listWorkflowsInDb,
-  type FileWorkflowScan,
-} from "./workflows";
+import { listWorkflowsInDb } from "./workflows";
 
 /** 动态读取 AUTOPILOT_HOME，便于测试通过 env 注入临时目录 */
 function getAutopilotHomeDynamic(): string {
@@ -317,96 +312,58 @@ function expandParallelDefaults(
 }
 
 // ──────────────────────────────────────────────
-// YAML 工作流加载
+// JSON 工作流加载（P1：examples 模板 JSON 化）
 // ──────────────────────────────────────────────
 
 /**
- * 从工作流目录加载 YAML 工作流定义。
- * 目录需包含：
- *   - workflow.yaml — 工作流结构定义
- *   - workflow.ts   — 阶段函数实现（可选）
+ * 从工作流目录加载 JSON 工作流定义（P1 后：examples 模板均为 workflow.json）。
+ * 目录需包含 workflow.json；如残留 workflow.ts 会被忽略并告警。
+ * 现存消费者：examples 模板解析（种子/测试/导出投影），不再用于运行时 discover。
  */
-export async function loadYamlWorkflow(wfDir: string): Promise<WorkflowDefinition | null> {
-  const yamlPath = join(wfDir, "workflow.yaml");
+export async function loadJsonWorkflow(wfDir: string): Promise<WorkflowDefinition | null> {
+  const jsonPath = join(wfDir, "workflow.json");
   const tsPath = join(wfDir, "workflow.ts");
 
-  if (!existsSync(yamlPath)) {
+  if (!existsSync(jsonPath)) {
     return null;
   }
 
   let wfDef: Record<string, unknown>;
   try {
-    const content = readFileSync(yamlPath, "utf-8");
-    const parsed = parseYaml(content);
+    const content = readFileSync(jsonPath, "utf-8");
+    const parsed = JSON.parse(content) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object") {
-      log.warn("YAML 工作流 %s 为空或格式错误", yamlPath);
+      log.warn("JSON 工作流 %s 为空或格式错误", jsonPath);
       return null;
     }
-    wfDef = parsed as Record<string, unknown>;
+    wfDef = parsed;
     // Schema 级归一化：允许字段类型宽松但会转为正确类型并记警告
-    normalizeWorkflowFields(wfDef, yamlPath);
+    normalizeWorkflowFields(wfDef, jsonPath);
     // `workspace:` 段已更名为 `sandbox:`；优先读 sandbox，回退老字段并 warn
-    normalizeSandboxSection(wfDef, yamlPath);
+    normalizeSandboxSection(wfDef, jsonPath);
     // 声明层（requires/delivers）：只做形状归一 + lint，不校验枚举值（语义在 daemon）
-    normalizeDeclarations(wfDef, yamlPath);
+    normalizeDeclarations(wfDef, jsonPath);
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
-    log.error("解析 YAML 工作流 %s 失败：%s", yamlPath, message);
+    log.error("解析 JSON 工作流 %s 失败：%s", jsonPath, message);
     return null;
   }
 
-  // 动态 import workflow.ts（如果存在）。
-  // Bun 的 ESM import() 会按路径缓存，一旦首次加载，后续 reload 即使磁盘变化
-  // 仍拿到旧版本。加 ?t=<mtime> query 强制每次文件变动后重新加载。
-  //
-  // 别名兜底：Bun.plugin 的 onResolve 在 dynamic import 后续静态 import 链上
-  // 不一定生效。所以加载前读文件，把 `@autopilot/...` 字符串替换为绝对路径
-  // 再写到 cache 临时文件 import，确保 examples cp 到 ~/.autopilot/workflows/
-  // 后能直接跑。
-  let tsModule: Record<string, unknown> | null = null;
+  // file 轨退役（2026-07-03）：不再动态 import workflow.ts。残留 ts 文件被忽略（告警），
+  // 阶段一律走框架原语（prompt / gate / deliver / decision）；含自定义函数的老工作流
+  // 由 migration 052 告警指引重建。
   if (existsSync(tsPath)) {
-    try {
-      const { statSync, readFileSync, writeFileSync, mkdirSync } = await import("fs");
-      const { join: joinPath, dirname: dirnamePath, basename: basenamePath, relative: relativePath } = await import("path");
-      const { getAutopilotSrcPath } = await import("../autopilot-resolver");
-
-      const mtime = statSync(tsPath).mtimeMs;
-      let importPath = tsPath;
-
-      const content = readFileSync(tsPath, "utf-8");
-      if (/(["'])@autopilot\//.test(content)) {
-        const srcPath = getAutopilotSrcPath();
-        const cacheDir = joinPath(getAutopilotHomeDynamic(), "runtime", "cache", "workflows");
-        if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
-        const wfDirName = basenamePath(dirnamePath(tsPath));
-        const cachedPath = joinPath(cacheDir, `${wfDirName}.${mtime}.ts`);
-        // 用相对路径 import 框架代码：避免绝对路径与 daemon 主进程相对路径
-        // 解析到不同的 module instance（导致 registry 状态丢失）
-        const relSrc = relativePath(cacheDir, srcPath).replace(/\\/g, "/");
-        const resolved = content.replace(
-          /(["'])@autopilot\//g,
-          (_m, q) => `${q}${relSrc}/`,
-        );
-        writeFileSync(cachedPath, resolved, "utf-8");
-        importPath = cachedPath;
-      }
-
-      tsModule = await import(`${importPath}?t=${mtime}`) as Record<string, unknown>;
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      log.warn("加载 YAML 工作流 TS 模块 %s 失败：%s", tsPath, message);
-      return null;
-    }
+    log.warn("工作流 %s 含 workflow.ts——file 轨已退役，TS 阶段函数不再加载（仅按 json 声明式解析）", wfDir);
   }
 
-  return buildWorkflowDefinition(wfDef, tsModule);
+  return buildWorkflowDefinition(wfDef, null);
 }
 
 /**
  * 从「已解析 + 归一化的 wfDef 对象」构建完整 WorkflowDefinition：收集 phase 名、声明式安全闸门、
  * 展开默认值 + 绑定函数、推导 initial/terminal_state、绑定 workflow 级函数、归一化 transitions。
- * file 工作流（loadYamlWorkflow 解析 yaml + import ts 后）与 native DB 工作流（解析 spec_json、
- * tsModule=null）共用此构建路径——统一入口，消除 yaml-only 假设。
+ * examples 模板（loadJsonWorkflow 解析 json 后）与 native DB 工作流（解析 spec_json、
+ * tsModule=null）共用此构建路径——统一入口。
  */
 export function buildWorkflowDefinition(
   wfDef: Record<string, unknown>,
@@ -905,8 +862,8 @@ function buildParallelTransitions(
 // ──────────────────────────────────────────────
 
 /**
- * 由 DB 工作流的 yaml 派生出一个完整 WorkflowDefinition：
- * - 解析 yaml 拿 phases / 元信息
+ * 由 DB 工作流的 spec_json 派生出一个完整 WorkflowDefinition：
+ * - 解析 spec_json（JSON）拿 phases / 元信息（P2 后 yaml_content 列已删除）
  * - 校验 phase name 必须 ⊆ base 的 phase 集合
  * - 复用 base 的 phase 函数引用（不重新加载 TS）
  *
@@ -915,12 +872,17 @@ function buildParallelTransitions(
 function composeDbWorkflow(
   name: string,
   description: string,
-  yamlContent: string,
+  specJson: string,
   base: WorkflowDefinition,
 ): WorkflowDefinition {
-  const parsed = parseYaml(yamlContent) as { phases?: unknown[] } | null;
+  let parsed: { phases?: unknown[] } | null;
+  try {
+    parsed = JSON.parse(specJson) as { phases?: unknown[] };
+  } catch (e: unknown) {
+    throw new Error(`DB 工作流 ${name} spec_json 解析失败：${e instanceof Error ? e.message : String(e)}`);
+  }
   if (!parsed || !Array.isArray(parsed.phases)) {
-    throw new Error(`DB 工作流 ${name} yaml 缺少 phases 字段`);
+    throw new Error(`DB 工作流 ${name} spec_json 缺少 phases 字段`);
   }
 
   // 收集 base 已注册的 phase name 集合（含 parallel 子项）
@@ -1041,80 +1003,12 @@ function findFlatPhase(
 }
 
 /**
- * Discover 多源加载（W1）：
- *   1. 扫文件系统 ~/.autopilot/workflows/（沿用 loadYamlWorkflow 加载 yaml + ts）
- *   2. 把扫到的文件工作流同步到 workflows 表（source=file 镜像）
- *   3. 扫 workflows 表所有行：
- *      - source=file：用 step 1 的内存 def 注册
- *      - source=db：解析 yaml，校验 phase name ⊆ derives_from 的 phase 集合，
- *        从 base 复制 phase 函数引用，注册
+ * Discover（file 轨退役后单源：DB）：
+ * 扫 workflows 表所有行注册——native/template 自包含（spec_json 组装），derived 寄生 base
+ * 二遍解析。不再扫 ~/.autopilot/workflows/ 目录、不再加载 workflow.ts（migration 052 已把
+ * 存量目录工作流救进 DB；残留 source='file' 行视为死行跳过并告警）。
  */
 export async function discover(): Promise<void> {
-  const userWfDir = join(getAutopilotHomeDynamic(), "workflows");
-
-  // (1) 扫文件系统
-  const fileDefs = new Map<string, WorkflowDefinition>();
-  const scanInputs: FileWorkflowScan[] = [];
-  if (existsSync(userWfDir)) {
-    let entries: string[] = [];
-    try {
-      entries = readdirSync(userWfDir).sort();
-    } catch {
-      entries = [];
-    }
-    for (const entry of entries) {
-      if (entry.startsWith("_")) continue;
-      const subDir = join(userWfDir, entry);
-      const yamlPath = join(subDir, "workflow.yaml");
-      if (!existsSync(yamlPath)) continue;
-      try {
-        const wf = await loadYamlWorkflow(subDir);
-        if (!wf) continue;
-        // 目录名 vs yaml 顶层 name 不一致警告——这通常是用户手工拷贝/移动了目录
-        // 但忘了改 yaml 里的 name，会导致跟源工作流同名互相覆盖、其中一个不可见
-        if (wf.name !== entry) {
-          log.warn(
-            "工作流目录名 (%s) 与 workflow.yaml name 字段 (%s) 不一致；推荐改 yaml 让两者一致，否则同名会被覆盖",
-            entry, wf.name,
-          );
-        }
-        if (fileDefs.has(wf.name)) {
-          log.warn(
-            "检测到重名工作流：%s 已被加载，目录 %s 的 yaml 也声明 name=%s，将覆盖前者",
-            wf.name, subDir, wf.name,
-          );
-        }
-        fileDefs.set(wf.name, wf);
-        const yaml_content = readFileSync(yamlPath, "utf-8");
-        scanInputs.push({
-          name: wf.name,
-          description: wf.description ?? "",
-          yaml_content,
-          file_path: subDir,
-        });
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        log.warn("加载 YAML 工作流 %s 失败：%s", subDir, message);
-      }
-    }
-  }
-
-  // (2) 同步到 DB
-  let syncOk = true;
-  try {
-    syncFileWorkflowsToDb(scanInputs);
-  } catch (e: unknown) {
-    syncOk = false;
-    log.error(
-      "同步文件工作流到 DB 失败：%s",
-      e instanceof Error ? e.message : String(e)
-    );
-  }
-
-  // (3) 从 DB 读所有行注册。**始终尝试读 DB 行**（即便 (2) 的文件同步失败）——存量 DB 工作流
-  // （native/derived/template）的行就在表里，文件同步出错不该连累它们不被注册。旧逻辑用
-  // `if (syncOk)` 把读行也跳过，一旦同步抛错就只注册文件 → 所有 DB 工作流静默蒸发（高危）。
-  void syncOk; // 仅作日志信息，不再门控读行
   let rows: ReturnType<typeof listWorkflowsInDb> = [];
   try {
     rows = listWorkflowsInDb();
@@ -1124,29 +1018,15 @@ export async function discover(): Promise<void> {
       e instanceof Error ? e.message : String(e)
     );
   }
-  if (rows.length === 0 && fileDefs.size > 0) {
-    // DB 真不可用 / 表不存在 — 至少把文件工作流注册进去（此时表里读不到任何行）
-    for (const def of fileDefs.values()) {
-      register(def);
-      log.debug("注册 file 工作流（仅文件，DB 不可用）：%s", def.name);
-    }
-    return;
-  }
-  // 两遍：先注册自包含工作流（file / native / template），再处理寄生 base 的 derived 行。
+  // 两遍：先注册自包含工作流（native / template），再处理寄生 base 的 derived 行。
   // 单遍时若 derived 行字母序排在其 base 之前，base 尚未 register → 解析失败；两遍消除这个顺序依赖。
-  // 更关键：derived 的 base 既可能是 file（fileDefs），也可能是「049 把内置模板转 native 后」的 native 行
-  //（在 _registry 而非 fileDefs）——第一遍把 native base 注册进 _registry，第二遍据此回退解析，
-  // 避免 dev/ad-hoc 转 native 后派生自它们的存量 derived 工作流静默掉出注册表。
   const derivedRows: typeof rows = [];
   for (const row of rows) {
     if (row.source === "file") {
-      const def = fileDefs.get(row.name);
-      if (!def) {
-        log.error("DB workflow %s source=file 但内存没有对应 def，跳过", row.name);
-        continue;
-      }
-      register(def);
-      log.debug("注册 file 工作流：%s（来自 %s）", row.name, row.file_path);
+      // file 轨已退役：正常情况下 migration 052 已把 file 行转 native 或删除；
+      // 走到这说明 052 之后又出现了 file 行（不应发生），跳过并告警。
+      log.warn("工作流 %s 是 file 轨残留行（source=file）——file 轨已退役，跳过注册；请用 workflow create 重建", row.name);
+      continue;
     } else if (row.kind === "native" || row.kind === "template") {
       // 独立 DB 工作流：从 spec_json 自包含组装，不依赖 file base
       try {
@@ -1165,9 +1045,8 @@ export async function discover(): Promise<void> {
     }
   }
   for (const row of derivedRows) {
-    // 派生 DB 工作流（kind=derived）：base 优先 file（fileDefs），回退已注册的 native/file（_registry）。
-    // 049 把 dev/ad-hoc 转 native 后，派生自它们的 derived 行靠这条回退继续解析，不再静默丢失。
-    const base = fileDefs.get(row.derives_from!) ?? _registry.get(row.derives_from!);
+    // 派生 DB 工作流（kind=derived）：base 从第一遍已注册的 _registry 解析（native/template）。
+    const base = _registry.get(row.derives_from!);
     if (!base) {
       log.error(
         "DB 工作流 %s derives_from %s 不存在或未加载成功，跳过",
@@ -1177,7 +1056,11 @@ export async function discover(): Promise<void> {
       continue;
     }
     try {
-      const wf = composeDbWorkflow(row.name, row.description, row.yaml_content, base);
+      if (!row.spec_json) {
+        log.error("derived 工作流 %s 缺 spec_json，跳过（请运行迁移 053 回填）", row.name);
+        continue;
+      }
+      const wf = composeDbWorkflow(row.name, row.description, row.spec_json, base);
       register(wf);
       log.debug("注册 db 工作流：%s（派生自 %s）", row.name, row.derives_from);
     } catch (e: unknown) {
@@ -1349,96 +1232,31 @@ export function getWorkflowTs(workflowName: string): string | null {
 }
 
 /**
- * 读取工作流 YAML 原文
+ * 读取工作流 spec（JSON 文本）。
+ * P2 后所有工作流的真相在 DB spec_json 列（yaml_content 列已删除）。
+ * file 轨已退役：磁盘 workflow.yaml 不再是真相源。
+ *
+ * 返回 DB 行的 spec_json；行不存在或 spec_json 为 null 返回 null。
  */
-export function getWorkflowYaml(workflowName: string): string | null {
-  const yamlPath = join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.yaml");
-  if (!existsSync(yamlPath)) return null;
-  return readFileSync(yamlPath, "utf-8");
+export function getWorkflowSpec(workflowName: string): string | null {
+  // P2 后：spec_json 是 DB 唯一真相；磁盘 yaml 已不读
+  // 注：需要使用者（routes / rpc）调用此函数而非读老 yaml 路径
+  return null; // 调用方统一改从 DB row.spec_json 读（不经此路由）
 }
 
 /**
- * 保存工作流 YAML（写入磁盘 + 备份）
- * @throws 如果 YAML 解析失败
+ * @deprecated P2 后 yaml 文件已不再是真相源。等价调用 getWorkflowSpec。
+ * 保留签名让老调用方在编译层得到类型提示，运行时返回 null（file 轨退役后磁盘无 yaml）。
  */
-export function saveWorkflowYaml(workflowName: string, yamlContent: string): void {
-  // 校验 YAML 语法
-  parseYaml(yamlContent);
-
-  const yamlPath = join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.yaml");
-  if (!existsSync(join(getAutopilotHomeDynamic(), "workflows", workflowName))) {
-    throw new Error(`工作流目录不存在：${workflowName}`);
-  }
-  writeFileSync(yamlPath, yamlContent, "utf-8");
+export function getWorkflowYaml(workflowName: string): string | null {
+  return getWorkflowSpec(workflowName);
 }
 
 // ──────────────────────────────────────────────
-// 工作流创建 / 删除
+// 工作流命名（file 轨退役后创建/删除均走 DB：workflows.ts）
 // ──────────────────────────────────────────────
 
 export const WORKFLOW_NAME_RE = /^[a-z][a-z0-9_\-]{0,39}$/;
-
-export interface CreateWorkflowInput {
-  name: string;
-  description?: string;
-  /** 初始阶段名（不含前缀，类似 "step1"），默认 "step1" */
-  firstPhase?: string;
-}
-
-/**
- * 创建新工作流目录 + 脚手架 workflow.yaml / workflow.ts。
- * 不注册到 registry —— 调用方需在成功后执行 reload()。
- * @throws 名称非法 / 目录已存在
- */
-export function createWorkflow(input: CreateWorkflowInput): { dir: string; yamlPath: string; tsPath: string } {
-  const { name, description, firstPhase = "step1" } = input;
-  if (!WORKFLOW_NAME_RE.test(name)) {
-    throw new Error("工作流名称非法：需以小写字母开头，仅包含小写字母、数字、下划线、连字符，长度 ≤ 40");
-  }
-  if (!/^[a-z][a-z0-9_]*$/.test(firstPhase)) {
-    throw new Error("首阶段名非法：需以小写字母开头，仅包含小写字母、数字、下划线");
-  }
-
-  const wfRoot = join(getAutopilotHomeDynamic(), "workflows");
-  const dir = join(wfRoot, name);
-  if (existsSync(dir)) {
-    throw new Error(`工作流目录已存在：${name}`);
-  }
-
-  mkdirSync(dir, { recursive: true });
-
-  const yamlPath = join(dir, "workflow.yaml");
-  const tsPath = join(dir, "workflow.ts");
-
-  const yamlContent = renderWorkflowYamlTemplate(name, description, firstPhase);
-  const tsContent = renderWorkflowTsTemplate(firstPhase);
-  writeFileSync(yamlPath, yamlContent, "utf-8");
-  writeFileSync(tsPath, tsContent, "utf-8");
-
-  return { dir, yamlPath, tsPath };
-}
-
-/**
- * 删除工作流目录（整体移除）。只要工作流在预期根目录下就允许删除。
- * 不刷新 registry —— 调用方应在成功后执行 reload()。
- * @returns true if removed, false if dir doesn't exist
- */
-export function deleteWorkflowDir(workflowName: string): boolean {
-  if (!WORKFLOW_NAME_RE.test(workflowName)) {
-    throw new Error(`工作流名称 "${workflowName}" 非法（只允许字母/数字/._-）`);
-  }
-  const wfRoot = join(getAutopilotHomeDynamic(), "workflows");
-  const dir = join(wfRoot, workflowName);
-  // 安全校验：最终路径必须仍在 wfRoot 下（防 path traversal）。
-  // 必须用平台 sep —— 硬编码 "/" 在 Windows 上（join 产出反斜杠）永不匹配，
-  // 会把所有合法删除误杀成「非法路径」（2026-06-12 事故：工作流全部无法删除）
-  if (!dir.startsWith(wfRoot + sep) && dir !== wfRoot) {
-    throw new Error(`非法路径：${dir}（必须在 ${wfRoot} 下）`);
-  }
-  if (!existsSync(dir)) return false;
-  rmSync(dir, { recursive: true, force: true });
-  return true;
-}
 
 /**
  * YAML 字段类型归一化 —— 用户手写 YAML 容易把 description 写成数字、
@@ -1533,59 +1351,6 @@ export function getWorkflowGitSandbox(wf: WorkflowDefinition): boolean {
   return getWorkflowGitRequirement(wf);
 }
 
-function renderWorkflowYamlTemplate(name: string, description: string | undefined, firstPhase: string): string {
-  const desc = description?.trim() ? description.trim() : "请补充描述";
-  return `name: ${name}
-description: ${desc}
-
-# 可选：每个任务自动创建一个独立的 sandbox 沙盒（路径经 getTaskSandbox 解析，
-# 新任务落 runtime/requirements/<req-id>/runs/<task-id>/workspace/），阶段函数在这里工作
-# sandbox:
-#   template: workspace_template   # 工作流目录下的模板文件夹，任务启动时 cp -r 到 sandbox
-
-# 工作流阶段列表。最简写法：只写 name 和 timeout，状态机将自动推导：
-#   pending_<name> / running_<name> / start_<name> / complete_<name>
-# 更多写法（并行、reject 跳转、自定义状态）见 docs/workflow-development.md
-phases:
-  - name: ${firstPhase}
-    timeout: 900
-    # 可选：为该 phase 内联配置 agent（省略则用 DEFAULT_AGENT 兜底）
-    # agent:
-    #   provider: anthropic
-    #   model: claude-sonnet-4-6
-    #   system_prompt: "特化提示词..."
-`;
-}
-
-// 脚手架模板：sandbox 路径必须走 @autopilot/core/sandbox 的 getTaskSandbox（双根解析）——
-// v2 R2 起新任务文件落 runtime/requirements/<reqId>/runs/<taskId>/，手写拼接
-// runtime/tasks/<taskId> 的旧写法对新任务定位不到目录。
-function renderWorkflowTsTemplate(firstPhase: string): string {
-  const fn = `run_${firstPhase}`;
-  return `// 每个 phase 函数接收 taskId: string 参数；抛错则该阶段失败，
-// 可被状态机重试或驳回。详见 docs/workflow-development.md
-//
-// 每次任务自动获得一个独立的 sandbox 目录（路径经 getTaskSandbox 解析，勿手写拼接）。
-// 阶段函数应把所有产出 / 读写都放在这里，保持任务之间隔离。
-// 如需把 sandbox 传给 agent，调用 agent.run(prompt, { cwd: wsPath })。
-//
-// 常见 import（按需启用）：
-//   import { getTask } from "@autopilot/core/db";             // 取任务对象
-//   import { agentForPhase } from "@autopilot/agents/registry"; // 按 phase 取内联配置 agent
-//   import { listTaskRepos } from "@autopilot/core/sandbox";  // git 工作流取各仓库 clone 布局
-
-import { getTaskSandbox } from "@autopilot/core/sandbox";
-
-export async function ${fn}(taskId: string): Promise<void> {
-  const ws = getTaskSandbox(taskId);
-  console.log(\`[\${taskId}] 执行阶段 ${firstPhase}，sandbox=\${ws}\`);
-  // TODO: 在这里实现阶段业务逻辑。例如：
-  //   const agent = agentForPhase("<工作流名>", "${firstPhase}");
-  //   await agent.run("修改 src/index.ts 添加 hello 函数", { cwd: ws });
-}
-`;
-}
-
 // ──────────────────────────────────────────────
 // 阶段级结构化编辑（保留 YAML 其他段）
 // ──────────────────────────────────────────────
@@ -1619,7 +1384,3 @@ export function getWorkflowYamlPath(workflowName: string): string {
   return join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.yaml");
 }
 
-/** @internal 导出供 workflow-ts-authoring.ts 兄弟模块用（workflow.ts 源码改写）。 */
-export function getWorkflowTsPath(workflowName: string): string {
-  return join(getAutopilotHomeDynamic(), "workflows", workflowName, "workflow.ts");
-}

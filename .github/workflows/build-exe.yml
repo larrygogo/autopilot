@@ -1,0 +1,48 @@
+name: Build EXE (multi-platform smoke)
+
+# 单文件可执行安装包（子项目 A）的多平台实机验收（子项目 B）：
+# 三平台 GitHub runner 各自原生 build:exe + 冒烟（init 跑迁移+examples → daemon run →
+# 嵌入 web-dist dashboard 断言 200）。弥补「本地开发机只能验 Windows」。
+#
+# 触发：手动（workflow_dispatch）或发版 tag（v*）。不挂 PR ——
+# 每 PR 跑三平台 --compile 太重；日常正确性由 ci.yml（typecheck/test/migrations）保障。
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-smoke:
+    name: build + smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      # 原生 build:exe：prebuild:exe（gen 迁移/examples + build:web 含 gen:web-assets）→ compile。
+      # outfile 固定 dist/autopilot.exe（三平台同名；linux/macOS 上是带 .exe 后缀的 ELF/Mach-O）。
+      - name: Build single-file exe (native)
+        run: bun run build:exe
+
+      # 冒烟编译产物：init（复刻「迁移目录不存在→no such table」崩溃点）→ daemon → 嵌入 dashboard。
+      - name: Smoke test compiled artifact
+        run: bun run scripts/smoke-exe.ts dist/autopilot.exe
+
+      # 产物留存供人工下载/检视（非正式发布；正式 Release 资产上传是子项目 C）。
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: autopilot-${{ matrix.os }}
+          path: dist/autopilot.exe
+          retention-days: 7

@@ -13,10 +13,10 @@ beforeEach(async () => {
   tmpHome = join(tmpdir(), `autopilot-extract-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(join(tmpHome, "runtime"), { recursive: true });
   process.env.AUTOPILOT_HOME = tmpHome;
-  process.env.DEV_WORKFLOW_CONFIG = join(tmpHome, "config.yaml");
+  process.env.DEV_WORKFLOW_CONFIG = join(tmpHome, "config.json");
   writeFileSync(
-    join(tmpHome, "config.yaml"),
-    "providers:\n  anthropic:\n    enabled: true\n    default_model: x\nagents:\n  coder:\n    provider: anthropic\n",
+    join(tmpHome, "config.json"),
+    "{}",
     "utf-8",
   );
   _setDbForTest(new Database(":memory:"));
@@ -43,6 +43,18 @@ describe("runClarifierExtract", () => {
     });
     expect(r.title).toBe("登录页忘记密码");
     expect(r.spec_md).toContain("## 背景");
+  });
+
+  it("```json 围栏块输出也能解析（降级契约格式）", async () => {
+    _setExtractFnForTest(async () =>
+      "```json\n" + JSON.stringify({ title: "围栏标题", spec_md: "## 背景\n围栏内容" }) + "\n```",
+    );
+    const r = await runClarifierExtract({
+      raw_text: "随便说点啥",
+      project_id: "proj-001",
+    });
+    expect(r.title).toBe("围栏标题");
+    expect(r.spec_md).toContain("围栏内容");
   });
 
   it("LLM 抛错走兜底（title=前30字 spec_md=原文）", async () => {

@@ -11,7 +11,7 @@ import { getEnabledDrivers, type NotifyDriver, type NotifyEvent } from "./driver
  *   2. 所有已注册且 enabled 的系统通知 driver（按 on_events 过滤，错误吞掉）
  *   3. log.info 兜底（无论上面是否触发都会记录，便于排错）
  *
- * driver 列表懒加载 + 缓存：daemon 启动后第一次 notify() 触发；config.yaml 改动后需 daemon 重启生效。
+ * driver 列表懒加载 + 缓存：daemon 启动后第一次 notify() 触发；config.json 改动后需 daemon 重启生效。
  */
 export async function notify(
   task: Task,
