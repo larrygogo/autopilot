@@ -7,8 +7,6 @@
  * - 磁盘扫描已于阶段 1 移除，数据源切为静态常量（零运行时 fs 依赖）
  */
 
-import { join } from "path";
-import { homedir } from "os";
 import { getWorkflowFromDb, createTemplateDbWorkflow, createNativeDbWorkflow, createDbWorkflow, updateDbWorkflow } from "./workflows";
 import { stringifyWorkflowDoc } from "./serialize";
 import { EXAMPLE_TEMPLATES, EXAMPLE_TS_ONLY } from "../../generated/_examples";
@@ -24,10 +22,6 @@ export interface WorkflowTemplate {
   phase_count: number;
   /** agents 数量 */
   agent_count: number;
-}
-
-function autopilotHome(): string {
-  return process.env.AUTOPILOT_HOME || join(homedir(), ".autopilot");
 }
 
 /** 按名字查 example 模板（未找到 → null）。 */
