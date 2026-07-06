@@ -1,5 +1,6 @@
 import { join } from "path";
 import { VERSION } from "../index";
+import { isStandaloneBinary } from "../core/runtime-env";
 import {
   writeSupervisorPid,
   removeSupervisorPid,
@@ -103,10 +104,14 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
   writeSupervisorPid();
   console.log(`autopilot supervisor v${VERSION} started (pid=${process.pid})`);
 
-  const daemonScript = join(import.meta.dir, "index.ts");
-  const baseArgs = ["run", daemonScript];
-  if (opts.port) baseArgs.push("--port", String(opts.port));
-  if (opts.host) baseArgs.push("--host", opts.host);
+  // 编译单文件模式：无 bun 可执行、无 index.ts 文件，直接用 execPath 子命令。
+  // dev 模式：保持原来的 bun run <script> 方式。
+  const standalone = isStandaloneBinary();
+  const spawnCmd: string[] = standalone
+    ? [process.execPath, "daemon", "run"]
+    : ["bun", "run", join(import.meta.dir, "index.ts")];
+  if (opts.port) spawnCmd.push("--port", String(opts.port));
+  if (opts.host) spawnCmd.push("--host", opts.host);
 
   let shuttingDown = false;
   let currentChild: ReturnType<typeof Bun.spawn> | null = null;
@@ -128,7 +133,7 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
     // stdio 必须用 ignore：当 supervisor 自身是后台 detach 启动时，inherit 的
     // stdout/stderr 句柄无效，会让 daemon 子进程一启动就崩溃。daemon 自己用 logger
     // 写文件日志，不依赖标准输出。
-    currentChild = Bun.spawn(["bun", ...baseArgs], {
+    currentChild = Bun.spawn(spawnCmd, {
       stdout: "ignore",
       stderr: "ignore",
     });

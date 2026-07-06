@@ -27,6 +27,7 @@
 
 import { resolve, dirname } from "path";
 import { existsSync } from "fs";
+import { isStandaloneBinary } from "./runtime-env";
 
 let installed = false;
 
@@ -43,6 +44,8 @@ function resolveWithExt(base: string): string {
 }
 
 export function installAutopilotResolver(): void {
+  // 编译单文件模式：用户 workflow.ts 已退役，Bun.plugin 在 compile 运行时可能报错，直接跳过。
+  if (isStandaloneBinary()) return;
   if (installed) return;
   installed = true;
 

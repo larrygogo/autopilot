@@ -6,6 +6,7 @@ import { listProviders } from "./providers";
 import { listUsableProviders } from "./default-provider";
 import { getCurrentVersion, latestMigrationVersion } from "./migrate";
 import { listOutdatedWorkflowCopies } from "./workflow/templates";
+import { isStandaloneBinary } from "./runtime-env";
 
 export type CheckStatus = "ok" | "warning" | "error" | "skipped";
 export type CheckCategory = "config" | "provider" | "project" | "workspace" | "upgrade";
@@ -180,19 +181,27 @@ export async function runChecks(opts: RunChecksOptions): Promise<DoctorReport> {
   // C8c：Web UI bundle 是否比 src/web 源码旧（git pull 后忘了 bun run build:web）。
   // 仅在「src/web 与 web-dist 都存在」时检查 stale；web-dist 缺失不在此报（那条由
   // serveStatic 的「未构建」指引页覆盖，且测试/CI 不构建 web-dist——只查 stale 才 test-safe）。
-  try {
-    const repoRoot = join(import.meta.dir, "..", "..");
-    const srcWebDir = join(repoRoot, "src", "web", "src");
-    const webDistIndex = join(repoRoot, "web-dist", "index.html");
-    if (existsSync(srcWebDir) && existsSync(webDistIndex) && newestMtime(srcWebDir) > statSync(webDistIndex).mtimeMs) {
-      checks.push({
-        id: "upgrade.webdist", category: "upgrade", status: "warning",
-        title: "Web UI bundle 可能过期（src/web 比上次构建新）",
-        detail: "git pull 更新了前端源码但没重建；跑 bun run build:web 后刷新页面。",
-        fix: { cli: "bun run build:web" },
-      });
-    }
-  } catch { /* ignore */ }
+  // 编译单文件模式：import.meta.dir 是虚拟路径，源码仓库不存在，跳过此检查。
+  if (isStandaloneBinary()) {
+    checks.push({
+      id: "upgrade.webdist", category: "upgrade", status: "skipped",
+      title: "打包运行，跳过源码仓库检查（Web UI bundle 检测不适用）",
+    });
+  } else {
+    try {
+      const repoRoot = join(import.meta.dir, "..", "..");
+      const srcWebDir = join(repoRoot, "src", "web", "src");
+      const webDistIndex = join(repoRoot, "web-dist", "index.html");
+      if (existsSync(srcWebDir) && existsSync(webDistIndex) && newestMtime(srcWebDir) > statSync(webDistIndex).mtimeMs) {
+        checks.push({
+          id: "upgrade.webdist", category: "upgrade", status: "warning",
+          title: "Web UI bundle 可能过期（src/web 比上次构建新）",
+          detail: "git pull 更新了前端源码但没重建；跑 bun run build:web 后刷新页面。",
+          fix: { cli: "bun run build:web" },
+        });
+      }
+    } catch { /* ignore */ }
+  }
 
   // L2 / L3
   if (opts.level >= 2) {
