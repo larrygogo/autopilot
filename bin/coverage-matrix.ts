@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * RPC method × {web / tui / cli} 覆盖矩阵扫描器。
+ * RPC method × {web / cli} 覆盖矩阵扫描器。
  *
  * 用途：发现 (a) 只在 Web 上用的 method —— 反渗内核命名的候选；
- *      (b) 在 TUI / CLI 上长期缺位的 method —— 死代码候选。
+ *      (b) 在 CLI 上长期缺位的 method —— 死代码候选。
  *
  * 用法：
  *   bun run bin/coverage-matrix.ts              # markdown 输出到 stdout
@@ -21,10 +21,9 @@ import { join, relative } from "path";
 
 const ROOT = join(import.meta.dir, "..");
 
-const CLIENT_ROOTS: Record<"web" | "tui" | "cli", string[]> = {
+const CLIENT_ROOTS: Record<"web" | "cli", string[]> = {
   web: ["src/web/src"],
-  tui: ["src/tui"],
-  // CLI 直接调 client；client 自身是三端共用，不算在 CLI 单独覆盖里
+  // CLI 直接调 client；client 自身是两端共用，不算在 CLI 单独覆盖里
   cli: ["src/cli", "bin"],
 };
 
@@ -33,9 +32,8 @@ interface CoverageRow {
   name: string;
   /** 类型：rpc 或 http */
   kind: "rpc" | "http";
-  /** 三端实际引用次数 */
+  /** 两端实际引用次数 */
   web: number;
-  tui: number;
   cli: number;
   /** 总引用次数（含内核 + 客户端） */
   totalRefs: number;
@@ -116,7 +114,7 @@ function makeMatcher(needle: string): RegExp {
 
 /** 一次读完所有客户端源文件，存到 root → [{file, content}] 缓存。 */
 function loadClientFiles(): Record<keyof typeof CLIENT_ROOTS, string[]> {
-  const out = { web: [] as string[], tui: [] as string[], cli: [] as string[] };
+  const out = { web: [] as string[], cli: [] as string[] };
   for (const key of Object.keys(CLIENT_ROOTS) as (keyof typeof CLIENT_ROOTS)[]) {
     for (const root of CLIENT_ROOTS[key]) {
       const abs = join(ROOT, root);
@@ -145,29 +143,25 @@ function buildMatrix(): CoverageRow[] {
 
   for (const m of extractRpcMethods()) {
     const web = countInContents(cache.web, m);
-    const tui = countInContents(cache.tui, m);
     const cli = countInContents(cache.cli, m);
     rows.push({
       name: m,
       kind: "rpc",
       web,
-      tui,
       cli,
-      totalRefs: web + tui + cli,
+      totalRefs: web + cli,
     });
   }
 
   for (const ep of extractHttpEndpoints()) {
     const web = countInContents(cache.web, ep.path);
-    const tui = countInContents(cache.tui, ep.path);
     const cli = countInContents(cache.cli, ep.path);
     rows.push({
       name: `${ep.httpMethod} ${ep.path}`,
       kind: "http",
       web,
-      tui,
       cli,
-      totalRefs: web + tui + cli,
+      totalRefs: web + cli,
     });
   }
 
@@ -188,26 +182,25 @@ function renderMarkdown(rows: CoverageRow[]): string {
   const http = rows.filter((r) => r.kind === "http");
 
   const lines: string[] = [];
-  lines.push("# RPC × {web / tui / cli} 覆盖矩阵");
+  lines.push("# RPC × {web / cli} 覆盖矩阵");
   lines.push("");
   lines.push("自动生成 —— `bun run bin/coverage-matrix.ts`。");
   lines.push("");
   lines.push("**覆盖判定**：在客户端目录里 grep method 名 / endpoint path 作为字符串字面量出现的次数。`—` 表示零引用。");
   lines.push("");
   lines.push("**怎么读这张表**：");
-  lines.push("- 一列只有 web 而 tui/cli 都 `—` 的 method → 反渗内核的高危候选；改名时 web 拖动 trigger 改动");
-  lines.push("- **三列全 `—` 的 method** → 死代码候选。常见两种来源：");
+  lines.push("- 一列只有 web 而 cli `—` 的 method → 反渗内核的高危候选；改名时 web 拖动 trigger 改动");
+  lines.push("- **两列全 `—` 的 method** → 死代码候选。常见两种来源：");
   lines.push("  - **HTTP / RPC 迁移残留**：同名 endpoint 已迁到 WS RPC，HTTP 这边没清 → 安全可删");
   lines.push("  - **孤儿 method**：注册了但客户端忘接 → 补客户端调用 or 删 method");
-  lines.push("- tui 列大面积 `—` 是当前定位（observer-only）的体现，正常");
   lines.push("- cli 列 `—` 而 web 有 → 若 method 跟自动化无关（如 UI 内编辑器）则正常；跟任务/工作流相关则是 CLI 待补");
-  lines.push("- ⚠️ **CLI/TUI 多经 `src/client` 类型化包装调 RPC（不含字面 method 名）**，本表按字面量 grep，故对这类 method 的 cli/tui 列恒显 `—`，**不代表未覆盖**（DC-1）。判「CLI 待补」前请先核对 `src/client/http.ts` 是否已封装该 method。");
+  lines.push("- ⚠️ **CLI 多经 `src/client` 类型化包装调 RPC（不含字面 method 名）**，本表按字面量 grep，故对这类 method 的 cli 列恒显 `—`，**不代表未覆盖**（DC-1）。判「CLI 待补」前请先核对 `src/client/http.ts` 是否已封装该 method。");
   lines.push("");
 
   // 摘要
-  const onlyWebRpc = rpc.filter((r) => r.web > 0 && r.tui === 0 && r.cli === 0).length;
+  const onlyWebRpc = rpc.filter((r) => r.web > 0 && r.cli === 0).length;
   const orphanRpc = rpc.filter((r) => r.totalRefs === 0).length;
-  const onlyWebHttp = http.filter((r) => r.web > 0 && r.tui === 0 && r.cli === 0).length;
+  const onlyWebHttp = http.filter((r) => r.web > 0 && r.cli === 0).length;
   const orphanHttp = http.filter((r) => r.totalRefs === 0).length;
 
   lines.push("## 摘要");
@@ -223,10 +216,10 @@ function renderMarkdown(rows: CoverageRow[]): string {
   function renderSection(title: string, items: CoverageRow[]) {
     lines.push(`## ${title}`);
     lines.push("");
-    lines.push("| Name | Web | TUI | CLI |");
-    lines.push("|------|-----|-----|-----|");
+    lines.push("| Name | Web | CLI |");
+    lines.push("|------|-----|-----|");
     for (const r of items) {
-      lines.push(`| \`${r.name}\` | ${fmtCov(r.web)} | ${fmtCov(r.tui)} | ${fmtCov(r.cli)} |`);
+      lines.push(`| \`${r.name}\` | ${fmtCov(r.web)} | ${fmtCov(r.cli)} |`);
     }
     lines.push("");
   }

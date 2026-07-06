@@ -239,12 +239,6 @@ PRIO  TITLE                        WAIT    ACTIONS
 P0    Plan awaiting review: task-001  5min  Approve / Reject
 ```
 
-**Terminal UI**:
-
-```bash
-autopilot tui
-```
-
 **Task details and logs**:
 
 ```bash
@@ -286,7 +280,6 @@ autopilot workflow show <name>  # inspect a workflow
 
 # UI
 autopilot now                   # text card stream (CLI version of /now)
-autopilot tui                   # terminal UI
 autopilot dashboard             # open Web UI in browser
 autopilot chat                  # chat with an agent (REPL)
 

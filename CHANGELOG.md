@@ -10,6 +10,12 @@
 
 `1.0` 发布后将严格遵守语义化版本：patch = bugfix，minor = 向后兼容的新功能，major = 破坏性变更。
 
+## [未发布]
+
+### Removed
+
+- **移除 TUI 客户端**：observer-only 的 ink 终端界面（`src/tui/`、`autopilot tui` 命令、`ink`/`ink-spinner` 依赖）整体删除。原因：功能不追决策对等、维护价值低，且 ink 依赖树（`react-devtools-core` 等）阻塞单文件 `bun build --compile` 打包。终端里盯进度改用 CLI —— `autopilot task status` / `autopilot task logs --follow` / `autopilot notifications list`。
+
 ## [0.1.0] - 2026-06-17
 
 版本号体系重置：此前代码内的 `1.0.0` 是从未随发布变动的占位符，与实际发布节奏脱节。现把版本号收敛为**单一真相源** `package.json`（`src/index.ts` 的 `VERSION`、daemon status、CLI `--version`、MCP serverInfo、WS 握手全部从此取值），并从 `0.1.0` 重新计数。

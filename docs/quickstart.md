@@ -242,12 +242,6 @@ PRIO  TITLE                        WAIT    ACTIONS
 P0    任务方案待审批: task-001      5min    审批 / 驳回
 ```
 
-**终端 UI**：
-
-```bash
-autopilot tui
-```
-
 **查看详情和日志**：
 
 ```bash
@@ -294,7 +288,6 @@ autopilot workflow show <name>  # 查看工作流详情
 
 # 界面
 autopilot now                   # 文本卡片流（/now 的 CLI 版）
-autopilot tui                   # 终端 UI
 autopilot dashboard             # 打开浏览器 Web UI
 autopilot chat                  # 与 agent 对话（REPL）
 

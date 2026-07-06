@@ -107,16 +107,11 @@ describe("端口解析优先级逻辑（bug22 fix）", () => {
 });
 
 /**
- * bug24: tui + dashboard 命令也走 resolvePort，跟随客户改的 daemon.port。
+ * bug24: dashboard 命令也走 resolvePort，跟随客户改的 daemon.port。
  *
- * 之前 tui 直接 `startTui({ port: parseInt(opts.port, 10) })`、dashboard
- * 拼 URL 用 opts.port —— 都硬编码 default 6180，客户改端口后必连错。
+ * 之前 dashboard 拼 URL 用 opts.port —— 硬编码 default 6180，客户改端口后必连错。
  */
-describe("tui + dashboard 端口解析（dogfood-bug24）", () => {
-  import("fs").then(({ mkdirSync, writeFileSync, rmSync, existsSync }) => {
-    // intentionally empty —— 真正测试在下面 spawn CLI
-  });
-
+describe("dashboard 端口解析（dogfood-bug24）", () => {
   it("dashboard 命令 listen.json 存在时打印的 URL 用 listen.json 的端口", async () => {
     const { join } = await import("path");
     const { mkdirSync, writeFileSync, rmSync, existsSync } = await import("fs");

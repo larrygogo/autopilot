@@ -17,31 +17,31 @@
 
 内核掌握"能做什么"的完整集合。一切上层 UI 只是它的不同 affordance，不应私藏业务概念或绕过内核。内核变化先在 core / daemon / agents / 协议上落地，UI 跟上。
 
-**三套客户端 — 面向同一开发者的三种模式，不是三类不同的人**
+**两套客户端 — 面向同一开发者的两种模式，不是两类不同的人**
 
-autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 工作流、管 Agent 凭证的人）。三套 UI 是他在不同**时刻**切换的 affordance，不是给三种不同人群的产品。不要在画像上虚构"无关技术/非技术的决策者"——服务的始终是同一个开发者，只是他放松到决策模式下的自己。
+autopilot 的真实用户是同一个开发者（能跑本地 daemon、配工作流、管 Agent 凭证的人）。两套 UI 是他在不同**时刻**切换的 affordance，不是给两种不同人群的产品。不要在画像上虚构"无关技术/非技术的决策者"——服务的始终是同一个开发者，只是他放松到决策模式下的自己。
 
 | 客户端 | 切到此 UI 的时刻 | 设计重心 | 投入级别 |
 |--------|----------------|---------|---------|
 | **Web** | **决策时刻** — 该批 / 该驳 / 该调方向时 | 可视化决策台，主战场。业务标签（"通过审批"）**叠加**内核名（`review_pass`）而非替换 —— 让放松状态下的自己读得顺，但懂行的自己仍能反向映射回 CLI。状态完整性优先，操作确认到位。 | **一等公民** |
-| **CLI** | **自动化时刻** — 写脚本、CI/CD、远程 ssh | 与内核 1:1 暴露面。命令完整、参数显式、退出码可用。保留 `--trigger review_pass` 等原始语义，是内核的最薄壳。 | **一等公民** |
-| **TUI** | **持续观察时刻** — tmux 里盯进度、看日志 | observer-only 视图。只保留"低成本盯进度"主线，决策动作跳转到 Web / CLI 完成，**不追功能对等**。 | **二等公民**（观察镜像） |
+| **CLI** | **自动化时刻** — 写脚本、CI/CD、远程 ssh；也用来在终端里盯进度 | 与内核 1:1 暴露面。命令完整、参数显式、退出码可用。保留 `--trigger review_pass` 等原始语义，是内核的最薄壳。 | **一等公民** |
+
+> **TUI 已于 2026-07-06 整体删除**（observer-only 二等公民，功能不追对等、维护价值低，且 ink 依赖树阻塞单文件打包）。终端里盯进度改用 CLI（`autopilot task status` / `task logs --follow` / `notifications list`）。
 
 **落地原则**
 
-- Web / CLI 是一等公民，新功能必须同时覆盖；TUI 只覆盖观察路径，不强求决策路径对等
+- Web / CLI 都是一等公民，新功能必须同时覆盖
 - **内核不为某个 UI 妥协命名** —— 客户端层负责翻译。Web 上业务标签与内核名**叠加显示**（hover / 详情侧栏 / 操作历史同时露出 trigger 名），不是替换；让懂行用户能反向映射，不懂的人可忽略
-- 添加新功能时先问三连：「决策时刻要不要点这个按钮？自动化要不要调这个？观察时要不要看这条信息？」前两个决定它在 Web / CLI 怎么长，第三个决定 TUI 是否补
+- 添加新功能时先问两连：「决策时刻要不要点这个按钮？自动化要不要调这个？」分别决定它在 Web / CLI 怎么长
 - 警惕 Web 的业务语言反渗内核：trigger 改名压力必须挡在客户端层，不能让 state-machine 退让
 - **工作流自定义的产品支持范围 = PR 交付形态的定制轴 + artifacts 文件产物交付**（2026-06-12 定位声明；同日「交付物抽象 P0」随 v2 R5 落地，泛化闸门已按计划开了「产出轴一格」）：澄清 / 调度 / 验收 / fix_revision 修复回路 / CI 自动修复这些增值服务长在「需求 → 交付物」闭环上，run 终结判定**以事实为准**（run-outcome：hasPr **优先**→ awaiting_review 交 pr-poller；无 PR 有 deliveries → awaiting_review 人工验收；都无 → done。混合交付不支持，PR 赢）——自定义工作流只要最终交付 PR 或调 `deliverArtifacts` 落表，全套照拿；「自定义」指定制这条管线，**不是任意流程编排平台**。**工作流声明层（v2 R5）**：workflow.yaml 顶层 `requires: {git: true|false}`（**二态：需要 / 不需要**——2026-06-22 optional 第三态废弃；缺省回退派生自 sandbox.git 兼容老副本）——**「建 git 沙盒」（clone 代码）从 requires.git 派生**（registry `getWorkflowGitSandbox`：需要代码库就一定 clone；显式 sandbox.git 优先兼容老工作流），task-factory 读它、不再读单独的 sandbox.git 旋钮，编辑器也删了「建 git 沙盒」开关（与 delivers 从 phase 派生同构）。+ **`delivers`（产出形态）从 phases 自动派生、不是用户输入**（2026-06-22：registry `deriveDelivers` —— 有 `deliver: pr` 阶段→"pr"、`deliver: artifacts` 阶段→"artifacts"、无→null 回退 ts 工作流的 yaml 显式值；编辑器删了 delivers 下拉、改只读展示，setMeta/patchWorkflowMetaYaml 不再写 delivers）——整类「顶层声明与 phase 不一致」的错误从根上消失（顶层=派生），原 `validateDeliveryConsistency` 退役。**顶层 `delivers` 对 pr/artifacts 一律纯声明**（管闸门 / 验收路由 / UI 展示，不参与终结判定）——运行时机制全由 phase 自驱：PR 看 phase `deliver: pr` 砖；artifacts 的沙盒 `deliverables/` 目录（agent 写产物处）预建 + 跑后校验非空由「phase 的 prompt 是否引用 `${DELIVERABLES}`」触发，**不读顶层 delivers**（B²；故多产物阶段只对真正产出的那个校验，不再误强制每个非空）；registry（core）只透传形状 + 派生（同 requires.git 从 sandbox.git 派生），枚举语义全在 `src/daemon/workflow-declarations.ts`；三闸门（transition→clarifying / enqueue（含集合空×delivers:pr 交叉拒）/ setWorkflow=update 带 warning 不阻断）按 `req.workflow ?? "dev"` 动态校验，**无库需求可走完整闭环**（create 不再因项目无 workspace 拒建、setWorkspaces 接受显式空集=确认无库、clarifier 空集走纯文本；`requirements.input_mode` 列=迁移 045：NULL 未确认/'git'/'none'）。**artifacts 交付**：`deliverArtifacts`（src/core/requirements/deliveries.ts，single-writer 白名单）promote 产物到 `runtime/requirements/<reqId>/deliveries/round-<N>/` + 落 `requirement_deliveries` 表（迁移 046，每验收轮一行）；验收 = 需求级 awaiting_review（poller 对无 PR 有 deliveries 静默 skip；Web 需求页验收卡=文件列表+下载（不做 iframe 渲染）+「验收通过」/驳回（=发布审查意见，与 PR 驳回同管道）；CLI `req accept`（有交付 PR 时拒绝——签字处唯一在 GitHub merge）/ `req reject -m`；驳回 → fix_revision → __fix run **artifacts 模式**（种入上一轮产物增量重做 → promote round+1）；通知 `requirement_awaiting_review` 仅 artifacts 需求记录，PR 路径零变化）。examples/workflows/artifact 已正式化（探针 gate hack 移除，老用户 `workflow sync artifact --apply`）。action 型产出（发邮件等不可逆动作）仍不做；教学 fixture（doc_gen / data_pipeline 等）定位不变
 
 ## 架构概要
 
-- **Daemon + 多客户端**：核心引擎作为 daemon 长驻运行，TUI/Web/CLI 通过 HTTP+WebSocket 连接
+- **Daemon + 多客户端**：核心引擎作为 daemon 长驻运行，Web/CLI 通过 HTTP+WebSocket 连接
 - **事件总线**：`src/core/event-bus.ts`（事件协议在 `src/core/events.ts`）懒激活模式，daemon 未运行时 emit 是 no-op。**已下沉 core**（core 模块无条件 emit、不判 daemon 在不在；daemon 起来才挂派发器到 ws）
 - **HTTP REST API**：`/api/tasks`、`/api/workflows`、`/api/status` 等 CRUD 端点
 - **WebSocket 实时推送**：频道订阅模式（`task:*`、`log:{taskId}` 等）推送状态变化和日志
-- **TUI**：ink (React for CLI) 终端 UI，WebSocket 连接 daemon
 - **Web UI**：React + Vite SPA，daemon 自身 serve 静态资源。**视觉风格 = claude.ai 质感**（暖象牙奶油底 / 深色暖炭灰、珊瑚橘 `#D97757` 强调、圆角、柔阴影、去大写去虚线）——token 在 `src/web/src/index.css`。早期的「蓝图工程图纸」风（直角/硬阴影/网格/大写压缩体）**已废弃，勿重新引入**。**布局骨架 = Supabase 控制台式**（2026-06-11）：全宽顶栏（logo + 面包屑页标题在左，搜索 / 快速创建 / 主题 / Now 铃铛在右）、侧栏下沉到顶栏之下、页头是单行中号标题（`PageHero` 已收敛，衬线 4xl hero 已废弃）。**侧栏是上下文导航**：进入项目（`/projects/:id`）或设置（`/settings`）后左侧菜单整体切换为该上下文的分区菜单（顶部「← 返回」回全局），设置分区 = 通用 / 提供商 / 任务调度 / 网络访问 / Daemon（子路由 `/settings/:section`，孤儿 Providers 页已接回「提供商」；旧 `?tab=` 链接有重定向兼容）。**移动端（<lg）= 底部 dock 原地展开抽屉（Supabase 式）**：页面常驻底部居中浮动 dock（搜索 / 现在(红点) / 菜单 三圆形图标，收起时离底边 1rem）；点击图标后展开：**pill 随面板一起从底部连续滑升、抽屉总高约 90vh**（容器锚底 + pill 在面板上方，面板 height 动画时容器顶边上移带着 pill 走；pill 行自身无背景、悬浮在**全屏玻璃遮罩**（bg-background/40 + blur，点击可关）上，激活图标反色高亮 + 旁出 ✕；**圆角卡片轮廓属于下方面板**（rounded-t-2xl + border-t）），不是独立弹层（无 Sheet/portal）。再点激活图标或 ✕ 收起；顶栏右侧菜单按钮（带未读 badge）是第二入口。搜索复用 `CommandPaletteContent`，与桌面 ⌘K dialog 同一内容体。**独立对话页 /chat 与 FloatingChat 已于 2026-06-11 整体删除**（后端 chat/sessions RPC 保留，需求澄清在用）。**左侧彩色亮条已全局移除**（2026-06-11 两轮清扫：选中/悬停态的 accent 条、NowCard 优先级条、错误/警告卡的 destructive/warning 条全部去掉，状态靠文字+底色表达；仅保留中性灰 `border-border` 的结构线——Markdown 引用、树形缩进、时间线轴。`toneToBorderLeftClass` 已删，勿再新增彩色左条）
 - **Web 场景组件体系（Pro 层）**（2026-06-12）：shadcn 基础件之上的场景级模板层，**完整体系与使用规范见 `docs/web-components.md`**（分层模型 L0 token→L1 ui/→L2 pro→L3 pages、组件清单、MUST/MUST NOT 条文、防漂移 grep 清单）。要点：L2a 统一从 `@/components/pro` barrel 导入（PageHero/EntityCards/RowCard/ConfirmDialog/EmptyState/DescList/FormField/页宽常量…）；页面禁手写 max-w/h1/空态 div/Label+Input 裸拼；新增 L2 组件须先交 3 处重复证据并同 PR 迁移原手写点
 - **执行视图 = 线性时间线**（`TaskRunView`，2026-06-10 重构）：每轮 phase 执行（含驳回重做）按实际发生顺序独立成块往下追加（不在原 section 上 ×N 折叠），日志按本轮时间窗切片（logger 落盘 UTC 字符串，`parseLineTs` 必须按 UTC 解析），agent 调用按时间窗内联到对应轮；未执行 phase 灰色占位垫底；daemon 重启被打断的轮次标 `aborted`（灰圈）。纯逻辑在 `src/web/src/lib/run-view-logic.ts`（buildTimeline / filterLinesToWindow / assignAgentCalls）。**独立任务详情页已下线**（2026-06-15）：task/run 详情**只在所属需求页（`/requirements/:id`）内嵌呈现**（`RequirementDetail` 内嵌 `TaskDetail`/`TaskRunView`），不再有专门的整页路由。`/tasks/:id` 路由仅作旧深链/通知/书签兼容：异步解析 task → 有 `requirement_id` 重定向 `/requirements/:reqId`、游离/失效任务退回流水线 `/tasks`（解析期间显示 `PageLoader`）。CommandPalette 相应删「最近任务」组（task 不再是独立导航目标）
@@ -57,7 +57,7 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 - **Phase 内联 Agent**：每个 phase 在 `workflow.yaml` 里内联配置自己的 agent（`agent: {provider, model, system_prompt, max_turns, permission_mode}`）；省略则用 `DEFAULT_AGENT` 兜底。无"全局命名可复用 agent"概念（已于 2026-06 移除）。model 缺省时回退到 `providers.<provider>.default_model`
 - **Web UI 工作流编辑器**：阶段 CRUD / 并行块 / 驳回 / **phase 内联 agent 编辑**全图形化，改动写回 DB（yaml_content/spec_json）；workflow.ts 同步机制已随 file 轨退役删除（ts-authoring.ts 已删）
 - **项目工作台**：两层数据模型 `Project ⊃ Workspace`，需求挂项目维度，支持 AI 调查 + 评论线程 + 用户审批流。**项目上下文壳层 = Supabase 式**（2026-06-11）：进入 `/projects/:id` 后顶栏面包屑换成项目切换器（`ProjectSwitcher` 下拉换项目/新建），左侧导航换成项目级菜单（需求 / 代码库 / 设置，子路由 `/projects/:id/:section`；**无概览页**，裸 `/projects/:id` 重定向到需求子页），顶部「← 项目列表」返回全局导航
-- **流水线（原"看板"）**：Web 的 `/tasks` 页（导航名「流水线」）把**需求 + 任务**合到一处看全生命周期，4 段 tab（全部 / 等待人工 / 运行中 / 归档），列表内按时间分组（今天/昨天/…），行是 Claude Code 风卡片。流水线是默认首页。**「Now 决策收件箱」已整体替换为「通知系统」**（2026-06-11，机制级重构非改名）：旧模型 = 11 个 card-source 从当前状态**派生**内存快照（状态变了卡片消失，aggregator + `now.*` RPC + `now:*` 频道，已全部删除，`/api/now/*` 410）；新模型 = **append-only 事件流**落 `notifications` 表（迁移 035/036，写入收口 `src/core/notify/stream.ts` 进 single-writer 白名单）。daemon 驻留 `notification-recorder` 订阅 event-bus 把领域事件翻译成通知行（task 终态/await_review、需求 awaiting_approval、agent 提问、clarifier/schedule 错误、watcher 恢复；新增 `requirement:schedule-error` 事件）；**read/dismiss 双状态独立**，RPC = `notifications.list/unreadCount/markRead/markAllRead/dismiss`，WS 频道 `notification:*`；保留策略 30 天/500 行。**持续状态不进通知流**：provider 不健康走面板顶部 `ProviderHealthBanner`（`providers.health` RPC + provider:* 订阅，恢复自动消失），空态走 NowEmptyGuide。badge=未读数（不再是"当前 error+decision 卡数"，状态看板职责归流水线「等待人工」tab）。三端：Web `NotificationsPanel`（右侧面板，optimistic 已读/删除）、CLI `autopilot notifications list/read/dismiss`（`now` 留隐藏 deprecated 别名一版）、TUI `NotificationList`（observer-only 不可操作）。`/now` 路由仍重定向到 `/tasks` 并自动展开面板
+- **流水线（原"看板"）**：Web 的 `/tasks` 页（导航名「流水线」）把**需求 + 任务**合到一处看全生命周期，4 段 tab（全部 / 等待人工 / 运行中 / 归档），列表内按时间分组（今天/昨天/…），行是 Claude Code 风卡片。流水线是默认首页。**「Now 决策收件箱」已整体替换为「通知系统」**（2026-06-11，机制级重构非改名）：旧模型 = 11 个 card-source 从当前状态**派生**内存快照（状态变了卡片消失，aggregator + `now.*` RPC + `now:*` 频道，已全部删除，`/api/now/*` 410）；新模型 = **append-only 事件流**落 `notifications` 表（迁移 035/036，写入收口 `src/core/notify/stream.ts` 进 single-writer 白名单）。daemon 驻留 `notification-recorder` 订阅 event-bus 把领域事件翻译成通知行（task 终态/await_review、需求 awaiting_approval、agent 提问、clarifier/schedule 错误、watcher 恢复；新增 `requirement:schedule-error` 事件）；**read/dismiss 双状态独立**，RPC = `notifications.list/unreadCount/markRead/markAllRead/dismiss`，WS 频道 `notification:*`；保留策略 30 天/500 行。**持续状态不进通知流**：provider 不健康走面板顶部 `ProviderHealthBanner`（`providers.health` RPC + provider:* 订阅，恢复自动消失），空态走 NowEmptyGuide。badge=未读数（不再是"当前 error+decision 卡数"，状态看板职责归流水线「等待人工」tab）。两端：Web `NotificationsPanel`（右侧面板，optimistic 已读/删除）、CLI `autopilot notifications list/read/dismiss`（`now` 留隐藏 deprecated 别名一版）。`/now` 路由仍重定向到 `/tasks` 并自动展开面板
 - **评论线程**：`requirement_questions` + `requirement_question_replies`，Agent 调查期主动提问，用户回复后继续。**澄清的代码上下文**（2026-06-11，自主探索模型）：①**需求级浅 clone 拉全集代码库**（v2 R4 起 = 需求 codebase：`runtime/requirements/<reqId>/codebase/<alias>/` 每库一个子目录 + 清单 `.codebase.json`，与执行完整 clone **同一份**——`src/core/sandbox/codebase.ts` 的 `ensureCodebase(fidelity:"shallow")`，`requirement-clone.ts` 的 `ensureRequirementClones` 是薄壳；clarifier 首轮 ensure 幂等复用、`--depth 1 --single-branch`、并行 clone、按库降级——失败库走远程快照、全失败纯文本；旧 `workspace/<alias>/` 布局检测删除重建）——**clone 就绪时不预拼接任何文档/结构快照**，prompt 如实告知克隆形态（浅克隆 = 深度 1/单分支/无历史；**failed 重澄清复用既有 full clone 时如实声明交付分支 + 可能有上轮遗留脏树，不静默 reset**），探索方式交给 agent 自主（读任意文件、搜索、git 命令、`git fetch --deepen` 加深历史），目标导向 = 了解项目以提出精准问题、代码能答的不问用户；clarifier `permission_mode: bypassPermissions`（default 下 Bash 被拒跑不了 git，信任级同 dev develop 阶段）+ max_turns 15，prompt 明确禁 push/改远程。生命周期 = done 即清（done-workspace-cleanup）；cancelled 仅清纯浅 clone（含 full 的留给 retention 按需求终态清）；删除需求整树删；failed 整份保留（重澄清 / fix 续作还要用）。② clone 失败降级：本地 path（老工作区）或 `gh api` 远程拉**结构事实 + 自述文档快照**（prompt 声明可能过期、仅作线索）。③ 全失败 = 纯文本模式
 - **框架零业务知识**：核心模块不含任何工作流专属常量或逻辑
 - **用户空间分离**：`AUTOPILOT_HOME`（默认 `~/.autopilot/`）存放用户配置、工作流和运行时数据
@@ -81,7 +81,6 @@ autopilot 的真实用户是同一个开发者（能跑本地 daemon、配 YAML 
 初始化：`autopilot init`（自动从 repo 内 examples 把 `dev` + `ad-hoc` 种成 DB native 工作流；其余示例是模板，按需 `workflow create` 从模板种 DB）
 升级：`autopilot upgrade`
 启动 daemon：`autopilot daemon run`
-启动 TUI：`autopilot tui`
 打开 Web UI：`autopilot dashboard`（浏览器访问 `http://127.0.0.1:6180`）
 
 **老用户拉 repo 内最新 workflow fix**：`autopilot workflow sync dev`（dry-run 看 diff，加 `--apply` 真覆盖）。语义 = 从 examples 重种 DB native 行（reseedTemplateWorkflow，按 template_revision 比对）；file 目录副本已随迁移 052 退役。
@@ -116,17 +115,12 @@ autopilot/
 │   │   ├── ws.ts                  # WebSocket 连接管理 + 订阅分发
 │   │   ├── protocol.ts            # JSON 协议类型定义
 │   │   └── pid.ts                 # PID 文件管理
-│   ├── client/                    # 薄客户端库（CLI/TUI/Web 共用）
+│   ├── client/                    # 薄客户端库（CLI/Web 共用）
 │   │   ├── index.ts               # AutopilotClient (HTTP+WS)
 │   │   ├── http.ts                # HTTP REST 方法
 │   │   └── ws.ts                  # WebSocket + 自动重连
 │   ├── cli/                       # CLI 薄客户端
 │   │   └── index.ts               # Commander CLI（daemon/task/workflow 命令组）
-│   ├── tui/                       # 终端 UI (ink/React)
-│   │   ├── index.ts               # ink render 入口
-│   │   ├── app.tsx                # 根组件（Tab 导航）
-│   │   ├── components/            # Header, TaskList, TaskDetail, StatusBar, WorkflowList
-│   │   └── hooks/                 # useClient, useTasks, useConnection
 │   ├── web/                       # Web UI (React+Vite SPA)
 │   │   ├── vite.config.ts
 │   │   ├── index.html
@@ -345,7 +339,6 @@ autopilot workflow export <name> [-o file]       # 导出 yaml
 autopilot workflow import <name> --from <yaml> --derives-from <base>  # 导入 yaml
 
 # UI
-autopilot tui                    # 终端 UI
 autopilot dashboard              # 浏览器打开 Web UI
 
 # 构建 Web UI（开发后需重新构建）
@@ -358,7 +351,7 @@ bun run build:web
 bun test
 bun run typecheck
 bun run smoke-test       # 客户 onboarding CLI 完整路径烟雾测试（12 步）
-bun run coverage:rpc     # RPC × {web/tui/cli} 覆盖矩阵（发现死代码 / 反渗内核命名候选）
+bun run coverage:rpc     # RPC × {web/cli} 覆盖矩阵（发现死代码 / 反渗内核命名候选）
 ```
 
 ## 配置

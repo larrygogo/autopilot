@@ -69,7 +69,7 @@ program
  *
  * 之前 commander 永远把 String(DEFAULT_PORT) 注入 opts.port → opts.port
  * 永远 truthy → readListenInfo 永远走不到。客户改 config.json.daemon.port
- * = 16180 后跑 daemon status / tui / dashboard 都连 6180 → 错的 daemon。
+ * = 16180 后跑 daemon status / dashboard 都连 6180 → 错的 daemon。
  */
 function resolvePort(opts?: { port?: string }): number {
   const explicitPort =
@@ -1003,25 +1003,6 @@ program
       if (sessionId) console.log(`\n（session 已保存：${sessionId}）`);
       process.exit(0);
     });
-  });
-
-// ──────────────────────────────────────────────
-// tui — 终端 UI
-// ──────────────────────────────────────────────
-
-program
-  .command("tui")
-  .description("启动终端 UI")
-  .option("-p, --port <port>", "daemon 端口", String(DEFAULT_PORT))
-  .action(async (opts: { port: string }) => {
-    try {
-      const { startTui } = await import("../tui/index");
-      startTui({ port: resolvePort(opts) });
-    } catch (e: unknown) {
-      console.error("错误：TUI 模块未安装。请运行 `bun install` 安装依赖。");
-      console.error(e instanceof Error ? e.message : String(e));
-      process.exit(1);
-    }
   });
 
 // ──────────────────────────────────────────────

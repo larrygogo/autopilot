@@ -8,7 +8,7 @@
 
 定义阶段，写每步逻辑，框架负责按顺序跑、失败重试、驳回回退、并行执行、卡死恢复。
 
-附带 Web UI（claude.ai 质感 · 亮暗双模 · 图形化工作流编辑器 · ⌘K 命令面板 · 实时日志 · 人机交互 banner）、TUI、CLI 三种客户端。
+附带 Web UI（claude.ai 质感 · 亮暗双模 · 图形化工作流编辑器 · ⌘K 命令面板 · 实时日志 · 人机交互 banner）、CLI 两种客户端。
 
 [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1.svg)](https://bun.sh/)
 [![TypeScript](https://img.shields.io/badge/language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
@@ -131,14 +131,13 @@ agent 收到答案继续
 | **🚀** | **Push 模型** | 阶段完成后非阻塞启动下一阶段，无需轮询 |
 | **🛡️** | **Supervisor 守护** | daemon 崩溃自动重启，指数退避 + 快速崩溃保护 |
 | **📜** | **三层日志落盘** | 进程日志 / 任务事件流 / Agent 调用 transcript 全部可追溯 |
-| **🔔** | **通知系统** | 替代旧 `autopilot now` 的 append-only 事件流通知；三端覆盖（Web/CLI/TUI） |
+| **🔔** | **通知系统** | 替代旧 `autopilot now` 的 append-only 事件流通知；两端覆盖（Web/CLI） |
 
 ## 架构
 
 ```mermaid
 graph TB
     CLI["CLI Client"] --HTTP--> Daemon
-    TUI["TUI (ink)"] --WS--> Daemon
     Web["Web UI<br/>(React 19 + Vite + shadcn/ui)"] --HTTP + WS--> Daemon
 
     Daemon["autopilot daemon<br/>(Bun.serve)"] --> Core
@@ -156,7 +155,7 @@ graph TB
     Daemon --> DaemonLog
 ```
 
-- **核心引擎**作为长驻 daemon 运行；CLI / TUI / Web 通过 HTTP + WebSocket 接入
+- **核心引擎**作为长驻 daemon 运行；CLI / Web 通过 HTTP + WebSocket 接入
 - **Supervisor** 守护 daemon，崩了自动重启
 - **每任务**一个独立 workspace 沙盒，每个 phase 完成时框架自动归档 agent 调用 + phase 日志
 
@@ -177,7 +176,6 @@ autopilot init                    # 创建 ~/.autopilot/、跑数据库迁移、
 ```bash
 autopilot daemon start            # 后台启动 daemon（带 supervisor 守护）
 autopilot dashboard               # 打开 Web UI（浏览器访问 http://127.0.0.1:6180）
-# 或：autopilot tui 进 TUI
 ```
 
 ### 纯 CLI 路径（不开浏览器也能跑）
@@ -284,7 +282,6 @@ autopilot notifications dismiss <id>
 autopilot workflow list
 
 # UI
-autopilot tui                       # 终端 UI
 autopilot dashboard                 # 浏览器打开 Web UI
 
 # 构建 Web（开发完改前端需执行）
@@ -302,7 +299,6 @@ autopilot/
 │   ├── daemon/                     # daemon 进程：server / routes / ws / event-bus / supervisor / protocol
 │   ├── client/                     # 薄客户端库（HTTP + WS）
 │   ├── cli/                        # CLI 薄客户端
-│   ├── tui/                        # ink (React) 终端 UI
 │   ├── web/                        # React 19 + Vite + Tailwind v4 + shadcn/ui SPA
 │   └── agents/                     # Agent 系统（providers + tools + pending-questions）
 ├── ~/.autopilot/                   # 用户空间（AUTOPILOT_HOME）
@@ -368,7 +364,6 @@ bun run build:web
 
 - **运行时**：Bun >= 1.3
 - **核心**：commander >= 13 · yaml >= 2.8
-- **TUI**：React 19 · ink 7
 - **Web 前端**：React 19 · Vite 6 · Tailwind v4 · shadcn/ui (Radix) · cmdk · sonner · lucide-react · dagre
 
 可选 Agent CLI（按需登录）：
