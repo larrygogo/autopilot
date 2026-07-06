@@ -1677,14 +1677,79 @@ migrateCmd
 // 启动
 // ──────────────────────────────────────────────
 
-// 短命令跑完后强制退出（WS RPC 连接保活 event loop 会阻塞自然 exit）。
-// long-running 命令（daemon run / daemon serve）通过 setInterval / signal 保活，不受影响。
-program.parseAsync(process.argv).then(() => {
-  // 给 ws 一个 50ms 的窗口 flush 缓冲（unref 让计时器自身不阻塞 exit）
-  const t = setTimeout(() => process.exit(0), 50);
-  // Bun Timer 兼容 Node Timer 的 unref（动态访问避开类型分歧）
-  (t as { unref?: () => void }).unref?.();
-}).catch((err: unknown) => {
-  console.error("CLI 错误：", err);
-  process.exit(1);
-});
+// 双击启动（Explorer 启动、无子命令）：启动服务 + 打开 Web 控制台，而非打印 help 一闪而过。
+// 命令行调用（有子命令，或终端里敲 autopilot）走正常 CLI 分支。
+// 注意：不能用 process.stdout.isTTY 判双击——Windows 双击的 console 窗口里 isTTY 常为 false，
+// 而终端里敲命令 isTTY 为 true，刚好相反。可靠信号是父进程：双击=explorer.exe、命令行=shell。
+function isDoubleClickLaunch(): boolean {
+  // 编译版 argv=[bun, "B:/~BUN/root/autopilot.exe", ...用户参数]、dev argv=[bun, script, ...]——
+  // 两者前两项都是 runtime，用户参数从 index 2 起。有子命令 = 命令行调用，排除。
+  const userArgs = process.argv.slice(2);
+  if (userArgs.length > 0) return false;
+  if (process.env.CI) return false;
+  // 无子命令：靠父进程区分「双击（explorer 启动）」vs「终端里敲 autopilot（cmd/powershell/bash）」。
+  // 注意：不能用 isTTY 判——双击 console 与终端里 isTTY 都可能为 true，无区分度；父进程才可靠。
+  if (process.platform !== "win32") return false; // 双击裸二进制主要是 Windows 场景
+  try {
+    const r = nodeSpawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `(Get-CimInstance Win32_Process -Filter "ProcessId=${process.ppid}").Name`,
+      ],
+      { encoding: "utf-8", windowsHide: true },
+    );
+    return (r.stdout ?? "").trim().toLowerCase().includes("explorer");
+  } catch {
+    return false;
+  }
+}
+
+if (isDoubleClickLaunch()) {
+  const url = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
+  console.log("");
+  console.log("  autopilot —— 多阶段任务编排引擎");
+  console.log("");
+  console.log(`  正在启动服务，Web 控制台将自动打开：${url}`);
+  console.log("  · 本机访问免登录（loopback 豁免鉴权）");
+  console.log("  · 关闭此窗口即停止服务");
+  console.log("  · 命令行用法：autopilot --help");
+  console.log("");
+  // 延迟拉起浏览器，给 daemon 一点 ready 时间（本机 loopback 访问免 token）。unref 不阻塞 exit。
+  const openTimer = setTimeout(() => {
+    const platform = process.platform;
+    const cmd: string[] =
+      platform === "darwin" ? ["open", url]
+      : platform === "win32" ? ["cmd", "/c", "start", "", url]
+      : ["xdg-open", url];
+    try {
+      Bun.spawn(cmd, { stdio: ["ignore", "ignore", "ignore"] });
+    } catch {
+      /* 打开浏览器失败：用户手动访问上面的 URL 即可 */
+    }
+  }, 2500);
+  (openTimer as { unref?: () => void }).unref?.();
+  try {
+    const { startDaemon } = await import("../daemon/index");
+    await startDaemon({}); // 前台长驻（默认 127.0.0.1），console 窗口保持，不再一闪而过
+  } catch (e: unknown) {
+    console.error(`\n启动失败：${e instanceof Error ? e.message : String(e)}`);
+    console.error("服务可能已在运行——直接访问上面的 URL，或用 `autopilot daemon stop` 停止后重试。");
+    prompt("按 Enter 退出…"); // 别让错误窗口一闪而过
+    process.exit(1);
+  }
+} else {
+  // 短命令跑完后强制退出（WS RPC 连接保活 event loop 会阻塞自然 exit）。
+  // long-running 命令（daemon run / daemon serve）通过 setInterval / signal 保活，不受影响。
+  program.parseAsync(process.argv).then(() => {
+    // 给 ws 一个 50ms 的窗口 flush 缓冲（unref 让计时器自身不阻塞 exit）
+    const t = setTimeout(() => process.exit(0), 50);
+    // Bun Timer 兼容 Node Timer 的 unref（动态访问避开类型分歧）
+    (t as { unref?: () => void }).unref?.();
+  }).catch((err: unknown) => {
+    console.error("CLI 错误：", err);
+    process.exit(1);
+  });
+}
