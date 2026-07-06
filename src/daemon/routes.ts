@@ -590,11 +590,13 @@ function serveStaticFromDisk(urlPath: string): Response | null {
 function serveStatic(urlPath: string): Response | null {
   if (hasWebAssets()) {
     // 查表分支：key 是嵌入清单中的 URL 路径（如 "/index.html"、"/assets/x.js"）
-    const key = (urlPath === "" || urlPath === "/") ? "/index.html" : decodeSafe(urlPath);
+    let key = (urlPath === "" || urlPath === "/") ? "/index.html" : decodeSafe(urlPath);
     if (key === null) return null;
     let handle = getWebAsset(key);
-    // SPA fallback — 只在无明确扩展名时生效
-    if (!handle && !/\.[a-zA-Z0-9]+$/.test(urlPath)) handle = getWebAsset("/index.html");
+    // SPA fallback — 只在无明确扩展名时生效；命中 index.html 后 key 一并更新，
+    // 使下方 Content-Type/缓存按 index.html（text/html、no-cache）算，而非原请求路径扩展名
+    // （否则 /requirements/xxx 这类前端路由直接访问会返回 octet-stream，浏览器下载而非渲染）
+    if (!handle && !/\.[a-zA-Z0-9]+$/.test(urlPath)) { handle = getWebAsset("/index.html"); key = "/index.html"; }
     if (!handle) return /\.[a-zA-Z0-9]+$/.test(urlPath) ? null : notBuiltPage();
     const ext = key.substring(key.lastIndexOf("."));
     const isHashed = key.startsWith("/assets/");
