@@ -4,6 +4,9 @@ import { join, sep } from "path";
 import { buildConfigTemplate } from "./config-template";
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync } from "node:child_process";
 import { VERSION, AUTOPILOT_HOME } from "../index";
+import { isStandaloneBinary } from "../core/runtime-env";
+export { daemonSpawnPlan } from "./spawn-plan";
+import { daemonSpawnPlan } from "./spawn-plan";
 import { notificationIntentToLabel } from "../client/notification-intent";
 import { localizeLogLine } from "../core/logger";
 import { initDb, closeDb } from "../core/db";
@@ -105,7 +108,18 @@ daemon
   .option("-p, --port <port>", "端口")
   .option("-H, --host <host>", "主机")
   .option("--insecure-no-auth", "明知风险：对外暴露且不设鉴权时仍然启动")
-  .action(async (opts: { port?: string; host?: string; insecureNoAuth?: boolean }) => {
+  .option("--supervise", "以 supervisor 模式运行（崩溃自动重启 daemon；编译单文件后台启动用）")
+  .action(async (opts: { port?: string; host?: string; insecureNoAuth?: boolean; supervise?: boolean }) => {
+    // 编译单文件模式：daemon start --supervise 会重入 `autopilot.exe daemon run --supervise`
+    // 走此分支启动 supervisor，而不是 spawn supervisor.ts（编译版无 .ts 文件）
+    if (opts.supervise) {
+      const { runSupervisor } = await import("../daemon/supervisor");
+      await runSupervisor({
+        host: opts.host,
+        port: opts.port ? parseInt(opts.port, 10) : undefined,
+      });
+      return;
+    }
     const { startDaemon } = await import("../daemon/index");
     // 不给 CLI 默认值：显式参数 > env > config.json > 内置默认 的优先级链由
     // startDaemon 统一裁决；CLI 默认 127.0.0.1 会掩盖 config 的 host 配置，
@@ -386,28 +400,24 @@ async function startDaemonProcess(supervise: boolean): Promise<number | null> {
     }
   } catch { /* 配置加载失败时让 daemon 自己处理 */ }
 
-  const scriptPath = supervise
-    ? join(import.meta.dir, "../daemon/supervisor.ts")
-    : join(import.meta.dir, "../daemon/index.ts");
+  const plan = daemonSpawnPlan({
+    standalone: isStandaloneBinary(),
+    supervise,
+    execPath: process.execPath,
+    scriptDir: import.meta.dir,
+  });
 
   if (process.platform === "win32") {
-    if (/\s/.test(scriptPath)) {
-      console.error(
-        `错误：daemon 脚本路径含空格（${scriptPath}），daemon start 暂不支持此场景，` +
-          `请用 \`autopilot daemon run\` 前台启动。`,
-      );
-      return null;
-    }
-    // 关键：cmd /c 后必须接单个完整命令字符串；不要用 "" 标题占位 + 引号包裹路径
-    // （会触发 cmd 的 "Access denied"）。Bun.spawn 在此场景下不可靠，必须用 nodeSpawn。
-    const cmdStr = `start /b bun run ${scriptPath}`;
-    const child = nodeSpawn("cmd.exe", ["/c", cmdStr], {
+    // 数组传参：nodeSpawn detached 在 Windows 下可直接后台拉起，
+    // 且对含空格的 execPath（如 Program Files/autopilot.exe）无需引号处理。
+    const child = nodeSpawn(plan.cmd, plan.args, {
+      detached: true,
       stdio: "ignore",
       windowsHide: true,
     });
     child.unref();
   } else {
-    const child = nodeSpawn("bun", ["run", scriptPath], {
+    const child = nodeSpawn(plan.cmd, plan.args, {
       detached: true,
       stdio: "ignore",
     });
