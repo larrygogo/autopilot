@@ -42,6 +42,7 @@ export function listWorkflowTemplates(): WorkflowTemplate[] {
   const result: WorkflowTemplate[] = [];
 
   for (const t of EXAMPLE_TEMPLATES) {
+    if (exampleHasTs(t.name)) continue;
     const doc = t.doc;
     const label = typeof doc["label"] === "string" && (doc["label"] as string).trim()
       ? (doc["label"] as string).trim()

@@ -9,25 +9,40 @@ const ROOT = join(import.meta.dir, "../examples/workflows");
 const OUT_DIR = join(import.meta.dir, "../src/generated");
 const OUT = join(OUT_DIR, "_examples.ts");
 
-const names = readdirSync(ROOT)
-  .filter((n) => statSync(join(ROOT, n)).isDirectory())
-  .sort();
+/**
+ * 扫 rootDir 下各子目录，按以下规则分类：
+ *  - 含 workflow.ts → tsOnly（不种 DB，避免幽灵死行）
+ *  - 否则含 workflow.json → templates（解析 doc + revision）
+ * 结果按 name 字母序返回。
+ */
+export function classifyExamples(rootDir: string): {
+  templates: { name: string; doc: Record<string, unknown>; revision: number }[];
+  tsOnly: string[];
+} {
+  const names = readdirSync(rootDir)
+    .filter((n) => statSync(join(rootDir, n)).isDirectory())
+    .sort();
 
-const templates: { name: string; doc: unknown; revision: number }[] = [];
-const tsOnly: string[] = [];
+  const templates: { name: string; doc: Record<string, unknown>; revision: number }[] = [];
+  const tsOnly: string[] = [];
 
-for (const name of names) {
-  const dir = join(ROOT, name);
-  if (existsSync(join(dir, "workflow.ts"))) {
-    tsOnly.push(name);
-    continue;
+  for (const name of names) {
+    const dir = join(rootDir, name);
+    if (existsSync(join(dir, "workflow.ts"))) {
+      tsOnly.push(name);
+      continue;
+    }
+    const jsonPath = join(dir, "workflow.json");
+    if (!existsSync(jsonPath)) continue;
+    const doc = JSON.parse(readFileSync(jsonPath, "utf-8")) as Record<string, unknown>;
+    const revision = typeof doc.template_revision === "number" ? doc.template_revision : 0;
+    templates.push({ name, doc, revision });
   }
-  const jsonPath = join(dir, "workflow.json");
-  if (!existsSync(jsonPath)) continue;
-  const doc = JSON.parse(readFileSync(jsonPath, "utf-8")) as Record<string, unknown>;
-  const revision = typeof doc.template_revision === "number" ? doc.template_revision : 0;
-  templates.push({ name, doc, revision });
+
+  return { templates, tsOnly };
 }
+
+const { templates, tsOnly } = classifyExamples(ROOT);
 
 const rows = templates
   .map((t) => `  { name: ${JSON.stringify(t.name)}, revision: ${t.revision}, doc: ${JSON.stringify(t.doc)} },`)

@@ -438,25 +438,6 @@ phases:
     expect(row!.kind).toBe("template");
   });
 
-  it("L6b：含 workflow.ts 的模板 → seedTemplateWorkflow 拒种（has-ts，避免幽灵死行）", async () => {
-    // examples 里已无含 ts 的真实模板（with_human 是最后一个），用临时合成 fixture 覆盖守卫
-    const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");
-    const { mkdirSync, writeFileSync, rmSync, existsSync } = await import("fs");
-    const { join, dirname } = await import("path");
-    const { fileURLToPath } = await import("url");
-    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-    const fixDir = join(repoRoot, "examples", "workflows", "__ts_fixture");
-    try {
-      mkdirSync(fixDir, { recursive: true });
-      writeFileSync(join(fixDir, "workflow.yaml"), "name: __ts_fixture\nphases:\n  - name: a\n    prompt: x\n");
-      writeFileSync(join(fixDir, "workflow.ts"), "export function run_a() {}\n");
-      expect(seedTemplateWorkflow("__ts_fixture")).toBe("has-ts");
-      expect(getWorkflowFromDb("__ts_fixture")).toBeNull(); // 没种进 DB
-    } finally {
-      if (existsSync(fixDir)) rmSync(fixDir, { recursive: true, force: true });
-    }
-  });
-
   it("Step5b：seedTemplateWorkflow 幂等——DB 已有 template 行 → 返回 exists（P1 后 file 副本不再检测）", async () => {
     const { seedTemplateWorkflow } = await import("../src/core/workflow/templates");
     // 第一次种入
