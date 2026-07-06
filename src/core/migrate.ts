@@ -2,6 +2,7 @@ import { readdirSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getDb } from "./db";
 import { log } from "./logger";
+import { MIGRATIONS } from "../migrations/_generated-index";
 
 export const MIGRATIONS_DIR = join(import.meta.dir, "../migrations");
 const MIGRATION_FILE_RE = /^\d{3}-[\w-]+\.ts$/;
@@ -62,11 +63,9 @@ export function nextMigrationVersion(files: string[]): number {
   return max + 1;
 }
 
-/** 磁盘上最高的迁移文件编号（= 该跑到的目标版本）。无迁移目录 / 空 → 0。doctor 据此判有无未应用迁移。 */
+/** 注册表里最高的迁移编号（= 该跑到的目标版本）。空注册表 → 0。doctor 据此判有无未应用迁移。 */
 export function latestMigrationVersion(): number {
-  if (!existsSync(MIGRATIONS_DIR)) return 0;
-  const files = readdirSync(MIGRATIONS_DIR).filter((f) => MIGRATION_FILE_RE.test(f));
-  return nextMigrationVersion(files) - 1;
+  return MIGRATIONS.length ? Math.max(...MIGRATIONS.map((m) => m.version)) : 0;
 }
 
 /** slug 规范化：小写、空格/下划线→连字符、剔除非法字符；必须以字母数字开头。 */
@@ -108,6 +107,8 @@ export function scaffoldMigration(rawSlug: string): { path: string; file: string
   const path = join(MIGRATIONS_DIR, file);
   if (existsSync(path)) throw new Error(`迁移文件已存在：${file}`);
   writeFileSync(path, migrationTemplate(slug), "utf-8");
+  // 触发 codegen 重跑，把新迁移文件纳入静态注册表 _generated-index.ts（dev-only，DX 不退化）。
+  Bun.spawnSync(["bun", "run", join(import.meta.dir, "../../scripts/gen-migrations-index.ts")]);
   return { path, file, version };
 }
 
@@ -116,22 +117,19 @@ export function scaffoldMigration(rawSlug: string): { path: string; file: string
 // ──────────────────────────────────────────────
 
 /**
- * 扫描 src/migrations/ 目录，按 NNN-name.ts 命名格式排序，执行尚未应用的迁移。
- * 返回执行的迁移数量。
+ * 遍历静态注册表 `MIGRATIONS`（scripts/gen-migrations-index.ts 从 src/migrations/ 生成、按版本升序），
+ * 执行尚未应用的迁移。返回执行的迁移数量。
+ *
+ * 注册表驱动而非 readdirSync + 动态 import，是为「bun build --compile 单文件安装包」扫清动态 import。
+ * 护栏（撞号 / file×ledger 一致性 / afterCommit 事务外副作用）与目录扫描时代完全等价——
+ * 仅把「迁移来源」从磁盘换成注册表。
  */
 export async function runPendingMigrations(): Promise<number> {
   ensureSchemaVersionTable();
 
-  const migrationsDir = MIGRATIONS_DIR;
-  if (!existsSync(migrationsDir)) {
-    log.warn("迁移目录不存在：%s", migrationsDir);
-    return 0;
-  }
-
-  // 扫描并排序迁移文件
-  const files = readdirSync(migrationsDir)
-    .filter((f) => MIGRATION_FILE_RE.test(f))
-    .sort();
+  // 由注册表派生文件名列表（护栏输入形状与目录扫描时代一致：NNN-name.ts）。
+  // 注册表已按版本升序生成，显式 .slice().sort() 保防御一致（撞号/skipped 判据不依赖顺序）。
+  const files = MIGRATIONS.map((m) => m.name + ".ts").slice().sort();
 
   // 撞号断言：两个并行 PR 取同一迁移号时，字母序先跑的占号、另一个被 `version<=current` 静默跳过
   // 永不补跑（033 撞号曾烧伤真实 DB）。在启动期就 throw，把账本冲突挡在跑迁移之前。
@@ -167,31 +165,20 @@ export async function runPendingMigrations(): Promise<number> {
 
   let count = 0;
 
-  for (const file of files) {
-    // 从文件名提取版本号，例如 "001-baseline.ts" → 1
-    const versionMatch = file.match(/^(\d{3})/);
-    if (!versionMatch) continue;
-    const version = parseInt(versionMatch[1], 10);
+  for (const entry of MIGRATIONS) {
+    const version = entry.version;
+    const file = entry.name + ".ts";
 
     if (version <= currentVersion) {
       log.debug("跳过已应用迁移 v%s：%s", version, file);
       continue;
     }
 
-    const migrationPath = join(migrationsDir, file);
     log.info("执行迁移 v%s：%s", version, file);
 
     try {
       // up 可选返回一个「事务后副作用」闭包：用于不可逆且非事务性的清理（如删磁盘文件）。
       // 放事务外执行，保证「DB 改动回滚 → 副作用绝不发生」，杜绝 DB↔磁盘不一致（049 的教训）。
-      const mod = await import(migrationPath) as {
-        up: (db: ReturnType<typeof getDb>) => unknown;
-      };
-      if (typeof mod.up !== "function") {
-        log.warn("迁移 %s 未导出 up() 函数，跳过", file);
-        continue;
-      }
-
       const db = getDb();
       // SQLite 不允许在事务内修改 foreign_keys PRAGMA，表重建（DROP+RENAME）
       // 模式必须在 FK 关闭时执行，迁移结束后立即恢复。
@@ -199,11 +186,11 @@ export async function runPendingMigrations(): Promise<number> {
       let afterCommit: (() => void) | undefined = undefined;
       try {
         db.transaction(() => {
-          const result = mod.up(db);
+          const result = entry.up(db);
           if (typeof result === "function") afterCommit = result as () => void;
           db.run(
             "INSERT INTO schema_version (version, name) VALUES (?, ?)",
-            [version, file.replace(/\.ts$/, "")]
+            [version, entry.name]
           );
         })();
       } finally {
