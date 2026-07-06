@@ -6,6 +6,8 @@ let assets: Record<string, string> = {};
 /** daemon 启动调一次。try 动态 import 生成的嵌入清单；dev 未构建则空表。 */
 export async function initWebAssets(): Promise<void> {
   try {
+    // @ts-ignore 生成物 _web-assets.generated.ts 是 gitignore 的构建产物，fresh clone/dev 未构建时不存在；
+    // bun build --compile 编译时它已由 gen:web-assets 生成、能静态打包，dev 运行时缺失则走下方 catch 回退空表。
     const gen = (await import("./_web-assets.generated")) as {
       WEB_ASSETS: Record<string, string>;
     };
