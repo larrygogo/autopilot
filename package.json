@@ -18,6 +18,8 @@
     "typecheck": "tsc --noEmit",
     "coverage:rpc": "bun run bin/coverage-matrix.ts",
     "gen:migrations": "bun run scripts/gen-migrations-index.ts",
+    "gen:examples": "bun run scripts/gen-examples-index.ts",
+    "gen": "bun run gen:migrations && bun run gen:examples",
     "check:migrations": "bun run scripts/check-migrations.ts",
     "check:docs": "bun run scripts/check-docs-translation.ts",
     "check:docs:strict": "bun run scripts/check-docs-translation.ts --strict",

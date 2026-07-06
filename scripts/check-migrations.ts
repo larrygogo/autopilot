@@ -56,4 +56,13 @@ if (diff) {
   process.exit(1);
 }
 
+// ④ examples 常量生成物一致性：重跑 gen:examples 后 git 无 diff
+execSync("bun run scripts/gen-examples-index.ts", { stdio: "ignore" });
+const examplesDiff = execSync("git status --porcelain src/generated/_examples.ts", { encoding: "utf-8" }).trim();
+if (examplesDiff) {
+  console.error("✗ src/generated/_examples.ts 与磁盘 examples/workflows/ 不一致。请跑 `bun run gen:examples` 并提交。");
+  process.exit(1);
+}
+
 console.log(`✓ ${valid.length} 条迁移：编号无撞号、命名规范、注册表与磁盘一致。`);
+console.log(`✓ examples 常量与磁盘 examples/workflows/ 一致。`);
