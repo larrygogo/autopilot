@@ -343,6 +343,10 @@ autopilot dashboard              # 浏览器打开 Web UI
 
 # 构建 Web UI（开发后需重新构建）
 bun run build:web
+
+# 打包单文件可执行安装包（bun build --compile → dist/autopilot.exe；
+# 迁移/examples/前端 web-dist 全嵌入，无需外置文件；build:exe:{win,linux,macos} 交叉编译）
+bun run build:exe
 ```
 
 ## 运行测试
