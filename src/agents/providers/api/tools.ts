@@ -10,9 +10,12 @@
  * 要获得真正的进程级隔离，应在 Docker/systemd-nspawn 等容器内运行 autopilot daemon。
  */
 
-import { existsSync, realpathSync, lstatSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync, readdirSync } from "fs";
+import { existsSync, realpathSync, lstatSync, statSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync, readdirSync } from "fs";
 import { join, dirname, basename, resolve, sep } from "path";
 import { spawn } from "child_process";
+import { request as httpRequest } from "http";
+import { request as httpsRequest } from "https";
+import { lookup as dnsLookup } from "dns/promises";
 import { log } from "../../../core/logger";
 import { expandToApiTools } from "../../tool-capabilities";
 
@@ -149,10 +152,33 @@ function checkPrivateIp(address: string, hostname: string): void {
   }
 }
 
-export async function assertSafeUrl(rawUrl: string, mode: PermissionMode): Promise<void> {
-  // bypassPermissions 模式不做 SSRF 检查（对齐 CLI 现状）
-  if (mode === "bypassPermissions") return;
+const DNS_LOOKUP_TIMEOUT_MS = 3_000;
 
+interface ResolvedUrlTarget {
+  parsed: URL;
+  /** bypassPermissions 下不固定地址；其余模式始终返回已校验的目标地址。 */
+  pinned?: { address: string; family: 4 | 6 };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new ToolError(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * 校验 URL 并解析出实际请求必须使用的 IP。调用者必须把 pinned 传给连接层，
+ * 不能校验后再让 HTTP 客户端独立解析一次，否则会留下 DNS rebinding 窗口。
+ */
+async function resolveSafeUrlTarget(rawUrl: string, mode: PermissionMode): Promise<ResolvedUrlTarget> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -163,42 +189,105 @@ export async function assertSafeUrl(rawUrl: string, mode: PermissionMode): Promi
   if (!["http:", "https:"].includes(parsed.protocol)) {
     throw new ToolError(`协议不允许：${parsed.protocol}`);
   }
+  if (mode === "bypassPermissions") return { parsed };
 
-  // 对 localhost 特判（URL 解析后 hostname 是 "localhost"）
   if (parsed.hostname === "localhost") {
-    throw new ToolError(`SSRF 防护：localhost 解析到私有地址 127.0.0.1`);
+    throw new ToolError("SSRF 防护：localhost 解析到私有地址 127.0.0.1");
   }
-
-  // 如果 hostname 本身就是 IP 地址（如 127.0.0.1, ::1），直接检查，无需 DNS 解析
   if (isIpAddress(parsed.hostname)) {
-    checkPrivateIp(stripBrackets(parsed.hostname), parsed.hostname);
-    return;
+    const address = stripBrackets(parsed.hostname);
+    checkPrivateIp(address, parsed.hostname);
+    return { parsed, pinned: { address, family: address.includes(":") ? 6 : 4 } };
   }
 
-  // 域名：DNS 解析后检查 IP
-  let addresses: Array<{ address: string }>;
+  let addresses: Array<{ address: string; family: number }>;
   try {
-    const dns = await import("dns");
-    addresses = await new Promise<Array<{ address: string }>>((resolve, reject) => {
-      dns.resolve4(parsed.hostname, (err, addrs) => {
-        if (err) {
-          // 回落尝试 IPv6
-          dns.resolve6(parsed.hostname, (err6, addrs6) => {
-            if (err6) reject(err6);
-            else resolve((addrs6 || []).map((a) => ({ address: a })));
-          });
-        } else {
-          resolve((addrs || []).map((a) => ({ address: a })));
-        }
-      });
-    });
-  } catch {
+    addresses = await withTimeout(
+      dnsLookup(parsed.hostname, { all: true, verbatim: true }) as Promise<Array<{ address: string; family: number }>>,
+      DNS_LOOKUP_TIMEOUT_MS,
+      `DNS 解析超时：${parsed.hostname}`,
+    );
+  } catch (e: unknown) {
+    if (e instanceof ToolError) throw e;
     throw new ToolError(`DNS 解析失败：${parsed.hostname}`);
   }
+  if (addresses.length === 0) throw new ToolError(`DNS 解析失败：${parsed.hostname}`);
+  for (const { address } of addresses) checkPrivateIp(address, parsed.hostname);
+  const selected = addresses[0];
+  return { parsed, pinned: { address: selected.address, family: selected.family as 4 | 6 } };
+}
 
-  for (const { address } of addresses) {
-    checkPrivateIp(address, parsed.hostname);
-  }
+export async function assertSafeUrl(rawUrl: string, mode: PermissionMode): Promise<void> {
+  await resolveSafeUrlTarget(rawUrl, mode);
+}
+
+interface PinnedHttpResponse {
+  status: number;
+  location: string | null;
+  text: string;
+  truncated: boolean;
+}
+
+/** 发起固定到已校验 IP 的请求，同时保留原域名用于 Host header 与 TLS SNI。 */
+function requestPinnedUrl(
+  target: ResolvedUrlTarget,
+  method: string,
+  timeoutMs = 30_000,
+): Promise<PinnedHttpResponse> {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const transport = target.parsed.protocol === "https:" ? httpsRequest : httpRequest;
+    let settled = false;
+    const finishError = (e: unknown) => {
+      if (settled) return;
+      settled = true;
+      rejectRequest(e);
+    };
+    const lookup = target.pinned
+      ? ((_hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
+          if (options?.all) callback(null, [target.pinned]);
+          else callback(null, target.pinned!.address, target.pinned!.family);
+        })
+      : undefined;
+    const req = transport(target.parsed, {
+      method,
+      headers: { "User-Agent": "autopilot/1.0" },
+      // Node 的重载类型不能表达同一个 callback 同时支持 all=true/false；运行时两种形态均已处理。
+      lookup: lookup as never,
+    }, (res) => {
+      let text = "";
+      let truncated = false;
+      res.setEncoding("utf8");
+      res.on("data", (chunk: string) => {
+        const remaining = 50_000 - text.length;
+        if (remaining > 0) text += chunk.slice(0, remaining);
+        if (chunk.length > remaining) truncated = true;
+      });
+      res.on("end", () => {
+        if (settled) return;
+        settled = true;
+        const locationHeader = res.headers.location;
+        resolveRequest({
+          status: res.statusCode ?? 0,
+          location: Array.isArray(locationHeader) ? (locationHeader[0] ?? null) : (locationHeader ?? null),
+          text,
+          truncated,
+        });
+      });
+      res.on("error", finishError);
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`请求超时（${timeoutMs}ms）`)));
+    req.on("error", finishError);
+    req.end();
+  });
+}
+
+/** 仅供安全回归测试：验证连接层不会对已校验主机名再次做 DNS 查询。 */
+export function _requestPinnedUrlForTest(
+  rawUrl: string,
+  address: string,
+  family: 4 | 6,
+): Promise<PinnedHttpResponse> {
+  return requestPinnedUrl({ parsed: new URL(rawUrl), pinned: { address, family } }, "GET", 2_000);
 }
 
 // ── bash 安全 ──
@@ -325,7 +414,7 @@ export function getToolDefinitions(mode: PermissionMode, allowedApiTools?: Set<s
     },
     {
       name: "search_files",
-      description: "Search for files matching a pattern using grep-like regex.",
+      description: "Search file contents using a regular expression.",
       input_schema: {
         type: "object",
         properties: {
@@ -365,7 +454,7 @@ export function getToolDefinitions(mode: PermissionMode, allowedApiTools?: Set<s
   if (mode !== "cautious") {
     tools.splice(tools.length - 1, 0, {
       name: "bash",
-      description: "Execute a bash command. Working directory is the project sandbox.",
+      description: "Execute a shell command. Working directory is the project sandbox.",
       input_schema: {
         type: "object",
         properties: {
@@ -559,28 +648,56 @@ export class ToolExecutor {
       ? this._resolvePath(input["path"])
       : this.sandboxRoot;
     const includeGlob = input["include"] as string | undefined;
-
-    // 使用 grep -rn 搜索；"--" 终止选项解析，防止以 '-' 开头的 pattern 被当成 grep 选项
-    const args = ["-rn", "--max-count=100"];
-    if (includeGlob) args.push("--include", includeGlob);
-    args.push("--", pattern, searchPath);
-
+    let matcher: RegExp;
     try {
-      const result = Bun.spawnSync(["grep", ...args], {
-        cwd: this.sandboxRoot,
-        timeout: 30_000,
-      });
-      const stdout = result.stdout?.toString() || "";
-      if (!stdout.trim()) return "无匹配结果";
-      // 截断过长的输出
-      const lines = stdout.split("\n");
-      if (lines.length > 200) {
-        return lines.slice(0, 200).join("\n") + `\n... (省略 ${lines.length - 200} 行)`;
-      }
-      return stdout;
-    } catch {
-      return "搜索执行失败";
+      matcher = new RegExp(pattern);
+    } catch (e: unknown) {
+      throw new ToolError(`无效搜索正则：${e instanceof Error ? e.message : String(e)}`);
     }
+    const glob = includeGlob ? new Bun.Glob(includeGlob) : null;
+    const matches: string[] = [];
+    let omitted = 0;
+    const MAX_MATCHES = 200;
+    const MAX_FILE_BYTES = 2 * 1024 * 1024;
+
+    const searchFile = (filePath: string): void => {
+      if (glob && !glob.match(basename(filePath))) return;
+      let content: string;
+      try {
+        if (statSync(filePath).size > MAX_FILE_BYTES) return;
+        content = readFileSync(filePath, "utf-8");
+      } catch {
+        return;
+      }
+      const relativePath = filePath.startsWith(this.sandboxRoot + sep)
+        ? filePath.slice(this.sandboxRoot.length + 1)
+        : filePath;
+      for (const [index, line] of content.split("\n").entries()) {
+        matcher.lastIndex = 0;
+        if (!matcher.test(line)) continue;
+        if (matches.length < MAX_MATCHES) matches.push(`${relativePath}:${index + 1}:${line}`);
+        else omitted++;
+      }
+    };
+    const walk = (entryPath: string): void => {
+      let stat;
+      try { stat = lstatSync(entryPath); } catch { return; }
+      if (stat.isSymbolicLink()) return;
+      if (stat.isFile()) {
+        searchFile(entryPath);
+        return;
+      }
+      if (!stat.isDirectory()) return;
+      let entries;
+      try { entries = readdirSync(entryPath, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries) {
+        if (entry.name === ".git" || entry.name === "node_modules") continue;
+        walk(join(entryPath, entry.name));
+      }
+    };
+    walk(searchPath);
+    if (matches.length === 0) return "无匹配结果";
+    return matches.join("\n") + (omitted > 0 ? `\n... (省略 ${omitted} 条匹配)` : "");
   }
 
   private async _fetchUrl(input: Record<string, unknown>): Promise<string> {
@@ -594,22 +711,16 @@ export class ToolExecutor {
     // 禁用自动重定向：每一跳的 Location 都要重新过 assertSafeUrl，
     // 防止公网 URL 302 跳到 127.0.0.1 / 169.254.169.254 等私网地址绕过 SSRF 检查
     for (let redirects = 0; ; redirects++) {
-      await assertSafeUrl(currentUrl, this.mode);
-
-      let response: Response;
+      const target = await resolveSafeUrlTarget(currentUrl, this.mode);
+      let response: PinnedHttpResponse;
       try {
-        response = await fetch(currentUrl, {
-          method,
-          headers: { "User-Agent": "autopilot/1.0" },
-          redirect: "manual",
-          signal: AbortSignal.timeout(30_000),
-        });
+        response = await requestPinnedUrl(target, method);
       } catch (e: unknown) {
         throw new ToolError(`fetch 失败：${e instanceof Error ? e.message : String(e)}`);
       }
 
       if ([301, 302, 303, 307, 308].includes(response.status)) {
-        const location = response.headers.get("location");
+        const location = response.location;
         if (location) {
           if (redirects >= MAX_REDIRECTS) {
             throw new ToolError(`重定向次数超过上限（${MAX_REDIRECTS}）：${url}`);
@@ -619,20 +730,15 @@ export class ToolExecutor {
           } catch {
             throw new ToolError(`重定向目标无效：${location}`);
           }
-          // 303（及历史上 301/302 对非 GET 的事实行为）降级为 GET
-          if (response.status === 303 || (method !== "GET" && method !== "HEAD")) {
+          // 303（及历史上 301/302 对非 GET 的事实行为）降级为 GET；307/308 保留方法。
+          if (response.status === 303 || ([301, 302].includes(response.status) && method !== "GET" && method !== "HEAD")) {
             method = "GET";
           }
           continue;
         }
       }
 
-      const text = await response.text();
-      // 截断过长的响应
-      if (text.length > 50_000) {
-        return text.slice(0, 50_000) + "\n... (响应被截断)";
-      }
-      return text;
+      return response.text + (response.truncated ? "\n... (响应被截断)" : "");
     }
   }
 
@@ -659,7 +765,10 @@ export class ToolExecutor {
       : buildSanitizedEnv();
 
     return new Promise<string>((resolve, reject) => {
-      const proc = spawn("bash", ["-c", command], {
+      const shell = process.platform === "win32"
+        ? { executable: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command] }
+        : { executable: "bash", args: ["-c", command] };
+      const proc = spawn(shell.executable, shell.args, {
         cwd: this.sandboxRoot,
         env: env as NodeJS.ProcessEnv,
         timeout,

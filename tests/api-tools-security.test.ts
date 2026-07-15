@@ -16,6 +16,7 @@ import { tmpdir } from "os";
 import {
   assertInSandbox,
   assertSafeUrl,
+  _requestPinnedUrlForTest,
   ToolError,
   UnsupportedInApiModeError,
 } from "../src/agents/providers/api/tools";
@@ -181,6 +182,25 @@ describe("assertSafeUrl", () => {
   it("DNS 解析失败时抛出错误", async () => {
     await expect(assertSafeUrl("http://this-domain-should-not-exist-xyz123.invalid/", "default")).rejects.toThrow("DNS");
   });
+
+  it("HTTP 连接固定使用已校验 IP，不会对域名二次解析（DNS rebinding）", async () => {
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) { return new Response(req.headers.get("host") ?? ""); },
+    });
+    try {
+      const response = await _requestPinnedUrlForTest(
+        `http://rebind-target.invalid:${server.port}/`,
+        "127.0.0.1",
+        4,
+      );
+      expect(response.status).toBe(200);
+      expect(response.text).toBe(`rebind-target.invalid:${server.port}`);
+    } finally {
+      server.stop(true);
+    }
+  });
 });
 
 // ── bash 安全测试 ──
@@ -191,6 +211,7 @@ describe("bash 安全 — ToolExecutor", () => {
   beforeAll(() => {
     sandbox = join(tmpdir(), `autopilot-bash-test-${Date.now()}`);
     mkdirSync(sandbox, { recursive: true });
+    writeFileSync(join(sandbox, "needle.txt"), "alpha\nportable-search-needle\nomega\n");
   });
 
   afterAll(async () => {
@@ -252,6 +273,17 @@ describe("bash 安全 — ToolExecutor", () => {
     // 这里用 echo 模拟——bypassPermissions 应该不做黑名单过滤
     const result = await executor.execute({ name: "bash", input: { command: "echo test" } });
     expect(result.is_error).toBe(false);
+  });
+
+  it("search_files 不依赖 grep，且无效正则正确标记为错误", async () => {
+    const executor = ToolExecutor.fromConfig(sandbox, "default");
+    const found = await executor.execute({ name: "search_files", input: { pattern: "portable-search-needle" } });
+    expect(found.is_error).toBe(false);
+    expect(found.output).toContain("needle.txt:2:portable-search-needle");
+
+    const invalid = await executor.execute({ name: "search_files", input: { pattern: "[" } });
+    expect(invalid.is_error).toBe(true);
+    expect(invalid.output).toContain("无效搜索正则");
   });
 });
 

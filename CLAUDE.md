@@ -352,7 +352,7 @@ bun run build:exe
 ## 运行测试
 
 ```bash
-bun test
+bun run test              # --isolate，避免测试文件共享 DB 单例
 bun run typecheck
 bun run smoke-test       # 客户 onboarding CLI 完整路径烟雾测试（12 步）
 bun run coverage:rpc     # RPC × {web/cli} 覆盖矩阵（发现死代码 / 反渗内核命名候选）

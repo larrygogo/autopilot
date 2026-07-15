@@ -9,7 +9,7 @@
 import { mkdirSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { join, extname } from "path";
 import { AUTOPILOT_HOME } from "../../index";
-import { getDb } from "../db";
+import { getDb, insertWithFreshId } from "../db";
 
 // ──────────────────────────────────────────────
 // 类型
@@ -184,31 +184,38 @@ export async function saveAttachment(opts: SaveAttachmentOpts): Promise<Attachme
   const { requirementId, originalName, mimeType, data } = opts;
   const ext = extname(originalName);
   const category = detectCategory(mimeType, originalName);
+  const db = getDb();
+  const ts = Date.now();
 
   // 确保目录存在
   const dir = getAttachmentsDir(requirementId);
   mkdirSync(dir, { recursive: true });
 
-  // 生成唯一文件名（ID + 原始扩展名），避免同名冲突
-  const id = nextAttachmentId();
+  // 先同步、原子地预留 ID，再进行任何 await。否则两个并发上传都可能在
+  // SELECT MAX+1 与 INSERT 之间拿到同一个 ID，继而写入同一文件并串数据。
+  const id = insertWithFreshId(nextAttachmentId, (candidate) => {
+    const candidatePath = join(dir, `${candidate}${ext}`);
+    db.run(
+      `INSERT INTO requirement_attachments
+         (id, requirement_id, original_name, mime_type, file_path, file_size, category, extracted_text, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+      [candidate, requirementId, originalName, mimeType, candidatePath, data.byteLength, category, ts],
+    );
+    return candidate;
+  });
   const fileName = `${id}${ext}`;
   const filePath = join(dir, fileName);
 
-  // 写磁盘（Bun 原生，已 await，无 race）
-  await Bun.write(filePath, data);
-
-  // 文本提取
-  const extractedText = await extractText(category, filePath, ext);
-
-  // 写 DB
-  const db = getDb();
-  const ts = Date.now();
-  db.run(
-    `INSERT INTO requirement_attachments
-       (id, requirement_id, original_name, mime_type, file_path, file_size, category, extracted_text, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, requirementId, originalName, mimeType, filePath, data.byteLength, category, extractedText, ts],
-  );
+  try {
+    await Bun.write(filePath, data);
+    const extractedText = await extractText(category, filePath, ext);
+    db.run("UPDATE requirement_attachments SET extracted_text = ? WHERE id = ?", [extractedText, id]);
+  } catch (e) {
+    // 预留成功但落盘失败时不能留下指向缺失/半写文件的幽灵记录。
+    try { if (existsSync(filePath)) unlinkSync(filePath); } catch { /* best-effort */ }
+    db.run("DELETE FROM requirement_attachments WHERE id = ?", [id]);
+    throw e;
+  }
 
   return getAttachmentById(id) as Attachment;
 }

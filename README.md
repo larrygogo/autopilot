@@ -353,7 +353,7 @@ sandbox_retention:        # 可选：自动清理终态任务 sandbox（旧名 w
 
 ```bash
 bun install
-bun test                  # 178 tests
+bun run test              # 全量测试（按文件隔离）
 bun run typecheck
 bun run build:web
 ```

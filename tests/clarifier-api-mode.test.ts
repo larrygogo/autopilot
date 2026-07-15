@@ -90,13 +90,15 @@ function createMockApiAgent(opts?: {
   } as unknown as Agent;
 }
 
+let testDb: Database | null = null;
+
 function initSchema(): void {
-  const db = new Database(":memory:");
+  testDb = new Database(":memory:");
   [
     m001, m002, m004, m005, m006, m007, m008, m009, m010,
     m011, m012, m013, m014, m015, m016, m021, m024, m032, m034,
-  ].forEach((fn) => fn(db));
-  _setDbForTest(db);
+  ].forEach((fn) => fn(testDb!));
+  _setDbForTest(testDb);
   createProject({ id: "p1", name: "测试项目" });
 }
 
@@ -111,6 +113,9 @@ describe("clarifier — API 模式 task context 注入", () => {
     _setClarifyFnForTest(null);
     _resetInflightForTest();
     disableBus();
+    _setDbForTest(null);
+    testDb?.close();
+    testDb = null;
   });
 
   // ──────────────────────────────────────────────

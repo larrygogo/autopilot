@@ -1,4 +1,7 @@
 import { describe, it, expect } from "bun:test";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { detectCategory, buildAttachmentContext } from "../src/core/requirements/attachments";
 import type { Attachment } from "../src/core/requirements/attachments";
 
@@ -93,5 +96,39 @@ describe("buildAttachmentContext", () => {
     ];
     const ctx = buildAttachmentContext(atts);
     expect(ctx).toContain("文本提取失败");
+  });
+});
+
+describe("saveAttachment 并发安全", () => {
+  it("并发上传预留不同 ID，文件内容不会互相覆盖", async () => {
+    const home = join(tmpdir(), `autopilot-attachment-race-${crypto.randomUUID()}`);
+    try {
+      const proc = Bun.spawn([
+        process.execPath,
+        join(import.meta.dir, "fixtures", "attachment-race-probe.ts"),
+      ], {
+        cwd: join(import.meta.dir, ".."),
+        env: { ...process.env, AUTOPILOT_HOME: home },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      expect(exitCode, stderr).toBe(0);
+      const result = JSON.parse(stdout.trim()) as {
+        statuses: string[];
+        rows: Array<{ id: string; original_name: string; extracted_text: string }>;
+      };
+      expect(result.statuses).toEqual(["fulfilled", "fulfilled"]);
+      expect(result.rows).toEqual([
+        { id: "att-001", original_name: "first.txt", extracted_text: "FIRST" },
+        { id: "att-002", original_name: "second.txt", extracted_text: "SECOND" },
+      ]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
