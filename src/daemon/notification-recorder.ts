@@ -24,6 +24,7 @@ import {
   notificationContextForTask,
 } from "../core/notify/context";
 import { createLogger } from "../core/logger";
+import { readSupervisorState, readCrashLoopAlertedAt, writeCrashLoopAlertedAt } from "./pid";
 
 const log = createLogger("notification-recorder");
 
@@ -41,6 +42,38 @@ function record(input: CreateNotificationInput): void {
 
 function preview(text: string, max = 100): string {
   return text.length > max ? text.slice(0, max) + "…" : text;
+}
+
+/**
+ * 启动时检查 supervisor 崩溃循环并补记通知。
+ *
+ * 为什么在 daemon 启动时补记、而非崩溃当下即时记：crash-loop 判定与重启由 supervisor
+ * （独立父进程）做，它不接 event-bus、也不该耦合通知 DB 写入；而 daemon 每次被 respawn
+ * 起来后能读到 supervisor.state。故由「活着的 daemon」代记。按 supervisor 会话 started_at
+ * 去重，避免同一崩溃循环里每次 respawn 重复记。
+ *
+ * 局限：fatal_config（配置错误）时 supervisor 直接退出、daemon 不再被拉起，无「活着的
+ * daemon」补记——那条路径仍靠 console + `daemon status`（supervisor 消失）暴露。
+ */
+export function checkSupervisorCrashLoop(): void {
+  try {
+    const st = readSupervisorState();
+    if (!st || !st.crash_loop) return;
+    if (readCrashLoopAlertedAt() === st.started_at) return; // 本会话已告警
+    record({
+      type: "supervisor_crash_loop",
+      title: "runner 反复崩溃",
+      body:
+        `daemon 已被 supervisor 重启 ${st.restarts} 次并进入快速崩溃循环` +
+        `${st.last_exit_code != null ? `（上次退出码 ${st.last_exit_code}）` : ""}。` +
+        `请查 daemon 日志排因：autopilot daemon logs`,
+      related: { type: "system", id: "supervisor" },
+    });
+    writeCrashLoopAlertedAt(st.started_at);
+    log.error("supervisor 崩溃循环已记通知（restarts=%d）", st.restarts);
+  } catch (e: unknown) {
+    log.error("检查 supervisor 崩溃循环失败：%s", (e as Error).message);
+  }
 }
 
 // ── 事件 handlers ──────────────────────────────

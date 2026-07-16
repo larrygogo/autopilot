@@ -182,6 +182,27 @@ export function removeSupervisorState(): void {
   try { unlinkSync(supervisorStateFile()); } catch { /* ignore */ }
 }
 
+// crash-loop 告警去重标记：记录已就哪个 supervisor 会话（started_at）告过警，
+// 避免同一崩溃循环里 daemon 每次被 respawn 都重复记通知。
+function crashLoopAlertFile(): string {
+  return join(home(), "runtime", "crash-loop-alert.json");
+}
+
+export function readCrashLoopAlertedAt(): number | null {
+  const path = crashLoopAlertFile();
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    return typeof parsed?.alerted_started_at === "number" ? parsed.alerted_started_at : null;
+  } catch { return null; }
+}
+
+export function writeCrashLoopAlertedAt(startedAt: number): void {
+  try {
+    writeFileSync(crashLoopAlertFile(), JSON.stringify({ alerted_started_at: startedAt }), "utf-8");
+  } catch { /* ignore：去重标记写失败最多多记一条通知，不影响正确性 */ }
+}
+
 // ──────────────────────────────────────────────
 // restart.flag —— 主动重启标志：新 daemon 启动时识别「上一次是主动重启不是崩溃」，
 // 从而对 running_* task 走自动 respawn（关旧 phase event + 立即重跑）而非标

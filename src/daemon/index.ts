@@ -258,8 +258,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   registerCoreRpcMethods();
 
   // 启动通知 recorder（事件型通知流；必须先于 scheduler / 恢复逻辑挂订阅，避免漏记）
-  const { initNotificationRecorder } = await import("./notification-recorder");
+  const { initNotificationRecorder, checkSupervisorCrashLoop } = await import("./notification-recorder");
   const disposeNotificationRecorder = initNotificationRecorder();
+  // 若上一段是被 supervisor 反复重启（崩溃循环）拉起的，补记一条告警（按会话去重）
+  checkSupervisorCrashLoop();
 
   // 启动 selfhosted-connector（B-interactive 模式：assignments/commands 轮询 + 全状态镜像推送）
   // 通过扩展点 API 装配：reqgenieExtension.enabled() 内部检查 config + 凭证，未启用则跳过
