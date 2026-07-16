@@ -1,5 +1,15 @@
 name: Release
 
+# 发版流水线（tag v* 触发）：一个 GitHub Release = 三平台单文件 exe 资产 + 发布说明。
+# 三段串行，越靠前越省算力（fail-fast）：
+#   guard   —— 版本一致性闸门（tag == package.json == CHANGELOG）+ 全量测试。不过不给建包。
+#   build   —— 三平台 GitHub runner 各自原生 build:exe → smoke-exe 冒烟 → 重命名为平台资产名 → 上传。
+#   release —— 下载三平台资产 → 抽 CHANGELOG 段 → action-gh-release 建 Release 并 attach files。
+#
+# 历史：build（子项目 B）与 release 曾是两个互不衔接的 workflow —— exe 只进 7 天 artifacts，
+#      Release 里没有二进制，用户下不到（子项目 C 交付缺口）。此处折进同一 workflow 补齐交付管道。
+#      日常多平台手工冒烟仍走 build-exe.yml 的 workflow_dispatch。
+
 on:
   push:
     tags:
@@ -9,13 +19,15 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  # ── 阶段 1：版本闸门 + 测试（不过不建包，最省算力的 fail-fast）─────────────
+  guard:
+    name: Version gate + tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       # 版本一致性闸门：tag 名（去 v）必须 == package.json version（版本号单一真相源），
-      # 且 CHANGELOG 有对应版本段。不一致就 fail，挡在建 Release 之前，避免版本漂移。
+      # 且 CHANGELOG 有对应版本段。不一致就 fail，挡在建包之前，避免版本漂移。
       - name: Verify version consistency (tag == package.json == CHANGELOG)
         run: |
           TAG_VERSION=${GITHUB_REF_NAME#v}
@@ -40,6 +52,60 @@ jobs:
       - name: Run tests
         run: bun run test
 
+  # ── 阶段 2：三平台原生构建 + 冒烟 + 重命名为资产名 ─────────────────────────
+  build:
+    name: Build + smoke (${{ matrix.os }})
+    needs: guard
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            asset: autopilot-windows-x64.exe
+          - os: ubuntu-latest
+            asset: autopilot-linux-x64
+          - os: macos-latest
+            asset: autopilot-macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      # 原生 build:exe：prebuild:exe（gen 迁移/examples + build:web 含 gen:web-assets）→ compile。
+      # outfile 固定 dist/autopilot.exe（三平台同名；linux/macOS 上是带 .exe 名的 ELF/Mach-O）。
+      - name: Build single-file exe (native)
+        run: bun run build:exe
+
+      # 冒烟编译产物：init（复刻「迁移目录不存在→no such table」崩溃点）→ daemon → 嵌入 dashboard 断言 200。
+      - name: Smoke test compiled artifact
+        run: bun run scripts/smoke-exe.ts dist/autopilot.exe
+
+      # 重命名为平台资产名（bash 在三平台 runner 均可用；用户从 Release 页凭名辨平台）。
+      - name: Rename to platform asset name
+        shell: bash
+        run: mv dist/autopilot.exe "dist/${{ matrix.asset }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          retention-days: 7
+          if-no-files-found: error
+
+  # ── 阶段 3：汇总三平台资产 + 抽 CHANGELOG → 建 Release ─────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Extract changelog for this version
         id: changelog
         run: |
@@ -51,8 +117,19 @@ jobs:
             echo "Release $GITHUB_REF_NAME" > release_notes.md
           fi
 
+      # 下载三平台构建资产，merge-multiple 拍平进 dist-assets/（每个 artifact 一个文件）。
+      - name: Download all platform assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-assets
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -la dist-assets
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: release_notes.md
           generate_release_notes: false
+          files: dist-assets/*

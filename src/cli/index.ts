@@ -34,6 +34,7 @@ import { registerRequirementCommands } from "./requirements-cli";
 import { registerProjectCommands } from "./project";
 import { registerWorkspaceCommands } from "./workspace";
 import { registerSelfhostedCommands } from "./selfhosted";
+import { registerServiceCommands } from "./service";
 import { runChecks as runDoctorChecks, hasTaskStartBlocker } from "../core/doctor";
 import {
   readPid,
@@ -41,6 +42,7 @@ import {
   isDaemonRunning,
   removePid,
   readSupervisorPid,
+  readSupervisorState,
   isSupervisorRunning,
   removeSupervisorPid,
   readListenInfo,
@@ -496,11 +498,26 @@ daemon
       console.log("daemon 未在运行。");
       if (supPid && isProcessAlive(supPid)) {
         console.log(`  supervisor 还活着 (pid=${supPid})，daemon 可能正在重启中`);
+        const st = readSupervisorState();
+        if (st) {
+          console.log(`  崩溃重启: ${st.restarts}${st.crash_loop ? " ⚠ 崩溃循环" : ""}`);
+          if (st.last_crash_at) {
+            console.log(`  上次崩溃: ${new Date(st.last_crash_at).toLocaleString()}（code=${st.last_exit_code ?? "?"}）`);
+          }
+        }
       }
       return;
     }
     if (supPid && isProcessAlive(supPid)) {
       console.log(`supervisor 运行中 (pid=${supPid})`);
+      const st = readSupervisorState();
+      if (st) {
+        console.log(`  supervisor 启动于: ${new Date(st.started_at).toLocaleString()}`);
+        console.log(`  daemon 启动次数: ${st.daemon_spawns} · 崩溃重启: ${st.restarts}${st.crash_loop ? " ⚠ 崩溃循环" : ""}`);
+        if (st.last_crash_at) {
+          console.log(`  上次崩溃: ${new Date(st.last_crash_at).toLocaleString()}（code=${st.last_exit_code ?? "?"}）`);
+        }
+      }
     }
 
     try {
@@ -532,6 +549,52 @@ daemon
       }
     } catch {
       console.log(`daemon 进程存在 (pid=${pid})，但 API 无响应。`);
+    }
+  });
+
+daemon
+  .command("logs")
+  .description("查看 daemon 主日志（tail；区别于 task logs 的状态机转换日志）")
+  .option("-n, --tail <n>", "显示末尾行数", "200")
+  .option("-f, --follow", "轮询跟踪新增行（Ctrl-C 退出）")
+  .option("-p, --port <port>", "daemon 端口")
+  .action(async (opts: { tail: string; follow?: boolean; port?: string }) => {
+    const client = getClient(opts);
+    await ensureDaemon(client);
+    const tail = parseInt(opts.tail, 10) || 200;
+
+    // logger 落盘为 UTC 字符串，localizeLogLine 行首转本地显示（与 task logs 一致）
+    const printLines = (text: string): void => {
+      for (const line of text.split(/\r?\n/)) {
+        if (line) console.log(localizeLogLine(line));
+      }
+    };
+    const lastNonEmpty = (text: string): string => {
+      const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
+      return lines[lines.length - 1] ?? "";
+    };
+
+    const first = await client.getDaemonLog(tail);
+    if (first.path) console.error(`# ${first.path}`); // 路径进 stderr，stdout 保持纯日志便于管道
+    printLines(first.content);
+    if (!opts.follow) return;
+
+    // daemon.log 是 tail 快照 RPC（无专用 WS 流），--follow 用轮询 + 末行锚点打增量。
+    // 常见场景（无轮转）精确；日志轮转/滚出锚点时回退整段重打，可接受。
+    let anchor = lastNonEmpty(first.content);
+    for (;;) {
+      await Bun.sleep(1000);
+      let content: string;
+      try {
+        content = (await client.getDaemonLog(tail)).content;
+      } catch {
+        continue; // daemon 重启中 / 瞬时失联，下一轮再试
+      }
+      const idx = anchor ? content.lastIndexOf(anchor) : -1;
+      const fresh = idx >= 0 ? content.slice(idx + anchor.length) : content;
+      if (fresh.trim()) printLines(fresh);
+      const nl = lastNonEmpty(content);
+      if (nl) anchor = nl;
     }
   });
 
@@ -879,6 +942,7 @@ registerRequirementCommands(program);
 registerSelfhostedCommands(program);
 registerProjectCommands(program);
 registerWorkspaceCommands(program);
+registerServiceCommands(program);
 
 program
   .command("doctor")

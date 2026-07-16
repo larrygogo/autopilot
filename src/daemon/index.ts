@@ -2,7 +2,7 @@ import { mkdirSync } from "fs";
 import { join, dirname, basename } from "path";
 import { AUTOPILOT_HOME, VERSION } from "../index";
 import { installAutopilotResolver } from "../core/autopilot-resolver";
-import { initDb, closeDb, listTasks, updateTask, closeOpenPhaseEvents } from "../core/db";
+import { initDb, closeDb, listTasks, updateTask, closeOpenPhaseEvents, maintainDb } from "../core/db";
 import { forceTransition } from "../core/state-machine";
 import { runPendingMigrations } from "../core/migrate";
 import { discover } from "../core/workflow/registry";
@@ -89,6 +89,7 @@ const DEFAULT_HOST = "127.0.0.1";
 const WATCHER_INTERVAL_MS = 60_000;
 const CLARIFIER_WATCHDOG_INTERVAL_MS = 60_000;
 const RETENTION_INTERVAL_MS = 3600_000;  // 每小时扫一次 workspace 保留策略
+const DB_MAINTENANCE_INTERVAL_MS = 24 * 3600_000;  // 每日 VACUUM + WAL checkpoint 回收磁盘
 // PR_POLL_INTERVAL_MS 由 config.json.github.poll_interval_seconds 决定
 
 export interface DaemonOptions {
@@ -351,6 +352,18 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   runRetention();
   const retentionTimer = setInterval(runRetention, RETENTION_INTERVAL_MS);
 
+  // DB 维护定时器：每日 VACUUM + WAL checkpoint 回收磁盘（WAL/主库删行后不归还 OS）。
+  // 不在启动时立即跑——VACUUM 重写整库、取写锁，频繁重启 daemon 时会反复空跑徒增延迟；
+  // 且与 run-phase 子进程并发写竞争时 busy_timeout 后可能 SQLITE_BUSY，try/catch 跳过本轮。
+  const dbMaintenanceTimer = setInterval(() => {
+    try {
+      const { before, after } = maintainDb();
+      log.info("db 维护完成（VACUUM + WAL checkpoint）：%d → %d 字节", before, after);
+    } catch (e: unknown) {
+      console.error("db 维护异常（本轮跳过）：", e instanceof Error ? e.message : String(e));
+    }
+  }, DB_MAINTENANCE_INTERVAL_MS);
+
   // pr-poller 定时器：扫 awaiting_review 需求的 PR，自动注入 review 反馈 / 标 done
   const ghCfg = loadGithubConfig();
   const prPollerInterval = ghCfg.poll_interval_seconds * 1000;
@@ -369,6 +382,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     clearInterval(watcherTimer);
     clearInterval(clarifierWatchdogTimer);
     clearInterval(retentionTimer);
+    clearInterval(dbMaintenanceTimer);
     clearInterval(prPollerTimer);
     configDirWatcher?.close();
     if (configWatchDebounce) {

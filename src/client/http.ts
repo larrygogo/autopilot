@@ -83,6 +83,11 @@ export class HttpClient {
     return this.call("daemon.status");
   }
 
+  /** 读 daemon 主日志（tail N 行）。返回日志文件路径 + 内容文本。 */
+  async getDaemonLog(tail?: number): Promise<{ path: string | null; content: string }> {
+    return this.call("daemon.log", { tail });
+  }
+
   // ── Tasks ──
 
   async listTasks(filters?: { status?: string; workflow?: string; limit?: number }): Promise<Task[]> {

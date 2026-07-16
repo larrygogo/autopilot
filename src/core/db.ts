@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "fs";
+import { mkdirSync, statSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../index";
 import { emit } from "./event-bus";
@@ -157,6 +157,31 @@ export function initDb(): void {
 
 export function now(): string {
   return new Date().toISOString();
+}
+
+/**
+ * DB 周期维护：VACUUM 压实主库 + wal_checkpoint(TRUNCATE) 回收 WAL 文件。
+ * 长跑下 workflow.db 与 -wal 只增不缩（删任务 / 通知 prune 后页面不归还 OS），
+ * daemon 每日跑一次回收磁盘。返回维护前后总字节数（主库 + wal）供日志。
+ *
+ * 注意：VACUUM 取写锁且不可在事务内执行——须在无活跃事务时调用（daemon 周期
+ * 定时器满足）。若 run-phase 子进程正并发写，会等 busy_timeout 后可能抛 SQLITE_BUSY，
+ * 调用方应 try/catch 跳过本轮（下一周期再来）。
+ */
+export function maintainDb(): { before: number; after: number } {
+  const db = getDb();
+  const dbPath = join(AUTOPILOT_HOME, "runtime", "workflow.db");
+  const totalSize = (): number => {
+    const sizeOf = (p: string): number => {
+      try { return statSync(p).size; } catch { return 0; }
+    };
+    return sizeOf(dbPath) + sizeOf(dbPath + "-wal");
+  };
+  const before = totalSize();
+  db.run("PRAGMA wal_checkpoint(TRUNCATE)");
+  db.run("VACUUM");
+  db.run("PRAGMA wal_checkpoint(TRUNCATE)");
+  return { before, after: totalSize() };
 }
 
 /**

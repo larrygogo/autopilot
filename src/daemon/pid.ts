@@ -136,6 +136,53 @@ export function isSupervisorRunning(): boolean {
 }
 
 // ──────────────────────────────────────────────
+// Supervisor 运行状态（重启次数 / 崩因 / 退避）—— supervisor 内存态的磁盘投影，
+// 供 `daemon status` 读出「supervisor 重启了几次、上次崩因是什么」（可观测性）。
+// 所有写入 try/catch 静默失败，绝不影响 supervisor 崩溃恢复主循环。
+// ──────────────────────────────────────────────
+
+export interface SupervisorState {
+  supervisor_pid: number;
+  started_at: number; // epoch ms
+  daemon_spawns: number; // daemon 子进程累计启动次数
+  restarts: number; // 崩溃触发的重启次数
+  last_exit_code: number | null;
+  last_classification: string | null; // exit_clean / respawn_immediate / fatal_config / crash
+  last_crash_at: number | null; // epoch ms
+  crash_loop: boolean;
+}
+
+function supervisorStateFile(): string {
+  return join(home(), "runtime", "supervisor.state.json");
+}
+
+export function writeSupervisorState(state: SupervisorState): void {
+  try {
+    const path = supervisorStateFile();
+    const { mkdirSync } = require("fs") as typeof import("fs");
+    const { dirname } = require("path") as typeof import("path");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(state), "utf-8");
+  } catch { /* ignore：状态投影失败不影响 supervisor 主循环 */ }
+}
+
+export function readSupervisorState(): SupervisorState | null {
+  const path = supervisorStateFile();
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    if (typeof parsed?.supervisor_pid === "number" && typeof parsed?.started_at === "number") {
+      return parsed as SupervisorState;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+export function removeSupervisorState(): void {
+  try { unlinkSync(supervisorStateFile()); } catch { /* ignore */ }
+}
+
+// ──────────────────────────────────────────────
 // restart.flag —— 主动重启标志：新 daemon 启动时识别「上一次是主动重启不是崩溃」，
 // 从而对 running_* task 走自动 respawn（关旧 phase event + 立即重跑）而非标
 // dangling 等用户。daemon.restart RPC 与 CLI `daemon restart` 都应写它——

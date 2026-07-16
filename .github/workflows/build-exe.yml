@@ -1,17 +1,16 @@
 name: Build EXE (multi-platform smoke)
 
-# 单文件可执行安装包（子项目 A）的多平台实机验收（子项目 B）：
+# 单文件可执行安装包（子项目 A）的多平台实机冒烟（子项目 B）：
 # 三平台 GitHub runner 各自原生 build:exe + 冒烟（init 跑迁移+examples → daemon run →
 # 嵌入 web-dist dashboard 断言 200）。弥补「本地开发机只能验 Windows」。
 #
-# 触发：手动（workflow_dispatch）或发版 tag（v*）。不挂 PR ——
-# 每 PR 跑三平台 --compile 太重；日常正确性由 ci.yml（typecheck/test/migrations）保障。
+# 触发：仅手动（workflow_dispatch），用于日常想在三平台验一把编译产物时。
+#   —— tag v* 的多平台构建 + 正式 Release 资产上传已由 release.yml 接管（同一份 build 步骤），
+#      此处不再挂 tag，避免发版时双份三平台编译。不挂 PR：每 PR 跑三平台 --compile 太重，
+#      日常正确性由 ci.yml（typecheck/test/migrations）保障。
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 jobs:
   build-smoke:
@@ -39,7 +38,7 @@ jobs:
       - name: Smoke test compiled artifact
         run: bun run scripts/smoke-exe.ts dist/autopilot.exe
 
-      # 产物留存供人工下载/检视（非正式发布；正式 Release 资产上传是子项目 C）。
+      # 产物留存供人工下载/检视（非正式发布；正式 Release 资产上传见 release.yml）。
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

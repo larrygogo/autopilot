@@ -307,8 +307,16 @@ autopilot daemon run
 # 启动 daemon（后台）
 autopilot daemon start
 autopilot daemon status
+autopilot daemon logs [-n 200] [-f]  # daemon 主日志 tail（区别于 task logs 的状态机转换日志）；-f 轮询跟踪增量（daemon.log RPC 是 tail 快照、无 WS 流，故 follow 走末行锚点轮询）
 autopilot daemon stop    # 优先走 daemon.shutdown RPC 优雅停机（daemon 自己关 socket 后 exit 0），
                          # 失联才回落 SIGTERM——Windows 硬杀会留 zombie LISTEN socket（已根治 e7cf6a4）
+
+# 开机自启（无人值守 runner；src/cli/service.ts）——OS 服务管理器作最外层看护，跑 daemon run --supervise
+autopilot service install    # 用户级免管理员：Linux systemd user unit（+enable-linger）/ macOS launchd LaunchAgent / Windows HKCU Run 键登录自启（schtasks ONLOGON 实测需管理员，故不用）
+autopilot service status     # 安装/启用状态
+autopilot service uninstall  # 停用移除
+# 两层看护正交：内部 supervisor 兜进程崩溃快恢复，OS 兜「机器重启拉起」+「supervisor 自身退出重启」。
+# 托管命令由 daemonSpawnPlan(supervise:true) 统一裁决（与 daemon start 同一真相源）；服务描述文件生成器是纯函数（tests/service-generators.test.ts）
 
 # Project / Workspace / Requirement（纯 CLI 路径，不必开浏览器；dogfood-bug20/21）
 autopilot project create <name> [-d desc]
