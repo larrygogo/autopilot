@@ -175,7 +175,26 @@ export function Settings({
                 label="启动于"
                 value={status.started_at_iso ? new Date(status.started_at_iso).toLocaleString() : formatUptime(status.uptime)}
               />
+              {status.supervisor?.running && (
+                <>
+                  <InfoField
+                    label="Supervisor"
+                    value={`崩溃重启 ${status.supervisor.restarts} 次${status.supervisor.crash_loop ? " · 崩溃循环" : ""}`}
+                  />
+                  {status.supervisor.last_crash_at && (
+                    <InfoField
+                      label="上次崩溃"
+                      value={`${new Date(status.supervisor.last_crash_at).toLocaleString()}（code=${status.supervisor.last_exit_code ?? "?"}）`}
+                    />
+                  )}
+                </>
+              )}
             </dl>
+            {status.supervisor?.crash_loop && (
+              <div className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+                runner 反复崩溃：daemon 已被 supervisor 重启 {status.supervisor.restarts} 次并进入快速崩溃循环。请查 daemon 日志排因（终端 <code className="rounded bg-destructive/15 px-1 py-0.5 font-mono">autopilot daemon logs</code>）。
+              </div>
+            )}
             {status.update?.status === "behind" && (
               <div className="mt-3 rounded-md bg-warning/10 px-3 py-2 text-[11px] text-warning">
                 有更新可用：本地代码落后远端。在项目目录跑 <code className="rounded bg-warning/15 px-1 py-0.5 font-mono">git pull</code>（必要时 <code className="rounded bg-warning/15 px-1 py-0.5 font-mono">bun run build:web</code>）后再重启 daemon。

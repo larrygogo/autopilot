@@ -14,6 +14,7 @@
 
 ### Added
 
+- **supervisor 指标上 Web（P1 可观测性 · 内核先行 UI 跟上）**：`daemon.status` RPC 与 `/api/status` 新增 `supervisor` 字段（`SupervisorStatusInfo`：running/pid/started_at/daemon_spawns/restarts/last_exit_code/last_crash_at/crash_loop），由 `getSupervisorStatus()` 读 supervisor.state 汇总。Web 设置页「Daemon 信息」卡展示崩溃重启次数 / 上次崩溃 code+时间，崩溃循环时额外红色警示条指引 `daemon logs`。此前 supervisor 指标只有 CLI `daemon status` 能看。
 - **supervisor 崩溃循环告警（P2 长跑健康）**：新增通知类型 `supervisor_crash_loop`（severity=error）。daemon 启动时读 `supervisor.state`，若发现被 supervisor 反复重启进入快速崩溃循环（`crash_loop=true`），补记一条告警通知（Web 通知面板 + CLI `notifications list`），带重启次数 + 排因指引。由「活着的 daemon」代记而非崩溃当下即时记——crash-loop 判定在 supervisor（独立父进程、不接 event-bus）；按 supervisor 会话 `started_at` 去重，避免同一循环里每次 respawn 重复记。局限：`fatal_config` 直接退出无「活着的 daemon」补记，仍靠 console + `daemon status`（supervisor 消失）暴露。
 - **DB 定期维护（P2 长跑健康）**：daemon 每日跑 `maintainDb()`（`VACUUM` 压实主库 + `PRAGMA wal_checkpoint(TRUNCATE)` 回收 WAL）——此前 workflow.db / -wal 只增不缩（删任务 / 通知 prune 后页面不归还 OS）。不在启动时立即跑（VACUUM 重写整库、频繁重启会空跑徒增延迟），与 run-phase 并发写竞争时 busy_timeout 后 SQLITE_BUSY 由 try/catch 跳过本轮。实测：8.6MB 膨胀库 VACUUM 后回收到 303KB。
 - **runner 可观测性（P1）**：

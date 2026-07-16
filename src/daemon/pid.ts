@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../index";
+import type { SupervisorStatusInfo } from "./protocol";
 
 // 路径函数化（不是常量）以便测试用 tmpdir 隔离：process.env.AUTOPILOT_HOME
 // 优先 / 常量兜底。daemon 运行期间 env 不变，行为跟常量等价。
@@ -201,6 +202,26 @@ export function writeCrashLoopAlertedAt(startedAt: number): void {
   try {
     writeFileSync(crashLoopAlertFile(), JSON.stringify({ alerted_started_at: startedAt }), "utf-8");
   } catch { /* ignore：去重标记写失败最多多记一条通知，不影响正确性 */ }
+}
+
+/**
+ * 汇总 supervisor 运行状态（供 daemon.status RPC / /api/status 透出到 Web/CLI）。
+ * running 凭 supervisor.pid 存活判定；其余指标读 supervisor.state（无则给零值缺省）。
+ */
+export function getSupervisorStatus(): SupervisorStatusInfo {
+  const pid = readSupervisorPid();
+  const running = pid !== null && isProcessAlive(pid);
+  const st = readSupervisorState();
+  return {
+    running,
+    pid,
+    started_at: st?.started_at ?? null,
+    daemon_spawns: st?.daemon_spawns ?? 0,
+    restarts: st?.restarts ?? 0,
+    last_exit_code: st?.last_exit_code ?? null,
+    last_crash_at: st?.last_crash_at ?? null,
+    crash_loop: st?.crash_loop ?? false,
+  };
 }
 
 // ──────────────────────────────────────────────
