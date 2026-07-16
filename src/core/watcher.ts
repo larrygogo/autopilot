@@ -6,7 +6,7 @@ import { forceTransition } from "./state-machine";
 import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./workflow/registry";
 import type { PhaseDefinition, ParallelDefinition } from "./workflow/registry";
 import { emit } from "./event-bus";
-import { applyRetentionPolicy, loadRetentionPolicy } from "./sandbox/retention";
+import { applyRetentionPolicy, loadRetentionPolicy, pruneTerminalRequirementRunLogs } from "./sandbox/retention";
 
 
 // ──────────────────────────────────────────────
@@ -314,6 +314,24 @@ function isRequirementTerminal(reqId: string): boolean {
 }
 
 /**
+ * 需求终态时间 epoch ms（run 日志 retention 第三轨的 age 闸门）：终态需求返回 updated_at
+ * （= 最近一次活动 / 终态转移时间），非终态 / 无记录返回 null（不清）。孤儿目录（需求已删）
+ * 返回 0 → 视作极早、可清。
+ */
+function requirementTerminalAt(reqId: string): number | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const reqs = require("./requirements") as typeof import("./requirements");
+    const r = reqs.getRequirementById(reqId);
+    if (!r) return 0; // 孤儿残留 → 可清
+    const terminal = r.status === "done" || r.status === "cancelled" || r.status === "failed";
+    return terminal ? r.updated_at : null;
+  } catch {
+    return null; // DB 不可用 → 保守不清
+  }
+}
+
+/**
  * 按全局 retention 配置清理老 sandbox。安全项：只清终态任务，永远不动
  * 运行中 / 待处理任务的 sandbox。
  * Daemon 每隔固定周期调一次，无配置 / 空配置直接跳过。
@@ -334,6 +352,24 @@ export function pruneSandboxesByPolicy(): void {
       mb,
     );
   }
+
+  // 第三轨：终态需求超 days 天后清 run 日志目录（phase 日志 / agent-calls / manifest）。
+  // 复用同一 days 窗口；tasks DB 行保留（run 多历史账本），只清文件级日志详情。
+  if (policy.days && policy.days > 0) {
+    const logResult = pruneTerminalRequirementRunLogs({
+      days: policy.days,
+      requirementTerminalAt,
+    });
+    if (logResult.removed.length > 0) {
+      const mb = (logResult.reclaimedBytes / 1024 / 1024).toFixed(1);
+      log.info(
+        "run 日志保留策略清理了 %d 个 run 目录（回收 %s MB）",
+        logResult.removed.length,
+        mb,
+      );
+    }
+  }
+
   // 每次运行后清缓存，因为下一轮任务状态可能已变
   terminalStateCache.clear();
 }
