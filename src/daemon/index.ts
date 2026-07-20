@@ -30,9 +30,10 @@ import { initFixRevisionRunner, disposeFixRevisionRunner } from "./fix-revision-
 import { initDoneWorkspaceCleanup, disposeDoneWorkspaceCleanup } from "./done-workspace-cleanup";
 import { initMcpRuntime, disposeMcpRuntime } from "./mcp-runtime";
 import { listUsableProviders, ensureDefaultProviderSet, resolveDefaultProvider } from "../core/default-provider";
+import { pruneGhostAttachments } from "../core/requirements/attachments";
 import type { AutopilotEvent } from "./protocol";
 import { RESTART_SENTINEL_CODE, FATAL_CONFIG_CODE } from "./supervisor";
-import { writeFileSync, existsSync, unlinkSync, watch as fsWatch } from "fs";
+import { writeFileSync, readFileSync, existsSync, unlinkSync, watch as fsWatch } from "fs";
 
 // ──────────────────────────────────────────────
 // Module 级 shutdown 注册表
@@ -90,6 +91,7 @@ const WATCHER_INTERVAL_MS = 60_000;
 const CLARIFIER_WATCHDOG_INTERVAL_MS = 60_000;
 const RETENTION_INTERVAL_MS = 3600_000;  // 每小时扫一次 workspace 保留策略
 const DB_MAINTENANCE_INTERVAL_MS = 24 * 3600_000;  // 每日 VACUUM + WAL checkpoint 回收磁盘
+const DB_MAINTENANCE_STARTUP_DELAY_MS = 5 * 60_000;  // 启动后延迟做首次到期检查（避开启动窗口写入）
 // PR_POLL_INTERVAL_MS 由 config.json.github.poll_interval_seconds 决定
 
 export interface DaemonOptions {
@@ -263,6 +265,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   // 若上一段是被 supervisor 反复重启（崩溃循环）拉起的，补记一条告警（按会话去重）
   checkSupervisorCrashLoop();
 
+  // 附件幽灵行对账：上次硬崩溃若正好落在「预留 id 已 INSERT、文件尚未落盘」的窗口里，
+  // 会留下指向缺失文件的行，clarifier 每轮都注入坏上下文。宽限期保护在途上传。
+  try {
+    const ghosts = pruneGhostAttachments();
+    if (ghosts > 0) log.warn("清理 %d 条指向缺失文件的附件记录（上次异常退出残留）", ghosts);
+  } catch (e: unknown) {
+    log.error("附件幽灵行对账失败：%s", e instanceof Error ? e.message : String(e));
+  }
+
   // 启动 selfhosted-connector（B-interactive 模式：assignments/commands 轮询 + 全状态镜像推送）
   // 通过扩展点 API 装配：reqgenieExtension.enabled() 内部检查 config + 凭证，未启用则跳过
   const { registerExtension, initExtensions } = await import("./extensions/registry");
@@ -354,17 +365,35 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
   runRetention();
   const retentionTimer = setInterval(runRetention, RETENTION_INTERVAL_MS);
 
-  // DB 维护定时器：每日 VACUUM + WAL checkpoint 回收磁盘（WAL/主库删行后不归还 OS）。
-  // 不在启动时立即跑——VACUUM 重写整库、取写锁，频繁重启 daemon 时会反复空跑徒增延迟；
-  // 且与 run-phase 子进程并发写竞争时 busy_timeout 后可能 SQLITE_BUSY，try/catch 跳过本轮。
-  const dbMaintenanceTimer = setInterval(() => {
+  // DB 维护：每日 VACUUM + WAL checkpoint 回收磁盘（WAL/主库删行后不归还 OS）。
+  // 到期判定用持久化的上次维护时间（runtime/db-maintenance.json）而非裸 setInterval——
+  // 裸定时器每次重启归零，重启周期 <24h 的 daemon（开发机日常）永远轮不到 VACUUM。
+  // 启动后延迟几分钟做首次到期检查：不增加启动延迟、避开启动窗口的迁移/恢复写入；
+  // 与 run-phase 子进程并发写竞争时 busy_timeout 后可能 SQLITE_BUSY，try/catch 跳过本轮。
+  const dbMaintenanceMarker = join(AUTOPILOT_HOME, "runtime", "db-maintenance.json");
+  const readLastDbMaintenance = (): number => {
+    try {
+      const parsed = JSON.parse(readFileSync(dbMaintenanceMarker, "utf-8")) as { last_run_at?: number };
+      return typeof parsed?.last_run_at === "number" ? parsed.last_run_at : 0;
+    } catch { return 0; }
+  };
+  const runDbMaintenance = () => {
+    // 启动检查与 24h 定时器共用此到期闸门（留 1h 容差，避免定时器抖动导致连跳两轮）
+    if (Date.now() - readLastDbMaintenance() < DB_MAINTENANCE_INTERVAL_MS - 3600_000) return;
     try {
       const { before, after } = maintainDb();
       log.info("db 维护完成（VACUUM + WAL checkpoint）：%d → %d 字节", before, after);
+      try {
+        writeFileSync(dbMaintenanceMarker, JSON.stringify({ last_run_at: Date.now() }), "utf-8");
+      } catch { /* 标记写失败最多提早重跑一轮，无害 */ }
     } catch (e: unknown) {
-      console.error("db 维护异常（本轮跳过）：", e instanceof Error ? e.message : String(e));
+      // supervisor 托管下子进程 stderr 是 ignore，console.error 石沉大海（2026-06-10 事故
+      // 教训，见上方 SEC-6 注释）——失败必须走 log.error 落 daemon.log
+      log.error("db 维护异常（本轮跳过）：%s", e instanceof Error ? e.message : String(e));
     }
-  }, DB_MAINTENANCE_INTERVAL_MS);
+  };
+  const dbMaintenanceStartupTimer = setTimeout(runDbMaintenance, DB_MAINTENANCE_STARTUP_DELAY_MS);
+  const dbMaintenanceTimer = setInterval(runDbMaintenance, DB_MAINTENANCE_INTERVAL_MS);
 
   // pr-poller 定时器：扫 awaiting_review 需求的 PR，自动注入 review 反馈 / 标 done
   const ghCfg = loadGithubConfig();
@@ -384,6 +413,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<void> {
     clearInterval(watcherTimer);
     clearInterval(clarifierWatchdogTimer);
     clearInterval(retentionTimer);
+    clearTimeout(dbMaintenanceStartupTimer);
     clearInterval(dbMaintenanceTimer);
     clearInterval(prPollerTimer);
     configDirWatcher?.close();

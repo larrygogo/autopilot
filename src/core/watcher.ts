@@ -296,39 +296,40 @@ function isTaskTerminal(taskId: string): boolean {
   return isTerm;
 }
 
+const REQUIREMENT_TERMINAL_STATUSES = new Set(["done", "cancelled", "failed"]);
+
 /**
- * 需求是否终态（done/cancelled/failed）——需求级 codebase 的 retention 闸门（v2 R4）。
- * 非终态永不清（fix run 的工作现场）；需求行已删的孤儿目录视作可清。
+ * 需求终态时间 epoch ms（retention 各轨的 age 闸门）：非终态 / DB 不可用返回 null（不清）；
+ * 孤儿目录（需求行已删的残留）返回 0 → 视作极早、可清。
+ *
+ * 时间取**最后一次进入终态的转移时间**（requirement_status_logs，迁移 030），而非
+ * requirements.updated_at —— failed 需求按设计可继续编辑（补约束重试），用 updated_at
+ * 会让每次编辑都把保留时钟推后。无状态日志（迁移未跑 / 老库）时回退 updated_at。
  */
-function isRequirementTerminal(reqId: string): boolean {
+function requirementTerminalAt(reqId: string): number | null {
   try {
     // 惰性 require：watcher 在 core，requirements 也在 core，但避免顶层 import 扩大模块环
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const reqs = require("./requirements") as typeof import("./requirements");
     const r = reqs.getRequirementById(reqId);
-    if (!r) return true; // 孤儿目录（需求已删但整树删失败的残留）→ 可清
-    return r.status === "done" || r.status === "cancelled" || r.status === "failed";
+    if (!r) return 0; // 孤儿目录（需求已删但整树删失败的残留）→ 可清
+    if (!REQUIREMENT_TERMINAL_STATUSES.has(r.status)) return null;
+    const lastTerminalLog = reqs
+      .listRequirementStatusLogs(reqId)
+      .filter((l) => REQUIREMENT_TERMINAL_STATUSES.has(l.to_status))
+      .pop();
+    return lastTerminalLog?.created_at ?? r.updated_at;
   } catch {
-    return false; // DB 不可用 → 保守不清
+    return null; // DB 不可用 → 保守不清
   }
 }
 
 /**
- * 需求终态时间 epoch ms（run 日志 retention 第三轨的 age 闸门）：终态需求返回 updated_at
- * （= 最近一次活动 / 终态转移时间），非终态 / 无记录返回 null（不清）。孤儿目录（需求已删）
- * 返回 0 → 视作极早、可清。
+ * 需求是否终态（done/cancelled/failed）——需求级 codebase 的 retention 闸门（v2 R4）。
+ * 非终态永不清（fix run 的工作现场）；需求行已删的孤儿目录视作可清。
  */
-function requirementTerminalAt(reqId: string): number | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const reqs = require("./requirements") as typeof import("./requirements");
-    const r = reqs.getRequirementById(reqId);
-    if (!r) return 0; // 孤儿残留 → 可清
-    const terminal = r.status === "done" || r.status === "cancelled" || r.status === "failed";
-    return terminal ? r.updated_at : null;
-  } catch {
-    return null; // DB 不可用 → 保守不清
-  }
+function isRequirementTerminal(reqId: string): boolean {
+  return requirementTerminalAt(reqId) !== null;
 }
 
 /**

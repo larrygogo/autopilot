@@ -155,7 +155,18 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
     console.log(`daemon 子进程启动 (pid=${currentChild.pid})`);
     state.daemon_spawns++;
     writeSupervisorState(state);
+    // daemon 存活满一个崩溃窗口即视为走出循环：清 crash_loop 投影。否则循环后恢复
+    // 稳定长跑时（不再有 exit 事件），状态文件里的 crash_loop=true 会永久挂着，
+    // daemon.status / Web 崩溃循环告警一直误报。
+    const stableTimer = setTimeout(() => {
+      if (state.crash_loop) {
+        state.crash_loop = false;
+        writeSupervisorState(state);
+        console.log("daemon 已稳定运行，崩溃循环标志清除");
+      }
+    }, CRASH_LOOP_WINDOW_MS);
     const exitCode = await currentChild.exited;
+    clearTimeout(stableTimer);
     const ranMs = Date.now() - startedAt;
 
     const classification = classifyExit(exitCode, shuttingDown);

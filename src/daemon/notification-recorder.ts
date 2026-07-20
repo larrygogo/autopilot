@@ -24,7 +24,7 @@ import {
   notificationContextForTask,
 } from "../core/notify/context";
 import { createLogger } from "../core/logger";
-import { readSupervisorState, readCrashLoopAlertedAt, writeCrashLoopAlertedAt } from "./pid";
+import { readSupervisorState, readCrashLoopAlertedAt, writeCrashLoopAlertedAt, isSupervisorRunning } from "./pid";
 
 const log = createLogger("notification-recorder");
 
@@ -57,6 +57,9 @@ function preview(text: string, max = 100): string {
  */
 export function checkSupervisorCrashLoop(): void {
   try {
+    // supervisor 必须还活着：state 文件在 SIGKILL / 断电后残留（只有优雅退出才清），
+    // 裸 `daemon run` 读到陈旧 crash_loop=true 不该记「正在崩溃循环」的假通知
+    if (!isSupervisorRunning()) return;
     const st = readSupervisorState();
     if (!st || !st.crash_loop) return;
     if (readCrashLoopAlertedAt() === st.started_at) return; // 本会话已告警

@@ -210,7 +210,7 @@ export async function saveAttachment(opts: SaveAttachmentOpts): Promise<Attachme
     await Bun.write(filePath, data);
     const extractedText = await extractText(category, filePath, ext);
     db.run("UPDATE requirement_attachments SET extracted_text = ? WHERE id = ?", [extractedText, id]);
-  } catch (e) {
+  } catch (e: unknown) {
     // 预留成功但落盘失败时不能留下指向缺失/半写文件的幽灵记录。
     try { if (existsSync(filePath)) unlinkSync(filePath); } catch { /* best-effort */ }
     db.run("DELETE FROM requirement_attachments WHERE id = ?", [id]);
@@ -234,6 +234,42 @@ export function listAttachments(requirementId: string): Attachment[] {
       "SELECT * FROM requirement_attachments WHERE requirement_id = ? ORDER BY created_at ASC",
     )
     .all(requirementId);
+}
+
+/**
+ * 只返回文件确实在盘上的附件——注入 prompt 前的过滤（buildAttachmentContext 是纯格式化
+ * 函数，不碰 fs）。挡掉两类：在途上传（行已 INSERT、文件还没写完，见 saveAttachment 注释）
+ * 与硬崩溃残留的幽灵行（pruneGhostAttachments 启动时清，但本轮可能还没轮到）。
+ */
+export function listReadableAttachments(requirementId: string): Attachment[] {
+  return listAttachments(requirementId).filter((a) => existsSync(a.file_path));
+}
+
+/**
+ * 幽灵附件行对账（daemon 启动时跑一次）。
+ *
+ * saveAttachment 为消灭并发撞号，先同步 INSERT 预留 id 再 await 落盘（见该函数注释）。
+ * 正常失败路径由 try/catch 回滚，但硬崩溃（SIGKILL / 断电）落在这个窗口里时，会留下
+ * 指向不存在文件的行——clarifier 之后每轮都注入「文本提取失败」或不存在的图片路径。
+ *
+ * graceMs 保护在途上传：只清创建时间早于宽限期的行，绝不误删正在写盘的附件。
+ */
+export function pruneGhostAttachments(opts: { graceMs?: number; now?: number } = {}): number {
+  const db = getDb();
+  const graceMs = opts.graceMs ?? 10 * 60_000;
+  const cutoff = (opts.now ?? Date.now()) - graceMs;
+  let removed = 0;
+  const rows = db
+    .query<{ id: string; file_path: string }, [number]>(
+      "SELECT id, file_path FROM requirement_attachments WHERE created_at < ?",
+    )
+    .all(cutoff);
+  for (const row of rows) {
+    if (existsSync(row.file_path)) continue;
+    db.run("DELETE FROM requirement_attachments WHERE id = ?", [row.id]);
+    removed++;
+  }
+  return removed;
 }
 
 export function deleteAttachment(id: string): void {

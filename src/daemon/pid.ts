@@ -220,7 +220,10 @@ export function getSupervisorStatus(): SupervisorStatusInfo {
     restarts: st?.restarts ?? 0,
     last_exit_code: st?.last_exit_code ?? null,
     last_crash_at: st?.last_crash_at ?? null,
-    crash_loop: st?.crash_loop ?? false,
+    // crash_loop 只在 supervisor 存活时透出：state 文件在 SIGKILL / 断电后残留
+    //（removeSupervisorState 只在优雅退出时跑），死 supervisor 谈不上"正在崩溃循环"，
+    // 陈旧判定收口在这一处，消费方（Web 告警 / CLI / 通知补记）不必各自发明。
+    crash_loop: running ? (st?.crash_loop ?? false) : false,
   };
 }
 

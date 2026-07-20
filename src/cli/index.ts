@@ -579,22 +579,37 @@ daemon
     printLines(first.content);
     if (!opts.follow) return;
 
-    // daemon.log 是 tail 快照 RPC（无专用 WS 流），--follow 用轮询 + 末行锚点打增量。
-    // 常见场景（无轮转）精确；日志轮转/滚出锚点时回退整段重打，可接受。
-    let anchor = lastNonEmpty(first.content);
+    // --follow 走 daemon.log 的字节游标增量模式（since_offset）：服务端只读新增字节，
+    // 客户端不再做「末行锚点」子串猜测——时间戳只有秒级，同秒重复行会锚到最新一条
+    // 并静默丢掉中间的行。轮转/截断由服务端处理（游标失效则整段重发当前文件）。
+    let offset = first.offset;
+    if (typeof offset !== "number") {
+      // 旧版 daemon（响应无 offset 字段）：退回末行锚点轮询（已知局限：同秒重复行可能丢增量）
+      let anchor = lastNonEmpty(first.content);
+      for (;;) {
+        await Bun.sleep(1000);
+        let content: string;
+        try {
+          content = (await client.getDaemonLog(tail)).content;
+        } catch {
+          continue; // daemon 重启中 / 瞬时失联，下一轮再试
+        }
+        const idx = anchor ? content.lastIndexOf(anchor) : -1;
+        const fresh = idx >= 0 ? content.slice(idx + anchor.length) : content;
+        if (fresh.trim()) printLines(fresh);
+        const nl = lastNonEmpty(content);
+        if (nl) anchor = nl;
+      }
+    }
     for (;;) {
       await Bun.sleep(1000);
-      let content: string;
       try {
-        content = (await client.getDaemonLog(tail)).content;
+        const res = await client.getDaemonLog(undefined, offset);
+        if (res.content) printLines(res.content);
+        if (typeof res.offset === "number") offset = res.offset;
       } catch {
-        continue; // daemon 重启中 / 瞬时失联，下一轮再试
+        // daemon 重启中 / 瞬时失联，下一轮再试（游标保留，重连后续读）
       }
-      const idx = anchor ? content.lastIndexOf(anchor) : -1;
-      const fresh = idx >= 0 ? content.slice(idx + anchor.length) : content;
-      if (fresh.trim()) printLines(fresh);
-      const nl = lastNonEmpty(content);
-      if (nl) anchor = nl;
     }
   });
 

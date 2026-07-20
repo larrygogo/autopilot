@@ -83,9 +83,12 @@ export class HttpClient {
     return this.call("daemon.status");
   }
 
-  /** 读 daemon 主日志（tail N 行）。返回日志文件路径 + 内容文本。 */
-  async getDaemonLog(tail?: number): Promise<{ path: string | null; content: string }> {
-    return this.call("daemon.log", { tail });
+  /**
+   * 读 daemon 主日志。tail 模式返回末 N 行 + 当前字节游标（offset）；
+   * 传 sinceOffset 则增量读游标之后的新增内容（--follow 轮询用）。
+   */
+  async getDaemonLog(tail?: number, sinceOffset?: number): Promise<{ path: string | null; content: string; offset?: number }> {
+    return this.call("daemon.log", sinceOffset !== undefined ? { since_offset: sinceOffset } : { tail });
   }
 
   // ── Tasks ──

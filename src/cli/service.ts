@@ -19,7 +19,7 @@
 
 import { spawnSync as nodeSpawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "fs";
-import { join } from "path";
+import { join, isAbsolute } from "path";
 import { homedir } from "os";
 import type { Command } from "commander";
 import { isStandaloneBinary } from "../core/runtime-env";
@@ -60,8 +60,9 @@ export function systemdUnitContent(opts: {
   autopilotHome?: string;
 }): string {
   const execLine = [opts.cmd, ...opts.args].map(shQuote).join(" ");
+  // systemd 的 Environment= 按空格拆多个赋值，值含空格必须整体加引号（Environment="K=V v"）
   const envLines = opts.autopilotHome
-    ? `Environment=AUTOPILOT_HOME=${opts.autopilotHome}\n`
+    ? `Environment=${shQuote(`AUTOPILOT_HOME=${opts.autopilotHome}`)}\n`
     : "";
   return `[Unit]
 Description=autopilot daemon (multi-stage task runner)
@@ -128,8 +129,11 @@ ${envBlock}  <key>StandardOutPath</key>
  * 与系统内既有 Run 项（OneDrive 等）同款格式。Windows 登录时按此值启动。
  */
 export function windowsRunCommand(opts: { cmd: string; args: string[] }): string {
+  // args 也必须逐个引号处理：dev 模式的 args 含绝对源码路径（bun run <supervisor.ts>），
+  // 用户目录带空格（C:\Users\John Smith\…）时未引号的值会在空格处分词、登录自启静默失败。
+  const quoteArg = (s: string): string => (/[\s"]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s);
   const quotedCmd = `"${opts.cmd}"`;
-  return [quotedCmd, ...opts.args].join(" ");
+  return [quotedCmd, ...opts.args.map(quoteArg)].join(" ");
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -160,29 +164,42 @@ function run(cmd: string, args: string[]): { code: number; stdout: string; stder
 }
 
 function hasCommand(cmd: string): boolean {
-  const probe = process.platform === "win32"
-    ? run("where", [cmd])
-    : run("sh", ["-c", `command -v ${cmd}`]);
-  return probe.code === 0;
+  // 用 Bun.which 而不是外挂 which/where：Windows 无 which，where 返回多行 \r\n
+  // 且受 PowerShell 别名干扰（同 src/agents/cli-status.ts 的既有结论），还省一次 spawn
+  return Bun.which(cmd) !== null;
 }
 
-function currentExec(): { cmd: string; args: string[] } {
-  return resolveServiceExec({
+function currentExec(): { cmd: string; args: string[] } | null {
+  const plan = resolveServiceExec({
     standalone: isStandaloneBinary(),
     execPath: process.execPath,
     scriptDir: import.meta.dir,
   });
+  // OS 服务管理器不吃 PATH 相对命令：systemd 要求 ExecStart 绝对路径（否则 unit 直接
+  // 无效）、launchd 默认 PATH 不含 ~/.bun/bin、HKCU Run 也按字面执行。dev 模式
+  // daemonSpawnPlan 给的是裸 "bun"，这里统一解析成绝对路径；解析不到就终止安装，
+  // 而不是写出一个永远起不来的服务还报成功。
+  if (isAbsolute(plan.cmd)) return plan;
+  const resolved = Bun.which(plan.cmd);
+  if (!resolved) {
+    console.error(`错误：无法把命令 "${plan.cmd}" 解析为绝对路径（OS 服务管理器不使用当前 shell 的 PATH）。`);
+    console.error(`  请确认 ${plan.cmd} 已安装并在 PATH 中，或改用编译单文件（bun run build:exe）后安装。`);
+    return null;
+  }
+  return { cmd: resolved, args: plan.args };
 }
 
 function installLinux(dryRun: boolean): number {
   if (!dryRun && !hasCommand("systemctl")) {
     console.error("错误：未找到 systemctl（本机可能非 systemd 发行版）。");
     console.error("  可改用 crontab 的 @reboot 项手动配置：");
-    const { cmd, args } = currentExec();
-    console.error(`  @reboot ${[cmd, ...args].map(shQuote).join(" ")}`);
+    const fallback = currentExec();
+    if (fallback) console.error(`  @reboot ${[fallback.cmd, ...fallback.args].map(shQuote).join(" ")}`);
     return 1;
   }
-  const { cmd, args } = currentExec();
+  const exec = currentExec();
+  if (!exec) return 1;
+  const { cmd, args } = exec;
   const home = process.env.AUTOPILOT_HOME || undefined;
   const unitPath = systemdUnitPath();
   const content = systemdUnitContent({ cmd, args, autopilotHome: home });
@@ -213,7 +230,9 @@ function installLinux(dryRun: boolean): number {
 }
 
 function installMacos(dryRun: boolean): number {
-  const { cmd, args } = currentExec();
+  const exec = currentExec();
+  if (!exec) return 1;
+  const { cmd, args } = exec;
   const home = process.env.AUTOPILOT_HOME || undefined;
   const logDir = serviceLogDir();
   const plistPath = launchdPlistPath();
@@ -241,8 +260,9 @@ function installMacos(dryRun: boolean): number {
 }
 
 function installWindows(dryRun: boolean): number {
-  const { cmd, args } = currentExec();
-  const value = windowsRunCommand({ cmd, args });
+  const exec = currentExec();
+  if (!exec) return 1;
+  const value = windowsRunCommand(exec);
   if (dryRun) {
     console.log(`[dry-run] 将执行：reg add ${WINDOWS_RUN_KEY} /v ${WINDOWS_RUN_VALUE_NAME} /t REG_SZ /d <值> /f`);
     console.log(`[dry-run] 命令值：${value}`);

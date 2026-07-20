@@ -1,8 +1,11 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
+import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { rmSync } from "node:fs";
-import { detectCategory, buildAttachmentContext } from "../src/core/requirements/attachments";
+import { rmSync, writeFileSync } from "node:fs";
+import { up as migrate032 } from "../src/migrations/032-requirement-attachments";
+import { getDb, _setDbForTest } from "../src/core/db";
+import { detectCategory, buildAttachmentContext, pruneGhostAttachments } from "../src/core/requirements/attachments";
 import type { Attachment } from "../src/core/requirements/attachments";
 
 describe("detectCategory", () => {
@@ -96,6 +99,54 @@ describe("buildAttachmentContext", () => {
     ];
     const ctx = buildAttachmentContext(atts);
     expect(ctx).toContain("文本提取失败");
+  });
+});
+
+describe("pruneGhostAttachments", () => {
+  const setup = () => {
+    const db = new Database(":memory:");
+    migrate032(db);
+    _setDbForTest(db);
+    return db;
+  };
+  const insert = (id: string, filePath: string, createdAt: number) => {
+    getDb().run(
+      `INSERT INTO requirement_attachments
+         (id, requirement_id, original_name, mime_type, file_path, file_size, category, extracted_text, created_at)
+       VALUES (?, 'req-001', 'f.txt', 'text/plain', ?, 10, 'text', NULL, ?)`,
+      [id, filePath, createdAt],
+    );
+  };
+  const ids = () =>
+    getDb().query<{ id: string }, []>("SELECT id FROM requirement_attachments ORDER BY id").all().map((r) => r.id);
+
+  afterEach(() => { _setDbForTest(null); });
+
+  it("清掉文件已不存在的过期幽灵行", () => {
+    setup();
+    insert("att-001", join(tmpdir(), "autopilot-ghost-does-not-exist.txt"), 1000);
+    expect(pruneGhostAttachments({ now: 1000 + 3600_000 })).toBe(1);
+    expect(ids()).toEqual([]);
+  });
+
+  it("宽限期内的在途上传不动（文件还没写完不等于幽灵）", () => {
+    setup();
+    insert("att-001", join(tmpdir(), "autopilot-ghost-inflight.txt"), 1000);
+    expect(pruneGhostAttachments({ now: 1000 + 60_000, graceMs: 10 * 60_000 })).toBe(0);
+    expect(ids()).toEqual(["att-001"]);
+  });
+
+  it("文件在盘上的行不动", () => {
+    setup();
+    const real = join(tmpdir(), `autopilot-ghost-real-${crypto.randomUUID()}.txt`);
+    writeFileSync(real, "x", "utf-8");
+    try {
+      insert("att-001", real, 1000);
+      expect(pruneGhostAttachments({ now: 1000 + 3600_000 })).toBe(0);
+      expect(ids()).toEqual(["att-001"]);
+    } finally {
+      rmSync(real, { force: true });
+    }
   });
 });
 

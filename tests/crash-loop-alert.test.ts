@@ -7,6 +7,7 @@
  * - 新 supervisor 会话（started_at 变化）再 crash_loop → 再记 1 条
  * - crash_loop=false → 不记
  * - 无 supervisor.state → 不记
+ * - supervisor 不在运行（陈旧 state 文件）→ 不记
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -18,7 +19,7 @@ import { up as migrate035 } from "../src/migrations/035-notifications";
 import { _setDbForTest } from "../src/core/db";
 import { listNotifications } from "../src/core/notify/stream";
 import { checkSupervisorCrashLoop } from "../src/daemon/notification-recorder";
-import { writeSupervisorState, type SupervisorState } from "../src/daemon/pid";
+import { writeSupervisorState, writeSupervisorPid, removeSupervisorPid, type SupervisorState } from "../src/daemon/pid";
 
 let tmpDir: string;
 let prevHome: string | undefined;
@@ -44,6 +45,9 @@ beforeEach(() => {
   db = new Database(":memory:");
   migrate035(db);
   _setDbForTest(db);
+  // 告警要求 supervisor 存活（陈旧 state 文件不该记假通知）：
+  // 用当前测试进程的 pid 冒充活着的 supervisor
+  writeSupervisorPid();
 });
 
 afterEach(() => {
@@ -86,6 +90,15 @@ describe("checkSupervisorCrashLoop", () => {
   });
 
   it("无 supervisor.state 不记", () => {
+    checkSupervisorCrashLoop();
+    expect(crashLoopNotifs().length).toBe(0);
+  });
+
+  it("supervisor 不在运行（陈旧 state 文件）不记", () => {
+    // SIGKILL / 断电后 state 文件残留：裸 daemon run 读到 crash_loop=true，
+    // 但 supervisor 已死，不该记「正在崩溃循环」的假通知
+    removeSupervisorPid();
+    writeSupervisorState(state({ crash_loop: true }));
     checkSupervisorCrashLoop();
     expect(crashLoopNotifs().length).toBe(0);
   });

@@ -16,6 +16,7 @@ import { spawn } from "child_process";
 import { request as httpRequest } from "http";
 import { request as httpsRequest } from "https";
 import { lookup as dnsLookup } from "dns/promises";
+import { createGunzip, createInflate, createBrotliDecompress } from "zlib";
 import { log } from "../../../core/logger";
 import { expandToApiTools } from "../../tool-capabilities";
 
@@ -237,9 +238,11 @@ function requestPinnedUrl(
   return new Promise((resolveRequest, rejectRequest) => {
     const transport = target.parsed.protocol === "https:" ? httpsRequest : httpRequest;
     let settled = false;
+    let totalTimer: ReturnType<typeof setTimeout> | undefined;
     const finishError = (e: unknown) => {
       if (settled) return;
       settled = true;
+      if (totalTimer) clearTimeout(totalTimer);
       rejectRequest(e);
     };
     const lookup = target.pinned
@@ -250,21 +253,21 @@ function requestPinnedUrl(
       : undefined;
     const req = transport(target.parsed, {
       method,
-      headers: { "User-Agent": "autopilot/1.0" },
+      headers: {
+        "User-Agent": "autopilot/1.0",
+        // 显式声明可解压的编码：旧 fetch 实现自带透明解压，裸 http.request 没有，
+        // 不声明时仍有服务器（预压缩静态资源 / 不合规实现）无条件回 gzip
+        "Accept-Encoding": "gzip, deflate, br",
+      },
       // Node 的重载类型不能表达同一个 callback 同时支持 all=true/false；运行时两种形态均已处理。
       lookup: lookup as never,
     }, (res) => {
       let text = "";
       let truncated = false;
-      res.setEncoding("utf8");
-      res.on("data", (chunk: string) => {
-        const remaining = 50_000 - text.length;
-        if (remaining > 0) text += chunk.slice(0, remaining);
-        if (chunk.length > remaining) truncated = true;
-      });
-      res.on("end", () => {
+      const settleResolve = () => {
         if (settled) return;
         settled = true;
+        if (totalTimer) clearTimeout(totalTimer);
         const locationHeader = res.headers.location;
         resolveRequest({
           status: res.statusCode ?? 0,
@@ -272,9 +275,36 @@ function requestPinnedUrl(
           text,
           truncated,
         });
+      };
+      // 重定向响应体无用（只读 Location），不必解压；正文按 Content-Encoding 解压后再读，
+      // 否则 setEncoding("utf8") 会把压缩字节当 UTF-8 解出乱码
+      const contentEncoding = String(res.headers["content-encoding"] ?? "").trim().toLowerCase();
+      let body: NodeJS.ReadableStream = res;
+      if (contentEncoding === "gzip") body = res.pipe(createGunzip());
+      else if (contentEncoding === "deflate") body = res.pipe(createInflate());
+      else if (contentEncoding === "br") body = res.pipe(createBrotliDecompress());
+      if (body !== res) body.on("error", finishError);
+
+      body.setEncoding("utf8");
+      body.on("data", (chunk: string) => {
+        const remaining = 50_000 - text.length;
+        if (remaining > 0) text += chunk.slice(0, remaining);
+        if (chunk.length > remaining) {
+          truncated = true;
+          // 已到 50KB 上限：立即带已收内容终结并断开——慢速流上继续等 'end' 会拖满总超时
+          settleResolve();
+          req.destroy();
+        }
       });
+      body.on("end", settleResolve);
       res.on("error", finishError);
     });
+    // 总时长硬上限：req.setTimeout 只是 socket 空闲超时，慢速滴流响应（每几秒 1 字节）
+    // 永不触发它——旧 fetch 实现的 AbortSignal.timeout 是总上限，这里补回同等语义。
+    totalTimer = setTimeout(() => {
+      finishError(new Error(`请求总时长超时（${timeoutMs}ms）`));
+      req.destroy();
+    }, timeoutMs);
     req.setTimeout(timeoutMs, () => req.destroy(new Error(`请求超时（${timeoutMs}ms）`)));
     req.on("error", finishError);
     req.end();
@@ -308,6 +338,23 @@ const DANGEROUS_PATTERNS = [
 
 function isDangerousCommand(cmd: string): boolean {
   return DANGEROUS_PATTERNS.some((p) => p.test(cmd));
+}
+
+/**
+ * 解析 bash 可执行路径。非 Windows 直接用 PATH 里的 bash；Windows 优先探 Git for
+ * Windows 的固定安装位（Git 默认只把 cmd\ 加进 PATH，bash.exe 不在 PATH 上），
+ * 再回退 Bun.which——注意 System32\bash.exe 是 WSL 入口，路径语义不同，故固定位优先。
+ */
+function resolveBashExecutable(): string | null {
+  if (process.platform !== "win32") return "bash";
+  const candidates = [
+    join(process.env["ProgramFiles"] ?? "C:\\Program Files", "Git", "bin", "bash.exe"),
+    join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Git", "bin", "bash.exe"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return Bun.which("bash");
 }
 
 /** 敏感环境变量关键字（default 和 cautious 模式屏蔽） */
@@ -641,7 +688,7 @@ export class ToolExecutor {
     return `已移动：${input["source"]} → ${input["destination"]}`;
   }
 
-  private _searchFiles(input: Record<string, unknown>): string {
+  private async _searchFiles(input: Record<string, unknown>): Promise<string> {
     const pattern = input["pattern"] as string;
     if (!pattern) throw new ToolError("pattern 参数缺失");
     const searchPath = input["path"]
@@ -656,15 +703,23 @@ export class ToolExecutor {
     }
     const glob = includeGlob ? new Bun.Glob(includeGlob) : null;
     const matches: string[] = [];
-    let omitted = 0;
+    let skippedLarge = 0;
+    let timedOut = false;
     const MAX_MATCHES = 200;
     const MAX_FILE_BYTES = 2 * 1024 * 1024;
+    // 执行预算：与旧 grep 子进程实现的 timeout(30s) 对齐。executor 与 daemon 同进程，
+    // 无预算的全量扫描会长时间占住事件循环（HTTP/WS/watcher 全停）。
+    // 已知残余局限：单次 matcher.test() 的灾难性回溯（如 (a+)+$）无法从外部打断
+    //（JS 正则无超时机制），预算只保证除此以外的一切有界。
+    const DEADLINE_MS = 30_000;
+    const deadline = Date.now() + DEADLINE_MS;
+    let sinceYield = 0;
 
     const searchFile = (filePath: string): void => {
       if (glob && !glob.match(basename(filePath))) return;
       let content: string;
       try {
-        if (statSync(filePath).size > MAX_FILE_BYTES) return;
+        if (statSync(filePath).size > MAX_FILE_BYTES) { skippedLarge++; return; }
         content = readFileSync(filePath, "utf-8");
       } catch {
         return;
@@ -673,13 +728,16 @@ export class ToolExecutor {
         ? filePath.slice(this.sandboxRoot.length + 1)
         : filePath;
       for (const [index, line] of content.split("\n").entries()) {
+        if ((index & 0xff) === 0 && Date.now() > deadline) { timedOut = true; return; }
         matcher.lastIndex = 0;
         if (!matcher.test(line)) continue;
-        if (matches.length < MAX_MATCHES) matches.push(`${relativePath}:${index + 1}:${line}`);
-        else omitted++;
+        matches.push(`${relativePath}:${index + 1}:${line}`);
+        if (matches.length >= MAX_MATCHES) return;
       }
     };
-    const walk = (entryPath: string): void => {
+    const walk = async (entryPath: string): Promise<void> => {
+      if (timedOut || matches.length >= MAX_MATCHES) return;
+      if (Date.now() > deadline) { timedOut = true; return; }
       let stat;
       try { stat = lstatSync(entryPath); } catch { return; }
       if (stat.isSymbolicLink()) return;
@@ -691,13 +749,21 @@ export class ToolExecutor {
       let entries;
       try { entries = readdirSync(entryPath, { withFileTypes: true }); } catch { return; }
       for (const entry of entries) {
+        if (timedOut || matches.length >= MAX_MATCHES) return;
         if (entry.name === ".git" || entry.name === "node_modules") continue;
-        walk(join(entryPath, entry.name));
+        // 每处理一批条目让出一次事件循环，避免大目录扫描冻结 daemon
+        if (++sinceYield >= 64) { sinceYield = 0; await Bun.sleep(0); }
+        await walk(join(entryPath, entry.name));
       }
     };
-    walk(searchPath);
-    if (matches.length === 0) return "无匹配结果";
-    return matches.join("\n") + (omitted > 0 ? `\n... (省略 ${omitted} 条匹配)` : "");
+    await walk(searchPath);
+    const notes: string[] = [];
+    if (matches.length >= MAX_MATCHES) notes.push(`已达 ${MAX_MATCHES} 条匹配上限，扫描提前结束`);
+    if (skippedLarge > 0) notes.push(`跳过 ${skippedLarge} 个超过 2MB 的大文件（未搜索）`);
+    if (timedOut) notes.push(`搜索超过 ${DEADLINE_MS / 1000}s 预算，未扫完全部文件`);
+    const suffix = notes.length > 0 ? `\n... (${notes.join("；")})` : "";
+    if (matches.length === 0) return "无匹配结果" + suffix;
+    return matches.join("\n") + suffix;
   }
 
   private async _fetchUrl(input: Record<string, unknown>): Promise<string> {
@@ -764,11 +830,20 @@ export class ToolExecutor {
       ? { ...process.env }
       : buildSanitizedEnv();
 
+    // Windows 也统一走 bash（Git Bash）：工具 schema 告诉模型写的是 bash 命令，
+    // DANGEROUS_PATTERNS 黑名单也只认 bash 拼写。换 PowerShell 会让守卫与实际 shell
+    // 脱节（Remove-Item -Recurse -Force 等破坏性命令全数放行）且模型写的 POSIX 语法
+    // （&& / export / 2>/dev/null）在 Windows PowerShell 5.1 下全是解析错误。
+    // 找不到 bash 时 fail-closed 报错，不降级到其它 shell。
+    const bashExecutable = resolveBashExecutable();
+    if (!bashExecutable) {
+      throw new ToolError(
+        "未找到 bash（Windows 上 bash 工具依赖 Git Bash）。请安装 Git for Windows，或把 bash 所在目录加入 PATH。"
+      );
+    }
+
     return new Promise<string>((resolve, reject) => {
-      const shell = process.platform === "win32"
-        ? { executable: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command] }
-        : { executable: "bash", args: ["-c", command] };
-      const proc = spawn(shell.executable, shell.args, {
+      const proc = spawn(bashExecutable, ["-c", command], {
         cwd: this.sandboxRoot,
         env: env as NodeJS.ProcessEnv,
         timeout,

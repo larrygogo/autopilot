@@ -105,6 +105,31 @@ describe("pruneTerminalRequirementRunLogs", () => {
     expect(existsSync(dir)).toBe(true);
   });
 
+  it("无 runs/ 目录的需求不查 DB（先 fs 后 DB，省掉终身累积需求的无谓点查）", () => {
+    mkdirSync(join(reqRoot, "req-no-runs", "codebase"), { recursive: true });
+    let queried = 0;
+    pruneTerminalRequirementRunLogs({
+      days: 30,
+      now,
+      requirementsRoot: reqRoot,
+      requirementTerminalAt: () => { queried++; return now - 40 * DAY; },
+    });
+    expect(queried).toBe(0);
+  });
+
+  it("空 run 目录也清掉（否则每轮重新扫到、永不消失）", () => {
+    const empty = join(reqRoot, "req-empty", "runs", "task6");
+    mkdirSync(empty, { recursive: true });
+    const r = pruneTerminalRequirementRunLogs({
+      days: 30,
+      now,
+      requirementsRoot: reqRoot,
+      requirementTerminalAt: () => now - 40 * DAY,
+    });
+    expect(r.removed).toContain("runlog:task6");
+    expect(existsSync(empty)).toBe(false);
+  });
+
   it("多 run 需求：全清", () => {
     seedRun("req-multi", "runA");
     seedRun("req-multi", "runB");

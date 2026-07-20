@@ -218,17 +218,20 @@ export function pruneTerminalRequirementRunLogs(opts: {
   if (!existsSync(root)) return { removed, reclaimedBytes: 0 };
 
   for (const reqId of readdirSync(root)) {
-    const terminalAt = opts.requirementTerminalAt(reqId);
-    if (terminalAt == null || terminalAt >= threshold) continue; // 非终态 / 未过保留窗口
+    // 先做便宜的 fs 判断再查 DB：需求目录终身累积，绝大多数轮次里 runs/ 要么不存在
+    // 要么已清空，没必要为它们各付一次 DB 点查
     const runsDir = join(root, reqId, "runs");
     if (!existsSync(runsDir)) continue;
     let taskIds: string[];
     try { taskIds = readdirSync(runsDir); } catch { continue; }
+    if (taskIds.length === 0) continue;
+    const terminalAt = opts.requirementTerminalAt(reqId);
+    if (terminalAt == null || terminalAt >= threshold) continue; // 非终态 / 未过保留窗口
     for (const taskId of taskIds) {
       const runDir = join(runsDir, taskId);
       try {
+        // 先量后删（size 仅用于日志汇报）；空目录也删——留着只会让下一轮重新扫到
         const size = dirSizeBytes(runDir);
-        if (size <= 0) continue;
         rmSync(runDir, { recursive: true, force: true });
         removed.push(`runlog:${taskId}`);
         reclaimed += size;

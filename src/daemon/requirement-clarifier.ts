@@ -21,7 +21,7 @@ import { buildClarifierAgent } from "./clarifier-agent";
 import { resolveDefaultProvider } from "../core/default-provider";
 import { takeClarifyResult } from "../agents/pending-clarify";
 import { extractJsonBlock } from "./llm-json";
-import { listAttachments, buildAttachmentContext } from "../core/requirements/attachments";
+import { listReadableAttachments, buildAttachmentContext } from "../core/requirements/attachments";
 import { ensureRequirementClones } from "../core/requirements/clone";
 import { deleteRequirementCodebase } from "../core/sandbox/codebase";
 import { deleteClarifyTaskDir } from "../core/sandbox";
@@ -683,7 +683,7 @@ async function _runClarifierRoundInner(reqId: string): Promise<void> {
       : null;
 
   // 读取需求的所有附件，构建 prompt 段落
-  const attachments = listAttachments(reqId);
+  const attachments = listReadableAttachments(reqId);
   const attachmentContext = buildAttachmentContext(attachments);
 
   // ── ① session 查询 & 消息选择 ─────────────────────────────────────

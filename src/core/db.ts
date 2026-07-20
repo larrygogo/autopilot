@@ -170,7 +170,9 @@ export function now(): string {
  */
 export function maintainDb(): { before: number; after: number } {
   const db = getDb();
-  const dbPath = join(AUTOPILOT_HOME, "runtime", "workflow.db");
+  // 量的必须是**这个连接打开的库**：测试经 _setDbForTest 注入其它库时，
+  // 拼 AUTOPILOT_HOME 路径会 VACUUM 注入库却报生产库的大小
+  const dbPath = db.filename;
   const totalSize = (): number => {
     const sizeOf = (p: string): number => {
       try { return statSync(p).size; } catch { return 0; }

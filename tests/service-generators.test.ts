@@ -77,6 +77,10 @@ describe("systemdUnitContent", () => {
     const noHome = systemdUnitContent({ cmd: "/x/autopilot", args: [] });
     expect(noHome).not.toContain("Environment=AUTOPILOT_HOME");
   });
+  it("含空格 autopilotHome 的 Environment 值整体加引号（systemd 按空格拆多赋值）", () => {
+    const unit = systemdUnitContent({ cmd: "/x/autopilot", args: [], autopilotHome: "/home/u/My Data/.autopilot" });
+    expect(unit).toContain('Environment="AUTOPILOT_HOME=/home/u/My Data/.autopilot"');
+  });
 });
 
 describe("launchdPlistContent", () => {
@@ -110,5 +114,9 @@ describe("windowsRunCommand", () => {
   it("exe 路径必带内嵌双引号，args 空格拼接（与系统内既有 Run 项同款格式）", () => {
     const v = windowsRunCommand({ cmd: "C:\\Program Files\\autopilot\\autopilot.exe", args: ["daemon", "run", "--supervise"] });
     expect(v).toBe('"C:\\Program Files\\autopilot\\autopilot.exe" daemon run --supervise');
+  });
+  it("含空格的 arg 也加引号（dev 模式 args 带绝对源码路径，用户目录可能含空格）", () => {
+    const v = windowsRunCommand({ cmd: "C:\\Users\\John Smith\\.bun\\bin\\bun.exe", args: ["run", "C:\\Users\\John Smith\\repo\\src\\daemon\\supervisor.ts"] });
+    expect(v).toBe('"C:\\Users\\John Smith\\.bun\\bin\\bun.exe" run "C:\\Users\\John Smith\\repo\\src\\daemon\\supervisor.ts"');
   });
 });
