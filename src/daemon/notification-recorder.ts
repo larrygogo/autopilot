@@ -75,7 +75,7 @@ export function checkSupervisorCrashLoop(): void {
     writeCrashLoopAlertedAt(st.started_at);
     log.error("supervisor 崩溃循环已记通知（restarts=%d）", st.restarts);
   } catch (e: unknown) {
-    log.error("检查 supervisor 崩溃循环失败：%s", (e as Error).message);
+    log.error("检查 supervisor 崩溃循环失败：%s", e instanceof Error ? e.message : String(e));
   }
 }
 

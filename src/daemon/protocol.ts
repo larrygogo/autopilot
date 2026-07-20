@@ -57,7 +57,7 @@ export interface UpdateInfo {
   checked_at: string | null;
 }
 
-/** supervisor 运行状态（供 Web/CLI 展示重启次数 / 崩因）；无 supervisor 时 null */
+/** supervisor 运行状态（供 Web/CLI 展示重启次数 / 崩因）；无 supervisor 时 running=false、pid=null 的零值对象 */
 export interface SupervisorStatusInfo {
   running: boolean;
   pid: number | null;
@@ -81,8 +81,8 @@ export interface DaemonStatus {
   taskCounts: Record<string, number>;
   /** 更新检查（本地是否落后远端）；daemon 启动后异步填充，未就绪时 status:"unknown" */
   update: UpdateInfo;
-  /** supervisor 运行状态；裸跑 daemon（无 supervisor）时 null */
-  supervisor: SupervisorStatusInfo | null;
+  /** supervisor 运行状态；裸跑 daemon（无 supervisor）时为 running=false、pid=null 的零值对象 */
+  supervisor: SupervisorStatusInfo;
 }
 
 export interface GraphNode {

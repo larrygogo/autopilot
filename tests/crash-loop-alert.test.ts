@@ -52,6 +52,7 @@ beforeEach(() => {
 
 afterEach(() => {
   _setDbForTest(null);
+  db.close();
   if (prevHome === undefined) delete process.env.AUTOPILOT_HOME;
   else process.env.AUTOPILOT_HOME = prevHome;
   if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
