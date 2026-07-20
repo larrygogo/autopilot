@@ -189,6 +189,59 @@ export function applyRetentionPolicy(
 }
 
 /**
+ * run 日志 retention（第三轨，2026-07）：**终态需求超 days 天后，清其 run 目录**
+ * （phase-*.log / agent-calls / manifest / workspace 残留，即 runtime/requirements/<reqId>/runs/<taskId>/）。
+ *
+ * 与前两轨（代码目录）的关键差异：
+ *   - age 以**需求终态时间**（requirementTerminalAt，= 需求 updated_at）为准，**不用 run 目录 mtime**
+ *     —— code 轨删 workspace/ 会刷新 run 目录 mtime，用 mtime 会漏清；需求终态时间稳定。
+ *   - 清整个 run 目录（前两轨只清 workspace/ 子目录）。tasks DB 行**保留**（run 多历史的账本），
+ *     故需求页仍列出该 run，只是过窗口后无文件级日志详情——这是「run 多历史」与磁盘的 30 天权衡。
+ *   - 只扫新布局 runtime/requirements/<reqId>/runs/；legacy runtime/tasks/ 不在此轨（冻结存量，自然老化）。
+ *
+ * retention.ts 保持 DB-free：终态时间由 requirementTerminalAt 注入（watcher 从需求行读）。
+ */
+export function pruneTerminalRequirementRunLogs(opts: {
+  days: number;
+  /** 需求终态时间 epoch ms；非终态 / 无记录返回 null → 不清 */
+  requirementTerminalAt: (reqId: string) => number | null;
+  now?: number;
+  /** 显式指定 requirements 根目录（测试用 tmpdir），默认 AUTOPILOT_HOME/runtime/requirements */
+  requirementsRoot?: string;
+}): { removed: string[]; reclaimedBytes: number } {
+  const removed: string[] = [];
+  let reclaimed = 0;
+  if (!(opts.days > 0)) return { removed, reclaimedBytes: 0 };
+  const now = opts.now ?? Date.now();
+  const threshold = now - opts.days * 86400 * 1000;
+  const root = opts.requirementsRoot ?? requirementsRootDir();
+  if (!existsSync(root)) return { removed, reclaimedBytes: 0 };
+
+  for (const reqId of readdirSync(root)) {
+    // 先做便宜的 fs 判断再查 DB：需求目录终身累积，绝大多数轮次里 runs/ 要么不存在
+    // 要么已清空，没必要为它们各付一次 DB 点查
+    const runsDir = join(root, reqId, "runs");
+    if (!existsSync(runsDir)) continue;
+    let taskIds: string[];
+    try { taskIds = readdirSync(runsDir); } catch { continue; }
+    if (taskIds.length === 0) continue;
+    const terminalAt = opts.requirementTerminalAt(reqId);
+    if (terminalAt == null || terminalAt >= threshold) continue; // 非终态 / 未过保留窗口
+    for (const taskId of taskIds) {
+      const runDir = join(runsDir, taskId);
+      try {
+        // 先量后删（size 仅用于日志汇报）；空目录也删——留着只会让下一轮重新扫到
+        const size = dirSizeBytes(runDir);
+        rmSync(runDir, { recursive: true, force: true });
+        removed.push(`runlog:${taskId}`);
+        reclaimed += size;
+      } catch { /* ignore */ }
+    }
+  }
+  return { removed, reclaimedBytes: reclaimed };
+}
+
+/**
  * 扫所有任务 sandbox 大小 + mtime（双根：legacy runtime/tasks/ + runtime/requirements/<reqId>/runs/）。
  * 可注入根目录让测试用 tmpdir；只传 rootOverride 时不扫默认新根（保持旧测试语义）。
  */

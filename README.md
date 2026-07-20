@@ -163,6 +163,28 @@ graph TB
 
 ### 安装
 
+**方式 A · 下载预编译单文件（推荐给使用者）**
+
+到 [Releases](https://github.com/larrygogo/autopilot/releases) 下载对应平台的单文件可执行程序（无需装 Bun / Node）：
+
+| 平台 | 资产名 |
+|------|--------|
+| Windows x64 | `autopilot-windows-x64.exe` |
+| Linux x64 | `autopilot-linux-x64` |
+| macOS (Apple Silicon) | `autopilot-macos-arm64` |
+
+```bash
+# Linux / macOS：下载后赋可执行权限并放进 PATH
+chmod +x autopilot-linux-x64 && mv autopilot-linux-x64 /usr/local/bin/autopilot
+autopilot init                    # 创建 ~/.autopilot/、跑数据库迁移、装 dev + ad-hoc 两个产品工作流
+```
+
+> Windows 用户可直接**双击 exe**：会自动在本机起服务并打开 Web 控制台（关窗即停）。命令行使用则把 exe 放进 PATH 后照下文用。
+>
+> 首次运行 macOS/Windows 可能遇到 Gatekeeper / SmartScreen 拦截（尚未做代码签名）——需手动放行。
+
+**方式 B · 从源码（开发者）**
+
 ```bash
 git clone https://github.com/larrygogo/autopilot && cd autopilot
 bun install
@@ -177,6 +199,17 @@ autopilot init                    # 创建 ~/.autopilot/、跑数据库迁移、
 autopilot daemon start            # 后台启动 daemon（带 supervisor 守护）
 autopilot dashboard               # 打开 Web UI（浏览器访问 http://127.0.0.1:6180）
 ```
+
+**开机自启（无人值守 runner）**：让 daemon 在机器重启后自动回来——
+
+```bash
+autopilot service install --dry-run   # 先预览：打印将写入的 unit/plist 内容与将执行的命令，不改动系统
+autopilot service install         # 注册系统自启（Linux systemd / macOS launchd / Windows 登录自启 HKCU Run，均免管理员）
+autopilot service status          # 查看安装 / 启用状态
+autopilot service uninstall       # 停用并移除
+```
+
+> `daemon start` 的 supervisor 只兜进程崩溃；`service install` 让 OS 服务管理器做最外层看护，补上「机器重启后拉起」+「supervisor 自身退出后重启」。
 
 ### 纯 CLI 路径（不开浏览器也能跑）
 
@@ -353,7 +386,7 @@ sandbox_retention:        # 可选：自动清理终态任务 sandbox（旧名 w
 
 ```bash
 bun install
-bun test                  # 178 tests
+bun run test              # 全量测试（按文件隔离）
 bun run typecheck
 bun run build:web
 ```

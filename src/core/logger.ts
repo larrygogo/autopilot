@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync, readFileSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync, readFileSync, openSync, readSync, closeSync } from "fs";
 import { dirname } from "path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { emit } from "./event-bus";
@@ -124,6 +124,39 @@ export function readDaemonFileLog(tail = 1000): string {
   const lines = content.split("\n");
   if (tail <= 0 || tail >= lines.length) return content;
   return lines.slice(-tail).join("\n");
+}
+
+/** 当前 daemon.log 的字节游标（= 当前文件大小；未激活 / 无文件时 0）。 */
+export function getDaemonFileLogOffset(): number {
+  const path = fileLogPath;
+  if (!path) return 0;
+  try { return statSync(path).size; } catch { return 0; }
+}
+
+/**
+ * 从字节游标增量读 daemon.log（CLI `daemon logs --follow` 用）。
+ * append 以整行为单位（appendFileLog 带 \n），游标恒落在行边界上。
+ * 文件被轮转 / 截断（size < offset）时从头重读当前文件（与旧「整段重打」语义一致）。
+ */
+export function readDaemonFileLogFromOffset(offset: number): { content: string; offset: number } {
+  const path = fileLogPath;
+  if (!path) return { content: "", offset: 0 };
+  let size = 0;
+  try { size = statSync(path).size; } catch { return { content: "", offset: 0 }; }
+  const start = offset >= 0 && offset <= size ? offset : 0;
+  if (start === size) return { content: "", offset: size };
+  try {
+    const fd = openSync(path, "r");
+    try {
+      const buf = Buffer.alloc(size - start);
+      const n = readSync(fd, buf, 0, buf.length, start);
+      return { content: buf.toString("utf-8", 0, n), offset: start + n };
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return { content: "", offset: size };
+  }
 }
 
 export function setPhase(phase: string, label?: string): void {

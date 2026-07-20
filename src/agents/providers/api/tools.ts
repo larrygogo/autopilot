@@ -10,9 +10,13 @@
  * 要获得真正的进程级隔离，应在 Docker/systemd-nspawn 等容器内运行 autopilot daemon。
  */
 
-import { existsSync, realpathSync, lstatSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync, readdirSync } from "fs";
+import { existsSync, realpathSync, lstatSync, statSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, renameSync, readdirSync } from "fs";
 import { join, dirname, basename, resolve, sep } from "path";
 import { spawn } from "child_process";
+import { request as httpRequest } from "http";
+import { request as httpsRequest } from "https";
+import { lookup as dnsLookup } from "dns/promises";
+import { createGunzip, createInflate, createBrotliDecompress } from "zlib";
 import { log } from "../../../core/logger";
 import { expandToApiTools } from "../../tool-capabilities";
 
@@ -149,10 +153,33 @@ function checkPrivateIp(address: string, hostname: string): void {
   }
 }
 
-export async function assertSafeUrl(rawUrl: string, mode: PermissionMode): Promise<void> {
-  // bypassPermissions 模式不做 SSRF 检查（对齐 CLI 现状）
-  if (mode === "bypassPermissions") return;
+const DNS_LOOKUP_TIMEOUT_MS = 3_000;
 
+interface ResolvedUrlTarget {
+  parsed: URL;
+  /** bypassPermissions 下不固定地址；其余模式始终返回已校验的目标地址。 */
+  pinned?: { address: string; family: 4 | 6 };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new ToolError(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * 校验 URL 并解析出实际请求必须使用的 IP。调用者必须把 pinned 传给连接层，
+ * 不能校验后再让 HTTP 客户端独立解析一次，否则会留下 DNS rebinding 窗口。
+ */
+async function resolveSafeUrlTarget(rawUrl: string, mode: PermissionMode): Promise<ResolvedUrlTarget> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -163,42 +190,134 @@ export async function assertSafeUrl(rawUrl: string, mode: PermissionMode): Promi
   if (!["http:", "https:"].includes(parsed.protocol)) {
     throw new ToolError(`协议不允许：${parsed.protocol}`);
   }
+  if (mode === "bypassPermissions") return { parsed };
 
-  // 对 localhost 特判（URL 解析后 hostname 是 "localhost"）
   if (parsed.hostname === "localhost") {
-    throw new ToolError(`SSRF 防护：localhost 解析到私有地址 127.0.0.1`);
+    throw new ToolError("SSRF 防护：localhost 解析到私有地址 127.0.0.1");
   }
-
-  // 如果 hostname 本身就是 IP 地址（如 127.0.0.1, ::1），直接检查，无需 DNS 解析
   if (isIpAddress(parsed.hostname)) {
-    checkPrivateIp(stripBrackets(parsed.hostname), parsed.hostname);
-    return;
+    const address = stripBrackets(parsed.hostname);
+    checkPrivateIp(address, parsed.hostname);
+    return { parsed, pinned: { address, family: address.includes(":") ? 6 : 4 } };
   }
 
-  // 域名：DNS 解析后检查 IP
-  let addresses: Array<{ address: string }>;
+  let addresses: Array<{ address: string; family: number }>;
   try {
-    const dns = await import("dns");
-    addresses = await new Promise<Array<{ address: string }>>((resolve, reject) => {
-      dns.resolve4(parsed.hostname, (err, addrs) => {
-        if (err) {
-          // 回落尝试 IPv6
-          dns.resolve6(parsed.hostname, (err6, addrs6) => {
-            if (err6) reject(err6);
-            else resolve((addrs6 || []).map((a) => ({ address: a })));
-          });
-        } else {
-          resolve((addrs || []).map((a) => ({ address: a })));
-        }
-      });
-    });
-  } catch {
+    addresses = await withTimeout(
+      dnsLookup(parsed.hostname, { all: true, verbatim: true }) as Promise<Array<{ address: string; family: number }>>,
+      DNS_LOOKUP_TIMEOUT_MS,
+      `DNS 解析超时：${parsed.hostname}`,
+    );
+  } catch (e: unknown) {
+    if (e instanceof ToolError) throw e;
     throw new ToolError(`DNS 解析失败：${parsed.hostname}`);
   }
+  if (addresses.length === 0) throw new ToolError(`DNS 解析失败：${parsed.hostname}`);
+  for (const { address } of addresses) checkPrivateIp(address, parsed.hostname);
+  const selected = addresses[0];
+  return { parsed, pinned: { address: selected.address, family: selected.family as 4 | 6 } };
+}
 
-  for (const { address } of addresses) {
-    checkPrivateIp(address, parsed.hostname);
-  }
+export async function assertSafeUrl(rawUrl: string, mode: PermissionMode): Promise<void> {
+  await resolveSafeUrlTarget(rawUrl, mode);
+}
+
+interface PinnedHttpResponse {
+  status: number;
+  location: string | null;
+  text: string;
+  truncated: boolean;
+}
+
+/** 发起固定到已校验 IP 的请求，同时保留原域名用于 Host header 与 TLS SNI。 */
+function requestPinnedUrl(
+  target: ResolvedUrlTarget,
+  method: string,
+  timeoutMs = 30_000,
+): Promise<PinnedHttpResponse> {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const transport = target.parsed.protocol === "https:" ? httpsRequest : httpRequest;
+    let settled = false;
+    let totalTimer: ReturnType<typeof setTimeout> | undefined;
+    const finishError = (e: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (totalTimer) clearTimeout(totalTimer);
+      rejectRequest(e);
+    };
+    const lookup = target.pinned
+      ? ((_hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
+          if (options?.all) callback(null, [target.pinned]);
+          else callback(null, target.pinned!.address, target.pinned!.family);
+        })
+      : undefined;
+    const req = transport(target.parsed, {
+      method,
+      headers: {
+        "User-Agent": "autopilot/1.0",
+        // 显式声明可解压的编码：旧 fetch 实现自带透明解压，裸 http.request 没有，
+        // 不声明时仍有服务器（预压缩静态资源 / 不合规实现）无条件回 gzip
+        "Accept-Encoding": "gzip, deflate, br",
+      },
+      // Node 的重载类型不能表达同一个 callback 同时支持 all=true/false；运行时两种形态均已处理。
+      lookup: lookup as never,
+    }, (res) => {
+      let text = "";
+      let truncated = false;
+      const settleResolve = () => {
+        if (settled) return;
+        settled = true;
+        if (totalTimer) clearTimeout(totalTimer);
+        const locationHeader = res.headers.location;
+        resolveRequest({
+          status: res.statusCode ?? 0,
+          location: Array.isArray(locationHeader) ? (locationHeader[0] ?? null) : (locationHeader ?? null),
+          text,
+          truncated,
+        });
+      };
+      // 重定向响应体无用（只读 Location），不必解压；正文按 Content-Encoding 解压后再读，
+      // 否则 setEncoding("utf8") 会把压缩字节当 UTF-8 解出乱码
+      const contentEncoding = String(res.headers["content-encoding"] ?? "").trim().toLowerCase();
+      let body: NodeJS.ReadableStream = res;
+      if (contentEncoding === "gzip") body = res.pipe(createGunzip());
+      else if (contentEncoding === "deflate") body = res.pipe(createInflate());
+      else if (contentEncoding === "br") body = res.pipe(createBrotliDecompress());
+      if (body !== res) body.on("error", finishError);
+
+      body.setEncoding("utf8");
+      body.on("data", (chunk: string) => {
+        const remaining = 50_000 - text.length;
+        if (remaining > 0) text += chunk.slice(0, remaining);
+        if (chunk.length > remaining) {
+          truncated = true;
+          // 已到 50KB 上限：立即带已收内容终结并断开——慢速流上继续等 'end' 会拖满总超时
+          settleResolve();
+          req.destroy();
+        }
+      });
+      body.on("end", settleResolve);
+      res.on("error", finishError);
+    });
+    // 总时长硬上限：req.setTimeout 只是 socket 空闲超时，慢速滴流响应（每几秒 1 字节）
+    // 永不触发它——旧 fetch 实现的 AbortSignal.timeout 是总上限，这里补回同等语义。
+    totalTimer = setTimeout(() => {
+      finishError(new Error(`请求总时长超时（${timeoutMs}ms）`));
+      req.destroy();
+    }, timeoutMs);
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`请求超时（${timeoutMs}ms）`)));
+    req.on("error", finishError);
+    req.end();
+  });
+}
+
+/** 仅供安全回归测试：验证连接层不会对已校验主机名再次做 DNS 查询。 */
+export function _requestPinnedUrlForTest(
+  rawUrl: string,
+  address: string,
+  family: 4 | 6,
+): Promise<PinnedHttpResponse> {
+  return requestPinnedUrl({ parsed: new URL(rawUrl), pinned: { address, family } }, "GET", 2_000);
 }
 
 // ── bash 安全 ──
@@ -219,6 +338,23 @@ const DANGEROUS_PATTERNS = [
 
 function isDangerousCommand(cmd: string): boolean {
   return DANGEROUS_PATTERNS.some((p) => p.test(cmd));
+}
+
+/**
+ * 解析 bash 可执行路径。非 Windows 直接用 PATH 里的 bash；Windows 优先探 Git for
+ * Windows 的固定安装位（Git 默认只把 cmd\ 加进 PATH，bash.exe 不在 PATH 上），
+ * 再回退 Bun.which——注意 System32\bash.exe 是 WSL 入口，路径语义不同，故固定位优先。
+ */
+function resolveBashExecutable(): string | null {
+  if (process.platform !== "win32") return "bash";
+  const candidates = [
+    join(process.env["ProgramFiles"] ?? "C:\\Program Files", "Git", "bin", "bash.exe"),
+    join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Git", "bin", "bash.exe"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return Bun.which("bash");
 }
 
 /** 敏感环境变量关键字（default 和 cautious 模式屏蔽） */
@@ -325,7 +461,7 @@ export function getToolDefinitions(mode: PermissionMode, allowedApiTools?: Set<s
     },
     {
       name: "search_files",
-      description: "Search for files matching a pattern using grep-like regex.",
+      description: "Search file contents using a regular expression.",
       input_schema: {
         type: "object",
         properties: {
@@ -365,7 +501,7 @@ export function getToolDefinitions(mode: PermissionMode, allowedApiTools?: Set<s
   if (mode !== "cautious") {
     tools.splice(tools.length - 1, 0, {
       name: "bash",
-      description: "Execute a bash command. Working directory is the project sandbox.",
+      description: "Execute a shell command. Working directory is the project sandbox.",
       input_schema: {
         type: "object",
         properties: {
@@ -552,35 +688,82 @@ export class ToolExecutor {
     return `已移动：${input["source"]} → ${input["destination"]}`;
   }
 
-  private _searchFiles(input: Record<string, unknown>): string {
+  private async _searchFiles(input: Record<string, unknown>): Promise<string> {
     const pattern = input["pattern"] as string;
     if (!pattern) throw new ToolError("pattern 参数缺失");
     const searchPath = input["path"]
       ? this._resolvePath(input["path"])
       : this.sandboxRoot;
     const includeGlob = input["include"] as string | undefined;
-
-    // 使用 grep -rn 搜索；"--" 终止选项解析，防止以 '-' 开头的 pattern 被当成 grep 选项
-    const args = ["-rn", "--max-count=100"];
-    if (includeGlob) args.push("--include", includeGlob);
-    args.push("--", pattern, searchPath);
-
+    let matcher: RegExp;
     try {
-      const result = Bun.spawnSync(["grep", ...args], {
-        cwd: this.sandboxRoot,
-        timeout: 30_000,
-      });
-      const stdout = result.stdout?.toString() || "";
-      if (!stdout.trim()) return "无匹配结果";
-      // 截断过长的输出
-      const lines = stdout.split("\n");
-      if (lines.length > 200) {
-        return lines.slice(0, 200).join("\n") + `\n... (省略 ${lines.length - 200} 行)`;
-      }
-      return stdout;
-    } catch {
-      return "搜索执行失败";
+      matcher = new RegExp(pattern);
+    } catch (e: unknown) {
+      throw new ToolError(`无效搜索正则：${e instanceof Error ? e.message : String(e)}`);
     }
+    const glob = includeGlob ? new Bun.Glob(includeGlob) : null;
+    const matches: string[] = [];
+    let skippedLarge = 0;
+    let timedOut = false;
+    const MAX_MATCHES = 200;
+    const MAX_FILE_BYTES = 2 * 1024 * 1024;
+    // 执行预算：与旧 grep 子进程实现的 timeout(30s) 对齐。executor 与 daemon 同进程，
+    // 无预算的全量扫描会长时间占住事件循环（HTTP/WS/watcher 全停）。
+    // 已知残余局限：单次 matcher.test() 的灾难性回溯（如 (a+)+$）无法从外部打断
+    //（JS 正则无超时机制），预算只保证除此以外的一切有界。
+    const DEADLINE_MS = 30_000;
+    const deadline = Date.now() + DEADLINE_MS;
+    let sinceYield = 0;
+
+    const searchFile = (filePath: string): void => {
+      if (glob && !glob.match(basename(filePath))) return;
+      let content: string;
+      try {
+        if (statSync(filePath).size > MAX_FILE_BYTES) { skippedLarge++; return; }
+        content = readFileSync(filePath, "utf-8");
+      } catch {
+        return;
+      }
+      const relativePath = filePath.startsWith(this.sandboxRoot + sep)
+        ? filePath.slice(this.sandboxRoot.length + 1)
+        : filePath;
+      for (const [index, line] of content.split("\n").entries()) {
+        if ((index & 0xff) === 0 && Date.now() > deadline) { timedOut = true; return; }
+        matcher.lastIndex = 0;
+        if (!matcher.test(line)) continue;
+        matches.push(`${relativePath}:${index + 1}:${line}`);
+        if (matches.length >= MAX_MATCHES) return;
+      }
+    };
+    const walk = async (entryPath: string): Promise<void> => {
+      if (timedOut || matches.length >= MAX_MATCHES) return;
+      if (Date.now() > deadline) { timedOut = true; return; }
+      let stat;
+      try { stat = lstatSync(entryPath); } catch { return; }
+      if (stat.isSymbolicLink()) return;
+      if (stat.isFile()) {
+        searchFile(entryPath);
+        return;
+      }
+      if (!stat.isDirectory()) return;
+      let entries;
+      try { entries = readdirSync(entryPath, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries) {
+        if (timedOut || matches.length >= MAX_MATCHES) return;
+        if (entry.name === ".git" || entry.name === "node_modules") continue;
+        // 每处理一批条目让出一次事件循环，避免大目录扫描冻结 daemon
+        if (++sinceYield >= 64) { sinceYield = 0; await Bun.sleep(0); }
+        await walk(join(entryPath, entry.name));
+      }
+    };
+    await walk(searchPath);
+    const notes: string[] = [];
+    if (matches.length >= MAX_MATCHES) notes.push(`已达 ${MAX_MATCHES} 条匹配上限，扫描提前结束`);
+    if (skippedLarge > 0) notes.push(`跳过 ${skippedLarge} 个超过 2MB 的大文件（未搜索）`);
+    if (timedOut) notes.push(`搜索超过 ${DEADLINE_MS / 1000}s 预算，未扫完全部文件`);
+    const suffix = notes.length > 0 ? `\n... (${notes.join("；")})` : "";
+    if (matches.length === 0) return "无匹配结果" + suffix;
+    return matches.join("\n") + suffix;
   }
 
   private async _fetchUrl(input: Record<string, unknown>): Promise<string> {
@@ -594,22 +777,16 @@ export class ToolExecutor {
     // 禁用自动重定向：每一跳的 Location 都要重新过 assertSafeUrl，
     // 防止公网 URL 302 跳到 127.0.0.1 / 169.254.169.254 等私网地址绕过 SSRF 检查
     for (let redirects = 0; ; redirects++) {
-      await assertSafeUrl(currentUrl, this.mode);
-
-      let response: Response;
+      const target = await resolveSafeUrlTarget(currentUrl, this.mode);
+      let response: PinnedHttpResponse;
       try {
-        response = await fetch(currentUrl, {
-          method,
-          headers: { "User-Agent": "autopilot/1.0" },
-          redirect: "manual",
-          signal: AbortSignal.timeout(30_000),
-        });
+        response = await requestPinnedUrl(target, method);
       } catch (e: unknown) {
         throw new ToolError(`fetch 失败：${e instanceof Error ? e.message : String(e)}`);
       }
 
       if ([301, 302, 303, 307, 308].includes(response.status)) {
-        const location = response.headers.get("location");
+        const location = response.location;
         if (location) {
           if (redirects >= MAX_REDIRECTS) {
             throw new ToolError(`重定向次数超过上限（${MAX_REDIRECTS}）：${url}`);
@@ -619,20 +796,15 @@ export class ToolExecutor {
           } catch {
             throw new ToolError(`重定向目标无效：${location}`);
           }
-          // 303（及历史上 301/302 对非 GET 的事实行为）降级为 GET
-          if (response.status === 303 || (method !== "GET" && method !== "HEAD")) {
+          // 303（及历史上 301/302 对非 GET 的事实行为）降级为 GET；307/308 保留方法。
+          if (response.status === 303 || ([301, 302].includes(response.status) && method !== "GET" && method !== "HEAD")) {
             method = "GET";
           }
           continue;
         }
       }
 
-      const text = await response.text();
-      // 截断过长的响应
-      if (text.length > 50_000) {
-        return text.slice(0, 50_000) + "\n... (响应被截断)";
-      }
-      return text;
+      return response.text + (response.truncated ? "\n... (响应被截断)" : "");
     }
   }
 
@@ -658,8 +830,20 @@ export class ToolExecutor {
       ? { ...process.env }
       : buildSanitizedEnv();
 
+    // Windows 也统一走 bash（Git Bash）：工具 schema 告诉模型写的是 bash 命令，
+    // DANGEROUS_PATTERNS 黑名单也只认 bash 拼写。换 PowerShell 会让守卫与实际 shell
+    // 脱节（Remove-Item -Recurse -Force 等破坏性命令全数放行）且模型写的 POSIX 语法
+    // （&& / export / 2>/dev/null）在 Windows PowerShell 5.1 下全是解析错误。
+    // 找不到 bash 时 fail-closed 报错，不降级到其它 shell。
+    const bashExecutable = resolveBashExecutable();
+    if (!bashExecutable) {
+      throw new ToolError(
+        "未找到 bash（Windows 上 bash 工具依赖 Git Bash）。请安装 Git for Windows，或把 bash 所在目录加入 PATH。"
+      );
+    }
+
     return new Promise<string>((resolve, reject) => {
-      const proc = spawn("bash", ["-c", command], {
+      const proc = spawn(bashExecutable, ["-c", command], {
         cwd: this.sandboxRoot,
         env: env as NodeJS.ProcessEnv,
         timeout,

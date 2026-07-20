@@ -60,7 +60,7 @@ import {
   readManifest as readSessionManifest,
   readMessages as readSessionMessages,
 } from "../core/sessions";
-import { readDaemonFileLog, getDaemonFileLogPath } from "../core/logger";
+import { readDaemonFileLog, readDaemonFileLogFromOffset, getDaemonFileLogOffset, getDaemonFileLogPath } from "../core/logger";
 import {
   listNotifications,
   unreadCount as notificationUnreadCount,
@@ -165,6 +165,7 @@ import { registerRpcMethod, hasRpcMethod, RpcError } from "./rpc";
 import { wsManager } from "./ws";
 import { VERSION, GIT_SHA, STARTED_AT_ISO } from "../index";
 import { getUpdateInfo } from "../core/update-check";
+import { getSupervisorStatus } from "./pid";
 import { listExtensionsInfo, invokeExtension } from "./extensions/registry";
 
 /** 业务错误 → RpcError 透传（保留 code）；其他错误让 invokeRpcMethod 包成 INTERNAL */
@@ -214,6 +215,7 @@ function registerCoreQueryRpc(): void {
       // taskCounts 由 daemon 启动时维护；此处直接现算一次（小数据量 OK）
       taskCounts: countTasksByStatus(),
       update: getUpdateInfo(),
+      supervisor: getSupervisorStatus(),
     }),
   });
 
@@ -1979,13 +1981,22 @@ function registerMiscMutationRpc(): void {
 
   registerRpcMethod({
     method: "daemon.log",
-    description: "读 daemon 主日志（tail N 行）",
+    description: "读 daemon 主日志（tail N 行；传 since_offset 走字节游标增量读）",
     handler: (params) => {
       const p = asObj(params);
+      // 增量模式（CLI --follow）：按字节游标只读新增，替代客户端「末行锚点」子串猜测
+      //（同秒重复行会锚错、静默丢行），也免去每轮整文件重读
+      if (typeof p.since_offset === "number") {
+        return {
+          path: getDaemonFileLogPath() ?? null,
+          ...readDaemonFileLogFromOffset(p.since_offset),
+        };
+      }
       const tail = typeof p.tail === "number" ? p.tail : 500;
       return {
         path: getDaemonFileLogPath() ?? null,
         content: readDaemonFileLog(tail),
+        offset: getDaemonFileLogOffset(),
       };
     },
   });

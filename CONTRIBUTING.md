@@ -21,7 +21,7 @@ bun run dev upgrade
 ```bash
 # 提交前务必通过
 bun run typecheck
-bun test
+bun run test
 ```
 
 ## 提交流程
@@ -41,7 +41,7 @@ git checkout -b docs/update-yaml-guide
 ### 2. 编写代码 & 测试
 
 - 新功能请添加对应的测试用例
-- 确保所有测试通过：`bun test`
+- 确保所有测试通过：`bun run test`（按文件隔离全局状态）
 - 确保类型检查通过：`bun run typecheck`
 
 ### 3. 提交

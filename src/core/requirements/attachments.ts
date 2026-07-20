@@ -9,7 +9,7 @@
 import { mkdirSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { join, extname } from "path";
 import { AUTOPILOT_HOME } from "../../index";
-import { getDb } from "../db";
+import { getDb, insertWithFreshId } from "../db";
 
 // ──────────────────────────────────────────────
 // 类型
@@ -184,31 +184,38 @@ export async function saveAttachment(opts: SaveAttachmentOpts): Promise<Attachme
   const { requirementId, originalName, mimeType, data } = opts;
   const ext = extname(originalName);
   const category = detectCategory(mimeType, originalName);
+  const db = getDb();
+  const ts = Date.now();
 
   // 确保目录存在
   const dir = getAttachmentsDir(requirementId);
   mkdirSync(dir, { recursive: true });
 
-  // 生成唯一文件名（ID + 原始扩展名），避免同名冲突
-  const id = nextAttachmentId();
+  // 先同步、原子地预留 ID，再进行任何 await。否则两个并发上传都可能在
+  // SELECT MAX+1 与 INSERT 之间拿到同一个 ID，继而写入同一文件并串数据。
+  const id = insertWithFreshId(nextAttachmentId, (candidate) => {
+    const candidatePath = join(dir, `${candidate}${ext}`);
+    db.run(
+      `INSERT INTO requirement_attachments
+         (id, requirement_id, original_name, mime_type, file_path, file_size, category, extracted_text, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+      [candidate, requirementId, originalName, mimeType, candidatePath, data.byteLength, category, ts],
+    );
+    return candidate;
+  });
   const fileName = `${id}${ext}`;
   const filePath = join(dir, fileName);
 
-  // 写磁盘（Bun 原生，已 await，无 race）
-  await Bun.write(filePath, data);
-
-  // 文本提取
-  const extractedText = await extractText(category, filePath, ext);
-
-  // 写 DB
-  const db = getDb();
-  const ts = Date.now();
-  db.run(
-    `INSERT INTO requirement_attachments
-       (id, requirement_id, original_name, mime_type, file_path, file_size, category, extracted_text, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, requirementId, originalName, mimeType, filePath, data.byteLength, category, extractedText, ts],
-  );
+  try {
+    await Bun.write(filePath, data);
+    const extractedText = await extractText(category, filePath, ext);
+    db.run("UPDATE requirement_attachments SET extracted_text = ? WHERE id = ?", [extractedText, id]);
+  } catch (e: unknown) {
+    // 预留成功但落盘失败时不能留下指向缺失/半写文件的幽灵记录。
+    try { if (existsSync(filePath)) unlinkSync(filePath); } catch { /* best-effort */ }
+    db.run("DELETE FROM requirement_attachments WHERE id = ?", [id]);
+    throw e;
+  }
 
   return getAttachmentById(id) as Attachment;
 }
@@ -227,6 +234,42 @@ export function listAttachments(requirementId: string): Attachment[] {
       "SELECT * FROM requirement_attachments WHERE requirement_id = ? ORDER BY created_at ASC",
     )
     .all(requirementId);
+}
+
+/**
+ * 只返回文件确实在盘上的附件——注入 prompt 前的过滤（buildAttachmentContext 是纯格式化
+ * 函数，不碰 fs）。挡掉两类：在途上传（行已 INSERT、文件还没写完，见 saveAttachment 注释）
+ * 与硬崩溃残留的幽灵行（pruneGhostAttachments 启动时清，但本轮可能还没轮到）。
+ */
+export function listReadableAttachments(requirementId: string): Attachment[] {
+  return listAttachments(requirementId).filter((a) => existsSync(a.file_path));
+}
+
+/**
+ * 幽灵附件行对账（daemon 启动时跑一次）。
+ *
+ * saveAttachment 为消灭并发撞号，先同步 INSERT 预留 id 再 await 落盘（见该函数注释）。
+ * 正常失败路径由 try/catch 回滚，但硬崩溃（SIGKILL / 断电）落在这个窗口里时，会留下
+ * 指向不存在文件的行——clarifier 之后每轮都注入「文本提取失败」或不存在的图片路径。
+ *
+ * graceMs 保护在途上传：只清创建时间早于宽限期的行，绝不误删正在写盘的附件。
+ */
+export function pruneGhostAttachments(opts: { graceMs?: number; now?: number } = {}): number {
+  const db = getDb();
+  const graceMs = opts.graceMs ?? 10 * 60_000;
+  const cutoff = (opts.now ?? Date.now()) - graceMs;
+  let removed = 0;
+  const rows = db
+    .query<{ id: string; file_path: string }, [number]>(
+      "SELECT id, file_path FROM requirement_attachments WHERE created_at < ?",
+    )
+    .all(cutoff);
+  for (const row of rows) {
+    if (existsSync(row.file_path)) continue;
+    db.run("DELETE FROM requirement_attachments WHERE id = ?", [row.id]);
+    removed++;
+  }
+  return removed;
 }
 
 export function deleteAttachment(id: string): void {

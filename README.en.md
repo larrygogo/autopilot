@@ -351,7 +351,7 @@ sandbox_retention:        # optional: auto cleanup of terminal-state task sandbo
 
 ```bash
 bun install
-bun test                  # 178 tests
+bun run test              # full suite (isolated per test file)
 bun run typecheck
 bun run build:web
 ```

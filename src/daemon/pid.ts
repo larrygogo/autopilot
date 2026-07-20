@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { AUTOPILOT_HOME } from "../index";
+import type { SupervisorStatusInfo } from "./protocol";
 
 // 路径函数化（不是常量）以便测试用 tmpdir 隔离：process.env.AUTOPILOT_HOME
 // 优先 / 常量兜底。daemon 运行期间 env 不变，行为跟常量等价。
@@ -133,6 +134,97 @@ export function isSupervisorRunning(): boolean {
     return false;
   }
   return true;
+}
+
+// ──────────────────────────────────────────────
+// Supervisor 运行状态（重启次数 / 崩因 / 退避）—— supervisor 内存态的磁盘投影，
+// 供 `daemon status` 读出「supervisor 重启了几次、上次崩因是什么」（可观测性）。
+// 所有写入 try/catch 静默失败，绝不影响 supervisor 崩溃恢复主循环。
+// ──────────────────────────────────────────────
+
+export interface SupervisorState {
+  supervisor_pid: number;
+  started_at: number; // epoch ms
+  daemon_spawns: number; // daemon 子进程累计启动次数
+  restarts: number; // 崩溃触发的重启次数
+  last_exit_code: number | null;
+  last_classification: string | null; // exit_clean / respawn_immediate / fatal_config / crash
+  last_crash_at: number | null; // epoch ms
+  crash_loop: boolean;
+}
+
+function supervisorStateFile(): string {
+  return join(home(), "runtime", "supervisor.state.json");
+}
+
+export function writeSupervisorState(state: SupervisorState): void {
+  try {
+    const path = supervisorStateFile();
+    const { mkdirSync } = require("fs") as typeof import("fs");
+    const { dirname } = require("path") as typeof import("path");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(state), "utf-8");
+  } catch { /* ignore：状态投影失败不影响 supervisor 主循环 */ }
+}
+
+export function readSupervisorState(): SupervisorState | null {
+  const path = supervisorStateFile();
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    if (typeof parsed?.supervisor_pid === "number" && typeof parsed?.started_at === "number") {
+      return parsed as SupervisorState;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+export function removeSupervisorState(): void {
+  try { unlinkSync(supervisorStateFile()); } catch { /* ignore */ }
+}
+
+// crash-loop 告警去重标记：记录已就哪个 supervisor 会话（started_at）告过警，
+// 避免同一崩溃循环里 daemon 每次被 respawn 都重复记通知。
+function crashLoopAlertFile(): string {
+  return join(home(), "runtime", "crash-loop-alert.json");
+}
+
+export function readCrashLoopAlertedAt(): number | null {
+  const path = crashLoopAlertFile();
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    return typeof parsed?.alerted_started_at === "number" ? parsed.alerted_started_at : null;
+  } catch { return null; }
+}
+
+export function writeCrashLoopAlertedAt(startedAt: number): void {
+  try {
+    writeFileSync(crashLoopAlertFile(), JSON.stringify({ alerted_started_at: startedAt }), "utf-8");
+  } catch { /* ignore：去重标记写失败最多多记一条通知，不影响正确性 */ }
+}
+
+/**
+ * 汇总 supervisor 运行状态（供 daemon.status RPC / /api/status 透出到 Web/CLI）。
+ * running 凭 supervisor.pid 存活判定；其余指标读 supervisor.state（无则给零值缺省）。
+ */
+export function getSupervisorStatus(): SupervisorStatusInfo {
+  const pid = readSupervisorPid();
+  const running = pid !== null && isProcessAlive(pid);
+  const st = readSupervisorState();
+  return {
+    running,
+    pid,
+    started_at: st?.started_at ?? null,
+    daemon_spawns: st?.daemon_spawns ?? 0,
+    restarts: st?.restarts ?? 0,
+    last_exit_code: st?.last_exit_code ?? null,
+    last_crash_at: st?.last_crash_at ?? null,
+    // crash_loop 只在 supervisor 存活时透出：state 文件在 SIGKILL / 断电后残留
+    //（removeSupervisorState 只在优雅退出时跑），死 supervisor 谈不上"正在崩溃循环"，
+    // 陈旧判定收口在这一处，消费方（Web 告警 / CLI / 通知补记）不必各自发明。
+    crash_loop: running ? (st?.crash_loop ?? false) : false,
+  };
 }
 
 // ──────────────────────────────────────────────

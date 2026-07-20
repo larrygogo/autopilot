@@ -11,7 +11,8 @@ export type NotificationType =
   | "clarifier_error"
   | "schedule_error"
   | "ci_fix_limit"
-  | "watcher_recovery";
+  | "watcher_recovery"
+  | "supervisor_crash_loop";
 
 export type NotificationSeverity = "error" | "action" | "info";
 

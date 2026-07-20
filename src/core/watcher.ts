@@ -6,7 +6,7 @@ import { forceTransition } from "./state-machine";
 import { getWorkflow, listWorkflows, getTerminalStates, buildTransitions } from "./workflow/registry";
 import type { PhaseDefinition, ParallelDefinition } from "./workflow/registry";
 import { emit } from "./event-bus";
-import { applyRetentionPolicy, loadRetentionPolicy } from "./sandbox/retention";
+import { applyRetentionPolicy, loadRetentionPolicy, pruneTerminalRequirementRunLogs } from "./sandbox/retention";
 
 
 // ──────────────────────────────────────────────
@@ -296,21 +296,40 @@ function isTaskTerminal(taskId: string): boolean {
   return isTerm;
 }
 
+const REQUIREMENT_TERMINAL_STATUSES = new Set(["done", "cancelled", "failed"]);
+
 /**
- * 需求是否终态（done/cancelled/failed）——需求级 codebase 的 retention 闸门（v2 R4）。
- * 非终态永不清（fix run 的工作现场）；需求行已删的孤儿目录视作可清。
+ * 需求终态时间 epoch ms（retention 各轨的 age 闸门）：非终态 / DB 不可用返回 null（不清）；
+ * 孤儿目录（需求行已删的残留）返回 0 → 视作极早、可清。
+ *
+ * 时间取**最后一次进入终态的转移时间**（requirement_status_logs，迁移 030），而非
+ * requirements.updated_at —— failed 需求按设计可继续编辑（补约束重试），用 updated_at
+ * 会让每次编辑都把保留时钟推后。无状态日志（迁移未跑 / 老库）时回退 updated_at。
  */
-function isRequirementTerminal(reqId: string): boolean {
+function requirementTerminalAt(reqId: string): number | null {
   try {
     // 惰性 require：watcher 在 core，requirements 也在 core，但避免顶层 import 扩大模块环
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const reqs = require("./requirements") as typeof import("./requirements");
     const r = reqs.getRequirementById(reqId);
-    if (!r) return true; // 孤儿目录（需求已删但整树删失败的残留）→ 可清
-    return r.status === "done" || r.status === "cancelled" || r.status === "failed";
+    if (!r) return 0; // 孤儿目录（需求已删但整树删失败的残留）→ 可清
+    if (!REQUIREMENT_TERMINAL_STATUSES.has(r.status)) return null;
+    const lastTerminalLog = reqs
+      .listRequirementStatusLogs(reqId)
+      .filter((l) => REQUIREMENT_TERMINAL_STATUSES.has(l.to_status))
+      .pop();
+    return lastTerminalLog?.created_at ?? r.updated_at;
   } catch {
-    return false; // DB 不可用 → 保守不清
+    return null; // DB 不可用 → 保守不清
   }
+}
+
+/**
+ * 需求是否终态（done/cancelled/failed）——需求级 codebase 的 retention 闸门（v2 R4）。
+ * 非终态永不清（fix run 的工作现场）；需求行已删的孤儿目录视作可清。
+ */
+function isRequirementTerminal(reqId: string): boolean {
+  return requirementTerminalAt(reqId) !== null;
 }
 
 /**
@@ -334,6 +353,24 @@ export function pruneSandboxesByPolicy(): void {
       mb,
     );
   }
+
+  // 第三轨：终态需求超 days 天后清 run 日志目录（phase 日志 / agent-calls / manifest）。
+  // 复用同一 days 窗口；tasks DB 行保留（run 多历史账本），只清文件级日志详情。
+  if (policy.days && policy.days > 0) {
+    const logResult = pruneTerminalRequirementRunLogs({
+      days: policy.days,
+      requirementTerminalAt,
+    });
+    if (logResult.removed.length > 0) {
+      const mb = (logResult.reclaimedBytes / 1024 / 1024).toFixed(1);
+      log.info(
+        "run 日志保留策略清理了 %d 个 run 目录（回收 %s MB）",
+        logResult.removed.length,
+        mb,
+      );
+    }
+  }
+
   // 每次运行后清缓存，因为下一轮任务状态可能已变
   terminalStateCache.clear();
 }

@@ -14,7 +14,7 @@
     "daemon": "bun run src/daemon/index.ts",
     "build:web": "cd src/web && bunx vite build --outDir ../../web-dist && cd ../.. && bun run gen:web-assets",
     "dev:web": "cd src/web && bunx vite",
-    "test": "bun test",
+    "test": "bun test --isolate",
     "typecheck": "tsc --noEmit",
     "coverage:rpc": "bun run bin/coverage-matrix.ts",
     "gen:migrations": "bun run scripts/gen-migrations-index.ts",

@@ -10,6 +10,9 @@ import {
   isProcessAlive,
   isSupervisorRunning,
   isDaemonRunning,
+  writeSupervisorState,
+  removeSupervisorState,
+  type SupervisorState,
 } from "./pid";
 
 // ──────────────────────────────────────────────
@@ -102,6 +105,18 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
   }
 
   writeSupervisorPid();
+  // 运行状态投影（供 daemon status 读出重启次数 / 崩因）——写失败静默，不影响主循环
+  const state: SupervisorState = {
+    supervisor_pid: process.pid,
+    started_at: Date.now(),
+    daemon_spawns: 0,
+    restarts: 0,
+    last_exit_code: null,
+    last_classification: null,
+    last_crash_at: null,
+    crash_loop: false,
+  };
+  writeSupervisorState(state);
   console.log(`autopilot supervisor v${VERSION} started (pid=${process.pid})`);
 
   // 编译单文件模式：无 bun 可执行、无 index.ts 文件，直接用 execPath 子命令。
@@ -138,10 +153,25 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
       stderr: "ignore",
     });
     console.log(`daemon 子进程启动 (pid=${currentChild.pid})`);
+    state.daemon_spawns++;
+    writeSupervisorState(state);
+    // daemon 存活满一个崩溃窗口即视为走出循环：清 crash_loop 投影。否则循环后恢复
+    // 稳定长跑时（不再有 exit 事件），状态文件里的 crash_loop=true 会永久挂着，
+    // daemon.status / Web 崩溃循环告警一直误报。
+    const stableTimer = setTimeout(() => {
+      if (state.crash_loop) {
+        state.crash_loop = false;
+        writeSupervisorState(state);
+        console.log("daemon 已稳定运行，崩溃循环标志清除");
+      }
+    }, CRASH_LOOP_WINDOW_MS);
     const exitCode = await currentChild.exited;
+    clearTimeout(stableTimer);
     const ranMs = Date.now() - startedAt;
 
     const classification = classifyExit(exitCode, shuttingDown);
+    state.last_exit_code = exitCode;
+    state.last_classification = classification;
     if (classification === "exit_clean") {
       console.log(shuttingDown
         ? `daemon 退出（信号传递完成），supervisor 退出`
@@ -170,6 +200,10 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
     crashTimestamps.length = 0;
     crashTimestamps.push(...nextCrashTimestamps);
     attempt++;
+    state.restarts++;
+    state.last_crash_at = now;
+    state.crash_loop = crashLoop;
+    writeSupervisorState(state);
     console.error(
       `daemon 异常退出 (code=${exitCode}, 运行 ${Math.round(ranMs / 1000)}s)` +
       `${crashLoop ? "，检测到快速崩溃循环，延长到" : "，将在"} ${backoff / 1000}s 后重启`,
@@ -199,6 +233,7 @@ export async function runSupervisor(opts: SupervisorOptions = {}): Promise<void>
   removePid();
   removeListenInfo();
   removeSupervisorPid();
+  removeSupervisorState();
   console.log("supervisor 已停止。");
 }
 

@@ -29,6 +29,7 @@ export class AutopilotClient {
   // ── 便捷方法：代理 HTTP ──
 
   get getStatus() { return this.http.getStatus.bind(this.http); }
+  get getDaemonLog() { return this.http.getDaemonLog.bind(this.http); }
   get shutdownDaemon() { return this.http.shutdownDaemon.bind(this.http); }
   get listTasks() { return this.http.listTasks.bind(this.http); }
   get getTask() { return this.http.getTask.bind(this.http); }

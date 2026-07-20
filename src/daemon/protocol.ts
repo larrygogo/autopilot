@@ -57,6 +57,19 @@ export interface UpdateInfo {
   checked_at: string | null;
 }
 
+/** supervisor 运行状态（供 Web/CLI 展示重启次数 / 崩因）；无 supervisor 时 running=false、pid=null 的零值对象 */
+export interface SupervisorStatusInfo {
+  running: boolean;
+  pid: number | null;
+  /** supervisor 启动时间 epoch ms；无 state 为 null */
+  started_at: number | null;
+  daemon_spawns: number;
+  restarts: number;
+  last_exit_code: number | null;
+  last_crash_at: number | null;
+  crash_loop: boolean;
+}
+
 export interface DaemonStatus {
   version: string;
   /** 当前代码的 git 短 SHA；非 git 仓库或 git 不可用时为 "dev" */
@@ -68,6 +81,8 @@ export interface DaemonStatus {
   taskCounts: Record<string, number>;
   /** 更新检查（本地是否落后远端）；daemon 启动后异步填充，未就绪时 status:"unknown" */
   update: UpdateInfo;
+  /** supervisor 运行状态；裸跑 daemon（无 supervisor）时为 running=false、pid=null 的零值对象 */
+  supervisor: SupervisorStatusInfo;
 }
 
 export interface GraphNode {
